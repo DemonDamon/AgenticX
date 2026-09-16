@@ -41,6 +41,31 @@ def get_logger(name=None):
     return logger
 
 
+#: LogRecord 自带的字段名。extra 里出现这些会让 logging 直接抛 KeyError。
+_RESERVED_LOGRECORD_ATTRS = frozenset(
+    vars(
+        logging.LogRecord(
+            name="", level=0, pathname="", lineno=0, msg="", args=(), exc_info=None
+        )
+    )
+) | {"message", "asctime"}
+
+
+def _log_extra(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """剔除会和 LogRecord 内建字段撞名的键。
+
+    logging.Logger.makeRecord 在 extra 里遇到 message / asctime 或任何已有属性，会直接
+    抛 KeyError("Attempt to overwrite 'message' in LogRecord")。而下面 log() 里拼的
+    log_data **恒定**带一个 "message" —— 也就是说这个 logger 每一次调用都会炸，
+    on_task_start / on_error 这些回调直接把异常抛回调用方。调用方自己传的 data 里出现
+    module / lineno 之类也是同样下场。
+
+    这些字段格式化器本来就会从 record 上自己取（见 JsonFormatter.format），丢掉不损失
+    任何信息。
+    """
+    return {k: v for k, v in payload.items() if k not in _RESERVED_LOGRECORD_ATTRS}
+
+
 class ColoredFormatter(logging.Formatter):
     """彩色日志格式化器"""
 
@@ -175,15 +200,15 @@ class StructuredLogger:
         
         # 根据级别调用对应的方法 (修复：使用extra参数传递额外数据)
         if level == LogLevel.DEBUG:
-            self.logger.debug(message, extra=log_data)
+            self.logger.debug(message, extra=_log_extra(log_data))
         elif level == LogLevel.INFO:
-            self.logger.info(message, extra=log_data)
+            self.logger.info(message, extra=_log_extra(log_data))
         elif level == LogLevel.WARNING:
-            self.logger.warning(message, extra=log_data)
+            self.logger.warning(message, extra=_log_extra(log_data))
         elif level == LogLevel.ERROR:
-            self.logger.error(message, extra=log_data)
+            self.logger.error(message, extra=_log_extra(log_data))
         elif level == LogLevel.CRITICAL:
-            self.logger.critical(message, extra=log_data)
+            self.logger.critical(message, extra=_log_extra(log_data))
     
     def debug(self, message: str, data: Optional[Dict[str, Any]] = None):
         """记录调试日志"""

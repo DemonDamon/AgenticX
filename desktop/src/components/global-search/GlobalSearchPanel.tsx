@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   ChevronUp,
   File,
@@ -82,6 +83,7 @@ type CtxMenuState = {
 };
 
 export function GlobalSearchPanel({ open, onClose }: Props) {
+  const { t } = useTranslation("sidebar");
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsScrollRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
@@ -106,7 +108,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
       setMainView("chat");
       const existing = panes.find((p) => p.avatarId === hit.avatarId);
       const paneId =
-        existing?.id ?? addPane(hit.avatarId, hit.avatarName || hit.title || "会话", "");
+        existing?.id ?? addPane(hit.avatarId, hit.avatarName || hit.title || t("search.session"), "");
       setActivePaneId(paneId);
       setActiveAvatarId(hit.avatarId);
       setPaneSessionId(paneId, hit.sessionId, { provider: hit.provider, model: hit.model });
@@ -123,6 +125,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
       setPaneHistorySearchTerms,
       search.query,
       onClose,
+      t,
     ]
   );
 
@@ -133,10 +136,10 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
   }, []);
 
   const revealLabel = useMemo(() => {
-    if (hostPlatform === "darwin") return "在访达中显示";
-    if (hostPlatform === "win32") return "在资源管理器中显示";
-    return "在文件管理器中显示";
-  }, [hostPlatform]);
+    if (hostPlatform === "darwin") return t("search.revealDarwin");
+    if (hostPlatform === "win32") return t("search.revealWin");
+    return t("search.revealLinux");
+  }, [hostPlatform, t]);
 
   useEffect(() => {
     void window.agenticxDesktop.platform().then((p) => setHostPlatform(p || "darwin"));
@@ -207,7 +210,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="全局搜索"
+        aria-label={t("search.dialogAria")}
       >
         {/* Header：搜索框 + 关闭 */}
         <div className="shrink-0 border-b border-border bg-surface-panel px-5 py-3">
@@ -226,7 +229,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                   search.submitQuery(search.query);
                 }
               }}
-              placeholder="搜索文件、应用与历史对话"
+              placeholder={t("search.placeholder")}
               className="min-w-0 flex-1 bg-transparent text-[15px] text-text-strong outline-none placeholder:text-text-faint"
             />
             {search.loading ? (
@@ -239,7 +242,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               type="button"
               className="rounded-md p-1 text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={onClose}
-              aria-label="关闭搜索"
+              aria-label={t("search.close")}
             >
               <X className="h-4 w-4" />
             </button>
@@ -267,7 +270,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                     }`}
                     onClick={() => search.setCategory(tab.id)}
                   >
-                    {tab.label}
+                    {t(`search.category.${tab.id}`)}
                     <span className="text-text-faint">{count}</span>
                   </button>
                 </div>
@@ -315,11 +318,11 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
             search.loading && conversationHits.length === 0 ? (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                正在搜索…
+                {t("search.searching")}
               </div>
             ) : conversationHits.length === 0 ? (
               <div className="py-16 text-center text-sm text-text-faint">
-                无匹配对话
+                {t("search.noConversations")}
               </div>
             ) : (
               <div>
@@ -335,18 +338,18 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
           ) : search.loading && !hasAnyHits ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
               <Loader2 className="h-4 w-4 animate-spin" />
-              正在搜索…
+              {t("search.searching")}
             </div>
           ) : search.query.trim() && !hasAnyHits ? (
             <div className="py-16 text-center text-sm text-text-faint">
-              {isAll ? "无匹配结果" : "无匹配文件"}
+              {isAll ? t("search.noResults") : t("search.noFiles")}
             </div>
           ) : (
             <>
               {filteredGroups.map(([label, items]) => (
                 <div key={label} className="mb-5 last:mb-0">
                   <div className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-text-strong">
-                    {label}
+                    {t(`search.kind.${items[0]?.kind ?? "other"}`)}
                     <span className="text-text-faint">({items.length})</span>
                   </div>
                   <div>
@@ -381,7 +384,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               {showConversationsInAll ? (
                 <div className="mb-5 last:mb-0">
                   <div className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-text-strong">
-                    对话
+                    {t("search.conversations")}
                     <span className="text-text-faint">({conversationHits.length})</span>
                   </div>
                   <div>
@@ -406,7 +409,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               onClick={() => {
                 resultsScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              aria-label="回到顶部"
+              aria-label={t("search.backToTop")}
             >
               <ChevronUp className="h-4 w-4" strokeWidth={2.25} />
             </button>
@@ -458,6 +461,7 @@ function ResultRow({
   onReveal: () => void;
   onContextMenu: (event: MouseEvent) => void;
 }) {
+  const { t } = useTranslation("sidebar");
   return (
     <div className="mb-1 last:mb-0">
       <button
@@ -485,13 +489,13 @@ function ResultRow({
       {active ? (
         <div className="mx-2 mt-1 rounded-lg border border-border bg-surface-card px-3 py-2.5">
           <div className="mb-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px] leading-relaxed">
-            <span className="text-text-faint">文件名:</span>
+            <span className="text-text-faint">{t("search.fileName")}</span>
             <span className="truncate text-text-strong">{item.name}</span>
-            <span className="text-text-faint">文件大小:</span>
+            <span className="text-text-faint">{t("search.fileSize")}</span>
             <span className="text-text-strong">{formatFileSize(item.size)}</span>
-            <span className="text-text-faint">修改时间:</span>
+            <span className="text-text-faint">{t("search.mtime")}</span>
             <span className="text-text-strong">{formatMtime(item.mtime)}</span>
-            <span className="text-text-faint">本地路径:</span>
+            <span className="text-text-faint">{t("search.localPath")}</span>
             <span className="break-all text-text-strong">{item.path}</span>
           </div>
           <div className="flex gap-2">
@@ -503,7 +507,7 @@ function ResultRow({
                 onOpen();
               }}
             >
-              打开
+              {t("search.open")}
             </button>
             <button
               type="button"
@@ -513,7 +517,7 @@ function ResultRow({
                 onReveal();
               }}
             >
-              所在位置
+              {t("search.location")}
             </button>
           </div>
         </div>

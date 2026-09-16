@@ -10,7 +10,15 @@ from agenticx.runtime.subagent_runs.contracts import (
     RunRecord,
     SCHEMA_VERSION,
 )
-from agenticx.runtime.subagent_runs.store import SubAgentRunStore
+from agenticx.runtime.subagent_runs.store import (
+    SubAgentRunStore,
+    SubAgentRunStoreReadError,
+)
+from agenticx.runtime.subagent_runs.resolver import (
+    apply_live_overrides,
+    list_resolved_runs,
+    resolve_run,
+)
 
 __all__ = [
     "ActivityEntry",
@@ -18,4 +26,8 @@ __all__ = [
     "RunRecord",
     "SCHEMA_VERSION",
     "SubAgentRunStore",
+    "SubAgentRunStoreReadError",
+    "apply_live_overrides",
+    "list_resolved_runs",
+    "resolve_run",
 ]

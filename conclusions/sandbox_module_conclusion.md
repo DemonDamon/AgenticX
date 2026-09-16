@@ -1,6 +1,6 @@
 # AgenticX Sandbox 模块总结
 
-> 结论更新时间：2026-05-29（覆盖 2026-02-01 之后的变更）（新增 mcp_gateway/ in-workspace MCP 网关，内化自 AgentScope v2 P0）
+> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）（base.py 同步包装器统一改用 `agenticx.utils.async_bridge.run_sync`，修复事件循环缺失/已运行场景的 RuntimeError）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/sandbox`
@@ -80,6 +80,8 @@ agenticx/sandbox/
 - `_select_backend()`: **[更新] 三档模式后端自动选择**，优先级 `remote > microsandbox > docker > subprocess`；可由 `~/.agenticx/config.yaml` 的 `sandbox.mode`（local / docker / microsandbox / remote(k8s/docker+k8s)）覆盖，目标后端不可用时按序回退（如 remote 不可达 → docker → subprocess）
 
 **审计 hook**：`SandboxBase` 构造函数新增可选 `audit_trail` 参数，内部 `_audit_record()` 在 execute / run_command 成功路径将操作、code 哈希、退出码、耗时、后端、语言写入审计
+
+**同步桥接**：`execute_sync()` 与同步上下文管理器 `__enter__` / `__exit__` 不再直接调用 `asyncio.get_event_loop().run_until_complete()`，统一改走 `agenticx.utils.async_bridge.run_sync()`——当前线程无运行中事件循环时用 `asyncio.run` 执行；已在循环内（或进程此前调用过 `asyncio.run` 导致主线程 loop 被置 None、Python 3.12+ 无运行循环直接抛错）则丢到独立线程的新循环跑完取结果，避免同步包装器在这些场景抛 `RuntimeError`
 
 设计原则（来自 AgentRun-SDK-Python）：
 1. 配置与实例分离：Template 定义配置，Sandbox 是运行实例

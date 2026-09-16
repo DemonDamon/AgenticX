@@ -2,8 +2,8 @@
 
 Author: Damon Li
 """
-from typing import cast
-from agenticx.knowledge.graphers.config import LLMConfig
+from typing import Any
+
 from .base import BaseLLMProvider
 from .litellm_provider import LiteLLMProvider
 from .kimi_provider import KimiProvider
@@ -19,7 +19,7 @@ class LlmFactory:
     """A factory for creating LLM clients."""
 
     @staticmethod
-    def create_llm(config: LLMConfig) -> BaseLLMProvider:
+    def create_llm(config: Any) -> BaseLLMProvider:
         """Create an LLM client based on the provided configuration.
 
         Args:

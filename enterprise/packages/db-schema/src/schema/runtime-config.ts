@@ -172,6 +172,7 @@ export const authRefreshSessions = pgTable("auth_refresh_sessions", {
   deptId: varchar("dept_id", { length: 26 }),
   email: text("email").notNull(),
   scopesJson: jsonb("scopes_json").notNull().$type<string[]>(),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

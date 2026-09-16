@@ -28,5 +28,15 @@ exports.default = async function verifyBundledBackend(context) {
         `Run packaging/build_backend.sh and stage desktop/bundled-backend/<arch>/ before packaging.`,
     );
   }
+  // onedir layout: dependencies live next to the exe in _internal/.
+  // A bundle with the exe but without _internal/ crashes at boot.
+  const internalDir = path.join(backendDir, "_internal");
+  if (!fs.existsSync(internalDir)) {
+    throw new Error(
+      `[afterPack] Bundled backend _internal/ missing: ${internalDir}\n` +
+        `The agx-server exe was staged without its onedir dependencies.\n` +
+        `Re-run packaging/build_backend.sh (onedir mode) and stage the whole directory.`,
+    );
+  }
   console.log(`[afterPack] Verified bundled backend: ${binary}`);
 };

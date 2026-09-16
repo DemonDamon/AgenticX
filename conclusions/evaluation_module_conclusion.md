@@ -4,7 +4,7 @@
 > **创建日期**: 2024-12-27
 > **核心价值**: 将智能体评估从"手工测试"升级为"工程化、自动化、标准化"的流程
 
-> 结论更新时间：2026-05-29（覆盖 2026-02-07 之后的变更）（无重大变更）
+> 结论更新时间：2026-09-01（覆盖上一基线 f3ba65001c29 之后的变更）
 
 ---
 
@@ -142,6 +142,10 @@ agenticx/evaluation/
 - **功能**: 多裁判组合策略
 - **策略**: 支持 all (全票通过)、any (一票通过)、majority (多数票)、average (平均分)
 - **业务价值**: 消除单点 LLM 评测的偏见，提升评估结果的客观性
+
+#### MockLLMProvider
+- **功能**: 测试用 Mock LLM 提供方，无需真实 LLM 调用即可返回可配置响应
+- **同步桥接**: `complete()` 通过 `agenticx.utils.async_bridge.run_sync()` 驱动协程，替代旧的 `asyncio.get_event_loop().run_until_complete()` 写法——后者在进程内任何一处调用过 `asyncio.run()` 后会因事件循环被置空而永久抛 `RuntimeError`（Python 3.12+ 无运行中循环时 `get_event_loop()` 本身即抛错），`run_sync` 同时覆盖「无循环」与「已在循环中」两种场景
 
 ---
 

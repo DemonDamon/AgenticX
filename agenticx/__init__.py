@@ -5,6 +5,14 @@ _SAVED_CLI_ARGV = _sys.argv[:]
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import os as _os
+# litellm 在 import 时会同步请求 https://raw.githubusercontent.com/BerriAI/litellm/main/
+# model_prices_and_context_window.json（timeout=5s）。在受限网络（如未开 VPN 的国内环境）
+# 下该请求会挂到超时，叠加 PyInstaller onefile 首次解压与杀毒扫描，容易耗尽桌面端
+# "agx serve startup timeout" 的就绪窗口。默认改用 litellm 自带的本地备份价格表（零网络）；
+# 已显式设置 LITELLM_LOCAL_MODEL_COST_MAP 的用户不受影响。
+_os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+
 """
 AgenticX: 一个统一的多智能体框架
 
@@ -33,7 +41,11 @@ from ._version import __version__
 __author__ = "Ziran Li"
 __email__ = "bingzhenli@hotmail.com"
 
-_IS_CLI_BOOTSTRAP = _Path(_sys.argv[0]).name in {"agx", "agenticx"}
+# Bundled Desktop entry is `agx-server` / `agx-server.exe`, not `agx`.
+# Treating it as a library import pulls GraphRAG / Neo4j / observability into
+# every cold start and is what surfaces "pip install neo4j" in the splash dialog.
+CLI_BOOTSTRAP_NAMES = frozenset({"agx", "agenticx", "agx-server", "agx-server.exe"})
+_IS_CLI_BOOTSTRAP = _Path(_sys.argv[0]).name in CLI_BOOTSTRAP_NAMES
 
 if not _IS_CLI_BOOTSTRAP:
     # 核心模块导出
@@ -180,7 +192,7 @@ if not _IS_CLI_BOOTSTRAP:
 # 主要类列表
 __all__ = [
     # 版本信息
-    "__version__", "__author__", "__email__",
+    "__version__", "__author__", "__email__", "CLI_BOOTSTRAP_NAMES",
     
     # 核心类
     "Agent", "Task", "BaseTool", "tool", "Workflow", "WorkflowNode", "WorkflowEdge",

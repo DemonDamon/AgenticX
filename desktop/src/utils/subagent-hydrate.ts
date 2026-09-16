@@ -3,6 +3,7 @@ import { useAppStore } from "../store";
 import type { SubAgentRunRecord } from "../components/subagent/badge-vm";
 import type { ActivityEntry } from "../components/subagent/run-drawer-api";
 import { fetchSubAgentClusters } from "../components/subagent/run-drawer-api";
+import { isTerminalStatus } from "../components/subagent/badge-theme";
 import { isSubAgentLiveStatus } from "./stream-overlay-policy";
 
 function normalizeStatus(raw: string | undefined): SubAgentStatus {
@@ -30,6 +31,17 @@ function activityToEvents(entries: ActivityEntry[]) {
       content: String(entry.detail ?? entry.title ?? "").trim() || entry.title,
       ts: entry.ts > 1_000_000_000_000 ? Math.floor(entry.ts) : Math.floor(entry.ts * 1000),
     }));
+}
+
+export function shouldHydratePersistedRun(
+  existingStatus: SubAgentStatus | undefined,
+  persistedStatus: string | undefined,
+): boolean {
+  const existing = String(existingStatus ?? "").trim();
+  const persisted = String(persistedStatus ?? "").trim();
+  if (isTerminalStatus(existing)) return false;
+  if (isTerminalStatus(persisted)) return true;
+  return !isSubAgentLiveStatus(existing as SubAgentStatus);
 }
 
 /** Rehydrate a persisted run record into the runtime `SubAgent` shape for Spawns / SubAgentCard. */
@@ -109,7 +121,7 @@ export async function hydrateSessionSubAgentsFromDisk(
       if (!rid) continue;
       const store = useAppStore.getState();
       const existing = store.subAgents.find((item) => item.id === rid);
-      if (existing && isSubAgentLiveStatus(existing.status)) {
+      if (existing && !shouldHydratePersistedRun(existing.status, member.status)) {
         continue;
       }
       const built = buildSubAgentFromRunRecord(member, [], sid);

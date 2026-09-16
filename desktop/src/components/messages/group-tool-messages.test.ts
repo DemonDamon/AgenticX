@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import type { Message } from "../../store";
 import {
+  isToolGroupCancelled,
   isToolGroupInProgress,
   shouldHoldToolGroupProgress,
   groupConsecutiveToolMessages,
@@ -32,6 +33,24 @@ test("isToolGroupInProgress is true while any tool row is running", () => {
     ]),
     true,
   );
+});
+
+test("isToolGroupCancelled is true only after in-flight rows are cancelled", () => {
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "running"),
+    ]),
+    false,
+  );
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "cancelled"),
+    ]),
+    true,
+  );
+  assert.equal(isToolGroupCancelled([toolMessage("t1", "done")]), false);
 });
 
 test("shouldHoldToolGroupProgress bridges the gap between sequential tool calls", () => {
@@ -84,4 +103,33 @@ test("actionConfirmation tool rows stay ungrouped", () => {
   if (rows[1]?.kind === "message") {
     assert.equal(rows[1].message.id, "confirm-1");
   }
+});
+
+test("Plan artifact tools stay ungrouped for the standalone Plan card", () => {
+  const rows = groupConsecutiveToolMessages([
+    toolMessage("t1", "done"),
+    toolMessage("plan", "done", "plan_create"),
+    toolMessage("t2", "done"),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1]?.kind, "message");
+});
+
+test("auto-approve confirm receipts are dropped from grouped chat rows", () => {
+  const receipt: Message = {
+    id: "receipt-1",
+    role: "tool",
+    content: "程基岩：确认通过，继续执行",
+    agentId: "cheng",
+  };
+  const rows = groupConsecutiveToolMessages([
+    { id: "u1", role: "user", content: "继续" },
+    receipt,
+    { id: "a1", role: "assistant", content: "FINAL" },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.kind, "message");
+  assert.equal(rows[1]?.kind, "message");
+  if (rows[0]?.kind === "message") assert.equal(rows[0].message.id, "u1");
+  if (rows[1]?.kind === "message") assert.equal(rows[1].message.id, "a1");
 });

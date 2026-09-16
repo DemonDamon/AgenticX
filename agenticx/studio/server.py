@@ -66,8 +66,9 @@ from agenticx.cli.studio_mcp import (
 )
 from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
-from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
+from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAutoConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
+from agenticx.runtime.checkpoint import CheckpointStore
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import (
@@ -77,6 +78,7 @@ from agenticx.cli.agent_tools import (
     merge_computer_use_tools_into,
 )
 from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_meta_agent_tools
+from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -117,6 +119,7 @@ from agenticx.studio.session_manager import (
 )
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
+from agenticx.studio.run_replay_routes import register_run_replay_routes
 from agenticx.studio.code_index.routes import register_code_index_routes
 from agenticx.brain.routes import register_brain_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
@@ -362,6 +365,11 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     return lines
 
 
+SUBAGENT_MESSAGE_TERMINAL_TYPES = frozenset(
+    {"subagent_completed", "subagent_error", "subagent_paused"}
+)
+
+
 def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
     """Serialize a hub-buffered event with monotonic SSE ``id:`` for reattach replay."""
     if buffered.event is None:
@@ -476,6 +484,17 @@ def _finalize_partial_assistant_if_needed(
     """Append interrupted partial assistant to chat_history when FINAL never arrived."""
     if saw_final:
         return False
+    history = getattr(session, "chat_history", None) or []
+    for row in reversed(history):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("role", "")).strip() != "assistant":
+            continue
+        meta = row.get("metadata")
+        # Runtime already committed this turn's cancelled prefix.
+        if isinstance(meta, dict) and meta.get("interrupted") is True:
+            return False
+        break
     body = _visible_assistant_body(partial_meta_text)
     if not body:
         return False
@@ -928,6 +947,13 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("LongRun orchestrator not started: %s", exc)
 
+        try:
+            from agenticx.ops.otel_bootstrap import maybe_enable_studio_otel
+
+            maybe_enable_studio_otel()
+        except Exception as exc:
+            logger.debug("otel bootstrap skipped: %s", exc)
+
         def _preload_code_index_model() -> None:
             try:
                 from agenticx.code_index.config import load_code_index_config
@@ -999,6 +1025,7 @@ def create_studio_app() -> FastAPI:
                 session_id=sid,
                 user_input=prompt,
                 skip_user_history=True,
+                unattended_run=source == "supervisor",
                 provider=managed.studio_session.provider_name,
                 model=managed.studio_session.model_name,
             )
@@ -1167,6 +1194,8 @@ def create_studio_app() -> FastAPI:
                 await asyncio.wait_for(task, timeout=1.0)
 
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
+    from agenticx.studio.changeplane_routes import mount_changeplane_routes
+    mount_changeplane_routes(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_studio_cors_origins(),
@@ -1251,26 +1280,46 @@ def create_studio_app() -> FastAPI:
     def _global_auto_confirm_enabled() -> bool:
         """Whether global settings require bypassing confirm_required.
 
-        Keep compatibility with both:
-        - Desktop `confirm_strategy: auto`
-        - Legacy permissions mode values (`auto` / `full_auto`)
+        Explicit ``run_mode`` / ``confirm_strategy`` wins. Legacy
+        ``permissions.mode`` (``auto`` / ``full_auto``) is only a fallback
+        when those keys are absent.
         """
-        try:
-            strategy = str(ConfigManager.get_value("confirm_strategy") or "").strip().lower()
-        except Exception:
-            strategy = ""
-        if strategy == "auto":
-            return True
+        from agenticx.runtime.confirm import is_global_auto_confirm_mode
+
+        strategy = ""
+        confirm_strategy = ""
+        for key in ("run_mode", "confirm_strategy"):
+            try:
+                raw = ConfigManager.get_value(key)
+            except Exception:
+                raw = None
+            value = str(raw or "").strip().lower()
+            if key == "run_mode":
+                strategy = value
+            else:
+                confirm_strategy = value
         try:
             mode = str(ConfigManager.get_value("permissions.mode") or "").strip().lower()
         except Exception:
             mode = ""
-        return mode in {"auto", "full_auto"}
+        return is_global_auto_confirm_mode(
+            run_mode=strategy,
+            confirm_strategy=confirm_strategy,
+            permissions_mode=mode,
+        )
 
-    def _resolve_confirm_gate(managed: Any, agent_id: str = "meta") -> Any:
+    def _resolve_confirm_gate(
+        managed: Any,
+        agent_id: str = "meta",
+        *,
+        unattended: bool = False,
+    ) -> Any:
+        if unattended:
+            return RiskAwareAutoConfirmGate(unattended=True)
+        managed_gate = managed.get_confirm_gate(agent_id)
         if _global_auto_confirm_enabled():
-            return AutoApproveConfirmGate()
-        return managed.get_confirm_gate(agent_id)
+            return RiskAwareAutoConfirmGate(delegate=managed_gate)
+        return managed_gate
 
     def _resolve_clarify_gate(managed: Any, agent_id: str = "meta", *, is_automation: bool = False) -> Any:
         # Clarification must NEVER be auto-approved (that would drop the user's
@@ -1363,6 +1412,12 @@ def create_studio_app() -> FastAPI:
 
     _verify_desktop_token = _check_token
 
+    register_run_replay_routes(
+        app,
+        manager=manager,
+        check_token=_check_token,
+        desktop_token=desktop_token,
+    )
     register_voice_endpoints(app, manager=manager, check_token=_check_token)
 
     from agenticx.memory.graph.routes import register_memory_graph_routes
@@ -1460,7 +1515,7 @@ def create_studio_app() -> FastAPI:
     def _modelscope_headers() -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "AgenticX/0.5.0",
+            "User-Agent": "AgenticX/0.6.0",
         }
         token = str(os.getenv("MODELSCOPE_API_TOKEN", "")).strip()
         if token:
@@ -2073,6 +2128,8 @@ def create_studio_app() -> FastAPI:
     @app.get("/api/session/context_usage")
     async def get_session_context_usage(
         session_id: str = Query(...),
+        model: str | None = Query(default=None),
+        context_window: int | None = Query(default=None),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
@@ -2081,7 +2138,11 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        from agenticx.studio.context_usage import estimate_session_context_usage
+        from agenticx.studio.context_usage import (
+            apply_last_request_occupancy_floor,
+            estimate_session_context_usage,
+            load_session_cache_payload,
+        )
 
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         avatar_context: dict[str, str] | None = None
@@ -2096,15 +2157,52 @@ def create_studio_app() -> FastAPI:
         group_chat = _meta_group_chat_payload(managed)
 
         try:
-            usage = estimate_session_context_usage(
-                managed,
-                avatar_context=avatar_context,
-                group_chat=group_chat,
+            # 丢到线程里跑：这是纯同步的只读估算，放在 async def 里会把事件循环
+            # 整个占住——正在流式输出的那一轮会跟着卡。账本读取和占用估算互不依赖。
+            usage, cache = await asyncio.gather(
+                asyncio.to_thread(
+                    estimate_session_context_usage,
+                    managed,
+                    avatar_context=avatar_context,
+                    group_chat=group_chat,
+                    model_name=model or "",
+                    session_id=session_id,
+                    declared_context_window=context_window,
+                ),
+                asyncio.to_thread(load_session_cache_payload, session_id),
+                return_exceptions=True,
             )
         except Exception as exc:
             logger.warning("context usage estimate failed for %s: %s", session_id, exc)
             raise HTTPException(status_code=500, detail="failed to estimate context usage")
-        return {"ok": True, "session_id": session_id, **usage}
+        if isinstance(usage, Exception):
+            logger.warning("context usage estimate failed for %s: %s", session_id, usage)
+            raise HTTPException(status_code=500, detail="failed to estimate context usage")
+        if isinstance(cache, Exception):
+            logger.warning("session cache payload failed for %s: %s", session_id, cache)
+            cache = {
+                "session_input_tokens": 0,
+                "session_output_tokens": 0,
+                "session_total_tokens": 0,
+                "session_cached_tokens": 0,
+                "session_cache_ratio": 0.0,
+                "last_input_tokens": 0,
+                "last_cached_tokens": 0,
+                "last_cache_ratio": 0.0,
+                "requests": 0,
+                "zero_cache_requests": 0,
+            }
+        usage = apply_last_request_occupancy_floor(
+            usage,
+            int(cache.get("last_input_tokens") or 0),
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "model": str(model or "").strip(),
+            **usage,
+            "cache": cache,
+        }
 
     # -------------------------------------------------------------------
     # Project state harness — read-only views over .agx/project/
@@ -2471,8 +2569,21 @@ def create_studio_app() -> FastAPI:
                 removed_agent += _strip_compacted_blocks(session.agent_messages)
         if matched_chat or matched_agent:
             from agenticx.runtime.session_summary_store import delete_session_summary
+            from agenticx.runtime.usage_store import get_usage_store
+            from agenticx.studio.context_usage import invalidate_occupancy_cache
+            from agenticx.studio.usage_alive import keep_before_ms_from_messages
 
             delete_session_summary(session_id)
+            invalidate_occupancy_cache(session_id)
+            remaining = session.chat_history if isinstance(session.chat_history, list) else []
+            try:
+                get_usage_store().set_session_alive_window(
+                    session_id,
+                    keep_before_ms=keep_before_ms_from_messages(remaining),
+                    alive_after_ms=int(time.time() * 1000),
+                )
+            except Exception:
+                logger.warning("usage alive window update failed for %s", session_id, exc_info=True)
         await manager.persist_async(session_id)
         return {
             "ok": True,
@@ -2642,6 +2753,50 @@ def create_studio_app() -> FastAPI:
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        is_automation_session = active_avatar_id.startswith("automation:")
+        from agenticx.runtime.plan_mode import apply_turn_intent_to_session, filter_tools_for_turn_intent
+
+        setattr(session, "session_id", payload.session_id)
+        from agenticx.runtime.isolate_run import ensure_isolate
+
+        _iso_requested = bool(getattr(payload, "isolate_run", False))
+        if is_automation_session or str(getattr(payload, "group_id", "") or "").strip():
+            _iso_requested = False
+        apply_turn_intent_to_session(
+            session,
+            plan_mode=bool(getattr(payload, "plan_mode", False)),
+            is_automation=is_automation_session,
+            isolate_run=_iso_requested,
+        )
+        _iso = ensure_isolate(
+            session,
+            isolate_run=_iso_requested,
+            is_automation=is_automation_session,
+        )
+        if _iso.get("error") == "not_git":
+            async def _not_git_stream() -> AsyncGenerator[str, None]:
+                err = SseEvent(
+                    type="error",
+                    data={
+                        "error": "not_git",
+                        "text": "Multitask needs a git workspace",
+                    },
+                )
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{"reason":"not_git"}}\n\n'
+
+            return StreamingResponse(
+                _not_git_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
+        if _iso.get("active"):
+            try:
+                manager.incremental_persist(payload.session_id)
+            except Exception:
+                pass
+        turn_is_unattended = bool(getattr(payload, "unattended_run", False)) or is_automation_session
         try:
             from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
 
@@ -2784,8 +2939,53 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
-        # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
-        # values from a previous turn do not leak onto other models.
+        # 附件自动路由：本轮带文档时把会话锁到私有部署的多模态模型。
+        #
+        # 必须在客户端选的 provider/model 落到 session 之后、ProviderResolver.resolve
+        # 之前。晚一步 LLM 就已经按公网模型建好了；Office 文档最终会被抽成文本，
+        # 先解析后决定的话文本已经发出去了。
+        #
+        # 前端也会拦一道（选择器变灰），但这里不能省：CLI、定时任务、子智能体、
+        # 分身委派都不经过那段 UI。读策略、应用、以及失败能不能放行都在
+        # attachment_routing.route_turn 里，这里只把失败翻译成 HTTP。
+        _routing_names = list(turn_context_files.keys())
+        try:
+            from agenticx.studio.attachment_routing import (
+                AttachmentRoutingUnavailable,
+                route_turn as _route_turn,
+            )
+
+            _routing_decision = _route_turn(session, filenames=_routing_names)
+        except AttachmentRoutingUnavailable:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "附件路由暂时不可用，本轮已停止。"
+                    "这条会话包含需要留在私有部署的附件，无法回退到公网模型。"
+                    "请稍后重试或联系管理员。"
+                ),
+            )
+        except ImportError:
+            logger.warning("attachment routing module unavailable", exc_info=True)
+            _routing_decision = None
+
+        if _routing_decision is not None:
+            # 锁到多模态模型之后就别再走抽文本那条有损通路了：PDF 直接渲染成页图。
+            # 渲染不了（没装 PyMuPDF、加密、损坏）就什么都不做，让抽文本接着跑——
+            # 此时会话已经锁在私有模型上，文本同样不出这台部署。
+            try:
+                from agenticx.studio.attachment_routing import read_policy as _read_routing
+                from agenticx.studio.document_pages import stage_pdf_pages
+
+                stage_pdf_pages(
+                    session,
+                    filenames=list(turn_context_files.keys()),
+                    max_pages=_read_routing().max_rendered_pages,
+                )
+            except Exception:
+                logger.warning("pdf page rendering skipped, falling back to text", exc_info=True)
+        # Kimi / GLM reasoning_effort; cleared when absent so stale values from
+        # a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
         if _effort in {"low", "high", "max"}:
             setattr(session, "_reasoning_effort", _effort)
@@ -2803,6 +3003,19 @@ def create_studio_app() -> FastAPI:
                 delattr(session, "_thinking_enabled")
             except Exception:
                 setattr(session, "_thinking_enabled", None)
+
+        _window = getattr(payload, "context_window", None)
+        try:
+            _window_n = int(_window) if _window is not None else 0
+        except (TypeError, ValueError):
+            _window_n = 0
+        if _window_n > 0:
+            setattr(session, "declared_context_window", _window_n)
+        elif hasattr(session, "declared_context_window"):
+            try:
+                delattr(session, "declared_context_window")
+            except Exception:
+                setattr(session, "declared_context_window", None)
 
         from agenticx.llms.vision import is_vision_capable
 
@@ -2895,7 +3108,14 @@ def create_studio_app() -> FastAPI:
                 team_manager = managed.team_manager or getattr(session, "_team_manager", None)
                 if team_manager is None:
                     try:
-                        team_manager = managed.get_or_create_team(llm_factory=_resolve_llm)
+                        team_manager = managed.get_or_create_team(
+                            llm_factory=_resolve_llm,
+                            confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                                managed,
+                                agent_id,
+                                unattended=turn_is_unattended,
+                            ),
+                        )
                         setattr(session, "_team_manager", team_manager)
                     except Exception as exc:
                         err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体团队尚未初始化: {exc}"})
@@ -2932,7 +3152,6 @@ def create_studio_app() -> FastAPI:
                     )
                     yield f"data: {json.dumps(ack.model_dump(), ensure_ascii=False)}\n\n"
 
-                    terminal_types = {"subagent_completed", "subagent_error"}
                     while True:
                         if await request.is_disconnected():
                             break
@@ -2945,7 +3164,7 @@ def create_studio_app() -> FastAPI:
                             continue
                         for line in _runtime_event_to_sse_lines(event):
                             yield line
-                        if event.type in terminal_types:
+                        if event.type in SUBAGENT_MESSAGE_TERMINAL_TYPES:
                             break
                 except Exception as exc:
                     err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体通信异常: {exc}"})
@@ -3029,8 +3248,16 @@ def create_studio_app() -> FastAPI:
                         llm_factory=llm_factory,
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
-                        confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(managed, agent_id),
-                        clarify_gate_factory=lambda agent_id: _resolve_clarify_gate(managed, agent_id),
+                        confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                            managed,
+                            agent_id,
+                            unattended=turn_is_unattended,
+                        ),
+                        clarify_gate_factory=lambda agent_id: _resolve_clarify_gate(
+                            managed,
+                            agent_id,
+                            is_automation=turn_is_unattended,
+                        ),
                     )
                     quoted_content = str(payload.quoted_content or "")
                     quoted_message_id = str(payload.quoted_message_id or "")
@@ -3091,6 +3318,8 @@ def create_studio_app() -> FastAPI:
                         quoted_message_id=quoted_message_id,
                         should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
+                        image_inputs=image_inputs,
+                        history_image_attachments=history_image_attachments,
                     ):
                         evt_type = str(getattr(reply, "event_type", "") or "")
                         if not evt_type:
@@ -3105,15 +3334,27 @@ def create_studio_app() -> FastAPI:
                                 "skipped": reply.skipped,
                                 "error": reply.error,
                                 "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
+                                "confirm_context": dict(getattr(reply, "confirm_context", None) or {}),
                                 "graph_run_id": str(getattr(reply, "graph_run_id", "") or ""),
                                 "graph_node_id": str(getattr(reply, "graph_node_id", "") or ""),
                                 "tool_name": str(getattr(reply, "tool_name", "") or ""),
                                 "tool_phase": str(getattr(reply, "tool_phase", "") or ""),
                                 "tool_call_id": str(getattr(reply, "tool_call_id", "") or ""),
+                                "tool_detail": str(getattr(reply, "tool_detail", "") or ""),
                                 "clarify_options": list(getattr(reply, "clarify_options", None) or []),
                                 "clarify_allow_free_text": bool(
                                     getattr(reply, "clarify_allow_free_text", True)
                                 ),
+                                "artifacts": [
+                                    {
+                                        "name": item.name,
+                                        "mime_type": item.mime_type,
+                                        "size": item.size,
+                                        "source_path": item.source_path,
+                                        "reference_token": True,
+                                    }
+                                    for item in (getattr(reply, "artifacts", None) or [])
+                                ],
                             },
                         )
                         await _emit_group_event(evt)
@@ -3226,6 +3467,26 @@ def create_studio_app() -> FastAPI:
             llm = _resolve_llm()
         except Exception as exc:
             llm_init_err_text = f"LLM init failed: {exc}"
+
+            # 这一步失败发生在 run_turn 之前，而用户那条消息是 run_turn 才写进
+            # chat_history 的。不补的话：这个会话一条可见消息都没有，list_sessions 会
+            # 把它当成「还没说过话的空壳」直接过滤掉——用户刚敲的字连同整个会话一起
+            # 从历史里消失，而他看到的只是一句报错。模型没配好、企业 token 过期、
+            # 网络在解析时断了，都会走到这里。
+            _failed_user_text = str(getattr(payload, "user_input", "") or "").strip()
+            if _failed_user_text and not bool(getattr(payload, "skip_user_history", False)):
+                session.chat_history.append({"role": "user", "content": _failed_user_text})
+                session.chat_history.append(
+                    {
+                        "role": "assistant",
+                        "content": llm_init_err_text,
+                        "metadata": {"source": "llm-init-failed"},
+                    }
+                )
+                manager.set_execution_state(payload.session_id, "interrupted")
+                with contextlib.suppress(Exception):
+                    await manager.persist_async(payload.session_id)
+
             async def _error_stream() -> AsyncGenerator[str, None]:
                 # Python 3.13 no longer allows closing over `exc` from except scope.
                 # Copy the message into a normal local before defining the generator.
@@ -3284,6 +3545,11 @@ def create_studio_app() -> FastAPI:
             llm_factory=_resolve_llm,
             event_emitter=_on_team_event,
             summary_sink=_on_subagent_summary,
+            confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                managed,
+                agent_id,
+                unattended=turn_is_unattended,
+            ),
         )
         setattr(session, "_team_manager", team_manager)
         setattr(session, "_session_manager", manager)
@@ -3295,18 +3561,22 @@ def create_studio_app() -> FastAPI:
             list(team_manager._agents.keys()) if team_manager else [],
         )
         setattr(session, "_session_id", payload.session_id)
-        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
-        is_automation_session = active_avatar_id.startswith("automation:")
         try:
             load_discovered_hooks()
         except Exception as exc:
             logger.debug("Skipping discovered hooks loading for chat: %s", exc)
-        # Desktop 定时/立即执行由主进程拉 SSE，无法像 ChatPane 那样响应 confirm_required；
-        # 无人值守会话必须自动放行 bash_exec 等工具确认，否则会永久卡住。
-        meta_confirm_gate = (
-            AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
+        # No human is available during automation/supervisor turns. Explicit
+        # low-risk requests may proceed, while protected requests fail closed.
+        meta_confirm_gate = _resolve_confirm_gate(
+            managed,
+            "meta",
+            unattended=turn_is_unattended,
         )
-        meta_clarify_gate = _resolve_clarify_gate(managed, "meta", is_automation=is_automation_session)
+        meta_clarify_gate = _resolve_clarify_gate(
+            managed,
+            "meta",
+            is_automation=turn_is_unattended,
+        )
         from agenticx.studio.turn_interruption import clear_stale_unattended_failure
 
         clear_stale_unattended_failure(session)
@@ -3314,6 +3584,11 @@ def create_studio_app() -> FastAPI:
         def _mid_turn_persist_cb() -> None:
             manager.incremental_persist(payload.session_id)
 
+        run_recorder: ReplayLedgerRecorder | None = recorder_for_session(
+            manager,
+            payload.session_id,
+            agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+        )
         try:
             runtime = AgentRuntime(
                 llm,
@@ -3322,8 +3597,10 @@ def create_studio_app() -> FastAPI:
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_mid_turn_persist_cb,
                 clarify_gate=meta_clarify_gate,
-                is_unattended=is_automation_session,
+                is_unattended=turn_is_unattended,
                 llm_factory=_resolve_llm,
+                checkpoint_store=CheckpointStore(),
+                run_recorder=run_recorder,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -3369,9 +3646,16 @@ def create_studio_app() -> FastAPI:
                 "- 优先动手执行，不要反复确认。\n"
                 "- 边做边汇报，每完成一步简要说明。\n"
                 "- 连续 2 次工具调用失败或返回相同结果后，必须切换策略，禁止重复同一操作。\n"
-                "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出 SVG 图，后分节解读；"
-                "禁止在 ```text``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
+                "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出图"
+                "（默认 SVG 或 HTML；仅用户明确要 Mermaid 时才 mermaid），后分节解读；"
+                "禁止在 ```text``` / ```mermaid``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
             )
+            try:
+                from agenticx.runtime.prompts.meta_agent import AVATAR_IDENTITY_UPDATE_RULES
+
+                prompt += AVATAR_IDENTITY_UPDATE_RULES + "\n"
+            except Exception:
+                pass
             prompt += (
                 "\n## 浏览器操作指南（browser-use MCP）\n"
                 "操作网页时严格遵循以下流程，每步都必须调用工具，禁止空转：\n"
@@ -3412,7 +3696,8 @@ def create_studio_app() -> FastAPI:
             # Automation avatar is an execution worker, not a scheduler author.
             # Keep runtime/file/mcp tools, but block task-management meta tools to
             # prevent recursive "create another schedule_task" behavior.
-            _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar"}
+            _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar",
+                        "wb_bridge_start", "wb_bridge_send", "wb_bridge_stop", "work_item_upsert"}
             effective_tools_source: list = [
                 t
                 for t in visible_meta_agent_tools()
@@ -3425,6 +3710,12 @@ def create_studio_app() -> FastAPI:
         else:
             effective_tools_source = list(visible_meta_agent_tools())
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
+        from agenticx.cli.agent_tools import merge_near_browser_tools_into
+
+        effective_tools_source = merge_near_browser_tools_into(effective_tools_source)
+        from agenticx.ops.tools import merge_ops_tools_into
+
+        effective_tools_source = merge_ops_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
         effective_tools_source = _maybe_inject_code_search_tools(
             session,
@@ -3436,8 +3727,12 @@ def create_studio_app() -> FastAPI:
             avatar_tools_enabled=avatar_tools_enabled,
             global_tools_enabled=global_tools_enabled,
         )
+        effective_tools = filter_tools_for_turn_intent(effective_tools, session)
 
         async def _event_stream() -> AsyncGenerator[str, None]:
+            if _iso.get("active"):
+                iso_evt = SseEvent(type="isolate", data={"active": True})
+                yield f"data: {json.dumps(iso_evt.model_dump(), ensure_ascii=False)}\n\n"
             runtime_task: "asyncio.Task[None] | None" = None
             meta_done = False
             saw_final = False
@@ -3564,6 +3859,16 @@ def create_studio_app() -> FastAPI:
                                         sys_prompt += "\n\n" + _cu_ctx
                                 except Exception:
                                     pass
+                                try:
+                                    from agenticx.runtime.prompts.meta_agent import (
+                                        _build_near_browser_capabilities_block,
+                                    )
+
+                                    _nb_ctx = _build_near_browser_capabilities_block()
+                                    if _nb_ctx:
+                                        sys_prompt += "\n\n" + _nb_ctx
+                                except Exception:
+                                    pass
                                 _ts_ctx = _build_taskspaces_context(
                                     list(getattr(managed, "taskspaces", None) or [])
                                 )
@@ -3604,6 +3909,7 @@ def create_studio_app() -> FastAPI:
                                 user_nickname=_u_nickname,
                                 user_preference=_u_preference,
                                 kb_retrieval_mode_override=_kb_mode_req or None,
+                                include_volatile=False,
                             )
                         user_message_content: Any | None = None
                         history_user_attachments: list[dict[str, Any]] | None = None
@@ -4032,6 +4338,7 @@ def create_studio_app() -> FastAPI:
                     provider=managed.studio_session.provider_name,
                     model=managed.studio_session.model_name,
                     keep_runtime_after_disconnect=True,
+                    unattended_run=source in {"desktop_auto_nudge", "supervisor"},
                 )
                 inner = await chat(chat_payload, request, x_agx_desktop_token)
                 if inner.body_iterator is not None:
@@ -4271,20 +4578,34 @@ def create_studio_app() -> FastAPI:
                 pass
 
         loop_is_automation = str(getattr(managed, "avatar_id", "") or "").startswith("automation:")
+        loop_is_unattended = loop_is_automation or bool(payload.get("unattended_run", False))
+        if loop_tm is not None:
+            loop_tm.confirm_gate_factory = lambda agent_id: _resolve_confirm_gate(
+                managed,
+                agent_id,
+                unattended=loop_is_unattended,
+            )
+        loop_recorder: ReplayLedgerRecorder | None = recorder_for_session(
+            manager,
+            session_id,
+            agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+        )
         try:
             runtime = AgentRuntime(
                 llm,
-                _resolve_confirm_gate(managed, "meta"),
+                _resolve_confirm_gate(managed, "meta", unattended=loop_is_unattended),
                 team_manager=loop_tm,
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_loop_persist_cb,
-                clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_automation),
-                is_unattended=loop_is_automation,
+                clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_unattended),
+                is_unattended=loop_is_unattended,
+                checkpoint_store=CheckpointStore(),
+                run_recorder=loop_recorder,
             )
         except TypeError:
             runtime = AgentRuntime(
                 llm,
-                _resolve_confirm_gate(managed, "meta"),
+                _resolve_confirm_gate(managed, "meta", unattended=loop_is_unattended),
             )
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 
@@ -4297,6 +4618,12 @@ def create_studio_app() -> FastAPI:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(visible_meta_agent_tools())
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
+        from agenticx.cli.agent_tools import merge_near_browser_tools_into
+
+        loop_tools_source = merge_near_browser_tools_into(loop_tools_source)
+        from agenticx.ops.tools import merge_ops_tools_into
+
+        loop_tools_source = merge_ops_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
         loop_tools_source = _maybe_inject_code_search_tools(
             session,
@@ -4308,6 +4635,9 @@ def create_studio_app() -> FastAPI:
             avatar_tools_enabled=loop_avatar_tools_enabled,
             global_tools_enabled=_load_global_tools_policy(),
         )
+        from agenticx.runtime.plan_mode import filter_tools_for_turn_intent as _filter_loop_turn_intent
+
+        loop_tools = _filter_loop_turn_intent(loop_tools, session)
         setattr(
             session,
             "bound_avatar_id",
@@ -4318,6 +4648,7 @@ def create_studio_app() -> FastAPI:
             mode="interactive",
             taskspaces=managed.taskspaces,
             group_chat=_meta_group_chat_payload(managed),
+            include_volatile=False,
         )
 
         async def _loop_stream() -> AsyncGenerator[str, None]:
@@ -4398,6 +4729,9 @@ def create_studio_app() -> FastAPI:
         session_id: str = Query(...),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
+        from agenticx.runtime.subagent_runs.resolver import list_resolved_runs
+        from agenticx.runtime.subagent_runs.store import SubAgentRunStoreReadError
+
         _check_token(x_agx_desktop_token)
         managed = manager.get(session_id, touch=False)
         if managed is None:
@@ -4408,82 +4742,20 @@ def create_studio_app() -> FastAPI:
                 all_sids[:10],
             )
             raise HTTPException(status_code=404, detail="session not found")
-        if managed.team_manager is None:
-            registry_count = len(AgentTeamManager._registry)
-            logger.warning(
-                "[subagents/status] sid=%s tm=None registry_managers=%d",
+        try:
+            rows = list_resolved_runs(
                 session_id,
-                registry_count,
+                session_manager=manager,
+                team_manager=managed.team_manager,
+                include_legacy=False,
             )
-            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
-            if global_rows:
-                logger.warning(
-                    "[subagents/status] sid=%s tm=None fallback global=%d",
-                    session_id,
-                    len(global_rows),
-                )
-                return {"ok": True, "subagents": global_rows}
-            return {"ok": True, "subagents": []}
-        logger.info(
-            "[subagents/status] sid=%s tm=%s agents=%s tasks=%s",
-            session_id,
-            id(managed.team_manager),
-            list(managed.team_manager._agents.keys()),
-            {k: (not v.done()) for k, v in managed.team_manager._tasks.items()},
-        )
-        status_payload = managed.team_manager.get_status_with_task_fallback()
-        if (
-            isinstance(status_payload, dict)
-            and status_payload.get("ok")
-            and not (status_payload.get("subagents") or [])
-        ):
-            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
-            if global_rows:
-                logger.warning(
-                    "[subagents/status] sid=%s local empty, fallback global=%d",
-                    session_id,
-                    len(global_rows),
-                )
-                status_payload = {"ok": True, "subagents": global_rows}
-
-        if not isinstance(status_payload, dict):
-            status_payload = {"ok": True, "subagents": []}
-        rows = status_payload.get("subagents") or []
-        if not isinstance(rows, list):
-            rows = []
-        known_ids = {str(r.get("agent_id", "")) for r in rows if isinstance(r, dict)}
-        for _sid, _managed in manager._sessions.items():
-            info = getattr(_managed, "_delegation_info", None)
-            if not isinstance(info, dict):
-                continue
-            dlg_id = str(info.get("delegation_id", "")).strip()
-            if not dlg_id or dlg_id in known_ids:
-                continue
-            if _sid == session_id:
-                continue
-            from_session = str(info.get("from_session", "")).strip()
-            if not from_session or from_session != session_id:
-                continue
-            task_obj = getattr(_managed, "_delegation_task", None)
-            is_running = task_obj is not None and not task_obj.done()
-            dlg_status = str(info.get("status", "")).strip()
-            if is_running:
-                dlg_status = "running"
-            elif not dlg_status:
-                dlg_status = "completed" if (task_obj is not None and task_obj.done()) else "unknown"
-            rows.append({
-                "agent_id": dlg_id,
-                "name": str(info.get("avatar_name", "")).strip() or str(getattr(_managed, "avatar_name", "")).strip() or dlg_id,
-                "role": "delegated avatar",
-                "task": str(info.get("task", "")).strip(),
-                "status": dlg_status,
-                "result_summary": str(info.get("summary", "")).strip() if dlg_status in ("completed", "failed") else None,
-                "error_text": str(info.get("error", "")).strip() if dlg_status == "failed" else None,
-                "delegation": True,
-                "avatar_session_id": str(info.get("avatar_session_id", _sid)).strip(),
-            })
-        status_payload["subagents"] = rows
-        return status_payload
+        except SubAgentRunStoreReadError as exc:
+            return {
+                "ok": False,
+                "error": "subagent_run_store_read_failed",
+                "detail": str(exc),
+            }
+        return {"ok": True, "subagents": rows, "count": len(rows)}
 
     @app.post("/api/subagent/retry")
     async def retry_subagent(
@@ -5755,6 +6027,46 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True, "session_id": session_id, "provider": provider, "model": model}
 
+    @app.post("/api/sessions/{session_id}/isolate/adopt")
+    async def adopt_session_isolate(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.runtime.isolate_run import adopt_isolate
+
+        result = adopt_isolate(managed.studio_session)
+        try:
+            manager.incremental_persist(session_id)
+        except Exception:
+            pass
+        if not result.get("ok"):
+            return {"ok": False, "error": str(result.get("error") or "adopt_failed")}
+        return {"ok": True, "isolate": None}
+
+    @app.post("/api/sessions/{session_id}/isolate/discard")
+    async def discard_session_isolate(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.runtime.isolate_run import discard_isolate
+
+        result = discard_isolate(managed.studio_session)
+        try:
+            manager.incremental_persist(session_id)
+        except Exception:
+            pass
+        if not result.get("ok"):
+            return {"ok": False, "error": str(result.get("error") or "discard_failed")}
+        return {"ok": True, "isolate": None}
+
     @app.post("/api/sessions/{session_id}/pin")
     async def pin_session(
         session_id: str,
@@ -5794,6 +6106,42 @@ def create_studio_app() -> FastAPI:
             "session_id": managed.session_id,
             "avatar_id": managed.avatar_id,
             "session_name": managed.session_name,
+        }
+
+    @app.post("/api/sessions/{session_id}/continue-from")
+    async def continue_session_from_message(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.studio.conversation_continue import ConversationContinueError
+
+        message_id = str((payload or {}).get("message_id", "") or "").strip()
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        try:
+            forked = manager.continue_session_from_message(session_id, message_id)
+        except ConversationContinueError as exc:
+            if exc.code in {"session_not_found", "message_not_found"}:
+                raise HTTPException(status_code=404, detail=exc.code)
+            if exc.code == "source_session_running":
+                raise HTTPException(status_code=409, detail=exc.code)
+            raise HTTPException(status_code=400, detail=exc.code)
+        lineage = (forked.studio_session.scratchpad or {}).get(
+            "conversation_lineage", {}
+        )
+        workspace_mode = "shared_current"
+        if isinstance(lineage, dict) and lineage.get("workspace_mode"):
+            workspace_mode = str(lineage.get("workspace_mode"))
+        return {
+            "ok": True,
+            "session_id": forked.session_id,
+            "avatar_id": forked.avatar_id,
+            "session_name": forked.session_name,
+            "parent_session_id": session_id,
+            "source_message_id": message_id,
+            "workspace_mode": workspace_mode,
         }
 
     @app.post("/api/sessions/archive-before")
@@ -6313,6 +6661,170 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"queue full: {exc}")
         return {"ok": True, "action": action_str}
+
+    def _require_group(group_id: str):
+        cfg = group_registry.get_group(group_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        return cfg
+
+    def _work_item_http(exc: Exception) -> None:
+        from agenticx.runtime.work_items import WorkItemError
+
+        if isinstance(exc, WorkItemError):
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise
+
+    def _expected_version(payload: dict) -> int:
+        raw = (payload or {}).get("expected_version")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="expected_version required")
+
+    @app.get("/api/groups/{group_id}/work-items")
+    async def list_work_items(
+        group_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        items = get_work_item_store().list_items(group_id)
+        return {"ok": True, "items": [i.to_dict() for i in items]}
+
+    @app.post("/api/groups/{group_id}/work-items")
+    async def create_work_item(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        cfg = _require_group(group_id)
+        allowed = set(cfg.avatar_ids)
+        try:
+            item = get_work_item_store().create_item(
+                group_id,
+                title=str(payload.get("title") or ""),
+                owner_kind=str(payload.get("owner_kind") or "human"),
+                owner_id=str(payload.get("owner_id") or ""),
+                definition_of_done=str(payload.get("definition_of_done") or ""),
+                blocked_by=list(payload.get("blocked_by") or []),
+                source_session_id=str(payload.get("source_session_id") or ""),
+                source_preview=str(payload.get("source_preview") or ""),
+                allowed_owner_ids=allowed,
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.patch("/api/groups/{group_id}/work-items/{item_id}")
+    async def patch_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        cfg = _require_group(group_id)
+        if "status" in (payload or {}):
+            raise HTTPException(status_code=400, detail="status cannot be changed via PATCH")
+        expected = _expected_version(payload)
+        kwargs: dict[str, Any] = {}
+        if "title" in payload:
+            kwargs["title"] = payload.get("title")
+        if "definition_of_done" in payload:
+            kwargs["definition_of_done"] = payload.get("definition_of_done")
+        if "artifact_paths" in payload:
+            kwargs["artifact_paths"] = list(payload.get("artifact_paths") or [])
+        if "blocked_by" in payload:
+            kwargs["blocked_by"] = list(payload.get("blocked_by") or [])
+        if "owner_kind" in payload:
+            kwargs["owner_kind"] = payload.get("owner_kind")
+        if "owner_id" in payload:
+            kwargs["owner_id"] = payload.get("owner_id")
+        try:
+            item = get_work_item_store().patch_item(
+                group_id,
+                item_id,
+                expected_version=expected,
+                allow_status=False,
+                allowed_owner_ids=set(cfg.avatar_ids),
+                **kwargs,
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/accept")
+    async def accept_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().accept(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/pause")
+    async def pause_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().pause(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/resume")
+    async def resume_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().resume(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
 
     @app.delete("/api/groups/{group_id}")
     async def delete_group(
@@ -7352,6 +7864,18 @@ def create_studio_app() -> FastAPI:
             denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
             denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
             allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            command_permissions = (
+                ConfigManager.get_value("permissions.command_permissions")
+                or "workspace-write"
+            )
+            unattended_allow_workspace_scripts = (
+                ConfigManager.get_value("permissions.unattended_allow_workspace_scripts")
+                is True
+            )
+            from agenticx.runtime.command_sandbox import (
+                path_deny_enforcement_for_host,
+                shell_read_isolation_for_host,
+            )
             return {
                 "ok": True,
                 "mode": mode,
@@ -7359,6 +7883,10 @@ def create_studio_app() -> FastAPI:
                 "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
                 "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
                 "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+                "command_permissions": command_permissions,
+                "unattended_allow_workspace_scripts": unattended_allow_workspace_scripts,
+                "shell_read_isolation": shell_read_isolation_for_host(),
+                "path_deny_enforcement": path_deny_enforcement_for_host(),
             }
         except Exception as exc:
             logger.warning("get_permissions error: %s", exc)
@@ -7374,7 +7902,15 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.cli.config_manager import ConfigManager
 
-            for key in ("mode", "path_rules", "denied_commands", "denied_tools", "allowed_tools"):
+            for key in (
+                "mode",
+                "path_rules",
+                "denied_commands",
+                "denied_tools",
+                "allowed_tools",
+                "command_permissions",
+                "unattended_allow_workspace_scripts",
+            ):
                 if key in payload:
                     ConfigManager.set_value(f"permissions.{key}", payload[key])
 
@@ -7383,6 +7919,18 @@ def create_studio_app() -> FastAPI:
             denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
             denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
             allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            command_permissions = (
+                ConfigManager.get_value("permissions.command_permissions")
+                or "workspace-write"
+            )
+            unattended_allow_workspace_scripts = (
+                ConfigManager.get_value("permissions.unattended_allow_workspace_scripts")
+                is True
+            )
+            from agenticx.runtime.command_sandbox import (
+                path_deny_enforcement_for_host,
+                shell_read_isolation_for_host,
+            )
             return {
                 "ok": True,
                 "mode": mode,
@@ -7390,6 +7938,10 @@ def create_studio_app() -> FastAPI:
                 "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
                 "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
                 "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+                "command_permissions": command_permissions,
+                "unattended_allow_workspace_scripts": unattended_allow_workspace_scripts,
+                "shell_read_isolation": shell_read_isolation_for_host(),
+                "path_deny_enforcement": path_deny_enforcement_for_host(),
             }
         except Exception as exc:
             logger.warning("put_permissions error: %s", exc)
@@ -7686,6 +8238,196 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # --- WB Bridge (local CodeBuddy HTTP) config ---
+
+    @app.get("/api/wb-bridge/config")
+    async def get_wb_bridge_config(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return WB bridge URL and token (Desktop-only; requires desktop token)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import (
+                ensure_wb_bridge_token_persisted,
+                wb_bridge_base_url,
+            )
+
+            return {
+                "ok": True,
+                "url": wb_bridge_base_url(),
+                "token": ensure_wb_bridge_token_persisted(),
+            }
+        except Exception as exc:
+            logger.warning("get_wb_bridge_config error: %s", exc)
+            return {
+                "ok": False,
+                "url": "http://127.0.0.1:9743",
+                "token": "",
+                "error": str(exc),
+            }
+
+    @app.put("/api/wb-bridge/config")
+    async def put_wb_bridge_config(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import (
+                ensure_wb_bridge_token_persisted,
+                validate_bridge_url_for_studio,
+                wb_bridge_base_url,
+            )
+
+            if "url" in payload:
+                u = str(payload.get("url") or "").strip().rstrip("/")
+                if u:
+                    err = validate_bridge_url_for_studio(u)
+                    if err:
+                        raise HTTPException(status_code=400, detail=err)
+                    ConfigManager.set_wb_bridge_field("url", u)
+            if "token" in payload:
+                t = str(payload.get("token") or "").strip()
+                ConfigManager.set_wb_bridge_field("token", t)
+
+            return {
+                "ok": True,
+                "url": wb_bridge_base_url(),
+                "token": ensure_wb_bridge_token_persisted(),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("put_wb_bridge_config error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/wb-bridge/token/regenerate")
+    async def regenerate_wb_bridge_token(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        import secrets
+
+        try:
+            tok = secrets.token_urlsafe(32)
+            ConfigManager.set_wb_bridge_field("token", tok)
+            return {"ok": True, "token": tok}
+        except Exception as exc:
+            logger.warning("regenerate_wb_bridge_token error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/wb-bridge/status")
+    async def get_wb_bridge_status(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Probe whether local wb-bridge serve is listening and token matches."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import probe_wb_bridge
+
+            return probe_wb_bridge()
+        except Exception as exc:
+            logger.warning("get_wb_bridge_status error: %s", exc)
+            return {
+                "ok": False,
+                "url": "http://127.0.0.1:9743",
+                "reachable": False,
+                "auth_ok": False,
+                "ready": False,
+                "detail": str(exc),
+            }
+
+    @app.post("/api/wb-bridge/ensure")
+    async def ensure_wb_bridge(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Start loopback ``agx wb-bridge serve`` if needed, then re-probe."""
+        _check_token(x_agx_desktop_token)
+        try:
+            import asyncio
+
+            from agenticx.wb_bridge.process import ensure_wb_bridge_protocol
+            from agenticx.wb_bridge.settings import (
+                probe_wb_bridge,
+                wb_bridge_base_url,
+                wb_bridge_token,
+            )
+
+            base = wb_bridge_base_url()
+            token = wb_bridge_token()
+            started, detail = ensure_wb_bridge_protocol(base, token)
+            if detail == "already_ready":
+                probe = probe_wb_bridge(url=base, token=token)
+                probe["autostart"] = "already_ready"
+                return probe
+            if detail == "skipped_token_mismatch":
+                probe = probe_wb_bridge(url=base, token=token)
+                probe["autostart"] = "skipped_token_mismatch"
+                return probe
+
+            if started and detail != "already running":
+                for _ in range(40):
+                    await asyncio.sleep(0.4)
+                    probe = probe_wb_bridge(url=base, token=token)
+                    if probe.get("reachable") and (
+                        probe.get("schema_ok") or detail.startswith("nonlocal_")
+                    ):
+                        break
+                    if probe.get("reachable") and not detail.startswith("recycled"):
+                        break
+            else:
+                probe = probe_wb_bridge(url=base, token=token)
+            probe["autostart"] = detail
+            return probe
+        except Exception as exc:
+            logger.warning("ensure_wb_bridge error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/wb-bridge/sessions/{session_id}")
+    async def get_wb_bridge_session(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        import uuid as _uuid
+
+        try:
+            sid = str(_uuid.UUID(session_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="session_id must be a UUID") from None
+        try:
+            import httpx
+            from agenticx.wb_bridge.settings import (
+                parse_wb_bridge_url,
+                wb_bridge_base_url,
+                wb_bridge_token,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        base = wb_bridge_base_url().rstrip("/")
+        tok = wb_bridge_token()
+        is_loopback, _h, _p = parse_wb_bridge_url(base)
+        kwargs: dict = {"timeout": 5.0, "trust_env": False}
+        if is_loopback:
+            kwargs["transport"] = httpx.HTTPTransport()
+        try:
+            with httpx.Client(**kwargs) as client:
+                resp = client.get(
+                    f"{base}/v1/sessions/{sid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="wb-bridge unreachable") from None
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="session not found")
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text[:300])
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="invalid describe payload")
+        return data
 
     # --- Hooks API ---
 

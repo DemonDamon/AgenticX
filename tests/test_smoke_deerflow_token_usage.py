@@ -19,7 +19,13 @@ class _RespWithTokenUsage:
 
 def test_usage_metadata_from_llm_response_happy() -> None:
     um = usage_metadata_from_llm_response(_RespWithTokenUsage())
-    assert um == {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
+    assert um == {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "total_tokens": 30,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+    }
 
 
 def test_usage_metadata_from_llm_response_zeros_returns_none() -> None:
@@ -65,3 +71,27 @@ def test_non_final_event_unchanged_single_line() -> None:
     assert len(lines) == 1
     payload = json.loads(lines[0].removeprefix("data: ").strip())
     assert payload["type"] == EventType.TOKEN.value
+
+
+def test_tool_result_sse_excludes_private_ledger_data() -> None:
+    from agenticx.studio import server as studio_server
+
+    event = RuntimeEvent(
+        type=EventType.TOOL_RESULT.value,
+        data={
+            "name": "file_read",
+            "result": "public compacted result",
+            "tool_call_id": "call-private",
+        },
+        private_data={
+            "raw_result": "private full result",
+            "tool_status": "error",
+        },
+    )
+
+    lines = studio_server._runtime_event_to_sse_lines(event)
+    payload = json.loads(lines[0].removeprefix("data: ").strip())
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["data"]["result"] == "public compacted result"
+    assert "private_data" not in serialized
+    assert "private full result" not in serialized

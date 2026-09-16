@@ -1,7 +1,14 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { useAppStore } from "../../../store";
 import type { createBrainsApi, BrainRecord } from "./api";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 export type CodeIndexBrainPanelHandle = {
   isDirty: () => boolean;
@@ -52,7 +59,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
       try {
         const picker = window.agenticxDesktop.chooseDirectory;
         if (typeof picker !== "function") {
-          setPathHint("当前客户端不支持目录选择，请重启桌面端后重试。");
+          setPathHint(st("brains.noFolderPicker"));
           return;
         }
         const picked = await picker();
@@ -61,9 +68,9 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
           return;
         }
         if (picked?.canceled) return;
-        setPathHint(picked?.error ? String(picked.error) : "未选择目录");
+        setPathHint(picked?.error ? String(picked.error) : st("brains.noDirSelected"));
       } catch (exc) {
-        setPathHint(exc instanceof Error ? exc.message : "选择目录失败");
+        setPathHint(exc instanceof Error ? exc.message : st("brains.pickDirFailed"));
       }
     }, []);
 
@@ -107,7 +114,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
       if (!dirty) return { ok: true };
       const trimmed = codebasePath.trim();
       if (!trimmed) {
-        const err = "请先填写代码库路径";
+        const err = st("brains.needPath");
         setMsg(err);
         return { ok: false, error: err };
       }
@@ -121,7 +128,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
           },
         });
         onUpdated();
-        setMsg("已保存");
+        setMsg(st("brains.saved"));
         return { ok: true };
       } catch (exc) {
         const err = String((exc as Error).message ?? exc);
@@ -174,10 +181,10 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
         });
         const body = (await res.json()) as { ok?: boolean; detail?: string; error?: string };
         if (!res.ok) {
-          setMsg(body.detail || body.error || `构建索引失败（HTTP ${res.status}）`);
+          setMsg(body.detail || body.error || st("brains.buildFailed", { status: res.status }));
           return;
         }
-        setMsg("索引任务已提交");
+        setMsg(st("brains.indexQueued"));
         await reloadStatus();
       } catch (exc) {
         setMsg(String((exc as Error).message ?? exc));
@@ -189,7 +196,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
     return (
       <div className="space-y-3">
         <label className="block text-xs text-text-subtle">
-          代码库路径（绝对路径）
+          {st("brains.codePath")}
           <div className="mt-1 flex gap-1.5">
             <input
               className="min-w-0 flex-1 rounded border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -202,7 +209,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
             />
             <button
               type="button"
-              title="在系统中浏览并选择文件夹"
+              title={st("brains.browseFolder")}
               className="shrink-0 rounded border border-border bg-surface-panel px-2.5 py-1.5 text-text-muted transition hover:border-text-faint hover:bg-surface-hover hover:text-text-primary"
               onClick={() => void chooseCodebaseDirectory()}
             >
@@ -218,7 +225,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
             className="rounded border border-border px-3 py-1.5 text-xs hover:bg-surface-hover disabled:opacity-40"
             onClick={() => void saveConfig()}
           >
-            保存配置
+            {st("brains.saveConfig")}
           </button>
           <button
             type="button"
@@ -227,7 +234,7 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
             onClick={() => void triggerIndex()}
           >
             {busy ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null}
-            构建索引
+            {st("brains.buildIndex")}
           </button>
         </div>
         <pre className="max-h-40 overflow-auto rounded border border-border bg-surface-panel p-2 text-[10px] text-text-faint">

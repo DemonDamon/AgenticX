@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Message } from "../store";
 import { TRAE_TODO_CHECK_CLASS } from "./work-panel/SessionTodoList";
 
@@ -102,6 +103,7 @@ export function parseTodoMessage(text: string): ParsedTodo | null {
 }
 
 export function TodoUpdateCard({ content }: { content: string }) {
+  const { t } = useTranslation("chat");
   const parsed = useMemo(() => parseTodoMessage(content), [content]);
   const [expanded, setExpanded] = useState(true);
 
@@ -115,26 +117,26 @@ export function TodoUpdateCard({ content }: { content: string }) {
     <div className="rounded-lg border border-border bg-surface-card px-2.5 py-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium text-text-strong">任务清单</span>
+          <span className="text-[11px] font-medium text-text-strong">{t("todo.title")}</span>
           <span className="rounded bg-[color-mix(in_srgb,var(--status-success)_15%,transparent)] px-1.5 py-0.5 text-[10px] text-[var(--status-success)]">
             {parsed.completed}/{parsed.total}
           </span>
           <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-muted">{percent}%</span>
           {inProgress > 0 ? (
             <span className="rounded bg-[color-mix(in_srgb,var(--status-warning)_15%,transparent)] px-1.5 py-0.5 text-[10px] text-[var(--status-warning)]">
-              进行中 {inProgress}
+              {t("todo.inProgress", { count: inProgress })}
             </span>
           ) : null}
           {pending > 0 ? (
-            <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-muted">待办 {pending}</span>
+            <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-muted">{t("todo.pending", { count: pending })}</span>
           ) : null}
         </div>
         <button
           className="rounded px-1.5 py-0.5 text-[10px] text-text-subtle hover:bg-surface-hover hover:text-text-primary"
           onClick={() => setExpanded((prev) => !prev)}
-          title={expanded ? "收起任务项" : "展开任务项"}
+          title={expanded ? t("todo.collapseItems") : t("todo.expandItems")}
         >
-          {expanded ? "收起" : "展开"}
+          {expanded ? t("todo.collapse") : t("todo.expand")}
         </button>
       </div>
       <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-hover">
@@ -172,7 +174,7 @@ export function TodoUpdateCard({ content }: { content: string }) {
                 </div>
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
                   <div className="mt-0.5 text-[10px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">
-                    当前动作：{item.activeForm}
+                    {t("todo.currentAction", { action: item.activeForm })}
                   </div>
                 ) : null}
               </div>

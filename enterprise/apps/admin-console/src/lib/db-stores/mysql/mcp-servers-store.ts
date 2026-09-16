@@ -7,6 +7,8 @@ import { mcpServers, mcpTools } from "@agenticx/db-schema/mysql";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 
+import { decryptBackendConfig, encryptBackendConfig } from "../../mcp-backend-config-crypto";
+
 export type McpServerStatus = "active" | "disabled";
 
 export interface McpServerRecord {
@@ -71,7 +73,7 @@ function rowToServer(row: typeof mcpServers.$inferSelect): McpServerRecord {
     displayName: row.displayName ?? "",
     transport: row.transport,
     backendType: row.backendType,
-    backendConfig: (row.backendConfig as Record<string, unknown>) ?? {},
+    backendConfig: decryptBackendConfig(row.backendConfig),
     requiredScopes: Array.isArray(row.requiredScopes) ? row.requiredScopes.map(String) : [],
     status: (row.status as McpServerStatus) || "active",
     rateLimit: (row.rateLimit as Record<string, unknown>) ?? {},
@@ -130,7 +132,7 @@ export async function createMcpServer(input: CreateMcpServerInput): Promise<McpS
     displayName: input.displayName?.trim() || name,
     transport: input.transport?.trim() || "streamable-http",
     backendType: input.backendType.trim(),
-    backendConfig: input.backendConfig ?? {},
+    backendConfig: encryptBackendConfig(input.backendConfig),
     requiredScopes: input.requiredScopes ?? [],
     status: input.status ?? "active",
     rateLimit: input.rateLimit ?? { tool_calls_per_minute: 60 },
@@ -149,7 +151,7 @@ export async function updateMcpServer(id: string, input: UpdateMcpServerInput): 
   if (input.displayName !== undefined) patch.displayName = input.displayName;
   if (input.transport !== undefined) patch.transport = input.transport;
   if (input.backendType !== undefined) patch.backendType = input.backendType;
-  if (input.backendConfig !== undefined) patch.backendConfig = input.backendConfig;
+  if (input.backendConfig !== undefined) patch.backendConfig = encryptBackendConfig(input.backendConfig);
   if (input.requiredScopes !== undefined) patch.requiredScopes = input.requiredScopes;
   if (input.status !== undefined) patch.status = input.status;
   if (input.rateLimit !== undefined) patch.rateLimit = input.rateLimit;

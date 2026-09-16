@@ -19,9 +19,11 @@ from .hierarchical import (
     MemoryImportance,
     MemorySensitivity,
     SearchContext,
-    SearchResult
+    SearchResult,
+    ensure_aware,
 )
 from .base import MemoryError, MemoryRecord
+
 
 
 class CoreMemory(BaseHierarchicalMemory):
@@ -59,7 +61,7 @@ class CoreMemory(BaseHierarchicalMemory):
             if not profile_exists:
                 # Create default agent profile directly
                 record_id = str(uuid.uuid4())
-                now = datetime.now()
+                now = datetime.now(UTC)
                 record = HierarchicalMemoryRecord(
                     id=record_id,
                     content=f"Agent {self.agent_id} profile",
@@ -193,7 +195,7 @@ class CoreMemory(BaseHierarchicalMemory):
         else:
             # Create new context
             record_id = str(uuid.uuid4())
-            now = datetime.now()
+            now = datetime.now(UTC)
             record = HierarchicalMemoryRecord(
                 id=record_id,
                 content=content,
@@ -319,7 +321,7 @@ class CoreMemory(BaseHierarchicalMemory):
         if record_id is None:
             record_id = str(uuid.uuid4())
         
-        now = datetime.now()
+        now = datetime.now(UTC)
         record = HierarchicalMemoryRecord(
             id=record_id,
             content=content,
@@ -415,7 +417,7 @@ class CoreMemory(BaseHierarchicalMemory):
                     continue
             
             if context.max_age:
-                if datetime.now(UTC) - record.created_at > context.max_age:
+                if datetime.now(UTC) - ensure_aware(record.created_at) > context.max_age:
                     continue
             
             if not context.include_decayed and record.decay_factor < 0.5:
@@ -486,7 +488,7 @@ class CoreMemory(BaseHierarchicalMemory):
         decay_factor = record.decay_factor
         
         # Apply recency bonus (newer records get slight boost)
-        age_hours = (datetime.now(UTC) - record.created_at).total_seconds() / 3600
+        age_hours = (datetime.now(UTC) - ensure_aware(record.created_at)).total_seconds() / 3600
         recency_bonus = max(0, 1 - (age_hours / (24 * 7)))  # Bonus fades over a week
         
         # Calculate final score

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "sandbox",
-  "generation": "95aa202b66e34b23be088857b4046f03",
+  "generation": "486e9df88ca04c9f916f4c231dac1df8",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:0090a49b89e162cda72c56169c574a10070530d30df1b01c275c39e1df57e6c5",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:8f7956cdc71dd5e252a10e7e3be743ef4ea4097c015e59aa91682de40f3699ed",
   "summary_path": "conclusions/sandbox_module_conclusion.md",
-  "summary_sha256": "sha256:e88ebf782a01a0462f17de8b216e86ec2402c0d908900ccec6aa07193ae9d13d",
-  "updated_at": "2026-08-08T01:37:16.834436+00:00"
+  "summary_sha256": "sha256:162795d30060fa9ad9d4978f9a10e94da28e676e12c2ebdced4a7e7d9e3ce67b",
+  "updated_at": "2026-09-01T06:08:40.186964+00:00"
 }

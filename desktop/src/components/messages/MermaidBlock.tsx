@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Copy, Download, Maximize2, Minimize2, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../ds/Modal";
 import { ZoomableViewport } from "../ds/ZoomableViewport";
 import { mermaidThemeFromApp, renderMermaidSvg } from "../../utils/mermaid-render";
@@ -213,6 +214,7 @@ type Props = {
 };
 
 export function MermaidBlock({ code }: Props) {
+  const { t } = useTranslation("chat");
   const reactId = useId().replace(/:/g, "");
   const renderId = `mmd-${reactId}`;
   const appTheme = useDocumentDataTheme();
@@ -416,13 +418,13 @@ export function MermaidBlock({ code }: Props) {
     return (
       <div className="my-2 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
-          <span>Mermaid 渲染失败，以下为源码。</span>
+          <span>{t("mermaid.renderFailed")}</span>
           <button
             type="button"
             className="no-drag rounded border border-amber-500/50 px-2 py-0.5 text-[11px] hover:bg-amber-500/20"
             onClick={() => void copyCode()}
           >
-            {copied ? "已复制" : "复制源码"}
+            {copied ? t("mermaid.copied") : t("mermaid.copySource")}
           </button>
         </div>
         <pre className="max-w-full overflow-x-auto rounded-md border border-border bg-surface-panel/80 p-3 text-xs">
@@ -435,7 +437,7 @@ export function MermaidBlock({ code }: Props) {
   if (!svg) {
     return (
       <div className="my-2 rounded-md border border-border bg-surface-panel/50 px-3 py-6 text-center text-xs text-text-faint">
-        正在渲染图表…
+        {t("mermaid.rendering")}
       </div>
     );
   }
@@ -449,25 +451,25 @@ export function MermaidBlock({ code }: Props) {
             background: "color-mix(in srgb, var(--surface-card) 92%, transparent)",
             borderColor: "var(--border-subtle)",
           }}
-          title="Ctrl/⌘ + 滚轮缩放"
+          title={t("mermaid.zoomWheel")}
         >
           <ToolbarButton
-            title="平移（拖动画布）"
+            title={t("mermaid.pan")}
             active={panMode}
             onClick={() => setPanMode((v) => !v)}
           >
             <Move className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
-          <ToolbarButton title="缩小" onClick={() => zoomAtCenter(1 / ZOOM_FACTOR)}>
+          <ToolbarButton title={t("mermaid.zoomOut")} onClick={() => zoomAtCenter(1 / ZOOM_FACTOR)}>
             <ZoomOut className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
-          <ToolbarButton title="放大" onClick={() => zoomAtCenter(ZOOM_FACTOR)}>
+          <ToolbarButton title={t("mermaid.zoomIn")} onClick={() => zoomAtCenter(ZOOM_FACTOR)}>
             <ZoomIn className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
-          <ToolbarButton title="适应窗口" onClick={() => fitToView()}>
+          <ToolbarButton title={t("mermaid.fit")} onClick={() => fitToView()}>
             <Minimize2 className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
-          <ToolbarButton title="放大查看" onClick={() => setZoomOpen(true)}>
+          <ToolbarButton title={t("mermaid.expand")} onClick={() => setZoomOpen(true)}>
             <Maximize2 className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
           <div
@@ -475,11 +477,11 @@ export function MermaidBlock({ code }: Props) {
             style={{ background: "var(--border-subtle)" }}
             aria-hidden
           />
-          <ToolbarButton title="复制 Mermaid 源码" onClick={() => void copyCode()}>
+          <ToolbarButton title={t("mermaid.copyMermaid")} onClick={() => void copyCode()}>
             <Copy className="h-4 w-4" strokeWidth={2} />
           </ToolbarButton>
           <ToolbarButton
-            title={exporting ? "导出中…" : "下载 PNG"}
+            title={exporting ? t("mermaid.exporting") : t("mermaid.downloadPng")}
             onClick={() => void downloadPng()}
           >
             <Download className={`h-4 w-4 ${exporting ? "opacity-50" : ""}`} strokeWidth={2} />
@@ -488,13 +490,13 @@ export function MermaidBlock({ code }: Props) {
 
         {copied ? (
           <div className="pointer-events-none absolute right-2 top-2 z-10 rounded border border-border bg-surface-panel/95 px-2 py-0.5 text-[11px] text-text-faint">
-            已复制源码
+            {t("mermaid.copiedSource")}
           </div>
         ) : null}
 
         <div
           ref={viewportRef}
-          title="Ctrl/⌘ + 滚轮缩放；可点放大查看"
+          title={t("mermaid.zoomHint")}
           className={`relative w-full touch-none overflow-hidden ${panMode ? (draggingUi ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
           style={{
             minHeight: VIEWPORT_MIN_H,
@@ -521,7 +523,7 @@ export function MermaidBlock({ code }: Props) {
 
       <Modal
         open={zoomOpen}
-        title="查看图表"
+        title={t("mermaid.viewChart")}
         onClose={() => setZoomOpen(false)}
         panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
       >

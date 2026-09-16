@@ -1,11 +1,19 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Plus } from "lucide-react";
+import { i18n } from "../../../i18n/i18n";
 import {
+
   buildRemoteMcpServerPayload,
   getMcpServersMap,
   parseMcpJsonDocument,
   setMcpServersMap,
 } from "../../../utils/mcp-remote-config";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type RegistryServer = {
   id: string;
@@ -53,6 +61,7 @@ function parseRegistryServers(payload: unknown): RegistryServer[] {
 }
 
 export function McpGatewayImportPanel({ configPath, existingServerNames, onImported }: Props) {
+  const { t } = useTranslation("settings");
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:8080");
   const [pat, setPat] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,11 +74,11 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
     const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
     const token = pat.trim();
     if (!trimmedBase) {
-      setError("请填写 Gateway 地址");
+      setError(st("mcpRemote.needGateway"));
       return;
     }
     if (!token) {
-      setError("请填写 PAT（Bearer Token）");
+      setError(st("mcpRemote.needPat"));
       return;
     }
     setLoading(true);
@@ -81,10 +90,10 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
         baseUrl: trimmedBase,
         token,
       });
-      if (!res.ok) throw new Error(res.error ?? "拉取注册表失败");
+      if (!res.ok) throw new Error(res.error ?? st("mcpRemote.registryFailed"));
       const parsed = parseRegistryServers(res.data);
       if (parsed.length === 0) {
-        setError("注册表为空或响应格式无法识别");
+        setError(st("mcpRemote.registryEmpty"));
         return;
       }
       setServers(parsed);
@@ -104,7 +113,7 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
     try {
       const raw = await window.agenticxDesktop.mcpGetRaw({ path: configPath });
       if (!raw.ok || typeof raw.text !== "string") {
-        throw new Error(raw.error ?? "无法读取 mcp.json");
+        throw new Error(raw.error ?? st("mcpRemote.cannotReadMcp"));
       }
       const doc = parseMcpJsonDocument(raw.text);
       const serversMap = getMcpServersMap(doc);
@@ -118,15 +127,15 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
         added += 1;
       }
       if (added === 0) {
-        setError("所选条目均已存在或未变更");
+        setError(st("mcpRemote.nothingChanged"));
         return;
       }
       const save = await window.agenticxDesktop.mcpPutRaw({
         path: configPath,
         text: `${JSON.stringify(setMcpServersMap(doc, serversMap), null, 2)}\n`,
       });
-      if (!save.ok) throw new Error(save.error ?? "保存失败");
-      await onImported(`已从 Gateway 导入 ${added} 个 MCP`);
+      if (!save.ok) throw new Error(save.error ?? st("mcpRemote.saveFailed"));
+      await onImported(st("mcpRemote.imported", { count: added }));
       setServers([]);
       setSelected(new Set());
     } catch (err) {
@@ -138,14 +147,13 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
 
   return (
     <div className="space-y-2 rounded-md border border-border bg-surface-card p-3">
-      <div className="text-sm font-medium text-text-muted">Enterprise Gateway 导入</div>
+      <div className="text-sm font-medium text-text-muted">{st("mcpRemote.gatewayTitle")}</div>
       <p className="text-[11px] leading-relaxed text-text-faint">
-        输入 Gateway 根地址与 PAT，从 <code className="text-[10px]">/mcp/registry</code>{" "}
-        拉取托管 MCP 并写入主配置（Streamable HTTP + Authorization）。
+        {st("mcpRemote.gatewayIntro")}
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block text-[11px] text-text-muted">
-          Gateway 地址
+          {st("mcpRemote.gatewayUrl")}
           <input
             className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs"
             value={baseUrl}
@@ -173,7 +181,7 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
           onClick={() => void discover()}
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-          发现 MCP
+          {st("mcpRemote.discover")}
         </button>
         {servers.length > 0 ? (
           <button
@@ -183,7 +191,7 @@ export function McpGatewayImportPanel({ configPath, existingServerNames, onImpor
             onClick={() => void importSelected()}
           >
             {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Plus className="h-3.5 w-3.5" aria-hidden />}
-            导入选中（{selected.size}）
+            {st("mcpRemote.importSelected", { count: selected.size })}
           </button>
         ) : null}
       </div>

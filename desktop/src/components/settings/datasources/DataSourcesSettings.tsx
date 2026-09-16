@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../../store";
 import { Toast } from "../../ds/Toast";
 import { fetchDataSourcesStatus, testDataSource, updateDataSourceConfig } from "./api";
@@ -6,6 +7,7 @@ import { DataSourceCard } from "./DataSourceCard";
 import type { DataSourceInfo } from "./types";
 
 export function DataSourcesSettings() {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const openSettings = useAppStore((s) => s.openSettings);
   const [items, setItems] = useState<DataSourceInfo[] | null>(null);
@@ -45,9 +47,9 @@ export function DataSourcesSettings() {
     try {
       await updateDataSourceConfig(apiToken, name, { enabled });
       await reload();
-      showToast(enabled ? "已启用数据源" : "已停用数据源");
+      showToast(enabled ? t("dataSources.enabledToast") : t("dataSources.disabledToast"));
     } catch (e) {
-      showToast(`保存失败：${String(e)}`, "warning");
+      showToast(t("dataSources.saveFailed", { reason: String(e) }), "warning");
       throw e;
     }
   };
@@ -55,9 +57,9 @@ export function DataSourcesSettings() {
   const handleTest = async (name: string) => {
     const result = await testDataSource(apiToken, name);
     if (result.ok) {
-      showToast("连通性测试通过");
+      showToast(t("dataSources.testOk"));
     } else {
-      showToast(result.detail || "连通性测试失败", "warning");
+      showToast(result.detail || t("dataSources.testFail"), "warning");
     }
     return result;
   };
@@ -67,10 +69,10 @@ export function DataSourcesSettings() {
   };
 
   if (error) {
-    return <div className="p-4 text-sm text-rose-400">加载数据源失败：{error}</div>;
+    return <div className="p-4 text-sm text-rose-400">{t("dataSources.loadFailed", { error })}</div>;
   }
   if (!items) {
-    return <div className="p-4 text-sm text-text-muted">正在加载数据源…</div>;
+    return <div className="p-4 text-sm text-text-muted">{t("dataSources.loading")}</div>;
   }
 
   const free = items.filter((i) => !i.requiresCredential);
@@ -80,7 +82,7 @@ export function DataSourcesSettings() {
     <>
       <div className="space-y-6 p-4">
         <section>
-          <h3 className="text-sm font-medium text-text-strong">开箱即用（免费/无需凭证）</h3>
+          <h3 className="text-sm font-medium text-text-strong">{t("dataSources.freeTitle")}</h3>
           <div className="mt-2 space-y-2">
             {free.map((item) => (
               <DataSourceCard
@@ -93,7 +95,7 @@ export function DataSourcesSettings() {
           </div>
         </section>
         <section>
-          <h3 className="text-sm font-medium text-text-strong">需要凭证 / 依赖 MCP</h3>
+          <h3 className="text-sm font-medium text-text-strong">{t("dataSources.credTitle")}</h3>
           <div className="mt-2 space-y-2">
             {credentialed.map((item) => (
               <DataSourceCard

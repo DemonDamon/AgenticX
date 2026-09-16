@@ -27,6 +27,8 @@ import {
 } from "./deep-research-artifact-errors";
 import { buildStoreZip } from "./zip-store";
 import { laneSourceHost, type LaneSource } from "./deep-research-lane-sources";
+import { useChatCopy, useChatLocale } from "../../i18n/ChatLocaleProvider";
+import { localizeReportChrome } from "./localize-report-chrome";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import "../../markdown/chat-prism-themes.css";
 
@@ -503,6 +505,8 @@ export function DeepResearchFilesPanel({
   sources,
   className,
 }: DeepResearchFilesPanelProps) {
+  const copy = useChatCopy();
+  const locale = useChatLocale();
   const [artifacts, setArtifacts] = React.useState<ArtifactListItem[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [view, setView] = React.useState<"browse" | "preview" | "sources">("browse");
@@ -674,6 +678,10 @@ export function DeepResearchFilesPanel({
     () => (selectedIsHtml ? "" : displayContentFromRawAssistantText(previewRaw)),
     [previewRaw, selectedIsHtml],
   );
+  const displayMarkdown = React.useMemo(
+    () => localizeReportChrome(previewMarkdown, locale),
+    [previewMarkdown, locale],
+  );
   const hasPreview = selectedIsHtml ? previewRaw.trim().length > 0 : previewMarkdown.length > 0;
 
   // Portal theme → report.html (iframe sandbox cannot read parent localStorage).
@@ -696,8 +704,11 @@ export function DeepResearchFilesPanel({
   }, []);
 
   const htmlSrcDoc = React.useMemo(
-    () => (selectedIsHtml ? prepareHtmlPreviewSrcDoc(previewRaw, portalDark) : ""),
-    [selectedIsHtml, previewRaw, portalDark],
+    () =>
+      selectedIsHtml
+        ? prepareHtmlPreviewSrcDoc(localizeReportChrome(previewRaw, locale), portalDark)
+        : "",
+    [selectedIsHtml, previewRaw, portalDark, locale],
   );
 
   // Prefer a wider docked width for HTML so the report TOC can sit beside content
@@ -838,7 +849,7 @@ export function DeepResearchFilesPanel({
   const previewing = view === "preview";
   const laneSources = focusLane?.sources ?? [];
   const title = browsing
-    ? "全部文件"
+    ? copy.delivery.allFiles
     : sourcesView
       ? `网页搜索 ${laneSources.length}`
       : selected?.path.split("/").pop() || selected?.title || "文件预览";
@@ -873,7 +884,7 @@ export function DeepResearchFilesPanel({
       data-view={view}
       data-fullscreen={fullscreen ? "true" : "false"}
       data-panel-width={fullscreen ? undefined : String(panelWidthPx)}
-      aria-label={browsing ? "全部文件" : sourcesView ? "网页搜索来源" : "文件预览"}
+      aria-label={browsing ? copy.delivery.allFiles : sourcesView ? "网页搜索来源" : "文件预览"}
     >
       {!fullscreen ? (
         <div
@@ -1026,7 +1037,7 @@ export function DeepResearchFilesPanel({
           className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-2"
           data-testid="deep-research-browse-list"
         >
-          {loading ? <p className="px-3 text-xs text-muted-foreground">加载中…</p> : null}
+          {loading ? <p className="px-3 text-xs text-muted-foreground">{copy.delivery.loading}</p> : null}
           {error ? (
             <p
               className="mb-2 px-3 text-xs text-destructive"
@@ -1097,7 +1108,7 @@ export function DeepResearchFilesPanel({
             .join(" ")}
         >
           {previewLoading ? (
-            <p className="px-5 py-4 text-xs text-muted-foreground">加载中…</p>
+            <p className="px-5 py-4 text-xs text-muted-foreground">{copy.delivery.loading}</p>
           ) : null}
           {previewError ? (
             <p className="px-5 py-4 text-xs text-destructive">{previewError}</p>
@@ -1116,7 +1127,7 @@ export function DeepResearchFilesPanel({
           {!previewLoading && !previewError && !selectedIsHtml && previewMarkdown ? (
             <div className="agx-assistant-md agx-assistant-md--document max-w-none break-words text-base">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {previewMarkdown}
+                {displayMarkdown}
               </ReactMarkdown>
             </div>
           ) : null}

@@ -36,6 +36,7 @@ import {
   Activity,
   BarChart3,
   Bell,
+  Boxes,
   Building2,
   ChevronRight,
   PanelLeftClose,
@@ -59,6 +60,7 @@ import {
   Sun,
   UserCog,
   Users,
+  UsersRound,
   Wand2,
   Database,
   Plug,
@@ -92,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/iam/users", labelKey: "users", icon: Users },
       { href: "/iam/departments", labelKey: "departments", icon: Building2 },
+      { href: "/iam/user-groups", labelKey: "userGroups", icon: UsersRound },
       { href: "/iam/roles", labelKey: "roles", icon: UserCog },
       { href: "/iam/bulk-import", labelKey: "bulkImport", icon: Wand2 },
     ],
@@ -120,6 +123,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/cache", labelKey: "cache", icon: Database },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
       { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: Plug },
+      { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
     ],
   },
@@ -247,6 +251,30 @@ export function AppShell({ children }: AppShellProps) {
       // noop
     }
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH !== "1") return;
+
+    let cancelled = false;
+    let index = 0;
+    let timer: number | undefined;
+    const warmNextRoute = () => {
+      if (cancelled || index >= FLAT_NAV.length) return;
+      if (document.visibilityState !== "visible") {
+        timer = window.setTimeout(warmNextRoute, 1_200);
+        return;
+      }
+      router.prefetch(FLAT_NAV[index]!.href);
+      index += 1;
+      timer = window.setTimeout(warmNextRoute, 1_200);
+    };
+    timer = window.setTimeout(warmNextRoute, 1_000);
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [router]);
 
   const handleSidebarResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -378,6 +406,7 @@ export function AppShell({ children }: AppShellProps) {
                     <Link
                       key={`${group.id}-${item.href}-${item.labelKey}`}
                       href={item.href}
+                      prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
                       className={[
                         "group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
                         active

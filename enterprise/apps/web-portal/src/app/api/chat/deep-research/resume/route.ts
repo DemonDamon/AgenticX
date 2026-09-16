@@ -38,6 +38,8 @@ import {
   resolveClarifyResume,
 } from "../../../../../lib/deep-research/run-wait";
 import { withRequestLog } from "../../../../../lib/observability/with-request-log";
+import { resolvePortalLocaleFromCookies } from "../../../../../lib/portal-locale";
+import { deepResearchCopy } from "../../../../../lib/deep-research/copy";
 
 export const runtime = "nodejs";
 export const maxDuration = 1500;
@@ -95,6 +97,8 @@ export async function POST(request: Request) {
     tenantId: session.tenantId,
   });
   logCtx.setMode("deep_research");
+  const locale = await resolvePortalLocaleFromCookies();
+  const copy = deepResearchCopy(locale);
 
   let body: {
     runId?: unknown;
@@ -603,6 +607,7 @@ export async function POST(request: Request) {
       {
         url: GATEWAY_COMPLETIONS_URL,
         headers: gatewayHeaders,
+        locale,
         loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
         artifactStore: defaultArtifactStore,
         runStore: defaultRunStore,
@@ -672,7 +677,7 @@ export async function POST(request: Request) {
 
   const action = planAction || (skip ? "skip" : "approve");
   let planActionOut: "approved" | "updated" = "approved";
-  let narrative = "已确认计划，继续执行研究。";
+  let narrative = copy.planApprovedContinue;
 
   if (action === "edit") {
     const patched = parsePlanPatchSubQuestions(answers[PLAN_GATE_PATCH_KEY]);
@@ -680,10 +685,10 @@ export async function POST(request: Request) {
       plan = { ...plan, subQuestions: patched };
       planVersion += 1;
       planActionOut = "updated";
-      narrative = "已按修改后的计划继续研究。";
+      narrative = copy.planEditedContinue;
     }
   } else if (action === "skip") {
-    narrative = "已跳过计划确认，直接开始研究。";
+    narrative = copy.planSkippedContinue;
   }
 
   const snapshot = toPlanSnapshot(plan, planVersion, proposedAssumptions);
@@ -723,6 +728,7 @@ export async function POST(request: Request) {
     {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
+      locale,
       loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
       artifactStore: defaultArtifactStore,
       runStore: defaultRunStore,

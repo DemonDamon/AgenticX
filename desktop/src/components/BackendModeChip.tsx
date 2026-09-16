@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { formatBackendChipLabel, getBackendScope, getConnectionModeSync } from "../utils/backend-scope";
 
-/** Small pill showing 本地/远程 backend connection mode; shared by Topbar and the expanded sidebar's top row. */
+/** Small pill showing local/remote backend connection mode; shared by Topbar and the expanded sidebar's top row. */
 export function BackendModeChip() {
+  const { t } = useTranslation("chat");
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -18,8 +20,8 @@ export function BackendModeChip() {
   const label = formatBackendChipLabel(backendScope, connectionMode);
   const tooltip =
     connectionMode === "remote"
-      ? `当前连接到远程后端 ${backendScope}。到「设置 → 服务器」可切换。`
-      : "当前使用本机 agx serve。到「设置 → 服务器」可切换远程模式。";
+      ? t("composer.connectedRemote", { scope: backendScope })
+      : t("composer.connectedLocal");
 
   return (
     <span

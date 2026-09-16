@@ -679,13 +679,20 @@ OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也
 
 本项目采用 Apache License 2.0（Apache-2.0）许可，详见 [LICENSE](LICENSE) 文件。
 
-## Star History
+## 在 GitHub 上给我们 Star
 
-[![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
+如果 AgenticX 对你有用或有启发，请滚到本页顶部，点击右上角的 `Star`。Star 会把仓库往 GitHub 搜索和 Trending 上推，这是大多数人第一次看到我们的方式。
+
+<a href="https://github.com/DemonDamon/AgenticX">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark.svg" />
+    <img alt="DemonDamon/AgenticX 的 Star 增长，目前 219 stars" src="assets/star-history-light.svg" width="100%" />
+  </picture>
+</a>
 
 ## 致谢
 
-AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们深度研读了以下这些项目的架构设计与源码实现，它们在智能体编排、工具调用、记忆系统、沙箱安全、桌面端 UX 等各个维度为我们提供了宝贵的灵感与参考。在此，向每一位为这些项目付出心血的作者、贡献者和社区成员，致以最诚挚的感谢。
+AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们深度研读了以下项目的架构设计与源码实现；其中少数条目是对外产品而非开源仓库，我们参考的是它们公开的文档与设计思路。它们在智能体编排、工具调用、记忆系统、沙箱安全、桌面端 UX 等各个维度为我们提供了宝贵的灵感与参考。在此，向每一位为这些项目付出心血的作者、贡献者和社区成员，致以最诚挚的感谢。
 
 | 项目 | 仓库 | 给予我们的启发 |
 |------|------|----------------|
@@ -696,6 +703,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **AgentKit SDK** | [volcengine/agentkit-sdk-python](https://github.com/volcengine/agentkit-sdk-python) | 智能体部署与 Skill 打包 |
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless 智能体运行时模式 |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | 多智能体通信与流水线设计 |
+| **AgentTeams** | [agentscope-ai/AgentTeams](https://github.com/agentscope-ai/AgentTeams) | 人可见的问责与持久事项卷宗 |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | 轻量级智能体框架设计 |
 | **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | 会话回环体检的证据分级（Present / Wired / Exercised / Outcome-supported） |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | 角色扮演智能体与社会模拟 |
@@ -705,10 +713,12 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | 多智能体团队协作机制 |
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | 桌面监控面板与 Tauri 应用模式 |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew 编排、Flow 工作流与记忆系统 |
-| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | 长程回合加固：窗口溢出同轮重试、中断 closer、落盘失败即停 |
+| **Cumora** | [yetone/cumora](https://github.com/yetone/cumora) | 智能体作为一等成员的团队聊天、人机同群与跨智能体协作 |
+| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | 长程回合加固：窗口溢出同轮重试、中断 closer、落盘失败即停、上下文复位与有界 handoff |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | 仓库级知识索引 |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | 深度研究工作流与 Skill 测试框架 |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | 多智能体 Workforce 与 SSE 事件规范 |
+| **Grok Bot** | [docs.x.ai/grok-bot](https://docs.x.ai/grok-bot/overview) | 持久化命名队友、共享计算机、独立协作与从演示沉淀工作流 |
 | **Iron Claw** | [nearai/ironclaw](https://github.com/nearai/ironclaw) | 智能体评测与基准测试框架 |
 | **JoyAgent / JD Genie** | [jd-opensource/joyagent-jdgenie](https://github.com/jd-opensource/joyagent-jdgenie) | 企业级智能体编排 |
 | **Khazix Skills** | [KKKKhazix/Khazix-Skills](https://github.com/KKKKhazix/Khazix-Skills) | Skill 模块结构与打包 |
@@ -720,6 +730,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | 多智能体移动 GUI 自动化 |
 | **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | LLM 工具/资源标准化协议 |
 | **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU 加速智能体插件系统 |
+| **OpenBot** | [CopilotKit/openbot](https://github.com/CopilotKit/openbot) | 先决策后执行且审计不可缺席、能力目录与安全边界分离、可观看的动作表面 |
 | **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 开放式桌面智能体平台与扩展生态 |
 | **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | 容器化代码沙箱 |
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |

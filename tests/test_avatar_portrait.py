@@ -9,10 +9,14 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from agenticx.avatar.portrait import (
+    PORTRAIT_STYLE,
+    PORTRAIT_STYLE_CUSTOM,
     build_avatar_portrait_svg,
     build_collection_portrait_url,
     fetch_collection_portrait_url,
     generate_avatar_portrait_url,
+    infer_portrait_traits,
+    needs_portrait_refresh,
 )
 from agenticx.avatar.registry import AvatarRegistry
 
@@ -23,6 +27,7 @@ _FAKE_PNG = (
     + b"IEND"
     + b"\x00" * 16
 )
+_PNG_DATA_URL = "data:image/png;base64,abc"
 
 
 def test_generate_avatar_portrait_url_is_data_svg() -> None:
@@ -48,13 +53,15 @@ def test_create_avatar_auto_assigns_portrait(tmp_path, monkeypatch) -> None:
     registry = AvatarRegistry()
     cfg = registry.create_avatar(name="安全·司南", role="安全 / 权限 / 合规")
     assert cfg.avatar_url.startswith("data:image/svg+xml;base64,")
+    assert cfg.portrait_style == PORTRAIT_STYLE
 
 
 def test_collection_url_is_deterministic() -> None:
     a = build_collection_portrait_url(name="飞坦", avatar_id="abc")
     b = build_collection_portrait_url(name="飞坦", avatar_id="abc")
     assert a == b
-    assert "avataaars" in a
+    assert "notionists" in a
+    assert "avataaars" not in a
     assert "seed=" in a
 
 
@@ -92,10 +99,10 @@ def test_generate_uses_collection_when_enabled(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "agenticx.avatar.portrait.fetch_collection_portrait_url",
-        lambda **_kwargs: "data:image/png;base64,abc",
+        lambda **_kwargs: _PNG_DATA_URL,
     )
     url = generate_avatar_portrait_url(name="飞坦", role="算法", avatar_id="abc")
-    assert url == "data:image/png;base64,abc"
+    assert url == _PNG_DATA_URL
 
 
 def test_list_backfills_empty_portrait_when_fetch_works(tmp_path, monkeypatch) -> None:
@@ -106,14 +113,16 @@ def test_list_backfills_empty_portrait_when_fetch_works(tmp_path, monkeypatch) -
     )
     monkeypatch.setattr(
         "agenticx.avatar.registry.fetch_collection_portrait_url",
-        lambda **_kwargs: "data:image/png;base64,abc",
+        lambda **_kwargs: _PNG_DATA_URL,
     )
     registry = AvatarRegistry()
     cfg = registry.create_avatar(name="路远行", role="发行运营")
     cfg.avatar_url = ""
+    cfg.portrait_style = ""
     registry._write_config(cfg)
     listed = registry.list_avatars()
-    assert listed[0].avatar_url == "data:image/png;base64,abc"
+    assert listed[0].avatar_url == _PNG_DATA_URL
+    assert listed[0].portrait_style == PORTRAIT_STYLE
 
 
 def test_list_replaces_geometric_svg_fallback(tmp_path, monkeypatch) -> None:
@@ -124,53 +133,135 @@ def test_list_replaces_geometric_svg_fallback(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "agenticx.avatar.registry.fetch_collection_portrait_url",
-        lambda **_kwargs: "data:image/png;base64,abc",
+        lambda **_kwargs: _PNG_DATA_URL,
     )
     registry = AvatarRegistry()
     cfg = registry.create_avatar(name="运维·磐石", role="基础设施运维工程师")
     assert cfg.avatar_url.startswith("data:image/svg+xml")
     listed = registry.list_avatars()
-    assert listed[0].avatar_url == "data:image/png;base64,abc"
+    assert listed[0].avatar_url == _PNG_DATA_URL
+    assert listed[0].portrait_style == PORTRAIT_STYLE
 
 
-def test_ops_role_selects_blazer_and_short_hair() -> None:
+def test_male_name_selects_short_hair() -> None:
     from urllib.parse import parse_qs, urlparse
 
-    from agenticx.avatar.portrait import infer_portrait_traits
-
     traits = infer_portrait_traits(name="运维·磐石", role="基础设施运维工程师")
-    assert "blazerAndShirt" in traits["clothing"]
+    assert "variant01" in traits["hair"] or traits["beardProbability"] != "0"
     url = build_collection_portrait_url(
         name="运维·磐石",
         role="基础设施运维工程师",
         avatar_id="x",
     )
     query = parse_qs(urlparse(url).query)
-    assert "blazerAndShirt" in query["clothing"][0]
-    assert "shortFlat" in query["top"][0] or query["facialHairProbability"] == ["20"]
+    assert "clothing" not in query
+    assert "top" not in query
+    assert "hair" in query
 
 
 def test_description_controls_gender_hair_glasses() -> None:
-    from agenticx.avatar.portrait import infer_portrait_traits
-
     traits = infer_portrait_traits(
         name="林绘澄",
         role="游戏美术",
         description="女设计师，长发，戴眼镜",
     )
-    assert traits["facialHairProbability"] == "0"
-    assert "straight" in traits["top"] or "miaWallace" in traits["top"]
-    assert traits["accessoriesProbability"] == "100"
-    assert "prescription" in traits["accessories"]
+    assert traits["beardProbability"] == "0"
+    assert "variant12" in traits["hair"] or "variant24" in traits["hair"]
+    assert traits["glassesProbability"] == "100"
+    assert "variant" in traits["glasses"]
 
 
-def test_hoodie_and_short_hair_from_description() -> None:
-    from agenticx.avatar.portrait import infer_portrait_traits
-
+def test_short_hair_from_description() -> None:
     traits = infer_portrait_traits(
         name="飞坦",
         role="算法工程专家",
         description="男，短发，卫衣",
     )
-    assert traits["clothing"] == "hoodie"
-    assert "shortFlat" in traits["top"] or "theCaesar" in traits["top"]
+    assert traits["beardProbability"] != "0" or "variant01" in traits["hair"]
+    assert "variant01" in traits["hair"] or "variant03" in traits["hair"]
+
+
+def test_needs_refresh_skips_current_and_custom() -> None:
+    assert needs_portrait_refresh(_PNG_DATA_URL, portrait_style=PORTRAIT_STYLE) is False
+    assert needs_portrait_refresh(_PNG_DATA_URL, portrait_style=PORTRAIT_STYLE_CUSTOM) is False
+
+
+def test_needs_refresh_migrates_unmarked_png() -> None:
+    assert needs_portrait_refresh(_PNG_DATA_URL, portrait_style="") is True
+    assert needs_portrait_refresh("data:image/svg+xml;base64,abc", portrait_style=PORTRAIT_STYLE) is True
+    assert needs_portrait_refresh("", portrait_style="") is True
+
+
+def test_list_migrates_legacy_png_and_marks_style(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.collection_fetch_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.fetch_collection_portrait_url",
+        lambda **_kwargs: "data:image/png;base64,new",
+    )
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(name="前端·晴空", role="前端")
+    cfg.avatar_url = _PNG_DATA_URL
+    cfg.portrait_style = ""
+    registry._write_config(cfg)
+    listed = registry.list_avatars()
+    assert listed[0].avatar_url == "data:image/png;base64,new"
+    assert listed[0].portrait_style == PORTRAIT_STYLE
+
+
+def test_list_keeps_custom_and_current_style(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.collection_fetch_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.fetch_collection_portrait_url",
+        lambda **_kwargs: "data:image/png;base64,should-not-use",
+    )
+    registry = AvatarRegistry()
+    custom = registry.create_avatar(name="自定义", role="x", avatar_url=_PNG_DATA_URL)
+    assert custom.portrait_style == PORTRAIT_STYLE_CUSTOM
+    current = registry.create_avatar(name="已线稿", role="y")
+    current.avatar_url = "data:image/png;base64,keep"
+    current.portrait_style = PORTRAIT_STYLE
+    registry._write_config(current)
+    listed = {item.name: item for item in registry.list_avatars()}
+    assert listed["自定义"].avatar_url == _PNG_DATA_URL
+    assert listed["已线稿"].avatar_url == "data:image/png;base64,keep"
+
+
+def test_create_marks_generated_and_uploaded(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    generated = registry.create_avatar(name="生成", role="角色")
+    uploaded = registry.create_avatar(name="上传", role="角色", avatar_url=_PNG_DATA_URL)
+    assert generated.portrait_style == PORTRAIT_STYLE
+    assert uploaded.portrait_style == PORTRAIT_STYLE_CUSTOM
+
+
+def test_update_empty_url_regenerates_line_art(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.generate_avatar_portrait_url",
+        lambda **_kwargs: "data:image/png;base64,regen",
+    )
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(name="清空", role="x", avatar_url=_PNG_DATA_URL)
+    updated = registry.update_avatar(cfg.id, {"avatar_url": ""})
+    assert updated is not None
+    assert updated.avatar_url == "data:image/png;base64,regen"
+    assert updated.portrait_style == PORTRAIT_STYLE
+
+
+def test_update_new_url_marks_custom(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(name="换图", role="x")
+    updated = registry.update_avatar(cfg.id, {"avatar_url": "data:image/png;base64,user"})
+    assert updated is not None
+    assert updated.avatar_url == "data:image/png;base64,user"
+    assert updated.portrait_style == PORTRAIT_STYLE_CUSTOM

@@ -8,6 +8,15 @@ describe("isKnownNonVisionChatModel — zhipu GLM text vs vision", () => {
     expect(isKnownNonVisionChatModel("zhipu", "glm-4.6")).toBe(true);
     expect(isKnownNonVisionChatModel("zhipu", "glm-4-plus")).toBe(true);
     expect(isKnownNonVisionChatModel("zhipu", "glm-5")).toBe(true);
+    expect(isKnownNonVisionChatModel("zhipu", "glm-5.2")).toBe(true);
+  });
+
+  it("treats GLM-5.3 Flash as vision-capable", () => {
+    expect(isKnownNonVisionChatModel("zhipu", "glm-5.3-flash")).toBe(false);
+    expect(isKnownNonVisionChatModel("zhipu", "GLM-5.3-Flash")).toBe(false);
+    expect(isKnownNonVisionChatModel("zhipu", "openai/glm-5.3-flash")).toBe(false);
+    expect(isKnownNonVisionChatModel("custom_openai_x", "glm-5.3-flash")).toBe(false);
+    expect(isKnownNonVisionChatModel("zhipu", "glm-5.3")).toBe(false);
   });
 
   it("treats known text-only SKUs as non-vision on custom OpenAI gateways", () => {

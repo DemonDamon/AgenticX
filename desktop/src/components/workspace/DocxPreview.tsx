@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PreviewFallback } from "./PreviewFallback";
 import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl, stripScriptTags } from "./preview-data";
 
@@ -17,6 +18,7 @@ export function DocxPreview({
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: DocxPreviewProps) {
+  const { t } = useTranslation("workspace");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [html, setHtml] = useState("");
@@ -57,7 +59,7 @@ export function DocxPreview({
   if (loading) {
     return (
       <div className="flex h-full min-h-[220px] items-center justify-center bg-surface-base p-6 text-sm text-text-muted">
-        正在加载 Word 文档…
+        {t("preview.docxLoading")}
       </div>
     );
   }
@@ -65,8 +67,8 @@ export function DocxPreview({
   if (error || !html) {
     return (
       <PreviewFallback
-        title="Office 文档"
-        message={error ?? "Word 文档预览失败；当前可在系统应用中打开。"}
+        title={t("preview.officeTitle")}
+        message={error ?? t("preview.docxFallback")}
         mimeType={mimeType}
         onCopyPath={onCopyPath}
         onRevealInFileManager={onRevealInFileManager}

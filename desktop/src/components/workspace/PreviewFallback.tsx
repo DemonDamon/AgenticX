@@ -1,4 +1,5 @@
 import { FileText, FolderOpen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export type PreviewFallbackProps = {
   title: string;
@@ -19,6 +20,7 @@ export function PreviewFallback({
   revealInFileManagerLabel,
   absolutePath,
 }: PreviewFallbackProps) {
+  const { t } = useTranslation("workspace");
   return (
     <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-4 bg-surface-base px-8 py-10 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-surface-popover">
@@ -35,7 +37,7 @@ export function PreviewFallback({
           className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
           onClick={onCopyPath}
         >
-          复制路径
+          {t("preview.copyPath")}
         </button>
         {onRevealInFileManager ? (
           <button
@@ -44,7 +46,7 @@ export function PreviewFallback({
             onClick={() => onRevealInFileManager(absolutePath)}
           >
             <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.5} />
-            {revealInFileManagerLabel ?? "在文件管理器中显示"}
+            {revealInFileManagerLabel ?? t("revealGeneric")}
           </button>
         ) : null}
       </div>

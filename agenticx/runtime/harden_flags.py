@@ -90,14 +90,65 @@ def interrupted_closers_enabled() -> bool:
     return _resolve_bool("AGX_INTERRUPTED_CLOSERS", "runtime.interrupted_closers", True)
 
 
+RELIABILITY_POSTURES = ("strict", "legacy")
+
+
+def _config_str(key: str) -> Optional[str]:
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg = ConfigManager.get_value(key)
+        if isinstance(cfg, str) and cfg.strip():
+            return cfg.strip().lower()
+    except Exception:
+        pass
+    return None
+
+
+def reliability_posture() -> str:
+    """``AGX_RELIABILITY_POSTURE`` / ``reliability.posture``. Default ``"strict"``.
+
+    ``strict``  — durability failures abort the current turn and surface to the
+                  user; this is the posture the reliability benchmark measures.
+    ``legacy``  — pre-2026-09 behaviour: durability failures are logged and the
+                  run continues. Kept as an explicit escape hatch, not a default.
+
+    An unrecognised value falls back to ``"strict"`` (fail-closed on config
+    typos too — a misspelled posture must not silently weaken durability).
+    """
+    raw = os.environ.get("AGX_RELIABILITY_POSTURE", "").strip().lower()
+    if raw not in RELIABILITY_POSTURES:
+        raw = _config_str("reliability.posture") or ""
+    if raw not in RELIABILITY_POSTURES:
+        return "strict"
+    return raw
+
+
 def persist_fail_closed_enabled() -> bool:
-    """``AGX_PERSIST_FAIL_CLOSED`` / ``runtime.persist_fail_closed``. Default False."""
-    return _resolve_bool("AGX_PERSIST_FAIL_CLOSED", "runtime.persist_fail_closed", False)
+    """``AGX_PERSIST_FAIL_CLOSED`` / ``runtime.persist_fail_closed``.
+
+    Default follows ``reliability_posture()``: True under ``strict`` (the new
+    default), False under ``legacy``. The dedicated env var / config key still
+    wins when set, so an operator can pin this single behaviour without moving
+    the whole posture.
+    """
+    return _resolve_bool(
+        "AGX_PERSIST_FAIL_CLOSED",
+        "runtime.persist_fail_closed",
+        reliability_posture() == "strict",
+    )
 
 
 def fresh_round_loop_enabled() -> bool:
     """``AGX_FRESH_ROUND_LOOP`` / ``runtime.fresh_round_loop``. Default False."""
     return _resolve_bool("AGX_FRESH_ROUND_LOOP", "runtime.fresh_round_loop", False)
+
+
+def cancelled_prefix_finalize_enabled() -> bool:
+    """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
+    return _resolve_bool(
+        "AGX_CANCELLED_PREFIX_FINALIZE", "runtime.cancelled_prefix_finalize", True
+    )
 
 
 def group_meta_direct_tools_enabled() -> bool:
@@ -139,3 +190,31 @@ def group_meta_reply_max_tokens() -> int:
     if raw is None:
         raw = 2000
     return max(500, min(8000, int(raw)))
+
+
+def group_open_floor_enabled() -> bool:
+    """``AGX_GROUP_OPEN_FLOOR`` / ``group.open_floor``. Default True.
+
+    Off 时 ``_analyze_intent`` 不再产出 ``open_floor``，群聊回到「路由器指派单一
+    发言人」的旧行为，用于快速回滚。
+    """
+    return _resolve_bool("AGX_GROUP_OPEN_FLOOR", "group.open_floor", True)
+
+
+def group_open_floor_max_speakers() -> int:
+    """``AGX_GROUP_OPEN_FLOOR_MAX_SPEAKERS`` / ``group.open_floor_max_speakers``.
+
+    Default 2, clamp 1..3. 一轮闲聊里最多让几个人有机会开口（他们仍可跳过）。
+    """
+    raw: Optional[int] = None
+    env = os.environ.get("AGX_GROUP_OPEN_FLOOR_MAX_SPEAKERS", "").strip()
+    if env:
+        try:
+            raw = int(env)
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = _config_int("group.open_floor_max_speakers")
+    if raw is None:
+        raw = 2
+    return max(1, min(3, int(raw)))

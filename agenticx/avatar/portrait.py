@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Illustrated portraits for digital avatars.
 
-Prefers a public illustrated-people collection (flat vector characters with
-colored circular backgrounds). Falls back to a local SVG if the collection
-cannot be reached. Tests skip the network fetch automatically.
+Prefers DiceBear Notionists (quiet line-art busts). Falls back to a local
+SVG if the collection cannot be reached. Tests skip the network fetch.
 
 Author: Damon Li
 """
@@ -33,27 +32,53 @@ _PALETTE_RGB: tuple[tuple[int, int, int], ...] = (
     (234, 88, 12),    # orange
 )
 
-_COLLECTION_BASE = "https://api.dicebear.com/9.x/avataaars/png"
+PORTRAIT_STYLE = "notionists-v1"
+PORTRAIT_STYLE_CUSTOM = "custom"
+
+_COLLECTION_BASE = "https://api.dicebear.com/9.x/notionists/png"
 _COLLECTION_TIMEOUT_SEC = 6.0
 _COLLECTION_MAX_BYTES = 180_000
 
-# Keep expressions professional (no heart-eyes / vomit / scream variants).
+# Quiet line-art: no badges, gestures, or saturated cartoon backdrops.
 _COLLECTION_QUERY = {
     "size": "256",
-    "radius": "50",
-    "backgroundColor": "ffd5dc,ffdfbf,c0aede,b6e3f4,d1d4f9,c1f4c1",
-    "eyes": "default,happy,wink,side,squint",
-    "eyebrows": "default,defaultNatural,flatNatural,raisedExcited",
-    "mouth": "smile,default,serious,twinkle",
+    "radius": "28",
+    "backgroundColor": "e8eef2,e8e8f0,ede9e3,e7efe9,efe7e9",
+    "bodyIconProbability": "0",
+    "gestureProbability": "0",
+    "beardProbability": "8",
+    "glassesProbability": "14",
 }
+_NOTIONISTS_TRAIT_KEYS = frozenset(
+    {
+        "beard",
+        "beardProbability",
+        "body",
+        "bodyIcon",
+        "bodyIconProbability",
+        "brows",
+        "eyes",
+        "gesture",
+        "gestureProbability",
+        "glasses",
+        "glassesProbability",
+        "hair",
+        "lips",
+        "nose",
+    }
+)
 
 _FEMALE_HAIR = (
-    "straight01,straight02,bob,bun,curly,longButNotTooLong,"
-    "miaWallace,straightAndStrand,bigHair"
+    "variant04,variant08,variant12,variant18,variant24,variant31,variant40,variant48,variant55"
 )
 _MALE_HAIR = (
-    "shortFlat,shortWaved,theCaesar,shortRound,sides,frizzle,shortCurly"
+    "variant01,variant03,variant06,variant10,variant14,variant20,variant27,variant35,variant43"
 )
+_LONG_HAIR = (
+    "variant12,variant18,variant24,variant31,variant40,variant48,variant55,variant63"
+)
+_SHORT_HAIR = "variant01,variant03,variant06,variant10,variant14,variant20,variant27"
+_CURLY_HAIR = "variant08,variant16,variant23,variant32,variant41,variant50"
 _FEMALE_HINTS = ("女", "女士", "女生", "小姐", "她", "female", "woman", "girl")
 _MALE_HINTS = ("男士", "男生", "先生", "male", "man", "boy")
 _FEMALE_NAME_SUFFIX = set("雯婷娜丽芳娟玲燕红霞梅琳雪慧静敏艳怡萱颖诗雅璐欣悦柔")
@@ -93,47 +118,35 @@ def infer_portrait_traits(
     description: str = "",
     tags: list[str] | None = None,
 ) -> dict[str, str]:
-    """Map name/role/description into collection query params (gender, hair, clothes)."""
+    """Map name/role/description into Notionists query params."""
     blob = _portrait_blob(name=name, role=role, description=description, tags=tags)
     lower = blob.lower()
-    clothing_blob = _portrait_blob(name="", role=role, description=description, tags=tags)
-    traits: dict[str, str] = {}
-
-    gender = _infer_gender(name=name, blob=blob, lower=lower)
-    if gender == "female":
-        traits["top"] = _FEMALE_HAIR
-        traits["facialHairProbability"] = "0"
-    else:
-        traits["top"] = _MALE_HAIR
-        traits["facialHairProbability"] = "20"
+    female = _infer_gender(name=name, blob=blob, lower=lower) == "female"
+    traits: dict[str, str] = {
+        "hair": _FEMALE_HAIR if female else _MALE_HAIR,
+        "beardProbability": "0" if female else "18",
+        "glassesProbability": "14",
+    }
 
     if any(key in blob for key in ("长发", "长头发", "披肩")):
-        traits["top"] = "straight01,straight02,longButNotTooLong,miaWallace"
-        traits["facialHairProbability"] = "0"
+        traits["hair"] = _LONG_HAIR
+        traits["beardProbability"] = "0"
     elif any(key in blob for key in ("马尾", "丸子", "盘发")):
-        traits["top"] = "bun,bob"
-        traits["facialHairProbability"] = "0"
+        traits["hair"] = "variant24,variant31,variant40,variant48"
+        traits["beardProbability"] = "0"
     elif any(key in blob for key in ("卷发", "羊毛卷")):
-        traits["top"] = "curly,shortCurly,frizzle"
+        traits["hair"] = _CURLY_HAIR
     elif any(key in blob for key in ("短发", "寸头", "板寸")):
-        traits["top"] = _MALE_HAIR
+        traits["hair"] = _SHORT_HAIR
     elif any(key in blob for key in ("光头", "秃")):
-        traits["top"] = "theCaesar,sides"
-
-    traits["clothing"] = _infer_clothing(blob=clothing_blob, lower=clothing_blob.lower())
+        traits["hair"] = "variant01,variant03,variant06"
 
     if any(key in blob for key in ("眼镜", "glasses", "spectacles")):
-        traits["accessories"] = "prescription01,prescription02"
-        traits["accessoriesProbability"] = "100"
+        traits["glasses"] = "variant01,variant02,variant03,variant04"
+        traits["glassesProbability"] = "100"
     elif any(key in lower for key in ("墨镜", "sunglasses")):
-        traits["accessories"] = "sunglasses,wayfarers"
-        traits["accessoriesProbability"] = "100"
-    else:
-        traits["accessoriesProbability"] = "12"
-
-    hair_color = _infer_hair_color(blob=blob, lower=lower)
-    if hair_color:
-        traits["hairColor"] = hair_color
+        traits["glasses"] = "variant09,variant10,variant11"
+        traits["glassesProbability"] = "100"
     return traits
 
 
@@ -154,46 +167,19 @@ def _infer_gender(*, name: str, blob: str, lower: str) -> str:
     return "female" if _hash_index(f"gender:{name}", 2) == 0 else "male"
 
 
-def _infer_clothing(*, blob: str, lower: str) -> str:
-    if any(key in blob for key in ("西装", "正装", "工装")):
-        return "blazerAndShirt,blazerAndSweater"
-    if any(key in blob for key in ("卫衣",)) or "hoodie" in lower:
-        return "hoodie"
-    if any(key in blob for key in ("运维", "基础设施", "架构", "安全", "合规", "后端")):
-        return "blazerAndShirt,blazerAndSweater"
-    if any(key in lower for key in ("architect", "security", "backend", "ops", "sre")):
-        return "blazerAndShirt,blazerAndSweater"
-    if any(key in blob for key in ("算法", "机器学习", "深度学习", "CUDA", "GPU")):
-        return "hoodie,shirtCrewNeck"
-    if any(key in blob for key in ("美术", "视觉", "原画")):
-        return "collarAndSweater,shirtScoopNeck,hoodie"
-    if any(key in blob for key in ("运营", "发行", "市场")):
-        return "blazerAndSweater,collarAndSweater"
-    if any(key in blob for key in ("测试", "QA")) or "test" in lower:
-        return "hoodie,shirtCrewNeck"
-    return "blazerAndShirt,blazerAndSweater,collarAndSweater,hoodie,shirtCrewNeck"
-
-
-def _infer_hair_color(*, blob: str, lower: str) -> str:
-    if any(key in blob for key in ("金发", "金色头发")) or "blonde" in lower:
-        return "e6c770,f5d76e,d6b370"
-    if any(key in blob for key in ("白发", "银发")) or "silver" in lower:
-        return "e8e1e1,d3d3d3"
-    if any(key in blob for key in ("红发", "赤发")) or "red hair" in lower:
-        return "c93305,a55728"
-    if any(key in blob for key in ("棕发", "褐色头发")) or "brown hair" in lower:
-        return "a55728,724133"
-    if any(key in blob for key in ("黑发", "黑头发")) or "black hair" in lower:
-        return "2c1b18,4a312c"
-    return ""
-
-
-def needs_portrait_refresh(avatar_url: str) -> bool:
-    """True when missing, or still using the local geometric SVG fallback."""
+def needs_portrait_refresh(
+    avatar_url: str,
+    *,
+    portrait_style: str = "",
+) -> bool:
+    """True when the stored portrait should be replaced with Notionists line art."""
     url = str(avatar_url or "").strip()
-    if not url:
+    style = str(portrait_style or "").strip()
+    if not url or url.startswith("data:image/svg+xml"):
         return True
-    return url.startswith("data:image/svg+xml")
+    if style in {PORTRAIT_STYLE_CUSTOM, PORTRAIT_STYLE}:
+        return False
+    return True
 
 
 def _initials(name: str) -> str:
@@ -328,8 +314,11 @@ def build_collection_portrait_url(
 ) -> str:
     """HTTP URL for the illustrated-people collection (deterministic by seed)."""
     params = dict(_COLLECTION_QUERY)
+    traits = infer_portrait_traits(
+        name=name, role=role, description=description, tags=tags
+    )
     params.update(
-        infer_portrait_traits(name=name, role=role, description=description, tags=tags)
+        {key: value for key, value in traits.items() if key in _NOTIONISTS_TRAIT_KEYS}
     )
     params["seed"] = portrait_seed(name=name, avatar_id=avatar_id)
     return f"{_COLLECTION_BASE}?{urllib.parse.urlencode(params)}"

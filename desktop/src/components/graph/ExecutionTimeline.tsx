@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Avatar } from "../../store";
 import { avatarDotColorForIdentity } from "../../utils/avatar-color";
@@ -22,6 +23,8 @@ type Props = {
   metaLeaderLabel?: string;
   selectedAgentId?: string | null;
   onSelectAgent?: (agentId: string) => void;
+  /** Ledger-backed replay hides live spans once the durable event arrives. */
+  excludeCallIds?: ReadonlySet<string>;
 };
 
 type MemberGroup = {
@@ -56,7 +59,9 @@ export function ExecutionTimeline({
   metaLeaderLabel = "Machi",
   selectedAgentId = null,
   onSelectAgent,
+  excludeCallIds,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const toolStepsByNode = useGraphRunStore(
     (s) => s.byPane[paneId]?.toolStepsByNode ?? EMPTY_PANE_GRAPH_STATE.toolStepsByNode,
   );
@@ -75,7 +80,8 @@ export function ExecutionTimeline({
         agentId,
         label: isMeta ? metaLeaderLabel : avatar?.name || agentId.slice(0, 8),
         color: avatar?.color,
-        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? []),
+        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? [])
+          .filter((span) => !excludeCallIds?.has(span.callId)),
       });
     }
     for (const nodeId of Object.keys(toolStepsByNode)) {
@@ -87,11 +93,12 @@ export function ExecutionTimeline({
         agentId,
         label: avatar?.name || agentId.slice(0, 8),
         color: avatar?.color,
-        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? []),
+        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? [])
+          .filter((span) => !excludeCallIds?.has(span.callId)),
       });
     }
     return out;
-  }, [agentIds, avatarById, metaLeaderLabel, toolStepsByNode]);
+  }, [agentIds, avatarById, excludeCallIds, metaLeaderLabel, toolStepsByNode]);
 
   const allSpans = useMemo(() => groups.flatMap((g) => g.spans), [groups]);
   const hasRunning = useMemo(() => allSpans.some((s) => s.running), [allSpans]);
@@ -216,9 +223,9 @@ export function ExecutionTimeline({
   if (!timelineWindow || allSpans.length === 0) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1 px-4 text-center">
-        <p className="text-[13px] text-text-subtle">本轮尚无工具调用</p>
+        <p className="text-[13px] text-text-subtle">{t("graph.timelineEmpty")}</p>
         <p className="max-w-[240px] text-[11px] leading-relaxed text-text-faint">
-          群成员开始调用工具后，将在此按时间轴展示各成员的执行过程
+          {t("graph.timelineEmptyHint")}
         </p>
       </div>
     );
@@ -331,7 +338,7 @@ export function ExecutionTimeline({
 
       <div className="shrink-0 border-t border-border px-3 py-2">
         <div className="mb-1 flex items-center justify-between text-[11px] text-text-faint">
-          <span>缩放 {zoom.toFixed(2)}x</span>
+          <span>{t("graph.zoom", { zoom: zoom.toFixed(2) })}</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -352,7 +359,7 @@ export function ExecutionTimeline({
               className="rounded px-1.5 py-0.5 hover:bg-surface-hover hover:text-text-strong"
               onClick={resetView}
             >
-              复位
+              {t("graph.reset")}
             </button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 # AgenticX Avatar 模块总结
 
-> 结论更新时间：2026-05-29（覆盖 2026-04-29 之后的变更）
+> 结论更新时间：2026-09-01（覆盖前一基线 `f3ba65001c29` 之后的变更）
 
 ## 目录路径
 
@@ -17,7 +17,8 @@ Avatar 模块提供多分身（Avatar）和群聊（GroupChat）的持久化管�
 ```
 agenticx/avatar/
 ├── __init__.py       # 包入口
-├── registry.py       # AvatarRegistry：Avatar CRUD + workspace 初始化
+├── registry.py       # AvatarRegistry：Avatar CRUD + workspace 初始化 + 头像生成/回填
+├── portrait.py       # 分身插画头像：DiceBear Notionists 线稿 + 本地 SVG 兜底
 └── group_chat.py     # GroupChatRegistry：群聊 CRUD
 ```
 
@@ -36,7 +37,8 @@ agenticx/avatar/
 | `id` | str | 12 位 hex UUID |
 | `name` | str | 显示名称 |
 | `role` | str | 角色描述 |
-| `avatar_url` | str | 头像图片 URL |
+| `avatar_url` | str | 头像图片 URL（可为 data URL） |
+| `portrait_style` | str | **(NEW)** 头像来源标记：`notionists-v1`=生成的插画风线稿；`custom`=用户上传；空串=未标记的老数据 |
 | `system_prompt` | str | 自定义系统提示 |
 | `workspace_dir` | str | 独立工作区路径（`~/.agenticx/avatars/<id>/workspace`） |
 | `created_by` | str | 创建方式（manual / api） |
@@ -51,11 +53,13 @@ agenticx/avatar/
 > **(NEW，2026-05-20 多脑知识库架构 MVP，commit `d695c202`)**：`AvatarConfig` 新增 `brains_enabled` 字段，将知识库从进程级单例升级为 Brain（知识脑）一等实体的分身级挂载。`to_dict()` 对 `brains_enabled` / `skills_enabled` 做显式非空保留（区分 `None` 与空集合）；`update_avatar()` 对 `brains_enabled` 做归一化（空串/None → `None`、`"*"` 保留、list 去空白）。
 
 **核心方法**：
-- `list_avatars()`：按 pinned 优先、created_at 降序排列
+- `list_avatars()`：按 pinned 优先、created_at 降序排列；**(NEW)** 返回前对缺头像/老数据的分身做惰性回填——`needs_portrait_refresh()` 判定后用 `ThreadPoolExecutor`（最多 6 worker）并发调 `_ensure_portrait()` 拉取 Notionists 线稿并落盘
 - `get_avatar(avatar_id)`：读取单条配置
-- `create_avatar(name, role, ...)`：创建 Avatar，自动初始化 workspace（含 IDENTITY.md / MEMORY.md / memory/）
-- `update_avatar(avatar_id, patch)`：增量更新；`id`、`created_at`、`workspace_dir` 为不可变字段；对 `skills_enabled` / `brains_enabled` 走专门的归一化分支
-- `delete_avatar(avatar_id)`：删除 avatar 目录及所有文件（`shutil.rmtree`）；**(NEW)** 删除前先调用 `BrainRegistry.instance().delete_private_brains_for_avatar(avatar_id)` 清理该分身的 private brain
+- `create_avatar(name, role, ...)`：创建 Avatar，自动初始化 workspace（含 IDENTITY.md / MEMORY.md / memory/）；**(NEW)** 未传 `avatar_url` 时自动调 `generate_avatar_portrait_url()` 生成插画头像并标记 `portrait_style=notionists-v1`，用户自带 URL 则标记 `custom`
+- `update_avatar(avatar_id, patch)`：增量更新；`id`、`created_at`、`workspace_dir` 为不可变字段；对 `skills_enabled` / `brains_enabled` 走专门的归一化分支；**(NEW)** patch 含 `avatar_url` 时：清空则重新生成插画头像（`notionists-v1`），换成新 URL 则标记 `custom`
+- `delete_avatar(avatar_id)`：删除 avatar 目录及所有文件（`shutil.rmtree`）；删除前先调用 `BrainRegistry.instance().delete_private_brains_for_avatar(avatar_id)` 清理该分身的 private brain
+
+**存储根目录惰性解析（NEW）**：`AVATARS_ROOT` 不再是 import 时被 `Path.home()` 定死的模块级常量，改为 `_avatars_root()` 按调用时的 HOME 解析（`agenticx/utils/agx_home.py` 的 `lazy_home_path`），并保留 PEP 562 `__getattr__` 供外部读取——避免测试重定向 HOME 后数据仍写进开发者真实的 `~/.agenticx`。
 
 **Workspace 初始化**（`_ensure_avatar_workspace`）：
 - 创建 `workspace/` 和 `workspace/memory/` 目录
@@ -64,9 +68,22 @@ agenticx/avatar/
 
 ---
 
+### portrait.py（NEW，分身插画头像）
+
+为分身生成「安静线稿」风格的插画头像，默认走 DiceBear Notionists 合集，网络不可达时回退本地生成的 SVG。
+
+**核心接口**：
+- `generate_avatar_portrait_url(name, role, description, tags, avatar_id)`：主入口，返回可直接写入 `AvatarConfig.avatar_url` 的 data URL；合集可达时下载 PNG 转 base64，否则用 `build_avatar_portrait_svg()` 本地生成 128×128 线稿 SVG
+- `infer_portrait_traits(...)`：从 name/role/description/tags 推断 Notionists 查询参数——性别（中英文提示词 + 中文名字尾字表 + hash 兜底）、发型（长发/马尾/卷发/短发/光头关键词）、眼镜/墨镜
+- `needs_portrait_refresh(avatar_url, portrait_style)`：判定存量头像是否应替换为线稿（空 URL、老的 data SVG、或无 style 标记的老数据返回 True；`custom` / `notionists-v1` 不覆盖）
+- `collection_fetch_enabled()`：测试环境（`pytest` 已加载）或 `AGX_SKIP_AVATAR_FETCH=1` 时跳过远程拉取
+- 合集请求带 6s 超时、180KB 上限与 PNG magic 校验；seed 由 `name:avatar_id` 派生，保证同一分身脸不变；配色 `_PALETTE_RGB` 与 `desktop/src/utils/avatar-color.ts` 的 `AVATAR_PALETTE` 顺序对齐
+
+---
+
 ### GroupChatRegistry（group_chat.py）
 
-**存储路径**：`~/.agenticx/groups/<group_id>/group.yaml`
+**存储路径**：`~/.agenticx/groups/<group_id>/group.yaml`（**(NEW)** `GROUPS_ROOT` 与 `AVATARS_ROOT` 一样改为 `_groups_root()` 惰性解析 + PEP 562 `__getattr__`，按调用时 HOME 求值）
 
 **数据模型 — GroupChatConfig**：
 

@@ -25,4 +25,11 @@ describe("labelForDeepResearchInteractionPref", () => {
     expect(labelForDeepResearchInteractionPref("card_first")).toBe("卡片确认");
     expect(labelForDeepResearchInteractionPref("plan_chat")).toBe("计划对齐");
   });
+
+  it("returns English chip labels when locale is en", () => {
+    expect(labelForDeepResearchInteractionPref("auto", "en")).toBe("Auto");
+    expect(labelForDeepResearchInteractionPref("direct", "en")).toBe("Start now");
+    expect(labelForDeepResearchInteractionPref("card_first", "en")).toBe("Card confirm");
+    expect(labelForDeepResearchInteractionPref("plan_chat", "en")).toBe("Plan alignment");
+  });
 });

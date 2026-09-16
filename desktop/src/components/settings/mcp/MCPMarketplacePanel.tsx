@@ -1,6 +1,13 @@
 import { Activity, AlertCircle, CheckCircle2, Eye, Loader2, Search, ShieldCheck, SquarePlus, Star } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../../ds/Modal";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type MarketplaceItem = {
   id: string;
@@ -57,6 +64,7 @@ export function MCPMarketplacePanel({
   statusKind = "info",
   statusTargetId,
 }: Props) {
+  const { t } = useTranslation("settings");
   const [installTarget, setInstallTarget] = useState<MarketplaceItem | null>(null);
   const [envForm, setEnvForm] = useState<Record<string, string>>({});
   const required = useMemo(() => envSchema?.required ?? [], [envSchema]);
@@ -74,15 +82,15 @@ export function MCPMarketplacePanel({
 
   const formatCount = (value: number): string => {
     if (!Number.isFinite(value)) return "0";
-    if (value >= 100000000) return `${(value / 100000000).toFixed(1)}亿`;
-    if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
+    if (value >= 100000000) return st("mcpMarket.countYi", { n: (value / 100000000).toFixed(1) });
+    if (value >= 10000) return st("mcpMarket.countWan", { n: (value / 10000).toFixed(1) });
     if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
     return String(value);
   };
 
   const getDeveloper = (item: MarketplaceItem): string => {
     const raw = [item.owner, item.publisher, item.id].find((x) => typeof x === "string" && x.trim());
-    if (!raw) return "未知";
+    if (!raw) return st("mcpMarket.unknown");
     const source = raw.trim();
     const first = source.includes("/") ? source.split("/")[0] : source;
     return first.replace(/^@/, "");
@@ -119,7 +127,7 @@ export function MCPMarketplacePanel({
               if (e.key === "Enter" && !loading) void onRefresh();
             }}
             className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-7 pr-2 text-sm"
-            placeholder="搜索 MCP 服务"
+            placeholder={st("mcpMarket.searchPh")}
           />
         </div>
         <button
@@ -128,7 +136,7 @@ export function MCPMarketplacePanel({
           disabled={loading}
           onClick={() => void onRefresh()}
         >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "刷新"}
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : st("mcpMarket.refresh")}
         </button>
       </div>
       {summary ? <div className="text-[11px] text-text-faint">{summary}</div> : null}
@@ -179,14 +187,14 @@ export function MCPMarketplacePanel({
                       <span key={cat} className="rounded border border-border px-1 py-0.5">{cat}</span>
                     ))}
                     {license ? <span className="rounded border border-border px-1 py-0.5">{license}</span> : null}
-                    <span className="rounded border border-border px-1 py-0.5">开发者: {developer}</span>
+                    <span className="rounded border border-border px-1 py-0.5">{st("mcpMarket.developer", { name: developer })}</span>
                   </div>
                 </>
               );
             })()}
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="line-clamp-2 text-[11px] text-text-faint">{cleanDescription(item.description) || "无描述"}</div>
+                <div className="line-clamp-2 text-[11px] text-text-faint">{cleanDescription(item.description) || st("mcpMarket.noDesc")}</div>
                 {(() => {
                   const callCount = Number(
                     item.hosted_service_call_count ?? item.call_count ?? item.invocation_count ?? item.invoke_count ?? 0,
@@ -220,12 +228,12 @@ export function MCPMarketplacePanel({
               {installedIds?.has(item.id) ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-xs font-medium text-emerald-400">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  已添加
+                  {st("mcpMarket.added")}
                 </span>
               ) : installingId === item.id ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--settings-accent-badge-bg)] bg-[var(--settings-accent-row-bg)] px-2 py-1 text-xs font-medium text-[var(--settings-accent-fg)]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  安装中...
+                  {st("mcpMarket.installing")}
                 </span>
               ) : (
                 <button
@@ -238,7 +246,7 @@ export function MCPMarketplacePanel({
                   }}
                 >
                   <SquarePlus className="h-3.5 w-3.5" />
-                  添加
+                  {st("mcpMarket.add")}
                 </button>
               )}
             </div>
@@ -254,7 +262,7 @@ export function MCPMarketplacePanel({
 
       <Modal
         open={!!installTarget}
-        title={installTarget ? `安装 ${installTarget.chinese_name || installTarget.name || installTarget.id}` : ""}
+        title={installTarget ? st("mcpMarket.installTitle", { name: installTarget.chinese_name || installTarget.name || installTarget.id }) : ""}
         onClose={() => setInstallTarget(null)}
         footer={(
           <div className="flex justify-end gap-2">
@@ -263,7 +271,7 @@ export function MCPMarketplacePanel({
               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
               onClick={() => setInstallTarget(null)}
             >
-              取消
+              {st("mcpMarket.cancel")}
             </button>
             <button
               type="button"
@@ -277,10 +285,10 @@ export function MCPMarketplacePanel({
               {resolving ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                  安装中...
+                  {st("mcpMarket.installing")}
                 </>
               ) : (
-                "确认安装"
+                st("mcpMarket.confirmInstall")
               )}
             </button>
           </div>
@@ -288,7 +296,7 @@ export function MCPMarketplacePanel({
       >
         <div className="space-y-2">
           {required.length === 0 ? (
-            <div className="text-xs text-text-faint">该服务不需要额外环境变量。</div>
+            <div className="text-xs text-text-faint">{st("mcpMarket.noEnv")}</div>
           ) : (
             required.map((key) => (
               <label key={key} className="block text-xs text-text-muted">

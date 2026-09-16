@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import {
   dispatchWorkspacePickDir,
@@ -16,6 +17,7 @@ type Props = {
  * Reuses Near WorkspacePanel (folder roots, tree, terminal) with a back affordance.
  */
 export function SidebarSessionFileManage({ paneId, sessionId, onBack }: Props) {
+  const { t } = useTranslation("sidebar");
   const activeTaskspaceId = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.activeTaskspaceId ?? null
   );
@@ -28,7 +30,7 @@ export function SidebarSessionFileManage({ paneId, sessionId, onBack }: Props) {
         sessionId={sessionId}
         activeTaskspaceId={activeTaskspaceId}
         onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(paneId, taskspaceId)}
-        backAction={{ label: "返回历史对话", onClick: onBack }}
+        backAction={{ label: t("history.backToHistory"), onClick: onBack }}
         onPickFileForReference={(taskspaceId, path) => {
           dispatchWorkspacePickFile({ paneId, taskspaceId, path });
         }}

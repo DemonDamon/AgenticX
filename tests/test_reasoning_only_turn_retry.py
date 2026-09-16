@@ -713,3 +713,109 @@ def test_internal_reasoning_is_not_promoted_even_after_successful_write() -> Non
         == ""
     )
 
+
+_LEAKED_TURN_NARRATION_COT = (
+    "The user's original question is \"我加入了计这个计划有什么帮助吗？对我\" — "
+    "asking whether joining the GitHub Developer Program helps them. "
+    "I've already answered this in my previous response. The todo_write "
+    "returned \"No todos\" which is fine — I shouldn't have called it anyway "
+    "since this is a Q&A task, not a multi-step execution task.\n\n"
+    "I've already given my complete answer in the previous turn. The anchor "
+    "is reminding me to directly answer the original question. My previous "
+    "response already did that comprehensively. I should just finalize my "
+    "answer — the response I gave was already complete. Let me just close "
+    "out cleanly with the final answer already delivered, perhaps with the "
+    "followups block which I haven't added yet.\n\n"
+    "Actually, looking at the flow: my previous message already contained "
+    "the full answer. Now I need to end the turn properly. The system requires a `"
+)
+
+
+def test_meta_turn_narration_in_reasoning_is_not_promoted() -> None:
+    """Session 712d7592: English turn-narration CoT must not become the final."""
+    from agenticx.runtime.agent_runtime import _recover_public_completion_from_reasoning
+
+    assert (
+        _recover_public_completion_from_reasoning(
+            _LEAKED_TURN_NARRATION_COT,
+            has_successful_file_write=False,
+            has_successful_tool=True,
+            last_tool_outcome="success",
+            finish_reason="stop",
+        )
+        == ""
+    )
+
+
+def test_complete_adjective_is_not_a_public_completion_signal() -> None:
+    """The adjective 'complete' alone must not promote a wrap-up monologue."""
+    from agenticx.runtime.agent_runtime import _recover_public_completion_from_reasoning
+
+    assert (
+        _recover_public_completion_from_reasoning(
+            "I've already given my complete answer in the previous turn.",
+            has_successful_file_write=False,
+            has_successful_tool=True,
+            last_tool_outcome="success",
+            finish_reason="stop",
+        )
+        == ""
+    )
+
+
+class _ToolThenMetaCotInReasoningThenReply(_ToolThenPublicFinalInReasoningStream):
+    """Tool success, then leaked turn-narration CoT, then a real public reply."""
+
+    def stream_with_tools(self, *_args, **kwargs):
+        self.calls += 1
+        self.kwargs_seen.append(dict(kwargs))
+        if self.calls == 1:
+            yield {
+                "type": "tool_call_delta",
+                "tool_index": 0,
+                "tool_call_id": "call-read",
+                "tool_name": "file_read",
+                "arguments_delta": '{"path":"/tmp/demo.html"}',
+            }
+            yield {"type": "done", "finish_reason": "tool_calls"}
+            return
+        if self.calls == 2:
+            yield {
+                "type": "content",
+                "text": _THINK_OPEN + "\n" + _LEAKED_TURN_NARRATION_COT + _THINK_CLOSE,
+            }
+            yield {"type": "done", "finish_reason": "stop"}
+            return
+        yield {
+            "type": "content",
+            "text": "团长，这个计划只对正在开发 GitHub 集成的人有用。",
+        }
+        yield {"type": "done", "finish_reason": "stop"}
+
+
+def test_tool_then_meta_cot_reasoning_nudges_instead_of_promoting(monkeypatch) -> None:
+    """After tools, leaked CoT must nudge; the later visible reply is the final."""
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "<html><body>demo</body></html>"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ToolThenMetaCotInReasoningThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=30)
+    session = StudioSession()
+    session.provider_name = "custom_openai"
+    session.model_name = "glm-5.3-flash"
+
+    events = asyncio.run(
+        _collect(runtime, session, "我加入了这个计划有什么帮助吗？")
+    )
+
+    final = [event for event in events if event["type"] == EventType.FINAL.value][-1]
+    assert llm.calls >= 3
+    assert final["data"]["text"] == "团长，这个计划只对正在开发 GitHub 集成的人有用。"
+    assert final["data"].get("terminal_reason") != "reasoning_field_final_recovered"
+    assert final["data"].get("reasoning_field_final_recovered") is not True
+    assert "The user's original question" not in final["data"]["text"]
+    assert session.chat_history[-1]["content"] == final["data"]["text"]
+

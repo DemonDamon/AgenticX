@@ -1,6 +1,6 @@
 # AgenticX Brain 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更；首次创建于 2026-05-29）
 
 ## 模块概述
 
@@ -39,6 +39,7 @@ agenticx/brain/
 脑的 CRUD 与持久化中枢（线程安全单例）：
 
 - **存储布局**：全局脑落在 `~/.agenticx/brains/<id>/brain.yaml`，私有脑落在 `~/.agenticx/avatars/<avatar_id>/brains/<id>/brain.yaml`；全局脑 id 列表登记在 `~/.agenticx/brains/registry.json`。
+- **路径惰性解析**：`AGENTICX_HOME` / `BRAINS_ROOT` / `REGISTRY_FILE` / `CONFIG_YAML` / `AVATARS_ROOT` / `LEGACY_KB_REGISTRY` 不再是 import 时定死的模块常量，而是经 `agenticx.utils.agx_home`（`agx_home()` / `lazy_home_path()`）在调用时按当前 `$HOME` 解析，模块内部统一走 `_brains_root()` / `_registry_file()` / `_config_yaml()` / `_avatars_root()` / `_legacy_kb_registry()` 辅助函数；同时保留 PEP 562 模块级 `__getattr__`，使外部读取与 `monkeypatch.setattr("agenticx.brain.registry.BRAINS_ROOT", tmp)` 等既有测试写法继续可用（模块 `__dict__` 覆盖优先）。此举修复了 import 期 `Path.home()` 冻结导致测试数据写入开发者真实 `~/.agenticx` 的问题。
 - **bootstrap()**：一次性迁移——若无 `registry.json`，读取旧版 `config.yaml` 的 `knowledge_base` 节生成 `default_docs` 默认文档库（保留 chroma 与文档登记路径不变）。
 - **create/update/delete**：创建文档脑时初始化 `chroma` 向量库目录与 `kb_data` 文档登记目录；`update` 对 `id/type/scope/storage_root/owner_avatar_id/created_at` 等字段做不可变保护。
 - **relocate_visibility()**：在 global ↔ private 之间迁移脑时移动存储目录并同步 registry 与（文档脑的）向量库路径；`default_docs` 禁止改可见性或删除。

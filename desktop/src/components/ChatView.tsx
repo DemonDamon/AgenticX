@@ -1,4 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../i18n/i18n";
 import { useAppStore, type Message, type QueuedMessage } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
@@ -17,11 +19,13 @@ import { CommandPalette } from "./CommandPalette";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
+import { RUN_MODE_CYCLE } from "../constants/confirm-strategy-options";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
+import { formatWbBridgeSendToolResult } from "../utils/wb-bridge-ui";
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import {
   mapLoadedSessionMessage,
@@ -33,8 +37,10 @@ import {
   normalizeFinalAssistantPayload,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
+import { resolveProcessFoldRange } from "./messages/react-work-fold";
 import {
   buildClarificationMessageExtras,
   findRunningClarificationToolMessage,
@@ -121,23 +127,12 @@ type Props = {
   mode?: "pro" | "lite";
 };
 
-const statusLabel: Record<string, string> = {
-  idle: "",
-  listening: "聆听中...",
-  processing: "思考中..."
-};
-
 const statusDot: Record<string, string> = {
   idle: "bg-emerald-400",
   listening: "bg-cyan-400 animate-pulse",
   processing: "bg-amber-400 animate-spin"
 };
 
-const confirmModeLabel: Record<string, string> = {
-  manual: "每次询问",
-  "semi-auto": "白名单放行",
-  auto: "全部自动执行",
-};
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "").trim() || "tool";
@@ -220,6 +215,16 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     } catch {
       // fall through
     }
+  }
+  if (toolName === "wb_bridge_send") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) {
+      return { content: formatted, silent: false };
+    }
+  }
+  if (toolName === "wb_bridge_describe") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) return { content: formatted, silent: false };
   }
   if (toolName === "query_subagent_status") {
     try {
@@ -341,13 +346,14 @@ function normalizeStreamText(text: string): string {
 }
 
 function StreamingThinkingIndicator() {
+  const { t } = useTranslation("chat");
   return (
     <div className="flex items-center gap-2">
       <span className="relative inline-flex h-3 w-3">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50" />
         <span className="relative inline-flex h-3 w-3 animate-pulse rounded-full bg-cyan-300" />
       </span>
-      <span className="text-xs font-medium tracking-wide text-cyan-200/90">AgenticX 正在深度思考</span>
+      <span className="text-xs font-medium tracking-wide text-cyan-200/90">{t("status.deepThinking")}</span>
     </div>
   );
 }
@@ -363,23 +369,25 @@ function MessageActions({
   onRetry: () => void;
   onReanswer: () => void;
 }) {
+  const { t } = useTranslation("chat");
   if (msg.role !== "assistant") return null;
   return (
     <div className="mt-3 flex items-center gap-3 text-[11px] text-text-faint pb-3">
-      <button className="transition hover:text-text-muted" onClick={onCopy} title="复制">
-        复制
+      <button className="transition hover:text-text-muted" onClick={onCopy} title={t("actions.copy")}>
+        {t("actions.copy")}
       </button>
-      <button className="transition hover:text-text-muted" onClick={onRetry} title="重试">
-        重试
+      <button className="transition hover:text-text-muted" onClick={onRetry} title={t("actions.retry")}>
+        {t("actions.retry")}
       </button>
-      <button className="transition hover:text-cyan-400" onClick={onReanswer} title="换模型回答">
-        @换模型
+      <button className="transition hover:text-cyan-400" onClick={onReanswer} title={t("actions.reanswer")}>
+        {t("actions.reanswerAt")}
       </button>
     </div>
   );
 }
 
 export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarification, mode = "pro" }: Props) {
+  const { t } = useTranslation("chat");
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -406,8 +414,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const keybindingsPanelOpen = useAppStore((s) => s.keybindingsPanelOpen);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
-  const confirmStrategy = useAppStore((s) => s.confirmStrategy);
-  const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const runMode = useAppStore((s) => s.runMode);
+  const setRunMode = useAppStore((s) => s.setRunMode);
   const clearMessages = useAppStore((s) => s.clearMessages);
   const subAgents = useAppStore((s) => s.subAgents);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
@@ -439,6 +447,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   }, []);
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [widgetFlowRewriting, setWidgetFlowRewriting] = useState(false);
   const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
   const [streamSearchedQueries, setStreamSearchedQueries] = useState<string[]>([]);
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
@@ -491,15 +500,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const applyUserMode = useCallback(
     async (nextMode: "pro" | "lite") => {
       setUserMode(nextMode);
-      const nextStrategy = nextMode === "lite" ? "manual" : "semi-auto";
-      setConfirmStrategy(nextStrategy);
+      const nextModeValue = nextMode === "lite" ? "ask" : "allowlist";
+      setRunMode(nextModeValue);
       if (nextMode === "lite") setPlanMode(false);
       setCommandPaletteOpen(false);
       setKeybindingsPanelOpen(false);
       await window.agenticxDesktop.saveUserMode(nextMode);
-      await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
+      await window.agenticxDesktop.saveRunMode(nextModeValue);
     },
-    [setUserMode, setConfirmStrategy, setPlanMode, setCommandPaletteOpen, setKeybindingsPanelOpen]
+    [setUserMode, setRunMode, setPlanMode, setCommandPaletteOpen, setKeybindingsPanelOpen]
   );
 
   const deferredCommandQuery = useDeferredValue(commandQuery);
@@ -519,12 +528,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           const nextMode = userMode === "pro" ? "lite" : "pro";
           await applyUserMode(nextMode);
         },
-        cycleConfirmStrategy: async () => {
-          const order: Array<"manual" | "semi-auto" | "auto"> = ["manual", "semi-auto", "auto"];
-          const idx = order.indexOf(confirmStrategy);
-          const next = order[(idx + 1) % order.length];
-          setConfirmStrategy(next);
-          await window.agenticxDesktop.saveConfirmStrategy(next);
+        cycleRunMode: async () => {
+          const idx = RUN_MODE_CYCLE.indexOf(runMode);
+          const next = RUN_MODE_CYCLE[(idx + 1) % RUN_MODE_CYCLE.length] ?? "ask";
+          setRunMode(next);
+          await window.agenticxDesktop.saveRunMode(next);
           return next;
         },
         addAssistantMessage: (content) => addMessage("assistant", content, "meta"),
@@ -536,8 +544,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       addMessage,
       planMode,
       setPlanMode,
-      confirmStrategy,
-      setConfirmStrategy,
+      runMode,
+      setRunMode,
       applyUserMode,
     ]
   );
@@ -554,12 +562,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   );
 
   const currentModelLabel = useMemo(() => {
-    if (!activeModel) return "未选模型";
+    if (!activeModel) return t("model.unselected");
     if (!activeProvider) return activeModel;
-    if (!isModelSelectable(activeProvider, activeModel, settings.providers)) return "未选模型";
+    if (!isModelSelectable(activeProvider, activeModel, settings.providers)) return t("model.unselected");
     const entry = settings.providers[activeProvider];
     return formatModelOptionLabel(activeProvider, activeModel, entry);
-  }, [activeModel, activeProvider, settings.providers]);
+  }, [activeModel, activeProvider, settings.providers, t]);
 
   const showStopButton = shouldShowStopButton({
     streaming,
@@ -702,11 +710,38 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
   const modelLabel = activeModel
     ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
-    : "未选择模型";
+    : t("model.unselectedLong");
+  const voiceStatusLabel =
+    status === "listening"
+      ? t("status.listening")
+      : status === "processing"
+        ? t("status.thinkingStatus")
+        : "";
+  const runModeDisplay =
+    runMode === "ask"
+      ? t("composer.runModeAsk")
+      : runMode === "allowlist"
+        ? t("composer.runModeAllowlist")
+        : t("composer.runModeAuto");
   const selectedSubAgentName = useMemo(() => {
     if (!selectedSubAgent) return "";
     return subAgents.find((item) => item.id === selectedSubAgent)?.name ?? selectedSubAgent;
   }, [selectedSubAgent, subAgents]);
+  const composerPlaceholder = !canSend
+    ? t("composer.placeholderConnecting")
+    : isLite
+      ? selectedSubAgent
+        ? t("composer.placeholderSubagentLite", { name: selectedSubAgentName })
+        : streaming
+          ? t("composer.placeholderStreaming")
+          : t("composer.placeholderLite")
+      : planMode
+        ? t("composer.placeholderPlan")
+        : selectedSubAgent
+          ? t("composer.placeholderSubagent", { name: selectedSubAgentName })
+          : streaming
+            ? t("composer.placeholderStreaming")
+            : t("composer.placeholderPro");
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -911,12 +946,14 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         subAgentStatusRef.current[id] = status;
         const currentAction =
           status === "completed"
-            ? (item.result_summary ? "已完成（见摘要）" : "已完成")
+            ? (item.result_summary
+                ? i18n.t("notice.completedViewSummary", { ns: "chat" })
+                : i18n.t("notice.completed", { ns: "chat" }))
             : status === "failed"
-              ? (item.error_text || "执行异常")
+              ? (item.error_text || i18n.t("notice.execError", { ns: "chat" }))
               : status === "cancelled"
-                ? "已中断"
-                : "执行中";
+                ? i18n.t("notice.interrupted", { ns: "chat" })
+                : i18n.t("notice.running", { ns: "chat" });
         const existing = currentSubs.find((s) => s.id === id);
         updateSubAgent(id, {
           status,
@@ -928,13 +965,19 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         const transitionedToTerminal =
           prevStatus !== status && (status === "completed" || status === "failed" || status === "cancelled");
         if (transitionedToTerminal) {
+          const statusLabel =
+            status === "completed"
+              ? i18n.t("notice.completed", { ns: "chat" })
+              : status === "cancelled"
+                ? i18n.t("notice.interrupted", { ns: "chat" })
+                : i18n.t("notice.execFailed", { ns: "chat" });
           const summaryText =
             status === "completed"
-              ? (item.result_summary || "子智能体任务已完成")
+              ? (item.result_summary || i18n.t("notice.taskEnded", { ns: "chat" }))
               : status === "cancelled"
-                ? "子智能体已中断"
-                : (item.error_text || "子智能体执行失败");
-          addMessage("tool", `📌 ${item.name ?? id} (${id}) ${status === "completed" ? "已完成" : status === "cancelled" ? "已中断" : "失败"}\n${summaryText}`, "meta");
+                ? i18n.t("notice.interrupted", { ns: "chat" })
+                : (item.error_text || i18n.t("notice.execFailed", { ns: "chat" }));
+          addMessage("tool", `📌 ${item.name ?? id} (${id}) ${statusLabel}\n${summaryText}`, "meta");
         }
 
         const seen = polledEventSeenRef.current[id] ?? new Set<string>();
@@ -975,9 +1018,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               updateSubAgent(id, { liveOutput: `${prev}\n\n# ${toolName} applied`.slice(-12000) });
             }
           } else if (evtType === "error") {
-            content = `❌ ${String(evtData.text ?? "执行异常")}`;
+            content = `❌ ${String(evtData.text ?? i18n.t("notice.execError", { ns: "chat" }))}`;
           } else if (evtType === "confirm_required") {
-            content = `⏸ 等待确认: ${String(evtData.question ?? "请确认执行")}`;
+            content = `⏸ ${i18n.t("notice.waitingConfirm", { ns: "chat" })}: ${String(evtData.question ?? i18n.t("notice.confirmQuestion", { ns: "chat" }))}`;
           } else if (typeof evtData.text === "string" && evtData.text.trim()) {
             content = evtData.text;
           } else {
@@ -1155,11 +1198,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       } catch (err) {
         console.warn("[ChatView] barge-in interrupt failed:", err);
       }
+      useAppStore.getState().cancelInFlightLiteTools(sessionId);
       abortRef.current?.abort();
       addMessage("tool", "已中断上一轮生成，开始处理新消息", "meta");
       streamTextRef.current = "";
       cancelStreamRenderFrame();
       setStreamedAssistantText("");
+      setWidgetFlowRewriting(false);
       setStreamReferences([]);
       setStreamSearchedQueries([]);
       setStreamingModel(null);
@@ -1283,6 +1328,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     recordProgressActivity();
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    setWidgetFlowRewriting(false);
     setStreamReferences([]);
     setStreamSearchedQueries([]);
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
@@ -1360,6 +1406,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
+      if (!isContinuation) {
+        useAppStore.getState().startConfirmRun(String(sessionId ?? ""), "");
+      }
       const resp = isContinuation && opts?.continuation
         ? await fetch(continueSessionUrl(apiBase, sessionId), {
             method: "POST",
@@ -1478,10 +1527,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               full += tokenText;
               cumulativeFull += tokenText;
               setStallWait(null);
+              setWidgetFlowRewriting(false);
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
               setStallWait(null);
+              setWidgetFlowRewriting(false);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -1692,12 +1743,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   content: payload.data?.question ?? "等待确认",
                 });
               }
+              const rawConfirmContext =
+                payload.data?.context && typeof payload.data.context === "object"
+                  ? (payload.data.context as Record<string, unknown>)
+                  : {};
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
                 payload.data?.context?.diff,
                 eventAgentId,
-                payload.data?.context
+                { ...rawConfirmContext, session_id: sessionId },
               );
               if (!isCurrentRequest()) continue;
               await fetch(`${apiBase}/api/confirm`, {
@@ -1990,6 +2045,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 full = "";
                 cancelStreamRenderFrame();
                 scheduleStreamTextUpdate("");
+                setWidgetFlowRewriting(true);
                 continue;
               }
               const isWarning = severity === "warning"
@@ -2125,6 +2181,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       cancelStreamRenderFrame();
       streamTextRef.current = "";
       setStreamedAssistantText("");
+      setWidgetFlowRewriting(false);
       setStreamReferences([]);
       setStreamSearchedQueries([]);
       setStreamingModel(null);
@@ -2236,6 +2293,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     const sid = String(sessionId || "").trim();
     if (sid) {
       void window.agenticxDesktop.interruptSession?.(sid);
+      useAppStore.getState().cancelInFlightLiteTools(sid);
+    } else {
+      useAppStore.getState().cancelInFlightLiteTools();
     }
     abortedByUserRef.current = true;
     abortRef.current?.abort();
@@ -2475,7 +2535,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 ref={modelBtnRef}
                 className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-cyan-400"
                 onClick={() => setHeaderModelPickerOpen((v) => !v)}
-                title="切换模型"
+                title={t("model.switch")}
               >
                 <span className="max-w-[200px] truncate">{modelLabel}</span>
                 <span className="text-[10px]">▾</span>
@@ -2497,15 +2557,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           {status !== "idle" && (
             <span className="flex items-center gap-1.5 text-xs text-text-subtle">
               <span className={`inline-block h-2 w-2 rounded-full ${statusDot[status]}`} />
-              {statusLabel[status]}
+              {voiceStatusLabel}
             </span>
           )}
           {!isLite && planMode && (
-            <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">计划模式</span>
+            <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">{t("toolbar.planMode")}</span>
           )}
           {!isLite && (
             <span className="rounded bg-surface-hover px-2 py-0.5 text-[11px] text-text-muted">
-              审批: {confirmModeLabel[confirmStrategy] ?? confirmStrategy}
+              {t("toolbar.approval", { mode: runModeDisplay })}
             </span>
           )}
         </div>
@@ -2515,9 +2575,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <button
               className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setPanelOpen((v) => !v)}
-              title="子智能体面板"
+              title={t("subagent.panelTitle")}
             >
-              团队{subAgents.length > 0 ? `(${subAgents.length})` : ""}
+              {subAgents.length > 0 ? t("subagent.teamCount", { count: subAgents.length }) : t("toolbar.team")}
             </button>
           ) : null}
           <button
@@ -2526,15 +2586,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const next = theme === "dark" || theme === "dim" ? "light" : "dark";
               setTheme(next);
             }}
-            title={theme === "light" ? "切换到暗色" : "切换到亮色"}
-            aria-label="切换主题"
+            title={theme === "light" ? t("toolbar.themeToDark") : t("toolbar.themeToLight")}
+            aria-label={t("toolbar.toggleTheme")}
           >
             {theme === "light" ? "🌙" : "☀"}
           </button>
           <button
             className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={() => openSettings()}
-            title="设置"
+            title={t("toolbar.settings")}
           >
             ⚙
           </button>
@@ -2543,16 +2603,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               className="no-drag inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={async () => {
                 const r = await window.agenticxDesktop.confirmDialog({
-                  title: "退出官网账号",
-                  message: "确定要清除本机已保存的 Near 官网登录状态吗？",
-                  confirmText: "退出",
+                  title: t("misc.logoutTitle"),
+                  message: t("misc.logoutMessage"),
+                  confirmText: t("misc.logout"),
                   destructive: true,
                 });
                 if (!r.confirmed) return;
                 await window.agenticxDesktop.agxAccountLogout();
                 setAgxAccount({ loggedIn: false, email: "", displayName: "" });
               }}
-              title={agxAccount.displayName || agxAccount.email || "已登录"}
+              title={agxAccount.displayName || agxAccount.email || t("misc.loggedIn")}
             >
               <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[9px] font-semibold text-[var(--theme-color-text)]">
                 {(agxAccount.displayName || agxAccount.email || "?").trim().charAt(0).toUpperCase()}
@@ -2572,25 +2632,25 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   const r = await window.agenticxDesktop.agxAccountLoginStart();
                   if (!r.ok) {
                     await window.agenticxDesktop.confirmDialog({
-                      title: "无法开始登录",
-                      message: "未能开始官网账号登录，请稍后再试。",
-                      detail: typeof r.error === "string" && r.error ? `错误：${r.error}` : undefined,
-                      confirmText: "确定",
+                      title: t("misc.loginFailedTitle"),
+                      message: t("misc.loginFailedMessage"),
+                      detail: typeof r.error === "string" && r.error ? t("misc.loginErrorDetail", { error: r.error }) : undefined,
+                      confirmText: t("misc.ok"),
                     });
                   }
                 } catch (e) {
                   await window.agenticxDesktop.confirmDialog({
-                    title: "无法开始登录",
+                    title: t("misc.loginFailedTitle"),
                     message: String(e),
-                    confirmText: "确定",
+                    confirmText: t("misc.ok"),
                   });
                 } finally {
                   setLoginBusy(false);
                 }
               }}
-              title="登录 Near 官网账号"
+              title={t("misc.loginNear")}
             >
-              {loginBusy ? "登录中..." : "登录"}
+              {loginBusy ? t("misc.loggingIn") : t("misc.login")}
             </button>
           )}
         </div>
@@ -2602,7 +2662,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-text-faint">
               <div className="mb-2 text-3xl">🤖</div>
-              <div className="text-sm">{isLite ? "问我任何问题，或使用下方推荐操作" : "输入你的需求开始对话"}</div>
+              <div className="text-sm">{isLite ? t("empty.liteHint") : t("empty.proHint")}</div>
             </div>
           </div>
         )}
@@ -2674,10 +2734,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
                   -1,
                 );
-                // 过程段 = 到「最后一个 tool_group」为止的所有行（思考行 + 工具组）；
-                // tail = 其后的行（最终回答等），永不折叠。
-                const processRows =
-                  lastToolGroupIdxInWork >= 0 ? groupedWork.slice(0, lastToolGroupIdxInWork + 1) : [];
+                // 过程段：见 resolveProcessFoldRange —— 只折工具段，两头的正文不折。
+                const { start: processStart, end: processEnd } =
+                  resolveProcessFoldRange(groupedWork);
+                const beforeProcessRows = groupedWork.slice(0, processStart);
+                const processRows = groupedWork.slice(processStart, processEnd);
                 const tailRows = groupedWork.slice(lastToolGroupIdxInWork + 1);
                 const processToolCount = processRows.reduce(
                   (n, r) => n + (r.kind === "tool_group" ? r.messages.length : 0),
@@ -2688,12 +2749,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   <div key={blockKey} className="space-y-3">
                     <div className="flex min-w-0 items-start gap-2">
                       <div className="flex min-w-0 flex-1 flex-col gap-3">
+                        {beforeProcessRows.map((r) => renderGroupedChatRow(r, true, undefined))}
                         <ReactWorkCollapse toolCount={processToolCount} active={streaming && isLastBlock}>
                           {processRows.map((r, i) =>
                             renderGroupedChatRow(
                               r,
                               true,
-                              r.kind === "tool_group" && i === lastToolGroupIdxInWork ? workMessages : undefined,
+                              r.kind === "tool_group" && processStart + i === lastToolGroupIdxInWork
+                                ? workMessages
+                                : undefined,
                             ),
                           )}
                         </ReactWorkCollapse>
@@ -2713,6 +2777,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               ),
             );
           })()}
+          {widgetFlowRewriting && !String(streamedAssistantText ?? "").trim() ? (
+            <WidgetFlowRewriteStatusLine />
+          ) : null}
           {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (
@@ -2804,12 +2871,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           {selectedSubAgent ? (
             <div className="mb-2 w-full">
               <div className="inline-flex items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200">
-                <span>当前对话目标: {selectedSubAgentName}</span>
+                <span>{t("subagent.talkToNamed", { name: selectedSubAgentName })}</span>
                 <button
                   className="rounded px-1 text-cyan-100 hover:bg-cyan-500/20"
                   onClick={() => setSelectedSubAgent(null)}
                 >
-                  切回 Meta
+                  {t("subagent.switchToMeta")}
                 </button>
               </div>
             </div>
@@ -2854,21 +2921,21 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? (isLite ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送消息...` : (streaming ? "生成中：Enter 排队，连按两次 Enter 立即发送" : "问我任何问题...")) : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : (streaming ? "生成中：Enter 排队，连按两次 Enter 立即发送" : "输入需求，Enter 发送")))) : "连接中..."}
+            placeholder={composerPlaceholder}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface-card px-3 py-2.5 text-sm outline-none transition placeholder:text-text-faint focus:border-cyan-500/50"
           />
           <button
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-surface-hover"
             onClick={onMicClick}
-            title={voiceTranscribing ? "识别中" : voiceRecording ? "停止录音" : "语音输入"}
+            title={voiceTranscribing ? t("send.transcribing") : voiceRecording ? t("send.stopRecording") : t("send.voice")}
           >
             {voiceTranscribing ? "…" : "🎙"}
           </button>
           {showStopButton ? (
             <div className="flex items-center gap-2">
-              <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
-              <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => { lastComposerEnterAtRef.current = 0; void sendChat(input.trim(), { forceSend: true }); }}>立即发送</button>
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>{t("send.interruptShort")}</button>
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => { lastComposerEnterAtRef.current = 0; void sendChat(input.trim(), { forceSend: true }); }}>{t("send.sendNow")}</button>
               <button
                 className="flex h-10 shrink-0 items-center rounded-xl border border-border px-4 text-sm font-medium text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
                 disabled={!canSend || !input.trim()}
@@ -2885,17 +2952,17 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   });
                   setInput("");
                 }}
-                title="不中断当前生成，排队等待发送"
-              >排队</button>
+                title={t("send.queueHint")}
+              >{t("send.queueShort")}</button>
             </div>
           ) : (
-            <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
+            <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>{t("send.send")}</button>
           )}
           </div>
           {messages.some((m) => m.role === "user" || m.role === "assistant") ? (
             <div className="mt-1.5 flex justify-center px-0.5">
               <p className="select-none text-[11px] leading-none text-text-faint">
-                内容由 AI 生成，请核实重要信息
+                {t("composer.disclaimer")}
               </p>
             </div>
           ) : null}
@@ -2917,12 +2984,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       {modelPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-[300px] rounded-xl border border-border bg-surface-panel p-3">
-            <div className="mb-2 text-sm font-medium text-text-muted">选择模型重新回答</div>
+            <div className="mb-2 text-sm font-medium text-text-muted">{t("actions.pickReanswerModel")}</div>
             <ModelPickerDropdown
               onSelect={(p, m) => { onReanswerSelect(p, m); setModelPickerOpen(false); }}
               onClose={() => { setModelPickerOpen(false); setReanswerTarget(null); }}
             />
-            <button className="mt-2 w-full rounded-md border border-border py-1.5 text-xs text-text-subtle hover:bg-surface-hover" onClick={() => { setModelPickerOpen(false); setReanswerTarget(null); }}>取消</button>
+            <button className="mt-2 w-full rounded-md border border-border py-1.5 text-xs text-text-subtle hover:bg-surface-hover" onClick={() => { setModelPickerOpen(false); setReanswerTarget(null); }}>{t("delete.cancel")}</button>
           </div>
         </div>
       )}
@@ -2932,6 +2999,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 }
 
 function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: string) => void; onClose: () => void }) {
+  const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
   const options = useMemo(
     () => collectSelectableModelOptions(settings.providers, " | "),
@@ -2939,7 +3007,7 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
   );
 
   if (options.length === 0) {
-    return <div className="px-3 py-4 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>;
+    return <div className="px-3 py-4 text-center text-xs text-text-faint">{t("model.empty")}</div>;
   }
   return (
     <div className="max-h-[240px] overflow-y-auto">

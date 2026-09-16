@@ -24,13 +24,14 @@ type PolicyEvaluator func(text string, ctx policyengine.EvalContext) policyengin
 
 // Host orchestrates MCP server resolution, protocol handling, quota, audit, and backends.
 type Host struct {
-	registry *Registry
-	logger   *slog.Logger
-	quota    *quota.Tracker
-	audit    audit.EventWriter
-	policy   PolicyEvaluator
-	backends map[string]Backend
-	mu       sync.RWMutex
+	registry    *Registry
+	entitlement *EntitlementChecker
+	logger      *slog.Logger
+	quota       *quota.Tracker
+	audit       audit.EventWriter
+	policy      PolicyEvaluator
+	backends    map[string]Backend
+	mu          sync.RWMutex
 }
 
 func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.Tracker, auditWriter audit.EventWriter, policy PolicyEvaluator) *Host {
@@ -38,11 +39,12 @@ func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.T
 		logger = slog.Default()
 	}
 	h := &Host{
-		registry: NewRegistry(handle, logger),
-		logger:   logger,
-		quota:    quotaTracker,
-		audit:    auditWriter,
-		policy:   policy,
+		registry:    NewRegistry(handle, logger),
+		entitlement: NewEntitlementChecker(handle, logger),
+		logger:      logger,
+		quota:       quotaTracker,
+		audit:       auditWriter,
+		policy:      policy,
 		backends: map[string]Backend{
 			BackendEcho:    &EchoBackend{},
 			BackendOpenAPI: NewOpenAPIBackend(),
@@ -61,6 +63,28 @@ func (h *Host) ResolveServer(ctx context.Context, tenantID, name string) (*Serve
 	return h.registry.GetByName(ctx, tenantID, name)
 }
 
+// EffectiveScopes resolves what the caller may do with this server, taking the
+// capability pack into account, and rejects a caller whose entitlement has been
+// revoked. Servers no pack references keep their previous behaviour.
+func (h *Host) EffectiveScopes(ctx context.Context, identity Identity, rec *ServerRecord) ([]string, error) {
+	if h.entitlement == nil {
+		return identity.Scopes, nil
+	}
+	decision, err := h.entitlement.Check(ctx, identity, rec)
+	if err != nil {
+		h.logger.Warn("mcp entitlement check failed; denying",
+			"server", rec.Name, "user", identity.UserID, "error", err)
+		return nil, ErrCapabilityRevoked
+	}
+	if revoked(decision) {
+		return nil, ErrCapabilityRevoked
+	}
+	if !decision.Governed {
+		return identity.Scopes, nil
+	}
+	return grantServerScopes(identity.Scopes, rec.Name), nil
+}
+
 func (h *Host) ListRegistry(ctx context.Context, identity Identity) ([]RegistryEntry, error) {
 	entries, err := h.registry.ListActive(ctx, identity.TenantID)
 	if err != nil {
@@ -72,7 +96,11 @@ func (h *Host) ListRegistry(ctx context.Context, identity Identity) ([]RegistryE
 		if rec.Name == "demo" {
 			hasDemo = true
 		}
-		if !CanListTools(identity.Scopes, rec.Name, rec.RequiredScopes) {
+		scopes, err := h.EffectiveScopes(ctx, identity, rec)
+		if err != nil {
+			continue
+		}
+		if !CanListTools(scopes, rec.Name, rec.RequiredScopes) {
 			continue
 		}
 		out = append(out, registryEntryFromRecord(rec))

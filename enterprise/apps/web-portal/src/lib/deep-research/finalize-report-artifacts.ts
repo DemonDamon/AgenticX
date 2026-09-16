@@ -44,6 +44,7 @@ export type FinalizeReportArtifactsInput = {
   deliveryPrefs?: DeliveryPrefs;
   enqueueEvent: (event: DeepResearchEvent) => void;
   now?: () => Date;
+  locale?: "zh" | "en";
 };
 
 /** Sanitize download filename: keep CJK/latin/digits/_-, else `_`; max 80; empty → research-report. */
@@ -70,6 +71,7 @@ function buildCompactHtml(input: {
   citations: Citation[];
   stats?: ResearchStats;
   generatedAt: string;
+  locale?: "zh" | "en";
 }): string {
   let body = input.markdown;
   const note = "\n\n> 报告体积较大，可视化版本已精简（省略思维导图并截断正文）。\n";
@@ -84,6 +86,7 @@ function buildCompactHtml(input: {
     mindmapMermaid: "",
     stats: input.stats,
     generatedAt: input.generatedAt,
+    locale: input.locale,
   });
   while (lo < hi) {
     const mid = Math.floor((lo + hi + 1) / 2);
@@ -95,6 +98,7 @@ function buildCompactHtml(input: {
       mindmapMermaid: "",
       stats: input.stats,
       generatedAt: input.generatedAt,
+      locale: input.locale,
     });
     if (byteLength(candidate) <= MAX_ARTIFACT_BYTES) {
       best = candidate;
@@ -188,6 +192,7 @@ export async function finalizeReportArtifacts(
     mindmapMermaid,
     stats: input.stats,
     generatedAt,
+    locale: input.locale,
   });
   if (byteLength(html) > MAX_ARTIFACT_BYTES) {
     html = buildCompactHtml({
@@ -197,6 +202,7 @@ export async function finalizeReportArtifacts(
       citations: input.citations,
       stats: input.stats,
       generatedAt,
+      locale: input.locale,
     });
   }
 

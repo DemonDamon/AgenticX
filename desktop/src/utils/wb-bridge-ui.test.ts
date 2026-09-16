@@ -1,0 +1,208 @@
+import { describe, expect, it } from "vitest";
+import {
+  formatWbBridgeLiveSnapshot,
+  formatWbBridgeSendToolResult,
+  latestRunningWbBridgeProgress,
+  wbBridgeSendToolProgressLabel,
+} from "./wb-bridge-ui";
+
+describe("formatWbBridgeSendToolResult", () => {
+  it("formats success with result_text", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "success", result_text: "Hello, World!", ok: true }),
+    );
+    expect(out).toContain("Hello, World!");
+  });
+
+  it("formats running and asks not to resend", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "running", turn_seq: 2, last_activity: "Write" }),
+    );
+    expect(out).toContain("勿重复投递");
+  });
+
+  it("formats blocked with acceptEdits guidance", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "blocked", terminal_detail: "Bash" }),
+    );
+    expect(out).toContain("acceptEdits");
+  });
+
+  it("formats error with terminal_detail", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "error", terminal_detail: "error_max_turns" }),
+    );
+    expect(out).toContain("error_max_turns");
+  });
+
+  it("formats exited and asks to reopen", () => {
+    const out = formatWbBridgeSendToolResult(JSON.stringify({ status: "exited" }));
+    expect(out).toContain("重开会话");
+  });
+
+  it("shows committed side effects for blocked tools", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "blocked",
+        observed_tools: ["Write", "Bash"],
+        terminal_detail: "Bash",
+      }),
+    );
+    expect(out).toContain("Write → Bash");
+    expect(out).toContain("重试前请先核验");
+  });
+
+  it("lists written_paths in backticks on success", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "success",
+        result_text: "done",
+        written_paths: ["/tmp/a.txt", "/tmp/b.py"],
+      }),
+    );
+    expect(out).toContain("`/tmp/a.txt`");
+    expect(out).toContain("`/tmp/b.py`");
+  });
+
+  it("formats a describe snapshot via last_terminal_kind and last_result_text", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        turn_state: "idle",
+        last_terminal_kind: "success",
+        written_paths: ["/tmp/a.py"],
+        last_result_text: "ok",
+      }),
+    );
+    expect(out).not.toBeNull();
+    expect(out).toContain("ok");
+    expect(out).toContain("/tmp/a.py");
+  });
+
+  it("shows observed tools on success without the retry-check warning", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "success",
+        result_text: "done",
+        observed_tools: ["Write"],
+      }),
+    );
+    expect(out).toContain("Write");
+    expect(out).not.toContain("重试前请先核验");
+  });
+
+  it("marks stalled running turns", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "running", stalled: true }),
+    );
+    expect(out).toContain("疑似等待确认");
+  });
+
+  it("prefixes deduplicated success", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "success", result_text: "ok", deduplicated: true }),
+    );
+    expect(out?.startsWith("（重复投递已去重）")).toBe(true);
+  });
+
+  it("appends usage on success", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "success",
+        result_text: "ok",
+        turns_completed: 22,
+        usage_totals: { input_tokens: 197000, output_tokens: 285 },
+      }),
+    );
+    expect(out).toContain("22");
+    expect(out).toContain("197000");
+  });
+
+  it("omits tokens when usage_totals is missing", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ status: "success", result_text: "ok" }),
+    );
+    expect(out).not.toContain("tokens");
+  });
+
+  it("returns null for non-json", () => {
+    expect(formatWbBridgeSendToolResult("not json")).toBeNull();
+  });
+
+  it("falls back to ok+result_text without status", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ ok: true, result_text: "hi" }),
+    );
+    expect(out).toContain("hi");
+  });
+
+  it("falls back to tail when status is missing", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({ ok: false, tail: "some tail" }),
+    );
+    expect(out).toContain("some tail");
+  });
+});
+
+describe("formatWbBridgeLiveSnapshot", () => {
+  it("summarizes activity, tools, and written files", () => {
+    const out = formatWbBridgeLiveSnapshot({
+      turn_state: "running",
+      last_activity: "Write",
+      turn_elapsed_sec: 8,
+      observed_tools: ["Write"],
+      written_paths: ["/tmp/a.txt"],
+    });
+    expect(out).toContain("当前 Write");
+    expect(out).toContain("已执行 Write");
+    expect(out).toContain("写入 1 个文件");
+  });
+
+  it("marks a quiet turn as no new output, not an approval wait", () => {
+    const out = formatWbBridgeLiveSnapshot({
+      turn_state: "running",
+      last_activity: "Bash",
+      last_activity_age_sec: 40,
+    });
+    expect(out).toContain("长时间无新输出");
+    expect(out).not.toContain("疑似等待确认");
+  });
+});
+
+describe("latestRunningWbBridgeProgress", () => {
+  it("returns the live send line while the tool is running", () => {
+    const line = latestRunningWbBridgeProgress([
+      {
+        role: "tool",
+        toolName: "wb_bridge_send",
+        toolStatus: "running",
+        content: "⏳ WB：running · 当前 Bash",
+      },
+    ]);
+    expect(line).toContain("当前 Bash");
+  });
+
+  it("returns null after the send tool finished", () => {
+    expect(
+      latestRunningWbBridgeProgress([
+        {
+          role: "tool",
+          toolName: "wb_bridge_send",
+          toolStatus: "success",
+          content: "✅ 完成",
+        },
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("wbBridgeSendToolProgressLabel", () => {
+  it("includes elapsed seconds and no-resend hint", () => {
+    const out = wbBridgeSendToolProgressLabel(12);
+    expect(out).toContain("12s");
+    expect(out).toContain("勿重复投递");
+  });
+
+  it("mentions wb-bridge when elapsed is unknown", () => {
+    expect(wbBridgeSendToolProgressLabel(null)).toContain("wb-bridge");
+  });
+});

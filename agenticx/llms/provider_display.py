@@ -163,10 +163,7 @@ def build_provider_catalog_block(
             f"(spawn 参数 provider={provider_id}, model=<模型 id>)"
         )
 
-    cur_prov = str(current_provider or "").strip()
-    cur_model = str(current_model or "").strip()
-    if cur_prov and cur_model:
-        cur_cfg = resolve_provider_config(cur_prov, providers)
-        cur_label = format_model_option_label(cur_prov, cur_model, cur_cfg)
-        lines.append(f"- 当前会话模型（用户可见）: {cur_label}")
+    # current_provider / current_model stay in the signature for callers, but
+    # the live session model belongs in <session-context>, not this stable block.
+    _ = (current_provider, current_model)
     return "\n".join(lines) + "\n\n"

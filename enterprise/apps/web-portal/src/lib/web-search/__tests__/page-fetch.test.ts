@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  extractDocumentTitle,
   extractMainText,
   fetchPageContent,
   fetchPagesBatch,
@@ -45,6 +46,122 @@ describe("extractMainText", () => {
   it("decodes common HTML entities", () => {
     const html = `<article><p>A&amp;B&nbsp;C</p></article>`;
     expect(extractMainText(html)).toContain("A&B C");
+  });
+
+  // Both fixtures are reduced from real pages that returned the wrong text.
+  // Neither uses <article>/<main>: everything is <div>, which is what made the
+  // old non-greedy `<div>...</div>` match stop at the first inner `</div>` and
+  // hand the page to whichever chrome container happened to be flat.
+  it("keeps a nested article body instead of the flat menu beside it", () => {
+    const menu = Array.from(
+      { length: 30 },
+      (_v, index) => `<a href="/c${index}">频道${index}</a>`,
+    ).join("");
+    const html = `
+      <body>
+        <div class="main-nav">${menu}</div>
+        <div class="article-body">
+          <div class="meta"><span>2026-08-14 21:12</span></div>
+          <div class="txt">
+            <p>公司发布半年度报告，实现营业收入907.03亿元，同比增长1.47%。</p>
+            <p>归属于上市公司股东的净利润445.17亿元，同比下降1.95%。</p>
+          </div>
+        </div>
+      </body>`;
+    const text = extractMainText(html);
+    expect(text).toContain("907.03亿元");
+    expect(text).toContain("445.17亿元");
+    expect(text).not.toContain("频道0");
+  });
+
+  it("keeps the page's own article instead of a rail of recommended headlines", () => {
+    const rail = Array.from(
+      { length: 12 },
+      (_v, index) => `<a href="/r${index}">另一篇被推荐的报道标题之${index}，内容与本页无关。</a>`,
+    ).join("");
+    const html = `
+      <body>
+        <div class="content">
+          <div class="hd">半年净利润445.17亿元</div>
+          <div class="detail">
+            <p>披露半年报，上半年实现营业收入907.03亿元，基本每股收益35.57元。</p>
+          </div>
+        </div>
+        <div class="recommend">为你推荐${rail}</div>
+      </body>`;
+    const text = extractMainText(html);
+    expect(text).toContain("35.57元");
+    expect(text).not.toContain("另一篇被推荐的报道标题之0");
+  });
+
+  it("does not count inline script source as page text", () => {
+    const noise = `<script>${"var padding = 'xxxxxxxxxx';".repeat(80)}</script>`;
+    const html = `
+      <body>
+        <div class="wrap">${noise}<p>短</p></div>
+        <div class="story"><div class="p"><p>${"真正的正文内容。".repeat(20)}</p></div></div>
+      </body>`;
+    const text = extractMainText(html);
+    expect(text).toContain("真正的正文内容");
+    expect(text).not.toContain("padding");
+  });
+
+  it("removes an unclosed noise element through to the end of the document", () => {
+    const script = "var payload = 'LEAKED_SCRIPT_BODY';".repeat(300);
+    const html =
+      `<body><div class="story"><p>${"正文一句。".repeat(10)}</p>` +
+      `<script>${script}</div></body>`;
+    const text = extractMainText(html);
+    expect(text).toContain("正文一句");
+    expect(text).not.toContain("LEAKED_SCRIPT_BODY");
+    expect(text.length).toBeLessThan(200);
+  });
+
+  it("treats script and style bodies as raw text, not as markup", () => {
+    const body = `<article><p>${"真正的正文内容，这里是一整篇文章。".repeat(20)}</p></article>`;
+    for (const noise of [
+      `<script>const tpl = "<script>";</script>`,
+      `<script>if (a<b) render();</script>`,
+      `<style>/* <style> */ .a{color:red}</style>`,
+    ]) {
+      const text = extractMainText(`${noise}\n${body}`);
+      expect(text).toContain("真正的正文内容");
+      expect(text).not.toContain("render");
+      expect(text).not.toContain("color:red");
+    }
+  });
+
+  it("ends a raw-text element at its own closing tag, as a browser does", () => {
+    const html =
+      `<body><script>var s = "</script>";</script>` +
+      `<div class="story"><p>${"正文一句。".repeat(20)}</p></div></body>`;
+    const text = extractMainText(html);
+    expect(text).toContain("正文一句");
+    expect(text).not.toContain("var s");
+  });
+
+  it("survives an unclosed container without losing the body", () => {
+    const html = `
+      <body>
+        <div class="broken">
+        <div class="story"><p>${"报告显示，营业收入增长。".repeat(20)}</p></div>
+      </body>`;
+    expect(extractMainText(html)).toContain("营业收入增长");
+  });
+});
+
+describe("extractDocumentTitle", () => {
+  it("reads and decodes the standard title element without site-specific rules", () => {
+    expect(
+      extractDocumentTitle(
+        "<html><head><TITLE>Research &amp; Engineering</TITLE></head><body></body></html>",
+      ),
+    ).toBe("Research & Engineering");
+  });
+
+  it("returns undefined for a missing or empty title", () => {
+    expect(extractDocumentTitle("<html><body>body</body></html>")).toBeUndefined();
+    expect(extractDocumentTitle("<title>   </title>")).toBeUndefined();
   });
 });
 

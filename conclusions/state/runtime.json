@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "runtime",
-  "generation": "2f7e222f987945ef83bf1dd02c1060f4",
+  "generation": "a9c69889a5d04244b9f7bb06d9bd7b5e",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:975abbb24b3d07e990cf2bc33b46c4b8e93d52e157109043eacb63ae07b0eb4b",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:7b12cc7ca8ebf2696672ea5b6311d79659bded005cf19c2ad78e910e5f88aede",
   "summary_path": "conclusions/runtime_module_conclusion.md",
-  "summary_sha256": "sha256:907445065bc57e552ffa875ebc9cff9a79f8b495d9ddd36b08074b8f1bebfa6b",
-  "updated_at": "2026-08-08T01:37:16.293780+00:00"
+  "summary_sha256": "sha256:cd5073dd8119655ae03d87f23e9f23a688a846c9862c497d49404f229ec63d7a",
+  "updated_at": "2026-09-01T06:08:39.742381+00:00"
 }

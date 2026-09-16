@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
+import { SETTINGS_PANEL_TITLE_CLASS } from "./settings-typography";
 
 type Props = {
   title: string;
@@ -14,8 +15,7 @@ type Props = {
   defaultCollapsed?: boolean;
 };
 
-const DEFAULT_TITLE_CLASS =
-  "text-xs font-semibold uppercase tracking-[0.06em] text-text-subtle";
+const DEFAULT_TITLE_CLASS = SETTINGS_PANEL_TITLE_CLASS;
 
 export function Panel({
   title,

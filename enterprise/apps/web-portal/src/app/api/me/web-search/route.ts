@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
 import { getSessionFromCookies } from "../../../../lib/session";
 import {
   getPublicWebSearchConfig,
@@ -21,7 +22,25 @@ export async function GET() {
 
   try {
     const data = await getPublicWebSearchConfig(session.tenantId);
-    return NextResponse.json({ data });
+    // 租户总开关之上再看分配范围。查不动时保持租户配置原样，避免一次抖动把入口藏掉。
+    const [webAllowed, deepAllowed] = await Promise.all([
+      isPlatformFeatureAllowedForUser("web_search", session.userId, session.email, session.deptId).catch(
+        () => true,
+      ),
+      isPlatformFeatureAllowedForUser(
+        "deep_research",
+        session.userId,
+        session.email,
+        session.deptId,
+      ).catch(() => true),
+    ]);
+    return NextResponse.json({
+      data: {
+        ...data,
+        enabled: data.enabled && webAllowed,
+        deepResearchEnabled: data.deepResearchEnabled && deepAllowed,
+      },
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "web search config unavailable";
     return NextResponse.json(

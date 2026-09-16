@@ -15,8 +15,22 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import unquote_to_bytes
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-_SESSIONS_ROOT = Path(os.path.expanduser("~")) / ".agenticx" / "sessions"
+def _sessions_root() -> Path:
+    """``~/.agenticx/sessions``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "_SESSIONS_ROOT", 'sessions')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _sessions_root()。
+    if name == "_SESSIONS_ROOT":
+        return agx_home().joinpath('sessions')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _MIME_EXT = {
     "image/png": ".png",
@@ -79,7 +93,7 @@ def _clean_image_attachment_rows(atts: Sequence[Any]) -> list[dict[str, Any]]:
 
 
 def session_uploads_dir(session_id: str) -> Path:
-    return _SESSIONS_ROOT / str(session_id or "").strip() / "uploads"
+    return _sessions_root() / str(session_id or "").strip() / "uploads"
 
 
 def _display_name_from_context_key(key: str) -> str:
@@ -118,6 +132,24 @@ def _is_readable_abs_file(key: str) -> bool:
         return Path(expanded).is_file()
     except (OSError, ValueError):
         return False
+
+
+#: 交给专门的文档抽取器处理的扩展名（与 context_file_hydration.ALLOWED_EXTENSIONS 同源）。
+#: 这些文件**不能**当纯文本直接读进上下文：读得出来不代表读对了。
+def _needs_document_extraction(key: str) -> bool:
+    """True when this attachment must go through the document extractor.
+
+    ``rehydrate_session_text_context_files`` 会把「能按 utf-8 读出来的绝对路径文件」
+    直接当正文塞进上下文。PDF 里只要内容流没压缩，整份文件就是可解码的 ASCII——于是
+    占位符被替换成 PDF 源码，后面的 hydrate_turn_context_files 一看已经不是占位符就
+    跳过，模型最终读到的是 `%PDF-1.4`、`/MediaBox`、`endobj` 这些东西，而不是正文。
+
+    Word/Chrome 导出的 PDF 多数带压缩流（二进制，解码失败）所以侥幸没事；不压缩的那
+    一类就会中招。是否走文档抽取不能取决于「这份文件的字节碰巧能不能解码」。
+    """
+    from agenticx.studio.context_file_hydration import ALLOWED_EXTENSIONS
+
+    return os.path.splitext(str(key or ""))[1].lower() in ALLOWED_EXTENSIONS
 
 
 def _is_text_attachment_placeholder(body: str) -> bool:
@@ -235,6 +267,10 @@ def rehydrate_session_text_context_files(
         if not key:
             continue
         if not _is_text_attachment_placeholder(body):
+            out[key] = body
+            continue
+        # 文档类附件保留占位符，交给文档抽取器；当纯文本读会把 PDF 源码灌进上下文。
+        if _needs_document_extraction(key):
             out[key] = body
             continue
         # Prefer reading the key itself when it already points at a durable file.

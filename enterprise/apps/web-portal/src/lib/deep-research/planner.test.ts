@@ -6,6 +6,7 @@ import {
   MAX_SUB_QUESTIONS,
   OPEN_ENDED_MIN_LANES,
 } from "./planner";
+import { languageDirective } from "./copy";
 
 describe("parseResearchPlanJson", () => {
   it("parses standard JSON", () => {
@@ -155,6 +156,37 @@ describe("buildResearchPlan", () => {
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(init.body)) as { stream: boolean };
     expect(body.stream).toBe(false);
+  });
+
+  it("appends the English language directive to the planner system prompt", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                topic: "T",
+                sub_questions: ["A", "B", "C"],
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    await buildResearchPlan({
+      url: "http://gw/v1/chat/completions",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "user question",
+      locale: "en",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.messages[0]?.content).toContain(languageDirective("en"));
   });
 
   it("injects today's date and recon brief as system grounding", async () => {

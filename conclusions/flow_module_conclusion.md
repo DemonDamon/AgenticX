@@ -1,5 +1,7 @@
 # Flow 模块结论
 
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+
 ## Responsibility
 
 `agenticx/flow` 提供两类互补能力：（1）基于装饰器的事件驱动工作流编排，供业务子类用 `@start` / `@listen` / `@router` 声明拓扑并由 `Flow.kickoff()` / `kickoff_async()` 调度执行；（2）可干预的执行计划模型 `ExecutionPlan` 及其管理器 `ExecutionPlanManager`，用于分阶段/子任务进度追踪、暂停恢复与持久化，供 `agenticx/planner` 的动态重规划消费。设计参考 crewAI Flow 与 Refly ProgressPlan/PilotEngine 思路，但二者在仓库内尚未直接耦合——`Flow` 执行引擎不自动读写 `ExecutionPlan`。
@@ -12,7 +14,7 @@
 
 ## Core execution path
 
-**Flow 编排**：类定义时 `FlowMeta` 扫描方法，收集 `_start_methods`、`_listeners`、`_routers` 与路由返回值常量；`kickoff_async` 先将 `FlowExecutionState.status` 置为 `running`，依次执行无条件 `@start()` 方法，再循环 `_process_listeners()`——对每个未完成的 listener 用 `_check_condition()` 评估 OR/AND 或嵌套 `FlowCondition`，满足则 `_collect_trigger_outputs()` 把上游输出作为 `result` 或命名字段传入 `_execute_method()`；`@router` 返回的字符串常量会被 `mark_completed` 为虚拟方法名，从而触发 `@listen("SUCCESS")` 一类分支。同步 `kickoff()` 在无运行中事件循环时用 `asyncio.run`，否则线程池包装异步路径。
+**Flow 编排**：类定义时 `FlowMeta` 扫描方法，收集 `_start_methods`、`_listeners`、`_routers` 与路由返回值常量；`kickoff_async` 先将 `FlowExecutionState.status` 置为 `running`，依次执行无条件 `@start()` 方法，再循环 `_process_listeners()`——对每个未完成的 listener 用 `_check_condition()` 评估 OR/AND 或嵌套 `FlowCondition`，满足则 `_collect_trigger_outputs()` 把上游输出作为 `result` 或命名字段传入 `_execute_method()`；`@router` 返回的字符串常量会被 `mark_completed` 为虚拟方法名，从而触发 `@listen("SUCCESS")` 一类分支。同步 `kickoff()` 委托 `agenticx.utils.async_bridge.run_sync` 做同步→异步桥接：无运行中事件循环时走 `asyncio.run`，否则提交到独立线程的新循环执行；此前 `kickoff()` 内联的 try/except 范围过大，会把 Flow 内部抛出的任何 `RuntimeError` 误判为「无运行中循环」而重走 `asyncio.run`，以 "cannot be called from a running event loop" 掩盖真实错因，该缺陷已随此次委托修复。`_execute_method()` 不再用 `inspect.iscoroutinefunction()` 预判是否 await——`@start()`/`@listen()` 包装出的 `FlowMethod` 可调用对象在 Python 3.10/3.11 上仅带 `asyncio.iscoroutinefunction()` 才认的 `_is_coroutine` 标记（`inspect.markcoroutinefunction` 为 3.12+ API），会使 async 方法落入同步分支、返回从未 await 的协程对象——现改为先调用 `method(...)`，再以 `inspect.isawaitable(result)` 决定是否 await。
 
 **ExecutionPlan 生命周期**：调用方构造 `ExecutionPlan(session_id, goal, stages=…)` → `ExecutionPlanManager.register()` 写入内存缓存 → 可选 `persist()` 经 `PlanStorageProtocol` 落盘 → 执行器更新子任务/阶段状态并 `update()` → 干预时 `pause_plan` / `resume_plan` / `reset_subtask` 修改 `intervention_state` 并发射 `PlanEvent`。
 
@@ -40,6 +42,7 @@
 ## Dependencies
 
 - **运行时**：`pydantic`（`FlowState`、`ExecutionPlan` 模型）；标准库 `asyncio`、`inspect`。
+- **内部依赖**：`agenticx.utils.async_bridge.run_sync`（`Flow.kickoff()` 的同步→异步桥接，覆盖「无循环」与「已有循环在跑」两种情况）。
 - **上游消费者**：`agenticx.planner.adaptive_planner.AdaptivePlanner` 依赖 `ExecutionPlan` 做 LLM 重规划与 patch 应用。
 - **外部参考**：模块 docstring 标明 crewAI Flow、Refly pilot 类型与 formatter 为设计来源，非运行时硬依赖。
 

@@ -73,10 +73,18 @@ def test_hooks_loader_discovers_workspace_and_bundled(tmp_path: Path):
     loaded_count = load_hooks(tmp_path)
     assert loaded_count >= 1
 
-    event = HookEvent(type="command", action="new", agent_id="agent-demo")
+    # 必须给 workspace_dir：bundled 的 session-memory 钩子在缺省时回落到 Path.cwd()，
+    # 于是这条用例会把 memory/<日期>-new.md 写进仓库根目录。
+    event = HookEvent(
+        type="command",
+        action="new",
+        agent_id="agent-demo",
+        context={"workspace_dir": str(tmp_path)},
+    )
     result = asyncio.run(trigger_hook_event(event))
     assert result is True
     assert "workspace-hook-fired" in event.messages
+    assert (tmp_path / "memory").is_dir(), "session-memory 钩子应把快照写进给定工作区"
 
 
 def test_legacy_llm_and_tool_hooks_still_work():

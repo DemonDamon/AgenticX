@@ -4,6 +4,7 @@ import {
   isDoubleEnterWithinWindow,
   isStreamRunActiveForQueue,
   resolveQueueSessionKey,
+  shouldAwaitInterruptBeforeRetry,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -123,6 +124,21 @@ describe("message queue resend policy", () => {
   it("force send interrupts instead of enqueueing", () => {
     expect(shouldEnqueueOnResend({ isStreamRunActive: true, forceSend: true })).toBe(false);
     expect(shouldInterruptOnResend({ isStreamRunActive: true, forceSend: true })).toBe(true);
+  });
+
+  it("skipInterrupt blocks barge-in persist even when force-sending a pending retry", () => {
+    expect(
+      shouldInterruptOnResend({
+        isStreamRunActive: true,
+        forceSend: true,
+        skipInterrupt: true,
+      })
+    ).toBe(false);
+  });
+
+  it("settled retry does not wait for interrupt", () => {
+    expect(shouldAwaitInterruptBeforeRetry({ streamActive: false })).toBe(false);
+    expect(shouldAwaitInterruptBeforeRetry({ streamActive: true })).toBe(true);
   });
 
   it("queue drain sends without re-enqueueing or barge-in interrupt", () => {

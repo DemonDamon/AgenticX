@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-05-29（覆盖 2026-04-22 之后的变更）
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
 
 ## 目录路径
 
@@ -32,6 +32,7 @@ agenticx/cli/
 ├── intent_classifier.py     # 用户意图分类
 ├── generate_commands.py     # generate 子命令
 ├── hooks_commands.py        # hooks 子命令
+├── harness_app.py           # harness 子命令（agx harness review 会话工作循环健康审查）
 ├── skills_commands.py       # skills 子命令
 ├── volcengine_commands.py   # 火山引擎专属命令
 ├── log_config.py            # 日志配置
@@ -102,7 +103,8 @@ agenticx/cli/
 |----------|-----------|
 | 文件操作 | `file_read`, `file_write`（**(NEW)** 支持 `from_path`/`from_url` 直读大文件，避免全文走 LLM 上下文）, `file_edit`, `list_files` |
 | Shell | `bash_exec` |
-| 网络 | `web_search`, `web_fetch`（**(NEW)** 抓取 URL 正文 + 发现页面图片）, `view_image`（**(NEW)** 视觉附件入队 + `is_vision_capable` 守卫） |
+| 网络 | `web_search`, `web_fetch`（**(NEW)** 抓取 URL 正文 + 发现页面图片，2026-09 起经 `is_junk_remote_image_url` 过滤运营位图）, `view_image`（**(NEW)** 视觉附件入队 + `is_vision_capable` 守卫；纯文本模型被引导改用 `analyze_image`） |
+| 图像/文档 | **(NEW)** `show_images`（1–6 张远程图内联展示，无需视觉模型）, `generate_image`（文生图落盘会话工作区）, `analyze_image`（纯文本模型经 `agenticx.llms.vision_fallback` 兜底视觉模型解读图片）, `document_read_pages`（本会话已附加 PDF 的分页渲染续读，经 `agenticx.studio.document_pages`） |
 | Todo 管理 | `todo_write` |
 | Scratchpad | `scratchpad_write`, `scratchpad_read` |
 | 记忆 | **(NEW)** `memory_search`, `memory_append`, `session_search`（跨会话 FTS5 检索） |
@@ -121,7 +123,23 @@ agenticx/cli/
 **dispatch_tool_async(tool_name, arguments, session, confirm_gate, event_callback, team_manager)**：
 - 按 tool_name 路由到对应工具实现
 - 支持 `event_callback` 异步回调（用于向 Runtime 传递 confirm_required 等中间事件）
-- 安全白名单检查：`bash_exec` 等高风险工具经 `ConfirmGate` 确认
+- **(NEW，2026-09)** 入口即策略收口：先查 `tool_denied_by_session_permissions`（会话权限 deny），再查 `_dispatch_path_rule_denial`（`permissions.path_rules` 对 `path`/`from_path` 参数的 deny，读写都拦、优先于 confirm），通过后才进入具体工具
+- 安全确认：高风险工具经 `ConfirmGate` 确认；**(NEW)** `_confirm` 改为按 gate 能力（`should_emit_prompt`）决定是否发 `confirm_required` 事件，先注册 pending 请求再发布 ID 避免竞态挂起；拒绝原因经 `confirm_denial_note` 挂到 gate 的 `last_denial_note`，`_cancelled()` 文案据此区分「用户拒绝 / 无人值守拦截 / 等待超时」；`is_service_mode()` 取代 `isinstance(AsyncConfirmGate)` 判定交互态
+
+**(NEW，2026-09) bash_exec 安全模型重写**（commits `b0d2f0b4` / `3742f8f9` / `f007c2c3` 等）：
+- 旧的 `SAFE_COMMANDS` 白名单集合已删除，改为 `agenticx.runtime.command_safety.assess_command` 对命令做风险分类（`destructive_filesystem` / `arbitrary_code_execution` / `version_control_change` / `external_publish` 等 code + 中文证据），`_bash_exec_safety_confirm` 据此给出 `high` / `non_whitelisted` 两档中文确认文案；`NEVER_AUTO_APPROVED_CATEGORIES` 类别永不可被豁免
+- `_apply_command_sandbox` 用 `agenticx.runtime.command_sandbox.build_command_sandbox_plan` 把 argv 包进 OS 级沙箱（可读/可写 roots 来自 `_session_workspace_root_sets`，`permissions.path_rules` 的 deny glob 经 `denied_path_patterns_for_sandbox` 下沉为进程级边界）；`permissions.command_permissions` 三档：`read-only` / `workspace-write`（默认）/ `danger-full-access`（脱离隔离需显式确认）；沙箱后端不可用时需确认后才裸跑
+- `permissions.allowed_tools` 语义改为「跳过确认」（`tool_allowed_without_confirm`），不放开沙箱；`unattended_allow_workspace_scripts=true` 时无人值守场景仅放行「工作区内已存在脚本」的调用（解释器按字面路径判定以兼容 venv 符号链接）
+- `_BASH_BG_LOG_DIR` 改为 `_bash_bg_log_dir()` 惰性解析（`agenticx.utils.agx_home.lazy_home_path`），不再 import 时定死 `Path.home()`
+
+**(NEW，2026-09) 工作区根与路径解析增强**：
+- `_session_workspace_root_sets` 重排 read_roots：用户挂载/引用的目录优先于会话默认工作区，`list_files(".")` 落到用户刚绑定的文件夹而非分身默认 workspace；默认工作区的 `.agx-mounts.json` 扫描去重
+- `_session_mount_aliases` / `_map_virtual_reference_path`：`<default>/<mount_name>/...` 虚拟路径映射到 reference 挂载源（写操作拒绝）；相对路径首段命中挂载名时同样映射
+- `_context_files_read_allowlist`：用户 `@` 附加的文件精确放行只读，写操作返回明确的 read-only 错误
+- `_tool_list_files` 输出改为 `root: <绝对路径>` 头 + 相对路径条目，并把 reference 挂载注入列表（对齐工作区面板）；`.agx-mounts.json` / `.agx-copy-manifest.json` 元文件被过滤
+- `file_read` / `file_write` / `file_edit` 完成后调用 `session.file_state_tracker.refresh_from_disk` 刷新文件快照；`file_write` / `file_edit` / `memory_append` / `skill_manage` 等确认文案中文化并带 `risk` 分级（`low` / `policy`）
+- `skill_use` 返回文案明确「正文已注入本轮上下文，不要再用 file_read/bash_exec 读技能目录（工作区外不可读）」
+- `META_TOOL_NAMES` 新增 `fresh_round_loop`
 
 ---
 
@@ -205,6 +223,12 @@ agenticx/cli/
 - `ConfigManager.get_value(key)`：点分路径取值（如 `"runtime.max_tool_rounds"`）
 - `ConfigManager._deep_merge(global_data, project_data)`：项目配置覆盖全局配置
 
+**(NEW，2026-09) 读取路径两处重构**（commits `cc45657d` / `e334ea6b`）：
+- `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析 `Path.home()`——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
+- `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 写入后主动 `_invalidate_yaml_cache`，不依赖时间戳精度。实测消除 `get_value` 读路径上约 96% 的重复 YAML 解析耗时
+
+**Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）。
+
 **配置项说明**：
 - `workspace_dir`：Meta-Agent workspace 目录
 - `runtime.max_tool_rounds`：工具调用最大轮数
@@ -215,6 +239,7 @@ agenticx/cli/
 - `mcp.disabled_tools`：`{server_name: [tool_names]}` 形式的 MCP 工具禁用表，由 UI 管理
 - **(NEW)** `web_search`：内置 Web 搜索配置（DuckDuckGo 默认 + 可选 API providers）；导出时对 `providers.*.api_key` 做掩码（参见 Studio `web_search` 路由）
 - **(NEW)** `longrun`（`LongRunSettings`）：Symphony 风格长任务编排开关——`enabled` / `workspace_root`（默认 `~/.agenticx/task-workspaces`）/ `stall_threshold_sec`（300s）/ `poll_interval_sec`（30s）/ `worker_session_id` / `linear_api_key` / `linear_team_ids`
+- **(NEW，2026-09)** `permissions.command_permissions`：OS 命令沙箱档位——`read-only` / `workspace-write`（默认）/ `danger-full-access`；`permissions.unattended_allow_workspace_scripts`（默认关）：无人值守（含 `automation:*` 定时任务）是否可执行工作区内已存在脚本，仅对非 never 类别、可执行文件在 writable roots 内且调用前已存在的调用生效；`permissions.allowed_tools` 语义明确为「跳过确认」（沙箱仍生效）
 
 ---
 
@@ -233,6 +258,17 @@ agenticx/cli/
 - `config`：配置管理（来自 config_commands.py）
 - `generate`：代码生成（来自 generate_commands.py）
 - `skills`：Skill 管理（来自 skills_commands.py）
+- **(NEW)** `harness`：会话工作循环健康审查（来自 harness_app.py，延迟导入注册）
+
+**(NEW，2026-09)** `loop` 命令构造系统提示时传 `include_volatile=False`（`build_meta_agent_system_prompt`），保持系统前缀稳定以利于 prompt 缓存。
+
+### harness_app.py — 会话工作循环健康审查（NEW）
+
+**功能**：`agx harness review` 子命令，对单个会话的工作循环做**只读、确定性**健康检查（无 LLM 调用、无网络）。
+
+- 会话目录解析 `_resolve_session_dir`：默认取 `~/.agenticx/sessions/` 下最近修改的会话，或 `--session/-s` 指定
+- 核心逻辑委托 `agenticx.learning.loop_review`（`review_session` / `format_review_text` / `write_review`）：五维度评分、证据强度封顶
+- 选项：`--json` 输出机读 JSON；`--write` 把 `loop_review.json` 持久化进会话目录（默认不落盘）
 
 ### scaffold.py — 项目脚手架
 
@@ -275,5 +311,5 @@ main.py (Typer)
 1. **双路径执行**：CLI 交互模式（`run_agent_loop`）和 Studio 服务模式（`server.py`）共享同一 `AgentRuntime`，行为一致
 2. **延迟导入**：main.py 使用延迟导入提升 CLI 启动速度
 3. **session 作为状态容器**：`StudioSession` 贯穿所有工具调用，持有消息历史、artifacts、MCP 状态和 Todo
-4. **工具安全机制**：`bash_exec` 等高风险工具通过 `ConfirmGate` 拦截，子智能体使用 `AutoApproveConfirmGate`；**(NEW)** agent 系统提示与 `mcp_connect` / `mcp_import` 工具描述明确拒绝在对话中收集 API Key，引导走「设置 → MCP」环境变量配置
+4. **工具安全机制**：`bash_exec` 等高风险工具通过 `ConfirmGate` 拦截，子智能体使用 `AutoApproveConfirmGate`；agent 系统提示与 `mcp_connect` / `mcp_import` 工具描述明确拒绝在对话中收集 API Key，引导走「设置 → MCP」环境变量配置；**(NEW，2026-09)** shell 安全从「`SAFE_COMMANDS` 白名单 + 正则启发式」升级为「`command_safety` 风险分类 + OS 级命令沙箱（`command_sandbox`）+ `path_rules` 进程级 deny 下沉」三层，`dispatch_tool_async` 为唯一策略收口点
 5. **Near 品牌默认（NEW，2026-05-24，commit `9a3100bb`）**：meta-agent 兜底标签、群聊 mention 旧别名（`@machi` 仍路由到 meta leader）、CLI/agent_tools 用户提示统一对齐 Desktop 的 Machi → Near 重命名（`DEFAULT_META_PRODUCT_LABEL`）

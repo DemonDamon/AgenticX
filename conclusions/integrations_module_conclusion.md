@@ -1,6 +1,6 @@
 # agenticx.integrations 模块结论
 
-> 结论生成时间：2026-08-08（首次创建，覆盖当前代码）
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
 
 ## Responsibility
 
@@ -110,7 +110,7 @@ SDK 未安装或初始化失败时，bridge 降级为进程内 `_records` 字典
 ### AgentKit 子域
 
 - **`AgentkitMemoryBridge`**：lazy init；`add`/`search`/`clear` 对齐 `BaseMemory`；tenant 写入 metadata。
-- **`AgentkitKnowledgeBridge`**：lazy init `AgentkitKnowledge`；`collection_name` 默认读 `DATABASE_VIKING_COLLECTION`；无 SDK 时用本地 `_documents` fallback。
+- **`AgentkitKnowledgeBridge`**：lazy init `AgentkitKnowledge`；`collection_name` 默认读 `DATABASE_VIKING_COLLECTION`；无 SDK 时用本地 `_documents` fallback。同步入口 `add_content` / `search` 经 `agenticx.utils.async_bridge.run_sync` 桥接协程（替代 `asyncio.get_event_loop().run_until_complete`）：无运行中循环时走 `asyncio.run`，已有循环时丢到独立线程跑完取结果，避免主线程循环被先前 `asyncio.run` 关闭后同步桥永久失效。
 - **`AgentkitMCPGateway`**：`register_tool` / `search_tools` / `invoke_tool` 封装 SDK。
 - **`AgentkitRuntimeClient`**：`create_runtime` / `get_runtime_status` / `list_runtimes` / `destroy_runtime`。
 - **`AgenticXMCPAppAdapter`**：`register_tool` 提取 `args_schema`；`register_agent_as_tool`；`generate_mcp_wrapper` 用 `string.Template` 生成部署代码。

@@ -19,7 +19,11 @@ import { URL } from "node:url";
 import type { Duplex } from "node:stream";
 
 /** Extra `timeoutMs` is honored by curl `--max-time` (AbortSignal alone is not enough). */
-export type DirectFetchInit = RequestInit & { timeoutMs?: number };
+export type DirectFetchInit = RequestInit & {
+  timeoutMs?: number;
+  /** Optional cap; callers may pass it even if this transport does not truncate yet. */
+  maxResponseBytes?: number;
+};
 
 export type DirectFetch = (input: string | URL, init?: DirectFetchInit) => Promise<Response>;
 

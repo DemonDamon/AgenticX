@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 
@@ -51,6 +52,7 @@ function defaultModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
 
 /** Compact inline dropdown for picking an avatar's default provider/model. */
 export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: Props) {
+  const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -65,7 +67,7 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
     }));
   }, [settings.providers]);
 
-  const placeholder = inheritLabel ?? "继承全局默认";
+  const placeholder = inheritLabel ?? t("model.inheritDefault");
   const currentKnown = provider && model && isModelSelectable(provider, model, settings.providers);
   const inheritSelected = !currentKnown;
 
@@ -137,7 +139,7 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
                 </span>
               </button>
               {options.length === 0 ? (
-                <div className="px-3 py-2 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>
+                <div className="px-3 py-2 text-center text-xs text-text-faint">{t("model.empty")}</div>
               ) : (
                 options.map((opt) => {
                   const isActive = !inheritSelected && opt.provider === provider && opt.model === model;

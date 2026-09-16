@@ -1,6 +1,6 @@
 # AgenticX LLM 模块（agenticx/llms）完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-04-14 之后的变更）
+> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\llms`
@@ -8,30 +8,35 @@
 ## 完整目录结构和文件摘要
 ```
 ├── __init__.py
-├── ark_provider.py          [火山引擎 Ark / Doubao 模型 Provider]
+├── ark_provider.py          [火山引擎 Ark / Doubao 模型 Provider；usage 提取改用 runtime.usage_metadata 共享助手]
 ├── auth_profile.py          [新增：Auth Profile 轮换与冷却持久化（参考 OpenClaw）]
-├── bailian_provider.py      [阿里云百炼 Provider]
-├── base.py                  [增强：invoke_with_profile / supports_auth_profile_rotation]
+├── bailian_provider.py      [阿里云百炼 Provider；stream usage 归一化复用共享助手]
+├── base.py                  [增强：invoke_with_profile / supports_auth_profile_rotation；astream 契约修正]
+├── deepseek_provider.py     [新增：DeepSeek 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.deepseek.com）]
 ├── failover.py              [新增：LLM 主备故障转移与冷却（内化自 IronClaw）]
 ├── kimi_provider.py
 ├── litellm_provider.py
-├── llm_factory.py           [Provider 工厂 / 路由]
+├── llm_factory.py           [Provider 工厂 / 路由；新增 deepseek 分支，与 knowledge.graphers 解耦]
 ├── minimax_provider.py      [MiniMax OpenAI 兼容 Provider]
-├── provider_resolver.py     [增强：旧版 custom_openai 兼容与模型前缀归一化]
+├── provider_display.py      [Provider/模型用户可见展示名与目录块；新增 DeepSeek 展示名]
+├── provider_fault.py        [Provider 故障分类与会话级熔断；新增 is_model_param_compat_error]
+├── provider_resolver.py     [增强：新增 deepseek 路由与会话模型兜底 / 默认模型回退助手]
 ├── qianfan_provider.py      [百度千帆 Provider]
-├── response.py
+├── response.py              [TokenUsage 新增 cached/reasoning tokens；LLMResponse 新增 reasoning_content]
 ├── response_cache.py        [新增：in-memory TTL+LRU 响应缓存（内化自 IronClaw）]
+├── sampling_params.py       [新增：采样参数共享助手（gpt-5 强制 temperature=1、MiniMax 省略该参数等）]
 ├── transcript_sanitizer.py  [新增：Provider 感知的 Transcript 卫生管线（参考 OpenClaw）]
-├── vision.py                [(NEW) 视觉能力推断：按 provider/model 判断是否接受 image_url 输入]
+├── vision.py                [视觉能力推断：改为按模型 slug 判定（provider 无关），GLM-5.3 系视为原生多模态]
+├── vision_fallback.py       [新增：为 analyze_image 解析可用的视觉回退模型（企业路由策略优先）]
 └── zhipu_provider.py        [智谱 GLM Provider]
 ```
 
 ### __init__.py
 **文件功能**：作为 LLM 子模块的入口，统一导出核心基类、数据结构与多种 Provider 适配类，方便外部按模型名称快速实例化。  
-**技术实现**：通过 `from .xxx import xxx` 聚合导入，随后在 `__all__` 中显式暴露公开 API；**新增对 LiteLLM 等依赖的 lazy import 支持，增强在受限沙箱环境下的加载兼容性**。  
-**关键组件**：`OpenAIProvider`、`AnthropicProvider`、`OllamaProvider`、`GeminiProvider`、`MoonshotProvider` 五个快捷类。  
+**技术实现**：通过 `from .xxx import xxx` 聚合导入，随后在 `__all__` 中显式暴露公开 API；**保留对 LiteLLM 等依赖的 lazy import 支持，增强在受限沙箱环境下的加载兼容性**；**`LlmFactory` 改为模块级 `__getattr__` 惰性导入**——其依赖 `knowledge.graphers`（Neo4j 为可选依赖），避免拖慢 Desktop / `agx serve` 冷启动路径。  
+**关键组件**：`OpenAIProvider`、`AnthropicProvider`、`OllamaProvider`、`GeminiProvider`、`MoonshotProvider` 五个快捷类；**新增导出 `DeepSeekProvider`**。  
 **业务逻辑**：为上层业务提供“按名称即用”的 LLM Provider，隐藏底层实现差异。  
-**依赖关系**：依赖本目录内 `base.py`、`response.py`、`litellm_provider.py`、`kimi_provider.py`。
+**依赖关系**：依赖本目录内 `base.py`、`response.py`、`litellm_provider.py`、`kimi_provider.py`、`deepseek_provider.py`。
 
 ### auth_profile.py (新增，内化自 OpenClaw)
 **文件功能**：实现 API Key 轮换管理，支持多 Profile 冷却退避与状态持久化。  
@@ -57,8 +62,20 @@
 **新增方法（参考 OpenClaw）**：
 - `supports_auth_profile_rotation()`：返回 `True`，表明该 Provider 支持接收外部轮换的凭据
 - `invoke_with_profile(prompt, api_key, **kwargs)`：使用指定 `api_key` 调用 LLM，默认实现委托给 `invoke()`，子类可覆写以实现更精细的凭据注入
+
+**astream 契约修正（f3ba65001c29 之后）**：抽象方法 `astream` 由 `async def` 改为普通 `def` 返回 `AsyncGenerator`——实现要么本身是异步生成器（内部 `yield`），要么返回一个异步生成器，**禁止** `async def` 再 `return` 生成器（调用方拿到的是协程，`async for` 直接 `TypeError`）。Ark/Bailian/Failover 为前者，Kimi/LiteLLM/Zhipu 等其余实现为后者，两种均满足该签名。  
 **业务逻辑**：约束所有具体 Provider 的功能一致性，使框架可在运行时自由切换后端模型；**新增的 Profile 接口使 AgentExecutor 可在不修改 Provider 实例的情况下切换 API Key**。  
 **依赖关系**：依赖 `pydantic`, `typing`, 本目录 `response.LLMResponse`。
+
+### deepseek_provider.py (新增)
+**文件功能**：实现 DeepSeek 官方 API 的 Provider `DeepSeekProvider`，继承 `LiteLLMProvider`，通过 OpenAI 兼容端点接入。  
+**技术实现**：
+1. `@model_validator(mode="after")` 自动标准化配置：`base_url` 默认 `https://api.deepseek.com/v1`；
+2. `_normalize_litellm_model_for_deepseek()` 把 UI/配置侧的 `deepseek/<id>` 或裸 id 统一映射为 `openai/<id>`，强制走官方网关而非 LiteLLM 原生 `deepseek/` 路由；
+3. 默认模型 `deepseek-v4-pro`；`from_config` 支持 `extra_body` 透传。  
+**关键组件**：类 `DeepSeekProvider`、函数 `_normalize_litellm_model_for_deepseek`。  
+**业务逻辑**：让 DeepSeek 官方模型以 OpenAI 兼容网关方式接入，与 MiniMax/Zhipu 等 LiteLLM 子类同一模式。  
+**依赖关系**：继承 `LiteLLMProvider`；被 `provider_resolver.py`（`PROVIDER_MAP["deepseek"]`）、`llm_factory.py`（`deepseek` 分支）与 `__init__.py` 导出使用。
 
 ### kimi_provider.py
 **文件功能**：实现 Moonshot AI Kimi 模型 Provider `KimiProvider`，封装同步 / 异步 / 流式三种调用及结果解析。  
@@ -75,17 +92,24 @@
 - **(NEW) Kimi K2.6 推理与流式适配**：`kimi-k2.5/k2.6` 开启 thinking 时强制 `temperature=1.0`、关闭时回落 `0.6`；将上游 `reasoning_content` 映射为 `redacted_thinking` 供 Desktop ReasoningBlock 渲染；新增 `stream_with_tools` 以支撑 AgentRuntime 流式工具调用路径（commit `95e2adda`）。
 - **(NEW) 空 assistant 行清洗**：在请求准备阶段丢弃 content 为空且无 tool_calls 的 assistant 历史行，仅当 tool_calls 需要非空 content 时填入单空格占位，规避 Moonshot 对引用转发等场景返回 HTTP 400（commit `62991535`）。
 
+**本次更新（f3ba65001c29 之后）**：
+- `stream_with_tools` 强制 `stream_options.include_usage=True`，usage chunk 提取切换到共享助手 `agenticx.runtime.usage_metadata.normalize_stream_usage`（删除本地 `_safe_int` 重复实现）。
+- `_parse_response` 经 `extract_cached_reasoning(usage)` 填充 `TokenUsage.cached_tokens` / `reasoning_tokens`。
+- `astream` 签名按 base.py 新契约修正为普通 `def` 直接返回异步生成器。
+
 ### litellm_provider.py
 **文件功能**：实现基于第三方库 `litellm` 的通用 Provider `LiteLLMProvider`，可同时支持 OpenAI、Anthropic、Ollama 等多后端。  
 **技术实现**：
 1. 使用 `litellm.completion / acompletion` 执行请求；
 2. 支持同步 / 异步 / 流式接口；
-3. `_parse_response` 兼容 `usage` 既可能为对象也可能为 dict 的情况，安全提取 token 使用与 cost；
+3. `_parse_response` 兼容 `usage` 既可能为对象也可能为 dict 的情况，安全提取 token 使用与 cost；**usage 全为 0 时回退 `_hidden_params` / `model_extra` 中的 raw usage，并经 `extract_cached_reasoning` 提取 `cached_tokens` / `reasoning_tokens`；同时从 message 的 `reasoning_content` / `reasoning` 字段填充 `LLMResponse.reasoning_content`**；
 4. `generate` 与 `from_config` 提供辅助方法；
-5. **新增 `fallbacks` 字段和支持（P1-3）**：支持主模型失败时自动回退到备选模型列表，提升系统稳健性。
-**关键组件**：类 `LiteLLMProvider`、方法 `_parse_response`。  
-**业务逻辑**：为多云/多模型场景提供统一适配层，大幅降低接入不同 LLM API 的成本。**新增模型回退机制，当主模型失败时自动切换到备选模型，无需上层应用感知，提升可用性**。  
-**依赖关系**：外部库 `litellm`; 内部 `BaseLLMProvider`、`LLMResponse`。
+5. **`fallbacks` 字段和支持（P1-3）**：支持主模型失败时自动回退到备选模型列表，提升系统稳健性；
+6. **新增 `_apply_sampling_constraints()`**：在 `invoke / ainvoke / stream / stream_with_tools` 四个入口统一调用 `sampling_params.sanitize_chat_call_kwargs`，gpt-5 推理系强制 `temperature=1`（即使调用方传入 Studio 默认 0.2）；
+7. **`astream` 签名按 base.py 新契约修正**：普通 `def` 直接返回异步生成器；`stream_with_tools` 的 usage chunk 提取同样切换到共享助手 `normalize_stream_usage`。  
+**关键组件**：类 `LiteLLMProvider`、方法 `_parse_response`、`_apply_sampling_constraints`。  
+**业务逻辑**：为多云/多模型场景提供统一适配层，大幅降低接入不同 LLM API 的成本。**模型回退机制当主模型失败时自动切换到备选模型，无需上层应用感知，提升可用性**。  
+**依赖关系**：外部库 `litellm`; 内部 `BaseLLMProvider`、`LLMResponse`、`sampling_params`、`agenticx.runtime.usage_metadata`。
 
 ### minimax_provider.py
 **文件功能**：实现 MiniMax 模型 Provider `MiniMaxProvider`，继承 `LiteLLMProvider`，通过 OpenAI 兼容端点接入 MiniMax API。
@@ -96,29 +120,68 @@
 **关键组件**：类 `MiniMaxProvider`、字段 `group_id`（可选，MiniMax account-scoped routes）。
 **依赖关系**：继承 `LiteLLMProvider`；被 `provider_resolver.py` 路由使用。
 
+### provider_display.py
+**文件功能**：维护与 Desktop 模型服务设置对齐的 Provider/模型用户可见展示名，并生成系统提示中的模型服务目录块。  
+**技术实现**：`BUILTIN_PROVIDER_DISPLAY_NAMES` 内置厂商展示名映射（**新增 `deepseek: DeepSeek`**）；`format_model_option_label()` / `get_provider_display_name()` 生成「厂商展示名/模型短名」；`normalize_bare_model_id()` 剥离 LiteLLM/网关路由前缀。  
+**本次更新（f3ba65001c29 之后）**：`build_provider_catalog_block()` 不再在目录块尾部追加「当前会话模型（用户可见）」行——当前会话模型改由 `<session-context>` 承载，保持该稳定块内容不随会话切换而变化（`current_provider` / `current_model` 参数仅为兼容保留）。  
+**依赖关系**：读取 `~/.agenticx/config.yaml` 的 providers 配置；被 runtime 系统提示构建与 `vision_fallback.py` 复用。
+
+### provider_fault.py
+**文件功能**：Provider 故障分类与会话级熔断（denylist）判定，供聊天链路的自动回退使用。  
+**技术实现**：`classify_provider_fault(exc)` 从异常消息识别 `billing / auth / rate_limit / tool_unavailable / context_window / transient / unknown`；`AGX_PROVIDER_FAULT_ESCALATION` 环境变量控制是否允许根据 LLM 错误改写会话 provider denylist。  
+**本次更新（f3ba65001c29 之后）**：新增 `is_model_param_compat_error(exc)`——识别厂商拒绝采样/工具参数的错误（LiteLLM `UnsupportedParamsError`、"only temperature=1"、"invalid chat setting/params" 等），此类错误可安全换模型重试，与 `sampling_params.py` 的前置规避形成兜底。  
+**依赖关系**：被 `vision_fallback.py`（`is_provider_session_blocked`）与 runtime 回退链路调用。
+
 ### provider_resolver.py（增强）
 **文件功能**：将 `~/.agenticx/config.yaml` 中 Provider 配置解析为具体 Provider 实例，并在解析阶段做兼容路由与模型名归一化。  
-**技术实现（本次关键更新）**：
-1. 新增 `_is_legacy_custom_openai_provider()`：针对旧版 Desktop 创建、缺少 `extra.interface` 字段的 `custom_openai_*` Provider，若同时具备 `base_url` 与 `api_key`，则按 OpenAI 兼容网关处理；
-2. `resolve()` 在 `provider_key` 不在 `PROVIDER_MAP` 时新增回退逻辑：`extra.interface == "openai"` 或命中旧版兼容判定时，统一路由到 `LiteLLMProvider`，并将 `effective_key` 设为 `openai`；否则仍抛出 `Unsupported provider`；
-3. `_normalized_model()` 新增 `base_url` 参与判断：当 `effective_key == "openai"` 且存在 `base_url` 时，若模型名不含 `/`（如 `deepseek-r1`），自动补 `openai/` 前缀，避免 LiteLLM 在网关场景下因裸模型名路由失败；
-4. `_build_kwargs()` 透传 `base_url` 到归一化流程，保证模型名前缀策略与网关配置一致。  
-**关键价值**：修复“健康检查可用但聊天时报 Unsupported provider / BadRequestError”的兼容问题，保障旧配置与自定义 OpenAI 网关模型在聊天链路中的可用性。  
+**技术实现（既有要点）**：
+1. `_is_legacy_custom_openai_provider()`：针对旧版 Desktop 创建、缺少 `extra.interface` 字段的 `custom_openai_*` Provider，若同时具备 `base_url` 与 `api_key`，则按 OpenAI 兼容网关处理；
+2. `resolve()` 在 `provider_key` 不在 `PROVIDER_MAP` 时回退：`extra.interface == "openai"` 或命中旧版兼容判定时，统一路由到 `LiteLLMProvider`，并将 `effective_key` 设为 `openai`；否则仍抛出 `Unsupported provider`；
+3. `_normalized_model()`：`effective_key == "openai"` 且存在 `base_url` 时，若模型名不含 `/`（如 `deepseek-r1`），自动补 `openai/` 前缀，避免 LiteLLM 在网关场景下因裸模型名路由失败。  
+**技术实现（f3ba65001c29 之后新增）**：
+1. `PROVIDER_MAP` 新增 `"deepseek": DeepSeekProvider` 路由；
+2. `effective_session_llm_names(provider, model, session_id=)`：会话未持久化 provider/model 时（IM 绑定会话常见），依次从微信桌面绑定（`~/.agenticx/wechat_binding.json` 的 `_desktop`）、`active_provider/active_model`、`config_default_llm_names()` 补齐，避免静默落到被禁用的 `default_provider`（如 gpt-5 SKU 会拒绝 runtime 默认 temperature=0.2）；
+3. `config_default_llm_names()`：返回 `default_provider` 及其默认模型（`model` 或首个可见 `models[]` 条目，且该渠道未显式 `enabled: false`），回退到 last-used `active_provider/active_model`；
+4. `should_fallback_to_default_model(...)`：判断当前失败后是否值得一次性回退到配置的默认模型重试（默认 provider/model 与当前不同且尚未尝试过）。  
+**关键价值**：修复“健康检查可用但聊天时报 Unsupported provider / BadRequestError”的兼容问题，保障旧配置与自定义 OpenAI 网关模型在聊天链路中的可用性；新增助手保证 IM 绑定会话与默认模型回退场景拿到正确的 provider/model。
 
-### vision.py (NEW，2026-05-26 随 web_fetch/view_image 引入)
+### vision.py
 **文件功能**：集中判断「某 provider/model 组合是否应接受图片（`image_url`）输入」，供 Studio/Desktop 在注入视觉附件前做统一守卫。  
-**技术实现**：纯函数模块（无外部依赖），核心 `is_vision_capable(provider_name, model_name) -> bool`；内置两条厂商规则：
+**技术实现**：纯函数模块（无外部依赖），核心 `is_vision_capable(provider_name, model_name) -> bool`。**f3ba65001c29 之后改为 provider 无关判定**：已知纯文本家族按模型 slug 识别，与 provider 无关——`custom_openai_*` 等 OpenAI 兼容网关上跑的 glm-5.x / qwen 文本 SKU 同样会被剥离图片；`provider_name` 仅为 API 兼容与日志保留。内置规则：
 - `_minimax_m2_family_no_vision()`：MiniMax M2 chat 系列（`minimax-m2*`、`m2.x` 等，名称不含 `vl`/`vision`）按非视觉处理
-- `_zhipu_glm5_family_no_vision()`：智谱 `glm-5` / `glm-5-*`（不含 `vl`/`vision`/`4v`/`5v`）按非视觉处理
+- `_zhipu_text_only_family()`：智谱 GLM 文本系（`glm-5`/`glm-4.6`/`glm-4.5`/`glm-4`/`glm-z1`/`glm-zero`，不含 `\dv`/`vision`/`vl` 标记）按非视觉处理；**GLM-5.3 系（`glm-5.3`、`glm-5.3-flash`…）是首个无 v 标记的原生多模态 GLM-5 线，明确保持 vision-capable**。原 `_zhipu_glm5_family_no_vision` 保留为向后兼容别名
+- `_bailian_qwen_text_no_vision()`：百炼/DashScope 的 Qwen 文本 SKU（不含 `vl`/`vision`/`omni`）拒绝 OpenAI 风格 image_url 内容块  
+未知模型名保持 vision-permissive，避免误伤未来视觉 SKU。  
 **业务逻辑**：是 `view_image` / 附图链路的前置闸门——对不支持多模态的模型剥离 `image_inputs`，避免上游因 image part 报错；与 Desktop `model-vision.ts` 的前端拦截一一对应。  
-**依赖关系**：被 runtime 视觉附件注入与 `agent_tools.view_image` 守卫调用。
+**依赖关系**：被 runtime 视觉附件注入、`agent_tools.view_image` 守卫与 `vision_fallback.py` 调用。
+
+### vision_fallback.py (新增)
+**文件功能**：为 `analyze_image` 工具解析一个可用的视觉模型——当当前会话模型为纯文本时，选出用于图片理解的回退 provider/model。  
+**技术实现**：核心 `resolve_vision_fallback(session)` 按以下优先级选择：
+1. **企业附件路由策略优先**：`agenticx.studio.attachment_routing.read_policy()` 启用且配置了 `vision_fallback` 时直接使用（图片不出私有部署，只有描述回云端；企业会话强制走 `enterprise` provider 与全模型 id）；
+2. `config.yaml` 的 `vision_fallback: {provider, model}` 显式覆盖（须经 `is_vision_capable` 验证）；
+3. 当前会话 provider，再按配置顺序遍历其余 provider，要求已启用、有凭据（api_key 或 base_url 非空）且未被 `provider_fault` 会话熔断，取首个 `is_vision_capable` 的模型。  
+返回 `{"available", "provider", "model", "label"}`，label 由 `provider_display.format_model_option_label` 生成。  
+**依赖关系**：依赖 `ConfigManager`、`vision.is_vision_capable`、`provider_display`、`provider_fault.is_provider_session_blocked`、`studio.attachment_routing`。
 
 ### response.py
 **文件功能**：定义 LLM 调用返回值标准数据结构，包括 token 用量、候选结果与元数据。  
 **技术实现**：使用 `pydantic` 定义 `TokenUsage`、`LLMChoice`, `LLMResponse` 三个模型；字段含义与 OpenAI API 对齐。  
 **关键组件**：`TokenUsage`, `LLMChoice`, `LLMResponse`。  
+**本次更新（f3ba65001c29 之后）**：
+- `TokenUsage` 新增 `cached_tokens` 与 `reasoning_tokens` 字段（默认 0），由各 Provider 的 `_parse_response` 经 `agenticx.runtime.usage_metadata.extract_cached_reasoning` 填充；
+- `LLMResponse` 新增 `reasoning_content` 可选字段：厂商 thinking 模式文本，后续工具轮次需回显（目前由 `LiteLLMProvider._parse_response` 从 message 的 `reasoning_content` / `reasoning` 提取）。  
 **业务逻辑**：在框架内部提供统一结果格式，方便后续统计、计费及业务处理。  
 **依赖关系**：无外部依赖本目录内其他文件，但被多 Provider 引用。
+
+### sampling_params.py (新增)
+**文件功能**：聊天 LLM 调用的采样参数共享助手，集中处理各厂商对 temperature 等参数的差异化约束。  
+**技术实现**：
+- `model_requires_fixed_temperature_one(model)`：OpenAI gpt-5 推理 SKU（排除 `gpt-5-chat*`）拒绝非 1 的 temperature（LiteLLM 抛 `UnsupportedParamsError`）；
+- `resolve_chat_temperature(model, provider=, default=0.2, fallback_model=)`：MiniMax 返回 `None`（省略该参数，厂商部分 SKU 拒绝任意采样值）、gpt-5 推理系强制 `1.0`、其他返回 `default`；`fallback_model` 用于会话模型名为空但 LLM 实例持有具体模型 id 的场景（如 IM 绑定会话）；
+- `sanitize_chat_call_kwargs(kwargs, model, ...)`：按上述规则改写调用 kwargs（删除或强制覆写 `temperature`），被 `LiteLLMProvider._apply_sampling_constraints` 在四个调用入口统一使用；
+- `provider_raw_enabled_for_fallback(raw)`：仅当配置显式 `enabled: false` 时返回 False，供聊天 LLM 自动回退跳过 config.yaml 中已禁用的条目。  
+**依赖关系**：被 `litellm_provider.py` 与 `provider_resolver.py` 引用。
 
 ### transcript_sanitizer.py (新增，内化自 OpenClaw)
 **文件功能**：实现 Provider 感知的 Transcript 卫生管线，在 LLM 调用前对 messages 列表做最小必要清洗。  

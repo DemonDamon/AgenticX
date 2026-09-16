@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { formatReferenceSnippet } from "./reference-snippet";
 import type { SearchReference } from "../types/search-references";

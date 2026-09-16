@@ -10,6 +10,10 @@ import sys
 
 import pytest
 
+# 文件头写的是「no Graphiti required」，但下面这些模块会传递依赖 graphiti_core。
+# 没装的时候 import 就炸，并中断整轮收集。
+pytest.importorskip("graphiti_core", reason="graphiti-core 未安装（pyproject 的 graphiti extra）")
+
 from agenticx.memory.graph.clients import (
     model_supports_reasoning_effort,
     should_use_generic_openai_client,

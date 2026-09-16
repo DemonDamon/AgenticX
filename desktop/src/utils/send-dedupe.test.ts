@@ -132,6 +132,17 @@ describe("shouldSuppressDuplicatePendingUserEcho", () => {
     ).toBe(false);
   });
 
+  it("allows a new composer turn id even when the last user row has no client_turn_id", () => {
+    expect(
+      shouldSuppressDuplicatePendingUserEcho(
+        [{ role: "user", content: "刚才解析到哪了" }],
+        "刚才解析到哪了",
+        undefined,
+        "turn-new",
+      ),
+    ).toBe(false);
+  });
+
   it("allows a same-text pending row when both client turn ids are different", () => {
     expect(
       shouldSuppressDuplicatePendingUserEcho(

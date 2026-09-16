@@ -9,8 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
+import signal
+import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +22,29 @@ from agenticx.tools.adapters.base import DocumentAdapter, ParsedArtifacts
 
 
 logger = logging.getLogger(__name__)
+
+
+class LiteParseCancelled(RuntimeError):
+    """Raised when a LiteParse parse is cancelled via cancel_event."""
+
+
+async def _kill_liteparse_process(process: asyncio.subprocess.Process) -> None:
+    """Force-kill a LiteParse child process and best-effort wait for exit."""
+    if process.returncode is not None:
+        return
+
+    if sys.platform == "win32":
+        process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            process.kill()
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2.0)
+    except asyncio.TimeoutError:
+        pass
 
 
 class LiteParseAdapter(DocumentAdapter):
@@ -83,29 +110,77 @@ class LiteParseAdapter(DocumentAdapter):
             if path.exists():
                 return [str(path)]
         return None
-    async def _run_liteparse_parse(self, file_path: Path) -> Dict[str, Any]:
+
+    async def _run_liteparse_parse(
+        self,
+        file_path: Path,
+        *,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, Any]:
         """Execute LiteParse parse command and decode JSON output."""
         cmd_prefix = self._find_cli()
         if not cmd_prefix:
             raise FileNotFoundError("liteparse CLI not found")
 
         cmd = [*cmd_prefix, "parse", str(file_path), "--format", "json", "-q"]
+        subprocess_kwargs: Dict[str, Any] = {}
+        if sys.platform != "win32":
+            subprocess_kwargs["start_new_session"] = True
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **subprocess_kwargs,
         )
 
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
-
-        if process.returncode != 0:
-            stderr_text = stderr.decode("utf-8", errors="ignore")
-            raise RuntimeError(f"liteparse parse failed: {stderr_text}")
+        comm_task = asyncio.create_task(process.communicate())
+        watcher_tasks: set[asyncio.Task[Any]] = {comm_task}
 
         try:
-            return json.loads(stdout.decode("utf-8", errors="ignore"))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"liteparse JSON decode failed: {exc}") from exc
+            if cancel_event is not None:
+                cancel_wait = asyncio.create_task(
+                    asyncio.to_thread(cancel_event.wait, self.timeout)
+                )
+                watcher_tasks.add(cancel_wait)
+                done, _pending = await asyncio.wait(
+                    watcher_tasks,
+                    timeout=self.timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            else:
+                done, _pending = await asyncio.wait(
+                    {comm_task},
+                    timeout=self.timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+            if cancel_event is not None and cancel_event.is_set():
+                await _kill_liteparse_process(process)
+                raise LiteParseCancelled("liteparse cancelled")
+
+            if comm_task not in done or not comm_task.done():
+                await _kill_liteparse_process(process)
+                raise TimeoutError(f"liteparse timed out after {self.timeout:.0f}s")
+
+            stdout, stderr = comm_task.result()
+
+            if process.returncode != 0:
+                stderr_text = stderr.decode("utf-8", errors="ignore")
+                raise RuntimeError(f"liteparse parse failed: {stderr_text}")
+
+            try:
+                return json.loads(stdout.decode("utf-8", errors="ignore"))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"liteparse JSON decode failed: {exc}") from exc
+        except asyncio.CancelledError:
+            await _kill_liteparse_process(process)
+            raise
+        finally:
+            for task in watcher_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*watcher_tasks, return_exceptions=True)
 
     async def parse(
         self,
@@ -115,6 +190,8 @@ class LiteParseAdapter(DocumentAdapter):
         enable_formula: bool = True,
         enable_table: bool = True,
         page_ranges: Optional[str] = None,
+        *,
+        cancel_event: Optional[threading.Event] = None,
         **kwargs: Any,
     ) -> ParsedArtifacts:
         """Parse document and map output to ParsedArtifacts."""
@@ -124,7 +201,13 @@ class LiteParseAdapter(DocumentAdapter):
         task_id = self._generate_task_id(file_path)
         actual_output_dir = self._prepare_output_dir(output_dir, task_id)
 
-        liteparse_json = await self._run_liteparse_parse(file_path)
+        if cancel_event is not None:
+            liteparse_json = await self._run_liteparse_parse(
+                file_path,
+                cancel_event=cancel_event,
+            )
+        else:
+            liteparse_json = await self._run_liteparse_parse(file_path)
         text_content = self._extract_text_content(liteparse_json)
         page_count = len(liteparse_json.get("pages", []))
 
@@ -177,11 +260,22 @@ class LiteParseAdapter(DocumentAdapter):
                     page_texts.append(text)
         return "\n\n".join(page_texts)
 
-    async def parse_to_text(self, file_path: Path) -> str:
+    async def parse_to_text(
+        self,
+        file_path: Path,
+        *,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> str:
         """Parse document and return merged plain text."""
         temp_output = Path(tempfile.mkdtemp(prefix="agenticx_liteparse_"))
         try:
-            artifacts = await self.parse(file_path=file_path, output_dir=temp_output)
+            parse_kwargs: Dict[str, Any] = {
+                "file_path": file_path,
+                "output_dir": temp_output,
+            }
+            if cancel_event is not None:
+                parse_kwargs["cancel_event"] = cancel_event
+            artifacts = await self.parse(**parse_kwargs)
             if artifacts.markdown_file and artifacts.markdown_file.exists():
                 return artifacts.markdown_file.read_text(encoding="utf-8", errors="ignore")
             return ""

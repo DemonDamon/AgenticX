@@ -142,6 +142,9 @@ export function mergeBadgeVMs(persisted: BadgeVM[], live: BadgeVM[]): BadgeVM[] 
     const l = liveById.get(p.runId);
     if (!l) return p;
     liveById.delete(p.runId);
+    // Persisted terminal states are irreversible. A stale Zustand snapshot may
+    // still say "running" after restart and must never reopen a finished run.
+    if (isTerminalStatus(p.status)) return p;
     // live 为运行时真相：状态 / 进度以 live 为准；persona / avatar / badgeSeq 保留落盘。
     return {
       ...p,

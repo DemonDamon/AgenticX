@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "workspace",
-  "generation": "a2bf106cf076407e8f5dae6431dd78ee",
+  "generation": "4c3e935294e14ffdbbb6300dd8171f1a",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:76d7b3dd201d7c1d3023d12bdeab7ed56a8a692e7c50d9ab515c17ae0ce86fad",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:af2c7bed4a1e18158868c36e270d297d887f88961a7a5bcc051c28dc8b30812f",
   "summary_path": "conclusions/workspace_module_conclusion.md",
-  "summary_sha256": "sha256:66a6e849ff99bfb9afb9905d1b22f903a6163b7dc58c86c46ee96d39ddb72f87",
-  "updated_at": "2026-08-08T01:39:57.299370+00:00"
+  "summary_sha256": "sha256:ff5c165901bf485a8068fae3ab78d257b10e4f33d792c3a33cf02c87df5682a7",
+  "updated_at": "2026-09-01T06:08:44.939539+00:00"
 }

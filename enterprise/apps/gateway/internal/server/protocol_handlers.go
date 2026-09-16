@@ -474,6 +474,7 @@ func (s *Server) protocolAuditEvent(
 		DepartmentID:     identity.DepartmentID,
 		SessionID:        identity.SessionID,
 		TraceID:          identity.TraceID,
+		DeploymentID:     identity.DeploymentID,
 		ClientType:       "multi-protocol",
 		ClientIP:         r.RemoteAddr,
 		Provider:         decision.Provider,

@@ -12,6 +12,8 @@ type NearElectronWebview = HTMLElement & {
   openDevTools: () => void;
   /** Run script in the guest page (used for WorkPanel browser text selection). */
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  getWebContentsId?: () => number;
+  capturePage?: () => Promise<{ toPNG?: () => Uint8Array; toDataURL?: () => string }>;
 };
 
 declare namespace React {
@@ -44,7 +46,7 @@ type LoadConfigResult = {
   providers: Record<string, ProviderConfig>;
   userMode?: "pro" | "lite";
   onboardingCompleted?: boolean;
-  confirmStrategy?: "manual" | "semi-auto" | "auto";
+  runMode?: "ask" | "allowlist" | "auto";
   activeProvider?: string;
   activeModel?: string;
   agxAccount?: {
@@ -75,6 +77,32 @@ type EmailConfig = {
 
 type ComputerUseConfig = {
   enabled: boolean;
+};
+type BrowserControlConfig = {
+  enabled: boolean;
+};
+type NearBrowserActPayload = {
+  request_id: string;
+  session_id: string;
+  action: string;
+  url?: unknown;
+  index?: unknown;
+  text?: unknown;
+  key?: unknown;
+  submit?: unknown;
+  query?: unknown;
+};
+type NearBrowserActResult = {
+  ok: boolean;
+  request_id?: string;
+  session_id?: string;
+  error?: string;
+  hint?: string;
+  url?: string;
+  title?: string;
+  elements?: unknown;
+  path?: string;
+  text?: string;
 };
 type TrinityConfig = {
   skill_protocol: boolean;
@@ -486,6 +514,28 @@ declare global {
       version: string;
       getApiBase: () => Promise<string>;
       waitForStudio: (timeoutMs?: number) => Promise<{ ok: boolean }>;
+      enterpriseSyncCapabilities: () => Promise<{ ok: boolean; skipped?: boolean }>;
+      collabRoomList: () => Promise<{ ok: boolean; data?: { rooms: unknown[] }; error?: string }>;
+      collabRoomGet: (
+        roomId: string,
+      ) => Promise<{
+        ok: boolean;
+        data?: { room: unknown; members: unknown[]; viewer_user_id?: string };
+        error?: string;
+      }>;
+      collabRoomMessages: (
+        roomId: string,
+        opts?: { afterSeq?: number; limit?: number },
+      ) => Promise<{ ok: boolean; data?: { messages: unknown[] }; error?: string }>;
+      collabRoomSend: (
+        roomId: string,
+        content: string,
+      ) => Promise<{ ok: boolean; data?: { message: unknown }; error?: string }>;
+      collabRoomWatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+      collabRoomUnwatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+      onCollabRoomEvent: (
+        cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void,
+      ) => () => void;
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       syncTitleBarOverlay: (theme: "dark" | "light" | "dim") => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
@@ -672,6 +722,7 @@ declare global {
         max_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         live_reattach_enabled?: boolean;
+        ops_tools_enabled?: boolean;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {
@@ -698,6 +749,7 @@ declare global {
         unattended_stall_continue_after_seconds?: number;
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
+        ops_tools_enabled?: boolean;
       }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;
@@ -734,8 +786,13 @@ declare global {
         }>;
         activePaneId: string;
         theme?: string;
+        locale?: string;
       }>;
-      saveUiPrefs: (payload: { theme: "dark" | "light" | "dim" }) => Promise<{ ok: boolean; error?: string }>;
+      saveUiPrefs: (payload: {
+        theme?: "dark" | "light" | "dim";
+        locale?: "zh" | "en";
+      }) => Promise<{ ok: boolean; error?: string }>;
+      getSystemLocale: () => Promise<string>;
       saveLayout: (payload: {
         panes?: Array<{
           id: string;
@@ -747,6 +804,7 @@ declare global {
         activePaneId?: string;
       }) => Promise<{ ok: boolean; error?: string }>;
       forkSession: (payload: { sessionId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; error?: string }>;
+      continueFromMessage: (payload: { sessionId: string; messageId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; workspace_mode?: string; error?: string; detail?: string }>;
       archiveSessions: (payload: { sessionId: string; avatarId?: string | null }) => Promise<{ ok: boolean; archived_count?: number; error?: string }>;
       listTaskspaces: (sessionId: string) => Promise<{ ok: boolean; workspaces: TaskspaceItem[]; error?: string }>;
       addTaskspace: (payload: { sessionId: string; path?: string; label?: string }) => Promise<{ ok: boolean; workspace?: TaskspaceItem; error?: string }>;
@@ -770,7 +828,7 @@ declare global {
         truncated?: boolean;
         size?: number;
         mime_type?: string;
-        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "binary";
+        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "video" | "binary";
         is_binary?: boolean;
         preview_supported?: boolean;
         error?: string;
@@ -859,6 +917,30 @@ declare global {
       }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
+      loadEnterpriseAccount: () => Promise<{
+        ok: boolean;
+        loggedIn?: boolean;
+        email?: string;
+        displayName?: string;
+        portalUrl?: string;
+      }>;
+      enterpriseLoginStart: (payload: { portalUrl?: string }) => Promise<{
+        ok: boolean;
+        verification_url?: string;
+        error?: string;
+      }>;
+      enterpriseLoginCancel: () => Promise<{ ok: boolean }>;
+      enterpriseLogout: () => Promise<{ ok: boolean }>;
+      onEnterpriseAccountChanged: (
+        cb: (payload: {
+          loggedIn: boolean;
+          email: string;
+          displayName: string;
+          portalUrl: string;
+        }) => void,
+      ) => () => void;
+      onEnterpriseLoginFailed: (cb: (payload: { error: string }) => void) => () => void;
+      onEnterpriseLoginTimeout: (cb: () => void) => () => void;
       updateSplashStage: (
         stage:
           | "initializing"
@@ -916,6 +998,8 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadBrowserControlConfig: () => Promise<{ ok: boolean; config?: BrowserControlConfig; error?: string }>;
+      saveBrowserControlConfig: (payload: BrowserControlConfig) => Promise<{ ok: boolean; error?: string }>;
       loadCodeIndexConfig: () => Promise<{
         ok: boolean;
         config?: {
@@ -940,6 +1024,7 @@ declare global {
       saveTurnArchiveConfig: (payload: TurnArchiveConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      writeWorkspacePerfLog: (payload: unknown) => Promise<{ ok: boolean; path?: string }>;
       confirmDialog: (payload: {
         title?: string;
         message: string;
@@ -1231,11 +1316,17 @@ declare global {
       }>;
       shellOpenPath: (path: string) => Promise<{ ok: boolean; error?: string }>;
       shellShowItemInFolder: (path: string) => Promise<{ ok: boolean; error?: string }>;
+      copyLocalFileAs: (payload: { sourcePath: string }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        path?: string;
+        error?: string;
+      }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
-      saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;
+      saveRunMode: (mode: "ask" | "allowlist" | "auto") => Promise<{ ok: boolean }>;
       saveEmailConfig: (payload: EmailConfig) => Promise<{ ok: boolean; error?: string }>;
       testEmailConfig: (payload: {
         config: EmailConfig;
@@ -1448,6 +1539,12 @@ declare global {
         size?: number;
         error?: string;
       }>;
+      resolveLocalMediaUrl: (path: string) => Promise<{
+        ok: boolean;
+        url?: string;
+        mime?: string;
+        error?: string;
+      }>;
       installFromRegistry: (args: {
         source: string;
         name: string;
@@ -1520,6 +1617,30 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       /** Popup / top-level http(s) from iframe → navigate WorkPanel browser in-app. */
       onInAppBrowserOpen: (cb: (url: string) => void) => () => void;
+      onNearBrowserAct: (cb: (payload: NearBrowserActPayload) => void) => () => void;
+      replyNearBrowserAct: (payload: NearBrowserActResult) => Promise<{ ok: boolean; error?: string }>;
+      saveNearBrowserScreenshot: (payload: { dataUrl: string }) => Promise<{
+        ok: boolean;
+        path?: string;
+        error?: string;
+      }>;
+      extractNearBrowserFrames: (payload: { webContentsId: number; query?: string }) => Promise<{
+        ok: boolean;
+        text?: string;
+        frame_count?: number;
+        error?: string;
+      }>;
+      listChromeCookieProfiles: () => Promise<{
+        ok: boolean;
+        profiles?: Array<{ id: string; name: string; cookiePath: string }>;
+        error?: string;
+      }>;
+      importChromeCookies: (payload: { profileId: string }) => Promise<{
+        ok: boolean;
+        imported?: number;
+        skipped?: number;
+        error?: string;
+      }>;
       copyPngToClipboard: (buffer: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
       downloadPngToDownloads: (payload: {
         buffer: ArrayBuffer;

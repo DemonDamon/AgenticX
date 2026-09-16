@@ -20,6 +20,10 @@ class KBError(Exception):
     """Base exception for KB subsystem errors."""
 
 
+class KBCancelled(KBError):
+    """Ingest aborted by user cancel. Not a parse/embed failure."""
+
+
 _LEGACY_DEFAULT_EXTENSIONS: frozenset = frozenset({".md", ".txt", ".pdf", ".docx"})
 """The pre-LiteParse default allowlist.
 
@@ -264,6 +268,7 @@ class KBDocumentStatus(str, Enum):
     WRITING = "writing"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -293,12 +298,14 @@ class IngestJobStatus(str, Enum):
     WRITING = "writing"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
 class IngestReport:
     success: int = 0
     failed: int = 0
+    cancelled: int = 0
     reasons: List[str] = field(default_factory=list)
 
 

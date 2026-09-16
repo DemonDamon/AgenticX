@@ -1,5 +1,7 @@
 /** Deep-research interaction preference (clarify entry), localStorage-backed. */
 
+import { getChatCopy, type PortalLocale } from "../i18n/chat-copy";
+
 export type DeepResearchInteractionPref =
   | "auto"
   | "direct"
@@ -8,12 +10,14 @@ export type DeepResearchInteractionPref =
 
 export const DEEP_RESEARCH_INTERACTION_STORAGE_KEY = "agx-deep-research-interaction-pref-v1";
 
-const VALID: ReadonlySet<string> = new Set([
+export const DEEP_RESEARCH_INTERACTION_OPTION_IDS = [
   "auto",
   "direct",
   "card_first",
   "plan_chat",
-]);
+] as const;
+
+const VALID: ReadonlySet<string> = new Set(DEEP_RESEARCH_INTERACTION_OPTION_IDS);
 
 /** Legacy values persisted before「计划对齐」合并，读出时迁移为 plan_chat. */
 const LEGACY_TO_PLAN_CHAT = new Set(["chat_first", "plan_first"]);
@@ -49,27 +53,17 @@ export function setDeepResearchInteractionPref(pref: DeepResearchInteractionPref
   }
 }
 
-/** Label + hint for the preference popover (中文界面). */
-export const DEEP_RESEARCH_INTERACTION_OPTIONS: Array<{
-  id: DeepResearchInteractionPref;
-  label: string;
-  hint: string;
-}> = [
-  { id: "auto", label: "自动", hint: "由系统判断是否需要问我" },
-  { id: "direct", label: "直接开始", hint: "能合理假设时不要等我确认" },
-  { id: "card_first", label: "卡片确认", hint: "开始前用选项卡确认关键方向" },
-  {
-    id: "plan_chat",
-    label: "计划对齐",
-    hint: "先看计划，可多轮对话修改再开跑",
-  },
-];
-
 /** Short label for the chip tag (survives session switches via localStorage). */
 export function labelForDeepResearchInteractionPref(
   pref: DeepResearchInteractionPref,
+  locale: PortalLocale = "zh",
 ): string {
-  return (
-    DEEP_RESEARCH_INTERACTION_OPTIONS.find((opt) => opt.id === pref)?.label ?? "自动"
-  );
+  const copy = getChatCopy(locale);
+  const map = {
+    auto: copy.interaction.auto,
+    direct: copy.interaction.direct,
+    card_first: copy.interaction.cardFirst,
+    plan_chat: copy.interaction.planChat,
+  };
+  return map[pref] ?? map.auto;
 }

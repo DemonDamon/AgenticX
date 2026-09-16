@@ -7,7 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, List
+from typing import Any, List, Mapping, Sequence
 
 
 @dataclass
@@ -54,32 +54,43 @@ class GroupChatContext:
         sender_name: str = "我",
         quoted_message_id: str = "",
         quoted_content: str = "",
+        attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         label = str(sender_name or "").strip() or "我"
-        self._history().append(
-            {
-                "role": "user",
-                "content": str(text or ""),
-                "sender_id": "user",
-                "sender_name": label,
-                "agent_id": "user",
-                "quoted_message_id": str(quoted_message_id or ""),
-                "quoted_content": str(quoted_content or ""),
-            }
-        )
+        row: dict[str, Any] = {
+            "role": "user",
+            "content": str(text or ""),
+            "sender_id": "user",
+            "sender_name": label,
+            "agent_id": "user",
+            "quoted_message_id": str(quoted_message_id or ""),
+            "quoted_content": str(quoted_content or ""),
+        }
+        if attachments:
+            row["attachments"] = [dict(item) for item in attachments]
+        self._history().append(row)
 
-    def append_agent(self, *, agent_id: str, agent_name: str, text: str, avatar_url: str = "") -> None:
-        self._history().append(
-            {
-                "role": "assistant",
-                "content": str(text or ""),
-                "sender_id": str(agent_id or ""),
-                "sender_name": str(agent_name or "") or str(agent_id or ""),
-                "agent_id": str(agent_id or ""),
-                "avatar_name": str(agent_name or "") or str(agent_id or ""),
-                "avatar_url": str(avatar_url or ""),
-            }
-        )
+    def append_agent(
+        self,
+        *,
+        agent_id: str,
+        agent_name: str,
+        text: str,
+        avatar_url: str = "",
+        attachments: Sequence[Mapping[str, Any]] | None = None,
+    ) -> None:
+        row: dict[str, Any] = {
+            "role": "assistant",
+            "content": str(text or ""),
+            "sender_id": str(agent_id or ""),
+            "sender_name": str(agent_name or "") or str(agent_id or ""),
+            "agent_id": str(agent_id or ""),
+            "avatar_name": str(agent_name or "") or str(agent_id or ""),
+            "avatar_url": str(avatar_url or ""),
+        }
+        if attachments:
+            row["attachments"] = [dict(item) for item in attachments]
+        self._history().append(row)
 
     def recent(self) -> List[GroupMessage]:
         out: List[GroupMessage] = []

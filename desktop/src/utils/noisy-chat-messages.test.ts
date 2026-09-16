@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
@@ -51,6 +51,51 @@ test("isNoisyToolStatusMessage hides ephemeral interruption meta rows", () => {
     }),
     true,
     "legacy todo snapshot prefix without toolName is hidden",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "正文按图示规范重写中，上一稿已撤回。",
+      toolName: "",
+    }),
+    true,
+    "legacy widget-flow rewrite notices stay hidden",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "正在改用可视化流程图…",
+      noticeKind: "widget_flow_retry",
+    }),
+    true,
+    "widget-flow retry kind is hidden even with new copy",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "程基岩：确认通过，继续执行",
+      toolName: "",
+    }),
+    true,
+    "auto-approve confirm receipts are ephemeral, not chat history",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "架构师·阿析：确认拒绝，执行终止",
+      toolName: "",
+    }),
+    true,
+    "manual reject receipts are hidden the same way",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "程基岩：⏸ 等待确认后继续执行",
+      toolName: "",
+    }),
+    false,
+    "real inline-confirm blocked cards stay visible",
   );
 });
 

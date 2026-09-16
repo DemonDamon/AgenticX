@@ -2,6 +2,7 @@
 @import "./styles/voice-focus.css";
 @import "./styles/animations.css";
 @import "./styles/chat-prism-themes.css";
+@import "./styles/code-source-view.css";
 
 @tailwind base;
 @tailwind components;
@@ -9,6 +10,13 @@
 
 :root {
   font-family: "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --chat-im-group-bg: var(--surface-card-strong);
+}
+
+.agx-im-group-bubble {
+  border: none;
+  box-shadow: none;
+  box-sizing: border-box;
 }
 
 body {
@@ -235,6 +243,47 @@ body {
   color: rgb(37, 99, 235);
 }
 
+/* 消息元数据行：Apple 液态玻璃模型徽标 (Liquid Glass Chip) */
+.agx-liquid-glass-chip {
+  width: max-content;
+  max-width: none;
+  min-width: max-content;
+  box-sizing: border-box;
+  overflow: visible;
+  /* backdrop-filter clips descendants to the rounded mask — do not use it here */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(192, 132, 252, 0.08) 80%, rgba(56, 189, 248, 0.06) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
+              inset 1px 0 1px 0 rgba(56, 189, 248, 0.3),
+              inset -1px -1px 1.5px 0 rgba(244, 114, 182, 0.25),
+              0 1px 3px 0 rgba(0, 0, 0, 0.35);
+  color: rgba(254, 243, 199, 0.95);
+}
+.agx-liquid-glass-chip:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.agx-liquid-glass-chip .agx-chip-sparkle {
+  color: rgba(253, 230, 138, 0.9);
+  fill: rgba(253, 230, 138, 0.35);
+}
+
+:root[data-theme="light"] .agx-liquid-glass-chip {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.75) 100%);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+              0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  color: #1e293b;
+}
+:root[data-theme="light"] .agx-liquid-glass-chip:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(241, 245, 249, 0.85) 100%);
+}
+:root[data-theme="light"] .agx-liquid-glass-chip .agx-chip-sparkle {
+  color: #b45309;
+  fill: rgba(217, 119, 6, 0.2);
+}
+
+
 /* 助手推荐问：柔和填充胶囊、无描边，宽度贴合文字 */
 .agx-followup-chip {
   background-color: var(--chat-followup-chip-bg, var(--surface-card));
@@ -265,9 +314,86 @@ body {
   line-height: inherit;
 }
 
-/* 固定操作图标行高，flex gap 从行盒顶/底计量 */
+/* 固定操作图标行高，flex gap 从行盒顶/底计量；窄宽度只裁切、不换行 */
 .agx-assistant-action-icons {
   min-height: 1.25rem; /* h-5 */
+  /* | 到模型名首字的视觉距离；1/2/3 段都用这一档 */
+  --turn-rule-gutter: 10px;
+  overflow: hidden;
+}
+
+/* 行上 gap-0.5=2px，按钮 20px / 图标 14px 各留 3px。补齐后图标墨水到 | 也是 10px */
+.agx-assistant-action-icons > [data-turn-meta] {
+  margin-left: calc(var(--turn-rule-gutter) - 2px - 3px);
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 13px + 半透明描边会落在半像素上，暗底发糊；钉到偶数尺寸并去掉多余 padding */
+.agx-assistant-action-icons button {
+  display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.agx-assistant-action-icons button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke-width: 2;
+}
+
+/* 主聊天栏被工作区挤窄时：用量 / 模型名 / 时间即使悬停也不展开，避免和图2一样撑破操作行 */
+.agx-assistant-action-line {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+.agx-assistant-action-line .agx-turn-hover-reveal,
+.agx-assistant-action-line [data-turn-meta] {
+  overflow: visible;
+}
+.agx-assistant-action-line [data-turn-model-chip] {
+  flex-shrink: 0;
+}
+@container (max-width: 36rem) {
+  .agx-assistant-action-line .agx-turn-hover-reveal {
+    display: none !important;
+  }
+}
+
+/* Turn deliverable chips: one file stays a compact tile; many files fill the column. */
+.agx-artifact-cq {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+}
+.agx-artifact-grid {
+  display: grid;
+  width: 100%;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+.agx-artifact-grid--single {
+  width: max-content;
+  max-width: min(100%, 14.4rem);
+  grid-template-columns: max-content;
+}
+@container (min-width: 22rem) {
+  .agx-artifact-grid--multi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 40rem) {
+  .agx-artifact-grid--multi {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
@@ -739,7 +865,7 @@ body.agx-settings-nav-resizing {
   margin-top: 0.35rem;
   overflow: visible;
   line-height: 1;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 
 .agx-im-user-actions-icons {
@@ -759,13 +885,21 @@ body.agx-settings-nav-resizing {
 
 .agx-im-user-actions-icons button {
   display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
   align-items: center;
   justify-content: center;
   border-radius: 0.35rem;
-  /* 四边对称 padding，避免末枚悬停底「右半被挤扁」 */
-  padding: 0.28rem;
-  opacity: 0.72;
-  transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.agx-im-user-actions-icons button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke-width: 2;
 }
 
 .agx-im-user-actions-icons > :last-child {
@@ -773,7 +907,6 @@ body.agx-settings-nav-resizing {
 }
 
 .agx-im-user-actions-icons button:hover {
-  opacity: 1;
   color: var(--text-strong);
   background: var(--surface-hover);
 }
@@ -861,6 +994,31 @@ input[type="radio"] {
   background: var(--border-strong);
   border: 3px solid transparent;
   background-clip: padding-box;
+}
+
+.agx-pptx-preview {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agx-pptx-preview img,
+.agx-pptx-preview canvas,
+.agx-pptx-preview svg {
+  max-width: 100%;
+}
+
+.agx-pdf-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.agx-pdf-preview canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */

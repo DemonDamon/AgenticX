@@ -1,74 +1,163 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
+import { useAppStore } from "../store";
+import {
+  buildContextUsageRefreshKey,
+  contextUsageMessageSignature,
+  formatCategoryTokens,
+  formatOccupancyFullLabel,
+  formatOccupancyTokenPair,
+  shouldDropCachedOccupancy,
+  shouldFetchContextUsage,
+} from "../utils/context-usage-refresh";
+import {
+  contextWindowOptionsForModel,
+  normalizeContextWindow,
+} from "../utils/model-hover-blurb";
 import { HoverTip } from "./ds/HoverTip";
+
+interface SessionCacheUsage {
+  session_input_tokens: number;
+  session_output_tokens: number;
+  session_total_tokens: number;
+  session_cached_tokens: number;
+  last_input_tokens: number;
+  last_cached_tokens: number;
+}
 
 interface ContextUsage {
   used_tokens: number;
   max_tokens: number;
   percent: number;
   categories: Record<string, number>;
+  cache?: SessionCacheUsage;
+  fetchedForSessionId: string;
+  fetchedForModel: string;
+}
+
+function parseCache(raw: unknown): SessionCacheUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  return {
+    session_input_tokens: Number(row.session_input_tokens ?? 0),
+    session_output_tokens: Number(row.session_output_tokens ?? 0),
+    session_total_tokens: Number(row.session_total_tokens ?? 0),
+    session_cached_tokens: Number(row.session_cached_tokens ?? 0),
+    last_input_tokens: Number(row.last_input_tokens ?? 0),
+    last_cached_tokens: Number(row.last_cached_tokens ?? 0),
+  };
 }
 
 const CATEGORY_ORDER = [
   "system_prompt",
-  "tools_and_subagents",
-  "messages",
-  "connectors_and_mcp",
+  "tool_definitions",
   "skills",
+  "connectors_and_mcp",
+  "subagents",
+  "summarized_conversation",
+  "messages",
 ];
 
-const CATEGORY_LABELS: Record<string, string> = {
-  system_prompt: "系统提示词",
-  tools_and_subagents: "工具及子智能体",
-  messages: "对话消息",
-  connectors_and_mcp: "连接器及MCP",
-  skills: "技能",
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  system_prompt: "contextUsage.systemPrompt",
+  tool_definitions: "contextUsage.toolDefinitions",
+  skills: "contextUsage.skills",
+  connectors_and_mcp: "contextUsage.connectors",
+  subagents: "contextUsage.subagents",
+  summarized_conversation: "contextUsage.summarized",
+  messages: "contextUsage.messages",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  system_prompt: "bg-emerald-500",
-  tools_and_subagents: "bg-amber-500",
-  messages: "bg-indigo-500",
-  connectors_and_mcp: "bg-cyan-500",
-  skills: "bg-violet-500",
+  system_prompt: "bg-neutral-400",
+  tool_definitions: "bg-violet-500",
+  skills: "bg-amber-400",
+  connectors_and_mcp: "bg-purple-400",
+  subagents: "bg-sky-500",
+  summarized_conversation: "bg-rose-400",
+  messages: "bg-indigo-700",
 };
 
-function formatK(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
-}
-
-/** Pie wedge from 12 o'clock clockwise; scales with context usage percent. */
-function pieWedgePath(cx: number, cy: number, r: number, percent: number): string | null {
-  const p = Math.min(100, Math.max(0, Number.isFinite(percent) ? percent : 0));
-  if (p <= 0.05) return null;
-  if (p >= 99.5) {
-    // Full disk (two semicircle arcs)
-    return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`;
+function categoryTokens(categories: Record<string, number>, key: string): number {
+  if (key === "tool_definitions" && !Object.hasOwn(categories, "tool_definitions")) {
+    return Number(categories.tools_and_subagents ?? 0);
   }
-  const angle = (p / 100) * 2 * Math.PI;
-  const startX = cx;
-  const startY = cy - r;
-  const endX = cx + r * Math.sin(angle);
-  const endY = cy - r * Math.cos(angle);
-  const largeArc = p > 50 ? 1 : 0;
-  return `M ${cx} ${cy} L ${startX} ${startY} A ${r} ${r} 0 ${largeArc} 1 ${endX} ${endY} Z`;
+  return Number(categories[key] ?? 0);
 }
 
-function UsagePieIcon({ percent }: { percent: number }) {
-  const wedge = pieWedgePath(12, 12, 8.0, percent);
+const CONTEXT_PANEL_WIDTH = 248;
+const CONTEXT_PANEL_GUTTER = 12;
+const USAGE_CACHE_MAX = 24;
+const usageBySession = new Map<string, ContextUsage>();
+
+function usageCacheKey(sessionId: string, model: string, contextWindow = 0): string {
+  return `${sessionId}\0${model}\0${contextWindow > 0 ? contextWindow : ""}`;
+}
+
+function readUsageCache(
+  sessionId: string,
+  model: string,
+  contextWindow = 0,
+): ContextUsage | null {
+  const exact = usageBySession.get(usageCacheKey(sessionId, model, contextWindow));
+  if (exact) return exact;
+  if (contextWindow > 0) return null;
+  for (const row of usageBySession.values()) {
+    if (row.fetchedForSessionId === sessionId) return row;
+  }
+  return null;
+}
+
+function writeUsageCache(row: ContextUsage, contextWindow = 0): void {
+  usageBySession.set(
+    usageCacheKey(row.fetchedForSessionId, row.fetchedForModel, contextWindow),
+    row,
+  );
+  while (usageBySession.size > USAGE_CACHE_MAX) {
+    const first = usageBySession.keys().next().value;
+    if (!first) break;
+    usageBySession.delete(first);
+  }
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, value));
+}
+
+/** Stroke-dasharray for a ring that starts at 12 o'clock. */
+function ringDash(radius: number, percent: number): string {
+  const c = 2 * Math.PI * radius;
+  const filled = (clampPercent(percent) / 100) * c;
+  return `${filled} ${Math.max(0, c - filled)}`;
+}
+
+function UsageOccupancyIcon({ occupancy }: { occupancy: number }) {
+  const radius = 7.25;
+  const show = occupancy > 0.05;
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-[17px] w-[17px] shrink-0" aria-hidden>
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] shrink-0" aria-hidden>
       <circle
         cx="12"
         cy="12"
-        r="8.0"
+        r={radius}
         stroke="currentColor"
         strokeWidth="1.7"
+        opacity={0.22}
       />
-      {wedge ? (
-        <path d={wedge} fill="currentColor" opacity={0.82} />
+      {show ? (
+        <circle
+          cx="12"
+          cy="12"
+          r={radius}
+          stroke="currentColor"
+          strokeWidth="1.85"
+          strokeLinecap="round"
+          strokeDasharray={ringDash(radius, occupancy)}
+          transform="rotate(-90 12 12)"
+        />
       ) : null}
     </svg>
   );
@@ -79,50 +168,121 @@ export function ContextUsageButton({
   sessionId,
   apiBase,
   apiToken,
+  isStreaming = false,
 }: {
   paneId: string;
   sessionId: string;
   apiBase: string;
   apiToken: string;
+  isStreaming?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [usage, setUsage] = useState<ContextUsage | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [panelPos, setPanelPos] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
+  const paneModel = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return String(pane?.modelName ?? "").trim();
+  });
+  const paneContextWindow = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return pane?.contextWindowTokens;
+  });
+  const declaredContextWindow = useMemo(() => {
+    if (!paneModel || contextWindowOptionsForModel(paneModel).length === 0) return 0;
+    return normalizeContextWindow(paneModel, paneContextWindow);
+  }, [paneModel, paneContextWindow]);
+  const messageCount = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return contextUsageMessageSignature(pane?.messages ?? []).messageCount;
+  });
+  const lastMessageId = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return contextUsageMessageSignature(pane?.messages ?? []).lastMessageId;
+  });
+  const sessionInputTokens = useAppStore((s) => {
+    const tokens = s.panes.find((item) => item.id === paneId)?.sessionTokens;
+    return tokens?.input ?? 0;
+  });
+  const sessionOutputTokens = useAppStore((s) => {
+    const tokens = s.panes.find((item) => item.id === paneId)?.sessionTokens;
+    return tokens?.output ?? 0;
+  });
+  const refreshKey = buildContextUsageRefreshKey({
+    sessionId,
+    model: paneModel,
+    isStreaming,
+    messageCount,
+    lastMessageId,
+    sessionInputTokens,
+    sessionOutputTokens,
+    contextWindow: declaredContextWindow || undefined,
+  });
 
   const refreshPanelPosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPanelPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    const width = Math.min(
+      CONTEXT_PANEL_WIDTH,
+      Math.max(0, window.innerWidth - CONTEXT_PANEL_GUTTER * 2)
+    );
+    const maxLeft = Math.max(
+      CONTEXT_PANEL_GUTTER,
+      window.innerWidth - width - CONTEXT_PANEL_GUTTER
+    );
+    setPanelPos({
+      left: Math.min(Math.max(CONTEXT_PANEL_GUTTER, rect.left), maxLeft),
+      bottom: window.innerHeight - rect.top + 8,
+      width,
+    });
   }, []);
 
   const fetchUsage = useCallback(async () => {
     if (!sessionId) return;
     const requestSeq = ++requestSeqRef.current;
+    const requestedSessionId = sessionId;
+    const requestedModel = paneModel;
+    const requestedWindow = declaredContextWindow;
     setLoadFailed(false);
     try {
-      const res = await fetch(
-        `${apiBase}/api/session/context_usage?session_id=${encodeURIComponent(sessionId)}`,
-        { headers: { "X-Agx-Desktop-Token": apiToken } }
-      );
+      const params = new URLSearchParams({ session_id: requestedSessionId });
+      if (requestedModel) params.set("model", requestedModel);
+      if (requestedWindow > 0) params.set("context_window", String(requestedWindow));
+      const res = await fetch(`${apiBase}/api/session/context_usage?${params.toString()}`, {
+        headers: { "X-Agx-Desktop-Token": apiToken },
+      });
       if (!res.ok) throw new Error(`http ${res.status}`);
       const data = await res.json();
       if (requestSeq !== requestSeqRef.current) return;
-      setUsage({
+      const returnedSessionId = String(data.session_id ?? requestedSessionId).trim();
+      if (returnedSessionId !== requestedSessionId) return;
+      const next: ContextUsage = {
         used_tokens: Number(data.used_tokens ?? 0),
         max_tokens: Number(data.max_tokens ?? 0),
         percent: Number(data.percent ?? 0),
         categories: data.categories ?? {},
-      });
+        cache: parseCache(data.cache),
+        fetchedForSessionId: returnedSessionId,
+        fetchedForModel: requestedModel,
+      };
+      writeUsageCache(next, requestedWindow);
+      setUsage(next);
     } catch {
       if (requestSeq !== requestSeqRef.current) return;
-      setUsage(null);
-      setLoadFailed(true);
+      if (!readUsageCache(requestedSessionId, requestedModel, requestedWindow)) {
+        setUsage(null);
+        setLoadFailed(true);
+      }
     }
-  }, [apiBase, apiToken, sessionId]);
+  }, [apiBase, apiToken, declaredContextWindow, paneModel, sessionId]);
 
   const toggleOpen = useCallback(() => {
     if (!sessionId) return;
@@ -158,37 +318,51 @@ export function ContextUsageButton({
     };
   }, [open, refreshPanelPosition]);
 
-  // Warm pie fill when the bound session changes.
+  // Restore this session's last payload instantly on switch. Never keep
+  // another session's numbers on screen; never blank to "加载中" when we
+  // already have a row for the new session. Same-session retry trim and
+  // turn settle change refreshKey so occupancy / ledger are fetched again.
   useEffect(() => {
     setLoadFailed(false);
-    requestSeqRef.current += 1;
     if (!sessionId) {
       setUsage(null);
       return;
     }
+    const cached = readUsageCache(sessionId, paneModel, declaredContextWindow);
+    if (
+      cached &&
+      shouldDropCachedOccupancy({
+        sessionInputTokens,
+        cachedLedgerInput: cached.cache?.session_input_tokens ?? 0,
+      })
+    ) {
+      setUsage(null);
+    } else {
+      setUsage(cached);
+    }
+    if (!shouldFetchContextUsage(isStreaming)) return;
     void fetchUsage();
-  }, [fetchUsage, sessionId]);
+  }, [declaredContextWindow, fetchUsage, isStreaming, paneModel, refreshKey, sessionId, sessionInputTokens]);
 
   useEffect(() => {
-    if (open && sessionId) {
-      refreshPanelPosition();
-      void fetchUsage();
-    }
-  }, [fetchUsage, open, refreshPanelPosition, sessionId]);
+    if (open && sessionId) refreshPanelPosition();
+  }, [open, refreshPanelPosition, sessionId]);
 
-  const percent = usage?.percent ?? 0;
+  const visibleUsage = usage && usage.fetchedForSessionId === sessionId ? usage : null;
+  const percent = visibleUsage?.percent ?? 0;
+  const occupancyLine = visibleUsage
+    ? `${formatOccupancyFullLabel(visibleUsage.percent)} · ${formatOccupancyTokenPair(visibleUsage.used_tokens, visibleUsage.max_tokens)}`
+    : t("contextUsage.title");
   const hoverLabel = useMemo(() => {
     if (open) return "";
-    if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!usage) return "上下文用量";
-    return `${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)} 上下文已使用`;
-  }, [open, sessionId, usage]);
+    if (!sessionId) return t("contextUsage.notReady");
+    return occupancyLine;
+  }, [occupancyLine, open, sessionId, t]);
 
   const ariaLabel = useMemo(() => {
-    if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!usage) return "上下文用量";
-    return `上下文用量 ${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)}`;
-  }, [sessionId, usage]);
+    if (!sessionId) return t("contextUsage.notReady");
+    return occupancyLine;
+  }, [occupancyLine, sessionId, t]);
 
   const trigger = (
     <button
@@ -203,7 +377,7 @@ export function ContextUsageButton({
       aria-expanded={open}
       onClick={toggleOpen}
     >
-      <UsagePieIcon percent={percent} />
+      <UsageOccupancyIcon occupancy={percent} />
     </button>
   );
 
@@ -214,11 +388,11 @@ export function ContextUsageButton({
         ? createPortal(
             <div
               ref={panelRef}
-              className="fixed z-[100] w-[300px] rounded-xl border border-border bg-surface-panel p-4 text-text-primary shadow-lg backdrop-blur-xl"
-              style={{ left: panelPos.left, bottom: panelPos.bottom }}
+              className="fixed z-[100] max-h-[calc(100vh-24px)] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-border bg-surface-panel px-3.5 py-3 text-text-primary shadow-lg backdrop-blur-xl"
+              style={{ left: panelPos.left, bottom: panelPos.bottom, width: panelPos.width }}
             >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[13px] font-medium text-text-strong">上下文用量</span>
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="text-[13px] font-medium text-text-strong">{t("contextUsage.title")}</span>
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
@@ -231,23 +405,25 @@ export function ContextUsageButton({
               </div>
 
               {loadFailed ? (
-                <div className="py-2 text-[12px] text-text-faint">加载失败，请稍后重试</div>
-              ) : !usage ? (
-                <div className="py-2 text-[12px] text-text-faint">加载中…</div>
+                <div className="py-2 text-[12px] text-text-faint">{t("contextUsage.loadFailed")}</div>
+              ) : !visibleUsage ? (
+                <div className="py-2 text-[12px] text-text-faint">{t("contextUsage.loading")}</div>
               ) : (
                 <>
-                  <div className="mb-1 flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold text-text-strong">{usage.percent}%</span>
-                    <span className="text-[11px] text-text-faint">
-                      已使用 {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <span className="text-[13px] font-medium tabular-nums text-text-strong">
+                      {formatOccupancyFullLabel(visibleUsage.percent)}
+                    </span>
+                    <span className="text-[13px] tabular-nums text-text-muted">
+                      {formatOccupancyTokenPair(visibleUsage.used_tokens, visibleUsage.max_tokens)}
                     </span>
                   </div>
-                  <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
-                    {usage.max_tokens > 0
+                  <div className="mb-3 flex h-1 w-full overflow-hidden rounded-full bg-surface-hover">
+                    {visibleUsage.max_tokens > 0
                       ? CATEGORY_ORDER.map((key) => {
-                          const value = usage.categories[key] ?? 0;
+                          const value = categoryTokens(visibleUsage.categories, key);
                           if (value <= 0) return null;
-                          const widthPct = (value / usage.max_tokens) * 100;
+                          const widthPct = (value / visibleUsage.max_tokens) * 100;
                           return (
                             <div
                               key={key}
@@ -258,14 +434,18 @@ export function ContextUsageButton({
                         })
                       : null}
                   </div>
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-2">
                     {CATEGORY_ORDER.map((key) => (
-                      <div key={key} className="flex items-center justify-between text-[12px]">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${CATEGORY_COLORS[key]}`} />
-                          <span className="text-text-muted">{CATEGORY_LABELS[key]}</span>
+                      <div key={key} className="flex items-center justify-between text-[13px]">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${CATEGORY_COLORS[key]}`}
+                          />
+                          <span className="truncate text-text-muted">{t(CATEGORY_LABEL_KEYS[key] ?? key)}</span>
                         </div>
-                        <span className="text-text-faint">~{formatK(usage.categories[key] ?? 0)}</span>
+                        <span className="ml-3 tabular-nums text-text-faint">
+                          {formatCategoryTokens(categoryTokens(visibleUsage.categories, key))}
+                        </span>
                       </div>
                     ))}
                   </div>

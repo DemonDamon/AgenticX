@@ -215,6 +215,16 @@ describe("buildCompletionSummary", () => {
     expect(out).toContain(`${ARTIFACT_HREF_PREFIX}art-final`);
   });
 
+  it("falls back to English chrome when locale is en and the model is empty", async () => {
+    const out = await buildCompletionSummary(baseInput, {
+      locale: "en",
+      callJson: async () => "",
+    });
+    expect(out).toBe(fallbackSummary(baseInput, "en"));
+    expect(out).toContain("Deep research complete.");
+    expect(out).not.toContain("深度调研完成");
+  });
+
   it("falls back when callJson throws", async () => {
     const out = await buildCompletionSummary(baseInput, {
       callJson: async () => {
@@ -241,7 +251,7 @@ describe("buildCompletionSummary", () => {
       callJson: async () => "<think>只有思考没有正文</think>",
     });
     expect(out).not.toContain("只有思考");
-    expect(out).toBe(fallbackSummary(baseInput));
+    expect(out).toBe(fallbackSummary(baseInput, "zh"));
   });
 
   it("truncates long LLM output to max chars", async () => {
@@ -294,6 +304,18 @@ describe("fallbackSummary", () => {
     });
     expect(out).not.toContain("final-report");
     expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
+  });
+
+  it("renders English chrome when locale is en", () => {
+    const out = fallbackSummary(baseInput, "en");
+    expect(out).toContain("Deep research complete.");
+    expect(out).toContain("This run planned 12 searches");
+    expect(out).toContain("Report sections:");
+    expect(out).toContain("Deliverables:");
+    expect(out).toContain("Open the link above for the full text");
+    expect(out).not.toContain("深度调研完成");
+    expect(out).not.toContain("本次规划检索");
+    expect(out).not.toContain("完整正文请打开");
   });
 
   it("caps section list at 8", () => {

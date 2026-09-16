@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ class MemoryGraphWriter:
             maxsize=self.cfg.ingest.max_queue
         )
         self._worker_task: Optional[asyncio.Task[None]] = None
+        self._worker_loop: Optional[asyncio.AbstractEventLoop] = None
         self._seq = 0
         self._status = MemoryGraphStatusStore(self.cfg.status_path)
         self._status.reconcile_after_restart(queue_size=0)
@@ -60,8 +62,56 @@ class MemoryGraphWriter:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
+        if self._worker_loop is not None and self._worker_loop is not loop:
+            self._drop_stale_worker(loop)
         if self._worker_task is None or self._worker_task.done():
+            self._worker_loop = loop
             self._worker_task = loop.create_task(self._run_worker(), name="memory-graph-writer")
+
+    def _drop_stale_worker(self, loop: asyncio.AbstractEventLoop) -> None:
+        """单例被另一个事件循环复用时，换掉绑在旧循环上的 worker 和队列。
+
+        队列必须一起换：``asyncio.Queue`` 内部的 ``_finished`` 是一个 ``asyncio.Event``，
+        一旦有人 await 过 ``join()`` 就会**绑定**到那个循环，之后在新循环上再用就直接抛
+        「bound to a different event loop」。job 本身是纯数据，搬过去即可。
+        """
+        old_task = self._worker_task
+        old_loop = self._worker_loop
+        self._worker_task = None
+        self._worker_loop = loop
+
+        pending: List[_IngestJob] = []
+        while True:
+            try:
+                pending.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        self._queue = asyncio.PriorityQueue(maxsize=self.cfg.ingest.max_queue)
+        for job in pending:
+            try:
+                self._queue.put_nowait(job)
+            except asyncio.QueueFull:
+                logger.warning("memory graph queue full while rebinding; dropping job")
+                break
+
+        if old_task is None or old_task.done():
+            return
+        if old_loop is not None and not old_loop.is_closed():
+            # 旧循环还活着，让它自己把 worker 收掉。
+            old_loop.call_soon_threadsafe(old_task.cancel)
+        else:
+            logger.debug("memory graph worker dropped with its closed loop")
+
+    async def aclose(self) -> None:
+        """Cancel the worker and await it. Call on shutdown so it never outlives its loop."""
+        task = self._worker_task
+        self._worker_task = None
+        self._worker_loop = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     async def enqueue_turn(
         self,
@@ -98,9 +148,23 @@ class MemoryGraphWriter:
         return True
 
     async def _run_worker(self) -> None:
+        """Drain the queue, then exit. Never suspend inside ``queue.get()``.
+
+        用 ``get_nowait()`` 而不是 ``await get()`` 是这里的关键。挂在 ``Queue.get()`` 里的
+        协程会在队列内部留下一个**绑定当前循环**的 future；一旦这个循环在 worker 还挂着的
+        时候被关掉（``loop.close()`` 不取消 pending task），之后某次 GC 关闭该协程时，
+        ``Queue.get`` 的收尾会对那个属于死循环的 future 调 ``cancel()``，抛出无法捕获的
+        ``RuntimeError: Event loop is closed`` —— 而且会被算在当时碰巧在跑的那段代码头上。
+
+        队列空了就结束，下一次 ``enqueue_turn`` 会重新拉起。``put_nowait`` 和
+        ``_ensure_worker`` 之间没有 await，所以不存在「刚好在退出瞬间入队」的竞态。
+        """
         store = MemoryGraphStore.singleton()
         while True:
-            job = await self._queue.get()
+            try:
+                job = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
             try:
                 self._status.mark_job_started()
                 await store.ingest_turn(
@@ -158,6 +222,9 @@ class MemoryGraphWriter:
 
 _writer_singleton: Optional[MemoryGraphWriter] = None
 
+#: 在飞的 fire-and-forget ingest task；只为持一个强引用，跑完自己摘掉。
+_pending_dispatches: set[asyncio.Task[None]] = set()
+
 
 def schedule_turn_ingest_from_session(
     session_id: str,
@@ -187,7 +254,11 @@ def schedule_turn_ingest_from_session(
 
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_dispatch(), name=f"memory-graph-ingest-{session_id[:8]}")
+        task = loop.create_task(_dispatch(), name=f"memory-graph-ingest-{session_id[:8]}")
+        # asyncio 只对运行中的 task 持弱引用。不留住返回值，这一轮 ingest 就可能在跑到
+        # 一半时被 GC 掉 —— 记忆图谱静悄悄少一轮，谁也不会收到报错。
+        _pending_dispatches.add(task)
+        task.add_done_callback(_pending_dispatches.discard)
     except RuntimeError:
         logger.warning(
             "memory graph ingest skipped (no running event loop) session=%s",

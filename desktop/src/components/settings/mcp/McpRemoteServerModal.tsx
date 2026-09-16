@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Modal } from "../../ds/Modal";
+import { i18n } from "../../../i18n/i18n";
 import {
+
   buildRemoteMcpServerPayload,
   extractRemoteMcpServerConfig,
   getMcpServersMap,
   parseMcpJsonDocument,
   setMcpServersMap,
 } from "../../../utils/mcp-remote-config";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type HeaderRow = { id: string; key: string; value: string };
 
@@ -50,6 +58,7 @@ export function McpRemoteServerModal({
   onClose,
   onSaved,
 }: Props) {
+  const { t } = useTranslation("settings");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [timeout, setTimeout] = useState("60");
@@ -83,13 +92,13 @@ export function McpRemoteServerModal({
         const path = locateServerPath ? await locateServerPath(targetName) : configPath;
         const raw = await window.agenticxDesktop.mcpGetRaw({ path });
         if (!raw.ok || typeof raw.text !== "string") {
-          throw new Error(raw.error ?? "无法读取配置文件");
+          throw new Error(raw.error ?? st("mcpRemote.cannotReadConfig"));
         }
         const doc = parseMcpJsonDocument(raw.text);
         const servers = getMcpServersMap(doc);
         const entry = extractRemoteMcpServerConfig(servers[targetName]);
         if (!entry) {
-          throw new Error(`「${targetName}」不是远程 URL 型 MCP，请用 JSON 编辑器修改 stdio 配置`);
+          throw new Error(st("mcpRemote.notRemote", { name: targetName }));
         }
         if (cancelled) return;
         setName(targetName);
@@ -112,24 +121,24 @@ export function McpRemoteServerModal({
     const trimmedName = name.trim();
     const trimmedUrl = url.trim();
     if (!trimmedName) {
-      setError("请填写服务名称");
+      setError(st("mcpRemote.needName"));
       return;
     }
     if (!trimmedUrl) {
-      setError("请填写 MCP URL");
+      setError(st("mcpRemote.needUrl"));
       return;
     }
     try {
       // eslint-disable-next-line no-new
       new URL(trimmedUrl);
     } catch {
-      setError("URL 格式无效");
+      setError(st("mcpRemote.badUrl"));
       return;
     }
 
     const timeoutNum = timeout.trim() ? Number(timeout.trim()) : undefined;
     if (timeout.trim() && (!Number.isFinite(timeoutNum) || (timeoutNum ?? 0) <= 0)) {
-      setError("超时须为正数（秒）");
+      setError(st("mcpRemote.badTimeout"));
       return;
     }
 
@@ -142,7 +151,7 @@ export function McpRemoteServerModal({
           : configPath;
       const raw = await window.agenticxDesktop.mcpGetRaw({ path });
       if (!raw.ok || typeof raw.text !== "string") {
-        throw new Error(raw.error ?? "无法读取配置文件");
+        throw new Error(raw.error ?? st("mcpRemote.cannotReadConfig"));
       }
       const doc = parseMcpJsonDocument(raw.text);
       const servers = getMcpServersMap(doc);
@@ -151,7 +160,7 @@ export function McpRemoteServerModal({
         delete servers[serverName];
       }
       if (mode === "add" && Object.prototype.hasOwnProperty.call(servers, trimmedName)) {
-        throw new Error(`服务名「${trimmedName}」已存在`);
+        throw new Error(st("mcpRemote.nameExists", { name: trimmedName }));
       }
 
       servers[trimmedName] = buildRemoteMcpServerPayload(
@@ -164,8 +173,8 @@ export function McpRemoteServerModal({
         path,
         text: `${JSON.stringify(nextDoc, null, 2)}\n`,
       });
-      if (!save.ok) throw new Error(save.error ?? "保存失败");
-      await onSaved(mode === "add" ? `已添加远程 MCP：${trimmedName}` : `已更新 ${trimmedName}`);
+      if (!save.ok) throw new Error(save.error ?? st("mcpRemote.saveFailed"));
+      await onSaved(mode === "add" ? st("mcpRemote.added", { name: trimmedName }) : st("mcpRemote.updated", { name: trimmedName }));
       onClose();
       resetForm();
     } catch (err) {
@@ -178,7 +187,7 @@ export function McpRemoteServerModal({
   return (
     <Modal
       open={open}
-      title={mode === "add" ? "添加远程 MCP（URL）" : `编辑远程 MCP — ${serverName ?? ""}`}
+      title={mode === "add" ? st("mcpRemote.addTitle") : st("mcpRemote.editTitle", { name: serverName ?? "" })}
       onClose={() => {
         if (saving) return;
         onClose();
@@ -191,7 +200,7 @@ export function McpRemoteServerModal({
             disabled={saving}
             onClick={onClose}
           >
-            取消
+            {st("mcpRemote.cancel")}
           </button>
           <button
             type="button"
@@ -200,7 +209,7 @@ export function McpRemoteServerModal({
             onClick={() => void handleSave()}
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            保存
+            {st("mcpRemote.save")}
           </button>
         </div>
       }
@@ -208,17 +217,17 @@ export function McpRemoteServerModal({
       {loading ? (
         <div className="flex items-center gap-2 py-6 text-sm text-text-subtle">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          加载配置…
+          {st("mcpRemote.loadingConfig")}
         </div>
       ) : (
         <div className="space-y-3">
           <label className="block text-sm text-text-muted">
-            服务名称
+            {st("mcpRemote.serverName")}
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={name}
               disabled={mode === "edit"}
-              placeholder="例如 tushareMcp"
+              placeholder={st("mcpRemote.namePh")}
               onChange={(e) => setName(e.target.value)}
             />
           </label>
@@ -227,7 +236,7 @@ export function McpRemoteServerModal({
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm font-mono text-[12px]"
               value={url}
-              placeholder="https://api.example.com/mcp 或 …/streamable-http"
+              placeholder={st("mcpRemote.urlPh")}
               onChange={(e) => setUrl(e.target.value)}
             />
           </label>
@@ -240,7 +249,7 @@ export function McpRemoteServerModal({
                 onClick={() => setHeaderRows((prev) => [...prev, newHeaderRow()])}
               >
                 <Plus className="h-3 w-3" aria-hidden />
-                添加
+                {st("mcpRemote.add")}
               </button>
             </div>
             <div className="space-y-1.5">
@@ -258,7 +267,7 @@ export function McpRemoteServerModal({
                   />
                   <input
                     className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs"
-                    placeholder="Bearer …（仅保存在 mcp.json）"
+                    placeholder={st("mcpRemote.headerPh")}
                     type="password"
                     autoComplete="off"
                     value={row.value}
@@ -272,7 +281,7 @@ export function McpRemoteServerModal({
                     type="button"
                     className="shrink-0 rounded-md border border-border p-1.5 text-text-faint hover:text-rose-400 disabled:opacity-30"
                     disabled={headerRows.length <= 1}
-                    title="移除此 Header"
+                    title={st("mcpRemote.removeHeader")}
                     onClick={() => setHeaderRows((prev) => prev.filter((r) => r.id !== row.id))}
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
@@ -281,11 +290,11 @@ export function McpRemoteServerModal({
               ))}
             </div>
             <p className="text-[11px] text-text-faint">
-              Header 值写入 <code className="text-[10px]">~/.agenticx/mcp.json</code>，不会存入 localStorage。
+              {st("mcpRemote.headerHint")}
             </p>
           </div>
           <label className="block text-sm text-text-muted">
-            超时（秒，可选）
+            {st("mcpRemote.timeout")}
             <input
               className="mt-1 w-28 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={timeout}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
 
@@ -28,6 +29,7 @@ export function ClarificationDialog({
   onSubmit,
   onSkip,
 }: Props) {
+  const { t } = useTranslation("chat");
   const opts = Array.isArray(options) ? options.filter((o) => typeof o === "string" && o.trim()) : [];
   const canFreeText = allowFreeText !== false;
   const [selected, setSelected] = useState<string | null>(null);
@@ -55,19 +57,19 @@ export function ClarificationDialog({
   return (
     <Modal
       open={open}
-      title="需要你的输入"
+      title={t("clarify.title")}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onSkip}>
-            跳过（按默认推进）
+            {t("clarify.skip")}
           </Button>
           <Button variant="primary" onClick={handleSubmit} disabled={!canSubmit}>
-            提交
+            {t("clarify.submit")}
           </Button>
         </div>
       }
     >
-      {sourceLabel ? <p className="mb-1 text-xs text-text-subtle">来源：{sourceLabel}</p> : null}
+      {sourceLabel ? <p className="mb-1 text-xs text-text-subtle">{t("clarify.source", { label: sourceLabel })}</p> : null}
       <p className="mb-3 break-words text-sm text-text-primary whitespace-pre-wrap">{prompt}</p>
 
       {opts.length > 0 ? (
@@ -108,13 +110,13 @@ export function ClarificationDialog({
               }}
               className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
             />
-            自定义回复
+            {t("clarify.customReply")}
           </label>
           {useCustom ? (
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="输入你的回复…"
+              placeholder={t("clarify.replyPlaceholder")}
               rows={4}
               className="mt-1 w-full resize-y rounded-md border border-border bg-surface-panel p-2 text-sm text-text-primary outline-none focus:border-[var(--ui-btn-primary-bg,--ui-accent)]"
             />
@@ -125,7 +127,7 @@ export function ClarificationDialog({
 
       {context && Object.keys(context).length > 0 ? (
         <details className="mt-2 text-xs text-text-subtle">
-          <summary className="cursor-pointer">附加上下文</summary>
+          <summary className="cursor-pointer">{t("clarify.extraContext")}</summary>
           <pre className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-surface-panel p-2 text-[11px] text-text-muted">
             {JSON.stringify(context, null, 2)}
           </pre>

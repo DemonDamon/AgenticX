@@ -3,6 +3,7 @@ import {
   isTurnInterruptionNoticeMessage,
   parseTurnInterruptionNotice,
   shouldAutoResumeTruncationInterruption,
+  shouldShowTurnInterruptedSyncToast,
   TURN_INTERRUPTED_KIND,
 } from "./turn-interruption-notice";
 
@@ -77,5 +78,38 @@ describe("turn-interruption-notice", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it("does not toast a completed group turn that never emits final", () => {
+    expect(
+      shouldShowTurnInterruptedSyncToast({
+        aborted: false,
+        receivedFinalEvent: false,
+        isGroupPane: true,
+        receivedGroupDone: true,
+        receivedGroupTerminal: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowTurnInterruptedSyncToast({
+        aborted: false,
+        receivedFinalEvent: false,
+        isGroupPane: true,
+        receivedGroupDone: false,
+        receivedGroupTerminal: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("still toasts 1:1 streams that end without final", () => {
+    expect(
+      shouldShowTurnInterruptedSyncToast({
+        aborted: false,
+        receivedFinalEvent: false,
+        isGroupPane: false,
+        receivedGroupDone: false,
+        receivedGroupTerminal: false,
+      }),
+    ).toBe(true);
   });
 });

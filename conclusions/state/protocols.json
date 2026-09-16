@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "protocols",
-  "generation": "5f8be47a51254e81b62cdc0876b478cc",
+  "generation": "94cbd3e0ce6043e5a74089f1c3ee4648",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
   "source_fingerprint": "sha256:f74fbffb1916aebdbcf5648091fa9fce354af1b40467b096b24e5c2e650dea1a",
   "summary_path": "conclusions/protocols_module_conclusion.md",
   "summary_sha256": "sha256:af7818bec5aeba990994a640db2d098512f2f2323e8efb33aec4ef854fb794a8",
-  "updated_at": "2026-08-08T01:37:15.748014+00:00"
+  "updated_at": "2026-09-01T05:50:21.309358+00:00"
 }

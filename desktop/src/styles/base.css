@@ -124,6 +124,10 @@ body,
   grid-template-rows: var(--topbar-height, 44px) 1fr;
 }
 
+.agx-main-shell--no-topbar {
+  grid-template-rows: 1fr;
+}
+
 .agx-topbar {
   display: flex;
   align-items: center;
@@ -139,7 +143,7 @@ body,
   user-select: none;
 }
 
-/* Landing views (avatars / groups / automation): no divider under 「本地」. */
+/* Landing views (avatars / groups / automation): no divider under the topbar. */
 .agx-topbar--no-border {
   border-bottom: none;
 }
@@ -156,11 +160,31 @@ html[data-platform="win32"] .agx-topbar {
   -webkit-app-region: no-drag;
 }
 
+/* Chat pane chrome sits in the traffic-light row when the main Topbar is hidden. */
+.agx-pane-toolbar {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.agx-pane-toolbar button,
+.agx-pane-toolbar select,
+.agx-pane-toolbar input,
+.agx-pane-toolbar .no-drag {
+  -webkit-app-region: no-drag;
+}
+
 .agx-topbar-left {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  transition: padding-left var(--ds-dur-slow) var(--ds-ease-out);
+}
+
+.agx-topbar-left--collapsed {
+  /* 侧栏收起后整排左侧图标（含加号）都要让过 macOS 红绿灯 */
+  padding-left: 68px;
 }
 
 .agx-topbar-left-controls {
@@ -168,15 +192,10 @@ html[data-platform="win32"] .agx-topbar {
   align-items: center;
   gap: var(--agx-topbar-icon-gap, 8px);
   min-width: 0;
-  transition: padding-left var(--ds-dur-slow) var(--ds-ease-out);
-}
-
-.agx-topbar-left-controls--collapsed {
-  padding-left: 68px;
 }
 
 /* Expanded sidebar: toggle + search sit in the traffic-light row, right-aligned
-   against the divider so they visually meet 本地 on the main Topbar. */
+   against the divider with the main content. */
 .agx-sidebar-topbar {
   display: flex;
   align-items: center;

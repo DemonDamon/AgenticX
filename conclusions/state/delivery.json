@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "delivery",
-  "generation": "b837e9181437416e9ecabbe2a5468bd3",
+  "generation": "e7a858d9e5894553a83e775fbbad00b0",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:fd2c594c589138c6d259fb52df3e49e8c79dc9ef3ba893530381bf5f689adc40",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:d3c83ad64df26eac8a0af75662652437eaa60e2ca2e0c60f2308656e7c0d1591",
   "summary_path": "conclusions/delivery_module_conclusion.md",
-  "summary_sha256": "sha256:380a4efdcece61dd0d8948906bf02d75221b99dffbe8c2793bef0f04ce6b0751",
-  "updated_at": "2026-08-08T01:39:54.341455+00:00"
+  "summary_sha256": "sha256:c03386c6851c6ab28ed3138721cc7a7f645c5c117965c6dcd22cee420d4acd26",
+  "updated_at": "2026-09-01T06:08:42.396382+00:00"
 }

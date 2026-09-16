@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { i18n } from "../../i18n/i18n";
 import { getEditBlockReason } from "./workspace-edit-guard";
 import {
   WRITE_LOCAL_TEXT_MAX_BYTES,
@@ -29,7 +30,7 @@ describe("getEditBlockReason", () => {
         size: 4,
         initialLineRange: { start: 1, end: 2 },
       }),
-    ).toBe("行号聚焦模式下不可编辑");
+    ).toBe(i18n.t("preview.editGuard.lineFocus", { ns: "workspace" }));
   });
 
   it("blocks truncated content", () => {
@@ -40,7 +41,7 @@ describe("getEditBlockReason", () => {
         content: "partial",
         size: WRITE_LOCAL_TEXT_MAX_BYTES + 1,
       }),
-    ).toContain("截断");
+    ).toBe(i18n.t("preview.editGuard.truncated", { ns: "workspace" }));
   });
 
   it("blocks content with UTF-8 replacement char", () => {

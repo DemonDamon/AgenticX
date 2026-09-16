@@ -120,6 +120,7 @@ export async function loadAuthUserByEmail(tenantId: string, email: string): Prom
     email: row[0].email.toLowerCase(),
     displayName: row[0].displayName,
     passwordHash: row[0].passwordHash,
+    mustChangePassword: row[0].mustChangePassword === true,
     status: mapDbStatus(row[0]),
     failedLoginCount: row[0].failedLoginCount ?? 0,
     lockedUntil,
@@ -308,6 +309,7 @@ function buildNewUserFields(input: {
   employeeNo?: string | null;
   jobTitle?: string | null;
   passwordHash: string;
+  mustChangePassword?: boolean;
 }): Omit<typeof users.$inferInsert, "id" | "tenantId" | "email" | "createdAt"> & {
   updatedAt: Date;
 } {
@@ -317,6 +319,7 @@ function buildNewUserFields(input: {
     deptId: input.deptId ?? null,
     displayName: input.displayName.trim(),
     passwordHash: input.passwordHash,
+    mustChangePassword: input.mustChangePassword ?? false,
     status: rowStatus,
     phone: input.phone ?? null,
     employeeNo: input.employeeNo ?? null,
@@ -381,6 +384,7 @@ export async function createAdminUser(input: {
     throw new Error("email already exists");
   }
 
+  const suppliedInitialPassword = Boolean(input.initialPassword?.trim());
   const initialPassword = input.initialPassword?.trim() || generateInitialPassword();
   const passwordHash = await hashPassword(initialPassword);
   const now = new Date();
@@ -392,6 +396,7 @@ export async function createAdminUser(input: {
     employeeNo: input.employeeNo,
     jobTitle: input.jobTitle,
     passwordHash,
+    mustChangePassword: !suppliedInitialPassword,
   });
 
   let id: string;
@@ -567,6 +572,7 @@ export async function resetUserPassword(input: {
     .update(users)
     .set({
       passwordHash,
+      mustChangePassword: true,
       lockedUntil: null,
       failedLoginCount: 0,
       status: "active",
@@ -583,6 +589,29 @@ export async function resetUserPassword(input: {
   });
 
   return { initialPassword };
+}
+
+export async function updatePasswordAndClearRequirementPg(
+  tenantId: string,
+  email: string,
+  passwordHash: string,
+): Promise<AuthUser | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.updatePasswordAndClearRequirement(tenantId, email, passwordHash);
+  }
+  const db = getIamDb();
+  await db
+    .update(users)
+    .set({
+      passwordHash,
+      mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: null,
+      status: "active",
+      updatedAt: new Date(),
+    })
+    .where(and(eq(users.tenantId, tenantId), eq(users.email, email.toLowerCase()), eq(users.isDeleted, false)));
+  return loadAuthUserByEmail(tenantId, email);
 }
 
 /**
@@ -603,6 +632,7 @@ export async function upsertUserRowFromAuthUser(user: AuthUser): Promise<void> {
       email: user.email.toLowerCase(),
       displayName: user.displayName,
       passwordHash: user.passwordHash,
+      mustChangePassword: user.mustChangePassword === true,
       status: user.status === "locked" ? "active" : user.status,
       failedLoginCount: user.failedLoginCount ?? 0,
       lockedUntil: user.lockedUntil ? new Date(user.lockedUntil) : null,
@@ -617,6 +647,7 @@ export async function upsertUserRowFromAuthUser(user: AuthUser): Promise<void> {
         email: user.email.toLowerCase(),
         displayName: user.displayName,
         passwordHash: user.passwordHash,
+        mustChangePassword: user.mustChangePassword === true,
         deptId: user.deptId ?? null,
         status: user.status === "locked" ? "active" : user.status,
         failedLoginCount: user.failedLoginCount ?? 0,
@@ -819,6 +850,7 @@ const usersRepositoryMethods = {
   updateAdminUser,
   softDeleteUser,
   resetUserPassword,
+  updatePasswordAndClearRequirement: updatePasswordAndClearRequirementPg,
   upsertUserRowFromAuthUser,
   assignRolesIfNone,
   upsertUserByEmail,

@@ -10,10 +10,19 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppStore, type ChatPane as ChatPaneState } from "../store";
+import { useTranslation } from "react-i18next";
+import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
 import { SortablePaneWrapper } from "./SortablePaneWrapper";
+
+function resolvePaneTabName(pane: ChatPaneState, avatars: Avatar[]): string {
+  const aid = pane.avatarId;
+  if (!aid || aid.startsWith("group:")) {
+    return pane.avatarName;
+  }
+  return avatars.find((avatar) => avatar.id === aid)?.name || pane.avatarName;
+}
 
 type Props = {
   onOpenConfirm: (
@@ -72,14 +81,17 @@ function PaneTabStrip({
   activePaneId: string;
   onSelect: (paneId: string) => void;
 }) {
+  const { t } = useTranslation("common");
+  const avatars = useAppStore((s) => s.avatars);
   return (
     <div
       className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface-base/80 px-2 backdrop-blur-sm"
       role="tablist"
-      aria-label="聊天窗格"
+      aria-label={t("chatPanes")}
     >
       {panes.map((pane) => {
         const active = pane.id === activePaneId;
+        const label = resolvePaneTabName(pane, avatars);
         return (
           <button
             key={pane.id}
@@ -91,10 +103,10 @@ function PaneTabStrip({
                 ? "bg-surface-hover font-medium text-text-strong"
                 : "text-text-muted hover:bg-surface-hover/60 hover:text-text-strong"
             }`}
-            title={pane.avatarName}
+            title={label}
             onClick={() => onSelect(pane.id)}
           >
-            {pane.avatarName}
+            {label}
           </button>
         );
       })}
@@ -103,12 +115,14 @@ function PaneTabStrip({
 }
 
 function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
+  const avatars = useAppStore((s) => s.avatars);
+  const label = resolvePaneTabName(pane, avatars);
   return (
     <div
       className="flex min-h-[40px] min-w-[200px] max-w-md cursor-grabbing flex-col justify-center rounded-lg border border-border bg-surface-card/95 px-4 py-2 shadow-lg shadow-black/40 backdrop-blur-sm"
       style={{ width: "min(100%, 360px)" }}
     >
-      <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+      <div className="truncate text-sm font-medium text-text-strong">{label}</div>
     </div>
   );
 }
@@ -118,8 +132,10 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const reorderPanes = useAppStore((s) => s.reorderPanes);
+  const durablePanes = panes.filter((pane) => !pane.composePreview);
+  const previewPane = panes.find((pane) => pane.composePreview && pane.id === activePaneId);
 
-  const paneCount = panes.length;
+  const paneCount = durablePanes.length;
   const rows = Math.ceil(paneCount / COLUMNS);
 
   const [colSizes, setColSizes] = useState<number[][]>(() =>
@@ -211,8 +227,8 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
     clearDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = panes.findIndex((p) => p.id === active.id);
-    const toIndex = panes.findIndex((p) => p.id === over.id);
+    const fromIndex = durablePanes.findIndex((p) => p.id === active.id);
+    const toIndex = durablePanes.findIndex((p) => p.id === over.id);
     if (fromIndex < 0 || toIndex < 0) return;
     reorderPanes(fromIndex, toIndex);
     resetLayoutSizes(paneCount);
@@ -220,8 +236,8 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
 
   const isMulti = paneCount >= 2;
   const paneTabMode = shouldUsePaneTabs(containerWidth, paneCount);
-  const paneIds = panes.map((p) => p.id);
-  const activeDragPane = activeDragId ? panes.find((p) => p.id === activeDragId) : undefined;
+  const paneIds = durablePanes.map((p) => p.id);
+  const activeDragPane = activeDragId ? durablePanes.find((p) => p.id === activeDragId) : undefined;
 
   const renderChatPane = (pane: ChatPaneState, isFocused: boolean) => (
     <ChatPane
@@ -234,6 +250,23 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
     />
   );
 
+  if (previewPane) {
+    return (
+      <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        {durablePanes.length >= 2 ? (
+          <PaneTabStrip
+            panes={durablePanes}
+            activePaneId={activePaneId}
+            onSelect={setActivePaneId}
+          />
+        ) : null}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          {renderChatPane(previewPane, true)}
+        </div>
+      </div>
+    );
+  }
+
   const multiPaneMinWidth = isMulti
     ? clamp(Math.floor((containerWidth || 680) / paneCount) - 8, 240, 320)
     : undefined;
@@ -241,12 +274,12 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const tabBody = paneTabMode ? (
     <>
       <PaneTabStrip
-        panes={panes}
+        panes={durablePanes}
         activePaneId={activePaneId}
         onSelect={setActivePaneId}
       />
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {panes.map((pane) => {
+        {durablePanes.map((pane) => {
           const isFocused = activePaneId === pane.id;
           return (
             <div
@@ -268,10 +301,10 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
 
   const layoutTwoOrFewer = (
     <div className="flex h-full min-w-0 flex-1 overflow-hidden">
-      {panes.map((pane, index) => {
+      {durablePanes.map((pane, index) => {
         const widthPct =
           paneCount === 1 ? 100 : colSizes[0]?.[index] ?? 100 / paneCount;
-        const isLast = index === panes.length - 1;
+        const isLast = index === durablePanes.length - 1;
         const isFocused = activePaneId === pane.id;
         const outerStyle = {
           width: `${widthPct}%`,
@@ -322,7 +355,7 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const layoutMultiRow = (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {Array.from({ length: rows }, (_, rowIndex) => {
-        const rowPanes = panes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
+        const rowPanes = durablePanes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
         const rowHeightPct = rowSizes[rowIndex] ?? 100 / rows;
         const isLastRow = rowIndex === rows - 1;
 

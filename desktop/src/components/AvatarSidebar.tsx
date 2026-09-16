@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
-import { AlarmClock, MessageSquarePlus, UserRound, Waypoints } from "lucide-react";
+import { AlarmClock, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { SidebarAccountBar } from "./SidebarAccountBar";
 import { SidebarSessionHistory } from "./sidebar/SidebarSessionHistory";
 import { TopbarLeftControls } from "./TopbarLeftControls";
+import { SidebarCreateButton } from "./quick-compose/SidebarCreateButton";
 
 type Props = {
   onToggleSidebar: () => void;
@@ -31,14 +34,29 @@ type NavEntry =
   | { kind: "action"; id: "new-task"; label: string; icon: LucideIcon }
   | { kind: "view"; id: MainView; label: string; icon: LucideIcon };
 
-const NAV_ENTRIES: NavEntry[] = [
-  { kind: "action", id: "new-task", label: "新建任务", icon: MessageSquarePlus },
-  { kind: "view", id: "avatars", label: "数字专家", icon: UserRound },
-  { kind: "view", id: "groups", label: "项目群聊", icon: Waypoints },
-  { kind: "view", id: "automation", label: "定时任务", icon: AlarmClock },
+const NAV_ENTRY_DEFS: Array<Omit<NavEntry, "label">> = [
+  { kind: "action", id: "new-task", icon: MessageSquarePlus },
+  { kind: "view", id: "avatars", icon: Bot },
+  { kind: "view", id: "groups", icon: Waypoints },
+  { kind: "view", id: "collab", icon: Users },
+  { kind: "view", id: "automation", icon: AlarmClock },
 ];
 
+const NAV_LABEL_KEY: Record<NavEntry["id"], string> = {
+  "new-task": "nav.newTask",
+  avatars: "nav.avatars",
+  groups: "nav.groups",
+  collab: "nav.collab",
+  automation: "nav.automation",
+};
+
 export function AvatarSidebar({ onToggleSidebar }: Props) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
+  const navEntries = useMemo<NavEntry[]>(
+    () => NAV_ENTRY_DEFS.map((entry) => ({ ...entry, label: t(NAV_LABEL_KEY[entry.id]) })),
+    [t]
+  );
   const setAvatars = useAppStore((s) => s.setAvatars);
   const setGroups = useAppStore((s) => s.setGroups);
   const mainView = useAppStore((s) => s.mainView);
@@ -206,14 +224,16 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
   return (
     <>
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
-        {/* macOS traffic-light row: toggle + search aligned to the right edge,
-            adjacent to the main-area divider (where 本地 sits on the Topbar). */}
+        {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
-          <TopbarLeftControls
-            onToggleSidebar={onToggleSidebar}
-            toggleTitle="收起侧栏"
-            className="agx-topbar-left-controls no-drag"
-          />
+          <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">
+            <SidebarCreateButton />
+            <TopbarLeftControls
+              onToggleSidebar={onToggleSidebar}
+              toggleTitle={t("collapseSidebar")}
+              className="agx-topbar-left-controls"
+            />
+          </div>
         </div>
 
         {/* Meta-Agent brand row — text-only product name + version (no character logo) */}
@@ -240,8 +260,8 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
         </button>
 
         {/* Compact button navigation */}
-        <nav className="flex flex-col gap-px px-2 py-1.5" aria-label="主导航">
-          {NAV_ENTRIES.map((entry) => {
+        <nav className="flex flex-col gap-px px-2 py-1.5" aria-label={t("nav.aria")}>
+          {navEntries.map((entry) => {
             const Icon = entry.icon;
             const active =
               entry.kind === "action" ? newTaskNavActive : mainView === entry.id;
@@ -264,6 +284,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
         </nav>
 
         <SidebarSessionHistory />
+        <SidebarAccountBar />
       </aside>
 
       {machiContextMenu && (
@@ -280,7 +301,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
               setMachiSettingsOpen(true);
             }}
           >
-            设置
+            {tCommon("settings")}
           </button>
         </div>
       )}

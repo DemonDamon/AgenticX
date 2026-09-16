@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { Share2, X, RefreshCw } from "lucide-react";
 import type { ChatPane } from "../../store";
 import { useAppStore } from "../../store";
@@ -85,6 +87,7 @@ export function RunGraphPanel({
   groupActivityHint = {},
   groupMemberPhase = {},
 }: Props) {
+  const { t } = useTranslation("workspace");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   // Must use a stable empty object — `?? emptyPaneGraphState()` allocates every
@@ -124,7 +127,7 @@ export function RunGraphPanel({
       applySnapshot(pane.id, run, projection);
       setBanner(null);
     } catch (err) {
-      setBanner(err instanceof Error ? err.message : "加载运行图失败");
+      setBanner(err instanceof Error ? err.message : i18n.t("graph.loadFailed", { ns: "workspace" }));
     }
   }, [apiBase, apiToken, applySnapshot, pane.id, pane.sessionId, runId, setActiveGraphRunId]);
 
@@ -151,11 +154,11 @@ export function RunGraphPanel({
         const res = await postGraphIntervene(apiBase, apiToken, runId, body);
         if (res.status === 409) {
           await refresh();
-          setBanner("版本冲突，已刷新图状态，请重试");
+          setBanner(i18n.t("graph.versionConflict", { ns: "workspace" }));
           return { ok: false, warnings: ["version_conflict"] };
         }
         if (!res.ok) {
-          setBanner(res.error || "干预失败");
+          setBanner(res.error || i18n.t("graph.interveneFailed", { ns: "workspace" }));
           return { ok: false, warnings: [] };
         }
         if (!res.warnings.includes("target_running")) {
@@ -218,7 +221,7 @@ export function RunGraphPanel({
         {!embedded ? (
           <>
             <Share2 className="h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.8} />
-            <span className="text-[14px] font-medium text-text-strong">运行图</span>
+            <span className="text-[14px] font-medium text-text-strong">{t("graph.title")}</span>
           </>
         ) : null}
         {hasTaskNodes ? (
@@ -237,7 +240,7 @@ export function RunGraphPanel({
               onClick={() => setPreferAgentView(true)}
               aria-pressed={preferAgentView}
             >
-              专家
+              {t("graph.experts")}
             </button>
             <button
               type="button"
@@ -249,7 +252,7 @@ export function RunGraphPanel({
               onClick={() => setPreferAgentView(false)}
               aria-pressed={!preferAgentView}
             >
-              任务
+              {t("graph.tasks")}
             </button>
           </div>
         ) : null}
@@ -259,8 +262,8 @@ export function RunGraphPanel({
             !hasTaskNodes && !embedded ? "ml-1" : ""
           }`}
           onClick={() => void refresh()}
-          title="刷新"
-          aria-label="刷新运行图"
+          title={t("graph.refresh")}
+          aria-label={t("graph.refreshAria")}
         >
           <RefreshCw className="h-4 w-4" strokeWidth={2} />
         </button>
@@ -269,8 +272,8 @@ export function RunGraphPanel({
             type="button"
             className="ml-auto rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
-            title="关闭运行图"
-            aria-label="关闭运行图"
+            title={t("graph.close")}
+            aria-label={t("graph.close")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -287,16 +290,16 @@ export function RunGraphPanel({
 
       {hasRun && !hasTaskNodes ? (
         <div className="shrink-0 border-b border-border px-2.5 py-1 text-[10px] leading-snug text-text-faint">
-          本轮只有「谁在答」的协作关系；出现可拆解的任务时，这里会显示任务分工与依赖，并支持注入 / 改派。
+          {t("graph.presenceHint")}
         </div>
       ) : null}
 
       {!hasRun ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <Share2 className="h-8 w-8 text-text-faint" strokeWidth={1.4} />
-          <p className="text-[13px] text-text-subtle">暂无运行图</p>
+          <p className="text-[13px] text-text-subtle">{t("graph.empty")}</p>
           <p className="text-[11px] leading-relaxed text-text-faint">
-            发送复杂任务或群聊协作后会自动生成。可在此观察专家思考、执行与协同，并做注入 / 改派 / 收敛干预。
+            {t("graph.emptyHint")}
           </p>
         </div>
       ) : (
@@ -305,7 +308,7 @@ export function RunGraphPanel({
             <Suspense
               fallback={
                 <div className="flex h-full items-center justify-center text-[12px] text-text-faint">
-                  加载画布…
+                  {t("graph.loadingCanvas")}
                 </div>
               }
             >
@@ -339,9 +342,9 @@ export function RunGraphPanel({
       {forceBody ? (
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-lg border border-border bg-surface-card p-4 shadow-xl">
-            <p className="text-[13px] font-medium text-text-strong">中断并改派？</p>
+            <p className="text-[13px] font-medium text-text-strong">{t("graph.reassignTitle")}</p>
             <p className="mt-1 text-[12px] text-text-subtle">
-              目标节点正在运行。确认后将中断当前执行并改派给新专家。
+              {t("graph.reassignHint")}
             </p>
             <div className="mt-3 flex justify-end gap-2">
               <button
@@ -349,7 +352,7 @@ export function RunGraphPanel({
                 className="rounded px-3 py-1.5 text-[12px] text-text-subtle hover:bg-surface-hover"
                 onClick={() => setForceBody(null)}
               >
-                取消
+                {t("cancel", { ns: "common" })}
               </button>
               <button
                 type="button"
@@ -361,7 +364,7 @@ export function RunGraphPanel({
                   void intervene(body);
                 }}
               >
-                确认改派
+                {t("graph.confirmReassign")}
               </button>
             </div>
           </div>

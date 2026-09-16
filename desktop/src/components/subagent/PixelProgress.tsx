@@ -4,6 +4,7 @@
  * 像进度条一样推进（运行中无精确进度时活跃列呼吸闪烁）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PIXEL_PROGRESS_CELLS, isTerminalStatus, statusMeta } from "./badge-theme";
 
 /** 粒子矩阵固定参数：3 行 × 12 列 */
@@ -31,6 +32,7 @@ const PAUSED_BG = "var(--status-warning)";
  * 运行中无精确进度时，活跃列（下一个待点亮列）缓慢呼吸前进。
  */
 function DotMatrix({ progress, status, className }: { progress?: number; status: string; className?: string }) {
+  const { t } = useTranslation("chat");
   const isRunning = status === "running" || status === "pending" || status === "awaiting_confirm" || status === "awaiting_input";
   const isCompleted = status === "completed";
   const isFailed = status === "failed";
@@ -92,7 +94,7 @@ function DotMatrix({ progress, status, className }: { progress?: number; status:
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={isCompleted ? 100 : Math.round((filledCols / DOT_COLS) * 100)}
-      aria-label={meta.label}
+      aria-label={t(meta.labelKey)}
     >
       {Array.from({ length: DOT_ROWS * DOT_COLS }).map((_, i) => {
         // grid-auto-flow:column 时，i = col * DOT_ROWS + row

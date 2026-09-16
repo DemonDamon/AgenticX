@@ -1,5 +1,6 @@
 import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
 import { Panel } from "../ds/Panel";
@@ -42,9 +43,13 @@ export function WorkspaceMemoryList({
   apiBase,
   apiToken,
   avatarId = null,
-  title = "主体文本记忆",
-  description = "编辑当前主体 MEMORY.md 中的长期记忆条目（含本主体理解的用户偏好）。",
+  title,
+  description,
 }: Props) {
+  const { t } = useTranslation("workspace");
+  const { t: tCommon } = useTranslation("common");
+  const heading = title ?? t("memoryList.title");
+  const desc = description ?? t("memoryList.description");
   const [sections, setSections] = useState<WorkspaceMemorySection[]>([]);
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(true);
@@ -176,7 +181,7 @@ export function WorkspaceMemoryList({
 
   const reload = useCallback(async () => {
     if (!apiBase.trim()) {
-      setError("后端未连接");
+      setError(t("memoryList.offline"));
       setLoading(false);
       return;
     }
@@ -187,11 +192,11 @@ export function WorkspaceMemoryList({
       setSections(doc.sections);
       setPath(doc.path);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载主体记忆失败");
+      setError(e instanceof Error ? e.message : t("memoryList.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [apiBase, apiToken, avatarId]);
+  }, [apiBase, apiToken, avatarId, t]);
 
   useEffect(() => {
     void reload();
@@ -212,7 +217,7 @@ export function WorkspaceMemoryList({
       setExpandedSections((prev) => new Set(prev).add(section));
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "新增失败");
+      setError(e instanceof Error ? e.message : t("memoryList.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -233,7 +238,7 @@ export function WorkspaceMemoryList({
         cancelEdit();
         await reload();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "保存失败");
+        setError(e instanceof Error ? e.message : t("memoryList.saveFailed"));
       } finally {
         setBusy(false);
       }
@@ -248,7 +253,7 @@ export function WorkspaceMemoryList({
       cancelEdit();
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      setError(e instanceof Error ? e.message : t("memoryList.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -263,7 +268,7 @@ export function WorkspaceMemoryList({
       setPendingDelete(null);
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败");
+      setError(e instanceof Error ? e.message : t("memoryList.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -283,7 +288,7 @@ export function WorkspaceMemoryList({
       exitSelectMode();
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "批量删除失败");
+      setError(e instanceof Error ? e.message : t("memoryList.batchDeleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -294,7 +299,7 @@ export function WorkspaceMemoryList({
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-sm text-text-subtle">
-        加载主体记忆…
+        {t("memoryList.loading")}
       </div>
     );
   }
@@ -302,8 +307,8 @@ export function WorkspaceMemoryList({
   return (
     <div className="flex flex-col gap-3">
       <div className="px-1">
-        <div className="text-sm font-medium text-text-primary">{title}</div>
-        <p className="mt-1 text-[11px] leading-relaxed text-text-subtle">{description}</p>
+        <div className="text-sm font-medium text-text-primary">{heading}</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-text-subtle">{desc}</p>
         {path ? (
           <p className="mt-1 truncate text-[10px] text-text-faint" title={path}>
             {path}
@@ -311,11 +316,11 @@ export function WorkspaceMemoryList({
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col gap-3">
-      <Panel title="新增记忆" collapsible defaultCollapsed={totalEntries > 0}>
+      <Panel title={t("memoryList.addTitle")} collapsible defaultCollapsed={totalEntries > 0}>
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             <div className="flex items-center justify-between gap-2">
-              <span>分组</span>
+              <span>{t("memoryList.group")}</span>
               {!isNewGroup ? (
                 <button
                   type="button"
@@ -325,7 +330,7 @@ export function WorkspaceMemoryList({
                     setNewGroupName("");
                   }}
                 >
-                  + 新建分组
+                  {t("memoryList.newGroup")}
                 </button>
               ) : (
                 <button
@@ -336,7 +341,7 @@ export function WorkspaceMemoryList({
                     setNewGroupName("");
                   }}
                 >
-                  取消
+                  {tCommon("cancel")}
                 </button>
               )}
             </div>
@@ -348,7 +353,7 @@ export function WorkspaceMemoryList({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newText.trim() && newGroupName.trim()) void onCreate();
                 }}
-                placeholder="输入新分组名，如「工作偏好」"
+                placeholder={t("memoryList.newGroupPlaceholder")}
                 autoFocus
                 className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
               />
@@ -367,19 +372,19 @@ export function WorkspaceMemoryList({
             )}
             <span className="text-[10px] leading-relaxed text-text-faint">
               {isNewGroup
-                ? "保存首条记忆后会在 MEMORY.md 中创建对应的 ## 分组标题。"
-                : "分组对应 MEMORY.md 中的 ## 标题；也可点「新建分组」添加。"}
+                ? t("memoryList.hintNew")
+                : t("memoryList.hintPick")}
             </span>
           </div>
           <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
-            内容
+            {t("memoryList.content")}
             <input
               value={newText}
               onChange={(e) => setNewText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void onCreate();
               }}
-              placeholder="输入长期记忆内容…"
+              placeholder={t("memoryList.contentPlaceholder")}
               className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
             />
           </label>
@@ -391,7 +396,7 @@ export function WorkspaceMemoryList({
             style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           >
             <Plus className="h-3.5 w-3.5" />
-            添加
+            {tCommon("add")}
           </button>
         </div>
       </Panel>
@@ -402,22 +407,22 @@ export function WorkspaceMemoryList({
 
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-xs font-semibold text-text-strong">记忆列表</h3>
+            <h3 className="text-xs font-semibold text-text-strong">{t("memoryList.listTitle")}</h3>
             <span className="rounded-md border border-border bg-surface-card px-2 py-0.5 text-[10px] font-medium text-text-muted">
-              长期记忆
+              {t("memoryList.longTerm")}
             </span>
-            <span className="text-[10px] text-text-faint">{totalEntries} 条</span>
+            <span className="text-[10px] text-text-faint">{t("memoryList.count", { count: totalEntries })}</span>
             {totalEntries > 0 ? (
               selectMode ? (
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] text-text-muted">已选 {selectedCount} 条</span>
+                  <span className="text-[10px] text-text-muted">{t("memoryList.selectedCount", { count: selectedCount })}</span>
                   <button
                     type="button"
                     disabled={busy || allEntryKeys.length === 0}
                     onClick={() => setSelectedKeys(new Set(allEntryKeys))}
                     className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
                   >
-                    全选
+                    {t("memoryList.selectAll")}
                   </button>
                   <button
                     type="button"
@@ -425,7 +430,7 @@ export function WorkspaceMemoryList({
                     onClick={() => setSelectedKeys(new Set())}
                     className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
                   >
-                    清空
+                    {t("memoryList.clearSelection")}
                   </button>
                   <button
                     type="button"
@@ -434,7 +439,7 @@ export function WorkspaceMemoryList({
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-status-error transition hover:bg-status-error/10 disabled:opacity-50"
                   >
                     <Trash2 className="h-3 w-3" />
-                    删除所选
+                    {t("memoryList.deleteSelected")}
                   </button>
                   <button
                     type="button"
@@ -442,7 +447,7 @@ export function WorkspaceMemoryList({
                     onClick={exitSelectMode}
                     className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
                   >
-                    取消
+                    {tCommon("cancel")}
                   </button>
                 </div>
               ) : (
@@ -451,16 +456,16 @@ export function WorkspaceMemoryList({
                   disabled={busy}
                   onClick={enterSelectMode}
                   className="ml-auto text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
-                  title="勾选多条后批量删除；单条仍可用右侧编辑/删除"
+                  title={t("memoryList.batchManageTip")}
                 >
-                  批量管理
+                  {t("memoryList.batchManage")}
                 </button>
               )
             ) : null}
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
-            长期记忆写入 MEMORY.md，跨会话保留并参与对话侧文本检索；日记类短期记忆在 memory/ 目录，不在此列表展示。
-            {selectMode ? " 勾选多条后可一次性删除。" : ""}
+            {t("memoryList.listHint")}
+            {selectMode ? t("memoryList.listHintSelect") : ""}
           </p>
         </div>
       </div>
@@ -468,9 +473,9 @@ export function WorkspaceMemoryList({
       <div>
         {totalEntries === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
-            <p className="text-sm font-medium text-text-subtle">暂无长期记忆条目</p>
+            <p className="text-sm font-medium text-text-subtle">{t("memoryList.empty")}</p>
             <p className="max-w-sm text-xs leading-relaxed text-text-faint">
-              展开上方「新增记忆」添加内容后会写入 MEMORY.md，并参与 memory_search 检索。
+              {t("memoryList.emptyHint")}
             </p>
             {path ? <p className="text-[10px] text-text-faint break-all">{path}</p> : null}
           </div>
@@ -480,8 +485,8 @@ export function WorkspaceMemoryList({
               <div
                 className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-panel/95 px-3 py-2 backdrop-blur-sm"
               >
-                <span className="text-[11px] font-medium text-text-strong">批量选择</span>
-                <span className="text-[10px] text-text-muted">已选 {selectedCount} 条</span>
+                <span className="text-[11px] font-medium text-text-strong">{t("memoryList.batchSelect")}</span>
+                <span className="text-[10px] text-text-muted">{t("memoryList.selectedCount", { count: selectedCount })}</span>
                 <button
                   type="button"
                   disabled={busy || selectedCount === 0}
@@ -489,7 +494,7 @@ export function WorkspaceMemoryList({
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-status-error transition hover:bg-status-error/10 disabled:opacity-50"
                 >
                   <Trash2 className="h-3 w-3" />
-                  删除所选
+                  {t("memoryList.deleteSelected")}
                 </button>
                 <button
                   type="button"
@@ -497,7 +502,7 @@ export function WorkspaceMemoryList({
                   onClick={exitSelectMode}
                   className="ml-auto text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
                 >
-                  完成
+                  {tCommon("done")}
                 </button>
               </div>
             ) : null}
@@ -522,7 +527,7 @@ export function WorkspaceMemoryList({
                         onChange={() => toggleSectionSelect(group)}
                         className="h-3.5 w-3.5 shrink-0 accent-[var(--ui-btn-primary-bg)]"
                         onClick={(e) => e.stopPropagation()}
-                        aria-label={`选择分组 ${group.section}`}
+                        aria-label={t("memoryList.selectGroup", { section: group.section })}
                       />
                     ) : null}
                     <button
@@ -542,7 +547,7 @@ export function WorkspaceMemoryList({
                         aria-hidden
                       />
                       <span className="min-w-0 flex-1 truncate">{group.section}</span>
-                      <span className="shrink-0 font-normal text-text-faint">{group.entries.length} 条</span>
+                      <span className="shrink-0 font-normal text-text-faint">{t("memoryList.count", { count: group.entries.length })}</span>
                     </button>
                   </div>
                 </header>
@@ -575,7 +580,7 @@ export function WorkspaceMemoryList({
                         <button
                           type="button"
                           className="rounded px-1.5 py-1 text-[10px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
-                          title="编辑"
+                          title={tCommon("edit")}
                           disabled={busy}
                           onClick={() => beginEdit(group.section, key, entry)}
                         >
@@ -584,7 +589,7 @@ export function WorkspaceMemoryList({
                         <button
                           type="button"
                           className="rounded px-1.5 py-1 text-[10px] text-status-error hover:bg-status-error/10"
-                          title="删除"
+                          title={tCommon("delete")}
                           disabled={busy}
                           onClick={() =>
                             setPendingDelete({
@@ -607,7 +612,7 @@ export function WorkspaceMemoryList({
                               checked={selectedKeys.has(key)}
                               onChange={() => toggleEntrySelect(key)}
                               className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--ui-btn-primary-bg)]"
-                              aria-label={`选择 ${entry.text.slice(0, 40)}`}
+                              aria-label={t("memoryList.selectEntry", { text: entry.text.slice(0, 40) })}
                             />
                             {entryContent}
                             {entryActions}
@@ -618,12 +623,12 @@ export function WorkspaceMemoryList({
                               <>
                                 <p className="text-xs font-medium text-text-strong">{editText}</p>
                                 <label className="block text-[10px] text-text-faint">
-                                  子项（每行一条）
+                                  {t("memoryList.childrenLabel")}
                                   <textarea
                                     value={editChildrenText}
                                     onChange={(e) => setEditChildrenText(e.target.value)}
                                     rows={Math.max(3, editChildrenText.split("\n").length)}
-                                    placeholder="数学/物理理论能力强"
+                                    placeholder={t("memoryList.childrenPlaceholder")}
                                     className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
                                   />
                                 </label>
@@ -638,7 +643,7 @@ export function WorkspaceMemoryList({
                             )}
                             <div className="flex justify-end gap-2">
                               <Button variant="ghost" disabled={busy} onClick={cancelEdit}>
-                                取消
+                                {tCommon("cancel")}
                               </Button>
                               <Button
                                 variant="primary"
@@ -654,7 +659,7 @@ export function WorkspaceMemoryList({
                                 }
                                 onClick={() => void onSaveEdit(group.section, entry.index)}
                               >
-                                保存
+                                {tCommon("save")}
                               </Button>
                             </div>
                           </div>
@@ -676,46 +681,46 @@ export function WorkspaceMemoryList({
         )}
 
         {path ? (
-          <div className="pt-2 text-[10px] text-text-faint break-all">文件：{path}</div>
+          <div className="pt-2 text-[10px] text-text-faint break-all">{t("memoryList.fileLabel", { path })}</div>
         ) : null}
       </div>
 
       <Modal
         open={pendingBatchDelete}
-        title="批量删除记忆"
+        title={t("memoryList.batchDeleteTitle")}
         onClose={() => setPendingBatchDelete(false)}
         footer={(
           <div className="flex justify-end gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => setPendingBatchDelete(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button variant="primary" disabled={busy || selectedCount === 0} onClick={() => void onConfirmBatchDelete()}>
-              确认删除 {selectedCount} 条
+              {t("memoryList.batchDeleteConfirm", { count: selectedCount })}
             </Button>
           </div>
         )}
       >
         <p className="text-sm text-text-primary">
-          确定删除已选择的 {selectedCount} 条用户记忆吗？此操作会写回 MEMORY.md，且不可撤销。
+          {t("memoryList.batchDeleteMessage", { count: selectedCount })}
         </p>
       </Modal>
 
       <Modal
         open={pendingDelete != null}
-        title="删除记忆"
+        title={t("memoryList.deleteTitle")}
         onClose={() => setPendingDelete(null)}
         footer={(
           <div className="flex justify-end gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => setPendingDelete(null)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button variant="primary" disabled={busy} onClick={() => void onConfirmDelete()}>
-              确认删除
+              {t("memoryList.deleteConfirm")}
             </Button>
           </div>
         )}
       >
-        <p className="text-sm text-text-primary">确定删除这条用户记忆吗？此操作会写回 MEMORY.md。</p>
+        <p className="text-sm text-text-primary">{t("memoryList.deleteMessage")}</p>
         {pendingDelete ? (
           <p className="mt-2 rounded-md border border-border bg-surface-panel p-2 text-xs text-text-subtle break-words">
             {pendingDelete.text}

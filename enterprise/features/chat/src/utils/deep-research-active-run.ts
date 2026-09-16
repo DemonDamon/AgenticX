@@ -1,5 +1,7 @@
 /** Helpers for detecting / reconnecting in-progress deep-research runs. */
 
+import { getChatCopy, type ChatCopy } from "../i18n/chat-copy";
+
 export type ActiveDeepResearchRun = {
   runId: string;
   sessionId: string;
@@ -9,18 +11,22 @@ export type ActiveDeepResearchRun = {
   updatedAt: string;
 };
 
-const PHASE_LABELS: Record<string, string> = {
-  recon: "开题侦查",
-  clarify: "澄清确认",
-  plan: "规划路径",
-  lanes: "并行检索",
-  reflect: "复盘补搜",
-  synthesize: "撰写报告",
-  done: "已完成",
-};
+export function phaseLabel(phase: string, copy: ChatCopy = getChatCopy("zh")): string {
+  const map: Record<string, string> = {
+    recon: copy.phases.recon,
+    clarify: copy.phases.clarify,
+    plan: copy.phases.plan,
+    lanes: copy.phases.lanes,
+    reflect: copy.phases.reflect,
+    synthesize: copy.phases.synthesize,
+    done: copy.phases.done,
+  };
+  return map[phase] ?? phase;
+}
 
+/** @deprecated use phaseLabel */
 export function phaseLabelZh(phase: string): string {
-  return PHASE_LABELS[phase] ?? phase;
+  return phaseLabel(phase);
 }
 
 export async function fetchActiveDeepResearchRuns(

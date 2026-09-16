@@ -1,0 +1,12 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.136.0
+    container_name: agenticx-gateway-scrape
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      GATEWAY_METRICS_HOST: ${GATEWAY_METRICS_HOST:-host.docker.internal}
+    restart: unless-stopped

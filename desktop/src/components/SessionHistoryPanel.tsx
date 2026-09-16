@@ -1,5 +1,6 @@
 import { MessageSquareMore } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 import { FitText } from "./ui/FitText";
@@ -59,6 +60,7 @@ function queryMatchesSearch(item: QueryNavItem, query: string): boolean {
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tintColor }: Props) {
+  const { t } = useTranslation("sidebar");
   const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
 
@@ -139,10 +141,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
 
   const showLoading = !fetchAttempted && queries.length === 0;
   const emptyLabel = !pane.sessionId
-    ? "当前无会话"
+    ? t("sessionQueries.emptyNoSession")
     : searchQuery.trim()
-      ? "未找到匹配提问"
-      : "本会话还没有提问";
+      ? t("sessionQueries.emptyNoMatch")
+      : t("sessionQueries.emptyNone");
 
   return (
     <div
@@ -152,12 +154,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
       <div className="flex shrink-0 flex-col">
         <div className="flex min-w-0 items-center gap-1 px-3 py-2">
           <div className="min-w-0 flex-1 font-medium text-text-strong">
-            <FitText maxSize={13} minSize={10} title="本会话提问">
-              本会话提问
+            <FitText maxSize={13} minSize={10} title={t("sessionQueries.title")}>
+              {t("sessionQueries.title")}
             </FitText>
           </div>
           {queries.length > 0 ? (
-            <span className="shrink-0 text-[11px] text-text-faint">{queries.length} 轮</span>
+            <span className="shrink-0 text-[11px] text-text-faint">{t("sessionQueries.turnCount", { count: queries.length })}</span>
           ) : null}
         </div>
         <div className="px-2 pb-1.5">
@@ -165,10 +167,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索提问…"
+            placeholder={t("sessionQueries.searchPlaceholder")}
             autoComplete="off"
             spellCheck={false}
-            aria-label="搜索本会话提问"
+            aria-label={t("sessionQueries.searchAria")}
             className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
           />
         </div>

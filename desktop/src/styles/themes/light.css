@@ -84,6 +84,8 @@
   --ui-btn-primary-bg: rgba(var(--theme-color-rgb), 1);
   --ui-btn-primary-bg-hover: rgba(var(--theme-color-rgb), 0.9);
   --ui-btn-primary-text: var(--theme-color-text);
+  /* Off-state switch track: must read as a gray well on white, not a floating thumb */
+  --ui-switch-track-off: rgba(0, 0, 0, 0.16);
   --ui-accent-surface: rgba(0, 0, 0, 0.05);
   --ui-accent-surface-hover: rgba(0, 0, 0, 0.08);
   --ui-accent-text: #111827;

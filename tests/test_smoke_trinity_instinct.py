@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -53,7 +54,16 @@ def test_instinct_store_persists_and_loads(tmp_path: Path) -> None:
     assert loaded[0].id == "keep-diffs-small"
 
 
-def test_observation_hook_writes_jsonl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observation_hook_persists_to_the_session_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """观察记录落在 ``~/.agenticx/sessions/<session_id>/tool_call_observations.json``。
+
+    这条用例原来按 ``instincts/projects/<project_id>/observations.jsonl`` 断言，并且
+    调 ``hook._project_id(session)``。落点后来改成了按 session_id 组织
+    （见 observer._resolve_session_dir），``_project_id`` 也随之删掉，于是这里一直是
+    AttributeError。tests/test_smoke_hermes_agent_observer.py 断言的才是现在的契约。
+    """
     monkeypatch.setenv("AGX_LEARNING_ENABLED", "true")
     monkeypatch.setattr("agenticx.learning.observer.Path.home", lambda: tmp_path)
     session = StudioSession()
@@ -63,11 +73,15 @@ def test_observation_hook_writes_jsonl(tmp_path: Path, monkeypatch: pytest.Monke
 
     async def _run() -> None:
         await hook.after_tool_call("file_read", "ok-result", session)
-        await asyncio.sleep(0.05)
+        # _persist 是 create_task 起的后台写，等它落盘。
+        await asyncio.sleep(0.15)
 
     asyncio.run(_run())
-    project_id = hook._project_id(session)  # noqa: SLF001
-    output_file = tmp_path / ".agenticx" / "instincts" / "projects" / project_id / "observations.jsonl"
-    assert output_file.exists()
-    content = output_file.read_text(encoding="utf-8")
-    assert "file_read" in content
+
+    output_file = (
+        tmp_path / ".agenticx" / "sessions" / "sess-1" / "tool_call_observations.json"
+    )
+    assert output_file.exists(), f"observations not found at {output_file}"
+    observations = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [o["tool_name"] for o in observations] == ["file_read"]
+    assert observations[0]["success"] is True

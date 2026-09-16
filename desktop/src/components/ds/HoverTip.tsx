@@ -9,6 +9,8 @@ type Props = {
   inline?: boolean;
   /** Tooltip horizontal anchor; `end` keeps the bubble inside narrow right-aligned rows. */
   tooltipAlign?: "center" | "end";
+  /** Default sits above the target; `below` is for composer chips. */
+  placement?: "above" | "below";
   /** Extra classes on the hover target wrapper (e.g. `w-full min-w-0` for block text). */
   className?: string;
   children: ReactNode;
@@ -19,6 +21,7 @@ export function HoverTip({
   delayMs = 280,
   inline = false,
   tooltipAlign = "center",
+  placement = "above",
   className,
   children,
 }: Props) {
@@ -38,10 +41,11 @@ export function HoverTip({
     const el = anchorRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    const y = placement === "below" ? rect.bottom : rect.top;
     if (tooltipAlign === "end") {
-      setCoords({ x: rect.right, y: rect.top });
+      setCoords({ x: rect.right, y });
     } else {
-      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+      setCoords({ x: rect.left + rect.width / 2, y });
     }
   };
 
@@ -73,8 +77,12 @@ export function HoverTip({
               top: coords.y,
               transform:
                 tooltipAlign === "end"
-                  ? "translate(-100%, calc(-100% - 6px))"
-                  : "translate(-50%, calc(-100% - 6px))",
+                  ? placement === "below"
+                    ? "translate(-100%, 6px)"
+                    : "translate(-100%, calc(-100% - 6px))"
+                  : placement === "below"
+                    ? "translate(-50%, 6px)"
+                    : "translate(-50%, calc(-100% - 6px))",
             }}
           >
             {label}

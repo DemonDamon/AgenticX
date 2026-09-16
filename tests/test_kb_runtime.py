@@ -675,6 +675,181 @@ def test_job_registry_runs_ingest(tmp_path: Path):
     assert final.progress == 1.0
 
 
+def test_job_registry_cancel_before_start(tmp_path: Path, monkeypatch):
+    import time
+
+    from agenticx.studio.kb.contracts import IngestReport
+    from agenticx.studio.kb.jobs import IngestJobStatus, JobRegistry
+
+    runtime = _build_runtime(tmp_path)
+    doc1_path = tmp_path / "first.md"
+    doc1_path.write_text("first document for cancel test")
+    doc2_path = tmp_path / "second.md"
+    doc2_path.write_text("second document for cancel test")
+    doc1 = runtime.register_document(str(doc1_path))
+    doc2 = runtime.register_document(str(doc2_path))
+
+    ingested: list[str] = []
+
+    def _slow_ingest(self, doc_id, *, progress_cb=None, cancel_event=None):
+        ingested.append(doc_id)
+        time.sleep(2)
+        return IngestReport(success=1)
+
+    monkeypatch.setattr(KBRuntime, "ingest_document", _slow_ingest)
+
+    registry = JobRegistry(max_workers=1)
+    registry.submit_ingest(runtime, doc1.id)
+    job2 = registry.submit_ingest(runtime, doc2.id)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        current = registry.get(job2.id)
+        if current and current.status == IngestJobStatus.QUEUED:
+            break
+        time.sleep(0.05)
+
+    job, already_terminal = registry.request_cancel(job2.id, runtime)
+    assert already_terminal is False
+    assert job.status == IngestJobStatus.CANCELLED
+    assert doc2.id not in ingested
+    assert doc1.id in ingested
+
+
+def test_ingest_document_honors_cancel_during_parse(tmp_path: Path, monkeypatch):
+    import threading
+
+    from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.studio.kb.contracts import KBCancelled, KBDocumentStatus
+
+    runtime = _build_runtime(tmp_path)
+    doc_path = tmp_path / "cancel-parse.md"
+    doc_path.write_text("cancel during parse")
+    doc = runtime.register_document(str(doc_path))
+
+    def _wait_then_cancel(source_path, cancel_event=None):
+        if cancel_event is not None:
+            cancel_event.wait(timeout=5)
+        raise KBCancelled("已取消")
+
+    monkeypatch.setattr(kb_runtime, "_read_document_text", _wait_then_cancel)
+
+    cancel_event = threading.Event()
+
+    def _set_event_later():
+        import time
+
+        time.sleep(0.1)
+        cancel_event.set()
+
+    threading.Thread(target=_set_event_later, daemon=True).start()
+    report = runtime.ingest_document(doc.id, cancel_event=cancel_event)
+
+    assert report.cancelled == 1
+    assert report.failed == 0
+    updated = runtime._registry.get(doc.id)
+    assert updated is not None
+    assert updated.status == KBDocumentStatus.CANCELLED
+    assert updated.error is not None
+    assert "已取消" in updated.error
+
+
+def test_ingest_document_honors_cancel_between_embed_batches(tmp_path: Path, monkeypatch):
+    import threading
+    import time
+
+    from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.studio.kb.contracts import KBDocumentStatus
+
+    runtime = _build_runtime(tmp_path)
+    runtime._config.chunking = ChunkingSpec(  # type: ignore[attr-defined]
+        strategy="recursive",
+        chunk_size=32,
+        chunk_overlap=0,
+    )
+    doc_path = tmp_path / "cancel-embed.md"
+    long_text = " ".join(f"token{i}" for i in range(600))
+    doc_path.write_text(long_text)
+    doc = runtime.register_document(str(doc_path))
+    monkeypatch.setattr(
+        kb_runtime,
+        "_read_document_text",
+        lambda source_path, cancel_event=None: long_text,
+    )
+
+    original_embed = kb_runtime._embed_texts
+    cancel_event = threading.Event()
+    embed_calls = 0
+    first_batch_started = threading.Event()
+    embed_lock = threading.Lock()
+
+    def _slow_embed(provider, texts):
+        nonlocal embed_calls
+        with embed_lock:
+            embed_calls += 1
+            call_num = embed_calls
+            if call_num == 1:
+                first_batch_started.set()
+        time.sleep(0.3)
+        result = original_embed(provider, texts)
+        if call_num == 1:
+            cancel_event.set()
+        return result
+
+    monkeypatch.setattr(kb_runtime, "_embed_texts", _slow_embed)
+
+    report_holder: list = []
+
+    def _run_ingest():
+        report_holder.append(
+            runtime.ingest_document(doc.id, cancel_event=cancel_event)
+        )
+
+    thread = threading.Thread(target=_run_ingest)
+    thread.start()
+    assert first_batch_started.wait(timeout=20), "expected first embed batch to start"
+    thread.join(timeout=20)
+    assert not thread.is_alive()
+
+    report = report_holder[0]
+    assert report.cancelled == 1
+    assert embed_calls == 1, "cancel must happen after first batch, before second"
+    updated = runtime._registry.get(doc.id)
+    assert updated is not None
+    assert updated.status != KBDocumentStatus.DONE
+
+
+def test_request_cancel_on_finished_job_is_noop(tmp_path: Path):
+    import time
+
+    from agenticx.studio.kb.jobs import IngestJobStatus, JobRegistry
+
+    runtime = _build_runtime(tmp_path)
+    doc_path = tmp_path / "noop-cancel.md"
+    doc_path.write_text("noop cancel after done")
+    doc = runtime.register_document(str(doc_path))
+
+    registry = JobRegistry(max_workers=1)
+    job = registry.submit_ingest(runtime, doc.id)
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        current = registry.get(job.id)
+        if current and current.status in {IngestJobStatus.DONE, IngestJobStatus.FAILED}:
+            break
+        time.sleep(0.1)
+
+    final = registry.get(job.id)
+    assert final is not None
+    assert final.status == IngestJobStatus.DONE
+
+    _, already_terminal = registry.request_cancel(job.id, runtime)
+    assert already_terminal is True
+    after = registry.get(job.id)
+    assert after is not None
+    assert after.status == IngestJobStatus.DONE
+
+
 def test_ingest_progress_callback_reports_embedding_percentage(tmp_path: Path):
     runtime = _build_runtime(tmp_path)
     runtime._config.chunking = ChunkingSpec(  # type: ignore[attr-defined]
@@ -719,7 +894,7 @@ def test_read_document_text_routes_liteparse_only_exts(tmp_path: Path, monkeypat
     img_path.write_bytes(b"\x89PNG\r\n\x1a\n")  # not a real PNG, but that's fine — we stub
     called: list[Path] = []
 
-    async def _fake_liteparse(path, *, require_libreoffice: bool = False):
+    async def _fake_liteparse(path, *, require_libreoffice: bool = False, cancel_event=None):
         called.append(path)
         return "hello from liteparse"
 

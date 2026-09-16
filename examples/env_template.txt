@@ -1,9 +1,9 @@
 # --- DeepSeek ---
-DEEPSEEK_API_KEY=sk-1118a1d3fc9f40dd9a01282baec3714b
+DEEPSEEK_API_KEY=
 DEEPSEEK_API_BASE=https://api.deepseek.com
 
 # --- OpenAI ---
-OPENAI_API_KEY=sk-jQ0b8347cc1b8d06395eeefe1461da93c99050f9ac8PZmEd
+OPENAI_API_KEY=
 OPENAI_API_BASE=https://api.gptsapi.net/v1
 
 # --- Anthropic ---

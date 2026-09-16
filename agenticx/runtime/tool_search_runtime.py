@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    resolve_effective_context_window,
+)
 from agenticx.runtime.tool_search import (
-    BUILTIN_DEFER_ALLOWLIST,
     CORE_ALWAYS_LOAD_TOOLS,
     DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD,
     DEFAULT_CONTEXT_BUDGET_RATIO,
@@ -21,14 +23,15 @@ from agenticx.runtime.tool_search import (
     estimate_schema_tokens,
     load_state_from_scratchpad,
     prune_state_to_catalog,
+    resolve_apply_threshold,
     resolve_effective_threshold,
     should_apply_tool_search,
 )
 
 
 def read_tool_search_config() -> ToolSearchConfig:
-    """Read ``runtime.tool_search`` from merged config; default mode=off."""
-    mode = "off"
+    """Read ``runtime.tool_search`` from merged config; default mode=auto."""
+    mode = "auto"
     threshold = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     strategy = "adaptive"
     ratio = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -37,7 +40,7 @@ def read_tool_search_config() -> ToolSearchConfig:
 
         raw = ConfigManager.get_value("runtime.tool_search")
         if isinstance(raw, dict):
-            mode = str(raw.get("mode") or "off").strip().lower() or "off"
+            mode = str(raw.get("mode") or "auto").strip().lower() or "auto"
             try:
                 threshold = int(
                     raw.get("auto_schema_token_threshold")
@@ -87,7 +90,7 @@ def build_builtin_catalog(openai_tools: list[dict]) -> ToolCatalog:
             fn = {}
         desc = str(fn.get("description") or "")
         params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
-        always = name in CORE_ALWAYS_LOAD_TOOLS or name not in BUILTIN_DEFER_ALLOWLIST
+        always = name in CORE_ALWAYS_LOAD_TOOLS
         descriptors.append(
             ToolDescriptor(
                 stable_id=f"builtin:{name}",
@@ -133,7 +136,11 @@ def build_runtime_context(
     pool_names = {_openai_tool_name(t) for t in full_openai_tools}
     tool_search_allowed = TOOL_SEARCH_TOOL_NAME in pool_names
 
-    window = resolve_context_window(str(getattr(session, "model_name", "") or ""))
+    window = resolve_effective_context_window(
+        str(getattr(session, "model_name", "") or ""),
+        declared_window_for_session(session),
+    )
+    apply_threshold = resolve_apply_threshold(cfg)
     effective_threshold = resolve_effective_threshold(cfg, context_window=window)
     prev_raw = scratchpad.get(TOOL_SEARCH_DECISION_KEY)
     prev_applied = (
@@ -146,7 +153,7 @@ def build_runtime_context(
         cfg,
         full_pool_schema_tokens=pool_tokens,
         tool_search_allowed=tool_search_allowed,
-        effective_threshold=effective_threshold,
+        effective_threshold=apply_threshold,
         prev_applied=prev_applied,
     )
     scratchpad[TOOL_SEARCH_DECISION_KEY] = {
@@ -154,6 +161,7 @@ def build_runtime_context(
         "applied": bool(applied),
         "pool_tokens": int(pool_tokens),
         "effective_threshold": int(effective_threshold),
+        "apply_threshold": int(apply_threshold),
         "context_window": int(window),
         "threshold_strategy": cfg.normalized().threshold_strategy,
     }
@@ -164,6 +172,7 @@ def build_runtime_context(
         state=state,
         tool_search_allowed=tool_search_allowed,
         effective_threshold=effective_threshold,
+        apply_threshold=apply_threshold,
         prev_applied=prev_applied,
         resolved_applied=applied,
     )

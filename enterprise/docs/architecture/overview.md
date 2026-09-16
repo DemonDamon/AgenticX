@@ -14,31 +14,9 @@ AgenticX Enterprise 面向企业客户，提供：
 
 ## 2. 组件拓扑
 
-```mermaid
-flowchart LR
-    user([员工浏览器])
-    admin_user([管理员浏览器])
+![三端应用与数据面](/docs/svg/ent-topo-zh.svg?v=2)
 
-    subgraph apps[Apps]
-      portal["web-portal\nNext.js :3000"]
-      console["admin-console\nNext.js :3001"]
-      gateway["apps/gateway\nGo :8088"]
-    end
-
-    db[("PostgreSQL\nIAM · Chat · Policy · Audit · Usage")]
-    redis[("Redis")]
-    upstream(["OpenAI 兼容上游\nDeepSeek / Moonshot / Ollama …"])
-
-    user -->|HTTPS| portal
-    admin_user -->|HTTPS| console
-    portal -->|POST /api/chat/completions| gateway
-    portal --> db
-    console --> db
-    gateway --> db
-    gateway -. remote poll /api/internal/* .-> console
-    gateway --> upstream
-    portal -. session .-> redis
-```
+*示意图：员工打 portal :3000，管理员打 admin :3001，聊天转发到 gateway :8088，共用 Postgres。*
 
 ### 端口与进程
 

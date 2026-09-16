@@ -1,5 +1,7 @@
 import { Mic, Wrench } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../i18n/i18n";
 import { useAppStore } from "../store";
 import type { VoiceProviderKind, VoiceRealtimeEmit, VoiceHistoryTurn, VoiceToolScope } from "../voice/realtime";
 import { createRealtimeVoiceSession } from "../voice/realtime";
@@ -122,23 +124,24 @@ function readVoiceToolScope(voice: Record<string, unknown>): VoiceToolScope {
 function voiceFocusPhaseAria(phase: string): string {
   switch (phase) {
     case "listening":
-      return "正在收听";
+      return i18n.t("voice.listening", { ns: "chat" });
     case "thinking":
-      return "思考中";
+      return i18n.t("voice.thinking", { ns: "chat" });
     case "speaking":
-      return "正在播报回复";
+      return i18n.t("voice.speaking", { ns: "chat" });
     case "tool_running":
-      return "正在执行工具";
+      return i18n.t("voice.tool", { ns: "chat" });
     case "idle":
-      return "连接中";
+      return i18n.t("voice.connecting", { ns: "chat" });
     case "error":
-      return "出现异常";
+      return i18n.t("voice.error", { ns: "chat" });
     default:
-      return "语音会话";
+      return i18n.t("voice.session", { ns: "chat" });
   }
 }
 
 export function VoiceFocusMode() {
+  const { t } = useTranslation("chat");
   const panes = useAppStore((s) => s.panes);
   const focusModePaneId = useAppStore((s) => s.focusModePaneId);
   const exitFocusMode = useAppStore((s) => s.exitFocusMode);
@@ -399,7 +402,11 @@ export function VoiceFocusMode() {
         sessionRef.current?.resumeDoubaoOutput?.();
         setBridgeArmed(false);
         clearBridgeHintTimer();
-        setBridgeHint({ text: "未检测到内容或会话", isError: true, fullText: "未检测到内容或会话" });
+        setBridgeHint({
+          text: i18n.t("voice.noContent", { ns: "chat" }),
+          isError: true,
+          fullText: i18n.t("voice.noContent", { ns: "chat" }),
+        });
         bridgeHintTimerRef.current = window.setTimeout(() => {
           setBridgeHint(null);
           bridgeHintTimerRef.current = null;
@@ -412,15 +419,19 @@ export function VoiceFocusMode() {
       const ac = new AbortController();
       bridgeAbortRef.current = ac;
       clearBridgeHintTimer();
-      setBridgeHint({ text: "正在为你调用 Meta…", isError: false, fullText: "正在为你调用 Meta…" });
+      setBridgeHint({
+        text: i18n.t("voice.callingMeta", { ns: "chat" }),
+        isError: false,
+        fullText: i18n.t("voice.callingMeta", { ns: "chat" }),
+      });
       setPhase("thinking");
       setPartial(null);
       const auth = await resolveBridgeAuth();
       if (!auth.apiBase) {
         setBridgeHint({
-          text: "工具调用失败：后端地址为空（apiBase 未初始化）",
+          text: i18n.t("voice.emptyApiBase", { ns: "chat" }),
           isError: true,
-          fullText: `工具调用失败：后端地址为空（apiBase 未初始化）\napiBase="${auth.apiBase}"`,
+          fullText: `${i18n.t("voice.emptyApiBase", { ns: "chat" })}\napiBase="${auth.apiBase}"`,
         });
         bridgeHintTimerRef.current = window.setTimeout(() => {
           setBridgeHint(null);
@@ -564,9 +575,9 @@ export function VoiceFocusMode() {
             if (fallbackHint.provider && fallbackHint.model) {
               clearBridgeHintTimer();
               setBridgeHint({
-                text: "模型不可用，正在切换备用模型重试…",
+                text: i18n.t("voice.fallbackRetry", { ns: "chat" }),
                 isError: false,
-                fullText: `模型不可用，正在切换备用模型重试：${fallbackHint.provider}/${fallbackHint.model}`,
+                fullText: `${i18n.t("voice.fallbackRetry", { ns: "chat" })}：${fallbackHint.provider}/${fallbackHint.model}`,
               });
               const retried = await runMetaTurnViaChat({
                 apiBase: auth.apiBase,
@@ -636,7 +647,7 @@ export function VoiceFocusMode() {
           }
         }
         const fullMsg = [
-          `工具调用失败：${msg}`,
+          i18n.t("voice.toolFailed", { ns: "chat", message: msg }),
           `error_name=${err instanceof Error ? err.name : "unknown"}`,
           `apiBase=${auth.apiBase || "<empty>"}`,
           `sessionId=${sid || "<empty>"}`,
@@ -649,7 +660,7 @@ export function VoiceFocusMode() {
         clearBridgeHintTimer();
         setPartial(null);
         setBridgeHint({
-          text: `工具调用失败：${msg.slice(0, 120)}`,
+          text: i18n.t("voice.toolFailed", { ns: "chat", message: msg.slice(0, 120) }),
           isError: true,
           fullText: fullMsg,
         });
@@ -798,7 +809,10 @@ export function VoiceFocusMode() {
         });
         if (!created.ok || !created.session_id) {
           setPhase("error");
-          setErrorText(`未找到目标会话且创建失败：${created.error || "未知错误"}`);
+          setErrorText(i18n.t("voice.createSessionFailed", {
+            ns: "chat",
+            error: created.error || i18n.t("voice.unknownError", { ns: "chat" }),
+          }));
           errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
           return;
         }
@@ -837,7 +851,7 @@ export function VoiceFocusMode() {
         const resolved = chooseFromFlags();
         if (!resolved) {
           setPhase("error");
-          setErrorText('请先在 设置 → 语音服务 配置实时语音 Provider。');
+          setErrorText(i18n.t("voice.needVoiceProvider", { ns: "chat" }));
           openSettings("voice");
           errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
           return;
@@ -875,7 +889,7 @@ export function VoiceFocusMode() {
           }
           if (ev.kind === "tool_running") {
             if (ev.toolName) {
-              setPartial({ role: "assistant", text: `正在调用：${ev.toolName.slice(0, 16)}` });
+              setPartial({ role: "assistant", text: i18n.t("voice.callingNamed", { ns: "chat", name: ev.toolName.slice(0, 16) }) });
               setPhase("tool_running");
             } else {
               setPartial(null);
@@ -988,7 +1002,7 @@ export function VoiceFocusMode() {
         if (cancelled) return;
         setPhase("error");
         const msg = e instanceof Error ? e.message : String(e);
-        setErrorText(msg || "灵巧模式初始化失败（麦克风或服务端）");
+        setErrorText(msg || i18n.t("voice.initFailed", { ns: "chat" }));
         clearErrorExit();
         errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
       }
@@ -1104,7 +1118,7 @@ export function VoiceFocusMode() {
           role={bridgeHint.isError ? "alert" : "status"}
           title={
             bridgeHint.isError
-              ? `${bridgeHint.fullText || bridgeHint.text}\n（点击复制完整错误）`
+              ? `${bridgeHint.fullText || bridgeHint.text}\n${t("voice.copyErrorHint")}`
               : bridgeHint.text
           }
           onClick={
@@ -1112,7 +1126,7 @@ export function VoiceFocusMode() {
               ? () => {
                   try {
                     void navigator.clipboard?.writeText(bridgeHint.fullText || bridgeHint.text);
-                    setBridgeHint({ text: "错误已复制到剪贴板", isError: false });
+                    setBridgeHint({ text: t("voice.copiedError"), isError: false });
                     clearBridgeHintTimer();
                     bridgeHintTimerRef.current = window.setTimeout(() => {
                       setBridgeHint(null);
@@ -1125,7 +1139,9 @@ export function VoiceFocusMode() {
               : undefined
           }
         >
-          {bridgeHint.isError ? `❌ ${bridgeHint.text.replace(/^工具调用失败：/, "")}` : bridgeHint.text}
+          {bridgeHint.isError
+            ? `❌ ${bridgeHint.text.replace(/^工具调用失败：/, "").replace(/^Tool call failed:\s*/i, "")}`
+            : bridgeHint.text}
         </div>
       ) : null}
 
@@ -1134,9 +1150,9 @@ export function VoiceFocusMode() {
         <button
           type="button"
           className={`agx-voice-focus-tool no-drag${bridgeArmed ? " agx-voice-focus-tool--on" : " agx-voice-focus-tool--off"}`}
-          aria-label={bridgeArmed ? "工具调用已开启，点击关闭（回到纯豆包对话）" : "工具调用已关闭，点击开启"}
+          aria-label={bridgeArmed ? t("voice.bridgeOn") : t("voice.bridgeOff")}
           aria-pressed={bridgeArmed}
-          title={bridgeArmed ? "工具调用：开（点击关闭）" : "工具调用：关（点击开启）"}
+          title={bridgeArmed ? t("voice.bridgeOnTitle") : t("voice.bridgeOffTitle")}
           onClick={() => toggleDoubaoToolAsk()}
         >
           <Wrench className="agx-voice-focus-tool-icon" strokeWidth={2} aria-hidden />
@@ -1148,7 +1164,7 @@ export function VoiceFocusMode() {
       <button
         type="button"
         className="agx-voice-focus-stop no-drag"
-        aria-label="停止并退出灵巧模式"
+        aria-label={t("voice.hangup")}
         onClick={() => void hangup()}
       >
         <span className="agx-voice-focus-stop-square" />

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "core",
-  "generation": "22a7c8ce7c4d4db3a83db2055b6111e4",
+  "generation": "c40c6a2f7caa4e1ab3dc33c06be46874",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:f0ad08a132b09b1b4795bb69aff4146312cf32e2fdf857d38839e437522e95fd",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:1c0d527cea808eaac0a91909c8eb882e3c168e7cf80241ea064020f33d6867f5",
   "summary_path": "conclusions/core_module_conclusion.md",
-  "summary_sha256": "sha256:8db3277707d2e6c2a0a1cace9fc4f124783f9dd665c791d0d1c40516a334316a",
-  "updated_at": "2026-08-08T01:37:11.871366+00:00"
+  "summary_sha256": "sha256:e32521dc0b5f3197bb82b4b4669f858dd7109cc451fe10c10ba332f18184b76b",
+  "updated_at": "2026-09-01T06:08:36.686418+00:00"
 }

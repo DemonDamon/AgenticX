@@ -1,0 +1,158 @@
+import { i18n } from "../i18n/i18n";
+import { normalizeRunMode, type RunMode } from "../constants/confirm-strategy-options";
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export type NormalizedConfirmRisk = "low" | "protected";
+export type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
+
+/** 与后端 NEVER_AUTO_APPROVED_CATEGORIES 保持一致（agenticx/runtime/command_safety.py）。 */
+export const NEVER_REUSABLE_CATEGORIES: ReadonlySet<string> = new Set([
+  "destructive_filesystem",
+  "external_publish",
+  "host_full_access",
+  "system_disruption",
+]);
+
+export function hasNeverReusableCategory(
+  context?: Record<string, unknown>,
+): boolean {
+  const raw = context?.risk_categories;
+  if (!Array.isArray(raw)) return false;
+  return raw.some((item) => {
+    if (typeof item === "string") return NEVER_REUSABLE_CATEGORIES.has(item);
+    if (item && typeof item === "object" && "code" in item) {
+      return NEVER_REUSABLE_CATEGORIES.has(String((item as { code?: unknown }).code ?? ""));
+    }
+    return false;
+  });
+}
+
+/**
+ * Mirror the backend's fail-closed confirmation policy. Only an explicit
+ * `risk: "low"` may be auto-approved; missing and future values stay protected.
+ */
+export function normalizeConfirmRisk(
+  context?: Record<string, unknown>,
+): NormalizedConfirmRisk {
+  return text(context?.risk).toLowerCase() === "low" ? "low" : "protected";
+}
+
+export function isProtectedConfirmContext(
+  context?: Record<string, unknown>,
+): boolean {
+  return normalizeConfirmRisk(context) === "protected";
+}
+
+/**
+ * 确认卡能否选「按需确认 / 全部允许」。
+ * 仅 `low` 与 `non_whitelisted` 可复用；高危、缺 risk、永不可复用类别仍锁「仅本次」。
+ */
+export function canReuseConfirmPolicy(
+  context?: Record<string, unknown>,
+): boolean {
+  if (hasNeverReusableCategory(context)) return false;
+  const risk = text(context?.risk).toLowerCase();
+  return risk === "low" || risk === "non_whitelisted";
+}
+
+/**
+ * 后端在受保护请求的 context 里带 `protected_reason`。这里优先用它，取不到才回退到
+ * 本地镜像的一张表——理由的唯一出处在后端，risk 将来加一档不用记得同步改两处文案。
+ */
+const LOCAL_PROTECTED_REASON_KEYS: Record<string, string> = {
+  high: "protectedReasonHigh",
+  destructive: "protectedReasonDestructive",
+  computer_use: "protectedReasonComputerUse",
+  non_whitelisted: "protectedReasonNonWhitelisted",
+  policy: "protectedReasonPolicy",
+};
+
+export function protectedConfirmReason(
+  context?: Record<string, unknown>,
+): string {
+  if (!isProtectedConfirmContext(context)) return "";
+  const fromBackend = text(context?.protected_reason);
+  if (fromBackend) return fromBackend;
+  const key = LOCAL_PROTECTED_REASON_KEYS[text(context?.risk).toLowerCase()] ?? "protectedReasonUnknown";
+  return String(i18n.t(key, { ns: "common" }));
+}
+
+/**
+ * 以「此刻的运行模式」为准：同一会话里改档后，重试和下一轮都按新档走。
+ * 始终询问一律问；按需确认只放行常规操作；全部允许不再弹确认。
+ */
+export function shouldAutoApproveConfirm(
+  strategy: RunMode | string,
+  _scopeAlreadyAllowed: boolean,
+  context?: Record<string, unknown>,
+): boolean {
+  const mode = normalizeRunMode(strategy);
+  if (mode === "ask") return false;
+  if (mode === "auto") return true;
+  return canReuseConfirmPolicy(context);
+}
+
+export function defaultConfirmPolicyForStrategy(
+  strategy: RunMode | string,
+): ConfirmPolicy {
+  const mode = normalizeRunMode(strategy);
+  if (mode === "auto") return "run-everything";
+  if (mode === "allowlist") return "use-allowlist";
+  return "ask-every-time";
+}
+
+export function normalizeConfirmWorkspace(value: unknown): string {
+  return text(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
+}
+
+export function workspaceFromConfirmContext(
+  context?: Record<string, unknown>,
+  fallback = "",
+): string {
+  const roots = context?.workspace_roots;
+  if (Array.isArray(roots) && roots.length > 0) {
+    return roots.map(normalizeConfirmWorkspace).filter(Boolean).sort().join("|");
+  }
+  return normalizeConfirmWorkspace(context?.workspace_root ?? context?.cwd ?? fallback);
+}
+
+/** 审批记录的 key：会话 + 工作区 + 既有 scope。跨会话 / 跨工作区不复用。 */
+export function buildConfirmApprovalKey(
+  ownerId: string,
+  workspace: string,
+  scope: string,
+): string {
+  return JSON.stringify([text(ownerId), normalizeConfirmWorkspace(workspace), scope]);
+}
+
+export function parentPathForConfirmScope(pathValue: unknown): string {
+  const path = text(pathValue).replace(/[\\/]+$/, "");
+  if (!path) return "";
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (separator < 0) return path;
+  if (separator === 0) return path.slice(0, 1);
+  if (separator === 2 && /^[A-Za-z]:[\\/]/u.test(path)) return path.slice(0, 3);
+  return path.slice(0, separator);
+}
+
+export function buildConfirmScope(
+  question: string,
+  context?: Record<string, unknown>,
+): string {
+  const tool = text(context?.tool);
+  if (tool === "bash_exec") {
+    const command = text(context?.command);
+    const commandName = command.split(/\s+/u)[0] || "unknown";
+    return `bash_exec:${commandName}`;
+  }
+  if (tool === "file_write" || tool === "file_edit") {
+    const path = text(context?.path);
+    const folder = parentPathForConfirmScope(path);
+    return `${tool}:${folder || "/"}`;
+  }
+  if (tool) return `tool:${tool}`;
+  return `question:${question}`;
+}

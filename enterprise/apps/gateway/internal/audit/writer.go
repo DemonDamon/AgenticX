@@ -30,6 +30,8 @@ type Event struct {
 	DepartmentID       string          `json:"department_id,omitempty"`
 	SessionID          string          `json:"session_id,omitempty"`
 	TraceID            string          `json:"trace_id,omitempty"`
+	// DeploymentID is JSONL-only in S1; PG column is out of scope.
+	DeploymentID       string          `json:"deployment_id,omitempty"`
 	ClientType         string          `json:"client_type"`
 	ClientIP           string          `json:"client_ip,omitempty"`
 	Provider           string          `json:"provider,omitempty"`

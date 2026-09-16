@@ -1,0 +1,220 @@
+{
+  "name": "agenticx-reliability-v1",
+  "version": "1.0.0",
+  "description": "In-process fault-injection reliability benchmark for ReActAgent.",
+  "cases": [
+    {
+      "id": "kill-before-external",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_before_tool_result", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": true
+        }
+      }
+    },
+    {
+      "id": "kill-before-read",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_before_tool_result", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "read",
+          "expected_total_effects": 2,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "kill-before-unknown",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_before_tool_result", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "unknown",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": true
+        }
+      }
+    },
+    {
+      "id": "kill-before-local",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_before_tool_result", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "local_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": true
+        }
+      }
+    },
+    {
+      "id": "kill-after-external",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_after_tool_result_before_persist", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "kill-after-local",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_after_tool_result_before_persist", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "local_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "persist-failure-read",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "persist_failure", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "read",
+          "expected_total_effects": 1,
+          "expect_resume_success": false,
+          "expect_error_diagnosable": true
+        }
+      }
+    },
+    {
+      "id": "llm-timeout-external",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "llm_timeout_mid_stream", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "llm-timeout-read",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "llm_timeout_mid_stream", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [{"id": "c1", "name": "bump", "arguments": {"key": "a"}}],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "read",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "duplicate-id-external",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "duplicate_tool_call_id", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [
+              {"id": "c1", "name": "bump", "arguments": {"key": "a"}},
+              {"id": "c1", "name": "bump", "arguments": {"key": "a"}}
+            ],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    },
+    {
+      "id": "changed-args-same-id",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "changed_args_same_id", "at_call_index": 1, "tool_name": null},
+          "llm_script": [
+            [
+              {"id": "c1", "name": "bump", "arguments": {"key": "a"}},
+              {"id": "c1", "name": "bump", "arguments": {"key": "b"}}
+            ],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 1,
+          "expect_resume_success": false,
+          "expect_error_diagnosable": true
+        }
+      }
+    },
+    {
+      "id": "kill-after-second-of-two",
+      "query": "do the thing",
+      "metadata": {
+        "reliability": {
+          "fault": {"kind": "kill_before_tool_result", "at_call_index": 2, "tool_name": null},
+          "llm_script": [
+            [
+              {"id": "c1", "name": "bump", "arguments": {"key": "a"}},
+              {"id": "c2", "name": "bump", "arguments": {"key": "b"}}
+            ],
+            [{"final": "done"}]
+          ],
+          "tool_effect_class": "external_write",
+          "expected_total_effects": 2,
+          "expect_resume_success": true,
+          "expect_error_diagnosable": false
+        }
+      }
+    }
+  ]
+}

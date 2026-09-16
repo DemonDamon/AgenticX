@@ -140,6 +140,8 @@ export type StreamingResendInput = {
   forceSend?: boolean;
   /** Auto-send dequeued after prior turn finished; must not re-enqueue. */
   queueDrain?: boolean;
+  /** Retry already handled interrupt (or the turn was idle); do not persist again. */
+  skipInterrupt?: boolean;
 };
 
 export type StreamRunActiveInput = {
@@ -190,8 +192,14 @@ export function shouldEnqueueOnResend(opts: StreamingResendInput): boolean {
 }
 
 export function shouldInterruptOnResend(opts: StreamingResendInput): boolean {
+  if (opts.skipInterrupt) return false;
   if (!opts.isStreamRunActive || opts.queueDrain) return false;
   return !!opts.forceSend;
+}
+
+/** Settled-turn retry must not wait on interrupt + full persist. */
+export function shouldAwaitInterruptBeforeRetry(opts: { streamActive: boolean }): boolean {
+  return opts.streamActive;
 }
 
 /** Window for double-Enter "send now" while a run is active. */

@@ -18,15 +18,34 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
 from agenticx.avatar.portrait import (
+    PORTRAIT_STYLE,
+    PORTRAIT_STYLE_CUSTOM,
     collection_fetch_enabled,
     fetch_collection_portrait_url,
     generate_avatar_portrait_url,
     needs_portrait_refresh,
 )
 
-AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
+
+def _avatars_root() -> Path:
+    """``~/.agenticx/avatars``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "AVATARS_ROOT", "avatars")
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _avatars_root()。
+    if name == "AVATARS_ROOT":
+        return agx_home().joinpath("avatars")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 AVATAR_CONFIG_FILE = "avatar.yaml"
 
 # Must stay aligned with desktop/src/utils/avatar-color.ts AVATAR_PALETTE.
@@ -88,6 +107,8 @@ class AvatarConfig:
     name: str
     role: str = ""
     avatar_url: str = ""
+    # notionists-v1 = generated line art; custom = user upload; empty = legacy unmarked.
+    portrait_style: str = ""
     system_prompt: str = ""
     # Short blurb shown on the gallery card, distinct from system_prompt (behavior rules).
     description: str = ""
@@ -134,7 +155,7 @@ class AvatarRegistry:
     """CRUD operations for avatars with YAML persistence."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root else AVATARS_ROOT
+        self.root = Path(root) if root else _avatars_root()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _avatar_dir(self, avatar_id: str) -> Path:
@@ -176,7 +197,11 @@ class AvatarRegistry:
             cfg = self._read_config(child.name)
             if cfg is not None:
                 avatars.append(cfg)
-        missing = [item for item in avatars if needs_portrait_refresh(item.avatar_url)]
+        missing = [
+            item
+            for item in avatars
+            if needs_portrait_refresh(item.avatar_url, portrait_style=item.portrait_style)
+        ]
         if missing and collection_fetch_enabled():
             workers = min(6, len(missing))
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -185,12 +210,10 @@ class AvatarRegistry:
         return avatars
 
     def _ensure_portrait(self, config: AvatarConfig) -> AvatarConfig:
-        """Fill an illustrated portrait once if the avatar has no image yet.
-
-        Existing avatars without a picture are only updated when the illustrated
-        collection is reachable. Offline / test runs leave them unchanged.
-        """
-        if not needs_portrait_refresh(config.avatar_url):
+        """Fill or migrate an illustrated portrait when the collection is reachable."""
+        if not needs_portrait_refresh(
+            config.avatar_url, portrait_style=config.portrait_style
+        ):
             return config
         if not collection_fetch_enabled():
             return config
@@ -204,6 +227,7 @@ class AvatarRegistry:
         if not fetched:
             return config
         config.avatar_url = fetched
+        config.portrait_style = PORTRAIT_STYLE
         self._write_config(config)
         return config
 
@@ -245,7 +269,9 @@ class AvatarRegistry:
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
         resolved_avatar_url = str(avatar_url or "").strip()
-        if not resolved_avatar_url:
+        if resolved_avatar_url:
+            resolved_style = PORTRAIT_STYLE_CUSTOM
+        else:
             resolved_avatar_url = generate_avatar_portrait_url(
                 name=name,
                 role=role,
@@ -253,11 +279,13 @@ class AvatarRegistry:
                 tags=normalize_avatar_tags(tags),
                 avatar_id=avatar_id,
             )
+            resolved_style = PORTRAIT_STYLE
         config = AvatarConfig(
             id=avatar_id,
             name=name,
             role=role,
             avatar_url=resolved_avatar_url,
+            portrait_style=resolved_style,
             system_prompt=system_prompt,
             description=str(description or "").strip(),
             tags=normalize_avatar_tags(tags),
@@ -281,6 +309,7 @@ class AvatarRegistry:
         config = self._read_config(avatar_id)
         if config is None:
             return None
+        original_url = str(config.avatar_url or "").strip()
         immutable = {"id", "created_at", "workspace_dir"}
         for key, value in patch.items():
             if key in immutable:
@@ -311,6 +340,19 @@ class AvatarRegistry:
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)
+        if "avatar_url" in patch:
+            new_url = str(config.avatar_url or "").strip()
+            if not new_url:
+                config.avatar_url = generate_avatar_portrait_url(
+                    name=config.name,
+                    role=config.role,
+                    description=str(config.description or "").strip(),
+                    tags=list(config.tags or []),
+                    avatar_id=config.id,
+                )
+                config.portrait_style = PORTRAIT_STYLE
+            elif new_url != original_url:
+                config.portrait_style = PORTRAIT_STYLE_CUSTOM
         config.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_config(config)
         return config

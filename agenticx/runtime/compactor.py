@@ -16,7 +16,10 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    resolve_effective_context_window,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -197,13 +200,14 @@ class ContextCompactor:
         return max(1, int(len(text) / 3.5))
 
     @staticmethod
-    def _resolve_context_window_tokens(model: str) -> int:
+    def _resolve_context_window_tokens(model: str, session: Any = None) -> int:
         """Token-window limit shared with Desktop/Studio Context chip."""
-        return int(resolve_context_window(model or None))
+        declared = declared_window_for_session(session) if session is not None else None
+        return int(resolve_effective_context_window(model or None, declared))
 
-    def _get_context_window_chars(self, model: str) -> int:
+    def _get_context_window_chars(self, model: str, session: Any = None) -> int:
         """Legacy char proxy; not used for full-compact primary trigger."""
-        window_tokens = self._resolve_context_window_tokens(model)
+        window_tokens = self._resolve_context_window_tokens(model, session)
         default_chars = _env_int("AGX_CONTEXT_WINDOW_CHARS", window_tokens * 4)
         m = (model or "").strip().lower()
         if not m:
@@ -233,10 +237,11 @@ class ContextCompactor:
         self,
         messages: Sequence[Dict[str, Any]],
         model: str,
+        session: Any = None,
     ) -> bool:
         if not messages:
             return False
-        window = self._resolve_context_window_tokens(model)
+        window = self._resolve_context_window_tokens(model, session)
         threshold = self._compute_autocompact_threshold(window)
         est_tokens = self._estimate_token_usage(messages)
         self._last_window = window
@@ -289,6 +294,7 @@ class ContextCompactor:
         *,
         model: str = "",
         force: bool = False,
+        session: Any = None,
     ) -> Tuple[bool, str]:
         if force:
             return True, "force"
@@ -308,7 +314,7 @@ class ContextCompactor:
             for item in eval_msgs
             if isinstance(item, dict)
         )
-        token_hit = self._token_threshold_exceeded(eval_msgs, model)
+        token_hit = self._token_threshold_exceeded(eval_msgs, model, session)
 
         if _prefix is not None:
             min_tail_before_recompact = self.retain_recent_messages + max(
@@ -336,7 +342,9 @@ class ContextCompactor:
         *,
         model: str = "",
     ) -> bool:
-        should, reason = self._should_compact_with_reason(messages, model=model, force=False)
+        should, reason = self._should_compact_with_reason(
+            messages, model=model, force=False
+        )
         if should:
             self.last_trigger_reason = reason
         return should
@@ -378,7 +386,7 @@ class ContextCompactor:
         """Condense verbose tool results preserving head/tail."""
         name = str(tool_name or "").strip().lower()
         # Widget payloads are structured JSON + SVG/HTML; truncation breaks UI rendering.
-        if name == "show_widget":
+        if name in {"show_widget", "tool_result_recall"}:
             return str(result or "")
         if name == "query_data_source":
             # Time-series data must stay complete for chart rendering: a
@@ -667,6 +675,7 @@ class ContextCompactor:
         *,
         force: bool = False,
         model: str = "",
+        session: Any = None,
     ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         """Compact old messages and return compacted messages.
 
@@ -684,6 +693,7 @@ class ContextCompactor:
             copied,
             model=model,
             force=force,
+            session=session,
         )
         if not should:
             self.last_trigger_reason = ""
@@ -697,9 +707,38 @@ class ContextCompactor:
             )
             return copied, False, "", 0, ""
 
+        from agenticx.runtime import compaction_journal as _journal
+
+        lock = _journal.begin(session, trigger=self.last_trigger_reason)
+        try:
+            return await self._maybe_compact_locked(
+                copied,
+                working,
+                compact_block,
+                lock=lock,
+                force=force,
+                model=model,
+            )
+        except Exception:
+            _journal.end(lock, outcome="failed")
+            raise
+
+    async def _maybe_compact_locked(
+        self,
+        copied: List[Dict[str, Any]],
+        working: List[Dict[str, Any]],
+        compact_block: Optional[Dict[str, Any]],
+        *,
+        lock: Any,
+        force: bool,
+        model: str,
+    ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
+        from agenticx.runtime import compaction_journal as _journal
+
         to_compact, retained = self._split_for_compaction(working)
         if not to_compact:
             self.last_trigger_reason = ""
+            _journal.end(lock, outcome="nothing-to-compact")
             return copied, False, "", 0, ""
         compacted_count = len(to_compact)
         _log.info(
@@ -751,4 +790,11 @@ class ContextCompactor:
             "role": "system",
             "content": "\n\n".join(content_parts),
         }
+        from agenticx.runtime import compaction_journal as _journal
+
+        _journal.end(
+            lock,
+            outcome="summarized",
+            compacted_count=compacted_count,
+        )
         return [compacted_message, *retained], True, summary, compacted_count, pending_question

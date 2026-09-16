@@ -11,8 +11,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Globe } from "lucide-react";
 import {
+  classifyFaviconPixels,
   hostnameFromUrlOrDomain,
   resolveFaviconCandidates,
+  type FaviconTone,
 } from "../../utils/favicon-url";
 
 type Props = {
@@ -22,7 +24,36 @@ type Props = {
   size?: number;
 };
 
-type CacheEntry = { status: "ok"; dataUrl: string } | { status: "fail" };
+type UsableTone = Exclude<FaviconTone, "empty">;
+type CacheEntry =
+  | { status: "ok"; dataUrl: string; tone: UsableTone }
+  | { status: "fail" };
+
+function inspectFaviconDataUrl(dataUrl: string): Promise<FaviconTone> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const width = Math.max(1, Math.min(img.naturalWidth || 16, 32));
+        const height = Math.max(1, Math.min(img.naturalHeight || 16, 32));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          resolve("normal");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(classifyFaviconPixels(ctx.getImageData(0, 0, width, height).data));
+      } catch {
+        resolve("normal");
+      }
+    };
+    img.onerror = () => resolve("empty");
+    img.src = dataUrl;
+  });
+}
 
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<CacheEntry>>();
@@ -42,7 +73,11 @@ async function loadViaIpc(
   if (!desktop?.fetchFavicon) return { status: "fail" };
   try {
     const result = await desktop.fetchFavicon({ url, domain, size });
-    if (result.ok && result.dataUrl) return { status: "ok", dataUrl: result.dataUrl };
+    if (result.ok && result.dataUrl) {
+      const tone = await inspectFaviconDataUrl(result.dataUrl);
+      if (tone === "empty") return { status: "fail" };
+      return { status: "ok", dataUrl: result.dataUrl, tone };
+    }
   } catch {
     // fall through
   }
@@ -84,6 +119,10 @@ export function SiteFavicon({
     const hit = cache.get(key);
     return hit?.status === "ok" ? hit.dataUrl : null;
   });
+  const [tone, setTone] = useState<UsableTone>(() => {
+    const hit = cache.get(key);
+    return hit?.status === "ok" ? hit.tone : "normal";
+  });
   const [failed, setFailed] = useState(() => cache.get(key)?.status === "fail");
 
   // Direct CDN fallback only when not running under Electron IPC (e.g. browser).
@@ -97,16 +136,19 @@ export function SiteFavicon({
     const hit = cache.get(key);
     if (hit?.status === "ok") {
       setDataUrl(hit.dataUrl);
+      setTone(hit.tone);
       setFailed(false);
       return;
     }
     if (hit?.status === "fail") {
       setDataUrl(null);
+      setTone("normal");
       setFailed(true);
       return;
     }
 
     setDataUrl(null);
+    setTone("normal");
     setFailed(false);
     setCdnIndex(0);
 
@@ -117,6 +159,7 @@ export function SiteFavicon({
       if (cancelled) return;
       if (entry.status === "ok") {
         setDataUrl(entry.dataUrl);
+        setTone(entry.tone);
         setFailed(false);
       } else {
         setDataUrl(null);
@@ -129,7 +172,7 @@ export function SiteFavicon({
   }, [key, hasElectronIpc, url, domain, size]);
 
   if (dataUrl) {
-    return (
+    const img = (
       <img
         src={dataUrl}
         alt=""
@@ -138,6 +181,22 @@ export function SiteFavicon({
         decoding="async"
       />
     );
+    if (tone === "light") {
+      return (
+        <span
+          className={`inline-flex items-center justify-center overflow-hidden rounded-full bg-neutral-800 ${className}`}
+        >
+          <img
+            src={dataUrl}
+            alt=""
+            className="h-full w-full object-contain"
+            draggable={false}
+            decoding="async"
+          />
+        </span>
+      );
+    }
+    return img;
   }
 
   if (!hasElectronIpc && !failed && cdnCandidates.length > 0) {
@@ -156,8 +215,22 @@ export function SiteFavicon({
             decoding="async"
             referrerPolicy="no-referrer"
             onLoad={(e) => {
-              (e.currentTarget as HTMLImageElement).style.opacity = "1";
-              setDataUrl(src);
+              const el = e.currentTarget as HTMLImageElement;
+              void inspectFaviconDataUrl(src).then((nextTone) => {
+                if (nextTone === "empty") {
+                  if (cdnIndex + 1 < cdnCandidates.length) {
+                    setCdnIndex((i) => i + 1);
+                    return;
+                  }
+                  cache.set(key, { status: "fail" });
+                  setFailed(true);
+                  return;
+                }
+                cache.set(key, { status: "ok", dataUrl: src, tone: nextTone });
+                el.style.opacity = "1";
+                setTone(nextTone);
+                setDataUrl(src);
+              });
             }}
             onError={() => {
               if (cdnIndex + 1 < cdnCandidates.length) {

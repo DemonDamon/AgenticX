@@ -43,6 +43,7 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
         "bash_bg_input",
         "bash_bg_stop",
         "file_read",
+        "tool_result_recall",
         "file_write",
         "file_edit",
         "list_files",
@@ -56,12 +57,14 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
         "knowledge_search",
         "spawn_subagent",
         "delegate_to_avatar",
+        "update_self_identity",
         "query_subagent_status",
         "send_message_to_agent",
         "cancel_subagent",
         "retry_subagent",
         "set_taskspace",
         "tool_search",
+        "web_search",
     }
 )
 
@@ -83,6 +86,7 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "code_search",
         "codegen",
         "create_avatar",
+        "update_self_identity",
         "desktop_keyboard_type",
         "desktop_mouse_click",
         "desktop_screenshot",
@@ -119,7 +123,6 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "video_understand",
         "view_image",
         "web_fetch",
-        "web_search",
     }
 )
 
@@ -142,7 +145,7 @@ class ToolDescriptor:
 
 @dataclass(frozen=True)
 class ToolSearchConfig:
-    mode: str = "off"  # "off" | "auto" | "always"
+    mode: str = "auto"  # "off" | "auto" | "always"
     auto_schema_token_threshold: int = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     threshold_strategy: str = "adaptive"
     context_budget_ratio: float = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -192,6 +195,7 @@ class ToolSearchRuntimeContext:
     state: ToolSearchStateV1
     tool_search_allowed: bool
     effective_threshold: Optional[int] = None
+    apply_threshold: Optional[int] = None
     prev_applied: Optional[bool] = None
     resolved_applied: Optional[bool] = None
 
@@ -348,6 +352,11 @@ def resolve_effective_threshold(
     return max(THRESHOLD_FLOOR, min(THRESHOLD_CEIL, raw))
 
 
+def resolve_apply_threshold(config: ToolSearchConfig) -> int:
+    """Gate for turning projection on. Never scale with context window."""
+    return int(config.normalized().auto_schema_token_threshold)
+
+
 def decide_apply_with_hysteresis(
     *,
     prev_applied: Optional[bool],
@@ -408,11 +417,14 @@ def should_apply_tool_search(
 def _resolve_applied(ctx: ToolSearchRuntimeContext, full_openai_tools: list[dict]) -> bool:
     if ctx.resolved_applied is not None:
         return bool(ctx.resolved_applied)
+    thr = ctx.apply_threshold
+    if thr is None:
+        thr = resolve_apply_threshold(ctx.config)
     return should_apply_tool_search(
         ctx.config,
         full_pool_schema_tokens=estimate_schema_tokens(list(full_openai_tools)),
         tool_search_allowed=ctx.tool_search_allowed,
-        effective_threshold=ctx.effective_threshold,
+        effective_threshold=thr,
         prev_applied=ctx.prev_applied,
     )
 
@@ -424,7 +436,7 @@ def _estimate_core_schema_tokens(ctx: ToolSearchRuntimeContext) -> int:
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             core_tools.append(_descriptor_to_openai_tool(d))
             continue
-        if d.kind == "builtin" and d.name not in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "builtin" and not is_deferred_builtin(d.name):
             core_tools.append(_descriptor_to_openai_tool(d))
     return estimate_schema_tokens(core_tools)
 
@@ -491,12 +503,10 @@ def project_tools_for_round(
         if name in pool:
             _add_name(name)
 
-    # Non-deferred builtins that are not in CORE: still always-load
-    for name, tool in pool.items():
-        if name in CORE_ALWAYS_LOAD_TOOLS:
-            continue
-        if name in BUILTIN_DEFER_ALLOWLIST:
-            continue
+    # Non-deferred names that are not in CORE: still always-load, sorted
+    for name in sorted(
+        n for n in pool if n not in CORE_ALWAYS_LOAD_TOOLS and not is_deferred_builtin(n)
+    ):
         _add_name(name)
 
     # Always include tool_search if present in pool
@@ -668,6 +678,7 @@ def apply_search(
         state=new_state,
         tool_search_allowed=ctx.tool_search_allowed,
         effective_threshold=ctx.effective_threshold,
+        apply_threshold=ctx.apply_threshold,
         prev_applied=ctx.prev_applied,
         resolved_applied=ctx.resolved_applied,
     )
@@ -690,7 +701,8 @@ def apply_search(
 
 
 def is_deferred_builtin(name: str) -> bool:
-    return name in BUILTIN_DEFER_ALLOWLIST and name not in CORE_ALWAYS_LOAD_TOOLS
+    """Defer any builtin that is not in CORE_ALWAYS_LOAD_TOOLS."""
+    return name not in CORE_ALWAYS_LOAD_TOOLS
 
 
 def auto_load_deferred_tool(session: Any, ts_ctx: ToolSearchRuntimeContext, tool_name: str) -> str:
@@ -734,7 +746,7 @@ def known_unloaded_names(ctx: ToolSearchRuntimeContext) -> set[str]:
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             continue
-        if d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "mcp" or is_deferred_builtin(d.name):
             out.add(d.name)
     return out
 
@@ -761,5 +773,5 @@ def is_tool_pending_next_round(
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             return False
-        return d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST
+        return d.kind == "mcp" or is_deferred_builtin(d.name)
     return False

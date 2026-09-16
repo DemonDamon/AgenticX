@@ -102,3 +102,34 @@ def test_build_runtime_context_hysteresis_latch():
         config=ToolSearchConfig(mode="auto"),
     )
     assert ctx2.resolved_applied is False
+
+
+def _studio_sized_pool() -> list[dict]:
+    fat_props = {f"p{i}": {"type": "string", "description": "x" * 80} for i in range(80)}
+    return [
+        _openai("bash_exec"),
+        _openai("tool_search"),
+        _openai("web_search", props=fat_props),
+        _openai("web_fetch", props=fat_props),
+        _openai("code_search", props=fat_props),
+        _openai("file_read", props=fat_props),
+    ]
+
+
+def test_build_runtime_context_1m_model_applies_studio_sized_pool():
+    pool = _studio_sized_pool()
+    tokens = estimate_schema_tokens(pool)
+    assert 6000 <= tokens < 50_000, tokens
+
+    session = SimpleNamespace(model_name="glm-5.3-flash", scratchpad={}, mcp_hub=None)
+    ctx = build_runtime_context(
+        session=session,
+        full_openai_tools=pool,
+        config=ToolSearchConfig(mode="auto"),
+    )
+    decision = session.scratchpad[TOOL_SEARCH_DECISION_KEY]
+    assert ctx.apply_threshold == 6000
+    assert ctx.effective_threshold == 50_000
+    assert ctx.resolved_applied is True
+    assert decision["apply_threshold"] == 6000
+    assert decision["effective_threshold"] == 50_000

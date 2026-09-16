@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import path from "node:path";
 import enterprisePkg from "../../package.json";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
@@ -27,6 +28,9 @@ const config: NextConfig = {
   ],
   experimental: {
     optimizePackageImports: ["lucide-react", "@agenticx/ui"],
+  },
+  turbopack: {
+    root: path.resolve(process.cwd(), "../.."),
   },
 };
 

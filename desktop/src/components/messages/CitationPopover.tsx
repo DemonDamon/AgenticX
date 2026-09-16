@@ -1,7 +1,10 @@
 import { FileText } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { SearchReference } from "../../types/search-references";
 import { formatReferenceSnippet } from "../../utils/reference-snippet";
+import { hostnameFromUrlOrDomain } from "../../utils/favicon-url";
 import { openSearchReference } from "../../utils/open-kb-reference";
+import { SiteFavicon } from "../work-panel/SiteFavicon";
 
 type Props = {
   /** One reference for a single citation, or several chunks of the same document (merged pill). */
@@ -18,6 +21,7 @@ function fileIconLabel(title: string): string {
 }
 
 export function CitationPopover({ references }: Props) {
+  const { t } = useTranslation("chat");
   const primary = references[0];
   if (!primary) return null;
   const isKb = primary.source === "kb" || primary.url.startsWith("agx://kb/");
@@ -33,9 +37,28 @@ export function CitationPopover({ references }: Props) {
       }}
       role="tooltip"
     >
-      <div className="mb-2 text-[22px] leading-none text-text-faint" aria-hidden>
-        “
-      </div>
+      {!isKb ? (
+        <div className="mb-2.5 flex items-center gap-2">
+          <SiteFavicon
+            url={primary.url}
+            domain={primary.domain}
+            className="h-[22px] w-[22px] rounded-lg"
+            size={32}
+          />
+          <span className="truncate text-[12px] text-text-faint">
+            {primary.domain || hostnameFromUrlOrDomain(primary.url) || primary.title}
+          </span>
+        </div>
+      ) : (
+        <div className="mb-2 text-[22px] leading-none text-text-faint" aria-hidden>
+          “
+        </div>
+      )}
+      {!isKb ? (
+        <div className="mb-1.5 text-[13px] font-semibold leading-snug text-text-strong">
+          {primary.title || primary.url}
+        </div>
+      ) : null}
       {hasAnySnippet ? (
         <div className="space-y-2">
           {snippets.map((snippet, idx) =>
@@ -50,7 +73,7 @@ export function CitationPopover({ references }: Props) {
           )}
         </div>
       ) : (
-        <p className="text-[12px] text-text-faint">暂无摘录</p>
+        <p className="text-[12px] text-text-faint">{t("citation.noSnippet")}</p>
       )}
       <div className="my-2.5 h-px bg-border-subtle" />
       <button
@@ -79,7 +102,9 @@ export function CitationPopover({ references }: Props) {
           {primary.title}
         </span>
         {references.length > 1 ? (
-          <span className="shrink-0 text-[11px] text-text-faint">{references.length} 个片段</span>
+          <span className="shrink-0 text-[11px] text-text-faint">
+            {t("citation.fragmentCount", { count: references.length })}
+          </span>
         ) : null}
       </button>
     </div>

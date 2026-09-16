@@ -1,4 +1,5 @@
 import {
+
   forwardRef,
   useCallback,
   useEffect,
@@ -7,10 +8,17 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, FolderOpen, Loader2 } from "lucide-react";
 import { useAppStore } from "../../../store";
 import { createCodeIndexApi } from "./api";
 import { defaultCodeIndexConfig, type CodeIndexConfig, type CodeIndexTaskStatus } from "./types";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 export type CodeIndexSettingsHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
@@ -52,6 +60,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
   _props,
   ref,
 ) {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
   const [loading, setLoading] = useState(true);
@@ -120,7 +129,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
     try {
       await api.writeConfig(draftRef.current);
       dirtyRef.current = false;
-      setMsg("已保存，立即生效（无需重启 Near）。");
+      setMsg(st("codeIndex.saved"));
       await reloadTasks();
       return { ok: true as const };
     } catch (e) {
@@ -144,47 +153,46 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
   );
 
   const statusLabel = (() => {
-    if (!draft.enabled) return "已关闭";
-    if (tasks.length === 0) return "未索引";
+    if (!draft.enabled) return st("codeIndex.off");
+    if (tasks.length === 0) return st("codeIndex.notIndexed");
     const indexing = tasks.find((t) => t.status === "indexing");
     if (indexing) {
       const pct =
         indexing.files_total > 0
           ? Math.round((indexing.files_done / indexing.files_total) * 100)
           : 0;
-      return `索引中 ${pct}%`;
+      return st("codeIndex.indexing", { pct });
     }
     const failed = tasks.find((t) => t.status === "indexfailed");
-    if (failed) return "失败";
+    if (failed) return st("codeIndex.failed");
     const ready = tasks.some((t) => t.status === "indexed");
-    return ready ? "已就绪" : "未索引";
+    return ready ? st("codeIndex.ready") : st("codeIndex.notIndexed");
   })();
 
   if (loading) {
     return (
       <div className="rounded-lg border border-border bg-surface-card p-4 text-sm text-text-faint">
-        加载代码语义索引…
+        {st("codeIndex.loading")}
       </div>
     );
   }
 
   return (
     <div className="rounded-lg border border-border bg-surface-card p-4">
-      <div className="mb-1 text-sm font-medium text-text-primary">代码语义索引</div>
+      <div className="mb-1 text-sm font-medium text-text-primary">{st("codeIndex.title")}</div>
       <p className="mb-3 text-xs text-text-faint">
-        为 Agent 提供 <code className="text-text-subtle">code_search</code> 工具（Semble hybrid）。
-        探索阶段优先于整文件读取；精确字符串匹配请用 grep。
+        {st("codeIndex.intro")}
       </p>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm text-text-subtle">启用代码语义索引</span>
+          <span className="text-sm text-text-subtle">{st("codeIndex.enable")}</span>
           <span
             className={`rounded px-2 py-0.5 text-xs ${
-              statusLabel === "已就绪"
+              statusLabel === st("codeIndex.ready")
                 ? "bg-emerald-500/15 text-emerald-300"
-                : statusLabel === "失败"
+                : statusLabel === st("codeIndex.failed")
                   ? "bg-rose-500/15 text-rose-300"
-                  : statusLabel.startsWith("索引中")
+                  : statusLabel.startsWith(st("codeIndex.indexing", { pct: "__" }).split("__")[0])
                     ? "bg-amber-500/15 text-amber-200"
                     : "bg-surface-panel text-text-faint"
             }`}
@@ -196,7 +204,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
         <SettingsSwitch
           checked={draft.enabled}
           disabled={busy}
-          aria-label="启用代码语义索引"
+          aria-label={st("codeIndex.enable")}
           onChange={(next) => {
             dirtyRef.current = true;
             setDraft((d) => ({ ...d, enabled: next }));
@@ -214,7 +222,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
               setMsg("");
               try {
                 await api.preloadModel();
-                setMsg("嵌入模型预热已提交（首次约需数分钟）。");
+                setMsg(st("codeIndex.warmupSubmitted"));
               } catch (e) {
                 setMsg(e instanceof Error ? e.message : String(e));
               } finally {
@@ -224,7 +232,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
           }}
         >
           {busy ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : null}
-          预热嵌入模型
+          {st("codeIndex.warmup")}
         </button>
         <button
           type="button"
@@ -232,7 +240,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
           onClick={() => void window.agenticxDesktop.openCodeIndexModelCache()}
         >
           <FolderOpen className="mr-1 inline h-3.5 w-3.5" />
-          打开模型缓存目录
+          {st("codeIndex.openCache")}
         </button>
       </div>
       <button
@@ -241,23 +249,23 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
         onClick={() => setAdvOpen((v) => !v)}
       >
         {advOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        高级设置
+        {st("codeIndex.advanced")}
       </button>
       {advOpen ? (
         <div className={`mt-2 space-y-3 ${draft.enabled ? "" : "pointer-events-none opacity-50"}`}>
           <label className="block text-xs text-text-subtle">
-            后端
+            {st("codeIndex.backend")}
             <select
               className="mt-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-sm"
               value={draft.backend}
               disabled
             >
               <option value="semble">Semble</option>
-              <option value="native">Native（即将推出）</option>
+              <option value="native">{st("codeIndex.nativeSoon")}</option>
             </select>
           </label>
           <label className="block text-xs text-text-subtle">
-            默认检索模式
+            {st("codeIndex.defaultMode")}
             <select
               className="mt-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-sm"
               value={draft.semble.search_mode}
@@ -275,7 +283,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
             </select>
           </label>
           <label className="block text-xs text-text-subtle">
-            默认 top_k
+            {st("codeIndex.defaultTopK")}
             <input
               type="number"
               min={1}
@@ -292,29 +300,29 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
             />
           </label>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-text-subtle">索引 Markdown 等文本文件</span>
+            <span className="text-xs text-text-subtle">{st("codeIndex.indexText")}</span>
             <SettingsSwitch
               checked={draft.semble.include_text_files}
               onChange={(next) => {
                 dirtyRef.current = true;
                 setDraft((d) => ({ ...d, semble: { ...d.semble, include_text_files: next } }));
               }}
-              aria-label="索引文本文件"
+              aria-label={st("codeIndex.indexTextAria")}
             />
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-text-subtle">启动时预热嵌入模型</span>
+            <span className="text-xs text-text-subtle">{st("codeIndex.warmupOnStart")}</span>
             <SettingsSwitch
               checked={draft.preload_model}
               onChange={(next) => {
                 dirtyRef.current = true;
                 setDraft((d) => ({ ...d, preload_model: next }));
               }}
-              aria-label="启动时预热"
+              aria-label={st("codeIndex.warmupOnStartAria")}
             />
           </div>
           <label className="block text-xs text-text-subtle">
-            单库内存上限 (MB)
+            {st("codeIndex.memLimit")}
             <input
               type="number"
               min={128}
@@ -328,11 +336,11 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
             />
           </label>
           <p className="text-xs text-text-faint">
-            模型：{draft.semble.model}（缓存目录见上方按钮）
+            {st("codeIndex.modelCache", { model: draft.semble.model })}
           </p>
           {tasks.length > 0 ? (
             <div className="space-y-2">
-              <div className="text-xs font-medium text-text-subtle">已索引工作区</div>
+              <div className="text-xs font-medium text-text-subtle">{st("codeIndex.indexedWs")}</div>
               {tasks.map((t) => (
                 <div
                   key={t.task_id}
@@ -358,7 +366,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
                       })();
                     }}
                   >
-                    清除
+                    {st("codeIndex.clear")}
                   </button>
                 </div>
               ))}

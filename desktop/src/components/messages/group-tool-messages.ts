@@ -12,6 +12,8 @@ function canGroupToolMessage(message: Message): boolean {
   if ((message.toolName ?? "").trim() === "group_progress") return false;
   // Inline widgets render in the message body, not inside TurnToolGroupCard.
   if ((message.toolName ?? "").trim() === "show_widget") return false;
+  // Durable Plan artifacts own a standalone interactive card.
+  if (["plan_create", "plan_update"].includes((message.toolName ?? "").trim())) return false;
   // Clarification cards must render as standalone interactive rows, not nested ToolCallCards.
   if (message.clarificationPrompt) return false;
   // Action confirmation cards must also stay standalone (never fold into TurnToolGroupCard).
@@ -52,6 +54,12 @@ export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRo
 
 export function isToolGroupInProgress(messages: Message[]): boolean {
   return messages.some((m) => m.toolStatus === "running" || m.toolStatus === "pending");
+}
+
+/** True when the group ended by user/runtime cancel, not a completed run. */
+export function isToolGroupCancelled(messages: Message[]): boolean {
+  if (isToolGroupInProgress(messages)) return false;
+  return messages.some((m) => m.toolStatus === "cancelled");
 }
 
 function findLastGroupedToolMessageId(messages: Message[]): string | undefined {

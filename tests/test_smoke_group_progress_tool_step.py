@@ -26,6 +26,7 @@ def test_group_reply_defaults_new_fields_empty() -> None:
     assert reply.tool_name == ""
     assert reply.tool_phase == ""
     assert reply.tool_call_id == ""
+    assert reply.tool_detail == ""
     assert reply.clarify_options == []
     assert reply.clarify_allow_free_text is True
 
@@ -68,6 +69,34 @@ def test_progress_text_omits_tool_result_preview() -> None:
     )
     assert text == "工具已完成：web_search"
     assert len(text) < 40
+
+
+def test_tool_detail_extracts_command_and_result_preview() -> None:
+    calling = GroupChatRouter._runtime_event_to_tool_detail(
+        EventType.TOOL_CALL.value,
+        {"name": "bash_exec", "arguments": {"command": 'grep -n countdown fanshu_game.html'}},
+    )
+    assert calling == "grep -n countdown fanshu_game.html"
+
+    path_detail = GroupChatRouter._runtime_event_to_tool_detail(
+        EventType.TOOL_CALL.value,
+        {"name": "file_read", "arguments": {"path": "/tmp/work/fanshu_game.html"}},
+    )
+    assert path_detail == "fanshu_game.html"
+
+    done = GroupChatRouter._runtime_event_to_tool_detail(
+        EventType.TOOL_RESULT.value,
+        {"name": "bash_exec", "result": "128:function countdown() {\n  return 0\n}"},
+    )
+    assert done.startswith("128:function countdown()")
+    assert "\n" not in done
+    assert len(done) <= 80
+
+    dumped = GroupChatRouter._runtime_event_to_tool_detail(
+        EventType.TOOL_RESULT.value,
+        {"name": "web_search", "result": "{" + ("x" * 80) + "}"},
+    )
+    assert dumped == ""
 
 
 def test_progress_text_omits_tool_call_args() -> None:

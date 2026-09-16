@@ -6,6 +6,7 @@ from pydantic import Field  # type: ignore
 
 from agenticx.llms.base import BaseLLMProvider, StreamChunk
 from agenticx.llms.response import LLMResponse, TokenUsage, LLMChoice
+from agenticx.runtime.usage_metadata import normalize_stream_usage
 
 _REDACTED_THINKING_BLOCK = re.compile(
     r"<think>\s*(.*?)\s*</think>",
@@ -370,6 +371,11 @@ class KimiProvider(BaseLLMProvider):
         }
         if tools:
             request_params["tools"] = tools
+        stream_options = request_params.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        stream_options["include_usage"] = True
+        request_params["stream_options"] = stream_options
 
         response_stream = self.client.chat.completions.create(**request_params)
         reasoning_started = False
@@ -377,22 +383,9 @@ class KimiProvider(BaseLLMProvider):
         last_finish_reason = ""
 
         for chunk in response_stream:
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-                total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
-                if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-                    total_tokens = prompt_tokens + completion_tokens
-                if prompt_tokens > 0 or completion_tokens > 0 or total_tokens > 0:
-                    yield {
-                        "type": "usage",
-                        "usage": {
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                        },
-                    }
+            usage_chunk = normalize_stream_usage(getattr(chunk, "usage", None))
+            if usage_chunk:
+                yield {"type": "usage", "usage": usage_chunk}
 
             choices = getattr(chunk, "choices", None)
             if not choices:
@@ -461,22 +454,27 @@ class KimiProvider(BaseLLMProvider):
         messages = self._convert_prompt_to_messages(prompt)
         return self._stream_with_messages(messages, **kwargs)
     
-    async def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
+    def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
         """Stream the Kimi model's response asynchronously."""
         messages = self._convert_prompt_to_messages(prompt)
-        async_gen = self._astream_with_messages(messages, **kwargs)
-        # 为了满足类型检查器的要求，我们需要返回一个协程
-        # 但实际上我们直接返回异步生成器
-        return async_gen
+        # 返回异步生成器本身，不要写成 async def —— 那样调用方拿到的是协程，
+        # `async for chunk in provider.astream(...)` 直接 TypeError。仓库里绝大多数调用点
+        # （agent_executor、failover）都是直接 async for 的。
+        return self._astream_with_messages(messages, **kwargs)
     
     def _parse_response(self, response) -> LLMResponse:
         """Parse OpenAI response into AgenticX LLMResponse format."""
         # 处理token使用情况
         usage = response.usage
+        from agenticx.runtime.usage_metadata import extract_cached_reasoning
+
+        cached_tokens, reasoning_tokens = extract_cached_reasoning(usage)
         token_usage = TokenUsage(
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0
+            total_tokens=usage.total_tokens if usage else 0,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
         
         # 处理选择

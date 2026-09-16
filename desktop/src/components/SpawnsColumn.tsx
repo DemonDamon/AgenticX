@@ -1,4 +1,5 @@
 import { type MouseEvent as ReactMouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { PanelRightClose, Bot } from "lucide-react";
 import type { SubAgent } from "../store";
 import { SubAgentCard } from "./SubAgentCard";
@@ -37,12 +38,13 @@ export function SpawnsColumn({
   onConfirmResolve,
   tintColor,
 }: Props) {
+  const { t } = useTranslation("workspace");
   return (
     <div className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
       <div
         className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
         onMouseDown={onResizeStart}
-        title="拖拽调整 Spawns 列宽度"
+        title={t("spawns.resizeWidth")}
       >
         <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
@@ -53,14 +55,14 @@ export function SpawnsColumn({
         </span>
         <div className="flex min-w-0 items-center gap-1">
           <span className="truncate text-[10px] text-text-faint" title={sessionId || undefined}>
-            当前会话
+            {t("spawns.currentSession")}
             {sessionId && sessionId.length > 6 ? ` · ${sessionId.slice(0, 8)}…` : sessionId ? ` · ${sessionId}` : ""}
           </span>
           <button
             type="button"
             className="agx-topbar-btn !px-[5px]"
             onClick={onClose}
-            title="收起 Spawns 列"
+            title={t("spawns.collapse")}
           >
             <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
@@ -69,7 +71,7 @@ export function SpawnsColumn({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {subAgents.length === 0 ? (
           <div className="rounded-md border border-border bg-surface-card px-2 py-3 text-xs text-text-faint">
-            当前会话还没有派生子智能体
+            {t("spawns.empty")}
           </div>
         ) : (
           // 不再额外渲染一张「集群概览」压缩卡：下方逐条子智能体明细卡已完整覆盖

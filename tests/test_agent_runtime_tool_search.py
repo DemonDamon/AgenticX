@@ -16,6 +16,8 @@ from agenticx.runtime.tool_search import (
     TOOL_SEARCH_TOOL_NAME,
     ToolSearchConfig,
     dump_state_to_scratchpad,
+    is_deferred_builtin,
+    is_tool_pending_next_round,
     project_tools_for_round,
 )
 from agenticx.runtime.tool_search_runtime import build_runtime_context
@@ -123,6 +125,23 @@ def test_studio_tools_registers_tool_search():
     assert TOOL_SEARCH_TOOL_NAME in _tool_names(META_AGENT_TOOLS)
 
 
+def test_studio_tools_registers_tool_result_recall():
+    from agenticx.cli.agent_tools import STUDIO_TOOLS
+
+    schema = next(
+        fn
+        for tool in STUDIO_TOOLS
+        if isinstance(tool, dict)
+        for fn in [tool.get("function")]
+        if isinstance(fn, dict) and fn.get("name") == "tool_result_recall"
+    )
+    params = schema["parameters"]
+    assert set(params["properties"]) == {"id", "offset_bytes", "query", "context_lines"}
+    assert params["required"] == ["id"]
+    assert params.get("additionalProperties") is False
+    assert "tool_result_recall" in CORE_ALWAYS_LOAD_TOOLS
+
+
 def test_mode_off_parity(monkeypatch):
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
@@ -149,7 +168,20 @@ def test_first_round_projected(monkeypatch):
     names0 = llm.tools_seen[0]
     assert TOOL_SEARCH_TOOL_NAME in names0
     assert "bash_exec" in names0
+    assert "tool_result_recall" in names0
     assert "web_fetch" not in names0
+
+
+def test_tool_result_recall_visible_in_auto_mode(monkeypatch):
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="auto"),
+    )
+    pool = _make_pool()
+    session = StudioSession()
+    ctx = build_runtime_context(session=session, full_openai_tools=pool)
+    out = project_tools_for_round(ctx, full_openai_tools=pool)
+    assert "tool_result_recall" in _tool_names(out)
 
 
 def test_load_builtin_next_round(monkeypatch):
@@ -312,13 +344,60 @@ def test_meta_prompt_mentions_tool_search():
     assert "tool_search" in prompt
 
 
-def test_show_widget_always_projected_when_in_pool(monkeypatch):
-    """AC-1: show_widget is not deferred; projection includes it without load."""
+def test_catalog_always_load_matches_defer_gate():
+    """always_load must follow is_deferred_builtin, or auto-load is skipped."""
+    from agenticx.cli.agent_tools import studio_tools_for_session
+
+    session = StudioSession()
+    pool = studio_tools_for_session(session)
+    ctx = build_runtime_context(
+        session=session,
+        full_openai_tools=pool,
+        config=ToolSearchConfig(mode="always"),
+    )
+    for d in ctx.catalog.descriptors:
+        if d.kind != "builtin":
+            continue
+        assert d.always_load is (not is_deferred_builtin(d.name)), d.name
+
+
+def test_show_widget_direct_call_is_pending_not_hard_denied(monkeypatch):
+    """Direct show_widget must self-heal, not hit the hard-deny branch."""
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
         lambda: ToolSearchConfig(mode="always"),
     )
-    assert "show_widget" not in BUILTIN_DEFER_ALLOWLIST
+    pool = _make_pool()
+    pool.append(
+        {
+            "type": "function",
+            "function": {
+                "name": "show_widget",
+                "description": "inline widget",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    )
+    session = StudioSession()
+    ctx = build_runtime_context(session=session, full_openai_tools=pool)
+    names = _tool_names(project_tools_for_round(ctx, full_openai_tools=pool))
+    assert "show_widget" not in names
+    desc = next(d for d in ctx.catalog.descriptors if d.name == "show_widget")
+    assert desc.always_load is False
+    assert is_tool_pending_next_round(
+        ctx,
+        "show_widget",
+        allowed_tool_names=names,
+        full_openai_tools=pool,
+    )
+
+
+def test_show_widget_is_deferred_until_loaded(monkeypatch):
+    """show_widget is outside CORE, so ToolSearch withholds its schema until loaded."""
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="always"),
+    )
     pool = _make_pool()
     pool.append(
         {
@@ -334,7 +413,7 @@ def test_show_widget_always_projected_when_in_pool(monkeypatch):
     ctx = build_runtime_context(session=session, full_openai_tools=pool)
     out = project_tools_for_round(ctx, full_openai_tools=pool)
     names = _tool_names(out)
-    assert "show_widget" in names
+    assert "show_widget" not in names
     assert "web_fetch" not in names
 
 

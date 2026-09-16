@@ -9,7 +9,8 @@ export type KBDocumentStatus =
   | "embedding"
   | "writing"
   | "done"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type IngestJobStatus = KBDocumentStatus;
 
@@ -100,7 +101,7 @@ export type IngestJob = {
   status: IngestJobStatus;
   progress: number;
   message: string;
-  report: { success: number; failed: number; reasons: string[] };
+  report: { success: number; failed: number; cancelled?: number; reasons: string[] };
   started_at: string | null;
   finished_at: string | null;
 };

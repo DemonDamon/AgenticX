@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Shimmer } from "../ds/Shimmer";
@@ -53,6 +54,7 @@ function persistReasoningDuration(content: string, startedAt: number, finishedAt
 }
 
 export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
+  const { t } = useTranslation("chat");
   const content = text.trim();
   const [open, setOpen] = React.useState(streaming);
   const [tick, setTick] = React.useState(0);
@@ -119,12 +121,12 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
     hasReliableDuration = true;
   }
 
-  const title = formatReasoningTitle({ streaming, elapsedSeconds, hasReliableDuration });
+  const title = formatReasoningTitle({ streaming, elapsedSeconds, hasReliableDuration, t });
   // Same rail title typography as completed "思考了 N 秒" / tool-group rows.
   const streamingMeta =
     hasReliableDuration && elapsedSeconds >= 1
-      ? `思考中 · ${formatToolElapsedSeconds(elapsedSeconds)}`
-      : "思考中 · …";
+      ? t("reasoning.thinkingElapsed", { elapsed: formatToolElapsedSeconds(elapsedSeconds) })
+      : t("reasoning.thinking");
   const showContent = open && (content.length > 0 || streaming);
 
   return (

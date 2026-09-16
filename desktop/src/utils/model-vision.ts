@@ -18,10 +18,11 @@ function minimaxM2TextOnlySlug(slug: string): boolean {
   return false;
 }
 
-/** Zhipu GLM text SKUs (no digit+"v" vision marker) reject image_url on paas v4. */
+/** Zhipu GLM text SKUs (no digit+"v" / GLM-5.3 multimodal line) reject image_url on paas v4. */
 function zhipuTextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
   if (/\dv|vision|vl/.test(s)) return false;
+  if (s.startsWith("glm-5.3")) return false;
   return /^glm-(5|4\.6|4\.5|4|z1|zero)/.test(s);
 }
 

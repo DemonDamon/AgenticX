@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from agenticx.runtime.model_context_window import resolve_context_window
-from agenticx.studio.context_usage import resolve_context_window as resolve_from_context_usage
+from types import SimpleNamespace
+
+from agenticx.runtime.model_context_window import (
+    resolve_context_window,
+    resolve_effective_context_window,
+)
+from agenticx.studio.context_usage import (
+    resolve_context_window as resolve_from_context_usage,
+    resolve_usage_window,
+)
 
 
 def test_resolve_context_window_known_models():
@@ -15,7 +23,12 @@ def test_resolve_context_window_known_models():
         ("gemini-2.5-pro", 1_048_576),
         ("gemini-1.5", 1_000_000),
         ("qwen-plus", 128_000),
+        ("glm-5.3-flash", 1_000_000),
+        ("openai/glm-5.3", 1_000_000),
         ("glm-5.2", 1_000_000),
+        ("kimi-k2.8-preview", 1_000_000),
+        ("MiniMax-M3", 512_000),
+        ("openai/minimax-m3", 512_000),
         ("glm-5.1", 200_000),
         ("glm-4.7", 128_000),
         ("unknown-model", 128_000),
@@ -28,3 +41,29 @@ def test_resolve_context_window_known_models():
 def test_resolve_context_window_none_and_empty():
     assert resolve_context_window(None) == 128_000
     assert resolve_context_window("") == 128_000
+
+
+def test_resolve_usage_window_prefers_override_over_empty_session_model():
+    assert resolve_usage_window(session_model="", override_model="") == 128_000
+    assert resolve_usage_window(session_model="", override_model="MiniMax-M2.7") == 192_000
+    assert resolve_usage_window(session_model="", override_model="glm-5.2") == 1_000_000
+    assert resolve_usage_window(session_model="glm-5.2", override_model="MiniMax-M2.7") == 192_000
+    assert resolve_usage_window(session_model="glm-5.2", override_model="") == 1_000_000
+    assert (
+        resolve_usage_window(
+            session_model="glm-5.3-flash",
+            override_model="glm-5.3-flash",
+            declared=300_000,
+        )
+        == 300_000
+    )
+    assert resolve_effective_context_window("glm-5.3", 2_000_000) == 1_000_000
+    assert resolve_effective_context_window("MiniMax-M3", 300_000) == 300_000
+    session = SimpleNamespace(declared_context_window=300_000)
+    assert (
+        resolve_usage_window(
+            session_model="deepseek-v4-pro",
+            declared=session.declared_context_window,
+        )
+        == 300_000
+    )

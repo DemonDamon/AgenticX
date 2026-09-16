@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Boxes, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { useAppStore } from "../../store";
 
@@ -57,6 +58,8 @@ export function DeliveryPanel({
   apiToken: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("workspace");
+  const { t: tCommon } = useTranslation("common");
   const selectedTaskId = useAppStore((s) => s.deliveryPanel.selectedTaskId);
   const setDeliverySelectedTaskId = useAppStore((s) => s.setDeliverySelectedTaskId);
 
@@ -132,7 +135,7 @@ export function DeliveryPanel({
   const handleCreate = async () => {
     const name = projectName.trim();
     if (!name) {
-      setError("请填写项目名称");
+      setError(t("delivery.nameRequired"));
       return;
     }
     setCreating(true);
@@ -181,18 +184,18 @@ export function DeliveryPanel({
 
   return (
     <div className="fixed inset-0 z-[85] flex">
-      <button type="button" className="flex-1 bg-black/40" aria-label="关闭交付面板" onClick={onClose} />
+      <button type="button" className="flex-1 bg-black/40" aria-label={t("delivery.closePanel")} onClick={onClose} />
       <div className="flex h-full w-[min(920px,95vw)] flex-col border-l border-border bg-surface-panel shadow-xl">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
           <div className="flex items-center gap-2 text-sm font-medium text-text-strong">
             <Boxes className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            交付任务（POC/MVP）
+            {t("delivery.title")}
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" className="agx-topbar-btn !px-[5px]" title="刷新列表" onClick={() => void fetchTasks()}>
+            <button type="button" className="agx-topbar-btn !px-[5px]" title={t("delivery.refreshList")} onClick={() => void fetchTasks()}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
-            <button type="button" className="agx-topbar-btn !px-[5px]" title="关闭" onClick={onClose}>
+            <button type="button" className="agx-topbar-btn !px-[5px]" title={tCommon("close")} onClick={onClose}>
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -207,12 +210,12 @@ export function DeliveryPanel({
                 onClick={() => setShowCreate((v) => !v)}
               >
                 <Plus className="h-3.5 w-3.5" />
-                新建任务
+                {t("delivery.newTask")}
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {tasks.length === 0 && !loading ? (
-                <p className="px-1 text-xs text-text-faint">暂无交付任务</p>
+                <p className="px-1 text-xs text-text-faint">{t("delivery.empty")}</p>
               ) : null}
               {tasks.map((t) => (
                 <button
@@ -235,15 +238,15 @@ export function DeliveryPanel({
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {showCreate ? (
               <div className="border-b border-border p-4 text-sm">
-                <div className="mb-2 font-medium text-text-strong">新建交付任务</div>
-                <label className="mb-1 block text-xs text-text-subtle">项目名称</label>
+                <div className="mb-2 font-medium text-text-strong">{t("delivery.newTitle")}</div>
+                <label className="mb-1 block text-xs text-text-subtle">{t("delivery.projectName")}</label>
                 <input
                   className="mb-3 w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm"
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="例如：客户门户 POC"
+                  placeholder={t("delivery.projectPlaceholder")}
                 />
-                <label className="mb-1 block text-xs text-text-subtle">目标产物</label>
+                <label className="mb-1 block text-xs text-text-subtle">{t("delivery.target")}</label>
                 <select
                   className="mb-3 w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm"
                   value={target}
@@ -252,7 +255,7 @@ export function DeliveryPanel({
                   <option value="POC">POC</option>
                   <option value="MVP">MVP</option>
                 </select>
-                <label className="mb-1 block text-xs text-text-subtle">需求文件路径（每行一个，可选）</label>
+                <label className="mb-1 block text-xs text-text-subtle">{t("delivery.inputPaths")}</label>
                 <textarea
                   className="mb-3 h-20 w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs font-mono"
                   value={inputPaths}
@@ -266,10 +269,10 @@ export function DeliveryPanel({
                     className="rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1.5 text-xs text-[var(--ui-btn-primary-fg)] disabled:opacity-50"
                     onClick={() => void handleCreate()}
                   >
-                    {creating ? "创建中…" : "开始交付 Loop"}
+                    {creating ? t("delivery.creating") : t("delivery.startLoop")}
                   </button>
                   <button type="button" className="rounded-md px-3 py-1.5 text-xs text-text-subtle" onClick={() => setShowCreate(false)}>
-                    取消
+                    {tCommon("cancel")}
                   </button>
                 </div>
               </div>
@@ -278,11 +281,11 @@ export function DeliveryPanel({
             {error ? <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-300">{error}</div> : null}
 
             {!selectedTask ? (
-              <div className="flex flex-1 items-center justify-center text-sm text-text-faint">选择或新建一个交付任务</div>
+              <div className="flex flex-1 items-center justify-center text-sm text-text-faint">{t("delivery.pickOrCreate")}</div>
             ) : (
               <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr_220px]">
                 <section className="overflow-y-auto border-r border-border p-3">
-                  <div className="mb-2 text-xs font-medium text-text-strong">阶段进度</div>
+                  <div className="mb-2 text-xs font-medium text-text-strong">{t("delivery.stageProgress")}</div>
                   {STAGE_ORDER.map((sid) => {
                     const st = stages.find((s) => s.id === sid);
                     return (
@@ -298,7 +301,7 @@ export function DeliveryPanel({
                       className="mt-2 w-full rounded-md border border-border px-2 py-1 text-xs text-text-subtle hover:bg-surface-card"
                       onClick={() => void handleResume(selectedTask.task_id)}
                     >
-                      继续执行
+                      {t("delivery.resume")}
                     </button>
                   ) : null}
                 </section>
@@ -306,16 +309,19 @@ export function DeliveryPanel({
                 <section className="overflow-y-auto p-3">
                   <div className="mb-1 text-sm font-medium text-text-strong">{selectedTask.project_name}</div>
                   <div className="mb-3 text-xs text-text-faint">
-                    状态：{selectedTask.plan?.overall_status ?? selectedTask.status} · 目标：{selectedTask.target}
+                    {t("delivery.statusTarget", {
+                      status: selectedTask.plan?.overall_status ?? selectedTask.status,
+                      target: selectedTask.target,
+                    })}
                   </div>
                   {selectedTask.status === "running" ? (
                     <div className="mb-3 flex items-center gap-2 text-xs text-sky-400">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      流水线执行中…
+                      {t("delivery.pipelineRunning")}
                     </div>
                   ) : null}
                   <div className="text-xs text-text-subtle">
-                    <div className="mb-1 font-medium text-text-strong">子智能体</div>
+                    <div className="mb-1 font-medium text-text-strong">{t("delivery.subagents")}</div>
                     {stages
                       .filter((s) => s.status === "running")
                       .map((s) => (
@@ -324,13 +330,13 @@ export function DeliveryPanel({
                         </div>
                       ))}
                     {!stages.some((s) => s.status === "running") ? (
-                      <p className="text-text-faint">当前无运行中阶段</p>
+                      <p className="text-text-faint">{t("delivery.noRunningStage")}</p>
                     ) : null}
                   </div>
                 </section>
 
                 <section className="overflow-y-auto border-l border-border p-3">
-                  <div className="mb-2 text-xs font-medium text-text-strong">产物</div>
+                  <div className="mb-2 text-xs font-medium text-text-strong">{t("delivery.artifacts")}</div>
                   <ul className="space-y-1 text-[11px] font-mono text-text-subtle">
                     {stages.flatMap((s) =>
                       (s.artifacts ?? []).map((a) => (

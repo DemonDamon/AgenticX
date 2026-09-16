@@ -19,6 +19,13 @@ function escapeCsvCell(value: string): string {
   return value;
 }
 
+/** Tab-separated values for pasting into spreadsheet apps. */
+export function rowsToTsv(rows: string[][]): string {
+  return rows
+    .map((row) => row.map((cell) => cell.replace(/[\t\r\n]+/g, " ").trim()).join("\t"))
+    .join("\n");
+}
+
 /** CSV with UTF-8 BOM for Excel compatibility on Windows. */
 export function rowsToCsv(rows: string[][]): string {
   const body = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");

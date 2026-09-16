@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultFacetLanes,
+  defaultFocusOptions,
   looksOpenEndedResearchQuery,
 } from "./research-intent";
 
@@ -21,5 +22,17 @@ describe("defaultFacetLanes", () => {
     const lanes = defaultFacetLanes("deepseek v4 核心技术点");
     expect(lanes.length).toBeGreaterThanOrEqual(4);
     expect(lanes[0]).toContain("模型架构");
+  });
+
+  it("builds English facets without CJK when locale is en", () => {
+    const options = defaultFocusOptions("deepseek v4", "en");
+    expect(options.map((o) => o.label)).toEqual([
+      "Architecture innovations (e.g. MoE, attention)",
+      "Training data and optimization",
+      "Inference, serving, and cost",
+      "Evaluation and typical applications",
+    ]);
+    const lanes = defaultFacetLanes("deepseek v4", "en");
+    expect(lanes.every((lane) => !/[\u4e00-\u9fff]/.test(lane))).toBe(true);
   });
 });

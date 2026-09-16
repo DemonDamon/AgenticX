@@ -5,8 +5,10 @@ import {
   collectDeepResearchDeliveryArtifacts,
   deepResearchNeedsTrailingActivity,
   deepResearchWaitingLabel,
+  finalizeToolsCardTitle,
   stripDeepResearchProgressFromContent,
 } from "./deep-research-segments";
+import { getChatCopy } from "../../i18n/chat-copy";
 
 describe("deepResearchWaitingLabel", () => {
   it("falls back to a startup label before any event lands", () => {
@@ -423,5 +425,43 @@ describe("stripDeepResearchProgressFromContent", () => {
       "正文",
     ].join("\n");
     expect(stripDeepResearchProgressFromContent(raw)).toBe("# 报告标题\n\n正文");
+  });
+});
+
+describe("english copy", () => {
+  it("uses Search web and English done suffix for settled lanes", () => {
+    const en = getChatCopy("en");
+    expect(
+      finalizeToolsCardTitle(
+        "Broke down 8 research lanes, searching in parallel…",
+        8,
+        true,
+        en,
+      ),
+    ).toBe("Completed 8 research lanes");
+    expect(
+      finalizeToolsCardTitle(
+        "Broke down 8 research lanes, searching in parallel…",
+        8,
+        true,
+        en,
+      ),
+    ).not.toContain("已完成");
+
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "Broke down 1 research lanes, searching in parallel…" },
+      {
+        type: "lane_started",
+        laneId: "a",
+        title: "Pricing",
+        index: 1,
+        total: 1,
+      },
+      { type: "lane_done", laneId: "a", status: "ok" },
+    ];
+    const segments = buildDeepResearchSegments(events, "completed", en);
+    const tools = segments.find((s) => s.kind === "tools");
+    expect(tools && tools.kind === "tools" ? tools.steps[0]?.title : "").toBe("Search web");
+    expect(tools && tools.kind === "tools" ? tools.title : "").not.toContain("已完成");
   });
 });

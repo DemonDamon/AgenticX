@@ -1,5 +1,7 @@
 # agenticx.hooks 模块结论
 
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+>
 >  Maintainer-facing summary for `agenticx/hooks` (~26 tracked files).
 
 ## Responsibility
@@ -78,20 +80,21 @@ sequenceDiagram
 **4. LLM/Tool 遗留 Hook API**
 
 - `register_before_llm_call_hook` 等将 sync 回调包装为 async `HookHandler`，注册键分别为 `llm:before_call`、`llm:after_call`、`tool:before_call`、`tool:after_call`。
-- `execute_before_*_hooks` 构造带 `llm_context` / `tool_context` 的 `HookEvent` 并 `trigger_sync`。
+- `execute_before_*_hooks` 构造带 `llm_context` / `tool_context` 的 `HookEvent`，并以 `stop_on_false=True` 触发：before 钩子是闸门，首个否决后不再执行后续 handler。
+- `execute_after_*_hooks` 仅在响应/结果**真的被改过**时才回传非 None（与调用前初值比较），避免未修改的 str 初值顶掉调用方手里的 int/dict 结果；after 钩子包装器会把字符串结果同步回 `ctx.response` / `ctx.tool_result`，链式 after 钩子因此能看到前一个钩子的产物。
 
 ## Important classes and functions
 
 | 符号 | 角色 |
 |------|------|
-| `HookRegistry` | 按 event key 维护 handler 列表；`trigger` 合并 generic + scoped handlers；`trigger_sync` 在已有 event loop 时用独立线程 + 8s 超时 |
+| `HookRegistry` | 按 event key 维护 handler 列表；`trigger` 合并 generic + scoped handlers，`stop_on_false=True` 时首个 `False` 即中断（闸门语义，默认关、通知类事件保持全量派发）；`trigger_sync` 透传该参数，在已有 event loop 时用独立线程 + 8s 超时 |
 | `HookEvent` | 统一事件载荷：`type`、`action`、`agent_id`、`session_key`、`task_id`、`context`、`timestamp` |
 | `HookEntry` / `discover_hooks` / `load_hooks` | 目录 Hook 发现与加载管线 |
 | `DeclarativeHookConfig` / `DeclarativeHookExecutor` | 声明式 Hook 模型与多类型执行 |
 | `deduplicate_hooks` / `classify_hook` | 导入 Hook 按 `(normalized_command, event)` 去重；标注 `native` / `needs_env` / `unknown` |
 | `LLMCallHookContext` / `ToolCallHookContext` | LLM/Tool Hook 上下文；支持原地修改 messages / tool_input，或返回 False / 替换 response |
 | `build_hooks_list_payload` | `/api/hooks` 响应构建（20s TTL 缓存） |
-| bundled `pre_tool_guard.handle` | 危险 shell 正则拦截 + visible TUI 期间禁止 cc-bridge 日志 tail |
+| bundled `pre_tool_guard.handle` | 危险 shell 正则拦截（含 macOS `diskutil` 擦除/重分区、`diskutil apfs delete/erase`、`newfs_*`，写盘设备模式扩到 `/dev/sd*` 与 `/dev/rdiskN|diskN`）+ visible TUI 期间禁止 cc-bridge 日志 tail |
 
 **预置 bundled Hook（`agenticx/hooks/bundled/`）**
 
@@ -99,7 +102,7 @@ sequenceDiagram
 |------|--------|------|
 | `pre-tool-guard` | `tool:before_call` | 危险命令闸门 |
 | `session-checkpoint` | `agent:start`, `agent:stop` | 会话状态快照 |
-| `session-memory` | `command:new`, `command:reset` | workspace `memory/` 写入快照 |
+| `session-memory` | `command:new`, `command:reset` | workspace `memory/` 写入快照；工作区兜底改走 `resolve_workspace_dir`（显式 > `$AGENTICX_WORKSPACE_DIR` > cwd），不再直接落调用方 cwd |
 | `session-evaluator` | `agent:stop` | 会话结束轻量分析 |
 | `compact-advisor` | `tool:after_call` | 上下文压缩建议 |
 | `command-logger` | `command` | JSONL 审计 |
@@ -116,6 +119,7 @@ sequenceDiagram
 | `~/.agenticx/hooks/config.yaml` | `internal.enabled` / `internal.entries.<name>.enabled` | 目录 Hook 运行时开关（`load_hook_runtime_config`） |
 | 每个 Hook 目录 | `HOOK.yaml` | `name`、`events`、`export`、`requires`（bins/env/os） |
 | 声明式 | `hooks.json` / plugin 内嵌 | Cursor/Claude 兼容格式 |
+| 环境变量 | `AGENTICX_WORKSPACE_DIR` | `resolve_workspace_dir`（`agenticx.utils.workspace_dir`）的工作区兜底覆盖，session-memory 等落点生效 |
 
 事件键约定示例：`tool:before_call`、`agent:start`、`command:new`、`llm:after_call`；handler 可同时订阅 `command` 与 `command:new`。
 

@@ -21,6 +21,12 @@
             ? savedThemeColor
             : "white";
         document.documentElement.setAttribute("data-theme-color", themeColor);
+        var savedLocale = localStorage.getItem("agx-locale");
+        var nav = (navigator.language || "").toLowerCase();
+        var loc = savedLocale === "en" || savedLocale === "zh"
+          ? savedLocale
+          : nav.indexOf("en") === 0 ? "en" : "zh";
+        document.documentElement.lang = loc === "en" ? "en" : "zh-CN";
       } catch (e) {}
     </script>
   </head>

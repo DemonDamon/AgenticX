@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { collectSelectableModelOptions } from "../utils/model-options";
 
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function ModelPicker({ open, onSelect, onClose }: Props) {
+  const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
 
   const options = useMemo<ModelOption[]>(
@@ -27,7 +29,7 @@ export function ModelPicker({ open, onSelect, onClose }: Props) {
       <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[280px] w-[280px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-xl">
         {options.length === 0 ? (
           <div className="px-3 py-4 text-center text-xs text-text-faint">
-            请先在设置中配置 Provider 和模型
+            {t("model.empty")}
           </div>
         ) : (
           options.map((opt) => (

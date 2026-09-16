@@ -1,10 +1,11 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
-import { isSettingsTab } from "./settings-tab";
-import type { SettingsTab } from "./settings-tab";
+import { isSettingsFocus, isSettingsTab } from "./settings-tab";
+import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
+import { COMPOSE_PREVIEW_PANE_ID, isComposePreviewPane } from "./utils/compose-preview";
 import {
   coerceSelectableModel,
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
@@ -13,8 +14,31 @@ import {
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
+import type { ContentBlock } from "./utils/content-blocks";
+import {
+  ATTACHMENT_ROUTING_OFF,
+  type AttachmentRoutingPolicy,
+  type RoutingModelRef,
+} from "./utils/attachment-routing";
+import {
+  UNRESTRICTED_CAPABILITY_LOCKS,
+  type DesktopCapabilityLocks,
+} from "./utils/enterprise-capability-policy";
+import type { RunMode } from "./constants/confirm-strategy-options";
+import {
+  LOCALE_STORAGE_KEY,
+  isAppLocale,
+  type AppLocale,
+} from "./i18n/locales";
+import type { TurnIntent } from "./utils/turn-intent";
+import { normalizeTurnIntent } from "./utils/turn-intent";
+import { resolveAppLocale } from "./i18n/resolve-locale";
+import { i18n } from "./i18n/i18n";
+
+export type { ContentBlock } from "./utils/content-blocks";
 
 export type {
   ActionConfirmationDecision,
@@ -34,8 +58,9 @@ export type SubAgentStatus =
   | "completed"
   | "failed"
   | "cancelled";
-export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
+export type { RunMode } from "./constants/confirm-strategy-options";
 export type ThemeMode = "dark" | "light" | "dim";
+export type { AppLocale } from "./i18n/locales";
 export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
@@ -122,7 +147,10 @@ export type GroupChat = {
 };
 
 /** Main-area view router state for button-style sidebar navigation. */
-export type MainView = "chat" | "avatars" | "groups" | "automation";
+export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation";
+
+/** Sidebar「+」快捷创建：收件人栏意图。不落盘。 */
+export type QuickComposeIntent = "expert" | "group";
 
 export type SidePanelTab = "workspace" | "members" | "graph";
 
@@ -146,9 +174,8 @@ export type ChatPane = {
   modelProvider: string;
   modelName: string;
   /**
-   * Kimi K3 `reasoning_effort` for this pane (`low` | `high` | `max`).
-   * DeepSeek V4 uses `high` | `max` when thinking is on.
-   * Only sent when the active model accepts the corresponding API.
+   * Thinking effort for this pane (`low` | `high` | `max`).
+   * Only sent when the active model accepts a selectable effort ladder.
    */
   reasoningEffort?: "low" | "high" | "max";
   /**
@@ -156,6 +183,8 @@ export type ChatPane = {
    * Ignored for models that do not support the V4 thinking API.
    */
   thinkingEnabled?: boolean;
+  /** Client-declared context budget in tokens (e.g. 300000 / 512000 / 1000000). */
+  contextWindowTokens?: number;
   messages: Message[];
   historyOpen: boolean;
   memoryGraphOpen: boolean;
@@ -179,7 +208,7 @@ export type ChatPane = {
   terminalTabs: PaneTerminalTab[];
   activeTerminalTabId: string | null;
   /** Cumulative token usage for the current session (resets on new session). */
-  sessionTokens: { input: number; output: number };
+  sessionTokens: SessionTokens;
   /** Temporary highlight terms from session-history search navigation. */
   historySearchTerms: string[];
   /** One-shot scroll target: user query message id inside the current session. */
@@ -188,6 +217,10 @@ export type ChatPane = {
   pendingQuote?: { messageId: string; body: string; label: string } | null;
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /** + menu turn intent: default execute / plan first / isolated copy. */
+  turnIntent?: TurnIntent;
+  /** True after Multitask successfully created a worktree for this pane. */
+  isolateActive?: boolean;
   /** True while messages are being fetched after a session switch (shows skeleton). */
   loadingMessages?: boolean;
   /** Absolute index of the earliest loaded row in the full session snapshot (0 = full load). */
@@ -196,6 +229,11 @@ export type ChatPane = {
   hasOlderMessages?: boolean;
   /** True while fetching an older page on scroll-up. */
   loadingOlderMessages?: boolean;
+  /**
+   * Transient compose-picker preview. Not a tab, not persisted.
+   * Switching experts rebinds this pane; cancel removes it.
+   */
+  composePreview?: boolean;
   /** Sub-Plan D: right column drawer showing one sub-agent run's activity log + artifacts. */
   runDrawerOpen?: boolean;
   /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
@@ -212,7 +250,21 @@ export type ContextNoticeKind =
   | "compactor_cb"
   | "compaction_reactive"
   | "compaction_proactive"
-  | "budget_exceeded";
+  | "budget_exceeded"
+  | "widget_flow_retry";
+
+export type MessageUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  turnInputTokens?: number;
+  turnOutputTokens?: number;
+  turnCachedTokens?: number;
+};
+
+export type ModelSelection = "manual" | "auto";
 
 export type Message = {
   id: string;
@@ -226,8 +278,14 @@ export type Message = {
   agentId?: string;
   avatarName?: string;
   avatarUrl?: string;
+  /** Centered muted system line (rename confirmation, etc.). */
+  systemNotice?: boolean;
   provider?: string;
   model?: string;
+  /** Per-turn token ledger persisted on the assistant row. */
+  usage?: MessageUsage;
+  /** How this turn's model was chosen. Default / omitted is manual. */
+  modelSelection?: ModelSelection;
   quotedMessageId?: string;
   quotedContent?: string;
   forwardedHistory?: ForwardedHistoryCard;
@@ -277,6 +335,10 @@ export type Message = {
   metadata?: Record<string, unknown>;
   /** Sub-Plan E: persisted anchor for a historical sub-agent cluster card. */
   subAgentCluster?: SubAgentClusterAnchor;
+  /** Ordered text/image blocks for inline generated images. */
+  blocks?: ContentBlock[];
+  /** Render-only presentation flag; never persist. */
+  presentationHoldDeliverables?: boolean;
 };
 
 export type SubAgentClusterAnchor = {
@@ -444,6 +506,10 @@ type SettingsState = {
   open: boolean;
   /** 打开设置时若指定，则 SettingsPanel 会切换到对应分区并随后清空。 */
   openToTab?: SettingsTab;
+  /** 打开后滚到 Tab 内某个区块（如安全中心的路径/命令/工具规则）。 */
+  openToFocus?: SettingsFocus;
+  /** 每次带着 focus 打开时递增，便于已打开时再次点「自定义」仍会滚一次。 */
+  focusSeq?: number;
   defaultProvider: string;
   providers: Record<string, ProviderEntry>;
   /** legacy compat */
@@ -459,6 +525,10 @@ type TokenDashboardState = {
   range: TokenDashboardRange;
   customFrom: string;
   customTo: string;
+};
+
+type CollabRoomsState = {
+  open: boolean;
 };
 
 type DeliveryPanelState = {
@@ -479,12 +549,17 @@ type AppState = {
   clarification: ClarificationState;
   settings: SettingsState;
   tokenDashboard: TokenDashboardState;
+  collabRooms: CollabRoomsState;
   deliveryPanel: DeliveryPanelState;
   activeProvider: string;
   activeModel: string;
   userMode: "pro" | "lite";
   onboardingCompleted: boolean;
   commandPaletteOpen: boolean;
+  /** Sidebar「+」快捷创建；关闭为 null。 */
+  quickComposeIntent: QuickComposeIntent | null;
+  openQuickCompose: (intent: QuickComposeIntent) => void;
+  closeQuickCompose: () => void;
   keybindingsPanelOpen: boolean;
   planMode: boolean;
   sidebarCollapsed: boolean;
@@ -506,6 +581,7 @@ type AppState = {
   focusExitScrollBottomPaneId: string | null;
   clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
+  locale: AppLocale;
   /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
@@ -516,9 +592,21 @@ type AppState = {
   userAvatarUrl: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
+  /** 附件路由策略。无企业下发时保持关闭；真正 containment 在 Studio 侧。 */
+  attachmentRouting: AttachmentRoutingPolicy;
+  /** 本客户端已锁定的私有部署目标；空表示尚未因文档锁模。 */
+  attachmentRoutingLock: RoutingModelRef | null;
+  setAttachmentRouting: (policy: AttachmentRoutingPolicy) => void;
+  setAttachmentRoutingLock: (target: RoutingModelRef | null) => void;
+  /** 企业下发的本机自助能力锁；无企业登录时保持全开。 */
+  capabilityLocks: DesktopCapabilityLocks;
+  setCapabilityLocks: (locks: DesktopCapabilityLocks) => void;
   /** Custom avatar for Meta-Agent (Near). */
   metaAvatarUrl: string;
-  confirmStrategy: ConfirmStrategy;
+  runMode: RunMode;
+  /** Per-session task-run id used to isolate confirmation allowlists. */
+  confirmRunsBySession: Record<string, { runId: string; workspace: string }>;
+  startConfirmRun: (sessionId: string, workspace: string) => string;
   mcpServers: McpServer[];
   avatars: Avatar[];
   activeAvatarId: string | null;
@@ -537,7 +625,7 @@ type AppState = {
   setMainView: (view: MainView) => void;
   /**
    * Snapshot of the active chat pane when leaving `mainView: "chat"` for a landing
-   * page (avatars / groups / automation). Used by MainViewShell's back button.
+   * page (avatars / groups / collab / automation). Used by MainViewShell's back button.
    */
   chatReturnSnapshot: { paneId: string; sessionId?: string } | null;
   /** Restore the snapshotted chat pane and switch mainView back to chat. */
@@ -581,10 +669,12 @@ type AppState = {
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
   setPaneModel: (paneId: string, provider: string, model: string) => void;
-  /** Persist Kimi K3 / DeepSeek V4 reasoning_effort for a pane. */
+  /** Persist thinking effort for a pane. */
   setPaneReasoningEffort: (paneId: string, effort: "low" | "high" | "max") => void;
   /** Persist DeepSeek V4 thinking switch for a pane. */
   setPaneThinkingEnabled: (paneId: string, enabled: boolean) => void;
+  /** Persist a client-declared context budget for a pane. */
+  setPaneContextWindow: (paneId: string, tokens: number) => void;
   /** Migrate pane/global picks that are no longer in the visible model catalog. */
   reconcilePaneModels: () => { changedPaneIds: string[]; activeChanged: boolean };
   setUserMode: (mode: "pro" | "lite") => void;
@@ -597,6 +687,7 @@ type AppState = {
   exitFocusMode: () => void;
   toggleFocusMode: (paneId?: string) => void;
   setTheme: (theme: ThemeMode) => void;
+  setLocale: (locale: AppLocale) => void;
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
@@ -604,9 +695,11 @@ type AppState = {
   setUserAvatarUrl: (url: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
-  setConfirmStrategy: (v: ConfirmStrategy) => void;
+  setRunMode: (v: RunMode) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
+  /** Update an avatar's display name in the gallery list and every open pane. */
+  renameAvatarInPanes: (avatarId: string, name: string) => void;
   applyCorePreloadBundle: (payload: {
     sessionsKey: string;
     sessions: unknown[];
@@ -619,6 +712,16 @@ type AppState = {
   setActivePaneId: (id: string) => void;
   hydratePanes: (panes: ChatPane[], activePaneId: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
+  /**
+   * Show one expert/group in the compose picker without creating a durable tab.
+   * Reuses an already-open pane when one exists; otherwise rebinds a single preview pane.
+   */
+  upsertComposePreviewPane: (
+    avatarId: string | null,
+    avatarName: string,
+  ) => { paneId: string; reusedDurable: boolean };
+  clearComposePreview: (restorePaneId?: string) => void;
+  promoteComposePreview: () => string | null;
   removePane: (paneId: string) => void;
   /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
   removePanesForAutomationTaskId: (taskId: string) => void;
@@ -636,6 +739,7 @@ type AppState = {
         Message,
         | "avatarName"
         | "avatarUrl"
+        | "systemNotice"
         | "quotedMessageId"
         | "quotedContent"
         | "timestamp"
@@ -649,6 +753,9 @@ type AppState = {
         | "searchedQueries"
         | "ownerSessionId"
         | "metadata"
+        | "blocks"
+        | "usage"
+        | "modelSelection"
       >
     > &
       Partial<MessageToolExtras>
@@ -703,6 +810,10 @@ type AppState = {
       appendStreamLine?: string;
     }
   ) => boolean;
+  /** Stop/barge-in: flip live tool cards to cancelled so timers do not keep ticking. */
+  cancelInFlightPaneTools: (paneId: string, ownerSessionId?: string) => number;
+  /** Lite / global `messages` counterpart of {@link cancelInFlightPaneTools}. */
+  cancelInFlightLiteTools: (ownerSessionId?: string) => number;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
   markClarificationAnswered: (
@@ -712,6 +823,8 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
+  setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
+  setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   prependPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneLoadingMessages: (paneId: string, loading: boolean) => void;
@@ -750,7 +863,8 @@ type AppState = {
   ) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
-  accumulatePaneTokens: (paneId: string, input: number, output: number) => void;
+  accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
+  replacePaneTokens: (paneId: string, tokens: SessionTokens) => void;
   addMessage: (
     role: MsgRole,
     content: string,
@@ -774,6 +888,7 @@ type AppState = {
         | "references"
         | "searchedQueries"
         | "metadata"
+        | "blocks"
       >
     > &
       Partial<MessageToolExtras>
@@ -805,18 +920,20 @@ type AppState = {
     context?: Record<string, unknown>
   ) => void;
   closeClarification: () => void;
-  openSettings: (tab?: SettingsTab) => void;
+  openSettings: (tab?: SettingsTab, focus?: SettingsFocus) => void;
   closeSettings: () => void;
   updateSettings: (
     patch: Partial<
       Pick<
         SettingsState,
-        "provider" | "model" | "apiKey" | "defaultProvider" | "providers" | "openToTab"
+        "provider" | "model" | "apiKey" | "defaultProvider" | "providers" | "openToTab" | "openToFocus"
       >
     >
   ) => void;
   openTokenDashboard: () => void;
   closeTokenDashboard: () => void;
+  openCollabRooms: () => void;
+  closeCollabRooms: () => void;
   setTokenDashboardRange: (range: TokenDashboardRange) => void;
   setTokenDashboardCustomRange: (from: string, to: string) => void;
   openDeliveryPanel: (taskId?: string | null) => void;
@@ -853,7 +970,7 @@ function makeDefaultPane(): ChatPane {
     runDrawerRunId: null,
     terminalTabs: [],
     activeTerminalTabId: null,
-    sessionTokens: { input: 0, output: 0 },
+    sessionTokens: { ...EMPTY_SESSION_TOKENS },
     historySearchTerms: [],
     historyJumpMessageId: null,
     loadingMessages: false,
@@ -872,6 +989,21 @@ const sessionMessageCache: Map<string, Message[]> = new Map();
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const THEME_STORAGE_KEY = "agx-theme";
+
+function loadLocale(): AppLocale | null {
+  try {
+    const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (isAppLocale(saved)) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function initialLocale(): AppLocale {
+  const osTag = typeof navigator !== "undefined" ? navigator.language : undefined;
+  return resolveAppLocale({ saved: loadLocale(), osTag });
+}
 const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
@@ -950,7 +1082,35 @@ function loadMetaAvatarUrl(): string {
   return "";
 }
 
-type SessionTokenCache = Record<string, { input: number; output: number; updatedAt: number }>;
+export type SessionTokens = {
+  input: number;
+  output: number;
+  cached: number;
+  lastInput: number;
+  lastCached: number;
+};
+
+export const EMPTY_SESSION_TOKENS: SessionTokens = {
+  input: 0,
+  output: 0,
+  cached: 0,
+  lastInput: 0,
+  lastCached: 0,
+};
+
+type SessionTokenCache = Record<string, SessionTokens & { updatedAt: number }>;
+
+export function normalizeSessionTokens(raw: unknown): SessionTokens {
+  if (!raw || typeof raw !== "object") return { ...EMPTY_SESSION_TOKENS };
+  const row = raw as Record<string, unknown>;
+  return {
+    input: toNonNegativeInt(row.input),
+    output: toNonNegativeInt(row.output),
+    cached: toNonNegativeInt(row.cached),
+    lastInput: toNonNegativeInt(row.lastInput),
+    lastCached: toNonNegativeInt(row.lastCached),
+  };
+}
 
 function toNonNegativeInt(raw: unknown): number {
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -968,8 +1128,7 @@ function readSessionTokenCache(): SessionTokenCache {
       if (!sid || !value || typeof value !== "object") continue;
       const row = value as Record<string, unknown>;
       out[sid] = {
-        input: toNonNegativeInt(row.input),
-        output: toNonNegativeInt(row.output),
+        ...normalizeSessionTokens(row),
         updatedAt: toNonNegativeInt(row.updatedAt) || Date.now(),
       };
     }
@@ -991,21 +1150,20 @@ function writeSessionTokenCache(cache: SessionTokenCache): void {
   }
 }
 
-function getSessionTokensFromCache(sessionId: string): { input: number; output: number } | null {
+function getSessionTokensFromCache(sessionId: string): SessionTokens | null {
   const sid = String(sessionId ?? "").trim();
   if (!sid) return null;
   const row = readSessionTokenCache()[sid];
   if (!row) return null;
-  return { input: toNonNegativeInt(row.input), output: toNonNegativeInt(row.output) };
+  return normalizeSessionTokens(row);
 }
 
-function upsertSessionTokenCache(sessionId: string, input: number, output: number): void {
+function upsertSessionTokenCache(sessionId: string, tokens: SessionTokens): void {
   const sid = String(sessionId ?? "").trim();
   if (!sid) return;
   const cache = readSessionTokenCache();
   cache[sid] = {
-    input: toNonNegativeInt(input),
-    output: toNonNegativeInt(output),
+    ...normalizeSessionTokens(tokens),
     updatedAt: Date.now(),
   };
   writeSessionTokenCache(cache);
@@ -1022,6 +1180,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   userMode: "pro",
   onboardingCompleted: true,
   commandPaletteOpen: false,
+  quickComposeIntent: null,
   keybindingsPanelOpen: false,
   planMode: false,
   sidebarCollapsed: false,
@@ -1029,14 +1188,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusModePaneId: null,
   focusExitScrollBottomPaneId: null,
   theme: loadTheme(),
+  locale: initialLocale(),
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userPreference: loadUserPreference(),
+  attachmentRouting: ATTACHMENT_ROUTING_OFF,
+  attachmentRoutingLock: null,
+  capabilityLocks: UNRESTRICTED_CAPABILITY_LOCKS,
   metaAvatarUrl: loadMetaAvatarUrl(),
-  confirmStrategy: "semi-auto",
+  runMode: "ask",
+  confirmRunsBySession: {},
   mcpServers: [],
   avatars: [],
   activeAvatarId: null,
@@ -1116,8 +1280,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     options: [],
     allowFreeText: true,
   },
-  settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
+  settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {}, focusSeq: 0 },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
+  collabRooms: { open: false },
   deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
@@ -1177,6 +1342,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, thinkingEnabled: enabled } : pane,
       ),
     })),
+  setPaneContextWindow: (paneId, tokens) =>
+    set((state) => {
+      const next = Number(tokens);
+      if (!Number.isFinite(next) || next <= 0) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId ? { ...pane, contextWindowTokens: Math.floor(next) } : pane,
+        ),
+      };
+    }),
   reconcilePaneModels: () => {
     let changedPaneIds: string[] = [];
     let activeChanged = false;
@@ -1211,6 +1386,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setUserMode: (userMode) => set({ userMode }),
   setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+  openQuickCompose: (intent) => set({ quickComposeIntent: intent, commandPaletteOpen: false }),
+  closeQuickCompose: () => set({ quickComposeIntent: null }),
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
   setSidebarCollapsed: (next) =>
@@ -1277,6 +1454,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { theme };
     }),
+  setLocale: (locale) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        void window.agenticxDesktop.saveUiPrefs({ locale });
+      } catch {
+        // ignore when not running inside Electron (e.g. unit tests)
+      }
+      try {
+        void i18n.changeLanguage(locale);
+      } catch {
+        // ignore when i18n is not ready
+      }
+      return { locale };
+    }),
   setThemeColor: (themeColor) =>
     set(() => {
       try {
@@ -1329,6 +1525,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { userPreference: next };
     }),
+  setAttachmentRouting: (attachmentRouting) => set({ attachmentRouting }),
+  setAttachmentRoutingLock: (attachmentRoutingLock) => set({ attachmentRoutingLock }),
+  setCapabilityLocks: (capabilityLocks) => set({ capabilityLocks }),
   setMetaAvatarUrl: (url) =>
     set(() => {
       const next = String(url ?? "");
@@ -1340,9 +1539,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { metaAvatarUrl: next };
     }),
-  setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
+  setRunMode: (runMode) => set({ runMode }),
+  startConfirmRun: (sessionId, workspace) => {
+    const sid = String(sessionId ?? "").trim();
+    const runId = crypto.randomUUID();
+    if (sid) {
+      set((state) => ({
+        confirmRunsBySession: {
+          ...state.confirmRunsBySession,
+          [sid]: { runId, workspace: String(workspace ?? "") },
+        },
+      }));
+    }
+    return runId;
+  },
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),
+  renameAvatarInPanes: (avatarId, name) =>
+    set((state) => {
+      const id = String(avatarId ?? "").trim();
+      const nextName = String(name ?? "").trim();
+      if (!id || !nextName) return state;
+      return {
+        avatars: state.avatars.map((avatar) =>
+          avatar.id === id ? { ...avatar, name: nextName } : avatar,
+        ),
+        panes: state.panes.map((pane) =>
+          pane.avatarId === id ? { ...pane, avatarName: nextName } : pane,
+        ),
+      };
+    }),
   applyCorePreloadBundle: (payload) =>
     set((state) => {
       const sessionsKey = String(payload.sessionsKey ?? "");
@@ -1456,7 +1682,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   hydratePanes: (panes, activePaneId) =>
     set((state) => {
       if (!Array.isArray(panes) || panes.length === 0) return state;
-      const nextPanes = panes.map((p) => ({ ...makeDefaultPane(), ...p }));
+      const nextPanes = panes
+        .filter((p) => !isComposePreviewPane(p))
+        .map((p) => ({ ...makeDefaultPane(), ...p }));
+      if (nextPanes.length === 0) return state;
       const hasActive = nextPanes.some((p) => p.id === activePaneId);
       const nextActiveId = hasActive ? activePaneId : nextPanes[0]?.id ?? state.activePaneId;
       const active = nextPanes.find((p) => p.id === nextActiveId) ?? nextPanes[0];
@@ -1600,7 +1829,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           runDrawerRunId: null,
           terminalTabs: [],
           activeTerminalTabId: null,
-          sessionTokens: { input: 0, output: 0 },
+          sessionTokens: { ...EMPTY_SESSION_TOKENS },
           historySearchTerms: [],
           historyJumpMessageId: null,
         },
@@ -1608,6 +1837,85 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePaneId: paneId,
     };
     });
+    return paneId;
+  },
+  upsertComposePreviewPane: (avatarId, avatarName) => {
+    const state = get();
+    const durable = state.panes.find(
+      (pane) => !isComposePreviewPane(pane) && pane.avatarId === avatarId,
+    );
+    if (durable) {
+      set({
+        panes: state.panes.filter((pane) => !isComposePreviewPane(pane)),
+        activePaneId: durable.id,
+      });
+      return { paneId: durable.id, reusedDurable: true };
+    }
+
+    const av = avatarId ? state.avatars.find((item) => item.id === avatarId) : null;
+    const defaultProvider = (state.settings.defaultProvider || "").trim();
+    const coerced = resolveSessionBindingModel({
+      providers: state.settings.providers,
+      sessionModelKnown: false,
+      avatarProvider: av?.defaultProvider,
+      avatarModel: av?.defaultModel,
+      defaultProvider,
+      defaultModel: state.settings.providers[defaultProvider]?.model,
+      activeProvider: state.activeProvider,
+      activeModel: state.activeModel,
+    });
+    const existingPreview = state.panes.find((pane) => isComposePreviewPane(pane));
+    const previewId = existingPreview?.id ?? COMPOSE_PREVIEW_PANE_ID;
+    const sameTarget = existingPreview && existingPreview.avatarId === avatarId;
+    const nextPreview: ChatPane = sameTarget
+      ? existingPreview
+      : {
+          ...(existingPreview ?? makeDefaultPane()),
+          id: previewId,
+          avatarId,
+          avatarName,
+          sessionId: "",
+          messages: [],
+          composePreview: true,
+          sessionTokens: { ...EMPTY_SESSION_TOKENS },
+          modelProvider: coerced?.provider ?? "",
+          modelName: coerced?.model ?? "",
+          historySearchTerms: [],
+          historyJumpMessageId: null,
+          loadingMessages: false,
+        };
+    set({
+      panes: [...state.panes.filter((pane) => !isComposePreviewPane(pane)), nextPreview],
+      activePaneId: previewId,
+    });
+    return { paneId: previewId, reusedDurable: false };
+  },
+  clearComposePreview: (restorePaneId) =>
+    set((state) => {
+      const next = state.panes.filter((pane) => !isComposePreviewPane(pane));
+      if (next.length === state.panes.length) {
+        if (restorePaneId && next.some((pane) => pane.id === restorePaneId)) {
+          return { activePaneId: restorePaneId };
+        }
+        return state;
+      }
+      if (next.length === 0) return state;
+      const restore =
+        (restorePaneId && next.some((pane) => pane.id === restorePaneId) && restorePaneId) ||
+        (next.some((pane) => pane.id === state.activePaneId) && state.activePaneId) ||
+        next[0].id;
+      return { panes: next, activePaneId: restore };
+    }),
+  promoteComposePreview: () => {
+    const preview = get().panes.find((pane) => isComposePreviewPane(pane));
+    if (!preview) return null;
+    const paneId = uid();
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === preview.id ? { ...pane, id: paneId, composePreview: false } : pane,
+      ),
+      activePaneId: state.activePaneId === preview.id ? paneId : state.activePaneId,
+    }));
     return paneId;
   },
   removePane: (paneId) =>
@@ -1802,6 +2110,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     return found;
   },
+  cancelInFlightPaneTools: (paneId, ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = cancelInFlightToolMessages(pane.messages ?? [], { ownerSessionId });
+        cancelledCount = next.cancelledCount;
+        if (next.cancelledCount === 0) return pane;
+        return { ...pane, messages: next.messages };
+      }),
+    }));
+    return cancelledCount;
+  },
+  cancelInFlightLiteTools: (ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => {
+      const next = cancelInFlightToolMessages(state.messages ?? [], { ownerSessionId });
+      cancelledCount = next.cancelledCount;
+      if (next.cancelledCount === 0) return state;
+      const byId = new Map(next.messages.map((message) => [message.id, message]));
+      return {
+        messages: next.messages,
+        panes: state.panes.map((pane) => ({
+          ...pane,
+          messages: (pane.messages ?? []).map((message) => byId.get(message.id) ?? message),
+        })),
+      };
+    });
+    return cancelledCount;
+  },
   updateLastPaneMessage: (paneId, content) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
@@ -1867,7 +2205,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (pane.id !== paneId) return pane;
         const msgs = [...pane.messages];
         for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === role) {
+          if (msgs[i].role === role && !msgs[i].systemNotice) {
             msgs[i] = { ...msgs[i], ...patch };
             found = true;
             break;
@@ -1881,27 +2219,46 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearPaneMessages: (paneId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, messages: [], sessionTokens: { input: 0, output: 0 } } : pane
+        pane.id === paneId ? { ...pane, messages: [], sessionTokens: { ...EMPTY_SESSION_TOKENS } } : pane
       ),
     })),
-  accumulatePaneTokens: (paneId, input, output) =>
+  accumulatePaneTokens: (paneId, input, output, cached = 0) =>
     set((state) => {
       let targetSessionId = "";
-      let nextInput = 0;
-      let nextOutput = 0;
+      let nextTokens: SessionTokens = { ...EMPTY_SESSION_TOKENS };
+      const addInput = toNonNegativeInt(input);
+      const addOutput = toNonNegativeInt(output);
+      const addCached = toNonNegativeInt(cached);
       const nextPanes = state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
-        const merged = {
-          input: (pane.sessionTokens?.input ?? 0) + input,
-          output: (pane.sessionTokens?.output ?? 0) + output,
+        const prev = normalizeSessionTokens(pane.sessionTokens);
+        const merged: SessionTokens = {
+          input: prev.input + addInput,
+          output: prev.output + addOutput,
+          cached: prev.cached + addCached,
+          lastInput: addInput,
+          lastCached: addCached,
         };
         targetSessionId = String(pane.sessionId ?? "").trim();
-        nextInput = merged.input;
-        nextOutput = merged.output;
+        nextTokens = merged;
         return { ...pane, sessionTokens: merged };
       });
       if (targetSessionId) {
-        upsertSessionTokenCache(targetSessionId, nextInput, nextOutput);
+        upsertSessionTokenCache(targetSessionId, nextTokens);
+      }
+      return { panes: nextPanes };
+    }),
+  replacePaneTokens: (paneId, tokens) =>
+    set((state) => {
+      const nextTokens = normalizeSessionTokens(tokens);
+      let targetSessionId = "";
+      const nextPanes = state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        targetSessionId = String(pane.sessionId ?? "").trim();
+        return { ...pane, sessionTokens: nextTokens };
+      });
+      if (targetSessionId) {
+        upsertSessionTokenCache(targetSessionId, nextTokens);
       }
       return { panes: nextPanes };
     }),
@@ -1960,8 +2317,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           cached
             ? cached
             : prevTrimmed === nextTrimmed
-              ? p.sessionTokens ?? { input: 0, output: 0 }
-              : { input: 0, output: 0 };
+              ? normalizeSessionTokens(p.sessionTokens)
+              : { ...EMPTY_SESSION_TOKENS };
         return {
           ...p,
           sessionId,
@@ -1991,6 +2348,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
+      ),
+    })),
+  setPaneTurnIntent: (paneId, intent) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, turnIntent: normalizeTurnIntent(intent) } : pane,
+      ),
+    })),
+  setPaneIsolateActive: (paneId, active) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, isolateActive: active } : pane,
       ),
     })),
   setPaneMessages: (paneId, messages) =>
@@ -2437,21 +2806,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   closeClarification: () =>
     set((state) => ({ clarification: { ...state.clarification, open: false, requestId: "" } })),
-  openSettings: (tab) =>
+  openSettings: (tab, focus) =>
     set((state) => {
       const openToTab =
         tab !== undefined && isSettingsTab(tab) ? tab : undefined;
+      const openToFocus =
+        focus !== undefined && isSettingsFocus(focus) ? focus : undefined;
       return {
         settings: {
           ...state.settings,
           open: true,
           openToTab,
+          openToFocus,
+          focusSeq: openToFocus
+            ? (state.settings.focusSeq ?? 0) + 1
+            : state.settings.focusSeq,
         },
       };
     }),
   closeSettings: () =>
     set((state) => ({
-      settings: { ...state.settings, open: false, openToTab: undefined },
+      settings: {
+        ...state.settings,
+        open: false,
+        openToTab: undefined,
+        openToFocus: undefined,
+      },
     })),
   updateSettings: (patch) =>
     set((state) => ({ settings: { ...state.settings, ...patch } })),
@@ -2463,6 +2843,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, open: false },
     })),
+  openCollabRooms: () => {
+    get().setMainView("collab");
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, open: true },
+    }));
+  },
+  closeCollabRooms: () => {
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, open: false },
+    }));
+    get().returnToPreviousChat();
+  },
   setTokenDashboardRange: (range) =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, range },

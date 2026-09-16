@@ -16,7 +16,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-DEFAULT_SESSION_DB_PATH = Path.home() / ".agenticx" / "memory" / "sessions.sqlite"
+def default_session_db_path() -> Path:
+    """会话库位置，按**调用时**的 HOME 解析。
+
+    原来这里是一个模块级常量，import 的那一刻就把 Path.home() 定死了。测试里
+    tests/conftest.py 用 monkeypatch 把 HOME 指到沙箱，那是在用例开始时才生效的，而这个
+    模块早在收集阶段就 import 完——于是测试写出来的会话元数据全部落进开发者真实的
+    ~/.agenticx/memory/sessions.sqlite。
+
+    会话目录反倒没事：SessionManager 在实例化时才拼 ~/.agenticx/sessions，重定向拦得住。
+    于是症状很别扭——sqlite 里几百条记录，磁盘上没有对应目录，桌面端历史里就是一堆点不
+    开的空白对话，名字还都是 "hello"、"总结简历"、"执行一次并发任务" 这种测试固定串。
+    """
+    return Path.home() / ".agenticx" / "memory" / "sessions.sqlite"
+
+
+def __getattr__(name: str) -> Any:
+    # PEP 562：DEFAULT_SESSION_DB_PATH 不再是固化的模块常量，每次读都按当前 HOME 算。
+    # 仍然可以被 monkeypatch.setattr 覆盖（那会往模块 __dict__ 里塞值，走不到这里），
+    # 撤销时 monkeypatch 把它删掉，又回落到这个懒解析。
+    if name == "DEFAULT_SESSION_DB_PATH":
+        return default_session_db_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 _SCRATCHPAD_JSON_PREFIX = "\x1eagx-json-v1:"
 
 
@@ -79,7 +101,12 @@ class SessionStore:
     _SUMMARY_HISTORY_KEEP: int = 8
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = Path(db_path or DEFAULT_SESSION_DB_PATH).expanduser().resolve(strict=False)
+        # 走模块属性而不是直接调函数：monkeypatch.setattr(module, "DEFAULT_SESSION_DB_PATH", ...)
+        # 这种既有写法要继续生效。
+        import sys as _sys
+
+        _fallback = getattr(_sys.modules[__name__], "DEFAULT_SESSION_DB_PATH")
+        self.db_path = Path(db_path or _fallback).expanduser().resolve(strict=False)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 

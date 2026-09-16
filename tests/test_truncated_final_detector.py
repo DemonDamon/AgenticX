@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from agenticx.runtime.truncated_final import detect_suspected_truncated_final
+from agenticx.runtime.truncated_final import (
+    detect_suspected_truncated_final,
+    is_search_deferral_stub,
+)
 
 
 def _detect(
@@ -31,6 +34,22 @@ def test_detects_short_unterminated_body_with_english_action_intent() -> None:
 
 def test_missing_finish_reason_does_not_trigger_without_action_intent() -> None:
     assert _detect(body="我来继续核实这个信息") == ""
+
+
+def test_aborted_stream_leaves_body_on_a_continuation_mark() -> None:
+    # Observed live: the gateway closed the SSE mid-reply, so no chunk carried a
+    # finish_reason and the answer was persisted ending on a comma.
+    assert _detect(
+        body="你好，团长。我在。\n\n有什么任务需要处理——分析、开发、调研还是调度分身，",
+    ) == "aborted_stream_no_finish_reason"
+
+
+def test_aborted_stream_signal_needs_a_missing_finish_reason() -> None:
+    assert _detect(body="先说结论，", finish_reason="stop") == ""
+
+
+def test_aborted_stream_signal_ignores_properly_closed_bodies() -> None:
+    assert _detect(body="你好，团长。我在。") == ""
 
 
 def test_ignores_long_body_even_without_terminal_punctuation() -> None:
@@ -88,3 +107,33 @@ def test_unbalanced_bold_markers_on_long_body() -> None:
 def test_mid_path_cut_on_long_body_without_terminator() -> None:
     body = ("这是一段足够长的说明文字，用来超过短回复阈值。" * 3) + "\n\n补齐清单后还需完成 T4/T"
     assert _detect(body=body, finish_reason="stop") == "mid_path_cut"
+
+
+def test_search_deferral_stub_live_session_wording() -> None:
+    assert is_search_deferral_stub(
+        visible_body="团长，我先联网查证一下，避免凭印象误导。",
+        reasoning_text="用户问 ExampleAgent 是哪个厂商的。我需要联网查证，不能编造。",
+    ) is True
+
+
+def test_search_deferral_stub_reasoning_only_wait_body() -> None:
+    assert is_search_deferral_stub(
+        visible_body="团长，稍等。",
+        reasoning_text="我需要联网查证，不能编造。",
+    ) is True
+
+
+def test_search_deferral_stub_already_answered() -> None:
+    assert is_search_deferral_stub(
+        visible_body="我先查了官网，结论是 Foo 厂商。",
+    ) is False
+
+
+def test_search_deferral_stub_long_prose() -> None:
+    body = "先说明背景。" + "（具体分析展开）" * 30 + "其中也会提到联网查证的步骤。"
+    assert len(body) >= 220
+    assert is_search_deferral_stub(visible_body=body) is False
+
+
+def test_search_deferral_stub_empty() -> None:
+    assert is_search_deferral_stub(visible_body="") is False

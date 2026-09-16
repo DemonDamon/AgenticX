@@ -7,6 +7,11 @@ export function shouldKeepWorkspaceVisibleWhenSessionMissing(
   return sessionId.trim().length === 0 && awaitingFreshSession;
 }
 
+/** 新建任务：工作区侧栏默认收起，不沿用上一会话的展开态。 */
+export function workspacePanelOpenAfterNewTopic(): boolean {
+  return false;
+}
+
 export type NewTaskNavPane = {
   id: string;
   avatarId: string | null;

@@ -80,3 +80,22 @@ export function turnInterruptionToastForCause(cause: TurnInterruptionCause | nul
   }
   return TURN_INTERRUPTED_TOAST;
 }
+
+/**
+ * Whether sendChat should flash the ephemeral "正在同步状态" toast.
+ * Group chat ends with `done` / `group_reply` (never `final`); treating that
+ * as a 1:1 mid-turn interrupt is a false positive.
+ */
+export function shouldShowTurnInterruptedSyncToast(input: {
+  aborted: boolean;
+  receivedFinalEvent: boolean;
+  isGroupPane: boolean;
+  receivedGroupDone: boolean;
+  receivedGroupTerminal: boolean;
+}): boolean {
+  if (input.aborted || input.receivedFinalEvent) return false;
+  if (input.isGroupPane && (input.receivedGroupDone || input.receivedGroupTerminal)) {
+    return false;
+  }
+  return true;
+}

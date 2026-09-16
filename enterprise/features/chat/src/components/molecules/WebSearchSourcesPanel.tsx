@@ -11,6 +11,7 @@ import {
 } from "@agenticx/ui";
 import { hostnameFromUrl, partitionSourcesByUsage, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 type WebSearchSourcesPanelProps = {
   open: boolean;
@@ -69,6 +70,7 @@ export function WebSearchSourcesPanel({
   sources,
   highlightIndex = null,
 }: WebSearchSourcesPanelProps) {
+  const copy = useChatCopy();
   const itemRefs = React.useRef<Map<number, HTMLAnchorElement>>(new Map());
   const { used, unused } = partitionSourcesByUsage(sources);
 
@@ -82,8 +84,10 @@ export function WebSearchSourcesPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
         <SheetHeader className="border-b border-border px-5 py-4 pr-12">
-          <SheetTitle>引用来源 {sources.length}</SheetTitle>
-          <SheetDescription className="sr-only">共 {sources.length} 个引用来源</SheetDescription>
+          <SheetTitle>{copy.delivery.citationSources(sources.length)}</SheetTitle>
+          <SheetDescription className="sr-only">
+            {copy.delivery.citationSourcesSr(sources.length)}
+          </SheetDescription>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto px-3 py-3">
           <ul className="space-y-1">
@@ -100,7 +104,7 @@ export function WebSearchSourcesPanel({
           {unused.length > 0 ? (
             <div className="mt-4">
               <div className="mb-2 px-3 text-xs font-medium text-muted-foreground">
-                未纳入本次回答（{unused.length}）
+                {copy.delivery.unusedSources(unused.length)}
               </div>
               <ul className="space-y-1">
                 {unused.map(({ source, index1Based }) => (

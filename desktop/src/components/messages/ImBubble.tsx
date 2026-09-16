@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus, ChevronDown, ChevronRight } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
@@ -10,10 +12,14 @@ import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from ".
 import { ReasoningBlock } from "./ReasoningBlock";
 import { resolvePersistedReasoningSeconds } from "./reasoning-duration-cache";
 import { ReferencesCard } from "./ReferencesCard";
+import { CitationSourcesCard } from "./WebSearchSources";
+import { withBibliographyFallback } from "./source-attribution-parse";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
+import { InlineImageBlock } from "./InlineImageBlock";
+import { hasImageBlock, readyLightboxImages, type ImageContentBlock } from "../../utils/content-blocks";
 import { renderUserMessageInlineBody, UserQuoteRefChip, renderUserBubbleInlineContent } from "./user-message-inline";
 import {
   parseQuotedContentItems,
@@ -26,7 +32,9 @@ import {
 import {
   ASSISTANT_ACTION_ICON_ONLY_CLASS,
   ASSISTANT_ACTION_ICON_ROW_CLASS,
+  ASSISTANT_ACTION_LINE_CLASS,
   ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
+  ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
@@ -34,9 +42,11 @@ import {
   getAssistantTextStyle,
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
-import { avatarBgClass, avatarFgClass, expertLabelChipStyle } from "../../utils/avatar-color";
+import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
+import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
 
 type Props = {
@@ -60,6 +70,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onWebSearchMessage?: (message: Message, selectedText: string) => void;
   onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
+  onContinueFromMessage?: (message: Message) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
@@ -94,28 +105,38 @@ type Props = {
   /** Replace animated streaming dots with a stalled indicator on the __stream__ placeholder. */
   streamStalled?: boolean;
   streamStalledSeconds?: number;
+  /** Ready images in the current user turn; lightbox arrows switch within this set. */
+  lightboxGallery?: ImageContentBlock[];
+  /** Deliverable cards after the body; copy/quote sit to the right of the cards. */
+  afterBody?: ReactNode;
+  /** Open WorkPanel「参考信息」for this turn's web citations. */
+  onOpenWorkspaceRefs?: () => void;
+  /** Session-level web refs so the chip still shows when this row omitted `references`. */
+  sessionWebRefs?: SearchReference[];
 };
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
+  const { t } = useTranslation("chat");
   return (
     <div
       className="inline-flex items-center gap-1.5 py-1.5 text-xs text-amber-300/90"
       aria-live="polite"
-      aria-label="任务已停滞"
+      aria-label={t("status.stalledAria")}
     >
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span>{silentSeconds > 0 ? `已停滞 ${silentSeconds}s` : "已停滞"}</span>
+      <span>{silentSeconds > 0 ? t("status.stalledSeconds", { seconds: silentSeconds }) : t("status.stalled")}</span>
     </div>
   );
 }
 
 /** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
 function StreamingDots({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation("chat");
   return (
     <div
       className={`inline-flex items-center gap-1.5 ${compact ? "py-0" : "py-1.5"}`}
       aria-live="polite"
-      aria-label="正在处理"
+      aria-label={t("status.processingAria")}
     >
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
@@ -140,6 +161,7 @@ export function ChatImAvatar({
   variant = "circle",
   avatarId,
   color,
+  size = "md",
 }: {
   label: string;
   imageUrl?: string;
@@ -147,6 +169,7 @@ export function ChatImAvatar({
   avatarId?: string;
   /** Palette key or empty (= Meta / theme). When omitted and avatarId set, looked up from store. */
   color?: string;
+  size?: "sm" | "md";
 }) {
   const storeColor = useAppStore((s) =>
     avatarId ? s.avatars.find((a) => a.id === avatarId)?.color : undefined,
@@ -154,19 +177,20 @@ export function ChatImAvatar({
   const resolvedColor = color ?? storeColor ?? "";
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
+  const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
   if (imageUrl) {
     return (
       <img
         src={imageUrl}
         alt={label}
-        className={`h-8 w-8 shrink-0 object-cover ${rounded}`}
+        className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
       />
     );
   }
   const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
   return (
     <div
-      className={`flex h-8 w-8 shrink-0 items-center justify-center text-xs font-bold ${rounded} ${tintClass}`}
+      className={`agx-im-avatar flex ${dim} shrink-0 items-center justify-center font-bold ${rounded} ${tintClass}`}
       style={
         avatarId
           ? undefined
@@ -181,6 +205,8 @@ export function ChatImAvatar({
   );
 }
 
+const MESSAGE_CONTEXT_MENU_MARGIN = 8;
+
 export function ImBubble({
   message,
   resolvedReferences,
@@ -194,6 +220,7 @@ export function ImBubble({
   onQuoteMessage,
   onWebSearchMessage,
   onQuoteToNewPane,
+  onContinueFromMessage,
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
@@ -216,19 +243,18 @@ export function ImBubble({
   isLastAssistantInPane = false,
   streamStalled = false,
   streamStalledSeconds = 0,
+  lightboxGallery,
+  afterBody,
+  onOpenWorkspaceRefs,
+  sessionWebRefs,
 }: Props) {
+  const { t } = useTranslation("chat");
   void _senderAvatarVariant;
   void userAvatarUrl;
-  void assistantAvatarUrl;
-  const theme = useAppStore((s) => s.theme);
-  const senderStoreColor = useAppStore((s) =>
-    senderAvatarId && senderAvatarId !== "meta"
-      ? s.avatars.find((a) => a.id === senderAvatarId)?.color
-      : undefined,
-  );
   const isUser = message.role === "user";
-  const displayName = isUser ? (userName || "我") : (assistantName || "AI");
-  const isStreaming = message.id === "__stream__";
+  const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
+  const displayName = isUser ? (userName || t("actions.me")) : (assistantName || "AI");
+  const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
     !isUser &&
@@ -240,13 +266,9 @@ export function ImBubble({
     (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") &&
     !isGroupTyping &&
     !isMetaPendingWork;
-  /** Group expert label only — no WeChat avatar rail (align with Meta chrome). */
-  const showExpertLabel = showSenderIdentity && !isUser && !compactAssistant;
-  const expertChip = showExpertLabel
-    ? expertLabelChipStyle(senderAvatarId, senderStoreColor, theme)
-    : null;
+  const isGroupAssistant = showSenderIdentity && !isUser && !compactAssistant;
+  const showExpertLabel = isGroupAssistant;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
-  const [expertCollapsed, setExpertCollapsed] = useState(false);
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const protocolParsed = !isUser ? parseAssistantOutputForUi(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
@@ -263,22 +285,39 @@ export function ImBubble({
     ? (protocolParsed?.visibleBody ?? (hasThinkTag ? (parsed?.response ?? "") : message.content))
     : (userQuoteDisplay?.body ?? message.content);
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
+  const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
   const bodyText =
     showExpertLabel && !isUser
-      ? String(rawBodyText ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
-      : rawBodyText;
+      ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : strippedBody;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
-  const citationReferences =
-    (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
+  const citationReferences = useMemo(
+    () =>
+      withBibliographyFallback(
+        (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references,
+        String(bodyText ?? ""),
+      ),
+    [resolvedReferences, message.references, bodyText],
+  );
+  const kbReferences = useMemo(
+    () => citationReferences.filter((ref) => ref.source === "kb"),
+    [citationReferences],
+  );
+  const webReferences = useMemo(
+    () => citationReferences.filter((ref) => ref.source !== "kb"),
+    [citationReferences],
+  );
   const referenceAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => isWorkspaceReferenceAttachment(attachment))
     : [];
   const displayAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
-  const hasBody = !!bodyText?.trim() || displayQuotedItems.length > 0;
+  const hasBody =
+    !!bodyText?.trim() || displayQuotedItems.length > 0 || hasImageBlock(message.blocks);
+  const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
     ? {
         background: "var(--chat-im-user-bg)",
@@ -292,6 +331,7 @@ export function ImBubble({
       };
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -388,6 +428,42 @@ export function ImBubble({
     };
   }, [menuOpen]);
 
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuLayout(null);
+      return;
+    }
+
+    const reposition = () => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      const rect = menu.getBoundingClientRect();
+      const maxLeft = Math.max(
+        MESSAGE_CONTEXT_MENU_MARGIN,
+        window.innerWidth - rect.width - MESSAGE_CONTEXT_MENU_MARGIN,
+      );
+      const maxTop = Math.max(
+        MESSAGE_CONTEXT_MENU_MARGIN,
+        window.innerHeight - rect.height - MESSAGE_CONTEXT_MENU_MARGIN,
+      );
+      const left = Math.min(
+        Math.max(menuPos.x, MESSAGE_CONTEXT_MENU_MARGIN),
+        maxLeft,
+      );
+      const top =
+        menuPos.y + rect.height <= window.innerHeight - MESSAGE_CONTEXT_MENU_MARGIN
+          ? Math.min(Math.max(menuPos.y, MESSAGE_CONTEXT_MENU_MARGIN), maxTop)
+          : menuPos.y - rect.height >= MESSAGE_CONTEXT_MENU_MARGIN
+            ? menuPos.y - rect.height
+            : maxTop;
+      setMenuLayout((prev) => (prev?.x === left && prev.y === top ? prev : { x: left, y: top }));
+    };
+
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [menuOpen, menuPos, menuHasSelection, onEditMessage, onQuoteToNewPane, onRetryMessage]);
+
   useEffect(() => {
     // NOTE: Keyword highlight used to mutate React-managed DOM nodes directly,
     // which can trigger removeChild/not-a-child crashes during reconciliation.
@@ -399,6 +475,7 @@ export function ImBubble({
     ev.stopPropagation();
     setMenuHasSelection(Boolean(getContainedSelectionText(msgContentRef.current)));
     setMenuPos({ x: ev.clientX, y: ev.clientY });
+    setMenuLayout(null);
     setMenuOpen(true);
   };
 
@@ -412,6 +489,7 @@ export function ImBubble({
     hasFollowupHandler: Boolean(onFollowupClick),
     sessionBusy,
     isLastAssistantInPane,
+    keepActionsWhileBusy: showSenderIdentity,
   });
   const assistantTextClassName = !isUser
     ? getAssistantTextClassName({
@@ -422,13 +500,16 @@ export function ImBubble({
   const assistantTextStyle = !isUser
     ? getAssistantTextStyle({ hasReasoning: Boolean(parsed?.reasoning), inReActRow: compactAssistant })
     : undefined;
-  const assistantActionStyle = getAssistantActionStyle({ inReActRow: compactAssistant });
+  const assistantActionStyle = isGroupAssistant
+    ? { marginLeft: 0 }
+    : getAssistantActionStyle({ inReActRow: compactAssistant });
+  const actionOnlyClass = isGroupAssistant
+    ? "mb-3 mt-1.5 min-w-0 self-stretch"
+    : ASSISTANT_ACTION_ICON_ONLY_CLASS;
   const USER_BUBBLE_GUTTER_PX = 14;
   const headerBadge = showExpertLabel ? badge : null;
   const contentBadge = headerBadge ? null : badge;
   const userBubbleGutterPx = USER_BUBBLE_GUTTER_PX;
-  const canFoldExpertReply =
-    showExpertLabel && !isStreaming && !isGroupTyping && !isMetaPendingWork && hasBody;
   // Gutter 挂在 stack 上（非整气泡 margin），保证操作栏与气泡边框同宽、左右缘对齐。
   const userStackStyle = isUser
     ? {
@@ -454,46 +535,59 @@ export function ImBubble({
     hasBody,
     sessionBusy,
     isLastAssistantInPane,
+    keepActionsWhileBusy: showSenderIdentity,
   }) ? (
       <>
-        <HoverTip label="复制">
+        <HoverTip label={t("actions.copy")}>
           <button
             type="button"
             className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onCopyMessage?.(message)}
           >
-            <Copy size={13} />
+            <Copy size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="引用">
+        <HoverTip label={t("actions.quote")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-            <Quote size={13} />
+            <Quote size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="收藏">
+        <HoverTip label={t("actions.favorite")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-            <Bookmark size={13} />
+            <Bookmark size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="转发">
+        <HoverTip label={t("actions.forward")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-            <Forward size={13} />
+            <Forward size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         {onRetryMessage ? (
-          <HoverTip label="重试">
+          <HoverTip label={t("actions.retry")}>
             <button
               type="button"
               className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onRetryMessage(message)}
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={14} strokeWidth={2} />
             </button>
           </HoverTip>
         ) : null}
-        <HoverTip label="多选">
+        {onContinueFromMessage ? (
+          <HoverTip label={t("actions.continueFrom")}>
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onContinueFromMessage(message)}
+            >
+              <ContinueInNewTaskIcon size={14} strokeWidth={2} />
+            </button>
+          </HoverTip>
+        ) : null}
+        <HoverTip label={t("actions.select")}>
           <button
             type="button"
             className={`rounded p-1 hover:bg-surface-hover ${
@@ -504,10 +598,45 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onToggleSelectMessage?.(message)}
           >
-            <LayoutList size={13} />
+            <LayoutList size={14} strokeWidth={2} />
           </button>
         </HoverTip>
       </>
+    ) : null;
+
+  const chipWebRefs = webReferences.length > 0 ? webReferences : (sessionWebRefs ?? []);
+  const showMetaCitation = Boolean(onOpenWorkspaceRefs) && !isUser && chipWebRefs.length > 0;
+  const citationChip = showMetaCitation ? (
+      <CitationSourcesCard
+        references={chipWebRefs}
+        onOpen={onOpenWorkspaceRefs}
+        variant="meta"
+      />
+    ) : null;
+
+  const assistantTurnMeta = (
+    <MessageTurnMeta
+      usage={message.usage}
+      model={message.model}
+      modelSelection={message.modelSelection}
+    />
+  );
+
+  const assistantActionLine =
+    assistantIconButtons ? (
+      <div
+        className={ASSISTANT_ACTION_LINE_CLASS}
+        style={assistantActionStyle}
+      >
+        <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} min-w-0`}>
+          {assistantIconButtons}
+        </div>
+        {citationChip ? <div className="shrink-0">{citationChip}</div> : null}
+        <div className={ASSISTANT_HOVER_REVEAL_CLASS}>
+          {assistantTurnMeta}
+          <MessageTimestamp ts={message.timestamp} align="left" />
+        </div>
+      </div>
     ) : null;
 
   const assistantFollowupChipButtons =
@@ -545,6 +674,8 @@ export function ImBubble({
   return (
     <div
       className={`group relative flex min-w-0 items-start gap-2${
+        isGroupAssistant ? " w-full px-3" : ""
+      }${
         !railRow && isStreaming && !pendingWorkCompact ? " !mt-1" : ""
       }${!railRow && pendingWorkCompact ? " -mt-1" : ""}`}
       onContextMenu={openContextMenu}
@@ -558,65 +689,30 @@ export function ImBubble({
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
-          aria-label={selected ? "取消选择消息" : "选择消息"}
+          aria-label={selected ? t("actions.unselectMessage") : t("actions.selectMessage")}
         >
           <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
           </svg>
         </button>
       ) : null}
+      {isGroupAssistant ? (
+        <div className="mt-[18px] shrink-0">
+          <ChatImAvatar
+            label={displayName}
+            imageUrl={assistantAvatarUrl}
+            avatarId={senderAvatarId}
+            variant="circle"
+            size="sm"
+          />
+        </div>
+      ) : null}
       <div
         className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
       >
-        {showExpertLabel && expertChip ? (
-          <div className="mb-1 flex max-w-full items-center gap-2 px-3">
-            {canFoldExpertReply ? (
-              <button
-                type="button"
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold transition hover:opacity-90"
-                style={{
-                  backgroundColor: expertChip.backgroundColor,
-                  borderColor: expertChip.borderColor,
-                }}
-                onClick={() => setExpertCollapsed((v) => !v)}
-                aria-expanded={!expertCollapsed}
-                title={expertCollapsed ? "展开回复" : "折叠回复"}
-              >
-                {expertCollapsed ? (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
-                )}
-                <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
-                  {displayName}
-                </span>
-                {headerBadge ? (
-                  <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
-                    {headerBadge}
-                  </span>
-                ) : null}
-                <span className="shrink-0 text-[11px] font-medium text-text-subtle">
-                  {expertCollapsed ? "展开" : "折叠"}
-                </span>
-              </button>
-            ) : (
-              <span
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold"
-                style={{
-                  backgroundColor: expertChip.backgroundColor,
-                  borderColor: expertChip.borderColor,
-                }}
-              >
-                <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
-                  {displayName}
-                </span>
-                {headerBadge ? (
-                  <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
-                    {headerBadge}
-                  </span>
-                ) : null}
-              </span>
-            )}
+        {isGroupAssistant ? (
+          <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
+            {displayName}
           </div>
         ) : null}
         {isEditing ? (
@@ -733,32 +829,32 @@ export function ImBubble({
               <div className="agx-im-user-actions">
                 <div className="agx-im-user-actions-icons">
                   <MessageTimestamp ts={message.timestamp} align="right" />
-                  <HoverTip label="复制">
+                  <HoverTip label={t("actions.copy")}>
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onCopyMessage?.(message)}
                     >
-                      <Copy size={13} strokeWidth={1.5} />
+                      <Copy size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="引用">
+                  <HoverTip label={t("actions.quote")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-                      <Quote size={13} strokeWidth={1.5} />
+                      <Quote size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="收藏">
+                  <HoverTip label={t("actions.favorite")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-                      <Bookmark size={13} strokeWidth={1.5} />
+                      <Bookmark size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="转发">
+                  <HoverTip label={t("actions.forward")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                      <Forward size={13} strokeWidth={1.5} />
+                      <Forward size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   {onEditMessage ? (
-                    <HoverTip label="修改">
+                    <HoverTip label={t("actions.edit")}>
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
@@ -767,22 +863,22 @@ export function ImBubble({
                           setIsEditing(true);
                         }}
                       >
-                        <Pencil size={13} strokeWidth={1.5} />
+                        <Pencil size={14} strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
                   {onRetryMessage ? (
-                    <HoverTip label="重试">
+                    <HoverTip label={t("actions.retry")}>
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => onRetryMessage(message)}
                       >
-                        <RotateCcw size={13} strokeWidth={1.5} />
+                        <RotateCcw size={14} strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
-                  <HoverTip label="多选" tooltipAlign="end">
+                  <HoverTip label={t("actions.select")} tooltipAlign="end">
                     <button
                       type="button"
                       className={
@@ -793,28 +889,13 @@ export function ImBubble({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onToggleSelectMessage?.(message)}
                     >
-                      <LayoutList size={13} strokeWidth={1.5} />
+                      <LayoutList size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                 </div>
               </div>
             )}
           </div>
-        ) : expertCollapsed && canFoldExpertReply ? (
-          <>
-            {/* Body hidden while folded — expand via expert label. Keep root for copy/quote. */}
-            <div ref={msgContentRef} className="hidden" aria-hidden>
-              {bodyText}
-            </div>
-            {hideActions || !assistantIconButtons ? null : (
-              <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
-                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
-                  {assistantIconButtons}
-                  <MessageTimestamp ts={message.timestamp} align="left" />
-                </div>
-              </div>
-            )}
-          </>
         ) : (
           <>
             <div
@@ -823,13 +904,24 @@ export function ImBubble({
                   ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isMetaPendingWork
                     ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                    : showExpertLabel
-                      ? `agx-expert-body relative min-w-0 w-full px-3 pt-0 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    : isGroupAssistant
+                      ? `agx-im-group-bubble relative min-w-0 rounded-2xl px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
                         ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                         : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
               }
-              style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
+              style={
+                compactAssistant && noBubbleBorder
+                  ? undefined
+                  : isGroupAssistant
+                    ? {
+                        background: "var(--chat-im-group-bg)",
+                        color: "var(--chat-im-assistant-text)",
+                        width: "fit-content",
+                        maxWidth: "min(100%, 760px)",
+                      }
+                    : userBubbleStyle
+              }
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
@@ -885,9 +977,9 @@ export function ImBubble({
                   )
                 ) : (
                   <>
-                    {(citationReferences?.length ?? 0) > 0 ? (
+                    {kbReferences.length > 0 ? (
                       <ReferencesCard
-                        references={citationReferences ?? []}
+                        references={kbReferences}
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
@@ -924,13 +1016,53 @@ export function ImBubble({
                         className={showExpertLabel ? undefined : assistantTextClassName}
                         style={assistantTextStyle}
                       >
-                        <CitationMarkdownBody
-                          content={bodyText}
-                          references={citationReferences}
-                          isStreaming={isStreaming}
-                          onQuoteText={(text) => onQuoteMessage?.(message, text)}
-                          onRevealPath={onRevealPath}
-                        />
+                        {renderInlineBlocks ? (
+                          <>
+                            {(message.blocks ?? []).some((b) => b.type === "text")
+                              ? (message.blocks ?? []).map((block, idx) =>
+                                  block.type === "text" ? (
+                                    block.text.trim() ? (
+                                      <CitationMarkdownBody
+                                        key={`text-${idx}`}
+                                        content={block.text}
+                                        references={citationReferences}
+                                        isStreaming={isStreaming}
+                                        onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                                        onRevealPath={onRevealPath}
+                                      />
+                                    ) : null
+                                  ) : (
+                                    <InlineImageBlock key={block.id} block={block} gallery={imageGallery} />
+                                  ),
+                                )
+                              : (
+                                <>
+                                  {bodyText.trim() ? (
+                                    <CitationMarkdownBody
+                                      content={bodyText}
+                                      references={citationReferences}
+                                      isStreaming={isStreaming}
+                                      onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                                      onRevealPath={onRevealPath}
+                                    />
+                                  ) : null}
+                                  {(message.blocks ?? [])
+                                    .filter((b) => b.type === "image")
+                                    .map((block) => (
+                                      <InlineImageBlock key={block.id} block={block} gallery={imageGallery} />
+                                    ))}
+                                </>
+                              )}
+                          </>
+                        ) : (
+                          <CitationMarkdownBody
+                            content={bodyText}
+                            references={citationReferences}
+                            isStreaming={isStreaming}
+                            onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                            onRevealPath={onRevealPath}
+                          />
+                        )}
                       </div>
                     ) : null}
                     {isStreaming && hasBody && (!hasThinkTag || reasoningClosed) ? (
@@ -940,21 +1072,31 @@ export function ImBubble({
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
+                    {!showMetaCitation && webReferences.length > 0 ? (
+                      <div className="mt-2">
+                        <CitationSourcesCard references={webReferences} />
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
             </div>
+            {afterBody ? (
+              <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
+                <div className="min-w-0 flex-1">{afterBody}</div>
+                {assistantIconButtons && !showAssistantFollowups ? (
+                  <div className="min-w-0 shrink-0 self-center">{assistantActionLine}</div>
+                ) : null}
+              </div>
+            ) : null}
             {budgetIncompleteHint ? (
               <p className="-mt-0.5 mb-1 px-3 text-[11px] leading-relaxed text-text-faint">
-                此回复因会话预算上限被截停，未完成
+                {t("status.budgetCut")}
               </p>
             ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
               <>
-                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
-                  {assistantIconButtons}
-                  <MessageTimestamp ts={message.timestamp} align="left" />
-                </div>
+                {assistantActionLine}
                 <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>
                   {assistantFollowupChipButtons}
                 </div>
@@ -964,12 +1106,9 @@ export function ImBubble({
                 {assistantFollowupChipButtons}
               </div>
             ) : null}
-            {hideActions || showAssistantFollowups || !assistantIconButtons ? null : (
-              <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
-                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
-                  {assistantIconButtons}
-                  <MessageTimestamp ts={message.timestamp} align="left" />
-                </div>
+            {hideActions || showAssistantFollowups || !assistantIconButtons || afterBody ? null : (
+              <div className={actionOnlyClass}>
+                {assistantActionLine}
               </div>
             )}
           </>
@@ -978,8 +1117,12 @@ export function ImBubble({
       {menuOpen ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[200] w-44 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
-          style={{ left: menuPos.x, top: menuPos.y }}
+          className="fixed z-[200] max-h-[calc(100vh-1rem)] w-44 overflow-y-auto rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
+          style={{
+            left: menuLayout?.x ?? menuPos.x,
+            top: menuLayout?.y ?? menuPos.y,
+            visibility: menuLayout ? "visible" : "hidden",
+          }}
           role="menu"
         >
           <button
@@ -987,21 +1130,21 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { void runCopy(); setMenuOpen(false); }}
           >
-            <Copy size={12} className="shrink-0 text-text-faint" />复制
+            <Copy size={12} className="shrink-0 text-text-faint" />{t("actions.copy")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runQuote(); }}
           >
-            <Quote size={12} className="shrink-0 text-text-faint" />引用至当前对话
+            <Quote size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToCurrent")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runSelectAll(); }}
           >
-            <TextSelect size={12} className="shrink-0 text-text-faint" />全选
+            <TextSelect size={12} className="shrink-0 text-text-faint" />{t("actions.selectAll")}
           </button>
           <button
             className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-hover ${
@@ -1013,7 +1156,7 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runWebSearch(); }}
           >
-            <Search size={12} className="shrink-0 text-text-faint" />用网络搜索
+            <Search size={12} className="shrink-0 text-text-faint" />{t("actions.webSearch")}
           </button>
           {onQuoteToNewPane ? (
             <button
@@ -1021,7 +1164,16 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); runQuoteToNewPane(); }}
             >
-              <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />引用至新对话
+              <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToNew")}
+            </button>
+          ) : null}
+          {!isUser && onContinueFromMessage ? (
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setMenuOpen(false); onContinueFromMessage(message); }}
+            >
+              <ContinueInNewTaskIcon size={12} strokeWidth={2} className="shrink-0 text-text-faint" />{t("actions.continueFrom")}
             </button>
           ) : null}
           <button
@@ -1029,14 +1181,14 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runFavorite(); }}
           >
-            <Bookmark size={12} className="shrink-0 text-text-faint" />收藏
+            <Bookmark size={12} className="shrink-0 text-text-faint" />{t("actions.favorite")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runForward(); }}
           >
-            <Forward size={12} className="shrink-0 text-text-faint" />转发
+            <Forward size={12} className="shrink-0 text-text-faint" />{t("actions.forward")}
           </button>
           {onEditMessage ? (
             <button
@@ -1048,7 +1200,7 @@ export function ImBubble({
                 setIsEditing(true);
               }}
             >
-              <Pencil size={12} className="shrink-0 text-text-faint" />修改
+              <Pencil size={12} className="shrink-0 text-text-faint" />{t("actions.edit")}
             </button>
           ) : null}
           {onRetryMessage ? (
@@ -1057,7 +1209,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); onRetryMessage(message); }}
             >
-              <RotateCcw size={12} className="shrink-0 text-text-faint" />重试
+              <RotateCcw size={12} className="shrink-0 text-text-faint" />{t("actions.retry")}
             </button>
           ) : null}
           <button
@@ -1065,7 +1217,7 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}
           >
-            <LayoutList size={12} className="shrink-0 text-text-faint" />多选
+            <LayoutList size={12} className="shrink-0 text-text-faint" />{t("actions.select")}
           </button>
         </div>,
         document.body,

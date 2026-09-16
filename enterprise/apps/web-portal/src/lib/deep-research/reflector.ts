@@ -3,6 +3,7 @@
  */
 
 import { parseLlmJson } from "./llm-json";
+import { languageDirective } from "./copy";
 
 export const MAX_GAPS = 4;
 export const MAX_FOLLOWUP_QUERIES = 8;
@@ -18,6 +19,7 @@ export type ReflectDeps = {
   topic: string;
   laneMemos: Array<{ question: string; memo: string }>;
   todayLine: string;
+  locale?: "zh" | "en";
 };
 
 const REFLECT_SYSTEM = [
@@ -65,7 +67,7 @@ export async function reflectOnGaps(deps: ReflectDeps): Promise<ResearchGap[]> {
       .map((m, i) => `### 车道 ${i + 1}：${m.question}\n${m.memo || "（无备忘）"}`)
       .join("\n\n");
     const raw = await deps.callJson([
-      { role: "system", content: REFLECT_SYSTEM },
+      { role: "system", content: `${REFLECT_SYSTEM}\n${languageDirective(deps.locale === "en" ? "en" : "zh")}` },
       {
         role: "user",
         content: [`主题：${deps.topic}`, deps.todayLine, "", memoBlock].join("\n"),

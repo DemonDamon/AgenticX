@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { prepareLocalHtmlSrcDoc } from "../../utils/html-preview-assets";
 import { injectHtmlPreviewStorageBridge } from "../../utils/html-preview-storage";
@@ -212,6 +213,7 @@ export function HtmlPreviewBody({
     };
   }, []);
 
+  const { t } = useTranslation("workspace");
   const fixed = isFixedViewport(viewport);
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
 
@@ -219,7 +221,7 @@ export function HtmlPreviewBody({
     <iframe
       key={`html-preview-${reloadKey}`}
       ref={iframeRef}
-      title={title ?? "HTML 预览"}
+      title={title ?? t("preview.htmlTitle")}
       className="block border-0 bg-white"
       style={
         fixed

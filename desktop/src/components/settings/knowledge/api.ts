@@ -51,6 +51,7 @@ export type KBApi = {
   deleteDocument: (id: string) => Promise<void>;
   rebuildDocument: (id: string) => Promise<{ job_id: string }>;
   getJob: (id: string) => Promise<IngestJob>;
+  cancelJob: (id: string) => Promise<IngestJob>;
   listJobs: () => Promise<IngestJob[]>;
   search: (query: string, topK?: number) => Promise<{ hits: RetrievalHit[]; used_top_k: number }>;
   previewChunks: (
@@ -141,6 +142,12 @@ export function createKbApi(
     },
     async getJob(id: string) {
       const body = await doJson<{ job: IngestJob }>(p(`/jobs/${encodeURIComponent(id)}`));
+      return body.job;
+    },
+    async cancelJob(id: string) {
+      const body = await doJson<{ job: IngestJob }>(p(`/jobs/${encodeURIComponent(id)}/cancel`), {
+        method: "POST",
+      });
       return body.job;
     },
     async listJobs() {

@@ -1,14 +1,16 @@
+import { i18n } from "../../i18n/i18n";
+
 export async function loadLocalPreviewDataUrl(
   absolutePath: string
 ): Promise<{ ok: true; dataUrl: string; mime?: string; size?: number } | { ok: false; error: string }> {
   const api = window.agenticxDesktop?.loadLocalFileDataUrl;
   if (typeof api !== "function") {
-    return { ok: false, error: "当前客户端不支持本地文件预览" };
+    return { ok: false, error: i18n.t("preview.clientNoLocalPreview", { ns: "workspace" }) };
   }
   try {
     const res = await api(absolutePath);
     if (!res.ok || !res.dataUrl) {
-      return { ok: false, error: res.error ?? "文件加载失败" };
+      return { ok: false, error: res.error ?? i18n.t("preview.fileLoadFailed", { ns: "workspace" }) };
     }
     return { ok: true, dataUrl: res.dataUrl, mime: res.mime, size: res.size };
   } catch (err) {

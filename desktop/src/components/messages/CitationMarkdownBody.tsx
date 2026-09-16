@@ -1,6 +1,7 @@
-import { Fragment, useMemo, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useContext, useMemo, type CSSProperties, type ReactNode } from "react";
 import { isValidElement } from "react";
 import ReactMarkdown from "react-markdown";
+import { useTranslation } from "react-i18next";
 import type { Components } from "react-markdown";
 import type { SearchReference } from "../../types/search-references";
 import { CitationBadge } from "./CitationBadge";
@@ -28,6 +29,7 @@ import {
 } from "./citation-normalize";
 import { buildDocNumberMap } from "../../utils/citation-doc-grouping";
 import {
+  bibliographyToSearchReferences,
   extractSourceAttribution,
   type KeyCitationItem,
 } from "./source-attribution-parse";
@@ -52,10 +54,11 @@ function KeyCitationsBlock({
   refMap: Map<number, SearchReference>;
   docNumberById: Map<number, number>;
 }) {
+  const { t } = useTranslation("chat");
   if (items.length === 0) return null;
   return (
     <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-      <div className="text-[13px] font-semibold text-text-strong">关键引用</div>
+      <div className="text-[13px] font-semibold text-text-strong">{t("citation.keyCitations")}</div>
       <ol className="m-0 space-y-2 pl-0">
         {items.map((item, index) => {
           const rawId = item.id ?? index + 1;
@@ -298,22 +301,21 @@ export function CitationMarkdownBody({
   className,
   style,
 }: Props) {
+  const parentMarkdown = useContext(MarkdownContext);
+  const extracted = useMemo(() => extractSourceAttribution(content), [content]);
+  const { body: contentWithoutAttribution, keyCitations } = extracted;
+  const effectiveRefs = useMemo(() => {
+    if ((references?.length ?? 0) > 0) return references ?? [];
+    return bibliographyToSearchReferences(extracted.bibliography);
+  }, [references, extracted]);
   const refMap = useMemo(() => {
     const map = new Map<number, SearchReference>();
-    for (const ref of references ?? []) map.set(ref.id, ref);
+    for (const ref of effectiveRefs) map.set(ref.id, ref);
     return map;
-  }, [references]);
-  const docNumberById = useMemo(() => buildDocNumberMap(references ?? []), [references]);
+  }, [effectiveRefs]);
+  const docNumberById = useMemo(() => buildDocNumberMap(effectiveRefs), [effectiveRefs]);
 
-  // Strip model-authored legends from body:
-  // - 数据来源标注 → discarded (epistemic theater)
-  // - 关键引用 → re-rendered as KeyCitationsBlock (keeps English quotes, uniform rows)
-  const { body: contentWithoutAttribution, keyCitations } = useMemo(
-    () => extractSourceAttribution(content),
-    [content],
-  );
-
-  const hasReferences = (references?.length ?? 0) > 0;
+  const hasReferences = effectiveRefs.length > 0;
   const normalized = normalizeCitationMarkers(contentWithoutAttribution, hasReferences);
   const withCitationLayout = hasReferences
     ? relocateCitationMarkersForDisplay(normalized)
@@ -328,7 +330,15 @@ export function CitationMarkdownBody({
 
   return (
     <div className={className} style={style}>
-      <MarkdownContext.Provider value={{ isStreaming, onQuoteText, onRevealPath, references }}>
+      <MarkdownContext.Provider
+        value={{
+          ...parentMarkdown,
+          isStreaming,
+          onQuoteText: onQuoteText ?? parentMarkdown.onQuoteText,
+          onRevealPath: onRevealPath ?? parentMarkdown.onRevealPath,
+          references: effectiveRefs.length > 0 ? effectiveRefs : parentMarkdown.references,
+        }}
+      >
         {blocks.map((block, blockIndex) => (
           <div key={`cite-block-${blockIndex}`} className={blockIndex < blocks.length - 1 ? "mb-2" : undefined}>
             {hasReferences ? (

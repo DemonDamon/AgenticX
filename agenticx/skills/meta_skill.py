@@ -45,10 +45,18 @@ class MetaSkillInjector:
             enabled = flag not in {"0", "false", "off", "no"}
         self.enabled = enabled
 
-    def inject(self, base_prompt: str, skill_summaries: list[dict[str, Any]]) -> str:
-        """Append protocol and available skill summaries to prompt text."""
+    def inject(
+        self,
+        base_prompt: str,
+        skill_summaries: list[dict[str, Any]],
+        *,
+        include_catalog: bool = True,
+    ) -> str:
+        """Append protocol and optionally available skill summaries to prompt text."""
         if not self.enabled:
             return base_prompt
+        if not include_catalog:
+            return f"{base_prompt}\n\n{USING_AGENTICX_SKILL}\n"
         lines = ["## Available Skills"]
         if not skill_summaries:
             lines.append("- (no registered skills)")

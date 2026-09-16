@@ -1,4 +1,5 @@
 import type { ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { SettingsRangeField } from "../settings/SettingsRangeField";
 
 export type StallNudgeConfig = {
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
+  const { t } = useTranslation("workspace");
   const set = (patch: Partial<StallNudgeConfig>) => onChange({ ...value, ...patch });
   const nudgeBelowDetect =
     value.stall_auto_nudge_enabled &&
@@ -27,19 +29,19 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
 
   return (
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-      <div className="text-sm font-semibold text-text-strong">长任务停滞与续跑</div>
+      <div className="text-sm font-semibold text-text-strong">{t("automation.stallTitle")}</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        控制任务进度感叹号、顶部「可能已中断」提示，以及可选的自动续跑。修改后请点击窗口底部「退出」。
+        {t("automation.stallHint")}
       </p>
 
       <div className="mt-3 space-y-2">
         <div className="rounded-md border border-border bg-surface-panel p-3">
-          <div className="text-sm font-medium text-text-primary">停滞警告</div>
+          <div className="text-sm font-medium text-text-primary">{t("automation.stallWarn")}</div>
           <p className="mt-0.5 text-xs text-text-muted">
-            连续无 SSE / 工具进展超过该秒数时，显示「已 Ns 无响应」与中断提示（默认 90 秒）。
+            {t("automation.stallWarnHint")}
           </p>
           <div className="mt-3 flex items-center gap-3">
-            <span className="w-28 shrink-0 text-xs text-text-muted">判定阈值（秒）</span>
+            <span className="w-28 shrink-0 text-xs text-text-muted">{t("automation.detectSeconds")}</span>
             <div className="min-w-0 flex-1">
               <SettingsRangeField
                 min={30}
@@ -62,7 +64,7 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary">自动续跑</span>
+                <span className="text-sm font-medium text-text-primary">{t("automation.autoNudge")}</span>
                 <span
                   className={`shrink-0 rounded-full border px-1.5 text-[10px] ${
                     value.stall_auto_nudge_enabled
@@ -70,12 +72,11 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                       : "border-border bg-surface-card text-text-faint"
                   }`}
                 >
-                  {value.stall_auto_nudge_enabled ? "已启用" : "未启用"}
+                  {value.stall_auto_nudge_enabled ? t("automation.enabled") : t("automation.disabled")}
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-text-muted">
-                已进入停滞警告时自动发送续跑提醒（不显示用户气泡）；支持 running / interrupted /
-                通道 C。无人值守模式由下方「无人值守完成任务」与后端 Supervisor 接管。默认关闭。
+                {t("automation.autoNudgeHint")}
               </p>
             </div>
             <label className="flex shrink-0 items-center gap-2 text-xs text-text-muted">
@@ -88,20 +89,19 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                   set({ stall_auto_nudge_enabled: e.target.checked })
                 }
               />
-              启用
+              {t("automation.enable")}
             </label>
           </div>
 
           {nudgeBelowDetect ? (
             <p className="mt-2 text-[11px] text-amber-300/90">
-              自动续跑触发时间应不小于停滞警告阈值；保存时将自动抬到{" "}
-              {value.stall_detect_silence_seconds} 秒。
+              {t("automation.nudgeBelow", { seconds: value.stall_detect_silence_seconds })}
             </p>
           ) : null}
 
           <div className="mt-3 space-y-2">
             <div className="flex items-center gap-3">
-              <span className="w-28 shrink-0 text-xs text-text-muted">触发等待（秒）</span>
+              <span className="w-28 shrink-0 text-xs text-text-muted">{t("automation.triggerWait")}</span>
               <div className="min-w-0 flex-1">
                 <SettingsRangeField
                   min={60}
@@ -119,7 +119,7 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="w-28 shrink-0 text-xs text-text-muted">每会话最多次数</span>
+              <span className="w-28 shrink-0 text-xs text-text-muted">{t("automation.maxPerSession")}</span>
               <input
                 type="number"
                 min={1}
@@ -143,7 +143,7 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary">模型超时自动等待恢复</span>
+                <span className="text-sm font-medium text-text-primary">{t("automation.llmPatience")}</span>
                 <span
                   className={`shrink-0 rounded-full border px-1.5 text-[10px] ${
                     value.llm_stall_patience_enabled
@@ -151,12 +151,11 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                       : "border-border bg-surface-card text-text-faint"
                   }`}
                 >
-                  {value.llm_stall_patience_enabled ? "已启用" : "未启用"}
+                  {value.llm_stall_patience_enabled ? t("automation.enabled") : t("automation.disabled")}
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-text-muted">
-                模型响应超时后不立即判定失败：界面显示「网络较慢，可能要等待更长时间」的缓冲提示，
-                后台按指数退避自动重试，网络恢复后本轮自动续跑，无需手动点「恢复执行」。预算耗尽后才落失败卡。默认开启。
+                {t("automation.llmPatienceHint")}
               </p>
             </div>
             <label className="flex shrink-0 items-center gap-2 text-xs text-text-muted">
@@ -169,13 +168,13 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                   set({ llm_stall_patience_enabled: e.target.checked })
                 }
               />
-              启用
+              {t("automation.enable")}
             </label>
           </div>
 
           <div className="mt-3 space-y-2">
             <div className="flex items-center gap-3">
-              <span className="w-28 shrink-0 text-xs text-text-muted">自动重试次数</span>
+              <span className="w-28 shrink-0 text-xs text-text-muted">{t("automation.retryCount")}</span>
               <input
                 type="number"
                 min={1}
@@ -193,7 +192,7 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
               />
             </div>
             <div className="flex items-center gap-3">
-              <span className="w-28 shrink-0 text-xs text-text-muted">总等待预算（秒）</span>
+              <span className="w-28 shrink-0 text-xs text-text-muted">{t("automation.waitBudget")}</span>
               <input
                 type="number"
                 min={60}

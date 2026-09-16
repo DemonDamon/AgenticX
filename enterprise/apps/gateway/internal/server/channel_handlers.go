@@ -3,11 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -85,6 +85,7 @@ func (s *Server) handleChatCompleteRelay(
 				DepartmentID:    identity.DepartmentID,
 				SessionID:       identity.SessionID,
 				TraceID:         identity.TraceID,
+				DeploymentID:    identity.DeploymentID,
 				ClientType:      "web-portal",
 				ClientIP:        r.RemoteAddr,
 				Provider:        decision.Provider,
@@ -126,6 +127,7 @@ func (s *Server) handleChatCompleteRelay(
 		DepartmentID:    identity.DepartmentID,
 		SessionID:       identity.SessionID,
 		TraceID:         identity.TraceID,
+		DeploymentID:    identity.DeploymentID,
 		ClientType:      "web-portal",
 		ClientIP:        r.RemoteAddr,
 		Provider:        decision.Provider,
@@ -239,7 +241,7 @@ func (s *Server) handleKeypoolReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func gatewayInternalAuthorized(r *http.Request) bool {
-	expected := strings.TrimSpace(os.Getenv("GATEWAY_INTERNAL_TOKEN"))
+	expected := gatewayinternal.SecretFromEnv("GATEWAY_INTERNAL_TOKEN")
 	if expected == "" {
 		return false
 	}

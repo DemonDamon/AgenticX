@@ -1,5 +1,30 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
+type NearBrowserActPayload = {
+  request_id: string;
+  session_id: string;
+  action: string;
+  url?: unknown;
+  index?: unknown;
+  text?: unknown;
+  key?: unknown;
+  submit?: unknown;
+  query?: unknown;
+};
+
+type NearBrowserActResult = {
+  ok: boolean;
+  request_id?: string;
+  session_id?: string;
+  error?: string;
+  hint?: string;
+  url?: string;
+  title?: string;
+  elements?: unknown;
+  path?: string;
+  text?: string;
+};
+
 function parseArgvFlag(prefix: string, fallback: string): string {
   for (const arg of process.argv) {
     if (arg.startsWith(prefix)) {
@@ -60,12 +85,28 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
-  version: "0.2.5",
+  version: "0.5.0",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
+  enterpriseSyncCapabilities: async (): Promise<{ ok: boolean; skipped?: boolean }> =>
+    ipcRenderer.invoke("enterprise-sync-capabilities"),
+  collabRoomList: async () => ipcRenderer.invoke("collab-room-list"),
+  collabRoomGet: async (roomId: string) => ipcRenderer.invoke("collab-room-get", roomId),
+  collabRoomMessages: async (roomId: string, opts?: { afterSeq?: number; limit?: number }) =>
+    ipcRenderer.invoke("collab-room-messages", roomId, opts),
+  collabRoomSend: async (roomId: string, content: string) =>
+    ipcRenderer.invoke("collab-room-send", roomId, content),
+  collabRoomWatch: async (roomId: string) => ipcRenderer.invoke("collab-room-watch", roomId),
+  collabRoomUnwatch: async (roomId: string) => ipcRenderer.invoke("collab-room-unwatch", roomId),
+  onCollabRoomEvent: (cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) => {
+    const listener = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("collab-room-event", listener as never);
+    return () => ipcRenderer.removeListener("collab-room-event", listener as never);
+  },
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
+  getSystemLocale: async (): Promise<string> => ipcRenderer.invoke("get-system-locale"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
     ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
@@ -276,6 +317,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     tool_search_auto_schema_token_threshold?: number;
     tool_search_threshold_strategy?: "adaptive" | "manual";
     tool_search_context_budget_ratio?: number;
+    ops_tools_enabled?: boolean;
   }) =>
     ipcRenderer.invoke("save-runtime-config", payload),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {
@@ -306,7 +348,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
-  saveUiPrefs: async (payload: { theme: "dark" | "light" | "dim" }) =>
+  saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,
   saveLayout: async (payload: {
     panes?: Array<{
@@ -320,6 +362,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("layout-set", payload),
   forkSession: async (payload: { sessionId: string }) =>
     ipcRenderer.invoke("fork-session", payload),
+  continueFromMessage: async (payload: { sessionId: string; messageId: string }) =>
+    ipcRenderer.invoke("continue-from-message", payload),
   archiveSessions: async (payload: { sessionId: string; avatarId?: string | null }) =>
     ipcRenderer.invoke("archive-sessions", payload),
   listTaskspaces: async (sessionId: string) =>
@@ -408,6 +452,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
+  loadBrowserControlConfig: async () => ipcRenderer.invoke("load-browser-control-config"),
+  saveBrowserControlConfig: async (payload: { enabled: boolean }) =>
+    ipcRenderer.invoke("save-browser-control-config", payload),
   loadCodeIndexConfig: async () => ipcRenderer.invoke("load-code-index-config"),
   saveCodeIndexConfig: async (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("save-code-index-config", payload),
@@ -432,6 +479,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
   saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
     ipcRenderer.invoke("save-automation-config", payload),
+  writeWorkspacePerfLog: async (payload: unknown) =>
+    ipcRenderer.invoke("workspace-perf-log", payload) as Promise<{ ok: boolean; path?: string }>,
   confirmDialog: async (payload: {
     title?: string;
     message: string;
@@ -658,6 +707,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),
   shellShowItemInFolder: async (path: string) => ipcRenderer.invoke("shell-show-item-in-folder", path),
+  copyLocalFileAs: async (payload: { sourcePath: string }) =>
+    ipcRenderer.invoke("copy-local-file-as", payload),
   connectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>
@@ -665,8 +716,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),
-  saveConfirmStrategy: async (strategy: "manual" | "semi-auto" | "auto") =>
-    ipcRenderer.invoke("save-confirm-strategy", strategy),
+  saveRunMode: async (mode: "ask" | "allowlist" | "auto") =>
+    ipcRenderer.invoke("save-run-mode", mode),
   saveEmailConfig: async (payload: {
     enabled: boolean;
     smtp_host: string;
@@ -871,6 +922,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       error?: string;
     }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
+  resolveLocalMediaUrl: async (path: string) => ipcRenderer.invoke("resolve-local-media-url", path),
   installFromRegistry: async (args: {
     source: string;
     name: string;
@@ -940,6 +992,46 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("agx-account-login-timeout", handler);
     return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
   },
+
+  loadEnterpriseAccount: async () =>
+    ipcRenderer.invoke("load-enterprise-account") as Promise<{
+      ok: boolean;
+      loggedIn?: boolean;
+      email?: string;
+      displayName?: string;
+      portalUrl?: string;
+    }>,
+  enterpriseLoginStart: async (payload: { portalUrl?: string }) =>
+    ipcRenderer.invoke("enterprise-login-start", payload) as Promise<{
+      ok: boolean;
+      verification_url?: string;
+      error?: string;
+    }>,
+  enterpriseLoginCancel: async () =>
+    ipcRenderer.invoke("enterprise-login-cancel") as Promise<{ ok: boolean }>,
+  enterpriseLogout: async () => ipcRenderer.invoke("enterprise-logout") as Promise<{ ok: boolean }>,
+  onEnterpriseAccountChanged: (
+    cb: (payload: {
+      loggedIn: boolean;
+      email: string;
+      displayName: string;
+      portalUrl: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("enterprise-account-changed", handler as never);
+    return () => ipcRenderer.removeListener("enterprise-account-changed", handler as never);
+  },
+  onEnterpriseLoginFailed: (cb: (payload: { error: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("enterprise-login-failed", handler as never);
+    return () => ipcRenderer.removeListener("enterprise-login-failed", handler as never);
+  },
+  onEnterpriseLoginTimeout: (cb: () => void): (() => void) => {
+    const handler = () => cb();
+    ipcRenderer.on("enterprise-login-timeout", handler);
+    return () => ipcRenderer.removeListener("enterprise-login-timeout", handler);
+  },
   updateSplashStage: async (stage: string) =>
     ipcRenderer.invoke("update-splash-stage", stage) as Promise<{ ok: boolean }>,
   getSplashPreloadEnabled: async () =>
@@ -1004,6 +1096,20 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("in-app-browser-open", handler);
     return () => ipcRenderer.removeListener("in-app-browser-open", handler);
   },
+  onNearBrowserAct: (cb: (payload: NearBrowserActPayload) => void): (() => void) => {
+    const handler = (_event: unknown, payload: NearBrowserActPayload) => cb(payload);
+    ipcRenderer.on("near-browser-act", handler);
+    return () => ipcRenderer.removeListener("near-browser-act", handler);
+  },
+  replyNearBrowserAct: async (payload: NearBrowserActResult) =>
+    ipcRenderer.invoke("near-browser-act-result", payload),
+  saveNearBrowserScreenshot: async (payload: { dataUrl: string }) =>
+    ipcRenderer.invoke("save-near-browser-screenshot", payload),
+  extractNearBrowserFrames: async (payload: { webContentsId: number; query?: string }) =>
+    ipcRenderer.invoke("extract-near-browser-frames", payload),
+  listChromeCookieProfiles: async () => ipcRenderer.invoke("list-chrome-cookie-profiles"),
+  importChromeCookies: async (payload: { profileId: string }) =>
+    ipcRenderer.invoke("import-chrome-cookies", payload),
   copyPngToClipboard: async (buffer: ArrayBuffer) =>
     ipcRenderer.invoke("clipboard-write-png", buffer) as Promise<{ ok: boolean; error?: string }>,
   downloadPngToDownloads: async (payload: { buffer: ArrayBuffer; defaultFileName?: string }) =>

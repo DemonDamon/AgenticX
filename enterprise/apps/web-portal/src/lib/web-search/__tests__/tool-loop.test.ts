@@ -12,6 +12,7 @@ import {
   withSearchContext,
 } from "../tool-loop";
 import type { WebSearchHit } from "../providers";
+import type { DirectPageView } from "../direct-page";
 
 function sseResponse(text: string): Response {
   return new Response(text, {
@@ -192,6 +193,158 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/opus");
     expect(text.includes("**来源**")).toBe(false);
     expect(text.includes("minimax:tool_call")).toBe(false);
+  });
+
+  it("reads a glued arXiv URL directly without spending a provider call", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse('data: {"choices":[{"delta":{"content":"可以读懂 [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: "Paper title\n\nAbstract evidence\n\nIntroduction evidence\n\nLate appendix",
+      rawChars: 80,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你好" },
+          { role: "assistant", content: "你好" },
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348你能读懂这篇文章嘛?",
+          },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readPage.mock.calls[0]?.[0]).toMatchObject({
+      readUrl: "https://arxiv.org/html/2606.19348",
+      question: "你能读懂这篇文章嘛?",
+    });
+    expect(bodies).toHaveLength(1);
+    expect(JSON.stringify(bodies[0])).toContain("网页直读状态");
+    expect(JSON.stringify(bodies[0])).toContain("Abstract evidence");
+    const text = await response.text();
+    expect(text).toContain("agenticx_web_search_sources");
+  });
+
+  it("reuses one historical document for a follow-up without another provider call", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse('data: {"choices":[{"delta":{"content":"80% [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: [
+        "Paper title and abstract.",
+        "Introduction and background.",
+        "Method details.",
+        "Table 8 Pass Rate Internal Engineers 80 percent.",
+      ].join("\n\n"),
+      rawChars: 140,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "https://arxiv.org/pdf/2606.19348 读一下" },
+          { role: "assistant", content: "已阅读摘要" },
+          { role: "user", content: "Table 8 的通过率是什么？" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(bodies[0])).toContain("Table 8 Pass Rate Internal Engineers 80 percent");
+  });
+
+  it("filters arXiv fallback search to the same document when direct read fails", async () => {
+    const executeSearch = vi.fn(async () => [
+      { title: "Noise", url: "https://arxiv.org/abs/2606.19349", snippet: "wrong" },
+      {
+        title: "Exact paper",
+        url: "https://arxiv.org/abs/2606.19348v1",
+        snippet: "exact abstract",
+      },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"fallback [1]"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "https://arxiv.org/pdf/2606.19348 帮我读" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage: vi.fn(async () => null),
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledWith(
+      "arXiv 2606.19348",
+      undefined,
+      expect.any(Object),
+    );
+    const text = await response.text();
+    expect(text).toContain("https://arxiv.org/abs/2606.19348v1");
+    expect(text).not.toContain("2606.19349");
   });
 
   it("skips web search for pure current-date questions and grounds on local clock", async () => {
@@ -662,21 +815,26 @@ describe("web search tool loop", () => {
     expect(String(executeSearch.mock.calls[0]?.[0])).toContain("蔡徐坤");
   });
 
-  it("skips search when referential follow-up has no resolvable entity", async () => {
-    const bodies: unknown[] = [];
-    const executeSearch = vi.fn(async () => []);
-    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body ?? "{}")));
-      return sseResponse('data: {"choices":[{"delta":{"content":"基于上下文"}}]}\n\ndata: [DONE]\n\n');
-    });
+  it("falls back to prior user context when referential follow-up has no entity", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "王虹", url: "https://ex.com/wh", snippet: String(q) },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"基于检索"}}]}\n\ndata: [DONE]\n\n'),
+    );
 
     await runWebSearchTurn(
       {
         model: "m",
         messages: [
-          { role: "user", content: "你认识宗主吗" },
-          { role: "assistant", content: "这是一个很宽泛的称呼，没有具体人名。" },
-          { role: "user", content: "他为什么被封为宗主呢" },
+          { role: "user", content: "搜一下这几天关于王虹的新闻" },
+          {
+            role: "assistant",
+            content:
+              "我来帮您搜索关于王虹的最新新闻。\n" +
+              `<minimax:tool_call><invoke name="web_search"></invoke></minimax:tool_call>`,
+          },
+          { role: "user", content: "她有哪些学术成就？" },
         ],
         agenticx_web_search: true,
       },
@@ -694,10 +852,54 @@ describe("web search tool loop", () => {
       },
     );
 
-    expect(executeSearch).not.toHaveBeenCalled();
-    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
-    const system = String(body.messages?.[0]?.content ?? "");
-    expect(system).not.toContain("联网搜索结果");
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(String(executeSearch.mock.calls[0]?.[0])).toContain("王虹");
+  });
+
+  it("retries MiniMax once when the grounded answer is only tool-call XML", async () => {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      if (fetchImpl.mock.calls.length === 1) {
+        return sseResponse(
+          'data: {"choices":[{"delta":{"content":"我来帮您搜索。\\n<minimax:tool_call>\\n<invoke name=\\"web_search\\"></invoke>\\n</minimax:tool_call>"}}]}\n\ndata: [DONE]\n\n',
+        );
+      }
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"王虹是数学家，2026年获菲尔兹奖 [1]"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "MiniMax-M2.5",
+        messages: [{ role: "user", content: "搜一下这几天关于王虹的新闻" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [
+          { title: "菲尔兹奖", url: "https://ex.com/fields", snippet: "王虹获奖" },
+        ],
+      },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const retrySystem = String(bodies[1]?.messages?.[0]?.content ?? "");
+    expect(retrySystem).toContain("联网搜索结果");
+    expect(retrySystem).toContain("本轮强制要求");
+    const text = await readText(res);
+    expect(text).toContain("菲尔兹奖");
+    expect(text).not.toContain("minimax:tool_call");
+    expect(text).toContain("agenticx_web_search_sources");
   });
 
   it("AGENTICX_WEB_SEARCH_ALWAYS still searches referential follow-ups without entity", async () => {

@@ -1,5 +1,6 @@
 import type { Message } from "../store";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
+import { isEphemeralConfirmReceiptMessage } from "./noisy-chat-messages";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
 import { assistantVisibleBodyForUi } from "./assistant-output";
 import {
@@ -73,6 +74,10 @@ function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
     searchedQueries: memory.searchedQueries ?? diskRow.searchedQueries,
     reasoning: memory.reasoning ?? diskRow.reasoning,
     reasoningSeconds: memory.reasoningSeconds ?? diskRow.reasoningSeconds,
+    provider: (diskRow.provider || "").trim() || memory.provider,
+    model: (diskRow.model || "").trim() || memory.model,
+    usage: diskRow.usage ?? memory.usage,
+    modelSelection: diskRow.modelSelection ?? memory.modelSelection,
     toolStatus: resolveMergedToolStatus(diskRow.toolStatus, memory.toolStatus),
     toolElapsedSec: memory.toolElapsedSec ?? diskRow.toolElapsedSec,
     metadata: memory.metadata ?? diskRow.metadata,
@@ -187,6 +192,7 @@ export function mergeSessionMessagesTail(
   for (const memory of existing) {
     if (consumedMemory.has(memory)) continue;
     if (isOrphanFormattedToolResultMessage(memory)) continue;
+    if (isEphemeralConfirmReceiptMessage(memory)) continue;
     if (memory.role === "assistant") {
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;
@@ -199,5 +205,51 @@ export function mergeSessionMessagesTail(
     out.push(memory);
   }
 
+  return retainUnpersistedLiveUserTurns(existing, out);
+}
+
+/**
+ * Disk snapshots lag composer echoes. A full replace / mid-await merge that
+ * captured `existing` a tick too early would drop those user rows while the
+ * SSE assistants stay — the transcript looks like the queries vanished until
+ * a later session-switch reload. Re-insert any live user turn whose
+ * `client_turn_id` is not already in `next`, keeping live order.
+ */
+export function retainUnpersistedLiveUserTurns(
+  live: Message[],
+  next: Message[],
+): Message[] {
+  const nextTurnIds = new Set<string>();
+  for (const row of next) {
+    if (row.role !== "user") continue;
+    const turnId = clientTurnId(row);
+    if (turnId) nextTurnIds.add(turnId);
+  }
+  const missing: Message[] = [];
+  for (const row of live) {
+    if (row.role !== "user") continue;
+    const turnId = clientTurnId(row);
+    if (!turnId || nextTurnIds.has(turnId)) continue;
+    missing.push(row);
+    nextTurnIds.add(turnId);
+  }
+  if (missing.length === 0) return next;
+
+  const out = [...next];
+  for (const user of missing) {
+    const liveAt = live.indexOf(user);
+    let insertAt = out.length;
+    for (let i = liveAt - 1; i >= 0; i -= 1) {
+      const prev = live[i];
+      const pos = out.findIndex(
+        (row) => row === prev || (row.id && prev.id && row.id === prev.id),
+      );
+      if (pos >= 0) {
+        insertAt = pos + 1;
+        break;
+      }
+    }
+    out.splice(insertAt, 0, user);
+  }
   return out;
 }

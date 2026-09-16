@@ -10,8 +10,10 @@ from agenticx.runtime.tool_search import (
     decide_apply_with_hysteresis,
     is_tool_pending_next_round,
     project_tools_for_round,
+    resolve_apply_threshold,
     resolve_effective_threshold,
     resolve_max_loaded,
+    should_apply_tool_search,
     ToolDescriptor,
 )
 
@@ -45,6 +47,70 @@ def test_resolve_effective_threshold_adaptive_windows():
     assert resolve_effective_threshold(cfg, context_window=8_000) == 1_000
 
 
+def test_resolve_apply_threshold_ignores_window_and_strategy():
+    assert resolve_apply_threshold(ToolSearchConfig(mode="auto")) == 6000
+    assert (
+        resolve_apply_threshold(ToolSearchConfig(mode="auto", auto_schema_token_threshold=8000))
+        == 8000
+    )
+    assert (
+        resolve_apply_threshold(
+            ToolSearchConfig(
+                mode="auto",
+                threshold_strategy="manual",
+                auto_schema_token_threshold=1000,
+            )
+        )
+        == 1000
+    )
+
+
+def test_adaptive_1m_window_applies_when_pool_exceeds_schema_gate():
+    """1M windows must not use the 50k loaded-budget as the apply gate."""
+    cfg = ToolSearchConfig(mode="auto")
+    budget = resolve_effective_threshold(cfg, context_window=1_000_000)
+    assert budget == 50_000
+    apply_thr = resolve_apply_threshold(cfg)
+    assert apply_thr == 6000
+    assert (
+        should_apply_tool_search(
+            cfg,
+            full_pool_schema_tokens=19_315,
+            tool_search_allowed=True,
+            effective_threshold=apply_thr,
+        )
+        is True
+    )
+    assert (
+        should_apply_tool_search(
+            cfg,
+            full_pool_schema_tokens=19_315,
+            tool_search_allowed=True,
+            effective_threshold=budget,
+        )
+        is False
+    )
+
+
+def test_resolve_applied_uses_apply_threshold_not_window_budget():
+    catalog = build_catalog(
+        [_builtin("bash_exec"), _builtin("web_fetch"), _builtin("tool_search")]
+    )
+    full = [_openai("bash_exec"), _openai("web_fetch"), _openai("tool_search")]
+    ctx = ToolSearchRuntimeContext(
+        config=ToolSearchConfig(mode="auto"),
+        catalog=catalog,
+        state=ToolSearchStateV1(),
+        tool_search_allowed=True,
+        effective_threshold=50_000,
+        apply_threshold=6000,
+        resolved_applied=None,
+    )
+    # Tiny 3-tool pool is below the 6000 apply gate, so projection fail-opens.
+    out = project_tools_for_round(ctx, full_openai_tools=full)
+    assert out is full
+
+
 def test_resolve_effective_threshold_manual():
     cfg = ToolSearchConfig(
         mode="auto",
@@ -71,8 +137,8 @@ def test_decide_apply_with_hysteresis_band():
 
 
 def test_resolved_applied_single_source_for_project_and_pending():
-    catalog = build_catalog([_builtin("bash_exec"), _builtin("web_search"), _builtin("tool_search")])
-    full = [_openai("bash_exec"), _openai("web_search"), _openai("tool_search")]
+    catalog = build_catalog([_builtin("bash_exec"), _builtin("web_fetch"), _builtin("tool_search")])
+    full = [_openai("bash_exec"), _openai("web_fetch"), _openai("tool_search")]
     ctx_off = ToolSearchRuntimeContext(
         config=ToolSearchConfig(mode="always"),
         catalog=catalog,
@@ -85,7 +151,7 @@ def test_resolved_applied_single_source_for_project_and_pending():
     assert (
         is_tool_pending_next_round(
             ctx_off,
-            "web_search",
+            "web_fetch",
             allowed_tool_names={"bash_exec", "tool_search"},
             full_openai_tools=full,
         )
@@ -105,11 +171,11 @@ def test_resolved_applied_single_source_for_project_and_pending():
         for t in projected
         if isinstance(t, dict)
     }
-    assert "web_search" not in names
+    assert "web_fetch" not in names
     assert (
         is_tool_pending_next_round(
             ctx_on,
-            "web_search",
+            "web_fetch",
             allowed_tool_names=names,
             full_openai_tools=full,
         )

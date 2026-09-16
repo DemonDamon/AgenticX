@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
 import { dedupeReferencesByDoc, type DocGroup } from "../../utils/citation-doc-grouping";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
+import { CitationSourcesCard, WebSearchSourceRow } from "./WebSearchSources";
 
 type Props = {
   references: SearchReference[];
@@ -18,20 +20,22 @@ function buildSummary(
   kbCount: number,
   webCount: number,
   queryCount: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
   if (kbCount > 0 && webCount === 0) {
-    return `找到了 ${kbCount} 篇知识库资料`;
+    return t("references.kbOnly", { count: kbCount });
   }
   if (kbCount > 0 && webCount > 0) {
-    return `参考 ${refCount} 篇资料（含知识库 ${kbCount} 篇）`;
+    return t("references.mixed", { count: refCount, kb: kbCount });
   }
   if (queryCount > 0) {
-    return `已检索 ${queryCount} 个关键词，参考 ${refCount} 篇资料`;
+    return t("references.withQueries", { queries: queryCount, count: refCount });
   }
-  return `参考 ${refCount} 篇资料`;
+  return t("references.generic", { count: refCount });
 }
 
 export function ReferencesCard({ references, searchedQueries }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -50,10 +54,15 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
   const visibleKb = visible.filter((g) => g.primary.source === "kb");
   const visibleWeb = visible.filter((g) => g.primary.source === "web");
   const kbOnly = kbGroups.length > 0 && webGroups.length === 0;
+  const webOnly = webGroups.length > 0 && kbGroups.length === 0;
 
   if (docCount === 0) return null;
 
-  const summary = buildSummary(docCount, kbGroups.length, webGroups.length, queryCount);
+  if (webOnly) {
+    return <CitationSourcesCard references={webGroups.map((g) => g.primary)} />;
+  }
+
+  const summary = buildSummary(docCount, kbGroups.length, webGroups.length, queryCount, t);
 
   const renderKbList = (items: DocGroup[]) => (
     <ol
@@ -82,7 +91,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
               </span>
               {fragmentCount > 1 ? (
                 <span className="shrink-0 whitespace-nowrap text-[11px] text-text-faint">
-                  · {fragmentCount} 个片段
+                  {t("references.fragments", { count: fragmentCount })}
                 </span>
               ) : null}
             </button>
@@ -93,43 +102,15 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
   );
 
   const renderWebList = (items: DocGroup[]) => (
-    <ol className="space-y-0.5">
-      {items.map((group) => {
-        const ref = group.primary;
-        const domain = ref.domain || "";
-        const clickable = /^https?:\/\//i.test(ref.url);
-        return (
-          <li
-            key={`web-${group.docKey}`}
-            className="flex min-w-0 items-start gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-hover/20"
-          >
-            <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
-              {group.docNumber}.
-            </span>
-            <div className="min-w-0 flex-1 leading-relaxed">
-              {clickable ? (
-                <button
-                  type="button"
-                  className="inline-flex max-w-full items-center gap-1 text-left text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
-                  title={ref.url}
-                  onClick={() => openSearchReference(ref)}
-                >
-                  <span className="truncate">{ref.title}</span>
-                  <ExternalLink className="h-3 w-3 shrink-0 opacity-65" aria-hidden />
-                </button>
-              ) : (
-                <span className="block truncate text-text-subtle" title={ref.url}>
-                  {ref.title}
-                </span>
-              )}
-              {domain ? (
-                <span className="ml-1 whitespace-nowrap text-[11px] text-text-faint">· {domain}</span>
-              ) : null}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+    <ul className="space-y-0.5">
+      {items.map((group) => (
+        <WebSearchSourceRow
+          key={`web-${group.docKey}`}
+          reference={group.primary}
+          index1Based={group.docNumber}
+        />
+      ))}
+    </ul>
   );
 
   return (
@@ -181,14 +162,14 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
               <>
                 {visibleKb.length > 0 ? (
                   <div className="space-y-1">
-                    <div className="text-[11px] font-medium tracking-wide text-text-faint">知识库</div>
+                    <div className="text-[11px] font-medium tracking-wide text-text-faint">{t("references.knowledgeBase")}</div>
                     {renderKbList(visibleKb)}
                   </div>
                 ) : null}
                 {visibleWeb.length > 0 ? (
                   <div className="space-y-1">
                     {visibleKb.length > 0 ? (
-                      <div className="text-[11px] font-medium tracking-wide text-text-faint">网络</div>
+                      <div className="text-[11px] font-medium tracking-wide text-text-faint">{t("references.web")}</div>
                     ) : null}
                     {renderWebList(visibleWeb)}
                   </div>
@@ -201,7 +182,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
                 className="rounded-md px-1 py-0.5 text-[12px] text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:bg-surface-hover/20 hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
                 onClick={() => setShowAll(true)}
               >
-                显示更多（+{hiddenCount}）
+                {t("references.showMore", { count: hiddenCount })}
               </button>
             ) : null}
           </div>

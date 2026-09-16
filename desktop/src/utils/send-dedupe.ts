@@ -51,11 +51,7 @@ export function shouldSuppressDuplicatePendingUserEcho(
     last.metadata?.client_turn_id ?? "",
   ).trim();
   const incomingClientTurnId = String(clientTurnId ?? "").trim();
-  if (
-    existingClientTurnId &&
-    incomingClientTurnId &&
-    existingClientTurnId !== incomingClientTurnId
-  ) {
+  if (incomingClientTurnId && incomingClientTurnId !== existingClientTurnId) {
     return false;
   }
   return (

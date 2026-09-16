@@ -81,6 +81,28 @@ def resolve_vision_fallback(session: Any = None) -> Dict[str, Any]:
             "label": label,
         }
 
+    # 企业下发的附件路由策略优先于本地 vision_fallback 配置。
+    #
+    # 顺序是刻意的：图片走这条路是为了**不出私有部署**——只有描述回到云端，原图不
+    # 离开。本地 config.yaml 里放一个别的 vision_fallback 就能把截图送去公网视觉模型，
+    # 那这条路就白设了。和 attachment_routing 只读全局配置是同一条纪律。
+    #
+    # 路由没启用时保持原来的顺序，不影响没接企业的用法。
+    try:
+        from agenticx.studio.attachment_routing import read_policy as _read_routing_policy
+
+        _routing = _read_routing_policy()
+    except Exception:
+        _routing = None
+    if _routing is not None and _routing.enabled and _routing.vision_fallback is not None:
+        _ref = _routing.vision_fallback
+        _rp, _rm = _ref.provider, _ref.model
+        if str(getattr(session, "provider_name", "") or "").strip() == "enterprise":
+            # 企业会话只有一个 enterprise provider，模型名是全 id。
+            _rp, _rm = "enterprise", (_ref.id or f"{_ref.provider}/{_ref.model}")
+        if _rp and _rm and not _blocked(_rp):
+            return _as_result(_rp, _rm)
+
     if isinstance(raw_override, dict):
         ov_provider = str(raw_override.get("provider") or "").strip()
         ov_model = str(raw_override.get("model") or "").strip()

@@ -235,6 +235,19 @@ def register_brain_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=404, detail=f"job {job_id} not found")
         return {"ok": True, "job": job.to_dict()}
 
+    @app.post("/api/brains/{brain_id}/jobs/{job_id}/cancel")
+    async def cancel_brain_job(brain_id: str, job_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        if rt.jobs.get(job_id) is None:
+            raise HTTPException(status_code=404, detail=f"job {job_id} not found")
+        try:
+            job, already_terminal = rt.jobs.request_cancel(job_id, rt.runtime)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"job {job_id} not found") from None
+        if already_terminal:
+            raise HTTPException(status_code=409, detail="job already finished")
+        return {"ok": True, "job": job.to_dict()}
+
     @app.get("/api/brains/{brain_id}/stats")
     async def brain_stats(brain_id: str) -> Dict[str, Any]:
         rt = _require_docs_brain(brain_id)

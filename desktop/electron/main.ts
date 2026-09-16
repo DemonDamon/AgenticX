@@ -10,6 +10,8 @@ import {
   powerSaveBlocker,
   screen,
   session,
+  net as electronNet,
+  protocol,
   shell,
   Tray
 } from "electron";
@@ -36,6 +38,7 @@ import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
 import { extract as extractTar } from "tar";
+import { isAppLocale, localeFromOsTag, type AppLocale } from "./app-locale";
 import {
   closeSplash,
   configureSplashLayoutThemeReader,
@@ -55,14 +58,57 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
+import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
+import { pickLocalFsPathCandidate } from "./local-fs-path";
+import {
+  getRoom as fetchCollabRoom,
+  listMessages as fetchCollabRoomMessages,
+  listRooms as fetchCollabRooms,
+  normalizePortalBase,
+  sendMessage as sendCollabRoomMessage,
+  streamRoomEvents,
+} from "./collab-room-client";
+import {
+  cancelEnterpriseDeviceAuth,
+  pollEnterpriseDeviceAuth,
+  startEnterpriseDeviceAuth,
+} from "./enterprise-device-login";
+import { normalizeEnterpriseCapabilities } from "./enterprise-capabilities";
+import {
+  applyEnterpriseCapabilitiesToDisk,
+  digestSkillBundle,
+  hasEnterprisePat,
+  readMcpDocumentViaStudio,
+  removeManagedSkill,
+  writeManagedSkill,
+  writeMcpDocumentViaStudio,
+} from "./enterprise-capabilities-sync";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
+import {
+  getServeStartupTimeoutMs,
+  LOCAL_BACKEND_STARTUP_ENV,
+  SERVE_READY_PROBE_TIMEOUT_MS,
+} from "./local-backend-startup";
 import {
   readSessionMessagesFromDisk,
   readSessionMessagesTailFromDisk,
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
+import {
+  previewLimitExceededMessage,
+  previewMaxBytesForHost,
+} from "./preview-file-limit";
+import {
+  LOCAL_MEDIA_SCHEME,
+  LOCAL_MEDIA_SCHEME_PRIVILEGES,
+  buildLocalMediaUrl,
+  localVideoMime,
+  parseLocalMediaPath,
+  resolveAllowedLocalVideoFile,
+} from "./local-media-protocol";
 import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
@@ -104,6 +150,8 @@ import {
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
+
+protocol.registerSchemesAsPrivileged([...LOCAL_MEDIA_SCHEME_PRIVILEGES]);
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -261,7 +309,8 @@ type AgxConfig = {
   providers?: Record<string, ProviderConfig>;
   user_mode?: "pro" | "lite";
   onboarding_completed?: boolean;
-  confirm_strategy?: "manual" | "semi-auto" | "auto";
+  confirm_strategy?: "manual" | "semi-auto" | "auto" | "ask" | "allowlist";
+  run_mode?: "ask" | "allowlist" | "auto";
   active_provider?: string;
   active_model?: string;
   remote_server?: RemoteServerConfig;
@@ -291,6 +340,7 @@ type AgxConfig = {
     };
   };
   computer_use?: Record<string, unknown>;
+  browser_control?: Record<string, unknown>;
   code_index?: Record<string, unknown>;
   agent_harness_trinity?: {
     skill_protocol?: boolean;
@@ -302,8 +352,22 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
+  ops?: Record<string, unknown>;
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
   workspace_dir?: string;
+  enterprise?: {
+    enabled?: boolean;
+    base_url?: string;
+    token?: string;
+    capabilities?: unknown;
+    managed_mcp_servers?: string[];
+    managed_skills?: string[];
+    /** 上次使用/预置的门户地址；登出后保留，用于下次登录预填。 */
+    default_portal_url?: string;
+    /** 仅用于设置页展示当前登录者，非鉴权依据。 */
+    user_email?: string;
+    user_display_name?: string;
+  };
   /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
     user_email?: string;
@@ -356,6 +420,14 @@ const SESSIONS_DIR = path.join(CONFIG_DIR, "sessions");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
 const DEFAULT_META_WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 
+function normalizeDesktopRunMode(raw: unknown): "ask" | "allowlist" | "auto" {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (text === "auto") return "auto";
+  if (text === "allowlist" || text === "semi-auto") return "allowlist";
+  if (text === "ask" || text === "manual") return "ask";
+  return "ask";
+}
+
 function expandDesktopLocalPath(input: string): string {
   const raw = String(input || "").trim();
   if (!raw) return "";
@@ -383,6 +455,7 @@ function metaWorkspaceMarkdownPath(filename: string, cfg?: AgxConfig): string {
 
 const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
 const AUTOMATION_LOGS_DIR = path.join(CONFIG_DIR, "logs", "automation");
+const WORKSPACE_PERF_LOG_PATH = path.join(CONFIG_DIR, "logs", "workspace-perf.log");
 
 function automationLogPath(taskId: string): string {
   const id = String(taskId ?? "").trim() || "unknown";
@@ -403,6 +476,28 @@ function appendAutomationLog(taskId: string, line: string): void {
     const ts = new Date().toISOString();
     fs.appendFileSync(file, `[${ts}] ${line.replace(/\s+$/,"")}\n`, "utf-8");
   } catch { /* best-effort */ }
+}
+
+/** Append renderer workspace timing data to a local diagnostic log. */
+function appendWorkspacePerfLog(payload: unknown): void {
+  try {
+    const line = typeof payload === "string" ? payload : JSON.stringify(payload);
+    fs.mkdirSync(path.dirname(WORKSPACE_PERF_LOG_PATH), { recursive: true });
+    try {
+      if (fs.statSync(WORKSPACE_PERF_LOG_PATH).size > 2 * 1024 * 1024) {
+        fs.renameSync(WORKSPACE_PERF_LOG_PATH, `${WORKSPACE_PERF_LOG_PATH}.1`);
+      }
+    } catch {
+      /* first write */
+    }
+    fs.appendFileSync(
+      WORKSPACE_PERF_LOG_PATH,
+      `[${new Date().toISOString()}] ${line}\n`,
+      "utf-8",
+    );
+  } catch {
+    /* best-effort diagnostics */
+  }
 }
 /** 默认定时任务根目录：~/.agenticx/crontask/<taskId>/，与用户指定 workspace 二选一；venv/脚本均应落在任务根下 */
 const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
@@ -436,11 +531,16 @@ function normalizeLayoutTheme(raw: unknown): LayoutTheme | undefined {
   return raw === "light" || raw === "dark" || raw === "dim" ? raw : undefined;
 }
 
+function normalizeLayoutLocale(raw: unknown): AppLocale | undefined {
+  return isAppLocale(raw) ? raw : undefined;
+}
+
 type LayoutFile = {
   mainWindow?: LayoutBounds;
   panes?: LayoutPaneSnapshot[];
   activePaneId?: string;
   theme?: LayoutTheme;
+  locale?: AppLocale;
 };
 
 /** Disk read for the pane/window layout. Returns an empty object on any error
@@ -1443,6 +1543,13 @@ function saveAgxConfig(cfg: AgxConfig): void {
   fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
 }
 
+function readOpsToolsEnabled(cfg: AgxConfig): boolean {
+  const raw = cfg.ops;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+  if (raw.tools_enabled === undefined) return true;
+  return Boolean(raw.tools_enabled);
+}
+
 function loadSoulFile(pathName: string): string {
   try {
     return fs.readFileSync(pathName, "utf-8");
@@ -1459,15 +1566,18 @@ function saveSoulFile(pathName: string, content: string): void {
 function normalizeLocalFsPath(raw: string): string {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
+  let expanded = "";
   if (trimmed.startsWith("file://")) {
     try {
-      return fileURLToPath(trimmed);
+      expanded = fileURLToPath(trimmed);
     } catch {
-      return decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
+      expanded = decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
     }
+  } else {
+    // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
+    expanded = expandDesktopLocalPath(trimmed);
   }
-  // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
-  return expandDesktopLocalPath(trimmed);
+  return pickLocalFsPathCandidate(expanded, (candidate) => fs.existsSync(candidate));
 }
 
 function decodeLocalTextBuffer(buf: Buffer): { content: string; encodingError?: string } {
@@ -1556,6 +1666,19 @@ function loadComputerUseEnabled(cfg: AgxConfig): boolean {
     if (["true", "1", "yes", "on"].includes(lowered)) return true;
   }
   return false;
+}
+
+function loadBrowserControlEnabled(cfg: AgxConfig): boolean {
+  const raw = cfg.browser_control;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+  const e = (raw as { enabled?: unknown }).enabled;
+  if (typeof e === "boolean") return e;
+  if (typeof e === "string") {
+    const lowered = e.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(lowered)) return true;
+    if (["false", "0", "no", "off"].includes(lowered)) return false;
+  }
+  return true;
 }
 
 function parseBooleanLoose(value: unknown, fallback: boolean): boolean {
@@ -1877,6 +2000,21 @@ let skillsChangedDebounceTimer: NodeJS.Timeout | null = null;
 let agxAccountLoginPollTimer: NodeJS.Timeout | null = null;
 let agxAccountLoginDeviceId: string | null = null;
 let agxAccountLoginPollTicks = 0;
+/** 企业门户设备授权：deviceSecret 只驻留主进程内存，禁止写盘或回传渲染进程。 */
+let enterpriseLoginPollTimer: NodeJS.Timeout | null = null;
+let enterpriseLoginCtx: { deviceId: string; deviceSecret: string; baseUrl: string } | null = null;
+let enterpriseLoginPollTicks = 0;
+let enterpriseLoginFailStreak = 0;
+
+function clearEnterpriseLoginPoll(): void {
+  if (enterpriseLoginPollTimer) {
+    clearInterval(enterpriseLoginPollTimer);
+    enterpriseLoginPollTimer = null;
+  }
+  enterpriseLoginCtx = null;
+  enterpriseLoginPollTicks = 0;
+  enterpriseLoginFailStreak = 0;
+}
 
 const AGX_ACCOUNT_WEB_BASE_DEFAULT = "https://www.agxbuilder.com";
 
@@ -1936,6 +2074,9 @@ function notifyRendererConnectionModeChanged(): void {
 function notifyRendererStudioReady(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agx-studio-ready");
+  void scheduleEnterpriseCapabilitySync().catch((error) => {
+    console.warn(`[enterprise] capability sync failed: ${String(error)}`);
+  });
 }
 
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
@@ -1974,6 +2115,51 @@ function getStudioUrl(): string {
 
 function getStudioToken(): string {
   return remoteConfig ? remoteConfig.token : apiToken;
+}
+
+async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skipped?: boolean }> {
+  const cfg = loadAgxConfig();
+  if (!hasEnterprisePat(cfg)) return { ok: true, skipped: true };
+  const token = String(cfg.enterprise?.token ?? "").trim();
+  const portal = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
+  let capabilities = cfg.enterprise?.capabilities;
+  if (portal) {
+    try {
+      const resp = await proxyAwareFetch(`${portal}/api/desktop/bootstrap`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (resp.ok) {
+        const json = (await resp.json()) as { data?: { capabilities?: unknown } };
+        capabilities = json.data?.capabilities ?? capabilities;
+      }
+    } catch (error) {
+      console.warn(`[enterprise] bootstrap capabilities failed: ${String(error)}`);
+    }
+  }
+  const studioUrl = getStudioUrl();
+  const studioToken = getStudioToken();
+  const result = await applyEnterpriseCapabilitiesToDisk({
+    cfg,
+    token,
+    capabilities,
+    readMcpDocument: () => readMcpDocumentViaStudio(studioUrl, studioToken),
+    writeMcpDocument: (document) => writeMcpDocumentViaStudio(studioUrl, studioToken, document),
+    fetchSkillBundle: async (uri, digest) => {
+      const resp = await proxyAwareFetch(uri, { signal: AbortSignal.timeout(15_000) });
+      if (!resp.ok) return null;
+      return digestSkillBundle(await resp.text(), digest);
+    },
+    writeSkill: writeManagedSkill,
+    removeSkill: removeManagedSkill,
+  });
+  if (cfg.enterprise) {
+    cfg.enterprise.capabilities = normalizeEnterpriseCapabilities(capabilities);
+    cfg.enterprise.managed_mcp_servers = result.managedMcp;
+    cfg.enterprise.managed_skills = result.managedSkills;
+    saveAgxConfig(cfg);
+  }
+  return { ok: true, skipped: result.skipped };
 }
 
 function isRemoteMode(): boolean {
@@ -2386,7 +2572,17 @@ function pickFreePort(): Promise<number> {
   });
 }
 
-function buildMenuTemplate(): MenuItemConstructorOptions[] {
+function resolveMenuLocale(locale?: AppLocale): AppLocale {
+  return (
+    locale ??
+    normalizeLayoutLocale(loadLayoutData().locale) ??
+    localeFromOsTag(app.getLocale())
+  );
+}
+
+function buildMenuTemplate(locale?: AppLocale): MenuItemConstructorOptions[] {
+  const resolved = resolveMenuLocale(locale);
+  const settingsLabel = resolved === "en" ? "Settings" : "设置";
   if (process.platform === "darwin") {
     return [
       {
@@ -2394,7 +2590,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         submenu: [
           { role: "about" },
           { type: "separator" },
-          { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
+          { label: settingsLabel, click: () => mainWindow?.webContents.send("open-settings") },
           { type: "separator" },
           { role: "quit" }
         ]
@@ -2712,6 +2908,10 @@ function findAgxBinaryOnPath(augmentedPath: string): string | null {
 async function checkAgxCli(): Promise<boolean> {
   const augmentedPath = buildAugmentedPath();
   const binaryPath = findAgxBinaryOnPath(augmentedPath);
+  // After `pip install -e .` the first `agx --version` can exceed 40s (full
+  // package import). The old 30s probe then killed the process and reported
+  // "agx not found" even though the executable was on the augmented PATH.
+  if (binaryPath) return true;
 
   return new Promise((resolve) => {
     const proc = spawnAgx(binaryPath, ["--version"], {
@@ -2756,6 +2956,7 @@ async function startStudioServe(): Promise<void> {
   const devPort = process.env.AGX_DEV_PORT || "5713";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...LOCAL_BACKEND_STARTUP_ENV,
     PATH: augmentedPath,
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
@@ -2768,6 +2969,8 @@ async function startStudioServe(): Promise<void> {
     AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
     AGX_LEARNING_NUDGE_INTERVAL: String(trinity.learning_nudge_interval),
     AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
+    // Override leftover shell exports so Settings → 工具 → 调查取证 wins.
+    AGENTICX_OPS_TOOLS: readOpsToolsEnabled(cfg) ? "1" : "0",
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
@@ -2799,7 +3002,10 @@ async function startStudioServe(): Promise<void> {
   }
 }
 
-async function waitServeReady(timeoutMs = 45000): Promise<void> {
+// 超时窗口按平台区分（见 local-backend-startup.ts）：Windows 首次启动需把数百 MB
+// onefile 解压到临时目录并接受杀毒扫描，45s 曾导致误报 "agx serve startup timeout"。
+// 就绪探测仍每 500ms 一次，正常启动不会等满超时。
+async function waitServeReady(timeoutMs = getServeStartupTimeoutMs()): Promise<void> {
   if (!serveProcess || !serveProcess.stdout || !serveProcess.stderr) {
     throw new Error("agx serve process not started");
   }
@@ -2807,17 +3013,26 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
   const currentStdout = currentProcess.stdout!;
   const currentStderr = currentProcess.stderr!;
   const pingReady = async (): Promise<boolean> => {
+    const controller = new AbortController();
+    const probeTimeout = setTimeout(
+      () => controller.abort(),
+      SERVE_READY_PROBE_TIMEOUT_MS,
+    );
     try {
       const resp = await fetch(`${getStudioUrl()}/api/session`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
+        signal: controller.signal,
       });
       return resp.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(probeTimeout);
     }
   };
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let probeInFlight = false;
     const fail = (message: string) => {
       if (settled) return;
       settled = true;
@@ -2842,17 +3057,21 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
           markReady();
           return;
         }
-        fail("agx serve startup timeout");
+        fail(`agx serve startup timeout after ${Math.ceil(timeoutMs / 1000)}s`);
       })();
     }, timeoutMs);
-    const probeTimer = setInterval(() => {
-      void (async () => {
-        if (settled) return;
+    const probeOnce = async () => {
+      if (settled || probeInFlight) return;
+      probeInFlight = true;
+      try {
         if (await pingReady()) {
           markReady();
         }
-      })();
-    }, 500);
+      } finally {
+        probeInFlight = false;
+      }
+    };
+    const probeTimer = setInterval(() => void probeOnce(), 500);
     const onData = (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
       if (text.includes("Uvicorn running") || text.includes("AgenticX Studio Server")) {
@@ -2883,6 +3102,7 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
     currentStderr.on("data", onErrData);
     currentProcess.on("exit", onExit);
     currentProcess.on("error", onError);
+    void probeOnce();
   });
 }
 
@@ -6599,6 +6819,40 @@ function createWindow(): void {
       mainWindow?.hide();
     }
   });
+  startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+}
+
+function trayLabels(locale?: AppLocale): { toggleWindow: string; settings: string; quit: string } {
+  const en = resolveMenuLocale(locale) === "en";
+  return {
+    toggleWindow: en ? "Show/Hide Window" : "打开/隐藏窗口",
+    settings: en ? "Settings" : "设置",
+    quit: en ? "Quit" : "退出",
+  };
+}
+
+function applyTrayMenu(locale?: AppLocale): void {
+  if (!tray) return;
+  const labels = trayLabels(locale);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: labels.toggleWindow,
+        click: () => {
+          if (!mainWindow) return;
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      },
+      { label: labels.settings, click: () => mainWindow?.webContents.send("open-settings") },
+      { type: "separator" },
+      { label: labels.quit, click: () => app.quit() },
+    ]),
+  );
 }
 
 function createTray(): void {
@@ -6617,24 +6871,7 @@ function createTray(): void {
     icon.setTemplateImage(true);
   }
   tray = new Tray(icon);
-  const menu = Menu.buildFromTemplate([
-    {
-      label: "打开/隐藏窗口",
-      click: () => {
-        if (!mainWindow) return;
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
-        } else {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    },
-    { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
-    { type: "separator" },
-    { label: "退出", click: () => app.quit() }
-  ]);
-  tray.setContextMenu(menu);
+  applyTrayMenu();
   tray.on("click", () => {
     if (!mainWindow) return;
     if (mainWindow.isVisible()) {
@@ -6653,6 +6890,7 @@ function createTray(): void {
  * so they need to be registered as early as possible in app.whenReady().
  */
 function registerEarlyIpc(): void {
+  registerChromeCookieImportIpc();
   ipcMain.handle("open-external", async (_event, url: unknown) => {
     const href = String(url ?? "").trim();
     if (!/^https?:\/\//i.test(href)) {
@@ -6738,8 +6976,139 @@ function registerEarlyIpc(): void {
     const ok = await waitForStudio(ms);
     return { ok };
   });
+  ipcMain.handle("enterprise-sync-capabilities", async () => scheduleEnterpriseCapabilitySync());
+  const collabRoomWatchers = new Map<string, AbortController>();
+  const collabRoomWatchSeq = new Map<string, number>();
+  const abortCollabRoomWatch = (roomId: string) => {
+    const ac = collabRoomWatchers.get(roomId);
+    if (ac) {
+      ac.abort();
+      collabRoomWatchers.delete(roomId);
+    }
+  };
+  const abortAllCollabRoomWatches = () => {
+    for (const ac of collabRoomWatchers.values()) ac.abort();
+    collabRoomWatchers.clear();
+  };
+  const resolveCollabRoomDeps = (): { baseUrl: string; token: string } | null => {
+    const cfg = loadAgxConfig();
+    if (!hasEnterprisePat(cfg)) return null;
+    const baseUrl = normalizePortalBase(cfg.enterprise?.base_url);
+    const token = String(cfg.enterprise?.token ?? "").trim();
+    if (!baseUrl || !token) return null;
+    return { baseUrl, token };
+  };
+  const toCollabRoomRendererEvent = (evt: { type: string; data: unknown }): { type: string; [k: string]: unknown } => {
+    if (evt.data && typeof evt.data === "object" && !Array.isArray(evt.data)) {
+      return { ...(evt.data as Record<string, unknown>), type: evt.type };
+    }
+    return { type: evt.type, data: evt.data };
+  };
+  const trackCollabRoomSeq = (roomId: string, event: { type: string; [k: string]: unknown }) => {
+    let seq: number | undefined;
+    if (event.type === "room_cursor" && typeof event.last_seq === "number") {
+      seq = event.last_seq;
+    } else if (event.type === "room_message") {
+      const message = event.message as { seq?: unknown } | undefined;
+      if (typeof message?.seq === "number") seq = message.seq;
+    }
+    if (typeof seq !== "number") return;
+    collabRoomWatchSeq.set(roomId, Math.max(collabRoomWatchSeq.get(roomId) ?? 0, seq));
+  };
+  ipcMain.handle("collab-room-list", async () => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    return fetchCollabRooms({ ...deps, fetchImpl: proxyAwareFetch });
+  });
+  ipcMain.handle("collab-room-get", async (_event, roomIdRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    return fetchCollabRoom({ ...deps, fetchImpl: proxyAwareFetch }, roomId);
+  });
+  ipcMain.handle("collab-room-messages", async (_event, roomIdRaw: unknown, optsRaw?: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    const opts = optsRaw && typeof optsRaw === "object" ? (optsRaw as { afterSeq?: number; limit?: number }) : {};
+    return fetchCollabRoomMessages({ ...deps, fetchImpl: proxyAwareFetch }, roomId, opts);
+  });
+  ipcMain.handle("collab-room-send", async (_event, roomIdRaw: unknown, contentRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    const content = typeof contentRaw === "string" ? contentRaw : "";
+    return sendCollabRoomMessage({ ...deps, fetchImpl: proxyAwareFetch }, roomId, content);
+  });
+  ipcMain.handle("collab-room-watch", async (event, roomIdRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    abortCollabRoomWatch(roomId);
+    const ac = new AbortController();
+    collabRoomWatchers.set(roomId, ac);
+    const sender = event.sender;
+    const onDestroyed = () => abortCollabRoomWatch(roomId);
+    sender.once("destroyed", onDestroyed);
+    const run = async () => {
+      const backoff = [1000, 2000, 5000];
+      let retries = 0;
+      while (!ac.signal.aborted) {
+        let gone = false;
+        try {
+          await streamRoomEvents(
+            { ...deps, fetchImpl: proxyAwareFetch },
+            roomId,
+            {
+              onEvent: (evt) => {
+                const payload = toCollabRoomRendererEvent(evt);
+                trackCollabRoomSeq(roomId, payload);
+                if (payload.type === "room_closed" && payload.reason === "gone") gone = true;
+                if (!sender.isDestroyed()) {
+                  sender.send("collab-room-event", { roomId, event: payload });
+                }
+              },
+              onClosed: () => undefined,
+            },
+            ac.signal,
+            collabRoomWatchSeq.get(roomId) ?? 0,
+          );
+        } catch {
+          /* streamRoomEvents maps errors to onClosed */
+        }
+        if (ac.signal.aborted) break;
+        if (gone) {
+          abortCollabRoomWatch(roomId);
+          break;
+        }
+        if (retries >= 5) break;
+        if (!sender.isDestroyed()) {
+          sender.send("collab-room-event", { roomId, event: { type: "room_closed", reason: "retry" } });
+        }
+        const delay = backoff[Math.min(retries, backoff.length - 1)];
+        retries += 1;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      sender.removeListener("destroyed", onDestroyed);
+    };
+    void run();
+    return { ok: true };
+  });
+  ipcMain.handle("collab-room-unwatch", async (_event, roomIdRaw: unknown) => {
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (roomId) abortCollabRoomWatch(roomId);
+    return { ok: true };
+  });
+  app.on("before-quit", () => {
+    abortAllCollabRoomWatches();
+  });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
+  ipcMain.handle("get-system-locale", async () => app.getLocale());
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
   ipcMain.handle("get-backend-scope-sync", async () => getInjectedBackendScope());
   ipcMain.handle("get-connection-mode-sync", async () => getInjectedConnectionMode());
@@ -6975,7 +7344,7 @@ function registerEarlyIpc(): void {
       providers,
       userMode: cfg.user_mode ?? "pro",
       onboardingCompleted: true,
-      confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
+      runMode: normalizeDesktopRunMode(cfg.run_mode ?? cfg.confirm_strategy),
       activeProvider,
       activeModel,
       agxAccount: {
@@ -6991,7 +7360,10 @@ function registerEarlyIpc(): void {
   // a misleading empty list during the cold-start window (issue #11).
   ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
     try {
-      await waitForStudio();
+      // Align with waitServeReady: a 30s barrier returns {ok:false, sessions:[]}
+      // while `agx serve` is still importing after an editable install, and the
+      // sidebar then paints an empty history until the next 5s poll.
+      await waitForStudio(getServeStartupTimeoutMs());
       const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
       const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
@@ -7232,6 +7604,141 @@ function registerIpc(): void {
       email: a?.user_email ?? "",
       displayName: a?.user_display_name ?? "",
     };
+  });
+
+  ipcMain.handle("load-enterprise-account", async () => {
+    const cfg = loadAgxConfig();
+    const ent = cfg.enterprise;
+    return {
+      ok: true,
+      loggedIn: hasEnterprisePat(cfg),
+      email: ent?.user_email ?? "",
+      displayName: ent?.user_display_name ?? "",
+      portalUrl: normalizePortalBase(ent?.base_url || ent?.default_portal_url || ""),
+    };
+  });
+
+  ipcMain.handle("enterprise-login-start", async (_event, payload?: { portalUrl?: string }) => {
+    clearEnterpriseLoginPoll();
+    const cfg = loadAgxConfig();
+    const baseUrl =
+      normalizePortalBase(payload?.portalUrl) ||
+      normalizePortalBase(cfg.enterprise?.default_portal_url);
+    if (!baseUrl) return { ok: false, error: "请先填写企业门户地址" };
+
+    const started = await startEnterpriseDeviceAuth(
+      { baseUrl, fetchImpl: proxyAwareFetch },
+      os.hostname(),
+    );
+    if (!started.ok) return { ok: false, error: started.error };
+
+    // 先记住地址：即使这次没批准，下次也不用重填。
+    const withPortal = loadAgxConfig();
+    withPortal.enterprise = { ...(withPortal.enterprise ?? {}), default_portal_url: baseUrl };
+    saveAgxConfig(withPortal);
+
+    void shell.openExternal(started.data.verificationUrl);
+
+    const interval = Math.max(started.data.pollIntervalMs, 1500);
+    const maxTicks = Math.ceil((started.data.expiresIn * 1000) / interval) + 4;
+    enterpriseLoginCtx = {
+      deviceId: started.data.deviceId,
+      deviceSecret: started.data.deviceSecret,
+      baseUrl,
+    };
+    enterpriseLoginPollTicks = 0;
+    enterpriseLoginFailStreak = 0;
+
+    enterpriseLoginPollTimer = setInterval(() => {
+      void (async () => {
+        const ctx = enterpriseLoginCtx;
+        if (!ctx) return;
+        enterpriseLoginPollTicks += 1;
+        if (enterpriseLoginPollTicks > maxTicks) {
+          clearEnterpriseLoginPoll();
+          mainWindow?.webContents.send("enterprise-login-timeout", {});
+          return;
+        }
+        const polled = await pollEnterpriseDeviceAuth(
+          { baseUrl: ctx.baseUrl, fetchImpl: proxyAwareFetch },
+          { deviceId: ctx.deviceId, deviceSecret: ctx.deviceSecret },
+        );
+        if (!polled.ok) {
+          // 单拍抖动不算失败；连续失败才放弃。
+          enterpriseLoginFailStreak += 1;
+          if (enterpriseLoginFailStreak >= 10) {
+            const error = polled.error;
+            clearEnterpriseLoginPoll();
+            mainWindow?.webContents.send("enterprise-login-failed", { error });
+          }
+          return;
+        }
+        enterpriseLoginFailStreak = 0;
+
+        if (polled.data.status === "pending") return;
+        if (polled.data.status === "gone") {
+          const error = polled.data.error;
+          clearEnterpriseLoginPoll();
+          mainWindow?.webContents.send("enterprise-login-failed", { error });
+          return;
+        }
+
+        const next = loadAgxConfig();
+        // 展开既有对象：capabilities / managed_* 是能力同步的地盘，不能被登录覆盖掉。
+        next.enterprise = {
+          ...(next.enterprise ?? {}),
+          enabled: true,
+          base_url: ctx.baseUrl,
+          token: polled.data.token,
+          default_portal_url: ctx.baseUrl,
+          user_email: polled.data.user.email,
+          user_display_name: polled.data.user.displayName,
+        };
+        saveAgxConfig(next);
+        clearEnterpriseLoginPoll();
+        mainWindow?.webContents.send("enterprise-account-changed", {
+          loggedIn: true,
+          email: polled.data.user.email,
+          displayName: polled.data.user.displayName,
+          portalUrl: ctx.baseUrl,
+        });
+        void scheduleEnterpriseCapabilitySync().catch(() => null);
+      })();
+    }, interval);
+
+    return { ok: true, verification_url: started.data.verificationUrl };
+  });
+
+  ipcMain.handle("enterprise-login-cancel", async () => {
+    const ctx = enterpriseLoginCtx;
+    if (ctx) {
+      await cancelEnterpriseDeviceAuth(
+        { baseUrl: ctx.baseUrl, fetchImpl: proxyAwareFetch },
+        { deviceId: ctx.deviceId, deviceSecret: ctx.deviceSecret },
+      );
+    }
+    clearEnterpriseLoginPoll();
+    return { ok: true };
+  });
+
+  ipcMain.handle("enterprise-logout", async () => {
+    clearEnterpriseLoginPoll();
+    const cfg = loadAgxConfig();
+    if (cfg.enterprise) {
+      // 只清登录相关字段；default_portal_url 留着预填，托管能力清单不归这里管。
+      delete cfg.enterprise.enabled;
+      delete cfg.enterprise.token;
+      delete cfg.enterprise.user_email;
+      delete cfg.enterprise.user_display_name;
+      saveAgxConfig(cfg);
+    }
+    mainWindow?.webContents.send("enterprise-account-changed", {
+      loggedIn: false,
+      email: "",
+      displayName: "",
+      portalUrl: normalizePortalBase(cfg.enterprise?.default_portal_url ?? ""),
+    });
+    return { ok: true };
   });
 
   ipcMain.handle("load-gateway-im", async () => {
@@ -8341,14 +8848,25 @@ function registerIpc(): void {
       panes: Array.isArray(data.panes) ? data.panes : [],
       activePaneId: typeof data.activePaneId === "string" ? data.activePaneId : "",
       theme: theme ?? "",
+      locale: normalizeLayoutLocale(data.locale) ?? "",
     };
   });
 
-  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown }) => {
+  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown; locale?: unknown }) => {
     try {
+      const patch: Partial<LayoutFile> = {};
       const theme = normalizeLayoutTheme(payload?.theme);
-      if (!theme) return { ok: false, error: "invalid theme" };
-      saveLayoutData({ theme });
+      if (theme) patch.theme = theme;
+      const locale = normalizeLayoutLocale(payload?.locale);
+      if (locale) patch.locale = locale;
+      if (!patch.theme && !patch.locale) return { ok: false, error: "invalid ui prefs" };
+      saveLayoutData(patch);
+      if (locale) {
+        if (process.platform === "darwin") {
+          Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(locale)));
+        }
+        applyTrayMenu(locale);
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -8408,6 +8926,27 @@ function registerIpc(): void {
       const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/fork`, {
         method: "POST",
         headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("continue-from-message", async (_event, payload: { sessionId: string; messageId: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const mid = String(payload?.messageId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    if (!mid) return { ok: false, error: "messageId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/continue-from`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({ message_id: mid }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -8728,6 +9267,11 @@ function registerIpc(): void {
     return { ok: true, config: { enabled: loadComputerUseEnabled(cfg) } };
   });
 
+  ipcMain.handle("load-browser-control-config", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: { enabled: loadBrowserControlEnabled(cfg) } };
+  });
+
   ipcMain.handle("load-trinity-config", async () => {
     const cfg = loadAgxConfig();
     return { ok: true, config: loadTrinityConfig(cfg) };
@@ -8756,6 +9300,33 @@ function registerIpc(): void {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[save-computer-use-config]", err);
+      return { ok: false, error: msg || "config_write_failed" };
+    }
+  });
+
+  ipcMain.handle("save-browser-control-config", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
+    const p = payload as { enabled?: unknown };
+    let enabled: boolean;
+    try {
+      enabled = parseBooleanStrict(p.enabled, "enabled");
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+    try {
+      const cfg = loadAgxConfig();
+      const prevRaw = cfg.browser_control;
+      const prev =
+        prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
+          ? { ...(prevRaw as Record<string, unknown>) }
+          : {};
+      prev.enabled = enabled;
+      cfg.browser_control = prev;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[save-browser-control-config]", err);
       return { ok: false, error: msg || "config_write_failed" };
     }
   });
@@ -8979,6 +9550,7 @@ function registerIpc(): void {
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
+        ops_tools_enabled: readOpsToolsEnabled(cfg),
       };
     } catch (err) {
       return {
@@ -9008,6 +9580,7 @@ function registerIpc(): void {
         max_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
         live_reattach_enabled: false,
+        ops_tools_enabled: true,
       };
     }
   });
@@ -9182,6 +9755,14 @@ function registerIpc(): void {
         if (prevTs.context_budget_ratio === undefined) prevTs.context_budget_ratio = 0.05;
         merged.tool_search = prevTs;
       }
+      if (p.ops_tools_enabled !== undefined) {
+        const prevOps =
+          root.ops && typeof root.ops === "object" && !Array.isArray(root.ops)
+            ? { ...(root.ops as Record<string, unknown>) }
+            : {};
+        prevOps.tools_enabled = Boolean(p.ops_tools_enabled);
+        root.ops = prevOps;
+      }
       root.runtime = merged;
       saveAgxConfig(cfg);
       return { ok: true };
@@ -9266,6 +9847,11 @@ function registerIpc(): void {
   });
 
   // ── Automation Tasks CRUD ──
+
+  ipcMain.handle("workspace-perf-log", async (_event, payload: unknown) => {
+    appendWorkspacePerfLog(payload);
+    return { ok: true, path: WORKSPACE_PERF_LOG_PATH };
+  });
 
   ipcMain.handle("confirm-dialog", async (_event, payload: unknown) => {
     const p = (payload && typeof payload === "object")
@@ -10046,6 +10632,33 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("copy-local-file-as", async (_event, payload: unknown) => {
+    const body =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const source = expandDesktopLocalPath(String(body.sourcePath ?? ""));
+    if (!source) return { ok: false, error: "source is required" };
+    try {
+      if (!fs.existsSync(source)) return { ok: false, error: "source is not a file" };
+      const stat = await fs.promises.stat(source);
+      if (!stat.isFile()) return { ok: false, error: "source is not a file" };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    const defaultPath = path.join(app.getPath("downloads"), path.basename(source));
+    const saveRes = focused
+      ? await dialog.showSaveDialog(focused, { defaultPath })
+      : await dialog.showSaveDialog({ defaultPath });
+    if (saveRes.canceled || !saveRes.filePath) return { ok: true, canceled: true };
+    try {
+      await fs.promises.copyFile(source, saveRes.filePath);
+      return { ok: true, canceled: false, path: saveRes.filePath };
+    } catch (err) {
+      return { ok: false, canceled: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("get-skill-settings", async () => {
     try {
       const resp = await fetchStudioBackend("/api/skills/settings");
@@ -10293,9 +10906,11 @@ function registerIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("save-confirm-strategy", async (_event, strategy: "manual" | "semi-auto" | "auto") => {
+  ipcMain.handle("save-run-mode", async (_event, mode: "ask" | "allowlist" | "auto") => {
     const cfg = loadAgxConfig();
-    cfg.confirm_strategy = strategy;
+    const next = normalizeDesktopRunMode(mode);
+    cfg.run_mode = next;
+    delete cfg.confirm_strategy;
     saveAgxConfig(cfg);
     return { ok: true };
   });
@@ -11573,12 +12188,12 @@ function registerIpc(): void {
     },
   );
 
-  const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
   const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   };
 
   ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {
@@ -11592,8 +12207,9 @@ function registerIpc(): void {
       if (stat.isDirectory()) {
         return { ok: false, error: "path is a directory" };
       }
-      if (stat.size > PREVIEW_MAX_BYTES) {
-        return { ok: false, error: `file exceeds preview limit (${PREVIEW_MAX_BYTES} bytes)` };
+      const previewMaxBytes = previewMaxBytesForHost();
+      if (stat.size > previewMaxBytes) {
+        return { ok: false, error: previewLimitExceededMessage(previewMaxBytes) };
       }
       const ext = path.extname(normalized).toLowerCase();
       const mime = PREVIEW_FILE_MIME_BY_EXT[ext];
@@ -11606,6 +12222,31 @@ function registerIpc(): void {
         dataUrl: `data:${mime};base64,${buf.toString("base64")}`,
         mime,
         size: stat.size,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("resolve-local-media-url", async (_event, inputPath: string) => {
+    try {
+      const resolved = resolveAllowedLocalVideoFile(String(inputPath || ""), {
+        normalizePath: normalizeLocalFsPath,
+        isFile: (absolutePath) => {
+          try {
+            return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (!resolved) {
+        return { ok: false, error: "video preview not allowed" };
+      }
+      return {
+        ok: true,
+        url: buildLocalMediaUrl(resolved),
+        mime: localVideoMime(resolved),
       };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -11893,6 +12534,22 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     try {
+      protocol.handle(LOCAL_MEDIA_SCHEME, (request) => {
+        const resolved = resolveAllowedLocalVideoFile(parseLocalMediaPath(request.url), {
+          normalizePath: normalizeLocalFsPath,
+          isFile: (absolutePath) => {
+            try {
+              return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+            } catch {
+              return false;
+            }
+          },
+        });
+        if (!resolved) {
+          return new Response("forbidden", { status: 403 });
+        }
+        return electronNet.fetch(pathToFileURL(resolved).href);
+      });
       logProxyConfig();
       if (process.platform === "win32" || process.platform === "linux") {
         Menu.setApplicationMenu(null);
@@ -12109,5 +12766,6 @@ if (!gotTheLock) {
     }
     stopWechatSidecar();
     stopStudioServe();
+    stopNearBrowserBridge();
   });
 }

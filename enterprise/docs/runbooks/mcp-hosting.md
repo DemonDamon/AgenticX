@@ -1,5 +1,11 @@
 # MCP Server 托管运维手册
 
+产品说明（端点语义、scope、未落地项）见 [gateway/mcp-hosting-overview.md](../gateway/mcp-hosting-overview.md)。本页只保留启用、验证与 Admin 入口。
+
+![MCP 托管组件](/docs/svg/ent-mcp-zh.svg?v=2)
+
+*示意图：开关打开后，Registry / Backend / Transport 挂在同一网关进程。*
+
 ## 启用
 
 网关进程需设置：

@@ -15,13 +15,16 @@
 import type { Message, SubAgent } from "../store";
 import { absoluteTaskspacePath, isAbsoluteFilePath } from "./workspace-file-path";
 
-const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?/gi;
+// Start with `\S` so a missing `(N chars)` suffix cannot collapse the path to `/`.
+// `.*?` then allows spaces in the filename until the optional size suffix or EOL.
+const OK_WRITE_RE =
+  /OK:\s*(?:wrote|edited)\s+(\S.*?)(?:\s+\(\d+\s+chars?\))?(?=\s*(?:\n|$))/gi;
 
 const ABS_PATH_BODY =
   "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s`<>\\[\\]()]+|~\\/[^\\s`<>\\[\\]()]+)";
 
 const SAVED_FILE_LABEL =
-  "(?:报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
+  "(?:产物(?:位于|在)|报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
 
 const LABELED_SAVE_PATH_RE = new RegExp(
   `${SAVED_FILE_LABEL}[：:\\s]*(\`?)${ABS_PATH_BODY}(\\1)`,
@@ -33,7 +36,9 @@ const LABELED_SAVE_PATH_RE = new RegExp(
  * Bare「路径」must be a label (`路径：`), not prose like「管理 ~/.codewiki/… 路径」.
  */
 const SAVE_CUE_LINE_RE =
-  /(?:保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+  /(?:产出文件|保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+const EXPLICIT_ARTIFACT_MANIFEST_RE =
+  /(?:产出文件|产物(?:位于|在)|\|\s*产物\s*\||(?:deliverables?|artifacts?)\s+(?:at|in)\b)/i;
 
 const INLINE_ABS_PATH_RE = new RegExp(`\`?${ABS_PATH_BODY}\`?`, "g");
 
@@ -43,9 +48,10 @@ const JSON_OUTPUT_PATH_RE =
 
 const BASH_REDIRECT_RE = /(?:>>?|\btee\b(?:\s+-a)?)\s+(['"]?)([^\s'"|;&<>]+)\1/g;
 
-/** Markdown table cell that looks like a bare filename with extension (any column). */
-const TABLE_FILENAME_RE =
-  /\|[ \t]*`?([^`|/\s\\]+\.[a-zA-Z0-9]{1,12})`?[ \t]*(?=\|)/g;
+/** Backticked relative output path in a Markdown table cell. */
+const TABLE_FILE_PATH_RE = /`([^`\r\n|]+?\.[a-zA-Z0-9]{1,12})`/g;
+const TABLE_BARE_FILENAME_RE =
+  /\|[ \t]*([^`|/\s\\]+\.[a-zA-Z0-9]{1,12})[ \t]*(?=\|)/g;
 
 /** Skill/source trees listed by find/ls must not become task artifacts. */
 const ARTIFACT_SOURCE_EXCLUDE_RE =
@@ -72,12 +78,44 @@ function looksLikeArtifactFile(path: string): boolean {
 /** Dirs that live in the session default workspace but are not task outputs. */
 const WORKSPACE_ARTIFACT_SKIP_DIRS = new Set([
   "memory",
+  "attachments",
   ".git",
   "node_modules",
   "site-packages",
   "__pycache__",
   "task_artifacts",
 ]);
+
+/** Chat uploads are materialized under <default>/attachments/; never task outputs. */
+const SESSION_USER_ATTACHMENT_RE =
+  /(?:^|\/)\.agenticx\/taskspaces\/[^/]+\/default\/attachments(?:\/|$)/i;
+
+/** True when a path is a user chat-upload, not an agent deliverable. */
+export function isSessionUserAttachmentPath(path: string): boolean {
+  const value = String(path || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!value) return false;
+  if (SESSION_USER_ATTACHMENT_RE.test(value)) return true;
+  return /^attachments(?:\/|$)/i.test(value);
+}
+
+function isVirtualEnvironmentDirName(name: string): boolean {
+  const value = String(name || "").trim().toLowerCase();
+  return /^(?:env|venv|virtualenv|[a-z0-9_-]+env)$/.test(value);
+}
+
+function isRuntimeArtifactPath(path: string): boolean {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .some(
+      (part) =>
+        isVirtualEnvironmentDirName(part) ||
+        part.toLowerCase() === "site-packages",
+    );
+}
 
 export type WorkspaceArtifactListingEntry = {
   name: string;
@@ -94,6 +132,7 @@ export function isWalkableWorkspaceArtifactDir(
   const name = String(entry.name || "").trim();
   if (!name || name.startsWith(".")) return false;
   if (WORKSPACE_ARTIFACT_SKIP_DIRS.has(name.toLowerCase())) return false;
+  if (isVirtualEnvironmentDirName(name)) return false;
   if (String(entry.mount_mode || "").trim()) return false;
   return true;
 }
@@ -117,6 +156,7 @@ export function collectWorkspaceListingArtifactPaths(opts: {
     if (!looksLikeArtifactFile(name)) continue;
     const rel = String(entry.path || name).trim().replace(/\\/g, "/");
     if (!rel) continue;
+    if (isRuntimeArtifactPath(rel)) continue;
     const parts = rel.split("/").filter(Boolean);
     if (parts.some((part) => WORKSPACE_ARTIFACT_SKIP_DIRS.has(part.toLowerCase()))) {
       continue;
@@ -178,14 +218,63 @@ function normalizeArtifactPath(raw: string): string | null {
     value = value.slice(1, -1).trim();
   }
   value = value.replace(/[，。；：！？,.]+$/u, "").trim();
-  if (!value || /\s/.test(value)) return null;
+  if (!value || /[\n\r]/.test(value)) return null;
   // Docs / templates like `~/.codewiki/<project>/` are not real artifacts.
   if (/[<>]/.test(value)) return null;
   if (!isAbsoluteFilePath(value) && !value.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(value) && !value.startsWith("~/")) {
     return null;
   }
   const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (isRuntimeArtifactPath(normalized)) return null;
+  if (isSessionUserAttachmentPath(normalized)) return null;
   return normalized || null;
+}
+
+function parseWbBridgeResultJson(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const stripped = text.replace(/^\[micro-compact[^\]]*\]\s*/i, "");
+  const start = stripped.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const parsed = JSON.parse(stripped.slice(start)) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* persist may leave raw control chars inside tail — fall through */
+  }
+  const match = stripped.match(/"written_paths"\s*:\s*(\[[^\]]*\])/);
+  if (!match?.[1]) return null;
+  try {
+    const list = JSON.parse(match[1]) as unknown;
+    if (!Array.isArray(list)) return null;
+    const statusMatch = stripped.match(/"status"\s*:\s*"([^"]*)"/);
+    const turnMatch = stripped.match(/"turn_state"\s*:\s*"([^"]*)"/);
+    return {
+      status: statusMatch?.[1] ?? "",
+      turn_state: turnMatch?.[1] ?? "",
+      written_paths: list,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractWbBridgeWrittenPaths(
+  raw: string,
+  paths: string[],
+  seen: Set<string>,
+): void {
+  const parsed = parseWbBridgeResultJson(raw);
+  if (!parsed) return;
+  const status = String(parsed.status || parsed.turn_state || "");
+  if (status === "running") return;
+  const list = parsed.written_paths;
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    addPath(paths, seen, String(item || "").trim());
+  }
 }
 
 function addPath(paths: string[], seen: Set<string>, raw: string): void {
@@ -303,7 +392,19 @@ function extractJsonOutputArtifactPaths(content: string, paths: string[], seen: 
   }
 }
 
-/** Join table filenames with a same-message「保存路径」directory (common agent report pattern). */
+function resolvePublishedRelativePath(outputDir: string, relativePath: string): string {
+  const dir = outputDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  let relative = relativePath.replace(/\\/g, "/").replace(/^\.?\//, "");
+  if (!dir || !relative) return "";
+  const dirBase = artifactBaseName(dir);
+  if (relative === dirBase || relative.startsWith(`${dirBase}/`)) {
+    const parent = dir.slice(0, Math.max(0, dir.length - dirBase.length)).replace(/\/+$/, "");
+    return `${parent}/${relative}`;
+  }
+  return `${dir}/${relative}`;
+}
+
+/** Join table file paths with a same-message output directory. */
 function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: Set<string>): void {
   const dirs: string[] = [];
   const dirSeen = new Set<string>();
@@ -319,13 +420,33 @@ function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: 
   }
   if (dirs.length === 0) return;
 
-  TABLE_FILENAME_RE.lastIndex = 0;
-  let fileMatch: RegExpExecArray | null;
-  while ((fileMatch = TABLE_FILENAME_RE.exec(content)) !== null) {
-    const name = String(fileMatch[1] || "").trim();
-    if (!name || name.includes("..")) continue;
-    for (const dir of dirs) {
-      addPath(paths, seen, `${dir.replace(/\/+$/, "")}/${name}`);
+  for (const line of String(content || "").split(/\r?\n/)) {
+    if (!line.includes("|")) continue;
+    TABLE_FILE_PATH_RE.lastIndex = 0;
+    const tokens: string[] = [];
+    let fileMatch: RegExpExecArray | null;
+    while ((fileMatch = TABLE_FILE_PATH_RE.exec(line)) !== null) {
+      const value = String(fileMatch[1] || "").trim();
+      if (value && !value.includes("..")) tokens.push(value);
+    }
+    if (tokens.length === 0) {
+      TABLE_BARE_FILENAME_RE.lastIndex = 0;
+      while ((fileMatch = TABLE_BARE_FILENAME_RE.exec(line)) !== null) {
+        const value = String(fileMatch[1] || "").trim();
+        if (value && !value.includes("..")) tokens.push(value);
+      }
+    }
+    let lineRelativeDir = "";
+    for (const token of tokens) {
+      let relative = token;
+      if (!relative.includes("/") && lineRelativeDir) {
+        relative = `${lineRelativeDir}/${relative}`;
+      } else if (relative.includes("/")) {
+        lineRelativeDir = relative.slice(0, relative.lastIndexOf("/"));
+      }
+      for (const dir of dirs) {
+        addPath(paths, seen, resolvePublishedRelativePath(dir, relative));
+      }
     }
   }
 }
@@ -564,14 +685,24 @@ export function collectSessionArtifactPaths(
         if (!isFailedWriteToolMessage(message)) {
           const argPath = String(message.toolArgs?.path ?? "").trim();
           if (argPath) addPath(paths, seen, argPath);
+          extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
         }
         extractOkWritePaths(String(message.content || ""), paths, seen);
         extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
       } else if (toolName === "bash_exec") {
-        const command = String(message.toolArgs?.command ?? "").trim();
-        if (command) extractBashRedirectPaths(command, paths, seen);
-        extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
-        extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+        // A denied/failed command never produced its redirect target.
+        if (!isFailedWriteToolMessage(message)) {
+          const command = String(message.toolArgs?.command ?? "").trim();
+          if (command) extractBashRedirectPaths(command, paths, seen);
+          extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
+          extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+        }
+      } else if (toolName === "wb_bridge_send" || toolName === "wb_bridge_describe") {
+        extractWbBridgeWrittenPaths(String(message.content || ""), paths, seen);
+        extractWbBridgeWrittenPaths(String(message.toolResultPreview || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
       } else {
@@ -600,6 +731,32 @@ export function collectSessionArtifactPaths(
   for (const extra of extraPaths ?? []) addPath(paths, seen, extra);
 
   return paths;
+}
+
+/**
+ * Prefer files explicitly handed off in assistant reports over implementation
+ * helpers discovered by the workspace fallback scanner.
+ */
+export function selectSessionDeliverablePaths(
+  messages: Message[] | undefined | null,
+  candidatePaths: string[],
+): string[] {
+  const published: string[] = [];
+  const publishedSeen = new Set<string>();
+  for (const message of messages ?? []) {
+    if (message.role !== "assistant") continue;
+    const body = String(message.content || "");
+    if (!EXPLICIT_ARTIFACT_MANIFEST_RE.test(body)) continue;
+    extractLabeledSavePaths(body, published, publishedSeen);
+    extractNearbyLabeledSavePaths(body, published, publishedSeen);
+    extractTableFilesUnderSaveDirs(body, published, publishedSeen);
+  }
+  if (published.length > 0) return published;
+
+  const fallback: string[] = [];
+  const fallbackSeen = new Set<string>();
+  for (const path of candidatePaths) addPath(fallback, fallbackSeen, path);
+  return fallback;
 }
 
 export function isPreviewImageArtifactPath(path: string): boolean {
@@ -680,11 +837,260 @@ export function collectTurnPreviewImagePaths(
   return preferAnimatedPreviewImages(collectSessionArtifactPaths(list.slice(start, idx + 1)));
 }
 
+/** Lowercase file extension without the dot (`html`, `py`). Empty when none. */
+export function artifactExt(path: string): string {
+  const base = artifactBaseName(path).toLowerCase();
+  return base.match(/\.([a-z0-9]{1,12})$/)?.[1] ?? "";
+}
+
+const PRIMARY_ARTIFACT_RANK: Record<string, number> = {
+  html: 0,
+  htm: 0,
+  pdf: 1,
+  docx: 2,
+  doc: 2,
+  xlsx: 3,
+  xls: 3,
+  csv: 3,
+  pptx: 4,
+  ppt: 4,
+  md: 5,
+  markdown: 5,
+  txt: 6,
+  png: 8,
+  jpg: 8,
+  jpeg: 8,
+  gif: 8,
+  webp: 8,
+  svg: 8,
+  bmp: 8,
+};
+
+const PRIMARY_ARTIFACT_EXCLUDE = new Set([
+  "py",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "lock",
+  "log",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+]);
+
+function turnWindowForAssistant(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): Message[] | null {
+  const list = messages ?? [];
+  const idx = list.findIndex((row) => row.id === assistantMessageId);
+  if (idx < 0) return null;
+  // Only the last assistant in the turn owns the card / auto-open (avoid duplicates).
+  for (let i = idx + 1; i < list.length; i += 1) {
+    if (list[i]?.role === "user") break;
+    if (list[i]?.role === "assistant") return [];
+  }
+  let start = 0;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    if (list[i]?.role === "user") {
+      start = i + 1;
+      break;
+    }
+  }
+  return list.slice(start, idx + 1);
+}
+
+/** Deliverable files produced in the same user turn as this assistant message. */
+export function collectTurnArtifactPaths(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): string[] {
+  const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
+  if (!turnMsgs || turnMsgs.length === 0) return [];
+  return selectSessionDeliverablePaths(turnMsgs, collectSessionArtifactPaths(turnMsgs));
+}
+
+export type ArtifactChangeRow = {
+  path: string;
+  added: number;
+  removed: number;
+};
+
+function countArtifactLines(text: string): number {
+  const body = String(text || "").replace(/\r\n/g, "\n");
+  if (!body) return 0;
+  const parts = body.split("\n");
+  if (parts.length > 0 && parts[parts.length - 1] === "") return parts.length - 1;
+  return parts.length;
+}
+
+export function firstWritePathFromToolMessage(message: Message): string | null {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  extractOkWritePaths(String(message.content || ""), paths, seen);
+  extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
+  extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+  extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+  const argPath = String(message.toolArgs?.path ?? "").trim();
+  if (argPath) addPath(paths, seen, argPath);
+  return paths[0] ?? null;
+}
+
+/** file_write / file_edit rows as a change list (session-wide). */
+export function collectSessionFileChanges(
+  messages: Message[] | undefined | null,
+): ArtifactChangeRow[] {
+  const byPath = new Map<string, ArtifactChangeRow>();
+  for (const message of messages ?? []) {
+    if (message.role !== "tool") continue;
+    const toolName = String(message.toolName || "").trim();
+    if (toolName !== "file_write" && toolName !== "file_edit") continue;
+    if (isFailedWriteToolMessage(message)) continue;
+    const path = firstWritePathFromToolMessage(message);
+    if (!path) continue;
+    const args = message.toolArgs ?? {};
+    let added = 0;
+    let removed = 0;
+    if (toolName === "file_write") {
+      added = countArtifactLines(String(args.content ?? ""));
+    } else {
+      const oldLines = countArtifactLines(String(args.old_string ?? args.oldString ?? ""));
+      const newLines = countArtifactLines(String(args.new_string ?? args.newString ?? args.content ?? ""));
+      added = Math.max(0, newLines - oldLines);
+      removed = Math.max(0, oldLines - newLines);
+    }
+    const prev = byPath.get(path);
+    if (prev) {
+      byPath.set(path, {
+        path,
+        added: prev.added + added,
+        removed: prev.removed + removed,
+      });
+    } else {
+      byPath.set(path, { path, added, removed });
+    }
+  }
+  return [...byPath.values()];
+}
+
+/** Same window as collectTurnArtifactPaths. */
+export function collectTurnFileChanges(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): ArtifactChangeRow[] {
+  const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
+  if (!turnMsgs || turnMsgs.length === 0) return [];
+  return collectSessionFileChanges(turnMsgs);
+}
+
+export function pickPrimaryTurnArtifact(paths: string[]): string | null {
+  let best: string | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const raw of paths) {
+    const path = String(raw || "").trim();
+    if (!path) continue;
+    const ext = artifactExt(path);
+    if (!ext || PRIMARY_ARTIFACT_EXCLUDE.has(ext)) continue;
+    const rank = PRIMARY_ARTIFACT_RANK[ext] ?? 50;
+    if (rank < bestRank) {
+      best = path;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+/** Primary artifact first; remaining paths keep collection order. */
+export function orderTurnArtifactsForCard(paths: string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    const path = String(raw || "").trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    unique.push(path);
+  }
+  const primary = pickPrimaryTurnArtifact(unique);
+  if (!primary) return unique;
+  return [primary, ...unique.filter((path) => path !== primary)];
+}
+
 export function artifactBaseName(path: string): string {
   const normalized = String(path || "").replace(/\\/g, "/");
   const trimmed = normalized.replace(/\/+$/, "");
   const idx = trimmed.lastIndexOf("/");
   return idx >= 0 ? trimmed.slice(idx + 1) || trimmed : trimmed;
+}
+
+export function normalizeArtifactPathKey(path: string): string {
+  return String(path || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** True when `path` is the same deliverable already shown on the turn handoff chip. */
+export function matchesHandoffPath(path: string, handoffPaths?: string[] | null): boolean {
+  const key = normalizeArtifactPathKey(path);
+  if (!key || !handoffPaths?.length) return false;
+  return handoffPaths.some((candidate) => normalizeArtifactPathKey(candidate) === key);
+}
+
+/** True when `path` is a parent directory of a turn handoff file. */
+export function matchesHandoffAncestor(path: string, handoffPaths?: string[] | null): boolean {
+  const key = normalizeArtifactPathKey(path);
+  if (!key || !handoffPaths?.length) return false;
+  return handoffPaths.some((candidate) => {
+    const child = normalizeArtifactPathKey(candidate);
+    return child === key || child.startsWith(`${key}/`);
+  });
+}
+
+/**
+ * Session default / extra taskspace: `~/.agenticx/taskspaces/<sid>/<name>[/rel]`.
+ * The session UUID is never useful in chat copy.
+ */
+const TASKSPACE_CHAT_PATH_RE =
+  /(?:^|\/)\.agenticx\/taskspaces\/[^/]+\/([^/]+)(?:\/(.*))?$/;
+
+function displayTaskspaceChatPath(normalized: string): string | null {
+  const homeRel = artifactHomeRelativeKey(normalized) ?? normalized;
+  const match = homeRel.match(TASKSPACE_CHAT_PATH_RE);
+  if (!match) return null;
+  const space = String(match[1] || "").trim();
+  const rel = String(match[2] || "").replace(/\/+$/, "");
+  if (!space) return null;
+  if (space === "default" && !rel) return "当前工作区";
+  if (space === "default") return rel;
+  return rel ? `${space}/${rel}` : space;
+}
+
+/**
+ * Chat-visible label for an inline local path. Collapses handoff files to the
+ * basename and never dumps `~/.agenticx/taskspaces/<uuid>/…`.
+ * Returns null when the original markdown children should stay as-is.
+ */
+export function displayChatLocalPath(
+  path: string,
+  handoffPaths?: string[] | null,
+): string | null {
+  const key = normalizeArtifactPathKey(path);
+  if (!key) return null;
+  if (matchesHandoffPath(path, handoffPaths)) {
+    return artifactBaseName(key);
+  }
+  const taskspaceLabel = displayTaskspaceChatPath(key);
+  if (taskspaceLabel != null) return taskspaceLabel;
+  if (matchesHandoffAncestor(key, handoffPaths)) {
+    const base = artifactBaseName(key);
+    return looksLikeDirectoryPath(path) ? `${base}/` : base;
+  }
+  return null;
 }
 
 /** True when path looks like a directory (trailing slash or no file extension segment). */

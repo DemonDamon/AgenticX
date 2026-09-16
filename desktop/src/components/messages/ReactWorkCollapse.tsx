@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, ListTree } from "lucide-react";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 
@@ -18,6 +19,7 @@ type Props = {
  * 流式执行中保持展开让用户看到进度，回合结束后自动折叠。
  */
 export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }: Props) {
+  const { t } = useTranslation("chat");
   const [collapsed, setCollapsed] = React.useState(false);
 
   React.useEffect(() => {
@@ -42,7 +44,7 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
         <span className={ASSISTANT_ICON_RAIL_CLASS}>
           <ListTree className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} aria-hidden />
         </span>
-        <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>已思考并调用 {toolCount} 次工具</span>
+        <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>{t("reactWork.title", { count: toolCount })}</span>
         <span className="shrink-0" aria-hidden>
           {collapsed ? (
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />

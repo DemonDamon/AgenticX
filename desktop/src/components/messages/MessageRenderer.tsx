@@ -29,6 +29,7 @@ import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
 import { InlineConfirmCard } from "./InlineConfirmCard";
+import { GroupSenderRail } from "./GroupSenderRail";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
@@ -37,17 +38,40 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
+import { collectSessionReferences } from "../../utils/session-references";
+import {
+  collectTurnLightboxImages,
+  hasImageBlock,
+  readyLightboxImages,
+  resolveAssistantBlocks,
+} from "../../utils/content-blocks";
 import {
   appendMissingImageMarkdown,
+  collectSessionArtifactPaths,
+  collectSessionFileChanges,
+  collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
 } from "../../utils/session-artifacts";
+import { isGroupStreamMessageId } from "../../utils/group-stream-text";
+import { TurnArtifactCard } from "./TurnArtifactCard";
+import { MarkdownContext } from "./markdown-components";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
+import { PlanArtifactCard } from "./PlanArtifactCard";
+import {
+  parsePlanArtifactToolResult,
+  type PlanArtifactPayload,
+} from "../../utils/plan-artifact";
 import type {
   ActionConfirmationDecision,
   PendingActionConfirmation,
 } from "../../utils/action-confirmation";
+import { BranchLineageCard } from "../replay/BranchLineageCard";
+import {
+  parseBranchLineage,
+  type BranchLineage,
+} from "../../utils/session-message-map";
 
 type Props = {
   message: Message;
@@ -123,6 +147,16 @@ type Props = {
     confirmation: PendingActionConfirmation,
     decision: ActionConfirmationDecision,
   ) => Promise<void> | void;
+  /** Open WorkPanel「任务产物」for the session file list. */
+  onOpenAllArtifacts?: () => void;
+  /** Open WorkPanel「变更」for the session write/edit list. */
+  onOpenAllChanges?: () => void;
+  /** Open WorkPanel「参考信息」for web citations. */
+  onOpenAllRefs?: () => void;
+  onViewPlan?: (path: string) => void;
+  onBuildPlan?: (plan: PlanArtifactPayload) => void;
+  onOpenBranchSource?: (lineage: BranchLineage) => void;
+  onContinueFromMessage?: (message: Message) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -172,11 +206,94 @@ function GroupProgressLine({ message }: { message: Message }) {
   );
 }
 
+function isExplicitGroupExpert(message: Message): boolean {
+  const agentId = String(message.agentId ?? "").trim();
+  return Boolean(agentId) && agentId !== "meta" && agentId !== "__meta__";
+}
+
+function wrapGroupIntervention(
+  show: boolean,
+  message: Message,
+  fallbackName: string | undefined,
+  fallbackAvatarUrl: string | undefined,
+  fallbackAvatarId: string | undefined,
+  children: ReactNode,
+): ReactNode {
+  if (!show || message.role !== "tool" || !isExplicitGroupExpert(message)) {
+    return children;
+  }
+  const name =
+    String(message.avatarName ?? "").trim() ||
+    String(fallbackName ?? "").trim() ||
+    String(message.agentId ?? "").trim();
+  return (
+    <GroupSenderRail
+      name={name}
+      avatarUrl={message.avatarUrl || fallbackAvatarUrl}
+      avatarId={fallbackAvatarId || message.agentId}
+    >
+      {children}
+    </GroupSenderRail>
+  );
+}
+
 export function isTodoUpdateToolMessage(content: string): boolean {
   return parseTodoMessage(content) !== null;
 }
 
 export { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
+
+function isStreamingAssistantId(id: string | undefined): boolean {
+  return id === "__stream__" || isGroupStreamMessageId(id);
+}
+
+function assistantHandoff(
+  message: Message,
+  allMessages: Message[],
+  onRevealPath: ((path: string) => void) | undefined,
+  browse?: {
+    onOpenAllArtifacts?: () => void;
+    onOpenAllChanges?: () => void;
+  },
+): { paths: string[]; card: ReactNode } {
+  if (
+    message.role !== "assistant"
+    || isStreamingAssistantId(message.id)
+    || message.presentationHoldDeliverables
+  ) {
+    return { paths: [], card: null };
+  }
+  const paths = collectTurnArtifactPaths(allMessages, message.id);
+  const artifactCount = collectSessionArtifactPaths(allMessages).length;
+  const changeCount = collectSessionFileChanges(allMessages).length;
+  return {
+    paths,
+    card:
+      paths.length > 0 ? (
+        <TurnArtifactCard
+          paths={paths}
+          onOpenPath={onRevealPath}
+          onOpenAllArtifacts={browse?.onOpenAllArtifacts}
+          onOpenAllChanges={browse?.onOpenAllChanges}
+          artifactCount={artifactCount || paths.length}
+          changeCount={changeCount || paths.length}
+        />
+      ) : null,
+  };
+}
+
+function withHandoffContext(
+  paths: string[],
+  onRevealPath: ((path: string) => void) | undefined,
+  node: ReactNode,
+): ReactNode {
+  if (paths.length === 0) return node;
+  return (
+    <MarkdownContext.Provider value={{ handoffPaths: paths, onRevealPath }}>
+      {node}
+    </MarkdownContext.Provider>
+  );
+}
 
 /** Shared extras row under tool cards (inline confirm + workspace reveal). */
 export function renderToolMessageExtras(
@@ -271,20 +388,60 @@ export function MessageRenderer({
   onOpenClarification,
   onSubmitClarification,
   onResolveActionConfirmation,
+  onOpenAllArtifacts,
+  onOpenAllChanges,
+  onOpenAllRefs,
+  onViewPlan,
+  onBuildPlan,
+  onOpenBranchSource,
+  onContinueFromMessage,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
   }, [message, allMessages]);
+  const sessionWebRefs = useMemo(() => {
+    const bundle = collectSessionReferences(allMessages);
+    return [...bundle.webGroups, ...bundle.kbGroups].map((group) => group.primary);
+  }, [allMessages]);
   const displayMessage = useMemo(() => {
     if (message.role !== "assistant") return message;
+    if (message.presentationHoldDeliverables) return message;
+    const resolvedBlocks = resolveAssistantBlocks(message, allMessages);
+    const withBlocks =
+      resolvedBlocks && resolvedBlocks !== message.blocks
+        ? { ...message, blocks: resolvedBlocks }
+        : message;
+    if (hasImageBlock(withBlocks.blocks)) return withBlocks;
     const images = collectTurnPreviewImagePaths(allMessages, message.id);
-    if (images.length === 0) return message;
-    const next = appendMissingImageMarkdown(message.content, images);
-    if (next === message.content) return message;
-    return { ...message, content: next };
+    if (images.length === 0) return withBlocks;
+    const next = appendMissingImageMarkdown(withBlocks.content, images);
+    if (next === withBlocks.content) return withBlocks;
+    return { ...withBlocks, content: next };
   }, [message, allMessages]);
+  const lightboxGallery = useMemo(() => {
+    if (displayMessage.role !== "assistant") return undefined;
+    const patched = allMessages.map((row) =>
+      row.id === displayMessage.id ? { ...row, blocks: displayMessage.blocks } : row,
+    );
+    const fromTurn = collectTurnLightboxImages(patched, displayMessage.id);
+    return fromTurn.length > 0 ? fromTurn : readyLightboxImages(displayMessage.blocks);
+  }, [displayMessage, allMessages]);
+  const branchLineage = parseBranchLineage(message.metadata);
+  if (branchLineage) {
+    return (
+      <BranchLineageCard
+        lineage={branchLineage}
+        onOpenSource={onOpenBranchSource}
+      />
+    );
+  }
+  if (message.systemNotice) {
+    const text = String(message.content ?? "").trim();
+    if (!text) return null;
+    return <div className="py-1 text-center text-[12px] text-text-muted">{text}</div>;
+  }
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;
   }
@@ -310,10 +467,38 @@ export function MessageRenderer({
       return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
-      return <TerminalLine message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
+      return withHandoffContext(
+        handoff.paths,
+        onRevealPath,
+        <TerminalLine
+          message={displayMessage}
+          badge={assistantBadge}
+          onRevealPath={onRevealPath}
+          onOpenFileReference={onOpenFileReference}
+          afterBody={handoff.card}
+        />,
+      );
     }
     if (chatStyle === "clean") {
-      return <CleanBlock message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
+      return withHandoffContext(
+        handoff.paths,
+        onRevealPath,
+        <CleanBlock
+          message={displayMessage}
+          badge={assistantBadge}
+          onRevealPath={onRevealPath}
+          onOpenFileReference={onOpenFileReference}
+          afterBody={handoff.card}
+        />,
+      );
     }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
@@ -328,7 +513,13 @@ export function MessageRenderer({
     const mergedAssistAvatarUrl = metaLeaderRow
       ? assistantAvatarUrl || message.avatarUrl
       : message.avatarUrl || assistantAvatarUrl;
-    return (
+    const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
+    return withHandoffContext(
+      handoff.paths,
+      onRevealPath,
       <ImBubble
         message={displayMessage}
         resolvedReferences={resolvedReferences}
@@ -344,6 +535,7 @@ export function MessageRenderer({
         onQuoteMessage={onQuoteMessage}
         onWebSearchMessage={onWebSearchMessage}
         onQuoteToNewPane={onQuoteToNewPane}
+        onContinueFromMessage={onContinueFromMessage}
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}
         onForwardMessage={onForwardMessage}
@@ -368,7 +560,11 @@ export function MessageRenderer({
         isLastAssistantInPane={isLastAssistantInPane}
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
-      />
+        lightboxGallery={lightboxGallery}
+        afterBody={handoff.card}
+        onOpenWorkspaceRefs={onOpenAllRefs}
+        sessionWebRefs={sessionWebRefs}
+      />,
     );
   }
   if (message.role === "tool") {
@@ -377,6 +573,21 @@ export function MessageRenderer({
     }
     if (message.toolName === "group_progress") {
       return <GroupProgressLine message={message} />;
+    }
+    if ((message.toolName ?? "").trim() === "plan_update") {
+      return null;
+    }
+    if ((message.toolName ?? "").trim() === "plan_create") {
+      const plan = parsePlanArtifactToolResult(message.content);
+      if (plan) {
+        return (
+          <PlanArtifactCard
+            initialPlan={plan}
+            onViewPlan={onViewPlan}
+            onBuildPlan={onBuildPlan}
+          />
+        );
+      }
     }
     if (message.noticeKind === "budget_exceeded" || /Token budget exceeded/i.test(String(message.content ?? ""))) {
       const current = Number(message.budgetCurrent);
@@ -445,7 +656,12 @@ export function MessageRenderer({
       }
     }
     if (message.actionConfirmation) {
-      return (
+      return wrapGroupIntervention(
+        showSenderIdentity,
+        message,
+        assistantName,
+        assistantAvatarUrl,
+        senderAvatarId,
         <InlineConfirmCard
           confirmation={message.actionConfirmation}
           groupChatRail={showSenderIdentity}
@@ -454,7 +670,7 @@ export function MessageRenderer({
               ? (confirmation, decision) => onResolveActionConfirmation(confirmation, decision)
               : async () => undefined
           }
-        />
+        />,
       );
     }
     if (message.clarificationPrompt) {
@@ -466,7 +682,12 @@ export function MessageRenderer({
         clarMeta && clarMeta.clarification_answered === true
           ? extractClarificationAnswerFromMeta(clarMeta)
           : null;
-      return (
+      return wrapGroupIntervention(
+        showSenderIdentity,
+        message,
+        assistantName,
+        assistantAvatarUrl,
+        senderAvatarId,
         <ClarificationCard
           prompt={message.clarificationPrompt}
           suspended={message.clarificationSuspended}
@@ -509,10 +730,10 @@ export function MessageRenderer({
                 }
               : undefined
           }
-        />
+        />,
       );
     }
-    return (
+    const toolCard = (
       <ToolCallCard
         message={message}
         highlightTerms={highlightTerms}
@@ -526,6 +747,18 @@ export function MessageRenderer({
         onSkillManageApply={onSkillManageApply}
       />
     );
+    const wrapToolCard =
+      message.toolStatus === "error" || Boolean(message.inlineConfirm);
+    return wrapToolCard
+      ? wrapGroupIntervention(
+          showSenderIdentity,
+          message,
+          assistantName,
+          assistantAvatarUrl,
+          senderAvatarId,
+          toolCard,
+        )
+      : toolCard;
   }
   return <SystemNotice text={message.content} />;
 }

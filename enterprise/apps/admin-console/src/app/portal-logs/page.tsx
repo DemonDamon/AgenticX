@@ -20,6 +20,7 @@ import {
   EmptyState,
   Input,
   Label,
+  useLocale,
   PageHeader,
   Select,
   SelectContent,
@@ -89,6 +90,8 @@ function PortalLogsPageContent() {
   const t = useTranslations("pages.ops.portalLogs");
   const tRuntime = useTranslations("pages.ops.traceRuntime");
   const ts = useTranslations("shell");
+  const { locale } = useLocale();
+  const dateFieldLang = locale === "en" ? "en-US" : "zh-CN";
   const searchParams = useSearchParams();
   const initialTrace = searchParams.get("trace_id")?.trim() ?? "";
 
@@ -509,6 +512,7 @@ function PortalLogsPageContent() {
             <Input
               id="portal-log-start"
               type="datetime-local"
+              lang={dateFieldLang}
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
@@ -518,6 +522,7 @@ function PortalLogsPageContent() {
             <Input
               id="portal-log-end"
               type="datetime-local"
+              lang={dateFieldLang}
               value={end}
               onChange={(e) => setEnd(e.target.value)}
             />

@@ -1,8 +1,8 @@
 # AgenticX Collaboration 模块完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-01-17 之后的变更）
+> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
 >
-> 自上次更新以来，该模块的代码变更集中在 Eigent 内化收尾：新增 `task_lock.py`（项目级状态容器），并补齐 `conversation.py`、`workforce/{events,hooks,context_manager}.py`（均已在下文记录）。其余多为版本号 bump（`__init__.py`）。
+> 自上次更新以来，该模块仅 `__init__.py` 发生变更：`__version__` 由 `0.4.2` 升至 `0.6.0`，导出符号（`__all__`）无新增或删除，下文各组件描述仍然成立。
 
 ## 目录路径
 `D:\myWorks\AgenticX\agenticx\collaboration`
@@ -31,7 +31,7 @@
 
 #### __init__.py (1,234 bytes)
 **文件功能**：AgenticX M8.5 多智能体协作框架模块的统一导出接口
-**技术实现**：通过 __all__ 列表导出所有核心组件，包括枚举类、配置类、基础抽象类、协作模式类和管理服务类
+**技术实现**：通过 __all__ 列表导出所有核心组件，包括枚举类、配置类、基础抽象类、协作模式类和管理服务类；当前 `__version__ = "0.6.0"`
 **关键组件**：导出 CollaborationMode、ConflictResolutionStrategy、RepairStrategy 等枚举，CollaborationConfig、CollaborationManagerConfig、RolePlayingConfig 等配置类，BaseCollaborationPattern、CollaborationResult 等基础类，以及包括 RolePlayingPattern 在内的各种协作模式和管理器
 **业务逻辑**：作为模块的统一入口，简化用户导入和使用协作框架的各个组件
 **依赖关系**：依赖模块内的所有核心文件，为外部提供统一的访问接口

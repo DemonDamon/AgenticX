@@ -13,9 +13,26 @@ from typing import Any
 
 logger = logging.getLogger("agenticx.delivery")
 
+def _default_worktree_root() -> str:
+    """``~/.agenticx/deliveries``，按调用时的 HOME 解析。
+
+    原来直接写在模块级 DEFAULTS 字典里，import 时就求值定死——测试的 HOME 重定向拦不住，
+    交付产物会写进开发者真实的 ~/.agenticx/deliveries。见 agenticx/utils/agx_home.py。
+    """
+    from agenticx.utils.agx_home import agx_home
+
+    return str(agx_home() / "deliveries")
+
+
+def defaults() -> dict[str, Any]:
+    """默认配置。每次调用重新算，不要缓存成模块常量。"""
+    return {**DEFAULTS, "worktree_root": _default_worktree_root()}
+
+
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
-    "worktree_root": str(Path.home() / ".agenticx" / "deliveries"),
+    # 占位：真实取值走 defaults() / _default_worktree_root()，见上面的说明。
+    "worktree_root": "",
     "bundle_source": "",
     "figma_token": "",
     "playwright_browsers": "chromium",
@@ -44,7 +61,7 @@ def _load_yaml_section() -> dict[str, Any]:
 
 def get_delivery_config() -> dict[str, Any]:
     """Return merged delivery config with env overrides."""
-    merged = dict(DEFAULTS)
+    merged = dict(defaults())  # 走 defaults()：worktree_root 要按当前 HOME 算
     yaml_section = _load_yaml_section()
     for key, value in yaml_section.items():
         if key in DEFAULTS:

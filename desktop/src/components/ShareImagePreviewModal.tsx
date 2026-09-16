@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Copy, Download, X } from "lucide-react";
 import { marked } from "marked";
 import { toPng } from "html-to-image";
-import type { Message } from "../store";
+import { useAppStore, type Message } from "../store";
+import { formatClock } from "../i18n/format";
+import type { AppLocale } from "../i18n/locales";
+import { buildShareImageTurns, formatShareCardDate } from "../utils/share-image-model";
 import {
-  SHARE_WIDGET_HINT,
-  buildShareImageTurns,
-  formatShareCardDate,
-} from "../utils/share-image-model";
+  hydrateShareImageTurns,
+  type HydratedShareGraphic,
+  type HydratedShareTurn,
+} from "../utils/share-image-graphics";
 import { APP_DISPLAY_NAME, APP_TAGLINE } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { AttachmentCard } from "./messages/AttachmentCard";
 
 export type ShareImagePreviewModalProps = {
   open: boolean;
@@ -27,10 +32,8 @@ function assistantMarkdownHtml(text: string): string {
   return html.replace(/<pre>/g, '<pre class="agx-chat-prism">');
 }
 
-function fileStamp(now: number): string {
-  return new Date(now)
-    .toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-    .replace(":", "-");
+function fileStamp(now: number, locale: AppLocale): string {
+  return formatClock(now, locale).replace(":", "-");
 }
 
 /** Opaque page surface — `bg-surface-card` is a translucent overlay and composites to white in PNG. */
@@ -55,8 +58,29 @@ async function waitForImages(el: HTMLElement): Promise<void> {
   );
 }
 
+function ShareGraphicView({ graphic }: { graphic: HydratedShareGraphic }) {
+  if (graphic.status === "fallback") {
+    return <div className="mt-1 text-[13px] text-text-muted">{graphic.hint}</div>;
+  }
+  return (
+    <div className="my-2 w-full">
+      {graphic.title ? (
+        <div className="mb-1.5 text-[12px] font-medium text-text-muted">{graphic.title}</div>
+      ) : null}
+      <div
+        className="share-graphic w-full overflow-hidden [&_svg]:mx-auto [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:w-full"
+        dangerouslySetInnerHTML={{ __html: graphic.svgHtml }}
+      />
+    </div>
+  );
+}
+
+const SHARE_MD_CLASS =
+  "share-md [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_h1]:text-[17px] [&_h2]:text-[16px] [&_h3]:text-[15px] [&_table]:w-full [&_table]:border-collapse [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_td]:px-2.5 [&_td]:py-1.5";
+
 async function cardToPngBuffer(el: HTMLElement): Promise<ArrayBuffer> {
   await waitForImages(el);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const bg = opaqueShareSurface();
   const color =
     getComputedStyle(document.documentElement).getPropertyValue("--text-strong").trim() ||
@@ -80,21 +104,40 @@ export function ShareImagePreviewModal({
   onClose,
   onToast,
 }: ShareImagePreviewModalProps) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+  const locale = useAppStore((s) => s.locale);
   const shareCardRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState<"copy" | "download" | null>(null);
   const [error, setError] = useState("");
   const [exportedAt, setExportedAt] = useState(() => Date.now());
+  const [hydrated, setHydrated] = useState<HydratedShareTurn[] | null>(null);
   const turns = useMemo(() => buildShareImageTurns(messages), [messages]);
-  const dateLabel = formatShareCardDate(exportedAt);
+  const dateLabel = formatShareCardDate(exportedAt, locale);
+  const graphicsReady = hydrated !== null;
 
   useEffect(() => {
     if (!open) {
       setBusy(null);
       setError("");
+      setHydrated(null);
       return;
     }
     setExportedAt(Date.now());
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setHydrated(null);
+    const appTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    void hydrateShareImageTurns(turns, { appTheme }).then((rows) => {
+      if (!cancelled) setHydrated(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, turns]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,8 +151,8 @@ export function ShareImagePreviewModal({
   const runCapture = useCallback(
     async (mode: "copy" | "download") => {
       const el = shareCardRef.current;
-      if (!el) {
-        setError("栅格化失败：卡片未就绪");
+      if (!el || !graphicsReady) {
+        setError(t("share.rasterNotReady"));
         return;
       }
       setBusy(mode);
@@ -119,31 +162,31 @@ export function ShareImagePreviewModal({
         const desktop = window.agenticxDesktop;
         if (mode === "copy") {
           if (!desktop?.copyPngToClipboard) {
-            throw new Error("当前环境不支持复制图片");
+            throw new Error(t("share.copyUnsupported"));
           }
           const res = await desktop.copyPngToClipboard(buf);
-          if (!res.ok) throw new Error(res.error || "复制失败");
-          onToast("已复制图片");
+          if (!res.ok) throw new Error(res.error || t("share.copyFailed"));
+          onToast(t("share.copiedImage"));
         } else {
           if (!desktop?.downloadPngToDownloads) {
-            throw new Error("当前环境不支持下载图片");
+            throw new Error(t("share.downloadUnsupported"));
           }
-          const slug = (sessionTitle || "对话").replace(/[\\/:*?"<>|]/g, "_").slice(0, 32);
+          const slug = (sessionTitle || t("share.conversation")).replace(/[\\/:*?"<>|]/g, "_").slice(0, 32);
           const res = await desktop.downloadPngToDownloads({
             buffer: buf,
-            defaultFileName: `Near对话_${slug}_${fileStamp(Date.now())}.png`,
+            defaultFileName: `${t("share.filePrefix")}_${slug}_${fileStamp(Date.now(), locale)}.png`,
           });
-          if (!res.ok) throw new Error(res.error || "下载失败");
-          onToast(res.path ? `已保存到 ${res.path}` : "已保存图片");
+          if (!res.ok) throw new Error(res.error || t("share.downloadFailed"));
+          onToast(res.path ? t("share.savedTo", { path: res.path }) : t("share.savedImage"));
         }
       } catch (e) {
         const raw = e instanceof Error ? e.message : String(e);
-        setError(raw.startsWith("栅格化失败") ? raw : `栅格化失败：${raw.slice(0, 120)}`);
+        setError(raw === t("share.rasterNotReady") ? raw : t("share.rasterFailed", { detail: raw.slice(0, 120) }));
       } finally {
         setBusy(null);
       }
     },
-    [onToast, sessionTitle],
+    [graphicsReady, locale, onToast, sessionTitle, t],
   );
 
   if (!open) return null;
@@ -155,11 +198,11 @@ export function ShareImagePreviewModal({
         style={{ backgroundColor: "var(--surface-popover)" }}
       >
         <div className="flex items-center justify-between px-5 py-3">
-          <h3 className="text-sm font-semibold text-text-strong">分享图片预览</h3>
+          <h3 className="text-sm font-semibold text-text-strong">{t("share.previewTitle")}</h3>
           <button
             type="button"
             className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
-            aria-label="关闭"
+            aria-label={tCommon("close")}
             onClick={onClose}
           >
             <X className="h-4 w-4" />
@@ -172,37 +215,61 @@ export function ShareImagePreviewModal({
               className="w-full rounded-2xl px-8 py-7 text-text-strong"
               style={{ backgroundColor: "var(--surface-base-fallback)" }}
             >
-              <div className="text-[20px] font-semibold">分享对话</div>
+              <div className="text-[20px] font-semibold">{t("share.shareConversation")}</div>
               <div className="mt-1.5 text-[13px] text-text-muted">{dateLabel}</div>
-              <div className="mt-0.5 text-[13px] text-text-muted">内容由 AI 生成，不能完全保障真实</div>
+              <div className="mt-0.5 text-[13px] text-text-muted">{t("share.aiDisclaimer")}</div>
               <div className="mt-5 border-t border-border pt-5">
                 <div className="flex flex-col gap-4">
-                  {turns.map((turn, idx) =>
-                    turn.kind === "user" ? (
-                      <div key={`u-${idx}`} className="flex justify-end">
-                        <div
-                          className="max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
-                          style={{
-                            backgroundColor:
-                              "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
-                          }}
-                        >
-                          {turn.text}
+                  {!hydrated ? (
+                    <div className="py-6 text-center text-[13px] text-text-muted">{t("share.renderingCharts")}</div>
+                  ) : (
+                    hydrated.map((turn, idx) =>
+                      turn.kind === "user" ? (
+                        <div key={`u-${idx}`} className="flex justify-end">
+                          <div className="flex max-w-[78%] flex-col items-end gap-1.5">
+                            {turn.attachments?.length ? (
+                              <div className="flex flex-wrap justify-end gap-2">
+                                {turn.attachments.map((attachment, attIdx) => (
+                                  <AttachmentCard
+                                    key={`${attachment.name}:${attachment.size}:${attachment.mimeType}:${attIdx}`}
+                                    attachment={attachment}
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                            {turn.text.trim() ? (
+                              <div
+                                className="whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
+                                style={{
+                                  backgroundColor:
+                                    "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
+                                }}
+                              >
+                                {turn.text}
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div key={`a-${idx}`} className="msg-content w-full text-left text-[14px] leading-relaxed">
-                        {turn.text ? (
-                          <div
-                            className="share-md [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_h1]:text-[17px] [&_h2]:text-[16px] [&_h3]:text-[15px] [&_table]:w-full [&_table]:border-collapse [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_td]:px-2.5 [&_td]:py-1.5"
-                            dangerouslySetInnerHTML={{ __html: assistantMarkdownHtml(turn.text) }}
-                          />
-                        ) : null}
-                        {turn.hasWidgetHint ? (
-                          <div className="mt-1 text-[13px] text-text-muted">{SHARE_WIDGET_HINT}</div>
-                        ) : null}
-                      </div>
-                    ),
+                      ) : turn.kind === "widget" ? (
+                        <div key={`w-${idx}`} className="w-full text-left">
+                          <ShareGraphicView graphic={turn.graphic} />
+                        </div>
+                      ) : (
+                        <div key={`a-${idx}`} className="msg-content w-full text-left text-[14px] leading-relaxed">
+                          {turn.parts.map((part, partIdx) =>
+                            part.kind === "md" ? (
+                              <div
+                                key={`md-${partIdx}`}
+                                className={SHARE_MD_CLASS}
+                                dangerouslySetInnerHTML={{ __html: assistantMarkdownHtml(part.text) }}
+                              />
+                            ) : (
+                              <ShareGraphicView key={`g-${partIdx}`} graphic={part.graphic} />
+                            ),
+                          )}
+                        </div>
+                      ),
+                    )
                   )}
                 </div>
               </div>
@@ -228,17 +295,17 @@ export function ShareImagePreviewModal({
         <div className="flex items-center justify-center gap-3 px-5 py-4">
           <button
             type="button"
-            disabled={busy !== null}
+            disabled={busy !== null || !graphicsReady}
             className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-[13px] text-text-strong transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: "var(--surface-base-fallback)" }}
             onClick={() => void runCapture("copy")}
           >
             <Copy className="h-3.5 w-3.5" />
-            {busy === "copy" ? "复制中…" : "复制图片"}
+            {busy === "copy" ? t("share.copying") : t("share.copyImage")}
           </button>
           <button
             type="button"
-            disabled={busy !== null}
+            disabled={busy !== null || !graphicsReady}
             className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{
               background: "var(--ui-btn-primary-bg)",
@@ -247,7 +314,7 @@ export function ShareImagePreviewModal({
             onClick={() => void runCapture("download")}
           >
             <Download className="h-3.5 w-3.5" />
-            {busy === "download" ? "保存中…" : "下载图片"}
+            {busy === "download" ? t("share.saving") : t("share.downloadImage")}
           </button>
         </div>
       </div>

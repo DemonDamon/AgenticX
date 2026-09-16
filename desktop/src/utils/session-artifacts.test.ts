@@ -9,8 +9,17 @@ import {
   collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
   parseSessionMessageFilePayload,
+  collectTurnArtifactPaths,
+  collectTurnFileChanges,
+  collectSessionFileChanges,
   collectTurnPreviewImagePaths,
+  matchesHandoffPath,
+  matchesHandoffAncestor,
+  displayChatLocalPath,
   collectWorkspaceListingArtifactPaths,
+  isSessionUserAttachmentPath,
+  orderTurnArtifactsForCard,
+  pickPrimaryTurnArtifact,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -18,6 +27,7 @@ import {
   looksLikeDirectoryPath,
   pathToFileUrl,
   preferAnimatedPreviewImages,
+  selectSessionDeliverablePaths,
 } from "./session-artifacts";
 
 function toolMsg(partial: Partial<Message> & Pick<Message, "id" | "content">): Message {
@@ -56,6 +66,84 @@ describe("collectSessionArtifactPaths", () => {
       "/Users/damon/.agenticx/avatars/x/workspace/charts/a.svg",
       "/Users/damon/.agenticx/avatars/x/workspace/charts/b.mmd",
     ]);
+  });
+
+  it("collects written_paths from a finished wb_bridge_send result", () => {
+    const path = "/tmp/agx-near-desktop-e2e.txt";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb1",
+        toolName: "wb_bridge_send",
+        content: JSON.stringify({ status: "success", written_paths: [path] }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("collects written_paths from a micro-compact wb_bridge_send persist row", () => {
+    const path = "/Users/damon/.agenticx/taskspaces/sid/default/2048-game/index.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb-compact",
+        toolName: "wb_bridge_send",
+        content:
+          `[micro-compact tool=wb_bridge_send original_chars=99]\n` +
+          JSON.stringify({ status: "success", written_paths: [path] }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("collects written_paths when persist JSON is invalid but the array is intact", () => {
+    const path = "/Users/damon/.agenticx/taskspaces/sid/default/2048-game/js/game.js";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb-broken",
+        toolName: "wb_bridge_send",
+        content:
+          `[micro-compact tool=wb_bridge_send original_chars=12]\n` +
+          `{"ok":true,"tail":"bad\ncontrol","status":"success","written_paths":["${path}"]}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("does not collect session chat-upload attachments as artifacts", () => {
+    const upload =
+      "/Users/damon/.agenticx/taskspaces/sid/default/attachments/image.png";
+    const uploadDup =
+      "/Users/damon/.agenticx/taskspaces/sid/default/attachments/image_2.png";
+    const written =
+      "/Users/damon/.agenticx/taskspaces/sid/default/report.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "ls",
+        toolName: "bash_exec",
+        toolArgs: { command: "ls -lh attachments" },
+        content: `${upload}\n${uploadDup}\n${written}`,
+      }),
+    ];
+    expect(isSessionUserAttachmentPath(upload)).toBe(true);
+    expect(isSessionUserAttachmentPath(uploadDup)).toBe(true);
+    expect(isSessionUserAttachmentPath(written)).toBe(false);
+    expect(collectSessionArtifactPaths(messages)).toEqual([written]);
+    expect(collectSessionArtifactPaths([], [], [upload, uploadDup, written])).toEqual([
+      written,
+    ]);
+  });
+
+  it("skips written_paths while a wb_bridge_send turn is still running", () => {
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb2",
+        toolName: "wb_bridge_send",
+        content: JSON.stringify({
+          status: "running",
+          written_paths: ["/tmp/agx-near-desktop-e2e.txt"],
+        }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
   });
 
   it("skips directory-only 保存路径 labels (join base, not an artifact row)", () => {
@@ -396,6 +484,20 @@ describe("collectSessionArtifactPaths — successful write only", () => {
     expect(collectSessionArtifactPaths(messages)).toEqual([p]);
   });
 
+  it("skips redirect targets from failed bash_exec calls", () => {
+    const p = "/Users/damon/.agenticx/taskspaces/session/default/game/index.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "bash-err",
+        toolName: "bash_exec",
+        toolStatus: "error",
+        toolArgs: { command: `cat > ${p} <<'EOF'\n<html></html>\nEOF` },
+        content: "工具 'bash_exec' 不在当前允许列表中，已拒绝执行。",
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
   it("still collects when toolStatus is undefined and body is OK: edited", () => {
     const p = "/Users/damon/x/a.txt";
     const messages: Message[] = [
@@ -699,6 +801,250 @@ describe("turn preview images", () => {
   });
 });
 
+describe("turn artifacts + primary pick", () => {
+  it("collects html + py and picks html as primary", () => {
+    const html = "/Users/damon/out/report.html";
+    const py = "/Users/damon/out/notes.py";
+    const messages: Message[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "写一份报告",
+        timestamp: 1,
+      },
+      toolMsg({
+        id: "t-html",
+        toolName: "file_write",
+        toolArgs: { path: html },
+        content: `OK: wrote ${html}`,
+      }),
+      toolMsg({
+        id: "t-py",
+        toolName: "file_write",
+        toolArgs: { path: py },
+        content: `OK: wrote ${py}`,
+      }),
+      assistantMsg({ id: "final", content: `路径：\`${html}\`` }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([html, py]);
+    expect(pickPrimaryTurnArtifact(collectTurnArtifactPaths(messages, "final"))).toBe(html);
+    expect(orderTurnArtifactsForCard([py, html])).toEqual([html, py]);
+  });
+
+  it("returns empty paths for an earlier assistant in the same turn", () => {
+    const html = "/Users/damon/out/report.html";
+    const messages: Message[] = [
+      assistantMsg({ id: "mid", content: "写着" }),
+      toolMsg({
+        id: "t-html",
+        toolName: "file_write",
+        toolArgs: { path: html },
+        content: `OK: wrote ${html}`,
+      }),
+      assistantMsg({ id: "final", content: "完成" }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "mid")).toEqual([]);
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([html]);
+  });
+
+  it("session browse counts accumulate across turns while the latest card stays turn-local", () => {
+    const a = "/tmp/a.txt";
+    const b = "/tmp/b.txt";
+    const c = "/tmp/c.txt";
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "先写两个", timestamp: 1 },
+      toolMsg({
+        id: "t-a",
+        toolName: "file_write",
+        toolArgs: { path: a, content: "a\n" },
+        content: `OK: wrote ${a}`,
+      }),
+      toolMsg({
+        id: "t-b",
+        toolName: "file_write",
+        toolArgs: { path: b, content: "b\n" },
+        content: `OK: wrote ${b}`,
+      }),
+      assistantMsg({ id: "a1", content: "写了两个" }),
+      { id: "u2", role: "user", content: "再写一个", timestamp: 2 },
+      toolMsg({
+        id: "t-c",
+        toolName: "file_write",
+        toolArgs: { path: c, content: "c\n" },
+        content: `OK: wrote ${c}`,
+      }),
+      assistantMsg({ id: "a2", content: "又写了一个" }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "a2")).toEqual([c]);
+    expect(collectTurnFileChanges(messages, "a2")).toHaveLength(1);
+    expect(collectSessionArtifactPaths(messages)).toEqual([a, b, c]);
+    expect(collectSessionFileChanges(messages)).toHaveLength(3);
+  });
+
+  it("picks null when the turn only has source/config files", () => {
+    expect(pickPrimaryTurnArtifact(["/tmp/notes.py", "/tmp/meta.json"])).toBeNull();
+  });
+
+  it("matches handoff paths after slash normalization", () => {
+    expect(matchesHandoffPath("/tmp/hello.txt", ["/tmp/hello.txt"])).toBe(true);
+    expect(matchesHandoffPath("/tmp/hello.txt/", ["/tmp/hello.txt"])).toBe(true);
+    expect(matchesHandoffPath("/tmp/other.txt", ["/tmp/hello.txt"])).toBe(false);
+    expect(matchesHandoffPath("/tmp/hello.txt", [])).toBe(false);
+  });
+
+  it("matches a parent directory of a handoff file", () => {
+    const file =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/a.txt";
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";
+    expect(matchesHandoffAncestor(root, [file])).toBe(true);
+    expect(matchesHandoffAncestor("/tmp/other", [file])).toBe(false);
+  });
+
+  it("does not dump taskspace UUID roots in chat", () => {
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";
+    const nested = `${root}archscribe-login/login-swimlane.gif`;
+    expect(displayChatLocalPath(root, [nested])).toBe("当前工作区");
+    expect(displayChatLocalPath(root.replace(/\/$/, ""), [])).toBe("当前工作区");
+    expect(displayChatLocalPath(`${root}archscribe-login/`, [nested])).toBe("archscribe-login");
+    expect(displayChatLocalPath(nested, [nested])).toBe("login-swimlane.gif");
+    expect(
+      displayChatLocalPath(
+        "~/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/",
+        [],
+      ),
+    ).toBe("当前工作区");
+    expect(
+      displayChatLocalPath(
+        "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/notes/draft.md",
+        [],
+      ),
+    ).toBe("notes/draft.md");
+    expect(displayChatLocalPath("/tmp/notes.txt", ["/tmp/other.txt"])).toBeNull();
+    expect(displayChatLocalPath("/tmp/project/", ["/tmp/project/a.txt"])).toBe("project/");
+  });
+
+  it("collects relative file_write paths from OK: wrote (no chars suffix)", () => {
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default";
+    const messages: Message[] = [
+      { id: "u3", role: "user", content: "三个 txt", timestamp: 1 },
+      toolMsg({
+        id: "t-a",
+        toolName: "file_write",
+        toolArgs: { path: "a.txt", content: 'fmt.Println("Hello World")\n' },
+        content: `OK: wrote ${root}/a.txt`,
+      }),
+      toolMsg({
+        id: "t-b",
+        toolName: "file_write",
+        toolArgs: { path: "b.txt", content: 'console.log("Hello World");\n' },
+        content: `OK: wrote ${root}/b.txt`,
+      }),
+      toolMsg({
+        id: "t-c",
+        toolName: "file_write",
+        toolArgs: { path: "c.txt", content: 'println!("Hello World");\n' },
+        content: `OK: wrote ${root}/c.txt`,
+      }),
+      assistantMsg({
+        id: "final-abc",
+        content: "已创建 3 个文件",
+      }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final-abc")).toEqual([
+      `${root}/a.txt`,
+      `${root}/b.txt`,
+      `${root}/c.txt`,
+    ]);
+    expect(collectTurnFileChanges(messages, "final-abc")).toEqual([
+      { path: `${root}/a.txt`, added: 1, removed: 0 },
+      { path: `${root}/b.txt`, added: 1, removed: 0 },
+      { path: `${root}/c.txt`, added: 1, removed: 0 },
+    ]);
+  });
+
+  it("keeps spaced filenames from OK: wrote (session c0683c71 last turn)", () => {
+    const abs =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/Hello World第三方技能点.txt";
+    const messages: Message[] = [
+      { id: "u-space", role: "user", content: "写 Hello World第三方技能点.TXT", timestamp: 1 },
+      toolMsg({
+        id: "t-space",
+        toolName: "file_write",
+        toolArgs: { path: "Hello World第三方技能点.txt", content: "#include <stdio.h>\n" },
+        content: `OK: wrote ${abs}`,
+      }),
+      assistantMsg({
+        id: "final-space",
+        content: `已创建 \`Hello World第三方技能点.txt\`\n\n路径：\`${abs}\``,
+      }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final-space")).toEqual([abs]);
+    expect(collectSessionArtifactPaths(messages)).toEqual([abs]);
+    expect(collectTurnFileChanges(messages, "final-space")).toEqual([
+      { path: abs, added: 1, removed: 0 },
+    ]);
+    expect(artifactBaseName(abs)).toBe("Hello World第三方技能点.txt");
+    expect(collectTurnArtifactPaths(messages, "final-space")[0]).not.toMatch(/\/Hello$/);
+  });
+
+  it("keeps spaced OK: wrote paths when a (N chars) suffix is present", () => {
+    const abs = "/tmp/Hello World第三方技能点.txt";
+    expect(
+      collectSessionArtifactPaths([
+        toolMsg({
+          id: "t-chars",
+          toolName: "file_write",
+          toolArgs: { path: abs },
+          content: `OK: wrote ${abs} (82 chars)`,
+        }),
+      ]),
+    ).toEqual([abs]);
+  });
+
+  it("reads OK: wrote from snake_case chat-history rows with relative path", () => {
+    const abs =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/a.txt";
+    expect(
+      collectArtifactPathsFromChatMessages([
+        {
+          role: "tool",
+          content: `OK: wrote ${abs}`,
+          tool_name: "file_write",
+          tool_args: { path: "a.txt", content: "package main\n" },
+          tool_status: "done",
+        },
+      ]),
+    ).toEqual([abs]);
+  });
+});
+
+describe("collectSessionFileChanges", () => {
+  it("sums write line counts and ignores failed edits", () => {
+    const ok = "/tmp/ok.txt";
+    const bad = "/tmp/bad.txt";
+    expect(
+      collectSessionFileChanges([
+        toolMsg({
+          id: "w1",
+          toolName: "file_write",
+          toolArgs: { path: ok, content: "a\nb\n" },
+          content: `OK: wrote ${ok}`,
+        }),
+        toolMsg({
+          id: "w2",
+          toolName: "file_edit",
+          toolStatus: "error",
+          toolArgs: { path: bad, old_string: "x", new_string: "y" },
+          content: "ERROR: denied",
+        }),
+      ]),
+    ).toEqual([{ path: ok, added: 2, removed: 0 }]);
+  });
+});
+
 describe("default workspace listing → 任务产物", () => {
   const root =
     "/Users/damon/.agenticx/taskspaces/33a3bc2a-d494-493f-a62a-e29a3b4f027d/default";
@@ -739,5 +1085,101 @@ describe("default workspace listing → 任务产物", () => {
       }),
     ).toBe(false);
     expect(isWalkableWorkspaceArtifactDir({ name: "output", type: "dir" })).toBe(true);
+    expect(isWalkableWorkspaceArtifactDir({ name: "attachments", type: "dir" })).toBe(false);
+    expect(isWalkableWorkspaceArtifactDir({ name: "docxenv", type: "dir" })).toBe(false);
+    expect(isWalkableWorkspaceArtifactDir({ name: "venv", type: "dir" })).toBe(false);
+  });
+
+  it("does not treat chat-upload attachments/ as 任务产物", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: "image.png", type: "file", path: "attachments/image.png" },
+          { name: "image_2.png", type: "file", path: "attachments/image_2.png" },
+          { name: "report.html", type: "file", path: "report.html" },
+        ],
+      }),
+    ).toEqual([`${root}/report.html`]);
+  });
+
+  it("skips virtual-environment files from nested workspace listings", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: "pyvenv.cfg", type: "file", path: "docxenv/pyvenv.cfg" },
+          { name: "activate.fish", type: "file", path: "docxenv/bin/activate.fish" },
+          { name: "report.md", type: "file", path: "output/report.md" },
+        ],
+      }),
+    ).toEqual([`${root}/output/report.md`]);
+  });
+});
+
+describe("session deliverable selection", () => {
+  it("uses the final handoff list instead of helper scripts and virtualenv internals", () => {
+    const outputDir = "/Users/damon/myWork/project/脱敏输出";
+    const messages: Message[] = [
+      toolMsg({
+        id: "helper",
+        toolName: "bash_exec",
+        toolArgs: { command: "cat > /tmp/session/default/convert.py <<'EOF'" },
+        content: "exit_code=0",
+      }),
+      assistantMsg({
+        id: "final",
+        content: [
+          `完成。产物在 \`${outputDir}/\`：`,
+          "",
+          "| 产物 | 路径 |",
+          "|---|---|",
+          "| 脱敏 Markdown | `脱敏输出/可研-脱敏.md` |",
+          "| 图片 | `脱敏输出/assets/image_001.png`、`image_002.png` |",
+        ].join("\n"),
+      }),
+    ];
+
+    expect(
+      selectSessionDeliverablePaths(messages, [
+        "/tmp/session/default/convert.py",
+        "/tmp/session/default/docxenv/pyvenv.cfg",
+      ]),
+    ).toEqual([
+      `${outputDir}/可研-脱敏.md`,
+      `${outputDir}/assets/image_001.png`,
+      `${outputDir}/assets/image_002.png`,
+    ]);
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([
+      `${outputDir}/可研-脱敏.md`,
+      `${outputDir}/assets/image_001.png`,
+      `${outputDir}/assets/image_002.png`,
+    ]);
+  });
+
+  it("recognizes an audited output heading and drops unrelated example files", () => {
+    const output =
+      "/Users/damon/.agenticx/taskspaces/session/default/脱敏输出/可研报告-脱敏.md";
+    const messages: Message[] = [
+      assistantMsg({
+        id: "final-audited",
+        content: [
+          "## 产出文件（已验证）",
+          "",
+          `\`${output}\``,
+          "",
+          "- 内容脱敏校验通过",
+        ].join("\n"),
+      }),
+    ];
+
+    expect(
+      selectSessionDeliverablePaths(messages, [
+        "/tmp/doc1.pdf",
+        "/tmp/example.docx",
+        output,
+      ]),
+    ).toEqual([output]);
+    expect(collectTurnArtifactPaths(messages, "final-audited")).toEqual([output]);
   });
 });

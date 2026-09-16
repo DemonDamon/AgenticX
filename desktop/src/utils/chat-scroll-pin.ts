@@ -22,3 +22,24 @@ export function shouldPinScrollOnUserSend(opts?: PinScrollOnSendInput): boolean 
 export function shouldApplyScrollPinFromEvent(programmatic: boolean): boolean {
   return !programmatic;
 }
+
+/**
+ * Live chat follows `pane.messages` / stream text.
+ * Replay presentation grows a sliced prefix in `renderMessages` while
+ * `visibleMessages` stays the full session — follow the sliced rows or the
+ * viewport stays on the first turn.
+ */
+export function chatListFollowRows<T>(
+  presenting: boolean,
+  liveRows: T,
+  presentedRows: T,
+): T {
+  return presenting ? presentedRows : liveRows;
+}
+
+export function shouldPinScrollOnPresentationEnter(
+  wasPresenting: boolean,
+  presenting: boolean,
+): boolean {
+  return presenting && !wasPresenting;
+}

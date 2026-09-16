@@ -163,7 +163,9 @@ class TestLiteLLMProvider:
         provider = LiteLLMProvider(model="test-model")
         stream = provider.astream([{"role": "user", "content": "Async stream test"}])
         
-        result = "".join([chunk async for chunk in stream])
+        # astream 的声明就是 Union[str, Dict]：除了正文分片，还会夹带 usage / tool_call
+        # 这类结构化块。这里只拼字符串块，别假设整条流都是 str。
+        result = "".join([chunk async for chunk in stream if isinstance(chunk, str)])
         
         mock_acompletion.assert_called_once()
         assert result == "This is a streamed response."

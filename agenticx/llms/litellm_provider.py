@@ -7,6 +7,7 @@ import litellm  # type: ignore
 litellm.suppress_debug_info = True
 
 from pydantic import Field  # type: ignore
+from agenticx.runtime.usage_metadata import normalize_stream_usage
 from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
@@ -326,24 +327,6 @@ class LiteLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
-        def _safe_int(value: Any) -> int:
-            if isinstance(value, bool):
-                return int(value)
-            if isinstance(value, (int, float)):
-                return int(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0
-                try:
-                    return int(raw)
-                except ValueError:
-                    try:
-                        return int(float(raw))
-                    except ValueError:
-                        return 0
-            return 0
-
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
         elif isinstance(prompt, list):
@@ -396,31 +379,7 @@ class LiteLLMProvider(BaseLLMProvider):
         try:
             for chunk in response_stream:
                 chunk = cast(Any, chunk)
-                usage_chunk: Dict[str, int] | None = None
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    if isinstance(usage, dict):
-                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-                        tt = _safe_int(usage.get("total_tokens") or 0)
-                    else:
-                        pt = _safe_int(
-                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
-                        )
-                        ct = _safe_int(
-                            getattr(usage, "completion_tokens", 0)
-                            or getattr(usage, "output_tokens", 0)
-                            or 0
-                        )
-                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
-                    if tt == 0 and (pt > 0 or ct > 0):
-                        tt = pt + ct
-                    if pt > 0 or ct > 0 or tt > 0:
-                        usage_chunk = {
-                            "prompt_tokens": pt,
-                            "completion_tokens": ct,
-                            "total_tokens": tt,
-                        }
+                usage_chunk = normalize_stream_usage(getattr(chunk, "usage", None))
                 choices = getattr(chunk, "choices", None)
                 if choices:
                     choice0 = choices[0]
@@ -530,12 +489,12 @@ class LiteLLMProvider(BaseLLMProvider):
             # 处理可能的异常
             raise e
 
-    async def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
+    def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
         """Stream the language model's response asynchronously."""
-        async_gen = self._astream_generator(prompt, **kwargs)
-        # 为了满足类型检查器的要求，我们需要返回一个协程
-        # 但实际上我们直接返回异步生成器
-        return async_gen
+        # 返回异步生成器本身，不要写成 async def —— 那样调用方拿到的是协程，
+        # `async for chunk in provider.astream(...)` 直接 TypeError。仓库里绝大多数调用点
+        # （agent_executor、failover）都是直接 async for 的。
+        return self._astream_generator(prompt, **kwargs)
 
     def _parse_response(self, response) -> LLMResponse:
         """Parses a LiteLLM ModelResponse into an AgenticX LLMResponse."""
@@ -560,9 +519,9 @@ class LiteLLMProvider(BaseLLMProvider):
         # Some providers (e.g. MiniMax via openai-compat) put usage inside
         # _hidden_params or the raw response dict; fall back to those when the
         # primary usage fields are all zero.
+        raw_usage: dict = {}
         if prompt_tokens == 0 and completion_tokens == 0:
             hidden = getattr(response, "_hidden_params", None) or {}
-            raw_usage: dict = {}
             if isinstance(hidden, dict):
                 raw_usage = hidden.get("usage") or hidden.get("original_response_usage") or {}
             if not raw_usage:
@@ -585,10 +544,21 @@ class LiteLLMProvider(BaseLLMProvider):
         if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
             total_tokens = prompt_tokens + completion_tokens
 
+        from agenticx.runtime.usage_metadata import extract_cached_reasoning
+
+        cached_tokens, reasoning_tokens = extract_cached_reasoning(usage)
+        if cached_tokens == 0 and raw_usage:
+            extra_c, extra_r = extract_cached_reasoning(raw_usage)
+            cached_tokens = extra_c
+            if reasoning_tokens == 0:
+                reasoning_tokens = extra_r
+
         token_usage = TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
 
         choices = [

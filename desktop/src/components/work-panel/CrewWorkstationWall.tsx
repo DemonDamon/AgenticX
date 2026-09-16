@@ -1,4 +1,5 @@
 import type { Avatar } from "../../store";
+import { useTranslation } from "react-i18next";
 import { isMetaLeaderAgentId } from "../../utils/display-name";
 import {
   crewPhaseLabel,
@@ -45,6 +46,7 @@ function ActionRow({
   onSwitchModel?: (agentId: string) => void;
   onInterrupt?: (agentId: string) => void;
 }) {
+  const { t } = useTranslation("workspace");
   if (slot.phase === "running") {
     const text = slot.actionText || crewPhaseLabel(slot);
     return (
@@ -74,7 +76,7 @@ function ActionRow({
                 className="text-[10px] text-text-subtle transition hover:text-text-strong"
                 onClick={() => onAppendDirective(slot.agentId)}
               >
-                追加指令
+                {t("work.appendDirective")}
               </button>
             ) : null}
             {onSwitchModel ? (
@@ -83,7 +85,7 @@ function ActionRow({
                 className="text-[10px] text-text-subtle transition hover:text-text-strong"
                 onClick={() => onSwitchModel(slot.agentId)}
               >
-                换模型
+                {t("work.switchModel")}
               </button>
             ) : null}
             {onInterrupt ? (
@@ -92,7 +94,7 @@ function ActionRow({
                 className="text-[10px] text-text-subtle transition hover:text-text-strong"
                 onClick={() => onInterrupt(slot.agentId)}
               >
-                打断
+                {t("work.interrupt")}
               </button>
             ) : null}
           </span>
@@ -114,6 +116,7 @@ export function CrewWorkstationWall({
   onSwitchModel,
   onInterrupt,
 }: Props) {
+  const { t } = useTranslation("workspace");
   return (
     <div className="space-y-1.5">
       {slots.map((slot) => {
@@ -149,7 +152,7 @@ export function CrewWorkstationWall({
               />
             </div>
             {slot.toolCalls > 0 ? (
-              <span className="shrink-0 text-[10px] text-text-faint">{slot.toolCalls} 次调用</span>
+              <span className="shrink-0 text-[10px] text-text-faint">{t("work.toolCalls", { count: slot.toolCalls })}</span>
             ) : null}
           </div>
         );

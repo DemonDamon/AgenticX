@@ -99,6 +99,12 @@ class AiObservationAttributes:
     AGENTICX_WORKFLOW_ID = "agenticx.workflow.id"
     # 会话 ID
     AGENTICX_SESSION_ID = "agenticx.session.id"
+    # Tenant ID (empty in single-tenant Desktop)
+    AGENTICX_TENANT_ID = "agenticx.tenant.id"
+    # Deployment snapshot ID (manual / env until change-plane)
+    AGENTICX_DEPLOYMENT_ID = "agenticx.deployment.id"
+    # Enterprise Gateway ULID from X-AgenticX-Trace-Id
+    AGENTICX_GATEWAY_TRACE_ID = "agenticx.gateway.trace_id"
     # 错误类型
     AGENTICX_ERROR_TYPE = "agenticx.error.type"
     # 是否可恢复

@@ -43,21 +43,9 @@ apps/gateway/
 
 ## 请求处理顺序（Chat）
 
-```mermaid
-flowchart TD
-    A[handleChatCompletions] --> B[parseJWT<br/>tenant/dept/user/session]
-    B --> C[quota.Check]
-    C --> D[policy.EvaluateRequest]
-    D -->|block| Z1[return error]
-    D -->|pass| E{routing.Decide<br/>或 channel.Pick}
-    E --> F[provider.Call / relay.Execute]
-    F --> G{流式?}
-    G -->|否| H[policy.EvaluateResponse]
-    G -->|是| I[SSE 扫描 + stream 阶段策略]
-    H --> J[audit.Write<br/>JSONL + PG]
-    I --> J
-    J --> K[metering.Record<br/>usage_records]
-```
+![handleChatCompletions 顺序](/docs/svg/ent-gw-chat-zh.svg?v=2)
+
+*示意图：JWT → 配额 → 请求策略 → 路由或 Channel → 上游 → 响应/流式二次评估 → 审计 → 计量。*
 
 流式路径在 SSE 扫描过程中做 **stream 阶段** 策略评估与分段审计。
 
@@ -80,15 +68,9 @@ flowchart TD
 
 启用：`GATEWAY_CHANNEL_REGISTRY=on`
 
-```mermaid
-flowchart LR
-    admin["admin CRUD<br/>gateway_channels"] --> api["/api/internal/channels"]
-    api --> reg["channel.Registry.Refresh"]
-    reg --> pick["Picker<br/>weight + priority"]
-    pick --> relay["relay.Executor<br/>失败重试"]
-    relay --> adp["adaptor"]
-    adp --> up([上游])
-```
+![Channel 中继](/docs/svg/ent-channel-zh.svg?v=2)
+
+*示意图：Admin CRUD 写入 gateway_channels，网关刷新 Registry 后按权重挑选并重试上游。*
 
 Runbook：[runbooks/gateway-channel-relay.md](../runbooks/gateway-channel-relay.md)
 

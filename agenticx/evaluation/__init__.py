@@ -22,6 +22,15 @@ from .trajectory_matcher import (
 )
 from .runner import EvalRunner
 from .trace_converter import TraceToEvalSetConverter
+from .fault_injection import (
+    CountingTool,
+    FaultInjector,
+    FaultKind,
+    FaultSpec,
+    ScriptedFakeLLM,
+    SideEffectCounter,
+)
+from .reliability_runner import ReliabilityCase, ReliabilityMetrics, ReliabilityRunner
 
 __all__ = [
     # EvalSet 数据模型
@@ -39,5 +48,14 @@ __all__ = [
     "EvalRunner",
     # 轨迹转换
     "TraceToEvalSetConverter",
+    "CountingTool",
+    "FaultInjector",
+    "FaultKind",
+    "FaultSpec",
+    "ScriptedFakeLLM",
+    "SideEffectCounter",
+    "ReliabilityCase",
+    "ReliabilityMetrics",
+    "ReliabilityRunner",
 ]
 

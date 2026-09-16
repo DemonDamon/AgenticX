@@ -51,3 +51,26 @@ export async function adminFetch(input: RequestInfo | URL, init?: RequestInit): 
   }
   return res;
 }
+
+/** Bound wait for list/first-paint fetches so hangForever (401 redirect) cannot freeze Loading. */
+export function adminFetchOrTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Request timed out"));
+    }, timeoutMs);
+    void adminFetch(input, init).then(
+      (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}

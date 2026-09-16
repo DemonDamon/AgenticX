@@ -365,3 +365,195 @@ def test_ssh_protected_even_when_mounted(tmp_path: Path, monkeypatch: pytest.Mon
     ssh_key = Path.home() / ".ssh" / "id_rsa"
     with pytest.raises(ValueError, match="protected"):
         at._resolve_workspace_path(str(ssh_key), session, for_write=False)
+
+
+def test_context_file_exact_path_readable_not_writable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    other = tmp_path / "other-taskspace"
+    other.mkdir()
+    note = other / "note.md"
+    note.write_text("hello-from-other-space", encoding="utf-8")
+    sibling = other / "secret.md"
+    sibling.write_text("nope", encoding="utf-8")
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    session.context_files = {str(note.resolve()): "hello-from-other-space"}
+
+    assert at._resolve_workspace_path(str(note), session, for_write=False) == note.resolve()
+    read = at._tool_file_read({"path": str(note)}, session)
+    assert "hello-from-other-space" in read
+
+    with pytest.raises(ValueError, match="escapes workspace|read-only"):
+        at._resolve_workspace_path(str(note), session, for_write=True)
+    with pytest.raises(ValueError, match="escapes workspace"):
+        at._resolve_workspace_path(str(sibling), session, for_write=False)
+    with pytest.raises(ValueError, match="escapes workspace"):
+        at._resolve_workspace_path(str(other), session, for_write=False)
+
+    read_roots, write_roots = at._session_workspace_root_sets(session)
+    assert other.resolve() not in read_roots
+    assert other.resolve() not in write_roots
+    assert note.resolve() not in read_roots
+
+
+def test_context_file_allowlist_does_not_override_protected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    ssh_key = Path.home() / ".ssh" / "id_rsa"
+    session.context_files = {str(ssh_key): "should-not-matter"}
+    with pytest.raises(ValueError, match="protected"):
+        at._resolve_workspace_path(str(ssh_key), session, for_write=False)
+
+
+def test_stage_context_file_copies_only_exact_reference_into_hidden_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source_dir = tmp_path / "external"
+    source_dir.mkdir()
+    source = source_dir / "report.docx"
+    source.write_bytes(b"PK\x03\x04document")
+    sibling = source_dir / "secret.docx"
+    sibling.write_bytes(b"secret")
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(workspace))
+    session = StudioSession()
+    session.workspace_dir = str(workspace)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(workspace), "mount_mode": "link"},
+    ]
+    session.context_files = {str(source): "[文件引用] report.docx"}
+
+    result = at._tool_stage_context_file({"path": str(source)}, session)
+    payload = json.loads(result)
+
+    assert payload["ok"] is True
+    staged = Path(payload["path"])
+    assert staged.read_bytes() == source.read_bytes()
+    assert staged.parent == workspace / ".agenticx" / "context-files"
+    source.write_bytes(b"PK\x03\x04updateme")
+    refreshed = json.loads(at._tool_stage_context_file({"path": str(source)}, session))
+    assert Path(refreshed["path"]).read_bytes() == source.read_bytes()
+    denied = at._tool_stage_context_file({"path": str(sibling)}, session)
+    assert denied.startswith("ERROR: path escapes workspace")
+
+
+def _default_session(ws: Path) -> StudioSession:
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    return session
+
+
+def test_default_prefix_is_virtual_workspace_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "taskspaces" / "sid" / "default"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+
+    resolved = at._resolve_workspace_path(
+        "default/mario-game/index.html", session, for_write=True
+    )
+    assert resolved == (ws / "mario-game" / "index.html").resolve()
+    assert "default/default" not in str(resolved).replace("\\", "/")
+
+
+def test_default_label_prefix_is_virtual_workspace_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "taskspaces" / "sid" / "default"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+
+    resolved = at._resolve_workspace_path(
+        "默认工作区/mario-game/index.html", session, for_write=True
+    )
+    assert resolved == (ws / "mario-game" / "index.html").resolve()
+
+
+def test_reference_mount_prefix_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "taskspaces" / "sid" / "default"
+    attached = tmp_path / "Downloads" / "调研报告"
+    ws.mkdir(parents=True)
+    attached.mkdir(parents=True)
+    (attached / "报告.md").write_text("hello", encoding="utf-8")
+    (ws / ".agx-mounts.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mounts": [
+                    {
+                        "name": "调研报告",
+                        "mode": "reference",
+                        "source_path": str(attached.resolve()),
+                        "linked_at": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+
+    resolved = at._resolve_workspace_path("调研报告/报告.md", session, pick_existing=True)
+    assert resolved == (attached / "报告.md").resolve()
+    with pytest.raises(ValueError, match=r"read-only \(mounted as reference\)"):
+        at._resolve_workspace_path("调研报告/报告.md", session, for_write=True)
+
+
+def test_unprefixed_relative_path_still_joins_primary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "taskspaces" / "sid" / "default"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+
+    resolved = at._resolve_workspace_path(
+        "mario-game/index.html", session, for_write=True
+    )
+    assert resolved == (ws / "mario-game" / "index.html").resolve()
+
+
+def test_outside_absolute_path_still_escapes_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "taskspaces" / "sid" / "default"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("nope", encoding="utf-8")
+    with pytest.raises(ValueError, match="escapes workspace"):
+        at._resolve_workspace_path(str(outside), session, for_write=True)

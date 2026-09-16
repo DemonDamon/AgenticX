@@ -81,19 +81,27 @@ PY
 
 cd "$PY_DIR"
 
+# 清理旧产物：onefile 时代的单文件 agx-server 与 onedir 目录同名冲突
+rm -rf "$DIST_DIR/agx-server"
+
 "$VPY" -m PyInstaller agx_serve.spec \
   --distpath "$DIST_DIR" \
   --workpath "$WORK_DIR" \
   --clean \
   --noconfirm
 
-BINARY="$DIST_DIR/agx-server"
+# onedir 产物：dist/<arch>/agx-server/agx-server（可执行）+ _internal/（依赖）
+BINARY="$DIST_DIR/agx-server/agx-server"
 if [[ ! -x "$BINARY" ]]; then
   echo "✗ Expected binary not found or not executable: $BINARY"
   exit 1
 fi
+if [[ ! -d "$DIST_DIR/agx-server/_internal" ]]; then
+  echo "✗ Expected onedir _internal/ not found: $DIST_DIR/agx-server/_internal"
+  exit 1
+fi
 
-echo "=== Built: $BINARY ($(du -sh "$BINARY" | cut -f1)) ==="
+echo "=== Built: $BINARY ($(du -sh "$DIST_DIR/agx-server" | cut -f1) onedir bundle) ==="
 
 echo "=== Bundled runtime dependency check ==="
 "$BINARY" --check-desktop-runtime

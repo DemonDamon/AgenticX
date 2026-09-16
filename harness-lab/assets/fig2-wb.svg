@@ -1,0 +1,162 @@
+<svg width="1600" height="980" viewBox="0 0 1600 980" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCFCFE"/>
+      <stop offset="1" stop-color="#F4F5F9"/>
+    </linearGradient>
+    <linearGradient id="agxbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="keybox" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#312E81"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="980" fill="url(#bg)"/>
+
+  <!-- 标题 -->
+  <text x="800" y="66" text-anchor="middle" font-size="36" font-weight="700" fill="#0F172A">机制归因：差距是怎么拉开的</text>
+  <text x="800" y="104" text-anchor="middle" font-size="19" fill="#64748B">同一模型下，Harness 的胜负手在长程上下文管理与错误恢复 · 数据为 trajectory 中位数</text>
+
+  <!-- ============ 左侧：通过率横向条形图 ============ -->
+  <rect x="60" y="140" width="740" height="560" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#soft)"/>
+  <text x="92" y="188" font-size="21" font-weight="700" fill="#0F172A">通过率（Terminal-Bench 2.1 · 89 题）</text>
+
+  <!-- 坐标网格：0% ~ 100%，条形图起点 x=250，最大宽 500 -->
+  <g stroke="#F1F5F9" stroke-width="1">
+    <line x1="375" y1="220" x2="375" y2="650"/>
+    <line x1="500" y1="220" x2="500" y2="650"/>
+    <line x1="625" y1="220" x2="625" y2="650"/>
+    <line x1="750" y1="220" x2="750" y2="650"/>
+  </g>
+  <g font-size="13" fill="#94A3B8">
+    <text x="250" y="670" text-anchor="middle">0%</text>
+    <text x="375" y="670" text-anchor="middle">25%</text>
+    <text x="500" y="670" text-anchor="middle">50%</text>
+    <text x="625" y="670" text-anchor="middle">75%</text>
+    <text x="750" y="670" text-anchor="middle">100%</text>
+  </g>
+
+  <!-- AgenticX 88.8% -->
+  <text x="92" y="262" font-size="19" font-weight="700" fill="#1E293B">AgenticX</text>
+  <text x="92" y="286" font-size="13" fill="#94A3B8">自研</text>
+  <rect x="250" y="238" width="500" height="44" rx="8" fill="#EEF2FF"/>
+  <rect x="250" y="238" width="444" height="44" rx="8" fill="url(#agxbar)"/>
+  <text x="704" y="266" font-size="20" font-weight="800" fill="#312E81">88.8%</text>
+
+  <!-- dsh 83.1% -->
+  <text x="92" y="342" font-size="19" font-weight="600" fill="#1E293B">dsh</text>
+  <text x="92" y="366" font-size="13" fill="#94A3B8">DeepSeek 官方</text>
+  <rect x="250" y="318" width="415.5" height="44" rx="8" fill="#475569"/>
+  <text x="675" y="346" font-size="19" font-weight="700" fill="#334155">83.1%</text>
+
+  <!-- OpenCode 79.8% -->
+  <text x="92" y="422" font-size="19" font-weight="600" fill="#1E293B">OpenCode</text>
+  <text x="92" y="446" font-size="13" fill="#94A3B8">开源</text>
+  <rect x="250" y="398" width="399" height="44" rx="8" fill="#64748B"/>
+  <text x="659" y="426" font-size="19" font-weight="700" fill="#334155">79.8%</text>
+
+  <!-- Hermes 67.4% -->
+  <text x="92" y="502" font-size="19" font-weight="600" fill="#1E293B">Hermes</text>
+  <text x="92" y="526" font-size="13" fill="#94A3B8">NousResearch</text>
+  <rect x="250" y="478" width="337" height="44" rx="8" fill="#7E8AA5"/>
+  <text x="597" y="506" font-size="19" font-weight="700" fill="#334155">67.4%</text>
+
+  <!-- Pi 58.4% -->
+  <text x="92" y="582" font-size="19" font-weight="600" fill="#1E293B">Pi</text>
+  <text x="92" y="606" font-size="13" fill="#94A3B8">对照组</text>
+  <rect x="250" y="558" width="292" height="44" rx="8" fill="#94A3B8"/>
+  <text x="552" y="586" font-size="19" font-weight="700" fill="#334155">58.4%</text>
+
+  <!-- 30pp 差距标注 -->
+  <g>
+    <path d="M 542 640 L 542 626 M 694 640 L 694 626" stroke="#EF4444" stroke-width="1.5"/>
+    <path d="M 542 632 L 694 632" stroke="#EF4444" stroke-width="1.5"/>
+    <text x="618" y="622" text-anchor="middle" font-size="14" font-weight="600" fill="#DC2626">首尾差 30.4pp</text>
+  </g>
+
+  <!-- McNemar 附注 -->
+  <rect x="92" y="688" width="676" height="0" fill="none"/>
+
+  <!-- ============ 右侧：机制指标卡 ============ -->
+  <rect x="830" y="140" width="710" height="560" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#soft)"/>
+  <text x="862" y="188" font-size="21" font-weight="700" fill="#0F172A">长跑画像：轮次 × 输出规模 × 上下文</text>
+
+  <!-- 表头 -->
+  <g font-size="14" fill="#94A3B8" font-weight="600">
+    <text x="862" y="228">Harness</text>
+    <text x="1010" y="228">每任务轮次</text>
+    <text x="1150" y="228">单题输出 tokens</text>
+    <text x="1420" y="228">上下文峰值</text>
+  </g>
+  <line x1="862" y1="240" x2="1510" y2="240" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- AgenticX 行 -->
+  <text x="862" y="286" font-size="17" font-weight="700" fill="#4F46E5">AgenticX</text>
+  <text x="1010" y="286" font-size="17" font-weight="700" fill="#1E293B">33 轮</text>
+  <rect x="1150" y="268" width="150" height="12" rx="6" fill="#4F46E5"/>
+  <text x="1312" y="286" font-size="15" fill="#334155">3.5 万</text>
+  <text x="1420" y="286" font-size="15" font-weight="700" fill="#1E293B">210 万</text>
+
+  <!-- dsh 行 -->
+  <text x="862" y="346" font-size="17" fill="#1E293B">dsh</text>
+  <text x="1010" y="346" font-size="15" fill="#94A3B8">—</text>
+  <rect x="1150" y="328" width="120" height="12" rx="6" fill="#475569"/>
+  <text x="1282" y="346" font-size="15" fill="#334155">2.8 万</text>
+  <text x="1420" y="346" font-size="15" fill="#334155">78 万</text>
+
+  <!-- OpenCode 行 -->
+  <text x="862" y="406" font-size="17" fill="#1E293B">OpenCode</text>
+  <text x="1010" y="406" font-size="15" fill="#334155">26 轮</text>
+  <rect x="1150" y="388" width="21" height="12" rx="6" fill="#64748B"/>
+  <text x="1183" y="406" font-size="15" fill="#334155">0.5 万</text>
+  <text x="1420" y="406" font-size="15" fill="#94A3B8">—</text>
+
+  <!-- Hermes 行 -->
+  <text x="862" y="466" font-size="17" fill="#1E293B">Hermes</text>
+  <text x="1010" y="466" font-size="15" fill="#334155">27 轮</text>
+  <text x="1150" y="466" font-size="15" fill="#94A3B8">未记录</text>
+  <text x="1420" y="466" font-size="15" fill="#94A3B8">—</text>
+
+  <!-- Pi 行 -->
+  <text x="862" y="526" font-size="17" fill="#1E293B">Pi</text>
+  <text x="1010" y="526" font-size="15" fill="#94A3B8">未记录</text>
+  <text x="1150" y="526" font-size="15" fill="#94A3B8">未记录</text>
+  <text x="1420" y="526" font-size="15" fill="#94A3B8">—</text>
+
+  <!-- 分隔 -->
+  <line x1="862" y1="556" x2="1510" y2="556" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- 三个观察 -->
+  <g>
+    <circle cx="872" cy="592" r="5" fill="#4F46E5"/>
+    <text x="892" y="598" font-size="15.5" fill="#334155" font-weight="600">轮次 × 每轮质量 = 最终成绩</text>
+    <text x="892" y="622" font-size="14" fill="#64748B">Hermes 27 轮不少、成绩居中：多轮 ≠ 有效轮</text>
+
+    <circle cx="872" cy="650" r="5" fill="#4F46E5"/>
+    <text x="892" y="656" font-size="15.5" fill="#334155" font-weight="600">AgenticX：长跑不迷失</text>
+    <text x="892" y="680" font-size="14" fill="#64748B">33 轮有效交互，上下文堆到 210 万 tokens 仍持续做对决策</text>
+  </g>
+
+  <!-- ============ 底部结论带 ============ -->
+  <rect x="60" y="730" width="1480" height="200" rx="18" fill="url(#keybox)" filter="url(#soft)"/>
+  <text x="110" y="800" font-size="26" font-weight="700" fill="#FFFFFF">三个反直觉结论</text>
+
+  <g font-size="16" fill="#C7D2FE">
+    <text x="110" y="848">① Harness 的价值不在「帮模型做得更多」，而在帮模型把错误限制在可恢复范围内——</text>
+    <text x="130" y="876">路径错了能绕回来，上下文脏了能止损。</text>
+  </g>
+
+  <line x1="960" y1="770" x2="960" y2="890" stroke="#818CF8" stroke-width="1" stroke-opacity="0.4"/>
+
+  <g font-size="16" fill="#C7D2FE">
+    <text x="1010" y="800">② 长程任务的胜负手在上下文管理，不在单轮智力。</text>
+    <text x="1010" y="848">③ 基础设施问题伪装成能力问题的概率远比想象的高：</text>
+    <text x="1010" y="876">dsh 一行沙箱配置 = 23 个百分点。</text>
+  </g>
+</svg>

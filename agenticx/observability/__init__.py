@@ -54,6 +54,14 @@ from .ai_attributes import (
     METRIC_NAME_MAPPING
 )
 
+from .correlation import (
+    apply_correlation_attributes,
+    bind_correlation,
+    bind_correlation_from_session,
+    current_correlation,
+    reset_correlation,
+)
+
 # 轨迹分析
 from .trajectory import (
     TrajectoryCollector,
@@ -166,4 +174,9 @@ __all__ = [
     "SpanTree",
     "SpanNode",
     "SpanQuery",
+    "apply_correlation_attributes",
+    "bind_correlation",
+    "bind_correlation_from_session",
+    "current_correlation",
+    "reset_correlation",
 ] 

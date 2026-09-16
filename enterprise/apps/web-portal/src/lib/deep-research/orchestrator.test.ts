@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@agenticx/iam-core", () => ({
+  createMysqlDb: vi.fn(),
+  getIamDb: vi.fn(),
+  resolveDatabaseConfig: vi.fn(() => ({ driver: "memory" })),
+}));
 import {
   CHAT_CLARIFY_ANSWER_KEY,
   DEEP_RESEARCH_SEARCH_FAILED,
@@ -203,6 +209,145 @@ describe("runDeepResearchTurn", () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     expect(lastUser?.content).toContain("子问1");
     expect(lastUser?.content).toContain("[1]");
+  });
+
+  it("reads an explicit page once and keeps that URL out of later lane fetches", async () => {
+    const plan: ResearchPlan = {
+      topic: "指定页面",
+      complexity: "simple",
+      subQuestions: ["这篇讲了什么"],
+    };
+    const readPage = vi.fn(async (reference) => ({
+      reference,
+      title: "Paper title",
+      text: "Paper title\n\nAbstract evidence that is long enough to keep.\n\nMethod details.",
+      rawChars: 80,
+      coverage: "full_html" as const,
+      backend: "native" as const,
+    }));
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "车道备忘摘要" } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("核心结论正文");
+    });
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348 你能读懂这篇文章吗",
+          },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => plan,
+          executeSearch: async () => [
+            {
+              title: "Same paper",
+              url: "https://arxiv.org/abs/2606.19348",
+              snippet: "should be dropped",
+            },
+            { title: "Other", url: "https://ex.com/other", snippet: "ok" },
+          ],
+          readPage,
+          fetchPagesFn,
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    const fetchedUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0] as string[]);
+    expect(fetchedUrls.some((url) => url.includes("2606.19348"))).toBe(false);
+    expect(events.some((e) => e.type === "narrative")).toBe(true);
+  });
+
+  it("audits the whole report once before linkify when budget remains", async () => {
+    const store = createMemoryArtifactStore();
+    const auditBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: unknown;
+      };
+      const isAudit = JSON.stringify(body.messages ?? []).includes("事实核查员");
+      if (isAudit) {
+        auditBodies.push(body);
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"findings":[{"claim_id":"c1","verdict":"partial","replacement":"营收有所增长 [1]。"}]}',
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "营收增长 40% [1]。" } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("营收增长 40% [1]。");
+    });
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "营收调研" }],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          artifactStore: store,
+          runId: "run-verify",
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "营收调研",
+            complexity: "simple" as const,
+            subQuestions: ["q1"],
+          }),
+          executeSearch: async () => [
+            { title: "财报", url: "https://ex.com/ir", snippet: "营收数据" },
+          ],
+        }),
+      },
+    );
+    const { events } = await readSsePayload(response);
+    expect(auditBodies).toHaveLength(1);
+    expect(auditBodies[0]).toMatchObject({ temperature: 0, max_tokens: 4096 });
+    expect(
+      events.some(
+        (event) => event.type === "phase" && event.message === "正在复核引用与关键断言…",
+      ),
+    ).toBe(true);
+    const artifacts = await store.listByRun("t1", "u1", "run-verify");
+    const report = artifacts.find((a) => a.path.endsWith("final-report.md"));
+    expect(report?.content).toContain("营收有所增长 [1]");
+    expect(report?.content).not.toMatch(/置信度|claim_id|verdict/u);
   });
 
   it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {
@@ -928,6 +1073,44 @@ describe("recon cold-start", () => {
 
     // Recon hits are reused as citable sources rather than thrown away.
     expect(raw).toContain("https://recon.example/v4");
+  });
+
+  it("emits English canned narratives when locale is en", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 core techniques" }] },
+      {
+        ...baseDeps({
+          locale: "en",
+          fetchImpl: gatewayStub() as unknown as typeof fetch,
+          runReconFn: async () => ({
+            brief: "recon",
+            hits: [{ title: "V4", url: "https://recon.example/v4", snippet: "s" }],
+          }),
+          proposeClarify: async () => ({ needed: false as const }),
+          buildPlan: async () => ({
+            topic: "T",
+            complexity: "moderate" as const,
+            subQuestions: ["q1"],
+          }),
+          executeSearch: async () => [{ title: "t", url: "https://lane.example/1", snippet: "s" }],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "narrative" &&
+          String(e.text).includes(
+            "I'll quickly search the latest public sources to calibrate the research premise.",
+          ),
+      ),
+    ).toBe(true);
+    const joined = events.map((e) => JSON.stringify(e)).join("\n");
+    expect(joined).not.toContain("校准调研前提");
+    expect(joined).not.toContain("开题冷启动检索");
+    expect(joined).not.toContain("已拆解");
   });
 
   it("puts recon findings into the evidence pack so their numbers are citable", () => {

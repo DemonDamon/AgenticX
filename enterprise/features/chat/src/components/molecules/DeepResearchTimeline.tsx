@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { buildDeepResearchSteps, type ResearchStep } from "./deep-research-steps";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 export type DeepResearchTimelineProps = {
   events: DeepResearchEvent[];
@@ -204,12 +205,13 @@ export function DeepResearchTimeline({
   onOpenArtifact,
   className,
 }: DeepResearchTimelineProps) {
+  const copy = useChatCopy();
   const waitingShell =
     events.length === 0 && (status === "running" || status === "awaiting_clarify");
   const steps = React.useMemo(() => {
-    const built = buildDeepResearchSteps(events, status, clarifyAnswers);
+    const built = buildDeepResearchSteps(events, status, clarifyAnswers, copy);
     return omitClarifySummary ? built.filter((s) => s.kind !== "clarify") : built;
-  }, [events, status, clarifyAnswers, omitClarifySummary]);
+  }, [events, status, clarifyAnswers, omitClarifySummary, copy]);
 
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
 
@@ -222,11 +224,11 @@ export function DeepResearchTimeline({
         .join(" ")}
       data-testid="deep-research-timeline"
     >
-      <div className="mb-2 text-xs font-medium text-muted-foreground">研究过程</div>
+      <div className="mb-2 text-xs font-medium text-muted-foreground">{copy.timeline.process}</div>
       {waitingShell ? (
         <div className="flex items-center gap-2 text-xs text-foreground/85">
           <IconSpinner className="h-3.5 w-3.5 animate-spin text-primary" />
-          <span>正在启动深度研究…</span>
+          <span>{copy.timeline.starting}</span>
         </div>
       ) : (
         <ol className="relative space-y-0.5">
@@ -294,7 +296,7 @@ export function DeepResearchTimeline({
                         className="text-primary hover:underline"
                         onClick={() => onOpenArtifact(step.artifactId!)}
                       >
-                        查看产物
+                        {copy.timeline.viewArtifact}
                       </button>
                     ) : null}
                   </div>

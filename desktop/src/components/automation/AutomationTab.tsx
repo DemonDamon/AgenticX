@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { Plus } from "lucide-react";
 import { Panel } from "../ds/Panel";
 import { TemplateGrid } from "./TemplateGrid";
@@ -8,6 +10,7 @@ import { TaskList } from "./TaskList";
 import type { AutomationTask, AutomationTemplate } from "./types";
 
 function PreventSleepToggle() {
+  const { t } = useTranslation("workspace");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -24,7 +27,7 @@ function PreventSleepToggle() {
           setEnabled(Boolean(result.config.prevent_sleep));
         }
       } catch {
-        if (!disposed) setMessage("读取配置失败。");
+        if (!disposed) setMessage(i18n.t("automation.loadConfigFailed", { ns: "workspace" }));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -39,14 +42,14 @@ function PreventSleepToggle() {
     try {
       const result = await window.agenticxDesktop.saveAutomationConfig({ prevent_sleep: next });
       if (!result?.ok) {
-        setMessage(result?.error ? String(result.error) : "保存失败。");
+        setMessage(result?.error ? String(result.error) : i18n.t("automation.saveFailed", { ns: "workspace" }));
         setEnabled(!next);
         return;
       }
       setEnabled(next);
-      setMessage("已保存。");
+      setMessage(i18n.t("automation.saved", { ns: "workspace" }));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setMessage(e instanceof Error ? e.message : i18n.t("automation.saveFailed", { ns: "workspace" }));
       setEnabled(!next);
     } finally {
       setSaving(false);
@@ -56,12 +59,12 @@ function PreventSleepToggle() {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-text-strong">抑制系统睡眠</div>
+        <div className="text-sm font-semibold text-text-strong">{t("automation.preventSleep")}</div>
         <p className="mt-1 text-xs leading-relaxed text-text-muted">
-          向系统申请「推迟睡眠」，减少长跑任务、合盖挂机或远程串联时被系统挂起的概率；退出 Near 后不再拦截。
+          {t("automation.preventSleepHint")}
         </p>
         {message ? (
-          <div className={`mt-1 text-xs ${message.startsWith("已保存") ? "text-text-faint" : "text-rose-400"}`}>
+          <div className={`mt-1 text-xs ${message === t("automation.saved") ? "text-text-faint" : "text-rose-400"}`}>
             {message}
           </div>
         ) : null}
@@ -70,7 +73,7 @@ function PreventSleepToggle() {
         type="button"
         role="switch"
         aria-checked={enabled}
-        aria-label={enabled ? "已开启抑制系统睡眠" : "已关闭抑制系统睡眠"}
+        aria-label={enabled ? t("automation.sleepOn") : t("automation.sleepOff")}
         disabled={saving || loading}
         onClick={() => { if (!saving && !loading) void persist(!enabled); }}
         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-focus,rgba(59,130,246,0.5))] ${
@@ -88,6 +91,7 @@ function PreventSleepToggle() {
 }
 
 export function AutomationTab() {
+  const { t } = useTranslation("workspace");
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingTask, setEditingTask] = useState<AutomationTask | null>(null);
@@ -146,9 +150,9 @@ export function AutomationTab() {
       r.ok
         ? {
             kind: "ok",
-            text: "已在新会话中触发执行。展开该任务可查看上次结果；侧栏打开该任务窗格可查看最新一轮对话。",
+            text: i18n.t("automation.runTriggered", { ns: "workspace" }),
           }
-        : { kind: "err", text: r.error ?? "执行失败" },
+        : { kind: "err", text: r.error ?? i18n.t("automation.runFailed", { ns: "workspace" }) },
     );
     setTimeout(() => void loadTasks(), 1500);
   }, [loadTasks]);
@@ -156,7 +160,7 @@ export function AutomationTab() {
   const handleTemplateSelect = useCallback((tpl: AutomationTemplate) => {
     setEditingTask({
       id: "",
-      name: tpl.name,
+      name: t(`automation.templates.${tpl.id}.name`),
       prompt: tpl.defaultPrompt,
       frequency: { ...tpl.defaultFrequency },
       enabled: true,
@@ -164,7 +168,7 @@ export function AutomationTab() {
       fromTemplate: tpl.id,
     });
     setShowForm(true);
-  }, []);
+  }, [t]);
 
   const handleAddManual = useCallback(() => {
     setEditingTask(null);
@@ -180,11 +184,11 @@ export function AutomationTab() {
     <div className="space-y-4">
       {/* Header */}
       <div className="text-sm text-text-subtle">
-      管理自动化任务，让 Near 按计划为你工作。
+      {t("automation.manageHint")}
       </div>
 
       {/* System section */}
-      <Panel title="系统" collapsible defaultCollapsed>
+      <Panel title={t("automation.system")} collapsible defaultCollapsed>
         <PreventSleepToggle />
       </Panel>
 
@@ -193,7 +197,7 @@ export function AutomationTab() {
 
       {/* Task list */}
       <Panel
-        title="我的自动化任务"
+        title={t("automation.myTasks")}
         actions={
           <button
             type="button"
@@ -201,7 +205,7 @@ export function AutomationTab() {
             className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition hover:bg-surface-card hover:text-text-primary"
           >
             <Plus className="h-3.5 w-3.5" />
-            添加任务
+            {t("automation.addTask")}
           </button>
         }
       >
@@ -217,7 +221,7 @@ export function AutomationTab() {
           </div>
         ) : null}
         {loading ? (
-          <div className="py-4 text-center text-sm text-text-faint">加载中…</div>
+          <div className="py-4 text-center text-sm text-text-faint">{t("automation.loading")}</div>
         ) : (
           <TaskList
             tasks={tasks}

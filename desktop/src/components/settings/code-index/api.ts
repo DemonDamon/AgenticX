@@ -1,4 +1,9 @@
+import { i18n } from "../../../i18n/i18n";
 import type { CodeIndexConfig, CodeIndexTaskStatus } from "./types";
+
+function ct(key: string): string {
+  return String(i18n.t(key, { ns: "settings" }));
+}
 
 type ResolveBase = () => Promise<string>;
 
@@ -13,27 +18,27 @@ export function createCodeIndexApi(apiToken: string, resolveApiBase: ResolveBase
     async readConfig(): Promise<CodeIndexConfig> {
       const res = await window.agenticxDesktop.loadCodeIndexConfig();
       if (!res?.ok || !res.config) {
-        throw new Error(res?.error ?? "读取代码索引配置失败");
+        throw new Error(res?.error ?? ct("codeIndex.readFailed"));
       }
       return res.config as CodeIndexConfig;
     },
     async writeConfig(config: CodeIndexConfig): Promise<void> {
       const res = await window.agenticxDesktop.saveCodeIndexConfig(config);
-      if (!res?.ok) throw new Error(res?.error ?? "保存代码索引配置失败");
+      if (!res?.ok) throw new Error(res?.error ?? ct("codeIndex.writeFailed"));
     },
     async preloadModel(): Promise<void> {
       const base = await resolveApiBase();
       const h = await headers();
       const res = await fetch(`${base}/api/code-index/preload`, { method: "POST", headers: h });
       const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? "预热失败");
+      if (!res.ok || !body.ok) throw new Error(body.error ?? ct("codeIndex.warmupFailed"));
     },
     async listTasks(): Promise<CodeIndexTaskStatus[]> {
       const base = await resolveApiBase();
       const h = await headers();
       const res = await fetch(`${base}/api/code-index/status`, { headers: h });
       const body = (await res.json()) as { ok?: boolean; tasks?: CodeIndexTaskStatus[]; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? "读取索引状态失败");
+      if (!res.ok || !body.ok) throw new Error(body.error ?? ct("codeIndex.statusFailed"));
       return body.tasks ?? [];
     },
     async clearIndex(codebasePath: string): Promise<void> {
@@ -45,7 +50,7 @@ export function createCodeIndexApi(apiToken: string, resolveApiBase: ResolveBase
         body: JSON.stringify({ codebase_path: codebasePath }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? "清除索引失败");
+      if (!res.ok || !body.ok) throw new Error(body.error ?? ct("codeIndex.clearFailed"));
     },
   };
 }

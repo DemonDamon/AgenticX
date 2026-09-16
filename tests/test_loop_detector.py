@@ -123,6 +123,31 @@ def test_successful_file_edit_resets_path_failure_count() -> None:
     assert result.level == "warning"
 
 
+def test_has_seen_result_detects_same_digest() -> None:
+    detector = LoopDetector()
+    detector.record_call(
+        "file_read",
+        '{"path":"/tmp/a.txt"}',
+        has_progress=True,
+        result_digest="abc123",
+    )
+    assert detector.has_seen_result("file_read", '{"path":"/tmp/a.txt"}', "abc123") is True
+    assert detector.has_seen_result("file_read", '{"path":"/tmp/a.txt"}', "other") is False
+    assert detector.has_seen_result("file_read", '{"path":"/tmp/b.txt"}', "abc123") is False
+
+
+def test_has_seen_result_clears_on_reset() -> None:
+    detector = LoopDetector()
+    detector.record_call(
+        "file_read",
+        '{"path":"/tmp/a.txt"}',
+        has_progress=True,
+        result_digest="abc123",
+    )
+    detector.reset()
+    assert detector.has_seen_result("file_read", '{"path":"/tmp/a.txt"}', "abc123") is False
+
+
 def test_loop_detector_reset_clears_file_edit_failures() -> None:
     detector = LoopDetector(warning_threshold=6, critical_threshold=12)
     signature = '{"path":"/tmp/demo.html"}'

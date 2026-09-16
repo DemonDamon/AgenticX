@@ -4,10 +4,17 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Radar, Sparkles } from "lucide-react";
 import { createKbApi } from "./api";
 import { defaultKBConfig, normalizeKbConfig, type KBConfig } from "./types";
 import { setCachedGlobalKbRetrievalMode, type KbRetrievalMode } from "../../../utils/kb-retrieval-mode";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 export type KbGlobalChatRetrievalHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
@@ -22,14 +29,14 @@ type Props = {
 const MODE_OPTIONS: { value: KbRetrievalMode; label: string; hint: string; icon: typeof Sparkles }[] = [
   {
     value: "auto",
-    label: "智能检索",
-    hint: "由模型判断何时查知识库",
+    label: st("knowledge.modeSmart"),
+    hint: st("knowledge.modeSmartHint"),
     icon: Sparkles,
   },
   {
     value: "always",
-    label: "始终检索",
-    hint: "回答前优先检索知识库",
+    label: st("knowledge.modeAlways"),
+    hint: st("knowledge.modeAlwaysHint"),
     icon: Radar,
   },
 ];
@@ -107,11 +114,11 @@ export const KbGlobalChatRetrievalPanel = forwardRef<KbGlobalChatRetrievalHandle
       <section className="shrink-0 flex items-center justify-between gap-4 rounded-xl border border-border bg-surface-card px-4 py-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium text-text-primary flex items-center gap-2">
-            默认检索模式
+            {st("knowledge.defaultMode")}
             {error ? <span className="text-[10px] font-normal text-red-400">{error}</span> : null}
           </h3>
           <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
-            新建对话的默认模式；单会话可在输入框旁单独切换
+            {st("knowledge.defaultModeHint")}
           </p>
         </div>
 
@@ -119,13 +126,13 @@ export const KbGlobalChatRetrievalPanel = forwardRef<KbGlobalChatRetrievalHandle
           {loading ? (
             <div className="flex items-center gap-2 text-xs text-text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              加载…
+              {st("knowledge.loadingShort")}
             </div>
           ) : (
             <div
               className="inline-grid grid-cols-2 rounded-md border border-border bg-surface-panel p-0.5"
               role="radiogroup"
-              aria-label="检索模式"
+              aria-label={st("knowledge.modeAria")}
             >
               {MODE_OPTIONS.map((opt) => {
                 const active = effectiveMode === opt.value;
@@ -161,7 +168,7 @@ export const KbGlobalChatRetrievalPanel = forwardRef<KbGlobalChatRetrievalHandle
                           active ? "bg-white/15" : "bg-surface-hover text-text-subtle"
                         }`}
                       >
-                        推荐
+                        {st("knowledge.recommended")}
                       </span>
                     ) : null}
                   </button>

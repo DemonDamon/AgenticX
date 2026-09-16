@@ -46,7 +46,42 @@ class BaseTool(ABC):
     - 统一的错误处理和回调机制
     - 多租户支持
     """
-    
+
+    #: Optional declaration of this tool's side-effect class, used by
+    #: ``agenticx.reliability.replay_policy`` to decide whether a call may be
+    #: re-executed after a crash. ``None`` means "no declaration" and falls
+    #: back to name/command based classification, which itself defaults to
+    #: ``"unknown"`` (fail-closed). Valid values: the members of
+    #: ``agenticx.runtime.replay_ledger.contracts.EFFECT_CLASSES``.
+    effect_class: Optional[str] = None
+
+    def resolve_effect_class(self, arguments: Optional[Dict[str, Any]] = None) -> str:
+        """Return the effective side-effect class for one invocation.
+
+        Resolution order (first hit wins):
+          1. this instance's / subclass's ``effect_class`` declaration
+          2. name & command based classification (``classify_tool_effect``)
+          3. ``"unknown"`` — never assume safety for an unrecognised tool
+        """
+        declared = self.effect_class
+        if declared is not None:
+            # Function-level import: ``agenticx.tools.base`` is a widely
+            # imported leaf. A module-level ``agenticx.runtime.*`` import
+            # would invert the tools → runtime dependency.
+            from agenticx.runtime.replay_ledger.contracts import EFFECT_CLASSES
+
+            if declared not in EFFECT_CLASSES:
+                raise ValueError(
+                    f"invalid effect_class {declared!r} for tool "
+                    f"{getattr(self, 'name', type(self).__name__)}"
+                )
+            return declared
+        from agenticx.runtime.replay_ledger.effects import classify_tool_effect
+
+        name = getattr(self, "name", None) or self.__class__.__name__
+        classified = classify_tool_effect(name, arguments or {})
+        return classified if classified else "unknown"
+
     def __init__(
         self,
         name: Optional[str] = None,

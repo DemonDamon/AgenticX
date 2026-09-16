@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { adaptSvgDocumentColors } from "../../utils/adapt-svg-theme";
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
 import { Modal } from "../ds/Modal";
@@ -173,6 +174,7 @@ function SvgWidget({
 }
 
 function HtmlWidget({ code, loadingMessages }: { code: string; loadingMessages: string[] }) {
+  const { t } = useTranslation("chat");
   const [height, setHeight] = useState(200);
   const [loaded, setLoaded] = useState(false);
   const [loadingIndex, setLoadingIndex] = useState(0);
@@ -209,8 +211,8 @@ function HtmlWidget({ code, loadingMessages }: { code: string; loadingMessages: 
 
   const loadingLabel =
     loadingMessages.length > 0
-      ? loadingMessages[loadingIndex] ?? "渲染中…"
-      : "渲染中…";
+      ? loadingMessages[loadingIndex] ?? t("widget.rendering")
+      : t("widget.rendering");
 
   return (
     <div className="relative w-full">
@@ -396,6 +398,8 @@ function WidgetMenu({
   getSvgDisplayWidth?: () => number;
   getLiveSvg?: () => SVGSVGElement | null;
 }) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [viewCode, setViewCode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -497,7 +501,7 @@ function WidgetMenu({
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex h-6 w-6 items-center justify-center rounded border border-border bg-[var(--surface-popover)] text-text-faint shadow-sm transition hover:bg-[var(--surface-card-strong)] hover:text-text-subtle"
-          title="更多操作"
+          title={t("composer.moreActions")}
         >
           {copied ? (
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2">
@@ -515,7 +519,7 @@ function WidgetMenu({
               className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
             >
               <Download size={13} className="shrink-0" />
-              下载到本地
+              {t("widget.downloadLocal")}
             </button>
             {payload.kind === "svg" && (
               <button
@@ -524,7 +528,7 @@ function WidgetMenu({
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
               >
                 <Image size={13} className="shrink-0" />
-                下载为图片
+                {t("share.downloadImage")}
               </button>
             )}
             {payload.kind === "svg" && (
@@ -534,7 +538,7 @@ function WidgetMenu({
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
               >
                 <Copy size={13} className="shrink-0" />
-                复制图片
+                {t("share.copyImage")}
               </button>
             )}
             <button
@@ -543,7 +547,7 @@ function WidgetMenu({
               className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
             >
               <Code size={13} className="shrink-0" />
-              查看代码
+              {t("widget.viewCode")}
             </button>
           </div>
         )}
@@ -560,14 +564,16 @@ function WidgetMenu({
           >
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <span className="text-[13px] font-medium text-text-primary">
-                {payload.title ? `${payload.title} — 源代码` : "源代码"}
+                {payload.title
+                  ? t("widget.sourceCodeTitle", { title: payload.title })
+                  : t("widget.sourceCode")}
               </span>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => void copyCodeToClipboard()}
                   className="flex h-7 w-7 items-center justify-center rounded text-text-faint transition hover:bg-[var(--surface-hover)] hover:text-text-subtle"
-                  title="复制代码"
+                  title={t("widget.copyCode")}
                 >
                   {codeCopied ? (
                     <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2">
@@ -581,7 +587,7 @@ function WidgetMenu({
                   type="button"
                   onClick={() => setViewCode(false)}
                   className="flex h-7 w-7 items-center justify-center rounded text-text-faint transition hover:bg-[var(--surface-hover)] hover:text-text-subtle"
-                  title="关闭"
+                  title={tCommon("close")}
                 >
                   <X size={15} />
                 </button>
@@ -598,12 +604,13 @@ function WidgetMenu({
 }
 
 function ZoomButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation("chat");
   return (
     <button
       type="button"
       onClick={onClick}
       className="absolute right-9 top-2 z-10 flex h-6 w-6 items-center justify-center rounded border border-border bg-[var(--surface-popover)] text-text-faint shadow-sm transition hover:bg-[var(--surface-card-strong)] hover:text-text-subtle"
-      title="放大查看"
+      title={t("mermaid.expand")}
     >
       <Maximize2 size={13} />
     </button>
@@ -611,6 +618,7 @@ function ZoomButton({ onClick }: { onClick: () => void }) {
 }
 
 export function WidgetBlock({ payload, streaming = false }: Props) {
+  const { t } = useTranslation("chat");
   const hostRef = useRef<HTMLDivElement>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
@@ -641,7 +649,7 @@ export function WidgetBlock({ payload, streaming = false }: Props) {
             <SvgWidget code={payload.widgetCode} preview streaming={streaming} />
             {streaming ? (
               <div className="absolute right-2 top-2 rounded bg-[var(--surface-popover)]/85 px-1.5 py-0.5 text-[11px] text-text-muted">
-                绘制中…
+                {t("tool.drawing")}
               </div>
             ) : (
               <>
@@ -658,7 +666,7 @@ export function WidgetBlock({ payload, streaming = false }: Props) {
         {!streaming ? (
           <Modal
             open={zoomOpen}
-            title={payload.title || "查看图表"}
+            title={payload.title || t("mermaid.viewChart")}
             onClose={() => setZoomOpen(false)}
             panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
           >
@@ -680,7 +688,7 @@ export function WidgetBlock({ payload, streaming = false }: Props) {
       </div>
       <Modal
         open={zoomOpen}
-        title={payload.title || "查看图表"}
+        title={payload.title || t("mermaid.viewChart")}
         onClose={() => setZoomOpen(false)}
         panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
       >

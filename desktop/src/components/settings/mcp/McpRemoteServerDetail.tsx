@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../../i18n/i18n";
 import {
+
   extractRemoteMcpServerConfig,
   getMcpServersMap,
   headerKeysOnly,
   mcpTransportBadgeLabel,
   parseMcpJsonDocument,
 } from "../../../utils/mcp-remote-config";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type Props = {
   serverName: string;
@@ -15,6 +23,7 @@ type Props = {
 };
 
 export function McpRemoteServerDetail({ serverName, url, transport, locateServerPath }: Props) {
+  const { t } = useTranslation("settings");
   const [headerKeys, setHeaderKeys] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -25,7 +34,7 @@ export function McpRemoteServerDetail({ serverName, url, transport, locateServer
         const path = await locateServerPath(serverName);
         const raw = await window.agenticxDesktop.mcpGetRaw({ path });
         if (!raw.ok || typeof raw.text !== "string") {
-          throw new Error(raw.error ?? "无法读取配置");
+          throw new Error(raw.error ?? st("mcpRemote.cannotRead"));
         }
         const doc = parseMcpJsonDocument(raw.text);
         const servers = getMcpServersMap(doc);
@@ -53,13 +62,13 @@ export function McpRemoteServerDetail({ serverName, url, transport, locateServer
         </span>
       </div>
       <div>
-        Headers（仅 key）：
+        {st("mcpRemote.headersKeys")}
         {loadError ? (
           <span className="text-rose-400"> {loadError}</span>
         ) : headerKeys === null ? (
-          <span className="text-text-faint"> 加载中…</span>
+          <span className="text-text-faint"> {st("mcpRemote.loading")}</span>
         ) : headerKeys.length === 0 ? (
-          <span className="text-text-faint"> 无</span>
+          <span className="text-text-faint"> {st("mcpRemote.none")}</span>
         ) : (
           <span className="text-text-subtle"> {headerKeys.join(", ")}</span>
         )}

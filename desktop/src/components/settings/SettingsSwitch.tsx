@@ -28,7 +28,7 @@ export function SettingsSwitch({
         if (!disabled) onChange(!checked);
       }}
       className={`relative ${trackClass} shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] disabled:opacity-40 ${
-        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
+        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-[var(--ui-switch-track-off)]"
       }`}
     >
       <span

@@ -19,7 +19,6 @@ import {
   Cpu,
   Plug,
   Link2,
-  Mail,
   Bookmark,
   Sparkles,
   Globe,
@@ -29,7 +28,6 @@ import {
   Loader2,
   ChevronRight,
   ChevronDown,
-  Anchor,
   User,
   Activity,
   RefreshCw,
@@ -49,26 +47,36 @@ import {
   Database,
   X,
   TriangleAlert,
+  ShieldCheck,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
+import {
+  SETTINGS_HINT_CLASS,
+  SETTINGS_INTRO_CLASS,
+  SETTINGS_LABEL_CLASS,
+  SETTINGS_NAV_ITEM_CLASS,
+  SETTINGS_PAGE_TITLE_CLASS,
+  SETTINGS_PANEL_TITLE_CLASS,
+} from "./ds/settings-typography";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
 import { HoverTip } from "./ds/HoverTip";
 import { ClampToFitText } from "./ds/ClampToFitText";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
+import type { AppLocale } from "../i18n/locales";
+import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import {
   RECOMMENDED_SKILLS,
-  RECOMMENDED_TIER_LABEL,
   type RecommendedSkillTier,
 } from "../data/recommended-skills";
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { filterAndRankSkills } from "../utils/skill-search";
-import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
-import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
@@ -154,23 +162,46 @@ import {
   readScopedLocalStorage,
   writeScopedLocalStorage,
 } from "../utils/backend-scope";
-import { studioFetch } from "../utils/studio-fetch";
+import type { RunMode } from "../constants/confirm-strategy-options";
+import type { SettingsFocus } from "../settings-tab";
+import {
+  SecurityCenterTab,
+  type SecurityCenterTabHandle,
+} from "./settings/security/SecurityCenterTab";
+import { useTrinityConfig } from "./settings/trinity-config";
 export type { SettingsTab } from "../settings-tab";
+export { useTrinityConfig } from "./settings/trinity-config";
 
 const MCP_MARKETPLACE_ID_MAP_KEY = "agenticx:mcp:marketplaceIdToNames";
 
+function settingsMsgLooksFail(msg: string): boolean {
+  return /失败|fail/i.test(msg);
+}
+
+function settingsMsgLooksNotFound(msg: string): boolean {
+  return /未找到|not found/i.test(msg);
+}
+
+function settingsMsgLooksHighRisk(msg: string): boolean {
+  return /高危|high.?risk/i.test(msg);
+}
+
 function RemoteBackendHintBanner({ kind = "local-only" }: { kind?: "synced" | "local-only" }) {
+  const { t } = useTranslation("settings");
   const mode = getConnectionModeSync();
   if (mode !== "remote") return null;
   const host = getBackendScope();
   const hostLabel = formatBackendChipLabel(host, "remote");
+  const bannerPath = {
+    mode: <strong className="text-text-muted" />,
+    host: <strong className="text-text-muted" />,
+    path: <code className="text-[10px] text-text-muted" />,
+  };
   if (kind === "synced") {
     return (
       <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-relaxed text-text-subtle">
         <p>
-          当前为<strong className="text-text-muted">远程模式</strong>，本页配置直接同步到远端{" "}
-          <strong className="text-text-muted">{hostLabel}</strong> 的{" "}
-          <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，对模型调用立即生效。
+          <Trans t={t} i18nKey="remoteBanner.synced" values={{ hostLabel }} components={bannerPath} />
         </p>
       </div>
     );
@@ -178,13 +209,10 @@ function RemoteBackendHintBanner({ kind = "local-only" }: { kind?: "synced" | "l
   return (
     <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-relaxed text-text-subtle">
       <p>
-        当前为<strong className="text-text-muted">远程模式</strong>，本页修改写入本机{" "}
-        <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，但实际加载发生在远端{" "}
-        <strong className="text-text-muted">{hostLabel}</strong>。
+        <Trans t={t} i18nKey="remoteBanner.localOnlyP1" values={{ hostLabel }} components={bannerPath} />
       </p>
       <p className="mt-1.5 text-text-faint">
-        如需修改远端配置，请直接编辑远端 <code className="text-[10px]">~/.agenticx/config.yaml</code>
-        （此 Tab 的远程同步能力规划中）。
+        <Trans t={t} i18nKey="remoteBanner.localOnlyP2" components={{ path: <code className="text-[10px]" /> }} />
       </p>
     </div>
   );
@@ -323,7 +351,7 @@ const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 const BUNDLED_DEFAULT_MCP_NAMES_FALLBACK = ["browser-use", "firecrawl"] as const;
 
 /** 与后端 `connection_state` 对齐；缺省时按 connected 推断（兼容旧 Studio） */
-function resolveMcpRowPresentation(server: McpServer): {
+function resolveMcpRowPresentation(server: McpServer, t: TFunction): {
   dotClass: string;
   statusLine: string;
   detail?: string;
@@ -333,7 +361,7 @@ function resolveMcpRowPresentation(server: McpServer): {
   if (st === "error") {
     return {
       dotClass: "bg-rose-500",
-      statusLine: "错误 — 仍标记已连接但未注册到可用工具",
+      statusLine: t("mcp.errorStillConnected"),
       detail: server.error_detail?.trim(),
     };
   }
@@ -341,45 +369,13 @@ function resolveMcpRowPresentation(server: McpServer): {
     const n = server.tool_count ?? 0;
     return {
       dotClass: "bg-emerald-400",
-      statusLine: n > 0 ? `已连接 · ${n} 个工具` : "已连接",
+      statusLine: n > 0 ? t("mcp.connectedTools", { count: n }) : t("mcp.connected"),
     };
   }
   return {
     dotClass: "bg-zinc-500",
-    statusLine: "未连接",
+    statusLine: t("mcp.disconnected"),
   };
-}
-
-type ConfirmMode = "manual" | "semi-auto" | "auto";
-
-const CONFIRM_MODE_OPTIONS = [
-  { value: "manual" as const, label: "每次询问" },
-  { value: "semi-auto" as const, label: "白名单放行" },
-  { value: "auto" as const, label: "全部自动执行" },
-] as const;
-
-/** Compact settings dropdown using the shared popover behavior. */
-function ConfirmStrategyDropdown({
-  value,
-  onChange,
-}: {
-  value: ConfirmMode;
-  onChange: (strategy: ConfirmMode) => void;
-}) {
-  const displayLabel =
-    CONFIRM_MODE_OPTIONS.find((option) => option.value === value)?.label ?? value;
-
-  return (
-    <SettingsDropdown
-      value={value}
-      displayLabel={displayLabel}
-      options={CONFIRM_MODE_OPTIONS}
-      onChange={(next) => onChange(next as ConfirmMode)}
-      className="w-44 shrink-0"
-      size="compact"
-      menuPortal
-    />
-  );
 }
 
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
@@ -411,15 +407,6 @@ type ToolInstallState = {
   phase: string;
   message: string;
   error?: string;
-};
-
-type TrinityConfigForm = {
-  skill_protocol: boolean;
-  session_summary: boolean;
-  learning_enabled: boolean;
-  skill_manage_enabled: boolean;
-  learning_nudge_interval: number;
-  learning_min_tool_calls: number;
 };
 
 type SkillItem = {
@@ -482,11 +469,11 @@ function effectiveSkillLocation(skill: SkillItem): "project" | "global" {
   return skill.location === "project" ? "project" : "global";
 }
 
-function skillSourceBadge(source: string | undefined): { label: string; className: string } {
+function skillSourceBadge(source: string | undefined, t: TFunction): { label: string; className: string } {
   const base = "shrink-0 rounded-full border px-1.5 text-[10px]";
   switch (source) {
     case "builtin":
-      return { label: "内置", className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
+      return { label: t("skills.sourceBuiltin"), className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
     case "cursor":
       return { label: "Cursor", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
     case "claude":
@@ -503,33 +490,37 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
       return { label: "Bundle", className: `${base} border-indigo-500/30 bg-indigo-500/10 text-indigo-400` };
     case "agents":
       return {
-        label: "Agents 全局",
+        label: t("skills.sourceAgentsGlobal"),
         className: `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-400`,
       };
     case "agent_global":
       return {
-        label: "全局 .agent",
+        label: t("skills.sourceAgentGlobal"),
         className: `${base} border-teal-500/30 bg-teal-500/10 text-teal-400`,
       };
     case "project_agents":
       return {
-        label: "项目 .agents",
+        label: t("skills.sourceProjectAgents"),
         className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-400`,
       };
     case "project_agent":
       return {
-        label: "项目 .agent",
+        label: t("skills.sourceProjectAgent"),
         className: `${base} border-cyan-500/30 bg-cyan-500/5 text-cyan-300`,
       };
     case "agenticx":
-      return { label: "自建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
+      return { label: t("skills.sourceSelf"), className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
     case "agent_created":
-      return { label: "自建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
+      return { label: t("skills.sourceSelf"), className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
     case "custom":
-      return { label: "自定义", className: `${base} border-border bg-surface-panel text-text-faint` };
+      return { label: t("skills.sourceCustom"), className: `${base} border-border bg-surface-panel text-text-faint` };
     default:
-      return { label: "其他", className: `${base} border-border bg-surface-panel text-text-faint` };
+      return { label: t("skills.sourceOther"), className: `${base} border-border bg-surface-panel text-text-faint` };
   }
+}
+
+function skillLocationDisplay(locationLabel: "全局" | "项目", t: TFunction): string {
+  return locationLabel === "项目" ? t("skills.location.project") : t("skills.location.global");
 }
 
 function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin" {
@@ -540,10 +531,9 @@ function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin
   return "custom";
 }
 
-const SKILLS_SECTION_PANEL_TITLE_CLASS =
-  "text-xs font-bold normal-case tracking-normal text-text-strong";
+const SKILLS_SECTION_PANEL_TITLE_CLASS = SETTINGS_PANEL_TITLE_CLASS;
 
-const SKILLS_GROUP_TITLE_CLASS = "text-xs font-semibold text-text-strong";
+const SKILLS_GROUP_TITLE_CLASS = SETTINGS_PANEL_TITLE_CLASS;
 
 function SkillRowButton({
   skill,
@@ -578,7 +568,8 @@ function SkillRowButton({
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
-  const src = skillSourceBadge(effectiveSkillSource(skill));
+  const { t } = useTranslation("settings");
+  const src = skillSourceBadge(effectiveSkillSource(skill), t);
   const conflictCount = Number(skill.conflict_count ?? 0);
   const variants = Array.isArray(skill.variants) ? skill.variants : [];
   const uniqueSources = Array.from(
@@ -611,17 +602,17 @@ function SkillRowButton({
           className="min-w-0 flex-1 text-left"
           onClick={() => onActivate(skill.name)}
           onDoubleClick={() => void onExpandDetail(skill.name)}
-          title="双击展开当前技能"
+          title={t("skills.expandTitle")}
         >
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
             {skill.name === recentMarketSkillName && (
               <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-                刚安装
+                {t("skills.justInstalled")}
               </span>
             )}
             <span className={src.className}>{src.label}</span>
-            <span className={locClass}>{locationLabel}</span>
+            <span className={locClass}>{skillLocationDisplay(locationLabel, t)}</span>
             {skill.tag ? (
               <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
                 {skill.tag}
@@ -634,7 +625,7 @@ function SkillRowButton({
             ) : null}
             {conflictCount > 1 ? (
               <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
-                同名冲突({conflictCount})
+                {t("skills.nameConflict", { count: conflictCount })}
               </span>
             ) : null}
           </div>
@@ -646,7 +637,7 @@ function SkillRowButton({
           <SettingsSwitch
             checked={globalSkillEnabled}
             disabled={skillScanBusy}
-            aria-label={`启用技能 ${skill.name}`}
+            aria-label={t("skills.enableSkill", { name: skill.name })}
             onChange={(next) => onToggleGlobalSkill(skill.name, next)}
           />
         </div>
@@ -656,19 +647,19 @@ function SkillRowButton({
           className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-text-faint"
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="shrink-0">默认来源</span>
+          <span className="shrink-0">{t("skills.defaultSource")}</span>
           <SettingsDropdown
             value={selectedSource}
-            displayLabel={skillSourceBadge(selectedSource).label}
+            displayLabel={skillSourceBadge(selectedSource, t).label}
             options={uniqueSources.map((source) => ({
               value: source,
-              label: skillSourceBadge(source).label,
+              label: skillSourceBadge(source, t).label,
             }))}
             onChange={(source) => onChoosePreferredSource(skill.name, source)}
             size="inline"
             menuPortal
             className="w-fit shrink-0"
-            title="同名技能冲突时优先使用的来源"
+            title={t("skills.preferredSourceTitle")}
           />
         </div>
       ) : null}
@@ -684,11 +675,11 @@ function SkillRowButton({
                 onCollapseDetail();
               }}
             >
-              关闭 ✕
+              {t("skills.closeDetail")}
             </button>
           </div>
           {detailLoading ? (
-            <div className="px-3 py-3 text-xs text-text-faint">加载详情...</div>
+            <div className="px-3 py-3 text-xs text-text-faint">{t("skills.loadingDetail")}</div>
           ) : (
             <pre className="max-h-[55vh] overflow-y-auto px-3 py-2 text-[11px] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
               {detailContent ?? ""}
@@ -725,6 +716,7 @@ function SkillList({
   const shouldCollapse = skills.length > PREVIEW_COUNT;
   const visibleSkills = showAll || !shouldCollapse ? skills : skills.slice(0, PREVIEW_COUNT);
   const remaining = Math.max(0, skills.length - visibleSkills.length);
+  const { t } = useTranslation("settings");
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface-base">
@@ -748,7 +740,7 @@ function SkillList({
           className="w-full border-t border-border bg-surface-panel py-2.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
           onClick={() => setShowAll(true)}
         >
-          显示其余 {remaining} 项...
+          {t("skills.showRemaining", { count: remaining })}
         </button>
       )}
     </div>
@@ -832,6 +824,7 @@ function SkillsLocationSection({
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
+  const { t } = useTranslation("settings");
   const isGlobal = locationLabel === "全局";
   if (skills.length === 0 && !showWhenEmpty) return null;
 
@@ -848,7 +841,7 @@ function SkillsLocationSection({
           <div className="mb-3 flex gap-2">
             <input
               className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-              placeholder="搜索技能名称或描述..."
+              placeholder={t("skills.searchPh")}
               value={search ?? ""}
               onChange={(e) => onSearchChange(e.target.value)}
             />
@@ -858,19 +851,19 @@ function SkillsLocationSection({
               onClick={() => onRefresh()}
               disabled={listLoading}
             >
-              刷新
+              {t("skills.refresh")}
             </button>
           </div>
         ) : null}
         {skills.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-faint">
-            未找到匹配的全局技能
+            {t("skills.noGlobalMatch")}
           </div>
         ) : isGlobal ? (
           <>
-            <SkillGroup title="第三方技能" skills={skills.filter(s => getSkillCategory(s) === "third-party")} locationLabel={locationLabel} {...props} />
-            <SkillGroup title="自建技能" skills={skills.filter(s => getSkillCategory(s) === "custom")} locationLabel={locationLabel} {...props} />
-            <SkillGroup title="内置技能" skills={skills.filter(s => getSkillCategory(s) === "builtin")} locationLabel={locationLabel} {...props} />
+            <SkillGroup title={t("skills.groupThirdParty")} skills={skills.filter(s => getSkillCategory(s) === "third-party")} locationLabel={locationLabel} {...props} />
+            <SkillGroup title={t("skills.groupCustom")} skills={skills.filter(s => getSkillCategory(s) === "custom")} locationLabel={locationLabel} {...props} />
+            <SkillGroup title={t("skills.groupBuiltin")} skills={skills.filter(s => getSkillCategory(s) === "builtin")} locationLabel={locationLabel} {...props} />
           </>
         ) : (
           <SkillList skills={skills} locationLabel={locationLabel} {...props} />
@@ -909,12 +902,12 @@ type Props = {
   apiToken: string;
   mcpServers: McpServer[];
   onRefreshMcp: (sessionId?: string) => Promise<void>;
-  confirmStrategy: ConfirmMode;
+  runMode: RunMode;
   theme: "dark" | "light" | "dim";
   chatStyle: ChatStyle;
   onThemeChange: (theme: "dark" | "light" | "dim") => void;
   onChatStyleChange: (style: ChatStyle) => void;
-  onConfirmStrategyChange: (strategy: ConfirmMode) => Promise<void> | void;
+  onRunModeChange: (mode: RunMode) => Promise<void> | void;
   onClose: () => void;
   onSave: (result: {
     defaultProvider: string;
@@ -948,9 +941,9 @@ function healthEntryFromCheckResult(res: HealthCheckResult): ModelHealthEntry {
   return { phase: "error" };
 }
 
-function unauthorizedHoverLabel(error?: string): string {
+function unauthorizedHoverLabel(error: string | undefined, t: TFunction): string {
   const trimmed = String(error || "").trim();
-  if (!trimmed) return "当前密钥无权调用此模型";
+  if (!trimmed) return t("provider.unauthorizedHover");
   return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
 }
 
@@ -998,15 +991,16 @@ function ModelCapabilityBadges({
   provider?: string;
   model?: string;
 }) {
+  const { t } = useTranslation("settings");
   const kind = classifyModelKind(provider, model);
   if (isEmbeddingModelKind(kind)) {
-    const label = kind === "multimodal_embedding" ? "多模态嵌入" : "嵌入";
+    const label = kind === "multimodal_embedding" ? t("provider.capMmEmbedding") : t("provider.capEmbedding");
     return (
       <div className={`flex items-center gap-1.5 ${className}`.trim()}>
         <HoverTip label={label}>
           <span
             role="img"
-            aria-label={`${label}能力`}
+            aria-label={t("provider.capAbility", { label })}
             className="inline-flex h-5 items-center justify-center rounded-full border border-teal-500/35 bg-teal-500/12 px-1.5 text-[11px] font-medium text-teal-400"
           >
             {label}
@@ -1017,19 +1011,19 @@ function ModelCapabilityBadges({
   }
   return (
     <div className={`flex items-center gap-1.5 ${className}`.trim()}>
-      <HoverTip label="推理">
+      <HoverTip label={t("provider.capReasoning")}>
         <span
           role="img"
-          aria-label="推理能力"
+          aria-label={t("provider.capReasoningAria")}
           className="inline-flex h-5 min-w-8 items-center justify-center rounded-full border border-indigo-500/35 bg-indigo-500/12 px-1.5 text-indigo-400"
         >
           <Sparkles className="h-3 w-3" aria-hidden />
         </span>
       </HoverTip>
-      <HoverTip label="工具">
+      <HoverTip label={t("provider.capTools")}>
         <span
           role="img"
-          aria-label="工具能力"
+          aria-label={t("provider.capToolsAria")}
           className="inline-flex h-5 min-w-8 items-center justify-center rounded-full border border-amber-500/35 bg-amber-500/12 px-1.5 text-amber-400"
         >
           <Wrench className="h-3 w-3" aria-hidden />
@@ -1039,38 +1033,36 @@ function ModelCapabilityBadges({
   );
 }
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
-  { id: "account", label: "用户账号", icon: User },
-  { id: "general", label: "通用偏好", icon: Settings2 },
-  { id: "provider", label: "模型服务", icon: Cpu },
-  { id: "mcp", label: "MCP", icon: Plug },
-  { id: "connectors", label: "连接器", icon: Link2 },
-  { id: "tools", label: "内置工具", icon: Wrench },
-  { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
+const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
+  { id: "account", icon: User },
+  { id: "general", icon: Settings2 },
+  { id: "provider", icon: Cpu },
+  { id: "mcp", icon: Plug },
+  { id: "connectors", icon: Link2 },
+  { id: "tools", icon: Wrench },
+  { id: "skills", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
-  { id: "knowledge", label: "知识库", icon: Library },
-  { id: "data_sources", label: "数据源", icon: Database },
-  { id: "memory", label: "记忆管理", icon: Network },
-  { id: "hooks", label: "钩子管理", icon: Anchor },
-  { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
-  { id: "voice", label: "语音服务", icon: Mic },
-  { id: "email", label: "邮件通知", icon: Mail },
-  { id: "favorites", label: "内容收藏", icon: Bookmark },
-  { id: "server", label: "远程连接", icon: Globe },
+  { id: "knowledge", icon: Library },
+  { id: "data_sources", icon: Database },
+  { id: "memory", icon: Network },
+  { id: "automation", icon: AutomationTaskIcon },
+  { id: "voice", icon: Mic },
+  { id: "favorites", icon: Bookmark },
+  { id: "server", icon: Globe },
+  { id: "security", icon: ShieldCheck },
 ];
 
 const EMAIL_PRESETS: Array<{
   id: EmailPresetId;
-  label: string;
   smtp_host: string;
   smtp_port: number;
   smtp_use_tls: boolean;
 }> = [
-  { id: "qq", label: "QQ 邮箱", smtp_host: "smtp.qq.com", smtp_port: 587, smtp_use_tls: true },
-  { id: "163", label: "163 邮箱", smtp_host: "smtp.163.com", smtp_port: 465, smtp_use_tls: true },
-  { id: "gmail", label: "Gmail", smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_use_tls: true },
-  { id: "outlook", label: "Outlook", smtp_host: "smtp.office365.com", smtp_port: 587, smtp_use_tls: true },
-  { id: "custom", label: "自定义", smtp_host: "", smtp_port: 587, smtp_use_tls: true },
+  { id: "qq", smtp_host: "smtp.qq.com", smtp_port: 587, smtp_use_tls: true },
+  { id: "163", smtp_host: "smtp.163.com", smtp_port: 465, smtp_use_tls: true },
+  { id: "gmail", smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_use_tls: true },
+  { id: "outlook", smtp_host: "smtp.office365.com", smtp_port: 587, smtp_use_tls: true },
+  { id: "custom", smtp_host: "", smtp_port: 587, smtp_use_tls: true },
 ];
 
 const DEFAULT_EMAIL_SETTINGS: EmailSettingsForm = {
@@ -1110,851 +1102,51 @@ function normalizeEmailSettings(input: unknown): EmailSettingsForm {
 
 type RegistryTool = { name: string; description: string; category: string; is_meta: boolean };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  system: "系统",
-  filesystem: "文件系统",
-  code: "代码与 LSP",
-  mcp: "MCP",
-  skill: "技能",
-  agent: "Agent 辅助",
-  memory: "记忆与搜索",
-  document: "文档解析",
-  scheduling: "后台任务",
-  data_source: "数据源",
-  meta: "元智能体专用",
-  other: "其他",
-};
-
 const CATEGORY_ORDER = ["system", "filesystem", "code", "document", "agent", "memory", "data_source", "scheduling", "mcp", "skill", "meta", "other"];
 
-const TOOL_LABELS: Record<string, string> = {
-  bash_exec: "Bash",
-  file_read: "Read",
-  file_write: "Write",
-  file_edit: "Edit",
-  list_files: "Glob",
-  codegen: "CodeGen",
-  lsp_goto_definition: "LSP GoTo",
-  lsp_find_references: "LSP References",
-  lsp_hover: "LSP Hover",
-  lsp_diagnostics: "LSP Diagnostics",
-  mcp_connect: "MCP Connect",
-  mcp_call: "MCP Call",
-  mcp_import: "MCP Import",
-  skill_use: "Skill Use",
-  skill_list: "Skill List",
-  skill_manage: "Skill Manage",
-  todo_write: "TodoWrite",
-  scratchpad_write: "Scratchpad Write",
-  scratchpad_read: "Scratchpad Read",
-  memory_append: "Memory Append",
-  memory_search: "Memory Search",
-  session_search: "Session Search",
-  code_search: "代码搜索",
-  code_index_create: "代码索引构建",
-  code_index_status: "代码索引状态",
-  code_index_clear: "代码索引清理",
-  code_index_cancel: "代码索引取消",
-  liteparse: "LiteParse",
-  schedule_task: "Task",
-  list_scheduled_tasks: "List Tasks",
-  cancel_scheduled_task: "Cancel Task",
-  spawn_subagent: "Spawn SubAgent",
-  cancel_subagent: "Cancel SubAgent",
-  retry_subagent: "Retry SubAgent",
-  query_subagent_status: "Query SubAgent",
-  check_resources: "Check Resources",
-  recommend_subagent_model: "Recommend Model",
-  list_skills: "List Skills",
-  list_mcps: "List MCPs",
-  send_bug_report_email: "Bug Report Email",
-  update_email_config: "Update Email Config",
-  set_taskspace: "Set Taskspace",
-  delegate_to_avatar: "Delegate to Avatar",
-  read_avatar_workspace: "Read Avatar Workspace",
-  chat_with_avatar: "Chat with Avatar",
-};
+const TOOL_LABEL_IDS = [
+  "bash_exec", "file_read", "file_write", "file_edit", "list_files", "codegen",
+  "lsp_goto_definition", "lsp_find_references", "lsp_hover", "lsp_diagnostics",
+  "mcp_connect", "mcp_call", "mcp_import", "skill_use", "skill_list", "skill_manage",
+  "todo_write", "scratchpad_write", "scratchpad_read", "memory_append", "memory_search",
+  "session_search", "code_search", "code_index_create", "code_index_status",
+  "code_index_clear", "code_index_cancel", "liteparse", "schedule_task",
+  "list_scheduled_tasks", "cancel_scheduled_task", "spawn_subagent", "cancel_subagent",
+  "retry_subagent", "query_subagent_status", "check_resources", "recommend_subagent_model",
+  "list_skills", "list_mcps", "send_bug_report_email", "update_email_config",
+  "set_taskspace", "delegate_to_avatar", "read_avatar_workspace", "chat_with_avatar",
+] as const;
 
-/** 设置页展示用中文说明（不改后端发给模型的英文 tool schema） */
-const TOOL_DESCRIPTIONS_ZH: Record<string, string> = {
-  bash_exec: "在当前工作区执行 Shell 命令。",
-  file_read: "读取文件内容，可指定行号范围。",
-  file_write: "写入完整文件内容；会先展示统一 diff，写入前需确认。",
-  file_edit: "在文件中替换指定文本；会先展示统一 diff，写入前需确认。",
-  list_files: "列出指定路径下的文件与目录，可选递归。",
-  codegen: "使用内置 CodeGen 引擎生成代码产物（agent / workflow / tool / skill 等）。",
-  mcp_connect: "按配置连接一个 MCP 服务。",
-  mcp_call: "调用已连接 MCP 上的工具，传入 JSON 参数。",
-  mcp_import: "从外部 mcp.json 导入 MCP 配置到 AgenticX 工作区。",
-  skill_use: "将某个技能激活到当前对话上下文。",
-  skill_list: "列出本地/远程可用技能的摘要。",
-  skill_manage:
-    "在 ~/.agenticx/skills/ 下创建、修改或删除技能（SKILL.md）；支持 create / patch / delete（需显式开启环境开关）。",
-  todo_write: "更新当前会话的结构化任务列表。",
-  scratchpad_write: "将会话中间结果写入草稿板（scratchpad）。",
-  scratchpad_read: "读取草稿板某键内容，或列出全部键。",
-  memory_append: "向工作区日记或长期 MEMORY.md 追加一条记忆（跨会话保留）。",
-  memory_search: "用全文 / 向量 / 混合模式检索已索引的工作区记忆。",
-  session_search: "按关键词检索历史会话消息，空查询则返回最近会话。",
-  code_search: "在已索引代码库上做语义/混合检索；探索阶段优先于整文件读取，精确字符串请用 grep。",
-  code_index_create: "后台为指定代码库构建语义索引。",
-  code_index_status: "查询代码索引构建进度与统计。",
-  code_index_clear: "释放内存中的代码索引。",
-  code_index_cancel: "协作式取消进行中的索引任务。",
-  liteparse: "通过 LiteParse 解析 PDF、Office、图片等文档并提取文本。",
-  lsp_goto_definition: "在指定文件位置跳转到符号定义（LSP）。",
-  lsp_find_references: "查找符号在工程内的所有引用（LSP）。",
-  lsp_hover: "获取光标处符号的类型信息与文档说明（LSP）。",
-  lsp_diagnostics: "读取文件或已打开文件的诊断/类型与 Lint 信息（LSP）。",
-  schedule_task: "安排后台异步任务，即使用户未在聊天也会执行。",
-  list_scheduled_tasks: "列出所有后台/计划任务及其状态。",
-  cancel_scheduled_task: "按 task_id 取消后台任务。",
-  spawn_subagent: "为委派任务启动一个子智能体工作进程。",
-  cancel_subagent: "按 ID 或分身名取消正在运行的子智能体。",
-  retry_subagent: "对已完成或失败的子智能体重试，可附带修正后的任务描述。",
-  query_subagent_status: "查询单个或全部子智能体状态（支持 agent_id、分身名或 avatar_id）。",
-  check_resources: "在调度前查看当前主机资源占用情况。",
-  recommend_subagent_model: "根据任务复杂度与已配置 Provider 为子智能体推荐模型。",
-  list_skills: "列出 AgenticX 中所有可用技能及简介。",
-  list_mcps: "列出已配置的 MCP 服务及其连接状态。",
-  send_bug_report_email: "使用用户配置的 SMTP 发送问题反馈邮件。",
-  update_email_config: "在严格校验下更新 notifications.email.* 邮件通知配置。",
-  set_taskspace: "为当前会话设置或追加工作区（taskspace）路径，本回合结束后注册生效。",
-  delegate_to_avatar: "将任务委派给指定分身，在其独立工作区中执行。",
-  read_avatar_workspace: "不启动子智能体的情况下读取分身工作区中的文件。",
-  chat_with_avatar: "向分身发送内部问题并返回其回复，供元智能体汇总给用户。",
-};
-
-function toolDisplayDescription(name: string, apiDescription: string): string {
-  return TOOL_DESCRIPTIONS_ZH[name] ?? apiDescription;
+function categoryLabels(t: TFunction): Record<string, string> {
+  return {
+    system: t("tools.categories.system"),
+    filesystem: t("tools.categories.filesystem"),
+    code: t("tools.categories.code"),
+    mcp: t("tools.categories.mcp"),
+    skill: t("tools.categories.skill"),
+    agent: t("tools.categories.agent"),
+    memory: t("tools.categories.memory"),
+    document: t("tools.categories.document"),
+    scheduling: t("tools.categories.scheduling"),
+    data_source: t("tools.categories.data_source"),
+    meta: t("tools.categories.meta"),
+    other: t("tools.categories.other"),
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Hooks Tab
-// ---------------------------------------------------------------------------
-
-type CuratedHookItem = {
-  name: string;
-  description: string;
-  events: string[];
-  enabled: boolean;
-  source: string;
-};
-
-type ImportedHookItem = {
-  name: string;
-  source: string;
-  event: string;
-  type: string;
-  command?: string;
-  url?: string;
-  prompt?: string;
-  matcher?: string;
-  block_on_failure?: boolean;
-  timeout_seconds?: number;
-  enabled: boolean;
-  source_path?: string;
-  discovered_via?: string;
-  event_inferred?: boolean;
-  duplicate_count?: number;
-  duplicate_sources?: string[];
-  usability?: string;
-};
-
-type HookSettings = {
-  preset_paths: Record<string, { enabled: boolean }>;
-  custom_paths: string[];
-  declarative: unknown[];
-  disabled: string[];
-};
-
-type HookScanPathItem = {
-  source: string;
-  path: string;
-  exists: boolean;
-};
-
-type ScanSummary = {
-  raw_total: number;
-  deduped_total: number;
-  source_counts: Record<string, number>;
-};
-
-const HOOK_PRIMARY_CONFIG_PATH = "~/.agenticx/hooks/";
-
-const HOOK_PRESETS: { key: string; label: string; path: string }[] = [
-  { key: "cursor_plugins", label: "Cursor 插件目录", path: "~/.cursor/plugins/" },
-  { key: "claude_plugins", label: "Claude 插件目录", path: "~/.claude/plugins/" },
-];
-
-function hookSourceBadge(source: string): { label: string; className: string } {
-  const base = "shrink-0 rounded-full border px-1.5 text-[10px]";
-  switch (source) {
-    case "bundled":
-    case "agenticx":
-      return { label: "内置", className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
-    case "cursor":
-      return { label: "Cursor", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
-    case "claude":
-      return { label: "Claude", className: `${base} border-orange-500/30 bg-orange-500/10 text-orange-400` };
-    case "cursor_plugins":
-      return { label: "Cursor 插件", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
-    case "claude_plugins":
-      return { label: "Claude 插件", className: `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-400` };
-    case "managed":
-      return { label: "用户", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
-    case "workspace":
-      return { label: "工作区", className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-400` };
-    default:
-      return { label: "自定义", className: `${base} border-border bg-surface-panel text-text-faint` };
+function toolLabels(t: TFunction): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const id of TOOL_LABEL_IDS) {
+    out[id] = t(`tools.labels.${id}`);
   }
+  return out;
 }
 
-function hookTypeBadge(hookType: string): { label: string; className: string } {
-  const base = "shrink-0 rounded-full border px-1.5 text-[10px]";
-  switch (hookType) {
-    case "command":
-      return { label: "命令", className: `${base} border-amber-500/30 bg-amber-500/10 text-amber-400` };
-    case "http":
-      return { label: "HTTP", className: `${base} border-blue-500/30 bg-blue-500/10 text-blue-400` };
-    case "prompt":
-      return { label: "提示词", className: `${base} border-green-500/30 bg-green-500/10 text-green-400` };
-    case "agent":
-      return { label: "智能体", className: `${base} border-rose-500/30 bg-rose-500/10 text-rose-400` };
-    default:
-      return { label: hookType, className: `${base} border-border bg-surface-panel text-text-faint` };
-  }
+function toolDisplayDescription(name: string, apiDescription: string, t: TFunction): string {
+  const key = `tools.descriptions.${name}`;
+  const translated = t(key);
+  return translated === key ? apiDescription : translated;
 }
-
-const EVENT_LABELS: Record<string, string> = {
-  before_tool_call: "preToolUse",
-  after_tool_call: "postToolUse",
-  session_start: "sessionStart",
-  session_end: "sessionEnd",
-  preToolUse: "preToolUse",
-  postToolUse: "postToolUse",
-};
-
-function HooksTab() {
-  const [curatedHooks, setCuratedHooks] = useState<CuratedHookItem[]>([]);
-  const [importedHooks, setImportedHooks] = useState<ImportedHookItem[]>([]);
-  const [scanSummary, setScanSummary] = useState<ScanSummary>({ raw_total: 0, deduped_total: 0, source_counts: {} });
-  const [scanPaths, setScanPaths] = useState<HookScanPathItem[]>([]);
-  const [hookError, setHookError] = useState<string>("");
-  const [settingsError, setSettingsError] = useState<string>("");
-  const [settings, setSettings] = useState<HookSettings>({
-    preset_paths: {},
-    custom_paths: [],
-    declarative: [],
-    disabled: [],
-  });
-  const [customPaths, setCustomPaths] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const apiToken = useAppStore((s) => s.apiToken);
-  const backendUrl = useAppStore((s) => s.backendUrl);
-
-  const fetchAll = useCallback(async () => {
-    try {
-      const token = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
-      const headers: Record<string, string> = {};
-      if (token) headers["x-agx-desktop-token"] = token;
-
-      const [hooksRes, settingsRes] = await Promise.all([
-        studioFetch("/api/hooks", { headers, storeBase: backendUrl }),
-        studioFetch("/api/hooks/settings", { headers, storeBase: backendUrl }),
-      ]);
-      const hooksData = await hooksRes.json();
-      const settingsData = await settingsRes.json();
-
-      if (hooksData.ok) {
-        setCuratedHooks(hooksData.curated_hooks ?? []);
-        setImportedHooks(hooksData.imported_hooks ?? []);
-        setScanSummary(hooksData.scan_summary ?? { raw_total: 0, deduped_total: 0, source_counts: {} });
-        setScanPaths(hooksData.scan_paths ?? []);
-        setHookError("");
-      } else {
-        setCuratedHooks([]);
-        setImportedHooks([]);
-        setScanPaths(hooksData.scan_paths ?? []);
-        setHookError(
-          String(hooksData.error ?? hooksData.detail ?? `/api/hooks 请求失败（HTTP ${hooksRes.status || "unknown"}）`),
-        );
-      }
-      if (settingsData.ok) {
-        setSettings(settingsData);
-        setCustomPaths(settingsData.custom_paths ?? []);
-        setSettingsError("");
-      } else {
-        setSettingsError(String(settingsData.error ?? settingsData.detail ?? "/api/hooks/settings 拉取失败"));
-      }
-    } catch (err) {
-      setCuratedHooks([]);
-      setImportedHooks([]);
-      setScanPaths([]);
-      setHookError(err instanceof Error ? err.message : "拉取 Hook 配置失败");
-      setSettingsError("");
-    } finally {
-      setLoading(false);
-    }
-  }, [apiToken, backendUrl]);
-
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
-
-  const persistSettings = useCallback(
-    async (patch: Partial<HookSettings>) => {
-      setBusy(true);
-      try {
-        const token = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (token) headers["x-agx-desktop-token"] = token;
-        const resp = await studioFetch("/api/hooks/settings", {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(patch),
-          storeBase: backendUrl,
-        });
-        const data = await resp.json().catch(() => null);
-        if (!resp.ok || !data?.ok) {
-          throw new Error(String(data?.detail ?? data?.error ?? `HTTP ${resp.status}`));
-        }
-        await fetchAll();
-      } finally {
-        setBusy(false);
-      }
-    },
-    [apiToken, backendUrl, fetchAll],
-  );
-
-  const togglePreset = useCallback(
-    (key: string, enabled: boolean) => {
-      void persistSettings({ preset_paths: { ...settings.preset_paths, [key]: { enabled } } });
-    },
-    [settings.preset_paths, persistSettings],
-  );
-
-  const persistCustomPaths = useCallback(
-    (paths: string[]) => void persistSettings({ custom_paths: paths.filter((p) => p.trim()) }),
-    [persistSettings],
-  );
-
-  const toggleHookEnabled = useCallback(
-    (hookName: string, enabled: boolean) => {
-      const current = Array.isArray(settings.disabled) ? settings.disabled : [];
-      const next = enabled ? current.filter((id) => id !== hookName) : Array.from(new Set([...current, hookName]));
-      setSettings((prev) => ({ ...prev, disabled: next }));
-      setCuratedHooks((prev) => prev.map((h) => (h.name === hookName ? { ...h, enabled } : h)));
-      setImportedHooks((prev) => prev.map((h) => (h.name === hookName ? { ...h, enabled } : h)));
-      void persistSettings({ disabled: next }).catch(() => void fetchAll());
-    },
-    [fetchAll, persistSettings, settings.disabled],
-  );
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 py-8 text-sm text-text-subtle">
-        <Loader2 className="h-4 w-4 animate-spin" /> 正在加载钩子配置...
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="text-sm text-text-subtle">
-        钩子（Hooks）是智能体在执行的特定节点运行自定义脚本，可用于修改行为、执行策略或记录日志。
-      </div>
-
-      {hookError ? (
-        <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-300">{hookError}</div>
-      ) : null}
-
-      {/* Block A: 预置钩子 */}
-      <Panel title={`预置钩子 (${curatedHooks.length})`} collapsible>
-        {curatedHooks.length === 0 ? (
-          <div className="py-3 text-center text-xs text-text-faint">暂无预置钩子</div>
-        ) : (
-          <div className="divide-y divide-border">
-            {curatedHooks.map((hook) => (
-              <div key={hook.name} className="flex items-center gap-3 px-1 py-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-text-primary">{hook.name}</span>
-                    <span className="shrink-0 rounded-full border border-zinc-500/30 bg-zinc-500/10 px-1.5 text-[10px] text-zinc-400">内置</span>
-                  </div>
-                  <div className="mt-0.5 text-xs text-text-faint truncate">{hook.description}</div>
-                  {hook.events?.length > 0 && (
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {hook.events.map((ev) => (
-                        <span key={ev} className="rounded bg-surface-hover px-1 py-0.5 text-[10px] font-mono text-text-subtle">{ev}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <SettingsSwitch
-                  checked={hook.enabled}
-                  disabled={busy}
-                  size="sm"
-                  aria-label={`启用 ${hook.name}`}
-                  onChange={(next) => toggleHookEnabled(hook.name, next)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-
-      {/* Block B: 外部导入（默认折叠） */}
-      <Panel
-        title={`外部导入钩子${scanSummary.deduped_total > 0 ? ` (${scanSummary.deduped_total} 条，去重自 ${scanSummary.raw_total} 条)` : ""}`}
-        collapsible
-        defaultCollapsed
-      >
-        <div className="space-y-3">
-            <div className="space-y-2">
-              {settingsError ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">配置路径读取异常：{settingsError}</div>
-              ) : null}
-              <div className="text-xs text-text-faint">勾选预设路径可自动导入 Cursor / Claude Code 等工具的 Hooks。</div>
-              {HOOK_PRESETS.map((preset) => {
-                const isOn = settings.preset_paths?.[preset.key]?.enabled !== false;
-                return (
-                  <label key={preset.key} className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-2 py-1.5">
-                    <input type="checkbox" checked={isOn} disabled={busy} onChange={(e) => togglePreset(preset.key, e.target.checked)} className="h-3.5 w-3.5 accent-[var(--ui-btn-primary-bg)]" />
-                    <span className="flex-1 text-sm text-text-primary">{preset.label}</span>
-                    <span className="text-xs text-text-faint">{preset.path}</span>
-                  </label>
-                );
-              })}
-              {customPaths.map((row, idx) => (
-                <div key={`hook-path-${idx}`} className="flex gap-2">
-                  <input className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={row} placeholder="例如 /path/to/hooks/" onChange={(e) => setCustomPaths((prev) => prev.map((p, i) => (i === idx ? e.target.value : p)))} onBlur={() => persistCustomPaths(customPaths)} disabled={busy} />
-                  <button type="button" className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40" title="移除此路径" disabled={busy} onClick={() => { const next = customPaths.filter((_, i) => i !== idx); setCustomPaths(next); persistCustomPaths(next); }}>
-                    <Trash2 className="h-4 w-4" aria-hidden />
-                  </button>
-                </div>
-              ))}
-              <button type="button" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40" disabled={busy} onClick={() => setCustomPaths((prev) => [...prev, ""])}>
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                添加配置路径
-              </button>
-            </div>
-            {importedHooks.length === 0 ? (
-              <div className="py-2 text-center text-xs text-text-faint">未发现外部钩子</div>
-            ) : (
-              <div className="divide-y divide-border rounded-md border border-border">
-                {importedHooks.map((hook, idx) => {
-                  const srcBadge = hookSourceBadge(hook.source || "custom");
-                  const typeBadge = hookTypeBadge(hook.type);
-                  const snippet = hook.command?.slice(0, 100) ?? hook.url?.slice(0, 100) ?? "";
-                  const eventLabel = EVENT_LABELS[hook.event] ?? hook.event;
-                  return (
-                    <div key={`${hook.name}-${idx}`} className="px-3 py-2">
-                      <div className="flex items-center gap-2 justify-between">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded bg-surface-hover px-1 py-0.5 text-[10px] font-mono text-text-subtle">{eventLabel}</span>
-                          <span className={srcBadge.className}>{srcBadge.label}</span>
-                          <span className={typeBadge.className}>{typeBadge.label}</span>
-                          {(hook.duplicate_count ?? 1) > 1 && (
-                            <span className="text-[10px] text-text-faint">x{hook.duplicate_count} 来自 {(hook.duplicate_sources ?? []).join(", ")}</span>
-                          )}
-                          {hook.usability === "needs_env" && (
-                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">需要外部环境</span>
-                          )}
-                        </div>
-                        <SettingsSwitch checked={hook.enabled} disabled={busy} size="sm" aria-label={`启用 ${hook.name}`} onChange={(next) => toggleHookEnabled(hook.name, next)} />
-                      </div>
-                      {snippet && <div className="mt-1 truncate font-mono text-[11px] text-text-faint">{snippet}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Permissions Advanced Panel
-// ---------------------------------------------------------------------------
-
-type PathRule = { pattern: string; allow: boolean };
-
-type RegistryToolRow = { name: string; description?: string; category?: string; is_meta?: boolean };
-
-export type PermissionsAdvancedPanelHandle = {
-  /** 将路径/命令/工具拒绝列表写入后端；与输入框失焦保存等效，供窗口底部「保存」统一触发。 */
-  flushPermissions: () => Promise<{ ok: boolean; error?: string }>;
-};
-
-const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandle>(function PermissionsAdvancedPanel(_props, ref) {
-  const [pathRules, setPathRules] = useState<PathRule[]>([]);
-  const [deniedCommands, setDeniedCommands] = useState<string[]>([]);
-  const [deniedTools, setDeniedTools] = useState<string[]>([]);
-  const [registryTools, setRegistryTools] = useState<RegistryToolRow[]>([]);
-  const [toolInsertFilter, setToolInsertFilter] = useState("");
-  const [permMode, setPermMode] = useState("default");
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const apiToken = useAppStore((s) => s.apiToken);
-  const backendUrl = useAppStore((s) => s.backendUrl);
-
-  /** 与 CC Bridge / Hooks 等面板一致：未配置远程 URL 时用本机内置 Studio 的 API 根地址，避免请求落到 `/api/...` 相对路径导致 HTTP 404。 */
-  const resolveApiBase = useCallback(async () => {
-    const u = (backendUrl ?? "").trim();
-    if (u) return u.replace(/\/+$/, "");
-    const raw = String((await window.agenticxDesktop.getApiBase()) || "").trim();
-    return raw.replace(/\/+$/, "");
-  }, [backendUrl]);
-
-  const filteredRegistryTools = useMemo(() => {
-    const q = toolInsertFilter.trim().toLowerCase();
-    const rows = registryTools.filter((t) => t.name);
-    if (!q) return rows;
-    return rows.filter((t) => {
-      const d = (t.description ?? "").toLowerCase();
-      return t.name.toLowerCase().includes(q) || d.includes(q) || (t.category ?? "").toLowerCase().includes(q);
-    });
-  }, [registryTools, toolInsertFilter]);
-
-  const fetchPerms = useCallback(async () => {
-    try {
-      const headers: Record<string, string> = {};
-      if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-      const base = await resolveApiBase();
-      const [permRes, regRes] = await Promise.all([
-        fetch(`${base}/api/permissions`, { headers }),
-        fetch(`${base}/api/tools/registry`, { headers }),
-      ]);
-      const data = await permRes.json();
-      if (data.ok) {
-        setPermMode(data.mode ?? "default");
-        setPathRules(
-          (data.path_rules ?? []).map((r: any) => ({
-            pattern: r.pattern ?? "",
-            allow: r.allow !== false,
-          })),
-        );
-        setDeniedCommands(data.denied_commands ?? []);
-        setDeniedTools(data.denied_tools ?? []);
-      }
-      try {
-        const reg = await regRes.json();
-        if (reg.ok && Array.isArray(reg.tools)) {
-          setRegistryTools(
-            reg.tools.map((t: any) => ({
-              name: String(t.name ?? "").trim(),
-              description: typeof t.description === "string" ? t.description : "",
-              category: typeof t.category === "string" ? t.category : "",
-              is_meta: Boolean(t.is_meta),
-            })),
-          );
-        } else {
-          setRegistryTools([]);
-        }
-      } catch {
-        setRegistryTools([]);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, [apiToken, resolveApiBase]);
-
-  useEffect(() => { void fetchPerms(); }, [fetchPerms]);
-
-  const persist = useCallback(
-    async (patch: Record<string, unknown>) => {
-      setBusy(true);
-      try {
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-        const base = await resolveApiBase();
-        await fetch(`${base}/api/permissions`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(patch),
-        });
-        await fetchPerms();
-      } finally {
-        setBusy(false);
-      }
-    },
-    [apiToken, resolveApiBase, fetchPerms],
-  );
-
-  const appendDeniedTool = useCallback(
-    (rawName: string) => {
-      const trimmed = rawName.trim();
-      if (!trimmed) return;
-      setDeniedTools((prev) => {
-        if (prev.some((p) => p.trim() === trimmed)) return prev;
-        const next = [...prev, trimmed];
-        queueMicrotask(() => {
-          void persist({ denied_tools: next });
-        });
-        return next;
-      });
-    },
-    [persist],
-  );
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      flushPermissions: async () => {
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-        const pathRulesPayload = pathRules.filter((r) => String(r.pattern ?? "").trim());
-        const deniedCommandsPayload = deniedCommands.map((s) => String(s).trim()).filter(Boolean);
-        const deniedToolsPayload = deniedTools.map((s) => String(s).trim()).filter(Boolean);
-        try {
-          const base = await resolveApiBase();
-          const res = await fetch(`${base}/api/permissions`, {
-            method: "PUT",
-            headers,
-            body: JSON.stringify({
-              path_rules: pathRulesPayload,
-              denied_commands: deniedCommandsPayload,
-              denied_tools: deniedToolsPayload,
-            }),
-          });
-          let detail = "";
-          try {
-            const j = (await res.json()) as { detail?: string; error?: string };
-            if (!res.ok) {
-              detail =
-                (typeof j?.detail === "string" && j.detail) ||
-                (typeof j?.error === "string" && j.error) ||
-                "";
-            }
-          } catch {
-            /* ignore */
-          }
-          if (!res.ok) {
-            return { ok: false, error: detail || `HTTP ${res.status}` };
-          }
-          await fetchPerms();
-          return { ok: true };
-        } catch (e) {
-          return { ok: false, error: e instanceof Error ? e.message : String(e) };
-        }
-      },
-    }),
-    [apiToken, resolveApiBase, pathRules, deniedCommands, deniedTools, fetchPerms],
-  );
-
-  if (loading) return null;
-
-  return (
-    <>
-      <Panel title="路径权限规则">
-        <div className="text-xs text-text-faint mb-2">
-          按 glob 模式匹配文件路径，决定允许或拒绝访问。规则按顺序匹配，首个命中生效。
-        </div>
-        <div className="space-y-1.5">
-          {pathRules.map((rule, idx) => (
-            <div key={`pr-${idx}`} className="flex gap-2 items-center">
-              <input
-                className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1 text-sm font-mono"
-                value={rule.pattern}
-                placeholder="/etc/*"
-                disabled={busy}
-                onChange={(e) => {
-                  const next = pathRules.map((r, i) => (i === idx ? { ...r, pattern: e.target.value } : r));
-                  setPathRules(next);
-                }}
-                onBlur={() => void persist({ path_rules: pathRules })}
-              />
-              <select
-                className="rounded-md border border-border bg-surface-panel px-1.5 py-1 text-xs"
-                value={rule.allow ? "allow" : "deny"}
-                disabled={busy}
-                onChange={(e) => {
-                  const next = pathRules.map((r, i) =>
-                    i === idx ? { ...r, allow: e.target.value === "allow" } : r,
-                  );
-                  setPathRules(next);
-                  void persist({ path_rules: next });
-                }}
-              >
-                <option value="allow">允许</option>
-                <option value="deny">拒绝</option>
-              </select>
-              <button
-                type="button"
-                className="shrink-0 rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                disabled={busy}
-                onClick={() => {
-                  const next = pathRules.filter((_, i) => i !== idx);
-                  setPathRules(next);
-                  void persist({ path_rules: next });
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            disabled={busy}
-            onClick={() => setPathRules((prev) => [...prev, { pattern: "", allow: false }])}
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加路径规则
-          </button>
-        </div>
-      </Panel>
-
-      <Panel title="命令拒绝列表">
-        <div className="text-xs text-text-faint mb-2">
-          fnmatch 模式匹配，命中的 shell 命令将被阻止执行。
-        </div>
-        <div className="space-y-1.5">
-          {deniedCommands.map((cmd, idx) => (
-            <div key={`dc-${idx}`} className="flex gap-2">
-              <input
-                className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1 text-sm font-mono"
-                value={cmd}
-                placeholder="rm -rf *"
-                disabled={busy}
-                onChange={(e) => {
-                  const next = deniedCommands.map((c, i) => (i === idx ? e.target.value : c));
-                  setDeniedCommands(next);
-                }}
-                onBlur={() => void persist({ denied_commands: deniedCommands })}
-              />
-              <button
-                type="button"
-                className="shrink-0 rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                disabled={busy}
-                onClick={() => {
-                  const next = deniedCommands.filter((_, i) => i !== idx);
-                  setDeniedCommands(next);
-                  void persist({ denied_commands: next });
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            disabled={busy}
-            onClick={() => setDeniedCommands((prev) => [...prev, ""])}
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加命令模式
-          </button>
-        </div>
-      </Panel>
-
-      <Panel title="工具拒绝列表">
-        <div className="text-xs text-text-faint mb-2">
-          按 Studio 工具名做 fnmatch（例如 <code className="text-text-subtle">bash_exec</code>、
-          <code className="text-text-subtle">mcp_call</code>、<code className="text-text-subtle">file_*</code>
-          ）。命中后<strong className="text-text-primary">直接拒绝</strong>该工具调用，且<strong className="text-text-primary">不会</strong>再弹出执行确认（策略优先于询问）。
-          工具名与<strong className="text-text-primary">设置 → 工具</strong>页预授权列表一致；亦可到该页查看说明。
-        </div>
-        {registryTools.length > 0 ? (
-          <details className="mb-3 rounded-md border border-border bg-surface-panel px-2 py-1.5">
-            <summary className="cursor-pointer text-xs font-medium text-text-primary">
-              从已注册工具插入（共 {registryTools.length} 个）
-            </summary>
-            <div className="mt-2 space-y-2">
-              <input
-                type="search"
-                className="w-full rounded-md border border-border bg-surface-card px-2 py-1 text-xs text-text-primary placeholder:text-text-faint"
-                placeholder="筛选工具名或描述…"
-                value={toolInsertFilter}
-                disabled={busy}
-                onChange={(e) => setToolInsertFilter(e.target.value)}
-                aria-label="筛选工具列表"
-              />
-              <div className="max-h-40 overflow-y-auto rounded border border-[var(--border-muted)] bg-surface-card p-1.5">
-                <div className="flex flex-wrap gap-1">
-                  {filteredRegistryTools.map((t) => (
-                    <button
-                      key={t.name}
-                      type="button"
-                      disabled={busy}
-                      title={t.description ? `${t.description.slice(0, 400)}` : t.name}
-                      className="rounded border border-border bg-surface-panel px-1.5 py-0.5 font-mono text-[11px] text-text-primary transition hover:bg-surface-hover hover:border-text-subtle disabled:opacity-40"
-                      onClick={() => appendDeniedTool(t.name)}
-                    >
-                      {t.name}
-                      {t.is_meta ? (
-                        <span className="ml-0.5 text-[9px] text-amber-400/90">meta</span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-                {filteredRegistryTools.length === 0 ? (
-                  <div className="py-2 text-center text-[11px] text-text-faint">无匹配项，清空筛选试试</div>
-                ) : null}
-              </div>
-            </div>
-          </details>
-        ) : (
-          <div className="mb-2 text-[11px] text-status-warning">
-            未能加载工具注册表（需后端在线）。仍可手动输入工具名；完整列表见设置 → 工具页。
-          </div>
-        )}
-        <datalist id="agx-studio-tool-names-datalist">
-          {registryTools.map((t) => (
-            <option key={t.name} value={t.name}>
-              {(t.description ?? "").slice(0, 80)}
-            </option>
-          ))}
-        </datalist>
-        <div className="space-y-1.5">
-          {deniedTools.map((toolPat, idx) => (
-            <div key={`dt-${idx}`} className="flex gap-2">
-              <input
-                className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1 text-sm font-mono"
-                value={toolPat}
-                placeholder="bash_exec"
-                list="agx-studio-tool-names-datalist"
-                autoComplete="off"
-                disabled={busy}
-                onChange={(e) => {
-                  const next = deniedTools.map((t, i) => (i === idx ? e.target.value : t));
-                  setDeniedTools(next);
-                }}
-                onBlur={() => void persist({ denied_tools: deniedTools })}
-              />
-              <button
-                type="button"
-                className="shrink-0 rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                disabled={busy}
-                onClick={() => {
-                  const next = deniedTools.filter((_, i) => i !== idx);
-                  setDeniedTools(next);
-                  void persist({ denied_tools: next });
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            disabled={busy}
-            onClick={() => setDeniedTools((prev) => [...prev, ""])}
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加工具模式
-          </button>
-        </div>
-      </Panel>
-    </>
-  );
-});
 
 // ---------------------------------------------------------------------------
 // Tools Tab
@@ -1981,6 +1173,7 @@ type ToolsTabHandle = {
 
 const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, never>>(
   function CcBridgeSettingsPanel(_props, ref) {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
   const [url, setUrl] = useState("");
@@ -2005,10 +1198,10 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
     } catch {
       const short = text.slice(0, 120).replace(/\s+/g, " ");
       throw new Error(
-        `后端返回非 JSON（可能是 API 地址不正确或未连到 agx serve）：HTTP ${res.status}，响应片段：${short}`,
+        t("commonSettings.nonJsonBackend", { status: res.status, snippet: short }),
       );
     }
-  }, []);
+  }, [t]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2037,14 +1230,14 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
         const effective = String(data.mode_effective || "").toLowerCase();
         const envOverride = String(data.mode_env_override || "").trim();
         if (effective && effective !== m && envOverride) {
-          setMsg(`检测到环境变量覆盖：AGX_CC_BRIDGE_MODE=${envOverride}（当前生效模式：${effective}）`);
+          setMsg(t("tools.cc.envOverride", { env: envOverride, effective }));
         }
         const idle = Number.isFinite(data.idle_stop_seconds as number)
           ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
           : 600;
         setIdleStopSeconds(String(idle));
       } else {
-        setMsg(data.error || "加载失败");
+        setMsg(data.error || t("commonSettings.loadFailed"));
       }
     } catch (e) {
       setMsg(String(e));
@@ -2062,7 +1255,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
     () => ({
       async save() {
         if (loading) {
-          return { ok: false, error: "Bridge 配置仍在加载，请稍后再点窗口底部「退出」。" };
+          return { ok: false, error: t("tools.cc.stillLoading") };
         }
         setBusy(true);
         setMsg("");
@@ -2104,13 +1297,13 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
             setIdleStopSeconds(String(idle));
             const hint =
               effective && effective !== m && envOverride
-                ? `已保存（但当前被 AGX_CC_BRIDGE_MODE=${envOverride} 覆盖，生效模式：${effective}）`
-                : "已保存";
+                ? t("tools.cc.savedOverride", { env: envOverride, effective })
+                : t("commonSettings.saved");
             setMsg(hint);
             return { ok: true };
           }
           const d = data.detail;
-          const errText = typeof d === "string" ? d : d != null ? JSON.stringify(d) : "保存失败";
+          const errText = typeof d === "string" ? d : d != null ? JSON.stringify(d) : t("commonSettings.saveFailed");
           setMsg(errText);
           return { ok: false, error: errText };
         } catch (e) {
@@ -2122,7 +1315,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
         }
       },
     }),
-    [apiToken, backendUrl, idleStopSeconds, loading, mode, parseJsonOrError, token, url],
+    [apiToken, backendUrl, idleStopSeconds, loading, mode, parseJsonOrError, t, token, url],
   );
 
   const regen = async () => {
@@ -2140,10 +1333,10 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
       const data = (await parseJsonOrError(res)) as { ok?: boolean; token?: string; detail?: unknown };
       if (data.ok && data.token) {
         setToken(data.token);
-        setMsg("已重新生成 token。请重启本机 `agx cc-bridge serve`（或下次启动 bridge）以使用相同 token。");
+        setMsg(t("tools.cc.regenDone"));
       } else {
         const d = data.detail;
-        setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : "重新生成失败");
+        setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : t("commonSettings.regenerateFailed"));
       }
     } catch (e) {
       setMsg(String(e));
@@ -2154,29 +1347,25 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
 
   if (loading) {
     return (
-      <Panel title="Claude Code 本机 Bridge">
-        <div className="py-4 text-center text-xs text-text-faint">加载中…</div>
+      <Panel title={t("tools.cc.title")}>
+        <div className="py-4 text-center text-xs text-text-faint">{t("commonSettings.loadingEllipsis")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="Claude Code 本机 Bridge">
-      <div className="mb-2 space-y-1 text-xs text-text-subtle">
+    <Panel title={t("tools.cc.title")}>
+      <div className={`mb-2 space-y-1 ${SETTINGS_INTRO_CLASS}`}>
         <p>
-          与终端中运行的 <code className="rounded bg-surface-panel px-0.5">agx cc-bridge serve</code>{" "}
-          通信。首次使用会在本机配置中自动生成 token（与 Near 工具 <code className="rounded bg-surface-panel px-0.5">cc_bridge_*</code>{" "}
-          一致）。
+          <Trans t={t} i18nKey="tools.cc.intro1" components={{ code: <code className="rounded bg-surface-panel px-0.5" /> }} />
         </p>
-        <p className="text-text-faint">
-          方式 B：先 <code className="rounded bg-surface-panel px-0.5">cc_bridge_start</code>，再{" "}
-          <code className="rounded bg-surface-panel px-0.5">cc_bridge_send</code>；完成后用{" "}
-          <code className="rounded bg-surface-panel px-0.5">test -f</code> / file_read 验收落盘。
+        <p>
+          <Trans t={t} i18nKey="tools.cc.intro2" components={{ code: <code className="rounded bg-surface-panel px-0.5" /> }} />
         </p>
       </div>
       <div className="space-y-2">
         <div>
-          <span className="mb-0.5 block text-[11px] font-medium text-text-muted">运行模式</span>
+          <span className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`}>{t("tools.cc.runMode")}</span>
           <div className="flex flex-wrap gap-3 text-xs text-text-subtle">
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               <input
@@ -2186,7 +1375,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
                 disabled={busy}
                 onChange={() => setMode("headless")}
               />
-              Headless（stream-json，稳定）
+              {t("tools.cc.headless")}
             </label>
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               <input
@@ -2196,12 +1385,12 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
                 disabled={busy}
                 onChange={() => setMode("visible_tui")}
               />
-              Visible TUI（交互界面，日志解析回填）
+              {t("tools.cc.visibleTui")}
             </label>
           </div>
         </div>
         <div>
-          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-url">
+          <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="cc-bridge-url">
             Bridge URL
           </label>
           <input
@@ -2216,7 +1405,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
         </div>
         <div>
           <div className="mb-0.5 flex items-center justify-between gap-2">
-            <label className="text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-token">
+            <label className={SETTINGS_LABEL_CLASS} htmlFor="cc-bridge-token">
               Bearer token
             </label>
             <button
@@ -2224,7 +1413,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
               className="text-[10px] text-text-subtle underline hover:text-text-primary"
               onClick={() => setShowToken((v) => !v)}
             >
-              {showToken ? "隐藏" : "显示"}
+              {showToken ? t("commonSettings.hide") : t("commonSettings.show")}
             </button>
           </div>
           <input
@@ -2238,8 +1427,8 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
           />
         </div>
         <div>
-          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-idle-seconds">
-            空闲自动停止（秒，0=关闭）
+          <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="cc-bridge-idle-seconds">
+            {t("tools.cc.idleStop")}
           </label>
           <input
             id="cc-bridge-idle-seconds"
@@ -2253,7 +1442,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
           />
         </div>
         <p className="text-[11px] text-text-faint">
-          运行模式、URL、token、空闲时间修改后，请点击窗口底部「退出」与「工具」页其它项一并写入本机配置。
+          {t("tools.cc.saveHint")}
         </p>
         <div className="flex flex-wrap gap-2">
           <button
@@ -2262,7 +1451,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
             disabled={busy}
             onClick={() => void regen()}
           >
-            重新生成 token
+            {t("tools.cc.regenToken")}
           </button>
           <button
             type="button"
@@ -2270,7 +1459,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
             disabled={busy}
             onClick={() => void load()}
           >
-            重新加载
+            {t("tools.cc.reload")}
           </button>
         </div>
         {msg ? <div className="text-xs text-text-subtle">{msg}</div> : null}
@@ -2279,8 +1468,342 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
   );
 });
 
+type WbBridgePanelHandle = {
+  save: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, never>>(
+  function WbBridgeSettingsPanel(_props, ref) {
+    const { t } = useTranslation("settings");
+    const apiToken = useAppStore((s) => s.apiToken);
+    const backendUrl = useAppStore((s) => s.backendUrl);
+    const [url, setUrl] = useState("http://127.0.0.1:9743");
+    const [token, setToken] = useState("");
+    const [showToken, setShowToken] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState("");
+    const [probeBusy, setProbeBusy] = useState(false);
+    const [probe, setProbe] = useState<{
+      ready?: boolean;
+      reachable?: boolean;
+      auth_ok?: boolean;
+      detail?: string;
+      autostart?: string;
+    } | null>(null);
+
+    const parseJsonOrError = useCallback(async (res: Response): Promise<any> => {
+      const text = await res.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch {
+        const short = text.slice(0, 120).replace(/\s+/g, " ");
+        throw new Error(
+          t("commonSettings.nonJsonBackend", { status: res.status, snippet: short }),
+        );
+      }
+    }, [t]);
+
+    const load = useCallback(async () => {
+      setLoading(true);
+      setMsg("");
+      try {
+        const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+        const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+        const headers: Record<string, string> = {};
+        if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/config`, { headers });
+        const data = (await parseJsonOrError(res)) as {
+          ok?: boolean;
+          url?: string;
+          token?: string;
+          error?: string;
+        };
+        if (data.ok) {
+          setUrl((data.url || "http://127.0.0.1:9743").trim());
+          setToken(data.token || "");
+        } else {
+          setMsg(data.error || t("commonSettings.loadFailed"));
+        }
+      } catch (e) {
+        setMsg(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }, [apiToken, backendUrl, parseJsonOrError]);
+
+    const authHeaders = useCallback(async (): Promise<{
+      headers: Record<string, string>;
+      effectiveBase: string;
+    }> => {
+      const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+      const headers: Record<string, string> = {};
+      if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+      return { headers, effectiveBase };
+    }, [apiToken, backendUrl]);
+
+    const checkStatus = useCallback(async () => {
+      setProbeBusy(true);
+      try {
+        const { headers, effectiveBase } = await authHeaders();
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/status`, { headers });
+        const data = (await parseJsonOrError(res)) as {
+          ready?: boolean;
+          reachable?: boolean;
+          auth_ok?: boolean;
+          detail?: string;
+        };
+        setProbe(data);
+      } catch (e) {
+        setProbe({ ready: false, reachable: false, auth_ok: false, detail: String(e) });
+      } finally {
+        setProbeBusy(false);
+      }
+    }, [authHeaders, parseJsonOrError]);
+
+    const ensureServe = useCallback(async () => {
+      setProbeBusy(true);
+      setMsg("");
+      try {
+        const { headers, effectiveBase } = await authHeaders();
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/ensure`, {
+          method: "POST",
+          headers,
+        });
+        const data = (await parseJsonOrError(res)) as {
+          ready?: boolean;
+          reachable?: boolean;
+          auth_ok?: boolean;
+          detail?: string;
+          autostart?: string;
+        };
+        setProbe(data);
+        if (data.ready) {
+          setMsg(t("tools.wb.serveReady"));
+        } else if (data.reachable && !data.auth_ok) {
+          setMsg(t("tools.wb.tokenMismatchHint"));
+        } else {
+          setMsg(data.detail || data.autostart || t("tools.wb.startFailed"));
+        }
+      } catch (e) {
+        setProbe({ ready: false, reachable: false, auth_ok: false, detail: String(e) });
+        setMsg(String(e));
+      } finally {
+        setProbeBusy(false);
+      }
+    }, [authHeaders, parseJsonOrError]);
+
+    useEffect(() => {
+      void load();
+    }, [load]);
+
+    useEffect(() => {
+      if (loading) return;
+      void checkStatus();
+    }, [loading, checkStatus]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        async save() {
+          if (loading) {
+            return { ok: false, error: t("tools.wb.stillLoading") };
+          }
+          setBusy(true);
+          setMsg("");
+          try {
+            const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+            const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+            const res = await fetch(`${effectiveBase}/api/wb-bridge/config`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ url: url.trim(), token }),
+            });
+            const data = (await parseJsonOrError(res)) as {
+              ok?: boolean;
+              url?: string;
+              token?: string;
+              detail?: unknown;
+            };
+            if (data.ok) {
+              setUrl((data.url || url).trim());
+              setToken(data.token || token);
+              setMsg(t("commonSettings.saved"));
+              return { ok: true };
+            }
+            const d = data.detail;
+            const errText = typeof d === "string" ? d : d != null ? JSON.stringify(d) : t("commonSettings.saveFailed");
+            setMsg(errText);
+            return { ok: false, error: errText };
+          } catch (e) {
+            const errText = String(e);
+            setMsg(errText);
+            return { ok: false, error: errText };
+          } finally {
+            setBusy(false);
+          }
+        },
+      }),
+      [apiToken, backendUrl, loading, parseJsonOrError, t, token, url],
+    );
+
+    const regen = async () => {
+      setBusy(true);
+      setMsg("");
+      try {
+        const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+        const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+        const headers: Record<string, string> = {};
+        if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/token/regenerate`, {
+          method: "POST",
+          headers,
+        });
+        const data = (await parseJsonOrError(res)) as { ok?: boolean; token?: string; detail?: unknown };
+        if (data.ok && data.token) {
+          setToken(data.token);
+          setMsg(t("tools.wb.regenDone"));
+        } else {
+          const d = data.detail;
+          setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : t("commonSettings.regenerateFailed"));
+        }
+      } catch (e) {
+        setMsg(String(e));
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const statusLabel = probeBusy
+      ? t("tools.wb.probing")
+      : probe?.ready
+        ? t("tools.wb.ready")
+        : probe?.reachable && !probe?.auth_ok
+          ? t("tools.wb.tokenMismatch")
+          : probe
+            ? t("tools.wb.notListening")
+            : t("tools.wb.unknown");
+    const statusDot = probeBusy
+      ? "bg-text-faint"
+      : probe?.ready
+        ? "bg-emerald-400"
+        : "bg-rose-400";
+
+    if (loading) {
+      return (
+        <Panel title={t("tools.wb.title")}>
+          <div className="py-4 text-center text-xs text-text-faint">{t("commonSettings.loadingEllipsis")}</div>
+        </Panel>
+      );
+    }
+
+    return (
+      <Panel
+        title={t("tools.wb.title")}
+        actions={
+          <span className="flex items-center gap-1.5 text-[11px] text-text-subtle">
+            <span className={`h-2 w-2 rounded-full ${statusDot}`} aria-hidden />
+            {statusLabel}
+          </span>
+        }
+      >
+        <div className={`mb-2 space-y-1 ${SETTINGS_INTRO_CLASS}`}>
+          <p>
+            <Trans t={t} i18nKey="tools.wb.intro1" components={{ code: <code className="rounded bg-surface-panel px-0.5" /> }} />
+          </p>
+          <p>
+            <Trans t={t} i18nKey="tools.wb.intro2" components={{ code: <code className="rounded bg-surface-panel px-0.5" /> }} />
+          </p>
+        </div>
+        <div className="space-y-2">
+          <div>
+            <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="wb-bridge-url">
+              Bridge URL
+            </label>
+            <input
+              id="wb-bridge-url"
+              type="text"
+              className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
+              value={url}
+              disabled={busy}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://127.0.0.1:9743"
+            />
+          </div>
+          <div>
+            <div className="mb-0.5 flex items-center justify-between gap-2">
+              <label className={SETTINGS_LABEL_CLASS} htmlFor="wb-bridge-token">
+                Bearer token
+              </label>
+              <button
+                type="button"
+                className="text-[11px] text-text-faint transition hover:text-text-subtle"
+                onClick={() => setShowToken((v) => !v)}
+              >
+                {showToken ? t("commonSettings.hide") : t("commonSettings.show")}
+              </button>
+            </div>
+            <input
+              id="wb-bridge-token"
+              className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
+              type={showToken ? "text" : "password"}
+              value={token}
+              disabled={busy}
+              onChange={(e) => setToken(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <p className="text-[11px] text-text-faint">
+            {t("tools.wb.saveHint")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={busy || probeBusy}
+              onClick={() => void checkStatus()}
+            >
+              {probeBusy ? t("tools.wb.probing") : t("tools.wb.probe")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-emerald-200 disabled:opacity-40"
+              disabled={busy || probeBusy}
+              onClick={() => void ensureServe()}
+            >
+              {t("tools.wb.startAndProbe")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-amber-200 disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void regen()}
+            >
+              {t("tools.cc.regenToken")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void load()}
+            >
+              {t("tools.cc.reload")}
+            </button>
+          </div>
+          {msg ? <div className="text-xs text-text-subtle">{msg}</div> : null}
+        </div>
+      </Panel>
+    );
+  },
+);
+
 const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function ToolsTab(_props, ref) {
+  const { t } = useTranslation("settings");
   const ccBridgePanelRef = useRef<CcBridgePanelHandle>(null);
+  const wbBridgePanelRef = useRef<WbBridgePanelHandle>(null);
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [policy, setPolicy] = useState<Record<string, boolean>>({});
   const [toolsOptions, setToolsOptions] = useState<StudioToolsOptions>({});
@@ -2294,6 +1817,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
+  const [opsToolsEnabled, setOpsToolsEnabled] = useState(true);
   const [toolSearchMode, setToolSearchMode] = useState<"off" | "auto" | "always">("off");
   const [toolSearchThreshold, setToolSearchThreshold] = useState(6000);
   const [toolSearchStrategy, setToolSearchStrategy] = useState<"adaptive" | "manual">("adaptive");
@@ -2338,7 +1862,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         });
         if (!rtRes?.ok) {
           setToolSearchPersistError(
-            rtRes?.error ? String(rtRes.error) : "工具按需加载配置写入失败",
+            rtRes?.error ? String(rtRes.error) : t("tools.toolSearchSaveFailed"),
           );
           return false;
         }
@@ -2424,7 +1948,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         window.agenticxDesktop.loadRuntimeConfig().catch(() => ({ ok: false as const })),
       ]);
       if (regResult?.ok) setRegistry(Array.isArray(regResult.tools) ? regResult.tools : []);
-      else setError(regResult?.error ?? "加载工具注册表失败");
+      else setError(regResult?.error ?? t("tools.registryLoadFailed"));
       if (policyResult?.ok) {
         setPolicy(policyResult.tools_enabled ?? {});
         const opts = policyResult.tools_options ?? {};
@@ -2528,15 +2052,16 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             max_tokens_per_turn: Number(runtimeResult.max_tokens_per_turn),
           }),
         );
+        setOpsToolsEnabled(runtimeResult.ops_tools_enabled !== false);
       } else {
-        setRuntimeLoadError("读取运行时参数失败，仍可按当前滑块值保存。");
+        setRuntimeLoadError(t("tools.runtimeReadFailed"));
       }
     } catch (err) {
       setError(String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
 
@@ -2555,7 +2080,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           percent: Number.isFinite(event.percent) ? event.percent : current.percent,
           phase: event.phase || current.phase,
           message: event.message || current.message,
-          error: event.phase === "error" ? event.message || "安装失败" : undefined,
+          error: event.phase === "error" ? event.message || t("commonSettings.installFailed") : undefined,
         };
         return { ...prev, [targetToolId]: next };
       });
@@ -2597,7 +2122,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     () => ({
       async saveAll() {
         if (loading) {
-          return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「退出」。" };
+          return { ok: false, error: t("tools.stillLoading") };
         }
         await saveBashDefaultTimeout();
         let afterSec = stallNudge.stall_auto_nudge_after_seconds;
@@ -2629,30 +2154,39 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           unattended_auto_resume_interrupted: unattended.unattended_auto_resume_interrupted,
           max_tokens_per_session: tokenBudget.max_tokens_per_session,
           max_tokens_per_turn: tokenBudget.max_tokens_per_turn,
+          ops_tools_enabled: opsToolsEnabled,
         });
         if (!rtRes?.ok) {
           return {
             ok: false,
-            error: rtRes?.error ? String(rtRes.error) : "运行时参数保存失败",
+            error: rtRes?.error ? String(rtRes.error) : t("tools.runtimeSaveFailed"),
           };
         }
         const bridge = ccBridgePanelRef.current;
         if (!bridge) {
-          return { ok: false, error: "Claude Code Bridge 区块未就绪，请稍后再试。" };
+          return { ok: false, error: t("tools.ccNotReady") };
         }
-        return bridge.save();
+        const ccRes = await bridge.save();
+        if (!ccRes.ok) return ccRes;
+        const wbBridge = wbBridgePanelRef.current;
+        if (!wbBridge) {
+          return { ok: false, error: t("tools.wbNotReady") };
+        }
+        return wbBridge.save();
       },
     }),
     [
       loading,
       maxToolRounds,
       maxTaskspaces,
+      opsToolsEnabled,
       toolSearchMode,
       toolSearchThreshold,
       toolSearchStrategy,
       toolSearchRatioPercent,
       saveBashDefaultTimeout,
       stallNudge,
+      t,
       tokenBudget,
       unattended,
     ],
@@ -2660,7 +2194,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
 
   const startInstall = async (tool: ToolStatusItem) => {
     if (!tool.auto_installable) {
-      const command = tool.install_command || "请参考官方文档安装";
+      const command = tool.install_command || t("tools.installDocs");
       setInstalling((prev) => ({
         ...prev,
         [tool.id]: { requestId: `manual-${tool.id}`, percent: 0, phase: "manual_required", message: command },
@@ -2670,58 +2204,63 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     const requestId = `${tool.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     setInstalling((prev) => ({
       ...prev,
-      [tool.id]: { requestId, percent: 0, phase: "starting", message: `开始安装 ${tool.name}...` },
+      [tool.id]: { requestId, percent: 0, phase: "starting", message: t("tools.startInstall", { name: tool.name }) },
     }));
     const result = await window.agenticxDesktop.installTool({ requestId, toolId: tool.id });
     if (!result?.ok) {
       setInstalling((prev) => ({
         ...prev,
-        [tool.id]: { requestId, percent: 0, phase: "error", message: result?.error || "安装失败", error: result?.error || "安装失败" },
+        [tool.id]: { requestId, percent: 0, phase: "error", message: result?.error || t("commonSettings.installFailed"), error: result?.error || t("commonSettings.installFailed") },
       }));
     }
   };
 
+  const labelsByTool = useMemo(() => toolLabels(t), [t]);
+  const labelsByCategory = useMemo(() => categoryLabels(t), [t]);
+
   const grouped = useMemo(() => {
     const q = search.toLowerCase().trim();
     const filtered = q
-      ? registry.filter((t) => {
-          const descZh = toolDisplayDescription(t.name, t.description).toLowerCase();
+      ? registry.filter((tool) => {
+          const descZh = toolDisplayDescription(tool.name, tool.description, t).toLowerCase();
           return (
-            t.name.toLowerCase().includes(q) ||
-            (TOOL_LABELS[t.name] ?? "").toLowerCase().includes(q) ||
+            tool.name.toLowerCase().includes(q) ||
+            (labelsByTool[tool.name] ?? "").toLowerCase().includes(q) ||
             descZh.includes(q) ||
-            t.description.toLowerCase().includes(q) ||
-            (CATEGORY_LABELS[t.category] ?? "").toLowerCase().includes(q)
+            tool.description.toLowerCase().includes(q) ||
+            (labelsByCategory[tool.category] ?? "").toLowerCase().includes(q)
           );
         })
       : registry;
     const map = new Map<string, RegistryTool[]>();
-    for (const t of filtered) {
-      const cat = t.category || "other";
+    for (const tool of filtered) {
+      const cat = tool.category || "other";
       const arr = map.get(cat);
-      if (arr) arr.push(t);
-      else map.set(cat, [t]);
+      if (arr) arr.push(tool);
+      else map.set(cat, [tool]);
     }
     return CATEGORY_ORDER
       .filter((cat) => map.has(cat))
-      .map((cat) => ({ category: cat, label: CATEGORY_LABELS[cat] ?? cat, tools: map.get(cat)! }));
-  }, [registry, search]);
+      .map((cat) => ({ category: cat, label: labelsByCategory[cat] ?? cat, tools: map.get(cat)! }));
+  }, [labelsByCategory, labelsByTool, registry, search, t]);
 
-  if (loading) return <div className="py-8 text-center text-sm text-text-faint">加载工具状态中...</div>;
+  if (loading) return <div className="py-8 text-center text-sm text-text-faint">{t("tools.loadingStatus")}</div>;
 
   return (
     <div className="space-y-4">
       <div className="text-sm text-text-subtle">
-        管理 Agent 可调用工具的全局启停状态。关闭后 Agent 将无法调用该工具。
+        {t("tools.intro")}
       </div>
       <div className="text-xs text-text-faint">
-        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。窗口底部「退出」会一并提交本页 bash 默认超时、最大工具轮数与 Claude Code Bridge 配置。
+        {t("tools.introHint")}
       </div>
       <RuntimeConfigSection
         maxToolRounds={maxToolRounds}
         onMaxToolRoundsChange={setMaxToolRounds}
         maxTaskspaces={maxTaskspaces}
         onMaxTaskspacesChange={setMaxTaskspaces}
+        opsToolsEnabled={opsToolsEnabled}
+        onOpsToolsEnabledChange={setOpsToolsEnabled}
         disabled={loading}
       />
       <ToolSearchConfigSection
@@ -2753,12 +2292,12 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       ) : null}
 
       {/* ── 内建 Agent 工具 ── */}
-      <Panel title={`预授权工具 (${registry.length})`} collapsible defaultCollapsed>
+      <Panel title={t("tools.preauthorized", { count: registry.length })} collapsible defaultCollapsed>
         <div className="mb-2 flex items-center gap-2">
           <input
             type="text"
             className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary placeholder:text-text-faint"
-            placeholder="搜索工具..."
+            placeholder={t("tools.searchPh")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -2768,33 +2307,33 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             <div key={category}>
               <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-faint">{label}</div>
               <div className="space-y-1">
-                {catTools.map((t) => {
-                  const enabled = policy[t.name] !== false;
-                  const autoAdded = !(t.name in policy) || policy[t.name] === true;
-                  const showAdvanced = ADVANCED_TOOL_POLICY_NAMES.has(t.name);
-                  const advOpen = Boolean(advOpenByTool[t.name]);
+                {catTools.map((tool) => {
+                  const enabled = policy[tool.name] !== false;
+                  const autoAdded = !(tool.name in policy) || policy[tool.name] === true;
+                  const showAdvanced = ADVANCED_TOOL_POLICY_NAMES.has(tool.name);
+                  const advOpen = Boolean(advOpenByTool[tool.name]);
                   return (
                     <div
-                      key={t.name}
+                      key={tool.name}
                       className="flex items-start justify-between gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-text-primary">{TOOL_LABELS[t.name] ?? t.name}</span>
+                          <span className="text-sm font-medium text-text-primary">{labelsByTool[tool.name] ?? tool.name}</span>
                           {autoAdded && enabled ? (
-                            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">模式自动添加</span>
+                            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">{t("tools.modeAuto")}</span>
                           ) : !enabled ? (
-                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">禁用时需要人工审批</span>
+                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">{t("tools.needsApproval")}</span>
                           ) : null}
                         </div>
-                        <div className="mt-0.5 text-xs text-text-muted">{toolDisplayDescription(t.name, t.description)}</div>
+                        <div className="mt-0.5 text-xs text-text-muted">{toolDisplayDescription(tool.name, tool.description, t)}</div>
                         {showAdvanced ? (
                           <div className="mt-2">
                             <button
                               type="button"
                               className="flex items-center gap-1 text-xs text-text-subtle transition hover:text-text-primary"
                               onClick={() =>
-                                setAdvOpenByTool((prev) => ({ ...prev, [t.name]: !prev[t.name] }))
+                                setAdvOpenByTool((prev) => ({ ...prev, [tool.name]: !prev[tool.name] }))
                               }
                               aria-expanded={advOpen}
                             >
@@ -2802,15 +2341,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
                                 className={`h-3.5 w-3.5 shrink-0 transition-transform ${advOpen ? "rotate-90" : ""}`}
                                 aria-hidden
                               />
-                              高级设置
+                              {t("tools.advanced")}
                             </button>
-                            {advOpen && t.name === "bash_exec" ? (
+                            {advOpen && tool.name === "bash_exec" ? (
                               <div className="mt-2 space-y-1.5 pl-1">
-                                <label className="block text-[11px] font-medium text-text-muted" htmlFor={`bash-timeout-${t.name}`}>
-                                  默认超时（秒）
+                                <label className="block text-[11px] font-medium text-text-muted" htmlFor={`bash-timeout-${tool.name}`}>
+                                  {t("tools.defaultTimeout")}
                                 </label>
                                 <input
-                                  id={`bash-timeout-${t.name}`}
+                                  id={`bash-timeout-${tool.name}`}
                                   type="text"
                                   inputMode="numeric"
                                   autoComplete="off"
@@ -2823,11 +2362,14 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
                                   onBlur={() => void saveBashDefaultTimeout()}
                                 />
                                 <p className="max-w-md text-[10px] leading-relaxed text-text-faint">
-                                  模型仍可在单次调用中传{" "}
+                                  {t("tools.timeoutHintBefore")}{" "}
                                   <code className="rounded bg-surface-panel px-0.5">timeout_sec</code>{" "}
-                                  覆盖；未传时使用此处默认值（范围 {BASH_DEFAULT_TIMEOUT_MIN}–{BASH_DEFAULT_TIMEOUT_MAX}{" "}
-                                  秒）。保存后下一轮 <code className="rounded bg-surface-panel px-0.5">bash_exec</code>{" "}
-                                  起生效。
+                                  <Trans
+                                    t={t}
+                                    i18nKey="tools.timeoutHintAfter"
+                                    values={{ min: BASH_DEFAULT_TIMEOUT_MIN, max: BASH_DEFAULT_TIMEOUT_MAX }}
+                                    components={{ code: <code className="rounded bg-surface-panel px-0.5" /> }}
+                                  />
                                 </p>
                               </div>
                             ) : null}
@@ -2837,8 +2379,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
                       <div className="mt-0.5 shrink-0">
                         <SettingsSwitch
                           checked={enabled}
-                          onChange={(next) => void toggleTool(t.name, next)}
-                          aria-label={`启用工具 ${t.name}`}
+                          onChange={(next) => void toggleTool(tool.name, next)}
+                          aria-label={t("tools.enableTool", { name: tool.name })}
                         />
                       </div>
                     </div>
@@ -2848,15 +2390,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             </div>
           ))}
           {grouped.length === 0 && search ? (
-            <div className="py-4 text-center text-xs text-text-faint">未找到匹配工具</div>
+            <div className="py-4 text-center text-xs text-text-faint">{t("tools.noMatch")}</div>
           ) : null}
         </div>
       </Panel>
 
       {/* ── 环境依赖（可安装的外部工具） ── */}
-      <Panel title="环境依赖">
+      <Panel title={t("tools.envDeps")}>
         <div className="mb-2 text-xs text-text-subtle">
-          外部可执行文件依赖。全局安装一次后所有分身共享。
+          {t("tools.envHint")}
         </div>
         <div className="space-y-2">
           {envTools.map((tool) => {
@@ -2864,8 +2406,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             const isInstalling = Boolean(installState) && !["done", "error", "manual_required"].includes(installState.phase);
             const isManual = installState?.phase === "manual_required";
             const badge = tool.installed
-              ? "已安装"
-              : isInstalling ? "安装中" : isManual ? "需手动安装" : "未安装";
+              ? t("tools.installed")
+              : isInstalling ? t("tools.installing") : isManual ? t("tools.manualInstall") : t("tools.notInstalled");
             const badgeClass = tool.installed
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
               : isInstalling
@@ -2881,7 +2423,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
                     </div>
                     <div className="mt-0.5 text-xs text-text-muted">{tool.description}</div>
                     {tool.installed && tool.version ? (
-                      <div className="mt-0.5 text-[11px] text-text-faint">版本: {tool.version}</div>
+                      <div className="mt-0.5 text-[11px] text-text-faint">{t("tools.version", { version: tool.version })}</div>
                     ) : null}
                   </div>
                   {!tool.installed ? (
@@ -2891,7 +2433,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
                       onClick={() => void startInstall(tool)}
                       disabled={isInstalling}
                     >
-                      {tool.auto_installable ? "安装" : "查看安装指南"}
+                      {tool.auto_installable ? t("tools.install") : t("tools.installGuide")}
                     </button>
                   ) : null}
                 </div>
@@ -2924,6 +2466,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       </Panel>
 
       <CcBridgeSettingsPanel ref={ccBridgePanelRef} />
+      <WbBridgeSettingsPanel ref={wbBridgePanelRef} />
     </div>
   );
 });
@@ -2962,6 +2505,8 @@ function normalizeSkillScanCustomPaths(
 }
 
 function SkillsTab() {
+  const { t } = useTranslation("settings");
+  const { t: tCommon } = useTranslation("common");
   const [items, setItems] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -3063,7 +2608,7 @@ function SkillsTab() {
         ]);
         if (!cancelled) {
           if (skillsRes.ok) setItems(skillsRes.items ?? []);
-          else setErr(skillsRes.error ?? "加载技能失败");
+          else setErr(skillsRes.error ?? t("skills.loadFailed"));
           if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
             setSkillScanPresets(
               scanRes.preset_paths.map((p) => ({
@@ -3150,12 +2695,12 @@ function SkillsTab() {
           if (Array.isArray(r.disabled_skills)) {
             setDisabledSkillNames([...r.disabled_skills]);
           }
-          setSkillScanMsg("已保存扫描路径");
+          setSkillScanMsg(t("skills.scanSaved"));
           await window.agenticxDesktop.refreshSkills();
           const skillsRes = await window.agenticxDesktop.loadSkills();
           if (skillsRes.ok) setItems(skillsRes.items ?? []);
         } else {
-          setSkillScanMsg(r.error ?? "保存失败");
+          setSkillScanMsg(r.error ?? t("commonSettings.saveFailed"));
         }
       } catch (e) {
         setSkillScanMsg(String(e));
@@ -3163,7 +2708,7 @@ function SkillsTab() {
         setSkillScanBusy(false);
       }
     },
-    [],
+    [t],
   );
 
   const onRefresh = async () => {
@@ -3179,7 +2724,7 @@ function SkillsTab() {
         window.agenticxDesktop.getSkillSettings(),
       ]);
       if (skillsRes.ok) setItems(skillsRes.items ?? []);
-      else setErr(skillsRes.error ?? "刷新失败");
+      else setErr(skillsRes.error ?? t("skills.refreshFailed"));
       if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
         setSkillScanPresets(
           scanRes.preset_paths.map((p) => ({
@@ -3238,7 +2783,7 @@ function SkillsTab() {
   const onAddCustomSkillPath = useCallback(() => {
     if (skillScanBusy) return;
     if (skillScanDraftPath !== null) {
-      setSkillScanMsg("请先确认或取消当前草稿路径");
+      setSkillScanMsg(t("skills.confirmDraftFirst"));
       return;
     }
     setSkillScanDraftPath("");
@@ -3248,14 +2793,14 @@ function SkillsTab() {
   const pickSkillDirectory = useCallback(async (): Promise<string | null> => {
     const picker = window.agenticxDesktop.chooseDirectory;
     if (typeof picker !== "function") {
-      setSkillScanMsg("当前客户端不支持目录选择，请重启桌面端后重试。");
+      setSkillScanMsg(t("skills.noFolderPicker"));
       return null;
     }
     try {
       const picked = await picker();
       if (picked.canceled) return null;
       if (!picked.ok || !picked.path?.trim()) {
-        setSkillScanMsg(picked.error ? `选择目录失败: ${picked.error}` : "未选择目录");
+        setSkillScanMsg(picked.error ? t("skills.pickDirFailed", { reason: picked.error }) : t("commonSettings.noDirectorySelected"));
         return null;
       }
       return picked.path.trim();
@@ -3279,7 +2824,7 @@ function SkillsTab() {
       const path = await pickSkillDirectory();
       if (path == null) return;
       if (skillScanCustomPaths.some((p, i) => i !== index && p.path.trim() === path)) {
-        setSkillScanMsg("该路径已在自定义列表中");
+        setSkillScanMsg(t("skills.pathAlreadyListed"));
         return;
       }
       const next = skillScanCustomPaths.map((row, i) =>
@@ -3303,11 +2848,11 @@ function SkillsTab() {
     if (skillScanBusy || skillScanDraftPath === null) return;
     const path = skillScanDraftPath.trim();
     if (!path) {
-      setSkillScanMsg("请先填写路径");
+      setSkillScanMsg(t("commonSettings.pathEmpty"));
       return;
     }
     if (skillScanCustomPaths.some((p) => p.path.trim() === path)) {
-      setSkillScanMsg("该路径已在自定义列表中");
+      setSkillScanMsg(t("skills.pathAlreadyListed"));
       return;
     }
     const next = [...skillScanCustomPaths, { path, enabled: true }];
@@ -3356,7 +2901,7 @@ function SkillsTab() {
       try {
         const created = await window.agenticxDesktop.createSession({});
         if (!created.ok || !created.session_id) {
-          const err = created.error ?? "创建 Meta-Agent 会话失败";
+          const err = created.error ?? t("skills.createMetaFailed");
           setSkillhubMsg(err);
           return;
         }
@@ -3414,7 +2959,7 @@ function SkillsTab() {
       const res = await window.agenticxDesktop.searchSkillHub({ q: skillhubQuery });
       if (!res.ok) {
         setSkillhubResults([]);
-        setSkillhubMsg(res.error || "搜索失败");
+        setSkillhubMsg(res.error || t("skills.searchFailed"));
         return;
       }
       const raw = Array.isArray(res.items) ? res.items : [];
@@ -3454,12 +2999,12 @@ function SkillsTab() {
       if (res.ok) {
         setMarketResults(res.items ?? []);
         if ((res.items ?? []).length === 0) {
-          setMarketMsg(res.hint?.trim() || "未找到相关技能");
+          setMarketMsg(res.hint?.trim() || t("skills.noneFound"));
         } else {
           setMarketMsg("");
         }
       } else {
-        setMarketMsg(res.error ?? "搜索失败");
+        setMarketMsg(res.error ?? t("skills.searchFailed"));
         setMarketResults([]);
       }
     } catch (e) {
@@ -3482,7 +3027,7 @@ function SkillsTab() {
         marketInstallQueueRef.current.push(item);
         setMarketQueuedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
       }
-      setMarketMsg(`正在安装「${marketInstallingKey.split(":")[1]}」，已将「${item.name}」加入队列。`);
+      setMarketMsg(t("skills.installQueued", { current: marketInstallingKey.split(":")[1], queued: item.name }));
       return;
     }
     setMarketQueuedKeys((prev) => prev.filter((k) => k !== key));
@@ -3494,7 +3039,7 @@ function SkillsTab() {
     setMarketNeedsConfirmNonHigh(false);
     setMarketNeedsConfirmHigh(false);
     setMarketPending(null);
-    setMarketMsg(`正在拉取并扫描「${item.name}」…`);
+    setMarketMsg(t("skills.pulling", { name: item.name }));
     let pauseQueue = false;
     try {
       const prev = await window.agenticxDesktop.installFromRegistryPreview({
@@ -3502,34 +3047,34 @@ function SkillsTab() {
         name: item.name,
       });
       if (!prev.ok) {
-        const rawErr = String(prev.error ?? "未知错误");
+        const rawErr = String(prev.error ?? t("commonSettings.unknownError"));
         const is429 = rawErr.includes("rate limited (429)") || rawErr.includes("Too Many Requests");
         if (is429) {
           const secMatch = rawErr.match(/about (\d+)s/);
           const waitSec = secMatch ? Math.min(Number(secMatch[1]), 30) : 10;
-          setMarketMsg(`拉取受限：ClawHub 限流中，${waitSec} 秒后自动重试…`);
+          setMarketMsg(t("skills.rateLimited", { seconds: waitSec }));
           await new Promise((r) => setTimeout(r, waitSec * 1000));
-          setMarketMsg(`正在重新拉取「${item.name}」…`);
+          setMarketMsg(t("skills.repulling", { name: item.name }));
           const retry = await window.agenticxDesktop.installFromRegistryPreview({
             source: item.source,
             name: item.name,
           });
           if (!retry.ok) {
-            const retryErr = String(retry.error ?? "未知错误");
-            setMarketMsg(`拉取失败：${retryErr}`);
+            const retryErr = String(retry.error ?? t("commonSettings.unknownError"));
+            setMarketMsg(t("skills.pullFailed", { reason: retryErr }));
             return;
           }
           Object.assign(prev, retry);
         } else if (rawErr.includes("fetch failed") || rawErr.includes("Failed to fetch skill")) {
-          setMarketMsg(`拉取失败：${rawErr}`);
+          setMarketMsg(t("skills.pullFailed", { reason: rawErr }));
           return;
         } else {
-          setMarketMsg(`扫描未通过：${rawErr}`);
+          setMarketMsg(t("skills.scanFailed", { reason: rawErr }));
           return;
         }
       }
       if (prev.scan) {
-        setMarketMsg(formatSkillScanSummary(prev.scan));
+        setMarketMsg(formatSkillScanSummary(prev.scan, t));
       }
 
       const res = await window.agenticxDesktop.installFromRegistry({
@@ -3538,7 +3083,7 @@ function SkillsTab() {
       });
       if (res.ok) {
         setMarketMsg(
-          formatInstallDoneMsg(`已安装 "${item.name}"`, res.scan_summary ?? prev.scan),
+          formatInstallDoneMsg(t("skills.installedNamed", { name: item.name }), res.scan_summary ?? prev.scan, t),
         );
         await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
         return;
@@ -3548,9 +3093,9 @@ function SkillsTab() {
         setMarketNeedsConfirmNonHigh(true);
         pauseQueue = true;
         if (res.scan_summary) {
-          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
+          setMarketMsg(t("skills.confirmThenWriteWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
         } else {
-          setMarketMsg("当前策略要求你点「确认安装」后再写入。");
+          setMarketMsg(t("skills.confirmThenWrite"));
         }
         return;
       }
@@ -3559,13 +3104,13 @@ function SkillsTab() {
         setMarketNeedsConfirmHigh(true);
         pauseQueue = true;
         if (res.scan_summary) {
-          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
+          setMarketMsg(t("skills.highRiskConfirmWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
         } else {
-          setMarketMsg("命中高危规则：请阅读说明后点下方按钮确认。");
+          setMarketMsg(t("skills.highRiskConfirm"));
         }
         return;
       }
-      setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
+      setMarketMsg(t("skills.installFailedReason", { reason: res.error ?? t("commonSettings.unknownError") }));
     } catch (e) {
       setMarketMsg(String(e));
     } finally {
@@ -3599,11 +3144,11 @@ function SkillsTab() {
       setMarketPending(null);
       if (res.ok) {
         setMarketMsg(
-          formatInstallDoneMsg(`已安装 "${pending.name}"`, res.scan_summary),
+          formatInstallDoneMsg(t("skills.installedNamed", { name: pending.name }), res.scan_summary, t),
         );
         await reloadSkillsAfterMarketInstall(String(res.name ?? pending.name));
       } else {
-        setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
+        setMarketMsg(t("skills.installFailedReason", { reason: res.error ?? t("commonSettings.unknownError") }));
       }
     } catch (e) {
       setMarketMsg(String(e));
@@ -3624,7 +3169,7 @@ function SkillsTab() {
       const res = await window.agenticxDesktop.loadSkillDetail({ name });
       if (detailRequestSeqRef.current !== requestSeq) return;
       if (res.ok) setDetail({ name, content: res.content });
-      else setErr(res.error ?? "加载详情失败");
+      else setErr(res.error ?? t("skills.loadDetailFailed"));
     } catch (e) {
       if (detailRequestSeqRef.current !== requestSeq) return;
       setErr(String(e));
@@ -3650,14 +3195,14 @@ function SkillsTab() {
     globalSkills.some((s) => s.name === recentMarketSkillName);
 
   if (loading) {
-    return <div className="py-8 text-center text-sm text-text-faint">加载技能中...</div>;
+    return <div className="py-8 text-center text-sm text-text-faint">{t("skills.loadingList")}</div>;
   }
 
   return (
     <div ref={skillsListAnchorRef} className="space-y-3">
 
       {pendingProposalCount > 0 ? (
-        <Panel title={`待审 (${pendingProposalCount})`}>
+        <Panel title={t("skills.pendingTitle", { count: pendingProposalCount })}>
           <PendingProposalsList onCountChange={setPendingProposalCount} />
         </Panel>
       ) : (
@@ -3665,9 +3210,17 @@ function SkillsTab() {
       )}
 
       {/* Skill scan roots (presets + custom paths) */}
-      <Panel title="扫描路径" collapsible titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
+      <Panel title={t("skills.scanPaths")} collapsible titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
         <p className="mb-3 text-xs leading-relaxed text-text-subtle">
-          项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
+          <Trans
+            t={t}
+            i18nKey="skills.scanIntro"
+            components={{
+              a: <code className="text-text-muted" />,
+              b: <code className="text-text-muted" />,
+              c: <code className="text-text-muted" />,
+            }}
+          />
         </p>
         
         <div className="overflow-hidden rounded-lg border border-border bg-surface-base">
@@ -3682,7 +3235,7 @@ function SkillsTab() {
                   <SettingsSwitch
                     checked={p.enabled}
                     disabled={skillScanBusy}
-                    aria-label={`切换 ${p.label}`}
+                    aria-label={t("skills.togglePreset", { label: p.label })}
                     onChange={(next) => {
                       const updated = skillScanPresets.map((row) =>
                         row.id === p.id ? { ...row, enabled: next } : row,
@@ -3702,7 +3255,7 @@ function SkillsTab() {
                 <div className="flex-1 min-w-0">
                   <input
                     className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
-                    placeholder="例如 ~/my-skills 或绝对路径"
+                    placeholder={t("skills.customPathPh")}
                     value={row.path}
                     disabled={skillScanBusy}
                     onChange={(e) => {
@@ -3728,7 +3281,7 @@ function SkillsTab() {
                   type="button"
                   className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                   disabled={skillScanBusy}
-                  title="浏览选目录"
+                  title={t("skills.browseDir")}
                   onClick={() => void onBrowseCommittedSkillPath(i)}
                 >
                   <FolderOpen className="h-3.5 w-3.5" aria-hidden />
@@ -3737,7 +3290,7 @@ function SkillsTab() {
                   type="button"
                   className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
                   disabled={skillScanBusy}
-                  title="移除"
+                  title={tCommon("remove")}
                   onClick={() => {
                     const next = skillScanCustomPaths.filter((_, j) => j !== i);
                     setSkillScanCustomPaths(next);
@@ -3755,7 +3308,7 @@ function SkillsTab() {
                   <SettingsSwitch
                     checked={row.enabled}
                     disabled={skillScanBusy}
-                    aria-label={`切换自定义路径 ${row.path || i + 1}`}
+                    aria-label={t("skills.toggleCustom", { label: row.path || i + 1 })}
                     onChange={(nextEnabled) => {
                       const next = skillScanCustomPaths.map((r, j) =>
                         j === i ? { ...r, enabled: nextEnabled } : r,
@@ -3779,7 +3332,7 @@ function SkillsTab() {
                   <div className="flex-1 min-w-0">
                     <input
                       className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
-                      placeholder="例如 ~/.agents/skills 或绝对路径"
+                      placeholder={t("skills.draftPathPh")}
                       value={skillScanDraftPath}
                       disabled={skillScanBusy}
                       autoFocus
@@ -3799,7 +3352,7 @@ function SkillsTab() {
                     type="button"
                     className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                     disabled={skillScanBusy}
-                    title="浏览选目录"
+                    title={t("skills.browseDir")}
                     onClick={() => void onBrowseSkillDraftPath()}
                   >
                     <FolderOpen className="h-3.5 w-3.5" aria-hidden />
@@ -3810,7 +3363,7 @@ function SkillsTab() {
                     disabled={skillScanBusy}
                     onClick={() => void onConfirmSkillDraftPath()}
                   >
-                    确认
+                    {tCommon("confirm")}
                   </button>
                   <button
                     type="button"
@@ -3818,10 +3371,10 @@ function SkillsTab() {
                     disabled={skillScanBusy}
                     onClick={onCancelSkillDraftPath}
                   >
-                    取消
+                    {tCommon("cancel")}
                   </button>
                 </div>
-                <p className="mt-1.5 text-[10px] text-text-faint">仅本地草稿，尚未写入配置</p>
+                <p className="mt-1.5 text-[10px] text-text-faint">{t("skills.draftHint")}</p>
               </div>
             ) : null}
 
@@ -3832,7 +3385,7 @@ function SkillsTab() {
                 disabled={skillScanBusy}
                 onClick={onAddCustomSkillPath}
               >
-                添加自定义路径
+                {t("skills.addCustomPath")}
               </button>
             </div>
           </div>
@@ -3840,7 +3393,7 @@ function SkillsTab() {
         
         {skillScanMsg ? (
           <div
-            className={`mt-2 text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
+            className={`mt-2 text-xs ${settingsMsgLooksFail(skillScanMsg) ? "text-amber-400" : "text-emerald-400"}`}
           >
             {skillScanMsg}
           </div>
@@ -3855,9 +3408,9 @@ function SkillsTab() {
 
       {items.length === 0 && !err && (
         <div className="py-6 text-center text-sm text-text-faint">
-          未发现任何技能。<br />
+          {t("skills.emptyTitle")}<br />
           <span className="text-xs text-text-subtle">
-            可将 SKILL.md 放置在项目 .agents/skills/、开启上方的第三方扫描路径，或使用「自定义路径」。
+            {t("skills.emptyHint")}
           </span>
         </div>
       )}
@@ -3868,7 +3421,7 @@ function SkillsTab() {
           <>
             <SkillsLocationSection
               skills={globalSkills}
-              title="全局技能"
+              title={t("skills.globalSkills")}
               locationLabel="全局"
               search={search}
               onSearchChange={setSearch}
@@ -3891,7 +3444,7 @@ function SkillsTab() {
             />
             <SkillsLocationSection
               skills={projectSkills}
-              title="项目技能"
+              title={t("skills.projectSkills")}
               locationLabel="项目"
               activeSkillName={activeSkillName}
               expandedSkillName={expandedSkillName}
@@ -3912,7 +3465,7 @@ function SkillsTab() {
           <>
             <SkillsLocationSection
               skills={projectSkills}
-              title="项目技能"
+              title={t("skills.projectSkills")}
               locationLabel="项目"
               activeSkillName={activeSkillName}
               expandedSkillName={expandedSkillName}
@@ -3930,7 +3483,7 @@ function SkillsTab() {
             />
             <SkillsLocationSection
               skills={globalSkills}
-              title="全局技能"
+              title={t("skills.globalSkills")}
               locationLabel="全局"
               search={search}
               onSearchChange={setSearch}
@@ -3957,7 +3510,7 @@ function SkillsTab() {
 
       {/* === Skills Marketplace Section (Collapsible) === */}
       <Panel
-        title="技能市场"
+        title={t("skills.market")}
         collapsible
         defaultCollapsed={false}
         className="mt-4"
@@ -3968,18 +3521,18 @@ function SkillsTab() {
             <section className="pt-0.5">
               <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
                 <div className="text-[11px] font-semibold tracking-wide text-text-strong">
-                  官方推荐
+                  {t("skills.official")}
                 </div>
                 <div
                   className="inline-flex rounded-full bg-surface-panel p-0.5"
                   role="tablist"
-                  aria-label="推荐来源档筛选"
+                  aria-label={t("skills.tierFilterAria")}
                 >
                   {(
                     [
-                      { id: "all" as const, label: "全部" },
-                      { id: "enterprise" as const, label: RECOMMENDED_TIER_LABEL.enterprise },
-                      { id: "third_party" as const, label: RECOMMENDED_TIER_LABEL.third_party },
+                      { id: "all" as const, label: t("skills.tierAll") },
+                      { id: "enterprise" as const, label: t("skills.tierEnterprise") },
+                      { id: "third_party" as const, label: t("skills.tierThirdParty") },
                     ] as const
                   ).map((tab) => {
                     const active = recommendedTierFilter === tab.id;
@@ -4004,7 +3557,7 @@ function SkillsTab() {
               </div>
               {filteredRecommendedSkills.length === 0 ? (
                 <p className="py-8 text-center text-xs text-text-faint">
-                  该来源档暂无推荐技能
+                  {t("skills.noTierResults")}
                 </p>
               ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -4048,15 +3601,15 @@ function SkillsTab() {
                               : "mt-0.5 text-[10px] text-text-faint"
                           }
                         >
-                          {RECOMMENDED_TIER_LABEL[skill.tier]}
+                          {skill.tier === "enterprise" ? t("skills.tierEnterprise") : t("skills.tierThirdParty")}
                           <span className="mx-1 text-border">·</span>
-                          <span className="font-normal text-text-faint">{skill.category}</span>
+                          <span className="font-normal text-text-faint">{t(`skills.recommended.${skill.id}.category`)}</span>
                         </div>
                       </div>
                       <button
                         type="button"
-                        title={canInstall ? "安装" : "打开官网"}
-                        aria-label={canInstall ? `安装 ${skill.name}` : `打开 ${skill.name} 官网`}
+                        title={canInstall ? t("tools.install") : t("skills.openSite")}
+                        aria-label={canInstall ? t("skills.installNamed", { name: skill.name }) : t("skills.openSiteNamed", { name: skill.name })}
                         disabled={canInstall && installPromptBusy}
                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-black/[0.06] text-text-strong transition-colors hover:bg-black/[0.1] active:scale-[0.97] disabled:opacity-40 dark:bg-white/10 dark:hover:bg-white/15"
                         onClick={primaryAction}
@@ -4067,12 +3620,12 @@ function SkillsTab() {
                       </button>
                     </div>
                     <HoverTip
-                      label={skill.description}
+                      label={t(`skills.recommended.${skill.id}.description`)}
                       delayMs={280}
                       className="mt-2.5 min-h-0 w-full flex-1 flex-col"
                     >
                       <ClampToFitText
-                        text={skill.description}
+                        text={t(`skills.recommended.${skill.id}.description`)}
                         className="min-h-0 w-full min-w-0 flex-1 break-words text-[12px] leading-4 text-text-muted"
                       />
                     </HoverTip>
@@ -4082,7 +3635,7 @@ function SkillsTab() {
                         className="mt-2 self-start text-[11px] text-text-faint transition hover:text-text-primary"
                         onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
                       >
-                        官网
+                        {t("skills.officialSite")}
                       </button>
                     ) : null}
                   </div>
@@ -4095,12 +3648,12 @@ function SkillsTab() {
             {/* === ClawHub marketplace (registry aggregate) === */}
             <section className="rounded-lg bg-surface-panel p-3 border border-border">
               <div className="mb-3 text-[11px] font-semibold text-text-strong">
-                CLAWHUB 市场
+                {t("skills.clawhubMarket")}
               </div>
               <div className="flex gap-2">
                 <input
                   className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                  placeholder="搜索技能名称..."
+                  placeholder={t("skills.searchNamePh")}
                   value={marketQuery}
                   onChange={(e) => setMarketQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void onMarketSearch(); }}
@@ -4110,15 +3663,15 @@ function SkillsTab() {
                   onClick={() => void onMarketSearch()}
                   disabled={marketLoading}
                 >
-                  {marketLoading ? "搜索中..." : "搜索"}
+                  {marketLoading ? t("skills.searching") : t("skills.search")}
                 </button>
               </div>
               {marketMsg && (
                 <div
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
-                    marketMsg.includes("失败") || marketMsg.includes("未找到")
+                    settingsMsgLooksFail(marketMsg) || settingsMsgLooksNotFound(marketMsg)
                       ? "text-amber-400"
-                      : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || marketMsg.includes("高危")
+                      : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || settingsMsgLooksHighRisk(marketMsg)
                         ? "text-amber-300"
                         : "text-emerald-400"
                   }`}
@@ -4135,7 +3688,7 @@ function SkillsTab() {
                       disabled={registryInstallBusy}
                       onClick={() => void onConfirmMarketInstall("non_high")}
                     >
-                      {registryInstallBusy ? "安装中…" : "确认安装"}
+                      {registryInstallBusy ? t("skills.installing") : t("skills.confirmInstall")}
                     </button>
                   )}
                   {marketNeedsConfirmHigh && (
@@ -4145,7 +3698,7 @@ function SkillsTab() {
                       disabled={registryInstallBusy}
                       onClick={() => void onConfirmMarketInstall("high")}
                     >
-                      {registryInstallBusy ? "安装中…" : "我已知晓风险，确认安装"}
+                      {registryInstallBusy ? t("skills.installing") : t("skills.confirmHighRisk")}
                     </button>
                   )}
                   <button
@@ -4159,7 +3712,7 @@ function SkillsTab() {
                       setMarketMsg("");
                     }}
                   >
-                    取消
+                    {tCommon("cancel")}
                   </button>
                 </div>
               )}
@@ -4194,10 +3747,10 @@ function SkillsTab() {
                         onClick={() => void onMarketInstall(item)}
                       >
                         {marketInstallingKey === `${item.source}:${item.name}`
-                          ? "安装中…"
+                          ? t("skills.installing")
                           : marketQueuedKeys.includes(`${item.source}:${item.name}`)
-                            ? "排队中…"
-                            : "安装"}
+                            ? t("skills.queued")
+                            : t("tools.install")}
                       </button>
                     </div>
                   ))}
@@ -4209,7 +3762,7 @@ function SkillsTab() {
             <section className="rounded-lg bg-surface-panel p-3 border border-border">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-text-strong">
-                  SKILLHUB 市场
+                  {t("skills.skillhubMarket")}
                 </div>
                 <button
                   type="button"
@@ -4222,7 +3775,7 @@ function SkillsTab() {
               <div className="flex gap-2">
                 <input
                   className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                  placeholder="搜索 SkillHub 技能名称或关键词..."
+                  placeholder={t("skills.skillhubSearchPh")}
                   value={skillhubQuery}
                   onChange={(e) => setSkillhubQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -4235,13 +3788,13 @@ function SkillsTab() {
                   onClick={() => void onSkillHubSearch()}
                   disabled={skillhubLoading}
                 >
-                  {skillhubLoading ? "搜索中..." : "搜索"}
+                  {skillhubLoading ? t("skills.searching") : t("skills.search")}
                 </button>
               </div>
               {skillhubMsg && (
                 <div
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
-                    skillhubMsg.includes("失败") ? "text-amber-400" : "text-rose-400"
+                    settingsMsgLooksFail(skillhubMsg) ? "text-amber-400" : "text-rose-400"
                   }`}
                 >
                   {skillhubMsg}
@@ -4260,7 +3813,7 @@ function SkillsTab() {
                       aria-expanded={skillhubResultsExpanded}
                     >
                       <span className={`min-w-0 truncate ${SKILLS_GROUP_TITLE_CLASS}`}>
-                        搜索结果 ({skillhubResults.length})
+                        {t("skills.searchResults", { count: skillhubResults.length })}
                       </span>
                       <ChevronDown
                         className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${skillhubResultsExpanded ? "" : "-rotate-90"}`}
@@ -4276,7 +3829,7 @@ function SkillsTab() {
                         setSkillhubResultsExpanded(true);
                       }}
                     >
-                      清空
+                      {t("skills.clear")}
                     </button>
                   </div>
                   {skillhubResultsExpanded ? (
@@ -4298,7 +3851,7 @@ function SkillsTab() {
                         ) : null}
                         <p className="mt-0.5 text-[10px] text-text-faint">
                           by {item.author} · v{item.version}
-                          {item.downloads != null && item.downloads !== "" ? ` · 下载 ${String(item.downloads)}` : ""}
+                          {item.downloads != null && item.downloads !== "" ? t("skills.downloads", { count: String(item.downloads) }) : ""}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-col gap-1">
@@ -4308,7 +3861,7 @@ function SkillsTab() {
                           disabled={installPromptBusy}
                           onClick={() => onSkillHubMarketInstall(item.slug)}
                         >
-                          安装
+                          {t("tools.install")}
                         </button>
                         <button
                           type="button"
@@ -4321,7 +3874,7 @@ function SkillsTab() {
                             )
                           }
                         >
-                          详情 ↗
+                          {t("skills.detailLink")}
                         </button>
                       </div>
                     </div>
@@ -4329,7 +3882,7 @@ function SkillsTab() {
                     </div>
                   ) : (
                     <div className="rounded-md border border-dashed border-border px-3 py-2 text-center text-xs text-text-faint">
-                      已收起 {skillhubResults.length} 条结果，点击上方标题可展开
+                      {t("skills.collapsedResults", { count: skillhubResults.length })}
                     </div>
                   )}
                 </div>
@@ -4342,6 +3895,7 @@ function SkillsTab() {
 }
 
 function EmailSettingsTab() {
+  const { t } = useTranslation("settings");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -4362,7 +3916,7 @@ function EmailSettingsTab() {
           setPreset(inferPresetFromConfig(config));
         }
       } catch (err) {
-        if (!disposed) setMessage("读取配置失败，请稍后重试。");
+        if (!disposed) setMessage(t("email.loadFailed"));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -4398,9 +3952,9 @@ function EmailSettingsTab() {
         config: form,
         toEmail: form.default_to_email,
       });
-      setMessage(res?.ok ? "测试邮件发送成功。" : `测试失败: ${res?.error ?? "未知错误"}`);
+      setMessage(res?.ok ? t("email.testOk") : t("email.testFailedReason", { reason: res?.error ?? t("commonSettings.unknownError") }));
     } catch (err) {
-      setMessage("测试失败，请检查 SMTP 配置与网络。");
+      setMessage(t("email.testFailed"));
     } finally {
       setTesting(false);
     }
@@ -4411,36 +3965,36 @@ function EmailSettingsTab() {
     setMessage("");
     try {
       const res = await window.agenticxDesktop.saveEmailConfig(form);
-      setMessage(res?.ok ? "邮件配置已保存。" : `保存失败: ${res?.error ?? "未知错误"}`);
+      setMessage(res?.ok ? t("email.saved") : t("commonSettings.saveFailedWithReason", { reason: res?.error ?? t("commonSettings.unknownError") }));
     } catch (err) {
-      setMessage("保存失败，请稍后重试。");
+      setMessage(t("email.saveFailedRetry"));
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) {
-    return <div className="py-8 text-center text-sm text-text-faint">加载邮件配置中...</div>;
+    return <div className="py-8 text-center text-sm text-text-faint">{t("email.loading")}</div>;
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-border bg-surface-card p-3">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="text-sm font-medium text-text-primary">SMTP 配置</div>
+          <div className="text-sm font-medium text-text-primary">{t("email.smtpTitle")}</div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted">启用邮件通知</span>
+            <span className="text-xs text-text-muted">{t("email.enableNotify")}</span>
             <SettingsSwitch
               checked={form.enabled}
               onChange={(next) => updateField("enabled", next)}
-              aria-label="启用邮件通知"
+              aria-label={t("email.enableNotify")}
             />
           </div>
         </div>
 
         <div className="space-y-3">
-          <label className="block text-sm text-text-muted">
-            SMTP 预设
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+            {t("email.preset")}
             <select
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={preset}
@@ -4448,13 +4002,13 @@ function EmailSettingsTab() {
             >
               {EMAIL_PRESETS.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.label}
+                  {t(`email.presets.${item.id}`)}
                 </option>
               ))}
             </select>
           </label>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             SMTP Host
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -4465,7 +4019,7 @@ function EmailSettingsTab() {
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm text-text-muted">
+            <label className={`block ${SETTINGS_LABEL_CLASS}`}>
               SMTP Port
               <input
                 type="number"
@@ -4474,21 +4028,21 @@ function EmailSettingsTab() {
                 onChange={(e) => updateField("smtp_port", Number(e.target.value) || 0)}
               />
             </label>
-            <label className="block text-sm text-text-muted">
+            <label className={`block ${SETTINGS_LABEL_CLASS}`}>
               TLS
               <select
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                 value={form.smtp_use_tls ? "true" : "false"}
                 onChange={(e) => updateField("smtp_use_tls", e.target.value === "true")}
               >
-                <option value="true">启用</option>
-                <option value="false">关闭</option>
+                <option value="true">{t("commonSettings.enable")}</option>
+                <option value="false">{t("commonSettings.disable")}</option>
               </select>
             </label>
           </div>
 
-          <label className="block text-sm text-text-muted">
-            SMTP 用户名
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+            {t("email.username")}
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={form.smtp_username}
@@ -4497,19 +4051,19 @@ function EmailSettingsTab() {
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
-            SMTP 授权码 / 密码
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+            {t("email.password")}
             <input
               type="password"
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={form.smtp_password}
               onChange={(e) => updateField("smtp_password", e.target.value)}
-              placeholder="应用专用密码"
+              placeholder={t("email.passwordPh")}
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
-            发件邮箱
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+            {t("email.from")}
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={form.from_email}
@@ -4518,8 +4072,8 @@ function EmailSettingsTab() {
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
-            默认收件邮箱
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+            {t("email.to")}
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
               value={form.default_to_email}
@@ -4536,14 +4090,14 @@ function EmailSettingsTab() {
           onClick={onTestSend}
           disabled={testing || saving}
         >
-          {testing ? "测试中..." : "测试发送"}
+          {testing ? t("commonSettings.testing") : t("email.testSend")}
         </button>
         <button
           className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
           onClick={onSave}
           disabled={testing || saving}
         >
-          {saving ? "保存中..." : "保存邮件配置"}
+          {saving ? t("commonSettings.savingDots") : t("email.save")}
         </button>
       </div>
       {message ? <div className="mt-2 text-xs text-text-subtle">{message}</div> : null}
@@ -4581,6 +4135,8 @@ function FavoritesTab({
     note: string
   ) => Promise<void>;
 }) {
+  const { t } = useTranslation("settings");
+  const { t: tCommon } = useTranslation("common");
   const [items, setItems] = useState<FavoriteRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -4611,7 +4167,7 @@ function FavoritesTab({
 
   useEffect(() => {
     if (!apiBase.trim()) {
-      setErr("未连接 Studio，无法加载收藏");
+      setErr(t("favorites.needStudio"));
       setItems([]);
       return;
     }
@@ -4676,23 +4232,23 @@ function FavoritesTab({
   }, [editing, patchTags, tagSaving]);
 
   if (!apiBase.trim()) {
-    return <div className="py-8 text-center text-sm text-text-faint">未连接 Studio，无法加载收藏</div>;
+    return <div className="py-8 text-center text-sm text-text-faint">{t("favorites.needStudio")}</div>;
   }
   if (loading) {
-    return <div className="py-8 text-center text-sm text-text-faint">加载中…</div>;
+    return <div className="py-8 text-center text-sm text-text-faint">{t("commonSettings.loadingEllipsis")}</div>;
   }
   if (err && items.length === 0 && !loading) {
     return <div className="py-8 text-center text-sm text-rose-400">{err}</div>;
   }
   if (items.length === 0) {
-    return <div className="py-8 text-center text-sm text-text-faint">暂无收藏</div>;
+    return <div className="py-8 text-center text-sm text-text-faint">{t("favorites.empty")}</div>;
   }
 
   return (
     <div className="space-y-2">
       {err ? <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">{err}</div> : null}
       <p className="mb-3 text-xs text-text-subtle">
-        以下为全局收藏（按保存时间倒序）。同一条消息重复收藏不会重复写入。
+        {t("favorites.intro")}
       </p>
       <ForwardPicker
         open={forwardOpen}
@@ -4710,7 +4266,7 @@ function FavoritesTab({
         }}
       />
       {items.map((row, idx) => {
-        const content = String(row.content ?? "").trim() || "（无文本）";
+        const content = String(row.content ?? "").trim() || t("favorites.noText");
         const savedAt = String(row.saved_at ?? "");
         const sid = String(row.session_id ?? "").trim();
         const mid = String(row.message_id ?? "").trim();
@@ -4721,7 +4277,7 @@ function FavoritesTab({
           // keep raw
         }
         const tags = Array.isArray(row.tags)
-          ? row.tags.map((t) => String(t).trim()).filter(Boolean)
+          ? row.tags.map((tag) => String(tag).trim()).filter(Boolean)
           : [];
         const isEditing = editing?.messageId === mid;
 
@@ -4734,12 +4290,12 @@ function FavoritesTab({
               <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm text-text-primary">{content}</p>
               {!isEditing && tags.length > 0 ? (
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {tags.map((t) => (
+                  {tags.map((tag) => (
                     <span
-                      key={t}
+                      key={tag}
                       className="rounded-full border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted"
                     >
-                      #{t}
+                      #{tag}
                     </span>
                   ))}
                 </div>
@@ -4754,12 +4310,12 @@ function FavoritesTab({
                   }}
                 >
                   <div className="flex flex-wrap gap-1">
-                    {editing.tags.map((t) => (
+                    {editing.tags.map((tag) => (
                       <span
-                        key={t}
+                        key={tag}
                         className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-muted"
                       >
-                        {t}
+                        {tag}
                         <button
                           type="button"
                           className="text-text-faint hover:text-rose-400"
@@ -4767,7 +4323,7 @@ function FavoritesTab({
                           onClick={() =>
                             setEditing((prev) =>
                               prev && prev.messageId === mid
-                                ? { ...prev, tags: prev.tags.filter((x) => x !== t) }
+                                ? { ...prev, tags: prev.tags.filter((x) => x !== tag) }
                                 : prev
                             )
                           }
@@ -4794,7 +4350,7 @@ function FavoritesTab({
                           return { ...prev, tags: [...prev.tags, next], input: "" };
                         });
                       }}
-                      placeholder="输入新标签后按 Enter"
+                      placeholder={t("favorites.tagPh")}
                       className="min-w-[8rem] flex-1 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-primary outline-none focus:border-[var(--settings-accent-focus)]"
                     />
                     <button
@@ -4804,7 +4360,7 @@ function FavoritesTab({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => void patchTags(mid, editing.tags)}
                     >
-                      {tagSaving ? "保存中…" : "保存"}
+                      {tagSaving ? t("commonSettings.saving") : tCommon("save")}
                     </button>
                   </div>
                 </div>
@@ -4821,11 +4377,11 @@ function FavoritesTab({
                       setCopiedId(mid);
                       copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1000);
                     } catch {
-                      setErr("复制失败");
+                      setErr(t("favorites.copyFailed"));
                     }
                   }}
                 >
-                  {copiedId === mid ? "已复制" : "复制"}
+                  {copiedId === mid ? t("favorites.copied") : tCommon("copy")}
                 </button>
                 <button
                   type="button"
@@ -4841,7 +4397,7 @@ function FavoritesTab({
                     setForwardOpen(true);
                   }}
                 >
-                  转发
+                  {t("favorites.forward")}
                 </button>
                 <button
                   type="button"
@@ -4855,7 +4411,7 @@ function FavoritesTab({
                     })
                   }
                 >
-                  编辑标签
+                  {t("favorites.editTags")}
                 </button>
                 <button
                   type="button"
@@ -4883,9 +4439,9 @@ function FavoritesTab({
                     })();
                   }}
                 >
-                  删除
+                  {tCommon("delete")}
                 </button>
-                {sid ? <span className="text-text-faint">会话 {sid.slice(0, 8)}…</span> : null}
+                {sid ? <span className="text-text-faint">{t("favorites.session", { id: sid.slice(0, 8) })}</span> : null}
                 {row.role ? <span className="text-text-faint">{row.role}</span> : null}
               </div>
             </div>
@@ -4925,7 +4481,7 @@ function SettingsSwitch({
         if (!disabled) onChange(!checked);
       }}
       className={`relative ${trackClass} shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] disabled:opacity-40 ${
-        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
+        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-[var(--ui-switch-track-off)]"
       }`}
     >
       <span
@@ -4937,609 +4493,16 @@ function SettingsSwitch({
   );
 }
 
-/** 桌面操控开关：在「通用」Tab，不在工作区。 */
-function ComputerUseGeneralPanel() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [enabled, setEnabled] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      setMessage("");
-      try {
-        const result = await window.agenticxDesktop.loadComputerUseConfig();
-        if (!disposed && result?.ok && result.config) {
-          setEnabled(Boolean(result.config.enabled));
-        }
-      } catch {
-        if (!disposed) setMessage("读取桌面操控配置失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  const persist = async (next: boolean) => {
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.saveComputerUseConfig({ enabled: next });
-      if (!result?.ok) {
-        const detail = result?.error ? String(result.error) : "保存失败。";
-        setMessage(detail);
-        setEnabled(!next);
-        return;
-      }
-      setEnabled(next);
-      setMessage(
-        "已保存到本机配置。请完全退出 Near 后重新打开（勿仅关闭窗口）；内置助手会随应用一起重启并加载新设置。若使用「设置 → 服务器连接」中的远程模式，请在服务器环境同步该配置并重启远端服务。"
-      );
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-      setEnabled(!next);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <Panel title="桌面操控">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
-      </Panel>
-    );
-  }
-
-  return (
-    <Panel title="桌面操控">
-      <p className="mb-3 text-xs text-text-faint">
-        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
-        <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Near 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Near 版本；修改后需完全退出并重新打开 Near（远程模式见保存成功后的说明）。
-      </p>
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-sm text-text-subtle">
-          启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
-        </span>
-        <SettingsSwitch
-          checked={enabled}
-          disabled={saving}
-          onChange={(next) => void persist(next)}
-          aria-label="启用桌面操控"
-        />
-      </div>
-      {message ? (
-        <div
-          className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}
-        >
-          {message}
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
-
-const TRINITY_DEFAULTS: TrinityConfigForm = {
-  skill_protocol: true,
-  session_summary: false,
-  learning_enabled: false,
-  skill_manage_enabled: false,
-  learning_nudge_interval: 10,
-  learning_min_tool_calls: 5,
-};
-
-/** Keys mirrored into agx serve env at startup — toggling requires app restart. */
-const TRINITY_RESTART_ENV_KEYS = new Set<keyof TrinityConfigForm>([
-  "skill_protocol",
-  "session_summary",
-  "learning_enabled",
-  "skill_manage_enabled",
-  "learning_nudge_interval",
-  "learning_min_tool_calls",
-]);
-
-async function promptNearRestartAfterTrinitySave(
-  patch: Partial<TrinityConfigForm>,
-): Promise<boolean> {
-  const touched = (Object.keys(patch) as (keyof TrinityConfigForm)[]).some((key) =>
-    TRINITY_RESTART_ENV_KEYS.has(key),
-  );
-  if (!touched || typeof window === "undefined" || !window.agenticxDesktop?.confirmDialog) {
-    return false;
-  }
-
-  let message: string;
-  if ("skill_manage_enabled" in patch) {
-    message = patch.skill_manage_enabled
-      ? "「允许助手改本地技能」已开启。需完全退出 Near（⌘Q）后重新打开，模型才能调用 skill_manage 修改 ~/.agenticx/skills/ 下的技能。"
-      : "「允许助手改本地技能」已关闭。需重启 Near 后，后端才会禁止 skill_manage。";
-  } else {
-    message =
-      "智能体三件套设置已保存。需完全退出 Near（⌘Q）后重新打开，内置助手才会加载新配置。";
-  }
-
-  const restartDlg = await window.agenticxDesktop.confirmDialog({
-    title: "需要重启 Near",
-    message,
-    detail:
-      "内置 agx serve 仅在启动时注入相关环境变量；不重启则当前对话里 skill_manage 等能力仍按旧设置运行。",
-    confirmText: "立即重启",
-    cancelText: "稍后手动重启",
-  });
-  if (restartDlg.confirmed && window.agenticxDesktop.appRelaunch) {
-    await window.agenticxDesktop.appRelaunch();
-    return true;
-  }
-  return false;
-}
-
-function useTrinityConfig() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<TrinityConfigForm>({ ...TRINITY_DEFAULTS });
-  const [message, setMessage] = useState("");
-  const [lastSaved, setLastSaved] = useState<TrinityConfigForm>({ ...TRINITY_DEFAULTS });
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      setMessage("");
-      try {
-        const result = await window.agenticxDesktop.loadTrinityConfig();
-        if (!disposed && result?.ok && result.config) {
-          const loaded: TrinityConfigForm = {
-            skill_protocol: Boolean(result.config.skill_protocol),
-            session_summary: Boolean(result.config.session_summary),
-            learning_enabled: Boolean(result.config.learning_enabled),
-            skill_manage_enabled: Boolean(result.config.skill_manage_enabled),
-            learning_nudge_interval:
-              Number(result.config.learning_nudge_interval) > 0
-                ? Number(result.config.learning_nudge_interval)
-                : TRINITY_DEFAULTS.learning_nudge_interval,
-            learning_min_tool_calls:
-              Number(result.config.learning_min_tool_calls) > 0
-                ? Number(result.config.learning_min_tool_calls)
-                : TRINITY_DEFAULTS.learning_min_tool_calls,
-          };
-          setForm(loaded);
-          setLastSaved(loaded);
-        } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取配置失败。");
-        }
-      } catch {
-        if (!disposed) setMessage("读取配置失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => { disposed = true; };
-  }, []);
-
-  const update = useCallback(async (patch: Partial<TrinityConfigForm>) => {
-    const next = { ...form, ...patch };
-    setForm(next);
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.saveTrinityConfig(next);
-      if (!result?.ok) {
-        setForm(lastSaved);
-        setMessage(result?.error ? String(result.error) : "保存失败。");
-        return;
-      }
-      setLastSaved(next);
-      const relaunched = await promptNearRestartAfterTrinitySave(patch);
-      if (!relaunched) {
-        setMessage("已保存。完全退出 Near（⌘Q）后重新打开生效。");
-      }
-    } catch (e) {
-      setForm(lastSaved);
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-    } finally {
-      setSaving(false);
-    }
-  }, [form, lastSaved]);
-
-  return { loading, saving, form, message, update };
-}
-
-function useSkillInstallPolicy() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [nonHighRiskAutoInstall, setNonHighRiskAutoInstall] = useState(true);
-  const [lastSaved, setLastSaved] = useState(true);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      setMessage("");
-      try {
-        const result = await window.agenticxDesktop.loadSkillInstallPolicy();
-        if (!disposed && result?.ok && result.config) {
-          const v = Boolean(result.config.non_high_risk_auto_install);
-          setNonHighRiskAutoInstall(v);
-          setLastSaved(v);
-        } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取技能安装策略失败。");
-        }
-      } catch {
-        if (!disposed) setMessage("读取技能安装策略失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  const updatePolicy = useCallback(async (next: boolean) => {
-    setNonHighRiskAutoInstall(next);
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.saveSkillInstallPolicy({
-        non_high_risk_auto_install: next,
-      });
-      if (!result?.ok) {
-        setNonHighRiskAutoInstall(lastSaved);
-        setMessage(result?.error ? String(result.error) : "保存失败。");
-        return;
-      }
-      setLastSaved(next);
-      setMessage("已保存。之后装扩展包或从 ClawHub 安装的技能时，是否跳过确认由本开关与安装前扫描结果一起决定（与后端共用同一份配置）。");
-    } catch (e) {
-      setNonHighRiskAutoInstall(lastSaved);
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-    } finally {
-      setSaving(false);
-    }
-  }, [lastSaved]);
-
-  return { loading, saving, nonHighRiskAutoInstall, message, updatePolicy };
-}
-
-type GuardScanItem = {
-  skill_name: string;
-  verdict: string;
-  score?: number;
-  grade?: string;
-  tier?: string;
-  source?: string;
-  base_dir?: string;
-  can_fix?: boolean;
-  ignored?: boolean;
-  findings?: Array<{
-    pattern_name: string;
-    severity?: string;
-    matched_text?: string;
-    file_path?: string;
-    line_number?: number;
-    category?: string;
-  }>;
-};
-
-function useGuardSettings() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [version, setVersion] = useState(1);
-  const [scanMode, setScanMode] = useState("standard");
-  const [message, setMessage] = useState("");
-  const [scanBusy, setScanBusy] = useState(false);
-  const [scanResults, setScanResults] = useState<GuardScanItem[]>([]);
-  const [ignoredSkills, setIgnoredSkills] = useState<string[]>([]);
-  const [scanned, setScanned] = useState(false);
-  const [scanMsg, setScanMsg] = useState("");
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
-  const [snapshotMap, setSnapshotMap] = useState<Record<string, { id: string; ts: string }>>({});
-  const [restoreMsg, setRestoreMsg] = useState("");
-
-  const refreshSnapshotsFor = useCallback(async (items: GuardScanItem[]) => {
-    const fixable = items.filter((r) => r.can_fix && r.base_dir?.trim());
-    if (fixable.length === 0) return;
-    const entries = await Promise.all(
-      fixable.map(async (r) => {
-        try {
-          const res = await window.agenticxDesktop.skillSnapshotsList({
-            base_dir: r.base_dir!.trim(),
-          });
-          if (res?.ok && res.snapshots?.length) {
-            const latest = res.snapshots[0];
-            return [r.skill_name, { id: latest.id, ts: latest.ts }] as const;
-          }
-        } catch {
-          /* ignore per-skill list errors */
-        }
-        return null;
-      }),
-    );
-    const next: Record<string, { id: string; ts: string }> = {};
-    for (const row of entries) {
-      if (row) next[row[0]] = row[1];
-    }
-    if (Object.keys(next).length > 0) {
-      setSnapshotMap((prev) => ({ ...prev, ...next }));
-    }
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const result = await window.agenticxDesktop.getGuardSettings();
-        if (!disposed && result?.ok) {
-          if (typeof result.version === "number") setVersion(result.version);
-          if (result.scan_mode) setScanMode(result.scan_mode);
-          if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
-        }
-      } catch {
-        if (!disposed) setMessage("读取安全扫描配置失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  const saveGuard = useCallback(async (next: { version?: number; scan_mode?: string }) => {
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.putGuardSettings(next);
-      if (!result?.ok) {
-        setMessage(result?.error ? String(result.error) : "保存失败。");
-        return;
-      }
-      if (typeof result.version === "number") setVersion(result.version);
-      if (result.scan_mode) setScanMode(result.scan_mode);
-      setMessage("已保存安全扫描配置。");
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
-  const runScanAll = useCallback(async () => {
-    setScanBusy(true);
-    setScanMsg("");
-    try {
-      const result = await window.agenticxDesktop.guardScanAll({});
-      if (!result?.ok) {
-        setScanMsg(result?.error ? String(result.error) : "扫描失败。");
-        return;
-      }
-      const rows = Array.isArray(result.results) ? result.results : [];
-      setScanResults(rows);
-      if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
-      setScanned(true);
-      void refreshSnapshotsFor(rows);
-    } catch (e) {
-      setScanMsg(e instanceof Error ? e.message : "扫描失败。");
-    } finally {
-      setScanBusy(false);
-    }
-  }, [refreshSnapshotsFor]);
-
-  const restoreSnapshot = useCallback(
-    async (item: GuardScanItem) => {
-      const meta = snapshotMap[item.skill_name];
-      const base = item.base_dir?.trim();
-      if (!base || !meta?.id) {
-        setRestoreMsg("无可用的修复前备份。");
-        return;
-      }
-      setRestoreMsg("");
-      setActionBusy(item.skill_name);
-      try {
-        const res = await window.agenticxDesktop.skillSnapshotRestore({
-          base_dir: base,
-          snapshot_id: meta.id,
-        });
-        if (!res?.ok) {
-          setRestoreMsg(res?.error ? String(res.error) : "恢复失败。");
-          return;
-        }
-        setRestoreMsg(`已恢复到修复前备份（${formatGuardSnapshotTs(meta.ts)}）。`);
-        const scan = await window.agenticxDesktop.guardScanAll({});
-        if (scan?.ok) {
-          const rows = Array.isArray(scan.results) ? scan.results : [];
-          setScanResults(rows);
-          if (Array.isArray(scan.ignored)) setIgnoredSkills(scan.ignored);
-          void refreshSnapshotsFor(rows);
-        }
-      } catch (e) {
-        setRestoreMsg(e instanceof Error ? e.message : "恢复失败。");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [refreshSnapshotsFor, snapshotMap],
-  );
-
-  const ignoreSkill = useCallback(async (name: string) => {
-    setActionBusy(name);
-    try {
-      const result = await window.agenticxDesktop.putGuardSettings({ add_ignore: name });
-      if (result?.ok && Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
-      setScanResults((prev) => prev.filter((r) => r.skill_name !== name));
-    } finally {
-      setActionBusy(null);
-    }
-  }, []);
-
-  const unignoreSkill = useCallback(async (name: string) => {
-    setActionBusy(name);
-    try {
-      const result = await window.agenticxDesktop.putGuardSettings({ remove_ignore: name });
-      if (result?.ok && Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
-    } finally {
-      setActionBusy(null);
-    }
-  }, []);
-
-  const disableSkill = useCallback(async (name: string) => {
-    setActionBusy(name);
-    try {
-      const settings = await window.agenticxDesktop.getSkillSettings();
-      const presetPaths = Array.isArray(settings?.preset_paths)
-        ? settings.preset_paths.map((p) => ({ id: p.id, enabled: p.enabled }))
-        : [];
-      const customPaths = normalizeSkillScanCustomPaths(
-        Array.isArray(settings?.custom_paths) ? settings.custom_paths : [],
-      );
-      const preferredSources =
-        settings?.preferred_sources && typeof settings.preferred_sources === "object"
-          ? settings.preferred_sources
-          : {};
-      const current = Array.isArray(settings?.disabled_skills) ? settings.disabled_skills : [];
-      const nextDisabled = current.includes(name) ? current : [...current, name];
-      await window.agenticxDesktop.putSkillSettings({
-        presetPaths,
-        customPaths,
-        preferredSources,
-        disabledSkills: nextDisabled,
-      });
-      setScanResults((prev) => prev.filter((r) => r.skill_name !== name));
-    } finally {
-      setActionBusy(null);
-    }
-  }, []);
-
-  return {
-    loading,
-    saving,
-    version,
-    scanMode,
-    message,
-    scanBusy,
-    scanResults,
-    ignoredSkills,
-    scanned,
-    scanMsg,
-    actionBusy,
-    saveGuard,
-    runScanAll,
-    ignoreSkill,
-    unignoreSkill,
-    disableSkill,
-    snapshotMap,
-    restoreMsg,
-    restoreSnapshot,
-    setSnapshotMap,
-  };
-}
-
 function SkillAdvancedPanel() {
+  const { t } = useTranslation("settings");
   const { loading: trinityLoading, saving: trinitySaving, form, message: trinityMessage, update } =
     useTrinityConfig();
-  const {
-    loading: policyLoading,
-    saving: policySaving,
-    nonHighRiskAutoInstall,
-    message: policyMessage,
-    updatePolicy,
-  } = useSkillInstallPolicy();
-  const {
-    loading: guardLoading,
-    saving: guardSaving,
-    version: guardVersion,
-    scanMode,
-    message: guardMessage,
-    scanBusy,
-    scanResults,
-    ignoredSkills,
-    scanned,
-    scanMsg,
-    actionBusy,
-    saveGuard,
-    runScanAll,
-    ignoreSkill,
-    unignoreSkill,
-    disableSkill,
-    snapshotMap,
-    restoreMsg,
-    restoreSnapshot,
-    setSnapshotMap,
-  } = useGuardSettings();
 
-  const addPane = useAppStore((s) => s.addPane);
-  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
-  const closeSettings = useAppStore((s) => s.closeSettings);
-
-  const loading = trinityLoading || policyLoading || guardLoading;
-  const busy = trinitySaving || policySaving || guardSaving;
+  const loading = trinityLoading;
+  const busy = trinitySaving;
   const [nudgeDraft, setNudgeDraft] = useState(String(form.learning_nudge_interval));
   const [minCallsDraft, setMinCallsDraft] = useState(String(form.learning_min_tool_calls));
   const [reviewAdvancedOpen, setReviewAdvancedOpen] = useState(false);
-  const [guardFixBusy, setGuardFixBusy] = useState(false);
-  const [guardFixMsg, setGuardFixMsg] = useState("");
-
-  const runGuardFixInMetaAgent = useCallback(
-    async (item: GuardFixScanItem) => {
-      if (!form.skill_manage_enabled) {
-        setGuardFixMsg("请先在上方开启「允许助手改本地技能」，再使用 AI 修复。");
-        return;
-      }
-      const prompt = buildGuardFixPrompt(item);
-      if (!prompt.trim()) {
-        setGuardFixMsg("缺少技能目录，无法委派修复。");
-        return;
-      }
-      setGuardFixMsg("");
-      setGuardFixBusy(true);
-      try {
-        const base = item.base_dir?.trim();
-        if (base) {
-          const snap = await window.agenticxDesktop.skillSnapshot({
-            base_dir: base,
-            trigger: "guard_ai_fix",
-            skill_name: item.skill_name,
-          });
-          if (snap?.ok && snap.snapshot_id) {
-            setSnapshotMap((prev) => ({
-              ...prev,
-              [item.skill_name]: {
-                id: snap.snapshot_id!,
-                ts: snap.timestamp ?? snap.snapshot_id!,
-              },
-            }));
-          } else if (snap?.error) {
-            setGuardFixMsg(`备份未创建（${snap.error}），仍将继续修复。`);
-          }
-        }
-        const created = await window.agenticxDesktop.createSession({});
-        if (!created.ok || !created.session_id) {
-          setGuardFixMsg(created.error ?? "创建元智能体会话失败");
-          return;
-        }
-        const sid = created.session_id;
-        const paneId = addPane(null, META_AGENT_DISPLAY_NAME, sid);
-        setForwardAutoReply({ paneId, sessionId: sid, text: prompt });
-        closeSettings();
-      } catch (e) {
-        setGuardFixMsg(e instanceof Error ? e.message : String(e));
-      } finally {
-        setGuardFixBusy(false);
-      }
-    },
-    [addPane, closeSettings, form.skill_manage_enabled, setForwardAutoReply, setSnapshotMap],
-  );
 
   useEffect(() => {
     setNudgeDraft(String(form.learning_nudge_interval));
@@ -5565,37 +4528,37 @@ function SkillAdvancedPanel() {
   if (loading) {
     return (
       <Panel
-        title="技能高级设置"
+        title={t("skills.advancedTitle")}
         collapsible
         defaultCollapsed={false}
         titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
       >
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+        <div className="py-2 text-sm text-text-faint">{t("commonSettings.loadingEllipsis")}</div>
       </Panel>
     );
   }
 
   return (
     <Panel
-      title="技能高级设置"
+      title={t("skills.advancedTitle")}
       collapsible
       defaultCollapsed={false}
       titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
     >
-      <p className="mb-3 text-xs text-text-faint">
-        写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
+        <Trans t={t} i18nKey="skills.writesConfig" components={{ path: <code className="text-text-subtle" /> }} />
       </p>
       <div className="space-y-3">
         <SettingsToggleCard
-          title="技能文档优先"
-          description="当任务命中已安装技能时，优先按该技能里的步骤与约束来选工具和执行顺序。"
+          title={t("skills.skillFirst")}
+          description={t("skills.skillFirstHint")}
           checked={form.skill_protocol}
           disabled={busy}
           onChange={(next) => void update({ skill_protocol: next })}
         />
         <SettingsToggleCard
-          title="允许助手改本地技能"
-          description="开启后，模型可在授权范围内通过 skill_manage 新增、改写或删除 ~/.agenticx/skills/ 下的技能；保存后需完全退出并重启 Near 才生效。"
+          title={t("skills.allowManage")}
+          description={t("skills.allowManageHint")}
           checked={form.skill_manage_enabled}
           disabled={busy}
           onChange={(next) => void update({ skill_manage_enabled: next })}
@@ -5603,20 +4566,25 @@ function SkillAdvancedPanel() {
         <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-text-strong">启用技能自进化</div>
+              <div className={SETTINGS_LABEL_CLASS}>{t("skills.learning")}</div>
               <p className="mt-1 text-xs leading-relaxed text-text-muted">
-                自动记录工具调用过程，会话结束后评估是否值得提炼为新技能。
+                {t("skills.learningHint")}
               </p>
             </div>
             <SettingsSwitch
               checked={form.learning_enabled}
               disabled={busy}
               onChange={(next) => void update({ learning_enabled: next })}
-              aria-label="启用技能自进化"
+              aria-label={t("skills.learning")}
             />
           </div>
           <div className="mt-2.5 rounded-md bg-surface-panel px-3 py-2 text-[11px] text-text-faint">
-            观测数据存储于 <code className="text-text-subtle">~/.agenticx/sessions/&lt;session_id&gt;/tool_call_observations.json</code>
+            <Trans
+              t={t}
+              i18nKey="skills.observationsPath"
+              values={{ obsPath: "~/.agenticx/sessions/<session_id>/tool_call_observations.json" }}
+              components={{ path: <code className="text-text-subtle" /> }}
+            />
           </div>
           <div className="mt-3 border-t border-border pt-3">
             <button
@@ -5629,12 +4597,12 @@ function SkillAdvancedPanel() {
                 className={`h-3.5 w-3.5 shrink-0 transition-transform ${reviewAdvancedOpen ? "rotate-90" : ""}`}
                 aria-hidden
               />
-              高级设置
+              {t("skills.advancedToggle")}
             </button>
             {reviewAdvancedOpen ? (
               <div className="mt-2 space-y-3">
-                <label className="block text-sm text-text-muted">
-                  复盘触发间隔
+                <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                  {t("skills.nudgeInterval")}
                   <input
                     type="number"
                     min={1}
@@ -5651,8 +4619,8 @@ function SkillAdvancedPanel() {
                     }}
                   />
                 </label>
-                <label className="block text-sm text-text-muted">
-                  最小工具调用数
+                <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                  {t("skills.minToolCalls")}
                   <input
                     type="number"
                     min={1}
@@ -5673,169 +4641,12 @@ function SkillAdvancedPanel() {
             ) : null}
           </div>
         </div>
-        <SettingsToggleCard
-          title="未见高危则自动装完"
-          description="安装前仍会跑一遍静态规则扫描并展示摘要；只有未命中高危规则时才可能一路装完，一旦命中高危必须你点确认。"
-          checked={nonHighRiskAutoInstall}
-          disabled={busy}
-          onChange={(next) => void updatePolicy(next)}
-        />
-        <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-          <div className="text-xs font-semibold text-text-strong">技能安全扫描</div>
-          <div className="mt-1 space-y-1 text-xs leading-relaxed text-text-muted">
-            <p>
-              从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
-              ，命中高危须你确认后才可安装。已安装的技能可用下方「扫描已安装技能」复查，逐个列出问题并给出处置选项。本页配置写入{" "}
-              <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
-            </p>
-            <p>
-              <span className="text-text-subtle">引擎 v1</span>：经典正则规则，与历史版本行为一致。
-              <span className="text-text-subtle">引擎 v2</span>：YAML 规则库，按技能体量分级扫描，并给出 0–100
-              分与安全等级，规则更全（推荐）。
-            </p>
-            <p>
-              <span className="text-text-subtle">扫描模式</span>（仅 v2 对安装流程生效）：
-              <span className="text-text-subtle">快速</span>—主要检查 SKILL.md，跳过重项，最快；
-              <span className="text-text-subtle">标准</span>—按目录文件量自动选深度，默认推荐；
-              <span className="text-text-subtle">完整</span>—尽量扫全目录与依赖，更严、更慢。
-            </p>
-          </div>
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="shrink-0 text-xs text-text-muted">引擎版本</span>
-              <SettingsDropdown
-                value={String(guardVersion)}
-                displayLabel={`v${guardVersion}`}
-                options={[
-                  { value: "1", label: "v1" },
-                  { value: "2", label: "v2" },
-                ]}
-                onChange={(v) => void saveGuard({ version: Number(v) })}
-                disabled={busy}
-                size="compact"
-                menuPortal
-                className="w-[7rem] shrink-0"
-              />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="shrink-0 text-xs text-text-muted">扫描模式</span>
-              <SettingsDropdown
-                value={scanMode}
-                displayLabel={
-                  scanMode === "quick" ? "快速" : scanMode === "full" ? "完整" : "标准"
-                }
-                options={[
-                  { value: "quick", label: "快速" },
-                  { value: "standard", label: "标准" },
-                  { value: "full", label: "完整" },
-                ]}
-                onChange={(v) => void saveGuard({ scan_mode: v })}
-                disabled={busy || guardVersion < 2}
-                size="compact"
-                menuPortal
-                className="w-[7rem] shrink-0"
-                title={guardVersion < 2 ? "仅引擎 v2 支持扫描模式" : undefined}
-              />
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-3 border-t border-border pt-3">
-            <button
-              type="button"
-              className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-              disabled={scanBusy}
-              onClick={() => void runScanAll()}
-            >
-              {scanBusy ? "扫描中…" : "扫描已安装技能"}
-            </button>
-            <span className="text-[11px] text-text-faint">
-              逐个技能扫描，仅列出有问题的。扫描只出报告，不会自动改动。
-            </span>
-          </div>
-          {guardMessage ? (
-            <div className={`mt-2 text-xs ${guardMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
-              {guardMessage}
-            </div>
-          ) : null}
-          {scanMsg ? <div className="mt-2 text-xs text-rose-400">{scanMsg}</div> : null}
-          {guardFixMsg ? (
-            <div
-              className={`mt-2 text-xs ${guardFixMsg.includes("请先在上方") || guardFixMsg.includes("备份未创建") ? "text-amber-400" : "text-rose-400"}`}
-            >
-              {guardFixMsg}
-            </div>
-          ) : null}
-          {restoreMsg ? (
-            <div
-              className={`mt-2 text-xs ${restoreMsg.startsWith("已恢复") ? "text-emerald-400" : "text-rose-400"}`}
-            >
-              {restoreMsg}
-            </div>
-          ) : null}
-          {scanned && !scanBusy ? (
-            scanResults.length === 0 ? (
-              <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400">
-                未发现有风险的已安装技能。
-              </div>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {scanResults.map((r) => (
-                  <GuardScanResultCard
-                    key={r.skill_name}
-                    item={r}
-                    busy={actionBusy === r.skill_name || guardFixBusy}
-                    aiFixDisabled={!form.skill_manage_enabled}
-                    onAiFix={
-                      r.can_fix
-                        ? () => void runGuardFixInMetaAgent(r)
-                        : undefined
-                    }
-                    hasSnapshot={Boolean(r.can_fix && snapshotMap[r.skill_name]?.id)}
-                    onRestore={
-                      r.can_fix && snapshotMap[r.skill_name]?.id
-                        ? () => void restoreSnapshot(r)
-                        : undefined
-                    }
-                    onDisable={() => void disableSkill(r.skill_name)}
-                    onIgnore={() => void ignoreSkill(r.skill_name)}
-                  />
-                ))}
-              </div>
-            )
-          ) : null}
-          {ignoredSkills.length > 0 ? (
-            <div className="mt-3 border-t border-border pt-3">
-              <div className="text-[11px] text-text-faint">已忽略（不再扫出）：</div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {ignoredSkills.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted transition hover:text-text-primary disabled:opacity-50"
-                    disabled={actionBusy === name}
-                    title="点击撤销忽略"
-                    onClick={() => void unignoreSkill(name)}
-                  >
-                    {name}
-                    <span className="text-text-faint">✕</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
       </div>
       {trinityMessage ? (
         <div
-          className={`mt-2 text-xs ${trinityMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
+          className={`mt-2 text-xs ${trinityMessage.startsWith(t("commonSettings.savedPrefix")) ? "text-text-muted" : "text-rose-400"}`}
         >
           {trinityMessage}
-        </div>
-      ) : null}
-      {policyMessage ? (
-        <div
-          className={`mt-2 text-xs ${policyMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
-        >
-          {policyMessage}
         </div>
       ) : null}
     </Panel>
@@ -5843,37 +4654,38 @@ function SkillAdvancedPanel() {
 }
 
 function SessionMemoryPanel() {
+  const { t } = useTranslation("settings");
   const { loading, saving, form, message, update } = useTrinityConfig();
 
   if (loading) {
     return (
-      <Panel title="会话与记忆">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={t("memory.title")}>
+        <div className="py-2 text-sm text-text-faint">{t("commonSettings.loadingEllipsis")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="会话与记忆">
-      <p className="mb-3 text-xs text-text-faint">
-        写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
+    <Panel title={t("memory.title")}>
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
+        <Trans t={t} i18nKey="skills.writesConfig" components={{ path: <code className="text-text-subtle" /> }} />
       </p>
       <div className="space-y-3 text-sm text-text-subtle">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div>启用会话摘要延续</div>
-            <div className="mt-0.5 text-[11px] text-text-faint">新会话可继承前次摘要上下文</div>
+            <div className={SETTINGS_LABEL_CLASS}>{t("memory.sessionSummary")}</div>
+            <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("memory.sessionSummaryHint")}</div>
           </div>
           <SettingsSwitch
             checked={form.session_summary}
             disabled={saving}
             onChange={(next) => void update({ session_summary: next })}
-            aria-label="启用会话摘要延续"
+            aria-label={t("memory.sessionSummary")}
           />
         </div>
       </div>
       {message ? (
-        <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+        <div className={`mt-2 text-xs ${message.startsWith(t("commonSettings.savedPrefix")) ? "text-text-muted" : "text-rose-400"}`}>
           {message}
         </div>
       ) : null}
@@ -5883,165 +4695,13 @@ function SessionMemoryPanel() {
 
 function formatInstallDoneMsg(
   successLine: string,
-  scan?: { overall: string; skills: Parameters<typeof formatSkillScanSummary>[0]["skills"] } | null,
+  scan: { overall: string; skills: Parameters<typeof formatSkillScanSummary>[0]["skills"] } | null | undefined,
+  t: TFunction,
 ): string {
   if (!scan?.skills?.length) return successLine;
-  return `${successLine}\n\n${formatSkillScanSummary(scan)}`;
-}
+  return `${successLine}
 
-const GUARD_PATTERN_LABELS: Record<string, string> = {
-  exfiltration_curl: "数据外泄（curl）",
-  exfiltration_wget: "数据外泄（wget）",
-  exfiltration_fetch_env: "读取环境变量并上传",
-  credential_ssh: "访问 SSH 密钥",
-  credential_dotenv: "引用 .env 文件",
-  credential_word: "涉及凭据/密码关键词",
-  prompt_ignore_previous: "提示词注入（忽略先前指令）",
-  prompt_system: "提示词注入（system prompt）",
-  prompt_system_tag: "提示词注入（<system> 标签）",
-  destructive_rm: "破坏性操作（rm -rf /）",
-  destructive_chmod: "破坏性操作（chmod 777）",
-  destructive_sql: "破坏性操作（DROP TABLE）",
-  curl_pipe_shell: "远程脚本管道执行",
-  reverse_shell: "反向 Shell",
-  invisible_unicode: "不可见 Unicode 字符",
-  suspicious_url: "可疑外发 URL",
-  typosquat_dependency: "疑似 typosquat 依赖",
-  dynamic_download_l2: "嵌套动态下载",
-  base64_decode_pipe: "Base64 解码后执行",
-};
-const GUARD_PATTERN_LABEL_HIGH_ENTROPY = "high_entropy_secret";
-
-function guardVerdictLabel(v: string): string {
-  return v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
-}
-
-function formatGuardSnapshotTs(ts: string): string {
-  const idMatch = ts.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
-  if (idMatch) {
-    return `${idMatch[1]}-${idMatch[2]}-${idMatch[3]} ${idMatch[4]}:${idMatch[5]}:${idMatch[6]} UTC`;
-  }
-  return ts;
-}
-
-function GuardScanResultCard({
-  item,
-  busy,
-  aiFixDisabled,
-  onAiFix,
-  hasSnapshot,
-  onRestore,
-  onDisable,
-  onIgnore,
-}: {
-  item: GuardScanItem;
-  busy: boolean;
-  aiFixDisabled?: boolean;
-  onAiFix?: () => void;
-  hasSnapshot?: boolean;
-  onRestore?: () => void;
-  onDisable: () => void;
-  onIgnore: () => void;
-}) {
-  const dangerous = item.verdict === "dangerous";
-  const findings = item.findings ?? [];
-  return (
-    <div className="rounded-xl border border-border bg-surface-card px-3.5 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="truncate text-sm font-medium text-text-primary">{item.skill_name}</span>
-        <span
-          className={`shrink-0 rounded-full px-1.5 text-[10px] ${
-            dangerous
-              ? "border border-rose-500/35 bg-rose-500/10 text-rose-300"
-              : "border border-amber-500/35 bg-amber-500/10 text-amber-300"
-          }`}
-        >
-          {guardVerdictLabel(item.verdict)}
-        </span>
-        {!item.can_fix ? (
-          <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-            外部
-          </span>
-        ) : null}
-        <span className="ml-auto text-[11px] text-text-faint">
-          {[item.grade ? `等级 ${item.grade}` : "", typeof item.score === "number" ? `${item.score} 分` : "", item.tier]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      </div>
-      {findings.length > 0 ? (
-        <ul className="mt-2 space-y-0.5 text-[11px] text-text-subtle">
-          {findings.slice(0, 5).map((f, i) => (
-            <li key={`${item.skill_name}-f-${i}`} className="flex gap-1.5">
-              <span className={f.severity === "dangerous" ? "text-rose-400" : "text-amber-400"}>
-                {f.severity === "dangerous" ? "⛔" : "⚠"}
-              </span>
-              <span className="min-w-0">
-                {GUARD_PATTERN_LABELS[f.pattern_name] ||
-                  (f.pattern_name === GUARD_PATTERN_LABEL_HIGH_ENTROPY
-                    ? "高熵可疑字符串"
-                    : f.pattern_name)}
-                {f.matched_text ? (
-                  <span className="text-text-faint">：「{f.matched_text.slice(0, 50)}」</span>
-                ) : null}
-              </span>
-            </li>
-          ))}
-          {findings.length > 5 ? (
-            <li className="text-text-faint">… 另有 {findings.length - 5} 条</li>
-          ) : null}
-        </ul>
-      ) : null}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        {item.can_fix ? (
-          <button
-            type="button"
-            className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-2.5 py-1 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-50"
-            disabled={busy || !onAiFix || aiFixDisabled}
-            title={
-              aiFixDisabled
-                ? "请先在上方开启「允许助手改本地技能」"
-                : "委派元智能体新会话修复；写入前会展示 diff 供确认"
-            }
-            onClick={onAiFix}
-          >
-            AI 修复
-          </button>
-        ) : (
-          <span className="text-[11px] text-text-faint">外部来源只读，可禁用或忽略</span>
-        )}
-        {item.can_fix && hasSnapshot ? (
-          <button
-            type="button"
-            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300 transition hover:bg-amber-500/15 disabled:opacity-50"
-            disabled={busy || !onRestore}
-            title="恢复到本次 AI 修复前自动保存的快照"
-            onClick={onRestore}
-          >
-            恢复备份
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
-          disabled={busy}
-          title="模型不再加载该技能，文件保留"
-          onClick={onDisable}
-        >
-          禁用
-        </button>
-        <button
-          type="button"
-          className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
-          disabled={busy}
-          title="后续扫描默认跳过该技能"
-          onClick={onIgnore}
-        >
-          忽略
-        </button>
-      </div>
-    </div>
-  );
+${formatSkillScanSummary(scan, t)}`;
 }
 
 function formatSkillScanSummary(scan: {
@@ -6058,55 +4718,38 @@ function formatSkillScanSummary(scan: {
       matched_text?: string;
     }>;
   }>;
-}): string {
+}, t: TFunction): string {
   const verdictLabel = (v: string) =>
-    v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
+    v === "dangerous" ? t("skills.scan.verdictDanger") : v === "caution" ? t("skills.scan.verdictCaution") : t("skills.scan.verdictOk");
   const sevLabel = (s: string | undefined) =>
-    s === "dangerous" ? "⛔ 高危" : s === "caution" ? "⚠ 注意" : s ?? "";
-  const patternLabel: Record<string, string> = {
-    exfiltration_curl: "数据外泄（curl）",
-    exfiltration_wget: "数据外泄（wget）",
-    exfiltration_fetch_env: "读取环境变量并上传",
-    credential_ssh: "访问 SSH 密钥",
-    credential_dotenv: "引用 .env 文件",
-    credential_word: "涉及凭据/密码关键词",
-    prompt_ignore_previous: "提示词注入（忽略先前指令）",
-    prompt_system: "提示词注入（system prompt）",
-    prompt_system_tag: "提示词注入（<system> 标签）",
-    destructive_rm: "破坏性操作（rm -rf /）",
-    destructive_chmod: "破坏性操作（chmod 777）",
-    destructive_sql: "破坏性操作（DROP TABLE）",
-    curl_pipe_shell: "远程脚本管道执行",
-    reverse_shell: "反向 Shell",
-    invisible_unicode: "不可见 Unicode 字符",
-    suspicious_url: "可疑外发 URL",
-    typosquat_dependency: "疑似 typosquat 依赖",
-    dynamic_download_l2: "嵌套动态下载",
-    base64_decode_pipe: "Base64 解码后执行",
+    s === "dangerous" ? t("skills.scan.sevDanger") : s === "caution" ? t("skills.scan.sevCaution") : s ?? "";
+  const patternLabelOf = (name: string) => {
+    const key = `skills.scan.patterns.${name}`;
+    const translated = t(key);
+    return translated === key ? name : translated;
   };
-  patternLabel["high_entropy" + "_secret"] = "高熵可疑字符串";
 
   const lines = [
-    `安装前扫描 · 总体：${verdictLabel(scan.overall)}`,
+    t("skills.scan.header", { verdict: verdictLabel(scan.overall) }),
   ];
   for (const s of scan.skills) {
     const meta: string[] = [];
-    if (s.grade) meta.push(`等级 ${s.grade}`);
-    if (typeof s.score === "number") meta.push(`${s.score} 分`);
+    if (s.grade) meta.push(t("skills.scan.grade", { grade: s.grade }));
+    if (typeof s.score === "number") meta.push(t("skills.scan.score", { score: s.score }));
     if (s.tier) meta.push(s.tier);
     lines.push(
       `· ${s.skill_name || "skill"}：${verdictLabel(s.verdict)}${
-        s.findings?.length ? `（命中 ${s.findings.length} 条规则）` : ""
+        s.findings?.length ? t("skills.scan.hitRules", { count: s.findings.length }) : ""
       }${meta.length ? ` · ${meta.join(" · ")}` : ""}`
     );
     if (s.findings?.length) {
       for (const f of s.findings.slice(0, 8)) {
-        const label = patternLabel[f.pattern_name] || f.pattern_name;
+        const label = patternLabelOf(f.pattern_name);
         const matched = f.matched_text ? `「${f.matched_text.slice(0, 60)}」` : "";
         lines.push(`  ${sevLabel(f.severity)} ${label}${matched ? " — " + matched : ""}`);
       }
       if (s.findings.length > 8) {
-        lines.push(`  … 另有 ${s.findings.length - 8} 条`);
+        lines.push(t("skills.scan.moreFindings", { count: s.findings.length - 8 }));
       }
     }
   }
@@ -6138,6 +4781,7 @@ function MetaMarkdownField({
   aiAssistLoading?: boolean;
   onOpenInEditor?: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const [preview, setPreview] = useState(false);
   const toolbarBtnClass = (active?: boolean) =>
     `flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors disabled:opacity-40 ${
@@ -6159,7 +4803,7 @@ function MetaMarkdownField({
           <span className="text-[10px] font-medium tracking-wide text-text-faint">Markdown</span>
           <div className="flex items-center gap-0.5">
             {onAiAssist ? (
-              <HoverTip label={value.trim() ? "AI 润色" : "AI 生成"}>
+              <HoverTip label={value.trim() ? t("meta.aiPolish") : t("meta.aiGenerate")}>
                 <button
                   type="button"
                   disabled={aiAssistLoading}
@@ -6174,7 +4818,7 @@ function MetaMarkdownField({
                 </button>
               </HoverTip>
             ) : null}
-            <HoverTip label="编辑">
+            <HoverTip label={t("meta.edit")}>
               <button
                 type="button"
                 className={toolbarBtnClass(!preview)}
@@ -6183,7 +4827,7 @@ function MetaMarkdownField({
                 <SquarePen className={iconClass} aria-hidden />
               </button>
             </HoverTip>
-            <HoverTip label="预览">
+            <HoverTip label={t("meta.preview")}>
               <button
                 type="button"
                 className={toolbarBtnClass(preview)}
@@ -6193,7 +4837,7 @@ function MetaMarkdownField({
               </button>
             </HoverTip>
             {onOpenInEditor ? (
-              <HoverTip label="在编辑器中打开">
+              <HoverTip label={t("meta.openInEditor")}>
                 <button type="button" className={toolbarBtnClass()} onClick={onOpenInEditor}>
                   <ExternalLink className={iconClass} aria-hidden />
                 </button>
@@ -6215,7 +4859,7 @@ function MetaMarkdownField({
                 {normalizeChatMarkdownContent(value)}
               </ReactMarkdown>
             ) : (
-              <span className="text-text-faint italic">（空）</span>
+              <span className="text-text-faint italic">{t("meta.emptyPreview")}</span>
             )}
           </div>
         ) : (
@@ -6249,8 +4893,8 @@ function SettingsToggleCard(props: {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold text-text-strong">{title}</div>
-        <p className="mt-1 text-xs leading-relaxed text-text-muted">{description}</p>
+        <div className={SETTINGS_LABEL_CLASS}>{title}</div>
+        <p className={`mt-1 ${SETTINGS_HINT_CLASS}`}>{description}</p>
       </div>
       <SettingsSwitch
         checked={checked}
@@ -6272,12 +4916,12 @@ export function SettingsPanel({
   apiToken,
   mcpServers,
   onRefreshMcp,
-  confirmStrategy,
+  runMode,
   theme,
   chatStyle,
   onThemeChange,
   onChatStyleChange,
-  onConfirmStrategyChange,
+  onRunModeChange,
   onClose,
   onSave,
   panes,
@@ -6285,6 +4929,14 @@ export function SettingsPanel({
   groups,
   onForwardFavorite,
 }: Props) {
+  const { t } = useTranslation("settings");
+  const { t: tCommon } = useTranslation("common");
+  const locale = useAppStore((s) => s.locale);
+  const setLocale = useAppStore((s) => s.setLocale);
+  const tabs = useMemo(
+    () => TAB_DEFS.map((def) => ({ ...def, label: t(`tabs.${def.id}`) })),
+    [t],
+  );
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
@@ -6296,7 +4948,10 @@ export function SettingsPanel({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
+  const settingsOpenToFocus = useAppStore((s) => s.settings.openToFocus);
+  const settingsFocusSeq = useAppStore((s) => s.settings.focusSeq ?? 0);
   const activePaneId = useAppStore((s) => s.activePaneId);
+  const capabilityLocks = useAppStore((s) => s.capabilityLocks) ?? UNRESTRICTED_CAPABILITY_LOCKS;
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
@@ -6309,8 +4964,10 @@ export function SettingsPanel({
   const toolsTabRef = useRef<ToolsTabHandle>(null);
   const knowledgeRef = useRef<KnowledgeSettingsHandle>(null);
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
-  const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
+  const securityTabRef = useRef<SecurityCenterTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
+  const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
   const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
@@ -6318,10 +4975,22 @@ export function SettingsPanel({
     loadSettingsNavWidth(loadSettingsPanelSize().width),
   );
   useEffect(() => {
-    if (!open || !settingsOpenToTab) return;
-    setTab(settingsOpenToTab);
-    updateSettingsSlice({ openToTab: undefined });
-  }, [open, settingsOpenToTab, updateSettingsSlice]);
+    if (!open) {
+      setSecurityFocus(undefined);
+      return;
+    }
+    if (!settingsOpenToTab && !settingsOpenToFocus) return;
+    // 钩子管理已并入安全中心；旧 deep-link 仍要能打开到正确分区。
+    if (settingsOpenToTab) {
+      const TAB_ALIASES: Partial<Record<SettingsTab, SettingsTab>> = { hooks: "security" };
+      setTab(TAB_ALIASES[settingsOpenToTab] ?? settingsOpenToTab);
+    }
+    if (settingsOpenToFocus) {
+      setSecurityFocus(settingsOpenToFocus);
+      setSecurityFocusSeq(settingsFocusSeq);
+    }
+    updateSettingsSlice({ openToTab: undefined, openToFocus: undefined });
+  }, [open, settingsOpenToTab, settingsOpenToFocus, settingsFocusSeq, updateSettingsSlice]);
   useEffect(() => {
     if (!open) return;
     const size = loadSettingsPanelSize();
@@ -6748,8 +5417,8 @@ export function SettingsPanel({
         : ["  (not set)"]),
     ].join("\n");
     void window.agenticxDesktop.saveUserMd({ content: userMdContent });
-    setUserProfileMessage("用户档案已保存。下一轮对话生效。");
-  }, [setUserNickname, setUserPreference, userNicknameDraft, userPreferenceDraft]);
+    setUserProfileMessage(t("profile.savedToast"));
+  }, [setUserNickname, setUserPreference, t, userNicknameDraft, userPreferenceDraft]);
 
   const metaSoulDirty = metaSoul !== metaSoulSaved;
   const metaIdentityDirty = metaIdentity !== metaIdentitySaved;
@@ -6772,12 +5441,12 @@ export function SettingsPanel({
       if (identityRes?.ok) {
         setMetaHistoryIdentityItems(identityRes.items ?? []);
       } else {
-        setMetaHistoryMessage(identityRes?.error ?? "无法加载身份历史");
+        setMetaHistoryMessage(identityRes?.error ?? t("meta.loadIdentityHistoryFailed"));
       }
       if (soulRes?.ok) {
         setMetaHistorySoulItems(soulRes.items ?? []);
       } else if (!identityRes?.ok) {
-        setMetaHistoryMessage(soulRes?.error ?? "无法加载人格历史");
+        setMetaHistoryMessage(soulRes?.error ?? t("meta.loadSoulHistoryFailed"));
       }
     } catch (err) {
       setMetaHistoryMessage(String(err));
@@ -6819,10 +5488,10 @@ export function SettingsPanel({
 
     if (localIdentity === savedIdentity && diskIdentity !== savedIdentity) {
       const dlg = await window.agenticxDesktop.confirmDialog({
-        title: "检测到外部修改",
-        message: "身份定义已在外部编辑器中修改，是否加载最新内容？",
-        confirmText: "加载",
-        cancelText: "保留当前编辑",
+        title: t("meta.externalIdentityTitle"),
+        message: t("meta.externalIdentityBody"),
+        confirmText: t("meta.load"),
+        cancelText: t("meta.keepEditing"),
       });
       if (dlg.confirmed) {
         applyIdentity(diskIdentity);
@@ -6837,10 +5506,10 @@ export function SettingsPanel({
 
     if (localSoul === savedSoul && diskSoul !== savedSoul) {
       const dlg = await window.agenticxDesktop.confirmDialog({
-        title: "检测到外部修改",
-        message: "全局人格已在外部编辑器中修改，是否加载最新内容？",
-        confirmText: "加载",
-        cancelText: "保留当前编辑",
+        title: t("meta.externalIdentityTitle"),
+        message: t("meta.externalSoulBody"),
+        confirmText: t("meta.load"),
+        cancelText: t("meta.keepEditing"),
       });
       if (dlg.confirmed) {
         applySoul(diskSoul);
@@ -6867,17 +5536,17 @@ export function SettingsPanel({
   const openMetaWorkspaceInEditor = useCallback(async (kind: "identity" | "soul") => {
     const res = await window.agenticxDesktop.openMetaWorkspaceFile({ kind });
     if (!res?.ok) {
-      setMetaWorkspaceMessage(`无法打开文件: ${res?.error ?? "未知错误"}`);
+      setMetaWorkspaceMessage(t("meta.openFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
     }
   }, []);
 
   const restoreMetaWorkspaceHistoryItem = useCallback(
     async (kind: "identity" | "soul", id: string) => {
       const dlg = await window.agenticxDesktop.confirmDialog({
-        title: "恢复历史版本",
-        message: "将用该历史版本覆盖当前文件与编辑区内容，是否继续？",
-        confirmText: "恢复",
-        cancelText: "取消",
+        title: t("meta.restoreTitle"),
+        message: t("meta.restoreBody"),
+        confirmText: t("meta.restore"),
+        cancelText: tCommon("cancel"),
         destructive: true,
       });
       if (!dlg.confirmed) return;
@@ -6885,7 +5554,7 @@ export function SettingsPanel({
       try {
         const res = await window.agenticxDesktop.restoreMetaWorkspaceHistory({ kind, id });
         if (!res?.ok) {
-          setMetaWorkspaceMessage(`恢复失败: ${res?.error ?? "未知错误"}`);
+          setMetaWorkspaceMessage(t("meta.restoreFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
           return;
         }
         const content = res.content ?? "";
@@ -6898,10 +5567,10 @@ export function SettingsPanel({
           setMetaSoulSaved(content);
           setMetaExternalHintSoul(false);
         }
-        setMetaWorkspaceMessage("已恢复，下一轮对话生效。");
+        setMetaWorkspaceMessage(t("meta.restoredToast"));
         if (metaHistoryOpen) void loadMetaWorkspaceHistory();
       } catch (err) {
-        setMetaWorkspaceMessage(`恢复失败: ${String(err)}`);
+        setMetaWorkspaceMessage(t("meta.restoreFailed", { reason: String(err) }));
       }
     },
     [loadMetaWorkspaceHistory, metaHistoryOpen],
@@ -6918,7 +5587,7 @@ export function SettingsPanel({
         if (res?.ok) {
           setMetaIdentitySaved(metaIdentity);
         } else {
-          errors.push(`身份定义: ${res?.error ?? "未知错误"}`);
+          errors.push(t("meta.identitySaveError", { reason: res?.error ?? t("commonSettings.unknownError") }));
         }
       }
       if (metaSoulDirty) {
@@ -6926,17 +5595,17 @@ export function SettingsPanel({
         if (res?.ok) {
           setMetaSoulSaved(metaSoul);
         } else {
-          errors.push(`全局人格: ${res?.error ?? "未知错误"}`);
+          errors.push(t("meta.soulSaveError", { reason: res?.error ?? t("commonSettings.unknownError") }));
         }
       }
       if (errors.length > 0) {
-        setMetaWorkspaceMessage(`保存失败: ${errors.join("；")}`);
+        setMetaWorkspaceMessage(t("meta.saveFailedJoin", { reasons: errors.join("；") }));
       } else if (metaIdentityDirty || metaSoulDirty) {
-        setMetaWorkspaceMessage("已保存，下一轮对话生效。");
+        setMetaWorkspaceMessage(t("meta.savedNextTurn"));
         if (metaHistoryOpen) void loadMetaWorkspaceHistory();
       }
     } catch (err) {
-      setMetaWorkspaceMessage(`保存失败: ${String(err)}`);
+      setMetaWorkspaceMessage(t("commonSettings.saveFailedWithReason", { reason: String(err) }));
     } finally {
       setMetaIdentitySaving(false);
       setMetaSoulSaving(false);
@@ -6956,19 +5625,19 @@ export function SettingsPanel({
       const res = await window.agenticxDesktop.chooseDirectory();
       if (res?.canceled) return;
       if (!res?.ok || !res.path) {
-        setWorkspaceDirMessage(res?.error ? `选择失败: ${res.error}` : "未选择目录");
+        setWorkspaceDirMessage(res?.error ? t("commonSettings.chooseFailed", { reason: res.error }) : t("commonSettings.noDirectorySelected"));
         return;
       }
       setWorkspaceDirDraft(res.path);
     } catch (err) {
-      setWorkspaceDirMessage(`选择失败: ${String(err)}`);
+      setWorkspaceDirMessage(t("commonSettings.chooseFailed", { reason: String(err) }));
     }
   }, []);
 
   const saveWorkspaceDirectory = useCallback(async () => {
     const trimmed = workspaceDirDraft.trim();
     if (!trimmed) {
-      setWorkspaceDirMessage("工作区路径不能为空");
+      setWorkspaceDirMessage(t("profile.workspaceEmpty"));
       return;
     }
     setWorkspaceDirSaving(true);
@@ -6976,7 +5645,7 @@ export function SettingsPanel({
     try {
       const res = await window.agenticxDesktop.saveWorkspaceConfig({ workspaceDir: trimmed });
       if (!res?.ok) {
-        setWorkspaceDirMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+        setWorkspaceDirMessage(t("commonSettings.saveFailedWithReason", { reason: res?.error ?? t("commonSettings.unknownError") }));
         return;
       }
       const saved = String(res.workspaceDir ?? trimmed).trim() || trimmed;
@@ -6986,23 +5655,23 @@ export function SettingsPanel({
       if (res.changed) {
         void reloadMetaWorkspaceFromDisk();
         const restartDlg = await window.agenticxDesktop.confirmDialog({
-          title: "工作区已更新",
-          message: "新建元智能体对话将使用新目录；已有会话仍保留原工作区。",
+          title: t("profile.workspaceUpdatedTitle"),
+          message: t("profile.workspaceUpdatedBody"),
           detail:
-            "建议完全退出 Near（⌘Q）后重新打开，以确保 Machi 人格文件、用户档案与记忆索引路径一致。",
-          confirmText: "立即重启",
-          cancelText: "稍后手动重启",
+            t("profile.workspaceRestartDetail"),
+          confirmText: t("commonSettings.restartNow"),
+          cancelText: t("commonSettings.restartLater"),
         });
         if (restartDlg.confirmed) {
           await window.agenticxDesktop.appRelaunch();
           return;
         }
-        setWorkspaceDirMessage("已保存。请新建对话使新路径生效；建议稍后重启 Near。");
+        setWorkspaceDirMessage(t("profile.workspaceSavedRestart"));
       } else {
-        setWorkspaceDirMessage("已保存，路径未变更。");
+        setWorkspaceDirMessage(t("profile.workspaceSavedUnchanged"));
       }
     } catch (err) {
-      setWorkspaceDirMessage(`保存失败: ${String(err)}`);
+      setWorkspaceDirMessage(t("commonSettings.saveFailedWithReason", { reason: String(err) }));
     } finally {
       setWorkspaceDirSaving(false);
     }
@@ -7059,26 +5728,26 @@ export function SettingsPanel({
           model,
         });
         if (!res?.ok) {
-          setMsg(`AI 辅助失败: ${res?.error ?? "未知错误"}`);
+          setMsg(t("profile.aiAssistFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
           return;
         }
         const result = (res.content ?? "").trim();
         if (!result) {
-          setMsg("AI 未返回有效内容，请重试。");
+          setMsg(t("profile.aiEmpty"));
           return;
         }
         if (kind === "identity") {
           setMetaIdentity(result);
-          setMetaWorkspaceMessage("AI 已生成身份定义，请检查后保存。");
+          setMetaWorkspaceMessage(t("profile.aiGeneratedIdentity"));
         } else if (kind === "soul") {
           setMetaSoul(result);
-          setMetaWorkspaceMessage("AI 已生成全局人格，请检查后保存。");
+          setMetaWorkspaceMessage(t("profile.aiGeneratedSoul"));
         } else {
           setUserPreferenceDraft(result);
-          setUserProfileMessage("AI 已生成偏好描述，请检查后保存。");
+          setUserProfileMessage(t("profile.aiGeneratedPreference"));
         }
       } catch (err) {
-        setMsg(`AI 辅助失败: ${String(err)}`);
+        setMsg(t("profile.aiAssistFailed", { reason: String(err) }));
       } finally {
         setAiAssistLoading(null);
       }
@@ -7090,25 +5759,25 @@ export function SettingsPanel({
     (file: File) => {
       const maxBytes = 1.8 * 1024 * 1024;
       if (!file.type.startsWith("image/")) {
-        setUserAvatarMessage("请选择图片文件（PNG/JPG/WebP/GIF）。");
+        setUserAvatarMessage(t("profile.pickImage"));
         return;
       }
       if (file.size > maxBytes) {
-        setUserAvatarMessage("图片过大，请选择小于 1.8MB 的文件。");
+        setUserAvatarMessage(t("profile.imageTooLarge"));
         return;
       }
       const reader = new FileReader();
       reader.onload = () => {
         const result = typeof reader.result === "string" ? reader.result : "";
         if (!result) {
-          setUserAvatarMessage("读取图片失败，请重试。");
+          setUserAvatarMessage(t("profile.readImageFailed"));
           return;
         }
         setUserAvatarUrl(result);
-        setUserAvatarMessage("已更新我的头像。");
+        setUserAvatarMessage(t("profile.avatarUpdated"));
       };
       reader.onerror = () => {
-        setUserAvatarMessage("读取图片失败，请重试。");
+        setUserAvatarMessage(t("profile.readImageFailed"));
       };
       reader.readAsDataURL(file);
     },
@@ -7142,13 +5811,13 @@ export function SettingsPanel({
         const r = await window.agenticxDesktop.putMcpSettings({ extraSearchPaths: cleaned });
         if (r.ok) {
           setMcpExtraPaths(cleaned);
-          setMcpMessage("已保存 MCP 配置路径");
+          setMcpMessage(t("mcp.pathSaved"));
           if (sessionId) await onRefreshMcp(sessionId);
         } else {
-          setMcpMessage(`保存路径失败: ${r.error ?? "未知错误"}`);
+          setMcpMessage(t("mcp.pathSaveFailed", { reason: r.error ?? t("commonSettings.unknownError") }));
         }
       } catch (err) {
-        setMcpMessage(`保存路径失败: ${String(err)}`);
+        setMcpMessage(t("mcp.pathSaveFailed", { reason: String(err) }));
       } finally {
         setMcpPathSaving(false);
       }
@@ -7271,9 +5940,9 @@ export function SettingsPanel({
       await onSave({ defaultProvider: defProv, providers: normalized });
       setProviderSavedSnapshot(cloneProviderDraftMap(normalized));
       setProviderSavedDefProv(defProv);
-      setProviderConfigMessage("已保存");
+      setProviderConfigMessage(t("commonSettings.saved"));
     } catch (err) {
-      setProviderConfigMessage(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+      setProviderConfigMessage(t("commonSettings.saveFailedColon", { reason: err instanceof Error ? err.message : String(err) }));
     } finally {
       setProviderConfigSaving(false);
     }
@@ -7289,7 +5958,7 @@ export function SettingsPanel({
     if (res.ok && res.warning) {
       setKeyWarning((p) => ({ ...p, [active]: res.warning ?? "" }));
     }
-    if (!res.ok) setKeyError((p) => ({ ...p, [active]: res.error ?? "未知错误" }));
+    if (!res.ok) setKeyError((p) => ({ ...p, [active]: res.error ?? t("commonSettings.unknownError") }));
   };
 
   const onFetchModels = async () => {
@@ -7312,7 +5981,7 @@ export function SettingsPanel({
       const providerUnchanged = activeProviderRef.current === requestProvider;
       if (!isLatestRequest || !providerUnchanged) return;
       if (!res.ok) {
-        setFetchModelsError(res.error ?? "拉取模型失败");
+        setFetchModelsError(res.error ?? t("provider.fetchModelsFailed"));
         return;
       }
       if (res.warning) {
@@ -7343,7 +6012,7 @@ export function SettingsPanel({
         fetchModelsRequestSeqRef.current === requestId &&
         activeProviderRef.current === requestProvider
       ) {
-        setFetchModelsError(`拉取模型失败: ${String(err)}`);
+        setFetchModelsError(t("provider.fetchModelsFailedReason", { reason: String(err) }));
       }
     } finally {
       if (
@@ -7613,7 +6282,7 @@ export function SettingsPanel({
     const oldId = editModelOriginalId;
     if (!newId || !oldId) return;
     if (newId !== oldId && current.models.includes(newId)) {
-      setEditModelError("列表中已有相同的模型 ID");
+      setEditModelError(t("provider.duplicateModelId"));
       return;
     }
     if (newId === oldId) {
@@ -7734,7 +6403,7 @@ export function SettingsPanel({
         ...(defProv === providerId ? { defaultProvider: nextDefault } : {}),
       });
     } catch {
-      window.alert("删除服务厂商失败，请稍后重试。");
+      window.alert(t("provider.deleteVendorFailed"));
     } finally {
       setProviderDeleteBusy(false);
     }
@@ -7751,13 +6420,13 @@ export function SettingsPanel({
 
   const handleSave = async () => {
     try {
-    const permRes = await permissionsPanelRef.current?.flushPermissions?.();
+    const permRes = await securityTabRef.current?.flushPermissions?.();
     if (permRes && !permRes.ok) {
       const msg =
         permRes.error ||
-        "请确认「设置 → 服务器连接」中 Studio 后端已连接且 token 正确。";
+        t("provider.permWriteFailedTitle");
       const still = window.confirm(
-        `权限（路径/命令/工具拒绝）未能写入 Studio：\n${msg}\n\n是否仍继续保存 Provider、远程连接等其他设置？`,
+        t("provider.permWriteFailedBody", { msg }),
       );
       if (!still) return;
     }
@@ -7766,20 +6435,20 @@ export function SettingsPanel({
     {
       const toolsRes = await toolsTabRef.current?.saveAll();
       if (toolsRes && !toolsRes.ok) {
-        window.alert(toolsRes.error || "工具页保存失败");
+        window.alert(toolsRes.error || t("provider.toolsSaveFailed"));
         return;
       }
     }
     const kbRes = await knowledgeRef.current?.flushIfDirty();
     if (kbRes && !kbRes.ok) {
       const cont = window.confirm(
-        `知识库配置保存失败：\n${kbRes.error ?? "未知错误"}\n\n是否仍继续保存其它设置？`,
+        t("provider.kbSaveFailed", { reason: kbRes.error ?? t("commonSettings.unknownError") }),
       );
       if (!cont) return;
     }
     const voiceRes = await voiceSettingsRef.current?.persist();
     if (voiceRes && !voiceRes.ok) {
-      window.alert(voiceRes.error || "语音设置保存失败");
+      window.alert(voiceRes.error || t("provider.voiceSaveFailed"));
       return;
     }
     const normalized: Record<string, ProviderEntry> = {};
@@ -7809,51 +6478,51 @@ export function SettingsPanel({
     });
     if (remoteSave.mode_changed) {
       const restartDlg = await window.agenticxDesktop.confirmDialog({
-        title: "需要重启 Near",
-        message: "连接模式已切换，需要重启 Near 以加载新后端工作区。",
+        title: t("server.modeSwitchTitle"),
+        message: t("server.modeSwitchBody"),
         detail:
-          "会话、窗格、分身与 MCP 状态将按新后端隔离，不会与上一套后端混用。",
-        confirmText: "立即重启",
-        cancelText: "稍后手动重启",
+          t("server.modeSwitchDetail"),
+        confirmText: t("commonSettings.restartNow"),
+        cancelText: t("commonSettings.restartLater"),
       });
       if (restartDlg.confirmed) {
         await window.agenticxDesktop.appRelaunch();
         return;
       }
       await window.agenticxDesktop.confirmDialog({
-        title: "请稍后重启",
-        message: "重启后连接模式切换才会生效。",
-        confirmText: "知道了",
+        title: t("commonSettings.pleaseRestartLaterTitle"),
+        message: t("commonSettings.pleaseRestartLaterBody"),
+        confirmText: t("commonSettings.gotIt"),
       });
       onClose();
       return;
     }
     onClose();
     } catch (err) {
-      window.alert(`保存设置失败：${err instanceof Error ? err.message : String(err)}`);
+      window.alert(t("commonSettings.saveSettingsFailed", { reason: err instanceof Error ? err.message : String(err) }));
     }
   };
 
   const runMcpToggleRequest = useCallback(async (name: string, next: boolean) => {
     if (!sessionId) return;
     setMcpMessage("");
-    const actionLabel = next ? "连接" : "断开";
+    const actionLabel = next ? t("mcp.connect") : t("mcp.disconnect");
     try {
       const result = next
         ? await window.agenticxDesktop.connectMcp({ sessionId, name })
         : await window.agenticxDesktop.disconnectMcp({ sessionId, name });
       if (result.ok) {
         await onRefreshMcp(sessionId);
-        setMcpMessage(next ? `已连接 ${name}；下次启动 Near 将自动重连此项。` : `已断开 ${name}，且不再自动连接。`);
+        setMcpMessage(next ? t("mcp.connectedAuto", { name }) : t("mcp.disconnectedNoAuto", { name }));
       } else {
-        const detail = String(result.error ?? "未知错误");
+        const detail = String(result.error ?? t("commonSettings.unknownError"));
         if (detail.includes("连接已取消")) return;
         try {
           await onRefreshMcp(sessionId);
         } catch {
           // best-effort refresh
         }
-        setMcpMessage(`${actionLabel}失败: ${detail}`);
+        setMcpMessage(t("mcp.actionFailed", { action: actionLabel, detail }));
       }
     } catch (err) {
       const detail = String(err);
@@ -7863,7 +6532,7 @@ export function SettingsPanel({
       } catch {
         // best-effort refresh
       }
-      setMcpMessage(`${actionLabel}失败: ${detail}`);
+      setMcpMessage(t("mcp.actionFailed", { action: actionLabel, detail }));
     }
   }, [onRefreshMcp, sessionId]);
 
@@ -7950,10 +6619,10 @@ export function SettingsPanel({
       if (res?.ok && Array.isArray(res.hits)) {
         setMcpDiscoverHits(res.hits as MCPDiscoveryHit[]);
       } else {
-        setMcpMessage(`扫描失败: ${res?.error ?? "未知错误"}`);
+        setMcpMessage(t("mcp.scanFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
       }
     } catch (err) {
-      setMcpMessage(`扫描失败: ${String(err)}`);
+      setMcpMessage(t("mcp.scanFailed", { reason: String(err) }));
     } finally {
       const elapsed = Date.now() - start;
       const MIN_MS = 800;
@@ -8061,7 +6730,7 @@ export function SettingsPanel({
         if (isStale()) return;
         if (hasKeyword) {
           setMcpMarketplaceItems(enriched);
-          setMcpMarketplaceSummary(`检索到 ${totalCount} 个，已全部展示`);
+          setMcpMarketplaceSummary(t("mcp.listedAll", { total: totalCount }));
           return;
         }
         const filtered = enriched.filter((item) => {
@@ -8072,16 +6741,16 @@ export function SettingsPanel({
         });
         setMcpMarketplaceItems(filtered);
         setMcpMarketplaceSummary(
-          `检索到 ${totalCount} 个，符合“官方认证 + 托管 + 可安装”条件 ${filtered.length} 个`,
+          t("mcp.listedFiltered", { total: totalCount, filtered: filtered.length }),
         );
         if (totalCount > filtered.length) {
-          setMcpMessage(`已过滤 ${totalCount - filtered.length} 个非官方或不可安装条目`);
+          setMcpMessage(t("mcp.filteredOut", { count: totalCount - filtered.length }));
         }
       } else {
-        setMcpMessage(`市场加载失败: ${res?.error ?? "未知错误"}`);
+        setMcpMessage(t("mcp.marketLoadFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
       }
     } catch (err) {
-      setMcpMessage(`市场加载失败: ${String(err)}`);
+      setMcpMessage(t("mcp.marketLoadFailed", { reason: String(err) }));
     } finally {
       if (!isStale()) {
         setMcpMarketplaceLoading(false);
@@ -8093,7 +6762,7 @@ export function SettingsPanel({
     async (serverId: string, env: Record<string, string>) => {
       setMcpMarketplaceInstallBusy(true);
       setMcpMarketplaceInstallingId(serverId);
-      setMcpMarketplaceStatus({ message: `正在安装 ${serverId} ...`, kind: "info", serverId });
+      setMcpMarketplaceStatus({ message: t("mcp.installingNamed", { id: serverId }), kind: "info", serverId });
       setMcpMessage("");
       try {
         const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId });
@@ -8105,14 +6774,14 @@ export function SettingsPanel({
 
         const res = await window.agenticxDesktop.mcpMarketplaceInstall({ serverId, env });
         if (!res.ok) {
-          const errMsg = `安装失败：${res.error ?? "未知错误"}`;
+          const errMsg = t("mcp.installFailedReason", { reason: res.error ?? t("commonSettings.unknownError") });
           setMcpMessage(errMsg);
           setMcpMarketplaceStatus({ message: errMsg, kind: "error", serverId });
           return;
         }
         const installedNames = [...(res.installed ?? []), ...(res.updated ?? [])];
         const installedLabel = installedNames.join("、") || serverId;
-        const okMsg = `安装成功：${installedLabel}`;
+        const okMsg = t("mcp.installOk", { label: installedLabel });
         setMcpMessage(okMsg);
         setMcpMarketplaceStatus({ message: okMsg, kind: "success", serverId });
         setMcpMarketplaceInstalledIds((prev) => new Set([...prev, serverId]));
@@ -8122,7 +6791,7 @@ export function SettingsPanel({
         if (sessionId) await onRefreshMcp(sessionId);
         await refreshMcpDiscover();
       } catch (err) {
-        const errMsg = `安装失败：${String(err)}`;
+        const errMsg = t("mcp.installFailedReason", { reason: String(err) });
         setMcpMessage(errMsg);
         setMcpMarketplaceStatus({ message: errMsg, kind: "error", serverId });
       } finally {
@@ -8229,18 +6898,18 @@ export function SettingsPanel({
       const path = await locateMcpServerPath(name);
       const raw = await window.agenticxDesktop.mcpGetRaw({ path });
       if (!raw?.ok || typeof raw.text !== "string") {
-        setMcpMessage(`删除失败：无法读取配置文件 ${path}`);
+        setMcpMessage(t("mcp.deleteReadFailed", { path }));
         return;
       }
       let parsed: Record<string, unknown>;
       try {
         parsed = JSON.parse(raw.text) as Record<string, unknown>;
       } catch (err) {
-        setMcpMessage(`删除失败：配置文件不是有效 JSON（${String(err)}）`);
+        setMcpMessage(t("mcp.deleteBadJson", { reason: String(err) }));
         return;
       }
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        setMcpMessage(`删除失败：配置文件结构无效（${path}）`);
+        setMcpMessage(t("mcp.deleteBadStruct", { path }));
         return;
       }
       let changed = false;
@@ -8261,7 +6930,7 @@ export function SettingsPanel({
         changed = true;
       }
       if (!changed) {
-        setMcpMessage(`未在 ${path} 中找到服务「${name}」`);
+        setMcpMessage(t("mcp.notInFile", { path, name }));
         return;
       }
       const isDefaultEntry = new Set(mcpDefaultEntryNames).has(name);
@@ -8283,7 +6952,7 @@ export function SettingsPanel({
           skipDefaultNames: nextSkipNames,
         });
         if (!skipPersist?.ok) {
-          setMcpMessage(`删除失败：无法更新默认服务跳过列表（${skipPersist?.error ?? "未知错误"}）`);
+          setMcpMessage(t("mcp.deleteSkipFailed", { reason: skipPersist?.error ?? t("commonSettings.unknownError") }));
           return;
         }
         setMcpSkipDefaultNames(nextSkipNames);
@@ -8303,10 +6972,10 @@ export function SettingsPanel({
             setMcpSkipDefaultNames(rollbackSkipNames);
           }
         }
-        setMcpMessage(`删除失败：${save?.error ?? "保存失败"}`);
+        setMcpMessage(t("mcp.deleteFailed", { reason: save?.error ?? t("commonSettings.saveFailed") }));
         return;
       }
-      setMcpMessage(`已删除 ${name}`);
+      setMcpMessage(t("mcp.deleted", { name }));
       setMcpExpandedServers((prev) => {
         const next = new Set(prev);
         next.delete(name);
@@ -8315,7 +6984,7 @@ export function SettingsPanel({
       if (sessionId) await onRefreshMcp(sessionId);
       await refreshMcpDiscover();
     } catch (err) {
-      setMcpMessage(`删除失败：${String(err)}`);
+      setMcpMessage(t("mcp.deleteFailed", { reason: String(err) }));
     } finally {
       setMcpServerBusy((prev) => ({ ...prev, [name]: false }));
     }
@@ -8362,13 +7031,13 @@ export function SettingsPanel({
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
-    if (mcpDiscoverHits.length === 0) {
+    if (capabilityLocks.allowMcpAutoDiscovery && mcpDiscoverHits.length === 0) {
       void refreshMcpDiscover();
     }
     if (mcpMarketplaceItems.length === 0) {
       void refreshMcpMarketplace();
     }
-  }, [open, tab, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
+  }, [open, tab, capabilityLocks.allowMcpAutoDiscovery, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -8402,28 +7071,28 @@ export function SettingsPanel({
           className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-0"
           style={{ width: navWidth }}
         >
-          <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">设置</div>
+          <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">{t("title")}</div>
           <nav className="agx-settings-nav-scroll flex flex-1 flex-col gap-1 overflow-y-auto">
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              const isActive = tab === t.id;
+            {tabs.map((item) => {
+              const Icon = item.icon;
+              const isActive = tab === item.id;
               return (
                 <button
-                  key={t.id}
-                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
+                  key={item.id}
+                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left ${SETTINGS_NAV_ITEM_CLASS} transition-all ${
                     isActive
                       ? "border-transparent bg-btnPrimary text-btnPrimary-text"
-                      : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+                      : "border-transparent text-text-primary hover:bg-surface-card hover:text-text-strong"
                   }`}
-                  onClick={() => setTab(t.id)}
-                  title={t.label}
+                  onClick={() => setTab(item.id)}
+                  title={item.label}
                 >
                   {Icon ? (
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   ) : (
                     <span className="h-4 w-4 shrink-0 rounded-sm bg-surface-hover" aria-hidden />
                   )}
-                  <span className="min-w-0 truncate">{t.label}</span>
+                  <span className="min-w-0 truncate">{item.label}</span>
                 </button>
               );
             })}
@@ -8432,8 +7101,8 @@ export function SettingsPanel({
             className="group absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize"
             role="separator"
             aria-orientation="vertical"
-            aria-label="拖拽调整导航栏宽度"
-            title="拖拽调整导航栏宽度"
+            aria-label={t("navResize")}
+            title={t("navResize")}
             onMouseDown={onNavResizeMouseDown}
           >
             <div className="absolute inset-y-0 right-0 w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
@@ -8443,12 +7112,12 @@ export function SettingsPanel({
         {/* Right: content */}
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
           <div className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-panel pl-5 pr-5 py-3">
-            <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text-strong">
-              {TABS.find((t) => t.id === tab)?.label ?? "设置"}
+            <h3 className={`min-w-0 flex-1 truncate ${SETTINGS_PAGE_TITLE_CLASS}`}>
+              {tabs.find((item) => item.id === tab)?.label ?? t("title")}
             </h3>
             <button
               type="button"
-              aria-label="关闭"
+              aria-label={tCommon("close")}
               className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-text-faint transition hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
               onClick={onClose}
             >
@@ -8469,18 +7138,44 @@ export function SettingsPanel({
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
-                <Panel title="显示">
+                <Panel title={t("display.title")}>
                   <div className="flex flex-col">
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">外观</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">选择界面的明暗层级</div>
+                        <div className={SETTINGS_LABEL_CLASS}>{t("display.language")}</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("display.languageHint")}</div>
                       </div>
                       {(() => {
                         const options = [
-                          { value: "light", label: "浅色" },
-                          { value: "dim", label: "暗灰" },
-                          { value: "dark", label: "深色" },
+                          { value: "zh", label: t("display.languageZh") },
+                          { value: "en", label: t("display.languageEn") },
+                        ] as const;
+                        return (
+                          <SettingsDropdown
+                            value={locale}
+                            displayLabel={options.find((option) => option.value === locale)?.label ?? locale}
+                            options={options}
+                            onChange={(next) => setLocale(next as AppLocale)}
+                            className="w-40 shrink-0"
+                            size="compact"
+                            menuPortal
+                          />
+                        );
+                      })()}
+                    </div>
+
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
+
+                    <div className="flex min-h-14 items-center justify-between gap-6 py-1">
+                      <div>
+                        <div className={SETTINGS_LABEL_CLASS}>{t("display.appearance")}</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("display.appearanceHint")}</div>
+                      </div>
+                      {(() => {
+                        const options = [
+                          { value: "light", label: t("display.themeLight") },
+                          { value: "dim", label: t("display.themeDim") },
+                          { value: "dark", label: t("display.themeDark") },
                         ] as const;
                         return (
                           <SettingsDropdown
@@ -8500,14 +7195,14 @@ export function SettingsPanel({
 
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">消息布局</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">决定聊天内容的呈现方式</div>
+                        <div className={SETTINGS_LABEL_CLASS}>{t("display.messageLayout")}</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("display.messageLayoutHint")}</div>
                       </div>
                       {(() => {
                         const options = [
-                          { value: "im", label: "IM 风格" },
-                          { value: "terminal", label: "终端风格" },
-                          { value: "clean", label: "简洁风格" },
+                          { value: "im", label: t("display.layoutIm") },
+                          { value: "terminal", label: t("display.layoutTerminal") },
+                          { value: "clean", label: t("display.layoutClean") },
                         ] as const;
                         return (
                           <SettingsDropdown
@@ -8527,19 +7222,19 @@ export function SettingsPanel({
 
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">强调色</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">用于按钮、选中状态与焦点提示</div>
+                        <div className={SETTINGS_LABEL_CLASS}>{t("display.accent")}</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("display.accentHint")}</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {[
-                          { id: "blue", color: "bg-blue-500", label: "蓝色" },
-                          { id: "green", color: "bg-emerald-500", label: "绿色" },
-                          { id: "pink", color: "bg-pink-500", label: "粉红色" },
-                          { id: "yellow", color: "bg-amber-500", label: "黄色" },
+                          { id: "blue", color: "bg-blue-500", label: t("display.accentBlue") },
+                          { id: "green", color: "bg-emerald-500", label: t("display.accentGreen") },
+                          { id: "pink", color: "bg-pink-500", label: t("display.accentPink") },
+                          { id: "yellow", color: "bg-amber-500", label: t("display.accentYellow") },
                           {
                             id: "white",
                             color: theme === "light" ? "bg-slate-900" : "bg-white",
-                            label: "单色",
+                            label: t("display.accentMono"),
                           },
                         ].map((color) => {
                           const selected = themeColor === color.id;
@@ -8566,27 +7261,27 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
-                <Panel title="用户档案">
+                <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
                     <div className="relative shrink-0">
                       {userAvatarUrl ? (
                         <img
                           src={userAvatarUrl}
-                          alt="我的头像"
+                          alt={t("profile.myAvatar")}
                           className="h-12 w-12 rounded-full border border-border object-cover"
                         />
                       ) : (
                         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-base font-semibold text-[var(--theme-color-text)]">
-                          {(userNicknameDraft.trim().slice(0, 1) || "我").toUpperCase()}
+                          {(userNicknameDraft.trim().slice(0, 1) || t("profile.me")).toUpperCase()}
                         </div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-text-primary">
-                        {userNicknameDraft.trim() || "我"}
+                      <div className={`truncate ${SETTINGS_LABEL_CLASS}`}>
+                        {userNicknameDraft.trim() || t("profile.me")}
                       </div>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-faint">
-                        {userPreferenceDraft.trim() || "尚未设置回答偏好与沟通风格"}
+                      <p className={`mt-0.5 line-clamp-2 ${SETTINGS_HINT_CLASS}`}>
+                        {userPreferenceDraft.trim() || t("profile.prefUnset")}
                       </p>
                     </div>
                     <button
@@ -8595,7 +7290,7 @@ export function SettingsPanel({
                       onClick={() => setUserProfileEditing((editing) => !editing)}
                     >
                       <SquarePen className="h-3.5 w-3.5" />
-                      {userProfileEditing ? "收起" : "编辑"}
+                      {userProfileEditing ? t("commonSettings.collapse") : tCommon("edit")}
                     </button>
                   </div>
 
@@ -8603,7 +7298,7 @@ export function SettingsPanel({
                     <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
                       <div className="mb-4 flex items-center gap-3">
                         <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary">
-                          更换头像
+                          {t("profile.changeAvatar")}
                           <input
                             type="file"
                             accept="image/*"
@@ -8621,10 +7316,10 @@ export function SettingsPanel({
                             className="text-xs text-text-faint transition-colors hover:text-text-muted"
                             onClick={() => {
                               setUserAvatarUrl("");
-                              setUserAvatarMessage("已恢复默认。");
+                              setUserAvatarMessage(t("profile.resetDefaultDone"));
                             }}
                           >
-                            恢复默认
+                            {t("profile.resetDefault")}
                           </button>
                         ) : null}
                         {userAvatarMessage ? (
@@ -8634,7 +7329,7 @@ export function SettingsPanel({
 
                       <div className="space-y-4">
                       <div>
-                        <div className="mb-1.5 text-xs font-medium text-text-muted">我的称呼</div>
+                        <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.nickname")}</div>
                         <input
                           type="text"
                           className="w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
@@ -8643,13 +7338,13 @@ export function SettingsPanel({
                             setUserNicknameDraft(e.target.value);
                             setUserProfileMessage("");
                           }}
-                          placeholder="留空则显示「我」"
+                          placeholder={t("profile.nicknamePlaceholder")}
                           maxLength={48}
                         />
                       </div>
 
                       <div>
-                        <div className="mb-1.5 text-xs font-medium text-text-muted">回答偏好与沟通风格</div>
+                        <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.preference")}</div>
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
                           rows={3}
@@ -8658,7 +7353,7 @@ export function SettingsPanel({
                             setUserPreferenceDraft(e.target.value);
                             setUserProfileMessage("");
                           }}
-                          placeholder="例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"
+                          placeholder={t("profile.preferencePlaceholder")}
                           maxLength={500}
                         />
                         <div className="mt-1.5 flex items-start justify-between gap-3">
@@ -8667,7 +7362,7 @@ export function SettingsPanel({
                             {userProfileMessage ? (
                               <span
                                 className={`max-w-[180px] text-right text-[11px] leading-snug ${
-                                  userProfileMessage.startsWith("用户档案已保存") || userProfileMessage.startsWith("AI 已")
+                                  userProfileMessage.startsWith(t("profile.saved")) || userProfileMessage.startsWith(t("profile.aiDonePrefix"))
                                     ? "text-text-subtle"
                                     : "text-rose-400"
                                 }`}
@@ -8686,7 +7381,7 @@ export function SettingsPanel({
                               ) : (
                                 <Sparkles className="h-3 w-3" />
                               )}
-                              {aiAssistLoading === "preference" ? "生成中…" : (userPreferenceDraft.trim() ? "AI 润色" : "AI 生成")}
+                              {aiAssistLoading === "preference" ? t("profile.generating") : (userPreferenceDraft.trim() ? t("profile.aiPolish") : t("profile.aiGenerate"))}
                             </button>
                             <button
                               type="button"
@@ -8694,7 +7389,7 @@ export function SettingsPanel({
                               disabled={!userProfileDirty}
                               onClick={saveUserProfile}
                             >
-                              保存
+                              {tCommon("save")}
                             </button>
                           </div>
                         </div>
@@ -8703,23 +7398,23 @@ export function SettingsPanel({
                     </div>
                   ) : null}
                 </Panel>
-                <Panel title="元智能体">
-                  <p className="text-[11px] leading-4 text-text-faint">
-                    管理元智能体的身份与行为原则
+                <Panel title={t("meta.title")}>
+                  <p className={SETTINGS_INTRO_CLASS}>
+                    {t("meta.intro")}
                   </p>
 
                   <div className="mt-4 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
                     {[
                       {
                         kind: "identity" as const,
-                        title: "身份定义",
-                        description: "Near 是谁，以及它在对话中的角色",
+                        title: t("meta.identity"),
+                        description: t("meta.identityHint"),
                         preview: metaIdentity,
                       },
                       {
                         kind: "soul" as const,
-                        title: "人格与原则",
-                        description: "Near 如何思考、表达和执行任务",
+                        title: t("meta.soul"),
+                        description: t("meta.soulHint"),
                         preview: metaSoul,
                       },
                     ].map((item, index) => {
@@ -8728,7 +7423,7 @@ export function SettingsPanel({
                         item.preview
                           .split("\n")
                           .map((line) => line.replace(/^#+\s*/, "").trim())
-                          .find(Boolean) || "尚未设置";
+                          .find(Boolean) || t("meta.unset");
                       return (
                         <div
                           key={item.kind}
@@ -8750,8 +7445,8 @@ export function SettingsPanel({
                               )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs font-medium text-text-primary">{item.title}</div>
-                              <div className="mt-0.5 truncate text-[11px] text-text-faint" title={preview}>
+                              <div className={SETTINGS_LABEL_CLASS}>{item.title}</div>
+                              <div className={`mt-0.5 truncate ${SETTINGS_HINT_CLASS}`} title={preview}>
                                 {item.description}
                               </div>
                             </div>
@@ -8769,13 +7464,13 @@ export function SettingsPanel({
                             <div className="border-t border-[var(--border-muted)] bg-surface-hover/30 px-3 pb-3 pt-2.5">
                               {item.kind === "identity" ? (
                                 <MetaMarkdownField
-                                  label="身份定义"
+                                  label={t("meta.identity")}
                                   showLabel={false}
                                   value={metaIdentity}
                                   rows={5}
                                   externalHint={metaExternalHintIdentity}
-                                  externalHintText="磁盘上的身份定义可能已在外部修改。"
-                                  placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                                  externalHintText={t("meta.identityExternal")}
+                                  placeholder={t("meta.identityPlaceholder")}
                                   onAiAssist={() => void callAiAssist("identity")}
                                   aiAssistLoading={aiAssistLoading === "identity"}
                                   onOpenInEditor={() => void openMetaWorkspaceInEditor("identity")}
@@ -8787,13 +7482,13 @@ export function SettingsPanel({
                                 />
                               ) : (
                                 <MetaMarkdownField
-                                  label="人格与原则"
+                                  label={t("meta.soul")}
                                   showLabel={false}
                                   value={metaSoul}
                                   rows={7}
                                   externalHint={metaExternalHintSoul}
-                                  externalHintText="磁盘上的全局人格可能已在外部修改。"
-                                  placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                                  externalHintText={t("meta.soulExternal")}
+                                  placeholder={t("meta.soulPlaceholder")}
                                   onAiAssist={() => void callAiAssist("soul")}
                                   aiAssistLoading={aiAssistLoading === "soul"}
                                   onOpenInEditor={() => void openMetaWorkspaceInEditor("soul")}
@@ -8819,7 +7514,7 @@ export function SettingsPanel({
                         onClick={() => setMetaHistoryOpen((open) => !open)}
                       >
                         <History className="h-3.5 w-3.5" />
-                        历史记录
+                        {t("meta.history")}
                       </button>
                       <button
                         type="button"
@@ -8830,7 +7525,7 @@ export function SettingsPanel({
                         }
                         onClick={() => void saveMetaWorkspace()}
                       >
-                        {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存"}
+                        {(metaSoulSaving || metaIdentitySaving) ? t("commonSettings.saving") : tCommon("save")}
                       </button>
                     </div>
                   </div>
@@ -8843,16 +7538,15 @@ export function SettingsPanel({
                     <div className="mt-3 border-t border-[var(--border-muted)] pt-3">
                       <div className="space-y-3 rounded-md border border-[var(--border-muted)] bg-surface-panel/50 p-2">
                         {metaHistoryLoading ? (
-                          <div className="text-[11px] text-text-faint">加载中…</div>
+                          <div className="text-[11px] text-text-faint">{t("commonSettings.loadingEllipsis")}</div>
                         ) : null}
                         {metaHistoryMessage ? (
                           <div className="text-[11px] text-red-400">{metaHistoryMessage}</div>
                         ) : null}
                         <div>
-                          <div className="mb-1 text-[11px] font-medium text-text-muted">身份定义</div>
+                          <div className="mb-1 text-[11px] font-medium text-text-muted">{t("meta.identity")}</div>
                           {metaHistoryIdentityItems.length === 0 ? (
-                            <div className="text-[10px] text-text-faint">暂无历史版本</div>
-                          ) : (
+                            <div className="text-[10px] text-text-faint">{t("meta.noIdentityHistory")}</div>                          ) : (
                             <ul className="space-y-1">
                               {metaHistoryIdentityItems.map((item) => (
                                 <li key={item.id} className="flex items-start gap-2 text-[11px]">
@@ -8860,14 +7554,14 @@ export function SettingsPanel({
                                     {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
                                   </span>
                                   <span className="min-w-0 flex-1 truncate text-text-subtle">
-                                    {item.preview || "（空）"}
+                                    {item.preview || t("meta.empty")}
                                   </span>
                                   <button
                                     type="button"
                                     className="shrink-0 text-theme hover:underline"
                                     onClick={() => void restoreMetaWorkspaceHistoryItem("identity", item.id)}
                                   >
-                                    恢复
+                                    {t("meta.restore")}
                                   </button>
                                 </li>
                               ))}
@@ -8875,10 +7569,9 @@ export function SettingsPanel({
                           )}
                         </div>
                         <div>
-                          <div className="mb-1 text-[11px] font-medium text-text-muted">人格与原则</div>
+                          <div className="mb-1 text-[11px] font-medium text-text-muted">{t("meta.soul")}</div>
                           {metaHistorySoulItems.length === 0 ? (
-                            <div className="text-[10px] text-text-faint">暂无历史版本</div>
-                          ) : (
+                            <div className="text-[10px] text-text-faint">{t("meta.noIdentityHistory")}</div>                          ) : (
                             <ul className="space-y-1">
                               {metaHistorySoulItems.map((item) => (
                                 <li key={item.id} className="flex items-start gap-2 text-[11px]">
@@ -8886,14 +7579,14 @@ export function SettingsPanel({
                                     {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
                                   </span>
                                   <span className="min-w-0 flex-1 truncate text-text-subtle">
-                                    {item.preview || "（空）"}
+                                    {item.preview || t("meta.empty")}
                                   </span>
                                   <button
                                     type="button"
                                     className="shrink-0 text-theme hover:underline"
                                     onClick={() => void restoreMetaWorkspaceHistoryItem("soul", item.id)}
                                   >
-                                    恢复
+                                    {t("meta.restore")}
                                   </button>
                                 </li>
                               ))}
@@ -8904,44 +7597,12 @@ export function SettingsPanel({
                     </div>
                   ) : null}
                 </Panel>
-                <Panel title="权限">
-                  <div className="flex items-center justify-between gap-6">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-text-primary">执行确认</div>
-                      <p className="mt-0.5 text-xs leading-5 text-text-faint">
-                        控制运行命令和工具前何时需要你的确认
-                      </p>
-                    </div>
-                    <ConfirmStrategyDropdown
-                      value={confirmStrategy}
-                      onChange={(next) => void onConfirmStrategyChange(next)}
-                    />
-                  </div>
-                  {confirmStrategy === "auto" ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
-                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
-                      <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
-                    </div>
-                  ) : null}
-                  <div className="mt-4 border-t border-[var(--border-muted)] pt-3">
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium text-text-muted">凭据安全</div>
-                        <p className="mt-1 text-[11px] leading-5 text-text-faint">
-                          请勿在对话中发送 API Key、Token 或密码；请前往对应服务设置中配置。
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </Panel>
-                <PermissionsAdvancedPanel ref={permissionsPanelRef} />
                 <WebSearchSettingsPanel />
                 <SuggestedQuestionsSettingsPanel />
-                <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
-                <Panel title="工作目录">
-                  <label className="block text-sm text-text-muted">
-                    默认工作区目录（元智能体）
+                <Panel title={t("profile.workspaceTitle")}>
+                  <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                    {t("profile.workspaceLabel")}
                     <div className="mt-1 flex gap-2">
                       <input
                         className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -8958,16 +7619,16 @@ export function SettingsPanel({
                         className="shrink-0 rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
                         onClick={() => void chooseWorkspaceDirectory()}
                       >
-                        选择…
+                        {t("profile.chooseDir")}
                       </button>
                     </div>
                     {workspaceDirResolved ? (
                       <span className="mt-1 block text-[11px] text-text-faint">
-                        解析路径：{workspaceDirResolved}
+                        {t("profile.resolvedPath", { path: workspaceDirResolved })}
                       </span>
                     ) : null}
                     <span className="mt-1 block text-xs text-text-faint">
-                      Machi 默认读写根目录（IDENTITY / USER / SOUL / MEMORY 等）。保存后新建对话生效；已有会话仍用原路径。
+                      {t("profile.workspaceHint")}
                     </span>
                   </label>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -8977,7 +7638,7 @@ export function SettingsPanel({
                       disabled={!workspaceDirDirty || workspaceDirSaving}
                       onClick={() => void saveWorkspaceDirectory()}
                     >
-                      {workspaceDirSaving ? "保存中…" : "保存工作区路径"}
+                      {workspaceDirSaving ? t("commonSettings.saving") : t("profile.saveWorkspace")}
                     </button>
                     {workspaceDirDirty ? (
                       <button
@@ -8988,7 +7649,7 @@ export function SettingsPanel({
                           setWorkspaceDirMessage("");
                         }}
                       >
-                        撤销
+                        {t("profile.undo")}
                       </button>
                     ) : null}
                   </div>
@@ -8996,11 +7657,11 @@ export function SettingsPanel({
                     <p className="mt-2 text-xs text-text-muted">{workspaceDirMessage}</p>
                   ) : null}
                   <div className="mt-3 rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                    每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
+                    {t("profile.avatarWorkspaceHint")}
                   </div>
                 </Panel>
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                  当前版本：AgenticX Desktop v0.2.5
+                  {t("profile.appVersion")}
                 </div>
             </div>
 
@@ -9049,12 +7710,12 @@ export function SettingsPanel({
                               {getProviderDisplayName(name, entry)}
                             </span>
                             <span className={`block text-[10px] ${isOn ? "text-emerald-500" : "text-text-faint"}`}>
-                              {isOn ? "已启用" : "未启用"}
+                              {isOn ? t("commonSettings.enabled") : t("commonSettings.notEnabled")}
                             </span>
                           </span>
                           {name === defProv && (
                             <span className="shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 py-0.5 text-[9px] font-medium text-[var(--settings-accent-fg)]">
-                              默认
+                              {t("commonSettings.defaultBadge")}
                             </span>
                           )}
                         </button>
@@ -9072,7 +7733,7 @@ export function SettingsPanel({
                       }}
                     >
                       <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      添加
+                      {t("provider.addVendor")}
                     </button>
                   </div>
                 </div>
@@ -9095,7 +7756,7 @@ export function SettingsPanel({
                             if (e.key === "Enter") { e.preventDefault(); commitInlineProviderRename(); }
                             if (e.key === "Escape") { e.preventDefault(); cancelInlineProviderRename(); }
                           }}
-                          aria-label="服务厂商显示名"
+                          aria-label={t("provider.renameAria")}
                         />
                       ) : (
                         <h2
@@ -9107,7 +7768,7 @@ export function SettingsPanel({
                           onClick={() => {
                             if (isProviderDisplayNameEditable(active, current)) beginInlineProviderRename(active);
                           }}
-                          title={isProviderDisplayNameEditable(active, current) ? "点击重命名" : undefined}
+                          title={isProviderDisplayNameEditable(active, current) ? t("provider.renameTitle") : undefined}
                         >
                           {getProviderDisplayName(active, current)}
                           {isProviderDisplayNameEditable(active, current) && (
@@ -9119,21 +7780,21 @@ export function SettingsPanel({
                     {/* 启用 / 设为默认 toggles */}
                     <div className="flex shrink-0 items-center gap-4">
                       <label className="flex cursor-pointer flex-col items-center gap-1">
-                        <span className="text-[10px] text-text-faint">启用</span>
+                        <span className="text-[10px] text-text-faint">{t("provider.enable")}</span>
                         <button
                           type="button"
                           role="switch"
                           aria-checked={currentEffectiveOn}
-                          aria-label={currentEffectiveOn ? `关闭 ${getProviderDisplayName(active, current)}` : `启用 ${getProviderDisplayName(active, current)}`}
+                          aria-label={currentEffectiveOn ? t("provider.turnOff", { name: getProviderDisplayName(active, current) }) : t("provider.turnOn", { name: getProviderDisplayName(active, current) })}
                           className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
-                            currentEffectiveOn ? "bg-btnPrimary" : "bg-surface-card-strong"
+                            currentEffectiveOn ? "bg-btnPrimary" : "bg-[var(--ui-switch-track-off)]"
                           }`}
                           onClick={() => {
                             if (currentEffectiveOn) {
                               updateField("enabled", false);
                               setProviderEnableHint(null);
                             } else if (!providerCredentialed(current)) {
-                              setProviderEnableHint("请先填写 API 密钥或 API 地址后再启用");
+                              setProviderEnableHint(t("provider.needCredsToEnable"));
                             } else {
                               updateField("enabled", true);
                               setProviderEnableHint(null);
@@ -9148,14 +7809,14 @@ export function SettingsPanel({
                         </button>
                       </label>
                       <label className="flex cursor-pointer flex-col items-center gap-1">
-                        <span className="text-[10px] text-text-faint">设为默认</span>
+                        <span className="text-[10px] text-text-faint">{t("provider.setDefault")}</span>
                         <button
                           type="button"
                           role="switch"
                           aria-checked={defProv === active}
-                          aria-label={defProv === active ? `取消默认 ${getProviderDisplayName(active, current)}` : `设为默认 ${getProviderDisplayName(active, current)}`}
+                          aria-label={defProv === active ? t("provider.unsetDefault", { name: getProviderDisplayName(active, current) }) : t("provider.setDefaultNamed", { name: getProviderDisplayName(active, current) })}
                           className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
-                            defProv === active ? "bg-btnPrimary" : "bg-surface-card-strong"
+                            defProv === active ? "bg-btnPrimary" : "bg-[var(--ui-switch-track-off)]"
                           }`}
                           onClick={() => {
                             if (defProv === active) {
@@ -9167,10 +7828,10 @@ export function SettingsPanel({
                                 setDefaultProvHint(null);
                                 setDefProv(fallback);
                               } else {
-                                setDefaultProvHint("至少要保留一个默认 Provider；请先在左侧选择其它厂商后再取消默认。");
+                                setDefaultProvHint(t("provider.keepOneDefault"));
                               }
                             } else if (!providerCredentialed(current)) {
-                              setDefaultProvHint("请先填写 API 密钥或 API 地址后再设为默认 Provider");
+                              setDefaultProvHint(t("provider.needCredsToDefault"));
                             } else {
                               setDefaultProvHint(null);
                               setDefProv(active);
@@ -9189,7 +7850,7 @@ export function SettingsPanel({
                           type="button"
                           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rose-500/30 text-rose-400/70 transition hover:border-rose-500/60 hover:bg-rose-500/10 hover:text-rose-400"
                           onClick={() => setProviderDeleteConfirmId(active)}
-                          aria-label="删除厂商"
+                          aria-label={t("provider.deleteVendor")}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden />
                         </button>
@@ -9199,8 +7860,8 @@ export function SettingsPanel({
                   {(providerEnableHint || defaultProvHint) && (
                     <div className="text-xs text-rose-400">{providerEnableHint || defaultProvHint}</div>
                   )}
-                      <label className="block text-sm text-text-muted">
-                        API 密钥
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("provider.apiKey")}
                         <div className="mt-1 flex gap-2">
                           <div className="relative min-w-0 flex-1">
                             <input
@@ -9214,7 +7875,7 @@ export function SettingsPanel({
                             <button
                               type="button"
                               tabIndex={-1}
-                              aria-label={apiKeyVisible ? "隐藏密钥" : "显示密钥"}
+                              aria-label={apiKeyVisible ? t("commonSettings.hideKey") : t("commonSettings.showKey")}
                               className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
                               onClick={() => setApiKeyVisible((v) => !v)}
                             >
@@ -9235,7 +7896,7 @@ export function SettingsPanel({
                             disabled={ks === "checking" || !providerCredentialed(current)}
                             onClick={onValidateKey}
                           >
-                            {ks === "checking" ? "检测中..." : ks === "ok" ? "有效 ✓" : ks === "fail" ? "失败 ✗" : "检 测"}
+                            {ks === "checking" ? t("provider.checking") : ks === "ok" ? t("provider.valid") : ks === "fail" ? t("provider.failedMark") : t("provider.check")}
                           </button>
                         </div>
                         {ks === "fail" && keyError[active] && <div className="mt-1 text-xs text-rose-400">{keyError[active]}</div>}
@@ -9243,11 +7904,11 @@ export function SettingsPanel({
                           <div className="mt-1 text-xs text-amber-400/90">{keyWarning[active]}</div>
                         )}
                         {!current.apiKey.trim() && current.baseUrl.trim() && (
-                          <div className="mt-1 text-xs text-text-faint">内网 OpenAI 兼容网关可不填密钥；若输入框仍是 sk-... 占位符请清空后再检测。</div>
+                          <div className="mt-1 text-xs text-text-faint">{t("provider.probeHint")}</div>
                         )}
                       </label>
-                      <label className="block text-sm text-text-muted">
-                        API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("provider.apiUrl")} <span className="text-xs text-text-faint">{t("provider.leaveDefault")}</span>
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                           value={current.baseUrl}
@@ -9260,12 +7921,12 @@ export function SettingsPanel({
                         />
                         {isOllamaLikeProvider(active, current) && (
                           <div className="mt-1 text-xs text-text-faint">
-                            Ollama 使用原生 API，<strong className="font-medium text-text-subtle">不要</strong>填写 <code className="text-[10px]">/v1</code>；留空密钥，仅填可访问的地址即可。
+                            <Trans t={t} i18nKey="provider.ollamaNativeHint" components={{ strong: <strong className="font-medium text-text-subtle" />, code: <code className="text-[10px]" /> }} />
                           </div>
                         )}
                         {current.baseUrl.trim() && (
                           <div className="mt-1 text-xs text-text-faint">
-                            预览：<span className="text-text-subtle">
+                            {t("provider.preview")}<span className="text-text-subtle">
                               {previewProviderApiEndpoint(active, current.baseUrl, current)}
                             </span>
                           </div>
@@ -9274,18 +7935,18 @@ export function SettingsPanel({
                       
                       <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="text-sm font-medium text-text-primary">模型列表</span>
-                          <span className="truncate text-[10px] text-text-faint">星标设为该渠道默认模型</span>
+                          <span className="text-sm font-medium text-text-primary">{t("provider.modelList")}</span>
+                          <span className="truncate text-[10px] text-text-faint">{t("provider.starHint")}</span>
                           <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium tabular-nums text-text-subtle">
                             {current.models.length}
                           </span>
                         </div>
                         <div />
                         <div className="flex shrink-0 items-center gap-1">
-                          <HoverTip label="批量健康检查">
+                          <HoverTip label={t("provider.batchHealth")}>
                             <button
                               type="button"
-                              aria-label="批量健康检查"
+                              aria-label={t("provider.batchHealth")}
                               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
                               disabled={!providerCredentialed(current) || current.models.length === 0}
                               onClick={() => void onBatchHealthCheck()}
@@ -9293,10 +7954,10 @@ export function SettingsPanel({
                               <Activity className="h-4 w-4" aria-hidden />
                             </button>
                           </HoverTip>
-                          <HoverTip label="从 API 获取模型">
+                          <HoverTip label={t("provider.fetchFromApi")}>
                             <button
                               type="button"
-                              aria-label="从 API 获取模型"
+                              aria-label={t("provider.fetchFromApi")}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
                               disabled={fetchingModels || !providerCredentialed(current)}
                               onClick={() => void onFetchModels()}
@@ -9308,10 +7969,10 @@ export function SettingsPanel({
                               )}
                             </button>
                           </HoverTip>
-                          <HoverTip label="添加模型">
+                          <HoverTip label={t("provider.addModel")}>
                             <button
                               type="button"
-                              aria-label="添加模型"
+                              aria-label={t("provider.addModel")}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                               onClick={() => {
                                 setAddModelFormId("");
@@ -9332,7 +7993,7 @@ export function SettingsPanel({
                       <div className="space-y-1.5">
                         {current.models.length === 0 ? (
                           <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-text-faint">
-                            暂无模型，可从 API 拉取或点击 + 手动添加
+                            {t("provider.emptyModels")}
                           </div>
                         ) : null}
                         {current.models.map((model) => {
@@ -9347,10 +8008,10 @@ export function SettingsPanel({
                               key={model}
                               className={`grid grid-cols-[2rem_minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]${unauthorized ? " opacity-80" : ""}`}
                             >
-                              <HoverTip label={isDefaultModel ? "当前默认模型" : "设为默认模型"}>
+                              <HoverTip label={isDefaultModel ? t("provider.currentDefaultModel") : t("provider.setDefaultModel")}>
                                 <button
                                   type="button"
-                                  aria-label={isDefaultModel ? "当前默认模型" : `设为默认 ${model}`}
+                                  aria-label={isDefaultModel ? t("provider.currentDefaultModel") : t("provider.setDefaultModelNamed", { model })}
                                   aria-pressed={isDefaultModel}
                                   className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
                                     isDefaultModel
@@ -9374,7 +8035,7 @@ export function SettingsPanel({
                                   </span>
                                   {isDefaultModel ? (
                                     <span className="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-400/90">
-                                      默认
+                                      {t("commonSettings.defaultBadge")}
                                     </span>
                                   ) : null}
                                 </div>
@@ -9387,13 +8048,13 @@ export function SettingsPanel({
                                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
                                   </>
                                 ) : entry?.phase === "unauthorized" ? (
-                                  <HoverTip label={unauthorizedHoverLabel(entry.error)}>
+                                  <HoverTip label={unauthorizedHoverLabel(entry.error, t)}>
                                     <span className="shrink-0 rounded px-1.5 py-0.5 text-xs text-amber-400/90">
-                                      未授权
+                                      {t("provider.unauthorized")}
                                     </span>
                                   </HoverTip>
                                 ) : entry?.phase === "error" ? (
-                                  <span className="text-xs text-rose-400/90">失败</span>
+                                  <span className="text-xs text-rose-400/90">{t("provider.failed")}</span>
                                 ) : checking ? (
                                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-faint" aria-hidden />
                                 ) : (
@@ -9403,25 +8064,25 @@ export function SettingsPanel({
                                     disabled={checking || !providerCredentialed(current)}
                                     onClick={() => void onHealthCheck(model)}
                                   >
-                                    检测
+                                    {t("provider.checkShort")}
                                   </button>
                                 )}
                               </div>
-                              <HoverTip label="编辑模型">
+                              <HoverTip label={t("provider.editModel")}>
                                 <button
                                   type="button"
                                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-faint transition hover:bg-surface-hover hover:text-text-primary"
-                                  aria-label="编辑模型"
+                                  aria-label={t("provider.editModel")}
                                   onClick={() => openEditModelModal(model)}
                                 >
                                   <SquarePen className="h-4 w-4" aria-hidden />
                                 </button>
                               </HoverTip>
-                              <HoverTip label="移除模型">
+                              <HoverTip label={t("provider.removeModel")}>
                                 <button
                                   type="button"
                                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-rose-400/70 transition hover:border-rose-400/50 hover:bg-rose-500/5 hover:text-rose-400"
-                                  aria-label="移除模型"
+                                  aria-label={t("provider.removeModel")}
                                   onClick={() => onRemoveModel(model)}
                                 >
                                   <CircleMinus className="h-4 w-4" aria-hidden />
@@ -9433,16 +8094,16 @@ export function SettingsPanel({
                       </div>
                       <Modal
                         open={fetchModelsModalOpen}
-                        title="获取模型列表"
+                        title={t("provider.fetchTitle")}
                         onClose={closeFetchModelsModal}
                         backdropClassName="bg-black/78"
                         panelClassName="w-full max-w-[min(90vw,720px)] bg-[var(--surface-base-fallback)]"
                         footer={(
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs text-text-faint">
-                              共 {fetchedModels.length} 个，可见 {current.models.length} 个
+                              {t("provider.fetchCount", { total: fetchedModels.length, visible: current.models.length })}
                               {authProbeProgress
-                                ? `，自动检测中 ${authProbeProgress.done}/${authProbeProgress.total}`
+                                ? t("provider.autoChecking", { done: authProbeProgress.done, total: authProbeProgress.total })
                                 : ""}
                             </span>
                             <button
@@ -9450,7 +8111,7 @@ export function SettingsPanel({
                               className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)]"
                               onClick={closeFetchModelsModal}
                             >
-                              完成
+                              {t("provider.done")}
                             </button>
                           </div>
                         )}
@@ -9460,12 +8121,12 @@ export function SettingsPanel({
                             className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                             value={fetchModelsSearch}
                             onChange={(e) => setFetchModelsSearch(e.target.value)}
-                            placeholder="搜索模型 ID 或名称"
+                            placeholder={t("provider.searchModels")}
                           />
                           <div className="max-h-[min(56vh,460px)] space-y-1 overflow-y-auto pr-1">
                             {filteredFetchedModels.length === 0 ? (
                               <div className="rounded-md border border-dashed border-border px-3 py-5 text-center text-sm text-text-faint">
-                                {fetchedModels.length === 0 ? "未从 API 返回可用模型" : "没有匹配的模型"}
+                                {fetchedModels.length === 0 ? t("provider.noApiModels") : t("provider.noMatch")}
                               </div>
                             ) : (
                               filteredFetchedModels.map((model) => {
@@ -9483,17 +8144,17 @@ export function SettingsPanel({
                                       <div className="truncate text-sm text-text-muted">{model}</div>
                                       <div className="mt-0.5 flex items-center gap-1.5">
                                         <span className="text-[11px] text-text-faint">
-                                          {isVisible ? "当前状态：可见" : "当前状态：不可见"}
+                                          {isVisible ? t("provider.visibleState") : t("provider.hiddenState")}
                                         </span>
                                         {unauthorized ? (
-                                          <HoverTip label={unauthorizedHoverLabel(authEntry?.error)}>
+                                          <HoverTip label={unauthorizedHoverLabel(authEntry?.error, t)}>
                                             <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-400">
                                               <TriangleAlert className="h-3 w-3" aria-hidden />
-                                              未授权
+                                              {t("provider.unauthorized")}
                                             </span>
                                           </HoverTip>
                                         ) : checkingAuth ? (
-                                          <span className="text-[11px] text-text-faint">检测中…</span>
+                                          <span className="text-[11px] text-text-faint">{t("provider.checkingShort")}</span>
                                         ) : null}
                                       </div>
                                     </div>
@@ -9502,15 +8163,15 @@ export function SettingsPanel({
                                       <HoverTip
                                         label={
                                           unauthorized
-                                            ? unauthorizedHoverLabel(authEntry?.error)
+                                            ? unauthorizedHoverLabel(authEntry?.error, t)
                                             : isVisible
-                                              ? "已可见"
-                                              : "设为可见"
+                                              ? t("provider.alreadyVisible")
+                                              : t("provider.makeVisible")
                                         }
                                       >
                                         <button
                                           type="button"
-                                          aria-label={`设为可见：${model}`}
+                                          aria-label={t("provider.makeVisibleNamed", { model })}
                                           className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
                                             isVisible
                                               ? "border-emerald-500/40 text-emerald-400/80"
@@ -9526,7 +8187,7 @@ export function SettingsPanel({
                                       </HoverTip>
                                       <button
                                         type="button"
-                                        aria-label={`设为不可见：${model}`}
+                                        aria-label={t("provider.makeHiddenNamed", { model })}
                                         className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
                                           isVisible
                                             ? "border-border text-text-subtle hover:bg-surface-hover hover:text-rose-400"
@@ -9547,7 +8208,7 @@ export function SettingsPanel({
                       </Modal>
                       <Modal
                         open={addServiceVendorModalOpen}
-                        title="添加服务厂商"
+                        title={t("provider.addVendorTitle")}
                         onClose={closeAddServiceVendorModal}
                         backdropClassName="bg-black/75"
                         panelClassName="w-full max-w-[min(92vw,400px)] bg-[var(--surface-base-fallback)]"
@@ -9558,7 +8219,7 @@ export function SettingsPanel({
                               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                               onClick={closeAddServiceVendorModal}
                             >
-                              取消
+                              {tCommon("cancel")}
                             </button>
                             <button
                               type="button"
@@ -9566,7 +8227,7 @@ export function SettingsPanel({
                               disabled={!addVendorFormName.trim()}
                               onClick={submitAddServiceVendorFromModal}
                             >
-                              确定
+                              {tCommon("ok")}
                             </button>
                           </div>
                         )}
@@ -9577,41 +8238,41 @@ export function SettingsPanel({
                               {(addVendorFormName.trim().charAt(0) || "P").toUpperCase()}
                             </div>
                           </div>
-                          <label className="block text-sm text-text-muted">
-                            服务厂商名称
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                            {t("provider.vendorName")}
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
                               value={addVendorFormName}
                               onChange={(e) => setAddVendorFormName(e.target.value)}
-                              placeholder="例如 OpenAI"
+                              placeholder={t("provider.vendorNamePh")}
                               onKeyDown={(e) => {
                                 if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && addVendorFormName.trim()) submitAddServiceVendorFromModal();
                               }}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
-                            服务厂商类型
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                            {t("provider.vendorType")}
                             <select
                               className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
                               value={addVendorFormType}
-                              aria-label="服务厂商类型"
+                              aria-label={t("provider.vendorType")}
                               onChange={(e) => setAddVendorFormType(e.target.value as ProviderInterfaceKind)}
                             >
-                              <option value="openai">OpenAI 兼容</option>
+                              <option value="openai">{t("provider.openaiCompat")}</option>
                               <option value="ollama">Ollama</option>
                             </select>
                             <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
                               {addVendorFormType === "ollama"
-                                ? "Ollama 直连（如局域网 11434）；API 地址勿带 /v1。侧栏已有内置「Ollama」时可改那边，此处用于第二实例或自定义名称。"
-                                : "OpenAI 兼容接口（含多数中转 / 网关）；保存设置后写入配置。"}
+                                ? t("provider.ollamaHint")
+                                : t("provider.openaiHint")}
                             </p>
                           </label>
                         </div>
                       </Modal>
                       <Modal
                         open={addModelModalOpen}
-                        title="添加模型"
+                        title={t("provider.addModel")}
                         onClose={closeAddModelModal}
                         footer={(
                           <div className="flex justify-end gap-2">
@@ -9620,7 +8281,7 @@ export function SettingsPanel({
                               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                               onClick={closeAddModelModal}
                             >
-                              取消
+                              {tCommon("cancel")}
                             </button>
                             <button
                               type="button"
@@ -9628,42 +8289,42 @@ export function SettingsPanel({
                               disabled={!addModelFormId.trim()}
                               onClick={submitAddModelFromModal}
                             >
-                              添加模型
+                              {t("provider.addModel")}
                             </button>
                           </div>
                         )}
                       >
                         <div className="space-y-3">
-                          <label className="block text-sm text-text-muted">
-                            <span className="text-rose-400">*</span> 模型 ID
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                            <span className="text-rose-400">*</span> {t("provider.modelId")}
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                               value={addModelFormId}
                               onChange={(e) => setAddModelFormId(e.target.value)}
-                              placeholder="必填，例如 gpt-4o-mini"
+                              placeholder={t("provider.modelIdRequiredPh")}
                               onKeyDown={(e) => {
                                 if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && addModelFormId.trim()) submitAddModelFromModal();
                               }}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
-                            模型名称
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                            {t("provider.modelName")}
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                               value={addModelFormName}
                               onChange={(e) => setAddModelFormName(e.target.value)}
-                              placeholder="可选，例如 GPT-4"
+                              placeholder={t("provider.modelNamePh")}
                             />
                           </label>
                           <p className="text-[11px] leading-relaxed text-text-faint">
-                            保存到列表时仅使用「模型 ID」；模型名称便于你对照 Cherry Studio 习惯填写，当前版本不参与路由。
+                            {t("provider.modelNameHint")}
                           </p>
                         </div>
                       </Modal>
                       <Modal
                         open={editModelModalOpen}
-                        title="编辑模型"
+                        title={t("provider.editModel")}
                         onClose={closeEditModelModal}
                         footer={(
                           <div className="flex justify-end gap-2">
@@ -9672,7 +8333,7 @@ export function SettingsPanel({
                               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                               onClick={closeEditModelModal}
                             >
-                              取消
+                              {tCommon("cancel")}
                             </button>
                             <button
                               type="button"
@@ -9680,14 +8341,14 @@ export function SettingsPanel({
                               disabled={!editModelFormId.trim()}
                               onClick={submitEditModelFromModal}
                             >
-                              保存
+                              {tCommon("save")}
                             </button>
                           </div>
                         )}
                       >
                         <div className="space-y-3">
-                          <label className="block text-sm text-text-muted">
-                            <span className="text-rose-400">*</span> 模型 ID
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                            <span className="text-rose-400">*</span> {t("provider.modelId")}
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                               value={editModelFormId}
@@ -9695,7 +8356,7 @@ export function SettingsPanel({
                                 setEditModelFormId(e.target.value);
                                 setEditModelError(null);
                               }}
-                              placeholder="例如 gpt-4o-mini"
+                              placeholder={t("provider.modelIdPh")}
                               onKeyDown={(e) => {
                                 if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && editModelFormId.trim()) submitEditModelFromModal();
@@ -9704,13 +8365,13 @@ export function SettingsPanel({
                           </label>
                           {editModelError ? <div className="text-[11px] text-rose-400">{editModelError}</div> : null}
                           <p className="text-[11px] leading-relaxed text-text-faint">
-                            列表项即请求时使用的模型 ID；保存设置后才会写入配置。
+                            {t("provider.editHint")}
                           </p>
                         </div>
                       </Modal>
                       <Modal
                         open={Boolean(providerDeleteConfirmId)}
-                        title="删除服务厂商"
+                        title={t("provider.deleteVendorTitle")}
                         onClose={() => {
                           if (providerDeleteBusy) return;
                           setProviderDeleteConfirmId(null);
@@ -9725,7 +8386,7 @@ export function SettingsPanel({
                               disabled={providerDeleteBusy}
                               onClick={() => setProviderDeleteConfirmId(null)}
                             >
-                              取消
+                              {tCommon("cancel")}
                             </button>
                             <button
                               type="button"
@@ -9733,17 +8394,17 @@ export function SettingsPanel({
                               disabled={providerDeleteBusy}
                               onClick={() => void confirmDeleteProvider()}
                             >
-                              {providerDeleteBusy ? "删除中…" : "删除"}
+                              {providerDeleteBusy ? t("provider.deleting") : tCommon("delete")}
                             </button>
                           </div>
                         )}
                       >
                         <p className="text-sm leading-relaxed text-text-muted">
-                          确认删除服务厂商「
+                          {t("provider.deleteConfirmBefore")}
                           {providerDeleteConfirmId
                             ? getProviderDisplayName(providerDeleteConfirmId, draft[providerDeleteConfirmId])
                             : ""}
-                          」？删除后立即生效，该厂商下的模型配置也会一并移除。
+                          {t("provider.deleteConfirmAfter")}
                         </p>
                       </Modal>
                 </div>
@@ -9752,13 +8413,13 @@ export function SettingsPanel({
                 {providerConfigMessage ? (
                   <span
                     className={`mr-auto text-xs ${
-                      providerConfigMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"
+                      providerConfigMessage.startsWith(t("commonSettings.saved")) ? "text-text-muted" : "text-rose-400"
                     }`}
                   >
                     {providerConfigMessage}
                   </span>
                 ) : providerConfigDirty ? (
-                  <span className="mr-auto text-xs text-text-subtle">有未保存的模型服务改动</span>
+                  <span className="mr-auto text-xs text-text-subtle">{t("provider.unsaved")}</span>
                 ) : null}
                 <button
                   type="button"
@@ -9766,7 +8427,7 @@ export function SettingsPanel({
                   disabled={!providerConfigDirty || providerConfigSaving}
                   onClick={() => void saveProviderConfig()}
                 >
-                  {providerConfigSaving ? "保存中…" : "保存"}
+                  {providerConfigSaving ? t("commonSettings.saving") : tCommon("save")}
                 </button>
               </div>
               </div>
@@ -9779,35 +8440,36 @@ export function SettingsPanel({
                 <RemoteBackendHintBanner />
                 <div className="space-y-1">
                   <div className="text-sm text-text-subtle">
-                    MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
+                    {t("mcp.intro")}
                   </div>
                   <div className="text-[11px] text-text-faint">
-                    已连接的 MCP 服务是 Near <strong>进程级</strong>资源，所有对话共享；Near 启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
+                    <Trans t={t} i18nKey="mcp.processHint" components={{ strong: <strong /> }} />
                   </div>
                   <div className="text-[11px] text-status-warning">
-                    所需 API Key 请在本页安装弹窗或 JSON 的 <code className="text-[10px]">env</code> 中填写，勿在聊天里发送给 Agent。
+                    <Trans t={t} i18nKey="mcp.keyHint" components={{ code: <code className="text-[10px]" /> }} />
                   </div>
                 </div>
 
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
 
                 {/* —— 配置文件路径 —— */}
+                {capabilityLocks.allowLocalMcpInstall ? (
                 <div className="space-y-2">
                   <div className="text-xs text-text-faint">
-                    配置文件路径（按顺序合并；同名服务以先出现的为准）。点右侧铅笔图标直接编辑 JSON。
+                    {t("mcp.pathsHint")}
                   </div>
                   <div className="flex gap-2">
                     <input
                       readOnly
                       className="flex-1 cursor-not-allowed rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-muted"
                       value={MCP_PRIMARY_CONFIG_PATH}
-                      aria-label="主 MCP 配置路径"
+                      aria-label={t("mcp.primaryPath")}
                     />
-                    <span className="shrink-0 self-center text-[10px] text-text-faint">主配置</span>
+                    <span className="shrink-0 self-center text-[10px] text-text-faint">{t("mcp.primary")}</span>
                     <button
                       type="button"
                       className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                      title="编辑此配置文件"
+                      title={t("mcp.editThisFile")}
                       onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
                     >
                       <SquarePen className="h-4 w-4" aria-hidden />
@@ -9818,7 +8480,7 @@ export function SettingsPanel({
                       <input
                         className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                         value={row}
-                        placeholder="例如 ~/.cursor/mcp.json"
+                        placeholder={t("mcp.extraPathPh")}
                         disabled={mcpPathSaving}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -9833,7 +8495,7 @@ export function SettingsPanel({
                       <button
                         type="button"
                         className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                        title="移除此路径"
+                        title={t("mcp.removePath")}
                         disabled={mcpPathSaving}
                         onClick={() => {
                           const next = mcpExtraPaths.filter((_, i) => i !== idx);
@@ -9846,7 +8508,7 @@ export function SettingsPanel({
                       <button
                         type="button"
                         className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                        title="编辑此配置文件"
+                        title={t("mcp.editThisFile")}
                         disabled={!row.trim()}
                         onClick={() => openMcpEditor(row.trim())}
                       >
@@ -9861,60 +8523,63 @@ export function SettingsPanel({
                     onClick={() => setMcpExtraPaths((prev) => [...prev, ""])}
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden />
-                    添加配置路径
+                    {t("mcp.addPath")}
                   </button>
                 </div>
+                ) : null}
 
                 {/* —— MCP 服务列表 —— */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-text-muted">MCP 服务</div>
+                    <div className="text-sm font-medium text-text-muted">{t("mcp.servers")}</div>
+                    {capabilityLocks.allowMcpAutoDiscovery ? (
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
                       onClick={() => void refreshMcpDiscover()}
                       disabled={mcpDiscoverLoading}
-                      title="扫描本地已安装的 AI 工具的 MCP 配置"
+                      title={t("mcp.scanLocal")}
                     >
                       <RefreshCw
                         className="h-3.5 w-3.5"
                         style={{ animation: mcpDiscoverLoading ? "spin 1s linear infinite" : "none" }}
                         aria-hidden
                       />
-                      {mcpDiscoverLoading ? "扫描中…" : "扫描发现"}
+                      {mcpDiscoverLoading ? t("mcp.scanning") : t("mcp.scanDiscover")}
                     </button>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-faint">
-                    <span className="text-text-faint">注：</span>
+                    <span className="text-text-faint">{t("mcp.note")}</span>
                     <span className="inline-flex items-center gap-1">
                       <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" />
-                      已连接且已注册工具
+                      {t("mcp.healthyNote")}
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                      异常，请先查看详情再重连
+                      {t("mcp.errorNote")}
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-[#6b7280]" />
-                      未连接
+                      {t("mcp.disconnected")}
                     </span>
                   </div>
 
                   <div className="space-y-1.5">
                     {mcpServers.length === 0 ? (
                       <div className="py-6 text-center text-sm text-text-faint">
-                        尚未发现 MCP 服务。点上方主配置右侧的编辑图标，在 <code>~/.agenticx/mcp.json</code> 中添加。
+                        <Trans t={t} i18nKey="mcp.empty" components={{ code: <code /> }} />
                       </div>
                     ) : null}
                     {mcpServers.map((server) => {
-                      const pres = resolveMcpRowPresentation(server);
+                      const pres = resolveMcpRowPresentation(server, t);
                       const isRemote = Boolean(server.url?.trim());
                       const optimisticChecked = mcpOptimisticChecked[server.name];
                       const switchChecked = typeof optimisticChecked === "boolean" ? optimisticChecked : server.connected;
                       const forceDisconnectedMessage = Boolean(mcpServerBusy[server.name]) && !switchChecked;
                       const latestOpMessage = forceDisconnectedMessage
-                        ? "未连接"
-                        : server.op_message?.trim() || `状态：${pres.statusLine}`;
+                        ? t("mcp.disconnected")
+                        : server.op_message?.trim() || t("mcp.statusAria", { line: pres.statusLine });
                       const toolNames = server.tool_names ?? [];
                       const disabledForServer = mcpDisabledTools[server.name] ?? [];
                       const isToolsExpanded = mcpExpandedServers.has(server.name);
@@ -9953,7 +8618,7 @@ export function SettingsPanel({
                                     <button
                                       type="button"
                                       className="shrink-0 rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
-                                      title={isToolsExpanded ? "收起工具列表" : `展开工具列表（${toolNames.length} 个）`}
+                                      title={isToolsExpanded ? t("mcp.collapseTools") : t("mcp.expandTools", { count: toolNames.length })}
                                       onClick={() =>
                                         setMcpExpandedServers((prev) => {
                                           const next = new Set(prev);
@@ -9971,14 +8636,14 @@ export function SettingsPanel({
                                   ) : null}
                                   {canExpandTools ? (
                                     <span className="shrink-0 text-[10px] text-text-faint">
-                                      {toolNames.length - disabledForServer.length}/{toolNames.length} 启用
+                                      {t("mcp.enabledCount", { on: toolNames.length - disabledForServer.length, total: toolNames.length })}
                                     </span>
                                   ) : null}
                                   {canExpandRemoteDetail ? (
                                     <button
                                       type="button"
                                       className="shrink-0 rounded px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
-                                      title={isRemoteDetailExpanded ? "收起远程详情" : "展开 URL / Headers"}
+                                      title={isRemoteDetailExpanded ? t("mcp.collapseRemote") : t("mcp.expandRemote")}
                                       onClick={() =>
                                         setMcpRemoteDetailExpanded((prev) => {
                                           const next = new Set(prev);
@@ -9988,7 +8653,7 @@ export function SettingsPanel({
                                         })
                                       }
                                     >
-                                      {isRemoteDetailExpanded ? "收起" : "详情"}
+                                      {isRemoteDetailExpanded ? t("commonSettings.collapse") : t("commonSettings.details")}
                                     </button>
                                   ) : null}
                                 </div>
@@ -10000,17 +8665,17 @@ export function SettingsPanel({
                                         type="button"
                                         className="text-[11px] text-rose-400 underline decoration-dotted hover:text-rose-300"
                                         onClick={() =>
-                                          setMcpErrorInspect({ title: `${server.name} — 异常说明`, body: pres.detail! })
+                                          setMcpErrorInspect({ title: t("mcp.errorTitle", { name: server.name }), body: pres.detail! })
                                         }
                                       >
-                                        查看详情
+                                        {t("mcp.viewDetails")}
                                       </button>
                                       <button
                                         type="button"
                                         className="text-[11px] text-[var(--settings-accent-text)] underline decoration-dotted"
                                         onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
                                       >
-                                        用编辑器修复
+                                        {t("mcp.fixInEditor")}
                                       </button>
                                     </>
                                   ) : null}
@@ -10038,7 +8703,7 @@ export function SettingsPanel({
                               <button
                                 type="button"
                                 className="rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                                title={`编辑 ${server.name} 配置`}
+                                title={t("mcp.editNamed", { name: server.name })}
                                 disabled={Boolean(mcpServerBusy[server.name])}
                                 onClick={() => {
                                   if (isRemote) {
@@ -10055,7 +8720,7 @@ export function SettingsPanel({
                               <button
                                 type="button"
                                 className="rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                                title={`删除 ${server.name}`}
+                                title={t("mcp.deleteNamed", { name: server.name })}
                                 disabled={Boolean(mcpServerBusy[server.name])}
                                 onClick={() => {
                                   setMcpDeleteConfirmServerName(server.name);
@@ -10073,7 +8738,7 @@ export function SettingsPanel({
                                   handleToggleMcp(server.name, next);
                                 }}
                                 aria-label={
-                                  switchChecked ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
+                                  switchChecked ? t("mcp.connectedToggle", { name: server.name }) : t("mcp.connectNamed", { name: server.name })
                                 }
                               />
                             </div>
@@ -10098,7 +8763,7 @@ export function SettingsPanel({
                                     <button
                                       key={tool}
                                       type="button"
-                                      title={isDisabled ? `启用 ${tool}` : `禁用 ${tool}`}
+                                      title={isDisabled ? t("mcp.enableTool", { tool }) : t("mcp.disableTool", { tool })}
                                       onClick={() => handleToggleMcpTool(server.name, tool, isDisabled)}
                                       className={`rounded-md border px-2 py-0.5 text-[11px] transition ${
                                         isDisabled
@@ -10117,6 +8782,7 @@ export function SettingsPanel({
                       );
                     })}
 
+                    {capabilityLocks.allowLocalMcpInstall ? (
                     <div className="grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
@@ -10131,7 +8797,7 @@ export function SettingsPanel({
                           <Plus className="h-3.5 w-3.5" aria-hidden />
                         </span>
                         <span className="flex flex-col">
-                          <span className="font-medium text-text-muted">添加远程 MCP</span>
+                          <span className="font-medium text-text-muted">{t("mcp.addRemote")}</span>
                           <span className="text-[11px] text-text-faint">URL + Headers（Tushare / Gateway）</span>
                         </span>
                       </button>
@@ -10144,11 +8810,12 @@ export function SettingsPanel({
                           <SquarePen className="h-3.5 w-3.5" aria-hidden />
                         </span>
                         <span className="flex flex-col">
-                          <span className="font-medium text-text-muted">编辑 JSON</span>
-                          <span className="text-[11px] text-text-faint">stdio 命令或高级字段</span>
+                          <span className="font-medium text-text-muted">{t("mcp.editJson")}</span>
+                          <span className="text-[11px] text-text-faint">{t("mcp.stdioHint")}</span>
                         </span>
                       </button>
                     </div>
+                    ) : null}
 
                     <McpGatewayImportPanel
                       configPath={MCP_PRIMARY_CONFIG_PATH}
@@ -10163,7 +8830,7 @@ export function SettingsPanel({
 
                 {/* —— MCP 市场 —— */}
                 <div className="space-y-2 border-t border-border pt-4">
-                  <div className="text-sm font-medium text-text-muted">MCP 市场</div>
+                  <div className="text-sm font-medium text-text-muted">{t("mcp.marketplace")}</div>
                   {/* <div className="text-[11px] leading-relaxed text-text-faint">
                     仅展示官方认证且可安装的托管 MCP（已过滤第三方/不可安装条目），点「添加」直接合并到主配置。
                   </div> */}
@@ -10218,9 +8885,9 @@ export function SettingsPanel({
             {/* === MEMORY TAB === Plan-Id: 2026-05-31-near-memory-graph-graphiti */}
             {tab === "memory" && (
               <div className="space-y-4">
-                <Panel title="记忆说明">
+                <Panel title={t("memory.notesTitle")}>
                   <p className="text-[11px] leading-relaxed text-text-subtle">
-                    记忆按<strong className="font-medium text-text-muted">主体</strong>隔离：元智能体、各分身、群聊各有文本 MEMORY 与图谱分区。全局用户偏好请在「显示 → 用户档案」维护；下方图谱与文本记忆仅覆盖 meta / 分身 / 群聊三类主体。
+                    <Trans t={t} i18nKey="memory.notesIntro" components={{ strong: <strong className="font-medium text-text-muted" /> }} />
                   </p>
                 </Panel>
                 <TurnArchiveSettingsPanel />
@@ -10237,8 +8904,16 @@ export function SettingsPanel({
               </div>
             )}
 
-            {/* === HOOKS TAB === */}
-            {tab === "hooks" && <HooksTab />}
+            {/* === SECURITY TAB ===（保持挂载：底部「保存」需 flushPermissions，勿改为条件渲染） */}
+            <div className={tab === "security" ? "space-y-4" : "hidden"}>
+              <SecurityCenterTab
+                ref={securityTabRef}
+                runMode={runMode}
+                onRunModeChange={onRunModeChange}
+                focus={securityFocus}
+                focusSeq={securityFocusSeq}
+              />
+            </div>
 
             {tab === "automation" && (
               <div className="space-y-4">
@@ -10265,7 +8940,7 @@ export function SettingsPanel({
 
             {tab === "server" && (
               <div className="space-y-4">
-                <Panel title="连接模式">
+                <Panel title={t("server.mode")}>
                   <div className="flex items-center gap-4">
                     <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
                       <input
@@ -10275,7 +8950,7 @@ export function SettingsPanel({
                         onChange={() => setServerMode("local")}
                         className="accent-[var(--ui-btn-primary-bg)]"
                       />
-                      本地 (默认)
+                      {t("server.localDefault")}
                     </label>
                     <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
                       <input
@@ -10285,18 +8960,18 @@ export function SettingsPanel({
                         onChange={() => setServerMode("remote")}
                         className="accent-[var(--ui-btn-primary-bg)]"
                       />
-                      远程服务器
+                      {t("server.remote")}
                     </label>
                   </div>
                   <p className="mt-2 text-xs text-text-faint">
-                    本地模式自动启动 agx serve；远程模式连接云主机上已部署的 agx serve 后端。
+                    {t("server.modeHint")}
                   </p>
                 </Panel>
 
-                <Panel title="远程服务器配置">
+                <Panel title={t("server.remoteConfig")}>
                   <fieldset disabled={serverMode === "local"} className={serverMode === "local" ? "opacity-50" : ""}>
-                    <label className="block text-sm text-text-muted">
-                      服务器 URL
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.serverUrl")}
                       <input
                         className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
                         placeholder="https://your-server:8080"
@@ -10304,13 +8979,13 @@ export function SettingsPanel({
                         onChange={(e) => setServerUrl(e.target.value)}
                       />
                     </label>
-                    <label className="mt-3 block text-sm text-text-muted">
-                      认证 Token
+                    <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.authToken")}
                       <div className="relative mt-1">
                         <input
                           className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
                           type={serverShowToken ? "text" : "password"}
-                          placeholder="与服务端 AGX_DESKTOP_TOKEN 一致"
+                          placeholder={t("server.tokenPh")}
                           value={serverToken}
                           onChange={(e) => setServerToken(e.target.value)}
                         />
@@ -10319,7 +8994,7 @@ export function SettingsPanel({
                           className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
                           onClick={() => setServerShowToken(!serverShowToken)}
                         >
-                          {serverShowToken ? "隐藏" : "显示"}
+                          {serverShowToken ? tCommon("hide") : tCommon("show")}
                         </button>
                       </div>
                     </label>
@@ -10344,33 +9019,33 @@ export function SettingsPanel({
                           }
                         }}
                       >
-                        {serverTestStatus === "testing" ? "测试中..." : "测试连接"}
+                        {serverTestStatus === "testing" ? t("commonSettings.testing") : t("server.testConn")}
                       </button>
                       {serverTestStatus === "ok" && (
-                        <span className="text-sm text-green-500">连接成功</span>
+                        <span className="text-sm text-green-500">{t("server.connOk")}</span>
                       )}
                       {serverTestStatus === "fail" && (
-                        <span className="text-sm text-red-400" title={serverTestError}>连接失败</span>
+                        <span className="text-sm text-red-400" title={serverTestError}>{t("server.connFail")}</span>
                       )}
                     </div>
                   </fieldset>
                 </Panel>
 
-                <Panel title="飞书集成">
+                <Panel title={t("server.feishu")}>
                   {/* Tab switcher */}
                   <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
-                    {(["feishu", "webhook"] as const).map((t) => (
+                    {(["feishu", "webhook"] as const).map((imKind) => (
                       <button
-                        key={t}
+                        key={imKind}
                         type="button"
                         className={`flex-1 rounded-md px-3 py-1 text-xs font-medium transition ${
-                          imTab === t
+                          imTab === imKind
                             ? "bg-surface-panel text-text-strong shadow-sm"
                             : "text-text-faint hover:text-text-subtle"
                         }`}
-                        onClick={() => setImTab(t)}
+                        onClick={() => setImTab(imKind)}
                       >
-                        {t === "feishu" ? "飞书长连接（推荐）" : "Webhook 模式"}
+                        {imKind === "feishu" ? t("server.feishuLong") : t("server.webhook")}
                       </button>
                     ))}
                   </div>
@@ -10379,19 +9054,19 @@ export function SettingsPanel({
                   {imTab === "feishu" && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        无需公网服务器，使用飞书官方 WebSocket 长连接接收消息，Near 启动后自动在后台运行。
+                        {t("server.feishuLongHint")}
                       </p>
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-sm text-text-subtle">启用飞书机器人</span>
+                        <span className="text-sm text-text-subtle">{t("server.enableFeishuBot")}</span>
                         <SettingsSwitch
                           checked={feishuEnabled}
                           onChange={setFeishuEnabled}
-                          aria-label="启用飞书长连接"
+                          aria-label={t("server.enableFeishuLong")}
                         />
                       </div>
                       {feishuEnabled && (
                         <>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             App ID
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -10400,7 +9075,7 @@ export function SettingsPanel({
                               onChange={(e) => setFeishuAppId(e.target.value)}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             App Secret
                             <div className="relative mt-1">
                               <input
@@ -10415,13 +9090,13 @@ export function SettingsPanel({
                                 className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
                                 onClick={() => setFeishuShowSecret(!feishuShowSecret)}
                               >
-                                {feishuShowSecret ? "隐藏" : "显示"}
+                                {feishuShowSecret ? tCommon("hide") : tCommon("show")}
                               </button>
                             </div>
                           </label>
                           <p className="text-xs text-text-faint">
-                            保存后 Near 自动在后台启动飞书长连接，无需额外开终端。
-                            飞书应用须开启「机器人」能力，订阅 <code className="rounded bg-surface-hover px-1">im.message.receive_v1</code> 长连接事件。
+                            {t("server.feishuSaveHint")}{" "}
+                            <Trans t={t} i18nKey="server.feishuEventHint" components={{ code: <code className="rounded bg-surface-hover px-1" /> }} />
                           </p>
                         </>
                       )}
@@ -10432,10 +9107,10 @@ export function SettingsPanel({
                   {imTab === "webhook" && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Near 绑定。
+                        {t("server.webhookHint")}
                       </p>
-                      <label className="block text-sm text-text-muted">
-                        网关地址
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("server.gatewayUrl")}
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
                           placeholder="https://gateway.example.com"
@@ -10443,8 +9118,8 @@ export function SettingsPanel({
                           onChange={(e) => setGwUrl(e.target.value)}
                         />
                       </label>
-                      <label className="block text-sm text-text-muted">
-                        设备 ID
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("server.deviceId")}
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
                           placeholder="my-macbook"
@@ -10452,8 +9127,8 @@ export function SettingsPanel({
                           onChange={(e) => setGwDeviceId(e.target.value)}
                         />
                       </label>
-                      <label className="block text-sm text-text-muted">
-                        设备 Token
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("server.deviceToken")}
                         <div className="relative mt-1">
                           <input
                             className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
@@ -10466,7 +9141,7 @@ export function SettingsPanel({
                             className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
                             onClick={() => setGwShowToken(!gwShowToken)}
                           >
-                            {gwShowToken ? "隐藏" : "显示"}
+                            {gwShowToken ? tCommon("hide") : tCommon("show")}
                           </button>
                         </div>
                       </label>
@@ -10480,7 +9155,7 @@ export function SettingsPanel({
                       disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
                       onClick={() => setGwQrOpen(true)}
                     >
-                      扫码连接（飞书/企微）
+                      {t("server.qrBind")}
                     </button>
                     <button
                       type="button"
@@ -10488,12 +9163,12 @@ export function SettingsPanel({
                       disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim() || gwBindingsLoading}
                       onClick={() => void refreshGwBindings()}
                     >
-                      {gwBindingsLoading ? "刷新中…" : "刷新已绑定账号"}
+                      {gwBindingsLoading ? t("server.refreshing") : t("server.refreshBindings")}
                     </button>
                   </div>
                   {gwBindingsErr && (
                     <p className="mt-2 text-xs text-red-400" title={gwBindingsErr}>
-                      无法拉取绑定列表：{gwBindingsErr.slice(0, 120)}
+                      {t("server.bindingsError", { error: gwBindingsErr.slice(0, 120) })}
                     </p>
                   )}
                   {gwBindings.length > 0 && (
@@ -10521,16 +9196,16 @@ export function SettingsPanel({
                                   { method: "DELETE" },
                                 );
                                 if (!r.ok) {
-                                  const t = await r.text();
-                                  throw new Error(t.slice(0, 120) || `HTTP ${r.status}`);
+                                  const body = await r.text();
+                                  throw new Error(body.slice(0, 120) || `HTTP ${r.status}`);
                                 }
                                 await refreshGwBindings();
                               } catch (e) {
-                                alert(`解绑失败：${String(e)}`);
+                                alert(t("server.unbindFailed", { reason: String(e) }));
                               }
                             }}
                           >
-                            解绑
+                            {t("server.unbind")}
                           </button>
                         </li>
                       ))}
@@ -10541,22 +9216,22 @@ export function SettingsPanel({
                     className="mt-4 text-sm text-text-faint underline decoration-dotted hover:text-text-subtle"
                     onClick={() => setGwAdvancedOpen(!gwAdvancedOpen)}
                   >
-                    {gwAdvancedOpen ? "收起高级配置" : "展开高级配置"}
+                    {gwAdvancedOpen ? t("server.collapseAdvanced") : t("server.expandAdvanced")}
                   </button>
                   {gwAdvancedOpen && (
                     <div className="mt-3 space-y-3 border-t border-border pt-3">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-sm text-text-subtle">
-                          启用网关客户端（agx serve 启动后连接 WebSocket）
+                          {t("server.enableGateway")}
                         </span>
                         <SettingsSwitch
                           checked={gwEnabled}
                           onChange={setGwEnabled}
-                          aria-label="启用网关客户端"
+                          aria-label={t("server.enableGatewayAria")}
                         />
                       </div>
-                      <label className="block text-sm text-text-muted">
-                        本机 Studio 基址（留空则使用 http://127.0.0.1:当前端口）
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                        {t("server.studioBase")}
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
                           placeholder="http://127.0.0.1:8000"
@@ -10565,18 +9240,18 @@ export function SettingsPanel({
                         />
                       </label>
                       <p className="mt-1 text-xs text-text-faint">
-                        修改后点底部「退出」统一生效；需重启 Near / agx serve。
+                        {t("server.applyHint")}
                       </p>
                     </div>
                   )}
                   </>)}
                 </Panel>
 
-                <Panel title="微信集成">
+                <Panel title={t("server.wechat")}>
                   {wechatStatus === "idle" && !wechatBotId && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        扫码绑定个人微信，绑定后可在微信中给 Near 发消息触发 Agent 执行。基于微信官方 iLink 协议。
+                        {t("server.wechatHint")}
                       </p>
                       <button
                         type="button"
@@ -10592,11 +9267,11 @@ export function SettingsPanel({
                               sidecarPort = startRes.port;
                               await new Promise((r) => setTimeout(r, 1500));
                             }
-                            if (!sidecarPort) { setWechatBindMsg("Sidecar 未启动"); return; }
+                            if (!sidecarPort) { setWechatBindMsg(t("server.sidecarDown")); return; }
                             const resp = await fetch(`http://127.0.0.1:${sidecarPort}/bind/start`, { method: "POST" });
                             const data = await resp.json() as { session_id: string; qr_url?: string };
                             const sid = String(data.session_id || "").trim();
-                            if (!sid) { setWechatBindMsg("会话创建失败，请重试"); return; }
+                            if (!sid) { setWechatBindMsg(t("server.sessionCreateFailed")); return; }
                             const proxyQrUrl = `http://127.0.0.1:${sidecarPort}/bind/${sid}/qr?ts=${Date.now()}`;
                             setWechatBindSessionId(sid);
                             setWechatBindSidecarPort(sidecarPort);
@@ -10607,12 +9282,12 @@ export function SettingsPanel({
                             ws.onmessage = (ev) => {
                               const msg = JSON.parse(ev.data as string) as { event: string; status?: string; bot_id?: string; qr_url?: string; error?: string };
                               if (msg.event === "status") {
-                                if (msg.status === "scanned") setWechatBindMsg("已扫码，请在手机上确认…");
+                                if (msg.status === "scanned") setWechatBindMsg(t("server.scannedConfirm"));
                                 if (msg.status === "expired") {
                                   const fallback = String(msg.qr_url || "").trim();
                                   if (fallback) setWechatQrFallbackUrl(fallback);
                                   setWechatQrUrl(`http://127.0.0.1:${sidecarPort}/bind/${sid}/qr?ts=${Date.now()}`);
-                                  setWechatBindMsg("二维码已刷新");
+                                  setWechatBindMsg(t("server.qrRefreshed"));
                                 }
                                 if (msg.status === "confirmed") {
                                   setWechatStatus("connected");
@@ -10640,14 +9315,14 @@ export function SettingsPanel({
                                   setWechatQrFallbackUrl("");
                                   setWechatBindSessionId("");
                                   setWechatBindSidecarPort(0);
-                                  setWechatBindMsg("绑定超时，请重试");
+                                  setWechatBindMsg(t("server.bindTimeout"));
                                   ws.close();
                                 }
                               }
-                              if (msg.event === "error") { setWechatBindMsg(msg.error || "绑定出错"); }
+                              if (msg.event === "error") { setWechatBindMsg(msg.error || t("server.bindError")); }
                             };
                             ws.onerror = () => {
-                              setWechatBindMsg("WebSocket 连接失败");
+                              setWechatBindMsg(t("server.wsFailed"));
                               setWechatStatus("idle");
                               setWechatQrUrl("");
                               setWechatQrFallbackUrl("");
@@ -10664,14 +9339,14 @@ export function SettingsPanel({
                           }
                         }}
                       >
-                        绑定微信
+                        {t("server.bindWechat")}
                       </button>
                     </div>
                   )}
 
                   {wechatStatus === "binding" && wechatQrUrl && (
                     <div className="space-y-3">
-                      <p className="text-xs text-text-faint">请使用微信扫描下方二维码：</p>
+                      <p className="text-xs text-text-faint">{t("server.scanBelow")}</p>
                       <div className="flex justify-center">
                         <img
                           src={wechatQrUrl}
@@ -10685,10 +9360,10 @@ export function SettingsPanel({
                             const fallback = String(wechatQrFallbackUrl || "").trim();
                             if (isProxySrc && fallback && fallback !== wechatQrUrl) {
                               setWechatQrUrl(fallback);
-                              setWechatBindMsg("本地二维码代理不可用，已回退直连链接");
+                              setWechatBindMsg(t("server.qrProxyFallback"));
                               return;
                             }
-                            setWechatBindMsg("二维码加载失败，请重试");
+                            setWechatBindMsg(t("server.qrLoadFailed"));
                           }}
                         />
                       </div>
@@ -10701,17 +9376,17 @@ export function SettingsPanel({
                       <div className="flex items-center gap-2">
                         <span className={`inline-block h-2 w-2 rounded-full ${wechatStatus === "connected" ? "bg-green-500" : wechatStatus === "recovering" ? "bg-[var(--status-warning)] animate-pulse" : wechatStatus === "stale" ? "bg-[var(--status-warning)]" : "bg-yellow-500"}`} />
                         <span className={`text-sm ${wechatStatus === "stale" || wechatStatus === "recovering" ? "text-status-warning" : "text-text-subtle"}`}>
-                          {wechatStatus === "connected" ? "已连接" : wechatStatus === "recovering" ? "恢复中..." : wechatStatus === "stale" ? "连接已失效（可恢复）" : "已绑定（未连接）"}
+                          {wechatStatus === "connected" ? t("server.connected") : wechatStatus === "recovering" ? t("server.recovering") : wechatStatus === "stale" ? t("server.connExpired") : t("server.boundDisconnected")}
                         </span>
                       </div>
                       {wechatBotId && (
                         <p className="text-xs text-text-faint">Bot ID: <code className="rounded bg-surface-hover px-1">{wechatBotId}</code></p>
                       )}
                       {wechatStatus === "recovering" && (
-                        <p className="text-xs text-status-warning">正在尝试重新连接微信 iLink，请稍候…</p>
+                        <p className="text-xs text-status-warning">{t("server.reconnectingIlink")}</p>
                       )}
                       {wechatStatus === "stale" && (
-                        <p className="text-xs text-status-warning">通道已降级（凭证可能过期或连接中断），建议尝试恢复或重新绑定。</p>
+                        <p className="text-xs text-status-warning">{t("server.channelDegraded")}</p>
                       )}
                       <div className="flex items-center gap-3 pt-1">
                         {wechatStatus === "stale" && (
@@ -10747,7 +9422,7 @@ export function SettingsPanel({
                                             if (conn && !stl) {
                                               setWechatStatus("connected");
                                               setWechatBotId(d.bot_id || "");
-                                              setWechatBindMsg("恢复成功，已连接");
+                                              setWechatBindMsg(t("server.recoverOk"));
                                               setTimeout(() => setWechatBindMsg(""), 1800);
                                               return true;
                                             } else if (stl) {
@@ -10759,7 +9434,7 @@ export function SettingsPanel({
                                       } catch {}
                                       if (final) {
                                         setWechatStatus("stale");
-                                        setWechatBindMsg("恢复未成功，通道仍不可用");
+                                        setWechatBindMsg(t("server.recoverStillDown"));
                                         setTimeout(() => setWechatBindMsg(""), 2200);
                                       }
                                       return false;
@@ -10770,14 +9445,14 @@ export function SettingsPanel({
                                   }
                                 }
                                 setWechatStatus("stale");
-                                setWechatBindMsg("恢复失败，请尝试重新绑定");
+                                setWechatBindMsg(t("server.recoverFailed"));
                               } catch (e) {
                                 setWechatStatus("stale");
-                                setWechatBindMsg("恢复出错：" + String(e));
+                                setWechatBindMsg(t("server.recoverError") + String(e));
                               }
                             }}
                           >
-                            尝试恢复连接
+                            {t("server.tryRecover")}
                           </button>
                         )}
                         <button
@@ -10804,7 +9479,7 @@ export function SettingsPanel({
                             setWechatBindMsg("");
                           }}
                         >
-                          解绑微信
+                          {t("server.unbindWechat")}
                         </button>
                       </div>
                     </div>
@@ -10814,10 +9489,10 @@ export function SettingsPanel({
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
                         <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-                        <span className="text-sm text-red-400">会话已过期</span>
+                        <span className="text-sm text-red-400">{t("server.sessionExpired")}</span>
                       </div>
                       <p className="text-xs text-text-faint">
-                        微信 iLink 会话已过期（超过 24 小时未活跃），请重新扫码绑定。
+                        {t("server.ilinkExpired")}
                       </p>
                       <button
                         type="button"
@@ -10831,7 +9506,7 @@ export function SettingsPanel({
                           setWechatBindSidecarPort(0);
                         }}
                       >
-                        重新绑定
+                        {t("server.rebind")}
                       </button>
                     </div>
                   )}
@@ -10851,11 +9526,11 @@ export function SettingsPanel({
                 />
 
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle space-y-1">
-                  <p>远程部署参考：</p>
-                  <p>1. 在云主机上安装 agenticx: <code className="text-text-muted">pip install agenticx</code></p>
-                  <p>2. 启动服务: <code className="text-text-muted">agx serve --host 0.0.0.0 --port 8080 --token YOUR_TOKEN</code></p>
-                  <p>3. 确保防火墙放行对应端口，生产环境建议配置 HTTPS (Nginx 反向代理)。</p>
-                  <p className="text-text-faint">修改后点底部「退出」统一生效；切换模式需重启 Near。</p>
+                  <p>{t("server.remoteRef")}</p>
+                  <p>{t("server.remoteStep1")} <code className="text-text-muted">pip install agenticx</code></p>
+                  <p>{t("server.remoteStep2")} <code className="text-text-muted">agx serve --host 0.0.0.0 --port 8080 --token YOUR_TOKEN</code></p>
+                  <p>{t("server.remoteStep3")}</p>
+                  <p className="text-text-faint">{t("server.remoteApply")}</p>
                 </div>
               </div>
             )}
@@ -10864,13 +9539,13 @@ export function SettingsPanel({
           {/* Footer */}
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
             <span className="min-w-0 truncate text-[11px] text-text-faint">
-              开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入模型服务、连接、语音等设置。
+              {t("commonSettings.footerHint")}
             </span>
             <button
               className="shrink-0 rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
               onClick={handleSave}
             >
-              退出
+              {t("commonSettings.exit")}
             </button>
           </div>
         </div>
@@ -10878,8 +9553,8 @@ export function SettingsPanel({
           className="agx-settings-panel-resize-handle"
           role="separator"
           aria-orientation="horizontal"
-          aria-label="拖拽调整设置窗口大小"
-          title="拖拽调整大小"
+          aria-label={t("commonSettings.resizeWindow")}
+          title={t("commonSettings.resize")}
           onMouseDown={onPanelResizeMouseDown}
         />
       </div>
@@ -10910,7 +9585,7 @@ export function SettingsPanel({
               className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text hover:bg-btnPrimary-hover"
               onClick={() => setMcpErrorInspect(null)}
             >
-              关闭
+              {tCommon("close")}
             </button>
           </div>
         </div>
@@ -10927,14 +9602,14 @@ export function SettingsPanel({
             className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setMcpDeleteConfirmServerName(null)}
           >
-            Cancel
+            {tCommon("cancel")}
           </button>
           <button
             type="button"
             className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
             onClick={confirmDeleteMcpServer}
           >
-            OK
+            {tCommon("ok")}
           </button>
         </div>
       )}
@@ -10961,9 +9636,7 @@ export function SettingsPanel({
           </div>
         </div>
         <p className="text-[38px] font-semibold leading-tight text-text-strong">
-          确认删除 MCP 服务「{mcpDeleteConfirmServerName ?? ""}」
-          <br />
-          吗？此操作会直接修改 mcp.json。
+          <Trans t={t} i18nKey="mcp.deleteConfirm" values={{ name: mcpDeleteConfirmServerName ?? "" }} />
         </p>
       </div>
     </Modal>

@@ -16,6 +16,20 @@ import json
 from .base import BaseMemory, MemoryRecord, SearchResult, MemoryError
 
 
+
+def ensure_aware(value: datetime) -> datetime:
+    """给 naive 时间戳补上时区，让它能和 aware 的 now 相减。
+
+    core_memory 建记录时用过 ``datetime.now()``（naive），而所有做时间运算的地方用的
+    是 ``datetime.now(UTC)``（aware），两者相减直接抛 TypeError——只要记录是从那条路
+    建出来的，检索时算相关度、算时间衰减、按 max_age 过滤全都会崩。创建点已经改成
+    aware，但已经落盘的老记录还是 naive，读取侧得兜一层。
+
+    补的是**本地**时区，不是 UTC：这些值当初就是 ``datetime.now()`` 出来的本地时间，
+    当成 UTC 会让 UTC+8 上的老记录凭空老 8 小时，时间衰减跟着一起错。
+    """
+    return value if value.tzinfo is not None else value.astimezone()
+
 class MemoryType(Enum):
     """Memory layer types in the hierarchical architecture."""
     
