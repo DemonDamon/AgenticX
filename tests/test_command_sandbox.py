@@ -15,7 +15,9 @@ from agenticx.runtime.command_sandbox import (
     READ_ONLY,
     WORKSPACE_WRITE,
     CommandSandboxUnavailable,
+    _argv_is_git_invocation,
     _bubblewrap_argv,
+    _git_credential_read_paths,
     _macos_profile,
     build_command_sandbox_plan,
     normalize_command_permissions,
@@ -113,3 +115,95 @@ def test_macos_profile_denies_proxy_binaries_after_allows(tmp_path: Path) -> Non
     assert profile.rfind(deny_exec) > profile.rfind("(allow file-")
     assert "osascript" in profile
     assert "/open$" not in profile
+
+
+def test_argv_is_git_invocation() -> None:
+    assert _argv_is_git_invocation(["git", "pull"])
+    assert _argv_is_git_invocation(["/usr/bin/git", "status"])
+    assert _argv_is_git_invocation(["/bin/sh", "-c", "git pull"])
+    assert _argv_is_git_invocation(["/bin/sh", "-c", "cd repo && git pull"])
+    assert _argv_is_git_invocation(["/bin/bash", "-c", "git fetch && git status"])
+    assert not _argv_is_git_invocation(["/bin/echo", "git"])
+    assert not _argv_is_git_invocation(["/bin/sh", "-c", "echo git"])
+    assert not _argv_is_git_invocation(["/bin/sh", "-c", "cat ~/.git-credentials"])
+    assert not _argv_is_git_invocation([])
+
+
+def test_git_credential_paths_only_when_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    assert _git_credential_read_paths({"HOME": str(home)}) == ()
+    creds = home / ".git-credentials"
+    creds.write_text("https://x:y@host\n", encoding="utf-8")
+    ssh = home / ".ssh"
+    ssh.mkdir()
+    paths = _git_credential_read_paths({"HOME": str(home)})
+    texts = {str(p) for p in paths}
+    assert str(creds) in texts
+    assert str(ssh) in texts
+
+
+def test_git_in_writable_workspace_reads_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    plan = build_command_sandbox_plan(
+        ["git", "pull"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    profile = " ".join(plan.argv)
+    assert ".git-credentials" in profile
+
+
+def test_non_git_command_gets_no_credential_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    plan = build_command_sandbox_plan(
+        ["/bin/cat", "inside.txt"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    profile = " ".join(plan.argv)
+    assert ".git-credentials" not in profile
+
+
+def test_git_outside_writable_workspace_gets_no_credential_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    plan = build_command_sandbox_plan(
+        ["git", "pull"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=elsewhere,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    profile = " ".join(plan.argv)
+    assert ".git-credentials" not in profile
