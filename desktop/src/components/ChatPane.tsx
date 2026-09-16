@@ -378,6 +378,7 @@ import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
+import { workspacePanelOpenAfterNewTopic } from "../utils/workspace-session-visibility";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -12401,6 +12402,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     markPaneAwaitingFreshSession(pane.id);
     setPaneSessionId(pane.id, "");
     setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
+    // 新任务空白态不要沿用上一会话的工作区展开。
+    setWorkPanelExpanded(false);
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) =>
+        row.id !== pane.id
+          ? row
+          : { ...row, taskspacePanelOpen: workspacePanelOpenAfterNewTopic() },
+      ),
+    }));
     if (isGroupPane || isAutomationTaskPane) {
       // Group/automation UI requires a bound session_id (no lazy empty composer).
       // Eager create with the pane's group:/automation: avatar_id.

@@ -8,6 +8,7 @@ import {
 import {
   isNewTaskNavActive,
   shouldKeepWorkspaceVisibleWhenSessionMissing,
+  workspacePanelOpenAfterNewTopic,
 } from "./workspace-session-visibility.ts";
 
 test("keeps workspace visible while waiting for a fresh session", () => {
@@ -20,6 +21,10 @@ test("does not keep workspace when session already exists", () => {
 
 test("does not keep workspace when not awaiting fresh session", () => {
   assert.equal(shouldKeepWorkspaceVisibleWhenSessionMissing("", false), false);
+});
+
+test("new topic does not inherit an open workspace panel", () => {
+  assert.equal(workspacePanelOpenAfterNewTopic(), false);
 });
 
 test("new task nav active only for meta pane awaiting first send", () => {
