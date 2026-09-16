@@ -473,6 +473,13 @@ def _parallel_tools_enabled() -> bool:
         return False
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
+
+
+def _should_surface_budget_compression_notice(budget_source: str) -> bool:
+    """Return whether token-budget pressure should be shown to the user."""
+    return str(budget_source or "").strip().lower() == "session"
+
+
 DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 60.0
 PROVIDER_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
     # Some providers/models (especially tool-heavy rounds) often need longer first-token latency.
@@ -4830,6 +4837,7 @@ class AgentRuntime:
                     budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
                     if (
                         budget_level == BudgetLevel.COMPRESS
+                        and _should_surface_budget_compression_notice(budget_source)
                         and not self._budget_compress_notice_sent_this_turn
                     ):
                         self._budget_compress_notice_sent_this_turn = True
@@ -4868,7 +4876,10 @@ class AgentRuntime:
                             },
                             agent_id=agent_id,
                         )
-                    elif did_react:
+                    elif (
+                        did_react
+                        and _should_surface_budget_compression_notice(budget_source)
+                    ):
                         yield RuntimeEvent(
                             type=EventType.COMPACTION.value,
                             data={
