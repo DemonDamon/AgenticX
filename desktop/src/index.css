@@ -253,8 +253,6 @@ body {
 .agx-liquid-glass-chip {
   --agx-chip-spin: 0deg;
   --agx-chip-ring: 1.5px;
-  --agx-chip-head: #e8fff4;
-  --agx-chip-trail: #4338ff;
   position: relative;
   isolation: isolate;
   width: max-content;
@@ -266,6 +264,7 @@ body {
   background: #0a0a0c;
   box-shadow: none;
   color: #f8fafc;
+  font-weight: 400;
   animation: agx-liquid-glass-chip-spin 4s linear infinite;
 }
 
@@ -290,20 +289,23 @@ body {
 .agx-liquid-glass-chip::before {
   background: repeating-conic-gradient(
     from var(--agx-chip-spin),
-    var(--agx-chip-trail) 0deg,
-    var(--agx-chip-trail) 99deg,
-    var(--agx-chip-head) 180deg
+    #ffffff 0deg,
+    #ffffff 70deg,
+    #5b4dff 84deg,
+    #22d3ee 88deg,
+    #00ff94 90deg,
+    #ffffff 96deg,
+    #ffffff 180deg
   );
 }
 
 .agx-liquid-glass-chip::after {
   background: conic-gradient(
     from var(--agx-chip-spin),
-    var(--agx-chip-trail),
-    var(--agx-chip-head),
-    var(--agx-chip-trail),
-    var(--agx-chip-head),
-    var(--agx-chip-trail)
+    #5b4dff,
+    #22d3ee,
+    #00ff94,
+    #5b4dff
   );
   opacity: 0;
   transition: opacity 0.25s ease;
@@ -319,20 +321,31 @@ body {
 }
 
 .agx-liquid-glass-chip .agx-chip-sparkle {
-  color: #e8fff4;
-  fill: rgba(0, 255, 148, 0.35);
+  color: #f8fafc;
+  fill: rgba(0, 255, 148, 0.28);
 }
 
 :root[data-theme="light"] .agx-liquid-glass-chip {
-  --agx-chip-head: #fde68a;
-  --agx-chip-trail: #b45309;
   background: #ffffff;
-  color: #1c1917;
+  color: #334155;
+}
+
+:root[data-theme="light"] .agx-liquid-glass-chip::before {
+  background: repeating-conic-gradient(
+    from var(--agx-chip-spin),
+    #cbd5e1 0deg,
+    #cbd5e1 70deg,
+    #5b4dff 84deg,
+    #22d3ee 88deg,
+    #00ff94 90deg,
+    #cbd5e1 96deg,
+    #cbd5e1 180deg
+  );
 }
 
 :root[data-theme="light"] .agx-liquid-glass-chip .agx-chip-sparkle {
-  color: #b45309;
-  fill: rgba(180, 83, 9, 0.2);
+  color: #64748b;
+  fill: rgba(91, 77, 255, 0.18);
 }
 
 @keyframes agx-liquid-glass-chip-spin {
@@ -345,6 +358,15 @@ body {
   .agx-liquid-glass-chip {
     animation: none;
   }
+}
+
+:root[data-theme="light"] [data-turn-usage-arrow] {
+  color: #047857;
+  background: color-mix(in srgb, #047857 16%, transparent);
+}
+
+:root[data-theme="light"] [data-turn-cache-hit] {
+  color: #047857;
 }
 
 

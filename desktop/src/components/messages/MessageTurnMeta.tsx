@@ -75,11 +75,11 @@ export function MessageTurnMeta({
   const modelChip = modelLabel ? (
     <span
       data-turn-model-chip=""
-      className="agx-liquid-glass-chip inline-flex h-5 w-max shrink-0 items-center gap-1 rounded-full px-3.5 text-[11px] font-medium leading-none cursor-default select-none"
+      className="agx-liquid-glass-chip inline-flex h-5 w-max shrink-0 items-center gap-1 rounded-full px-3.5 text-[12px] font-normal leading-none cursor-default select-none"
       title={modelLabel}
     >
       <Sparkle
-        size={10}
+        size={12}
         className="agx-chip-sparkle shrink-0"
         strokeWidth={2}
       />
