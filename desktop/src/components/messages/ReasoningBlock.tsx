@@ -55,6 +55,7 @@ function persistReasoningDuration(content: string, startedAt: number, finishedAt
 
 export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
   const { t } = useTranslation("chat");
+  const parentMarkdown = React.useContext(MarkdownContext);
   const content = text.trim();
   const [open, setOpen] = React.useState(streaming);
   const [tick, setTick] = React.useState(0);
@@ -170,7 +171,7 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
             <div className="pl-[28px] text-[13px] leading-[1.7] text-text-subtle">
               {content.length > 0 ? (
                 <div className="msg-content min-w-0 break-words">
-                  <MarkdownContext.Provider value={{ isStreaming: streaming }}>
+                  <MarkdownContext.Provider value={{ ...parentMarkdown, isStreaming: streaming }}>
                     <ReactMarkdown
                       remarkPlugins={chatRemarkPlugins}
                       rehypePlugins={chatRehypePlugins}

@@ -37,6 +37,8 @@ export const MarkdownContext = createContext<{
   documentImage?: boolean;
   /** Turn deliverables already shown as a handoff chip; collapse matching path pills. */
   handoffPaths?: string[];
+  /** Chat bubbles only: user clicked an http(s) link. */
+  onHttpLinkClick?: (url: string) => void;
 }>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -588,6 +590,7 @@ export const chatMarkdownComponents: Partial<Components> = {
     return <MarkdownImage src={src} alt={alt} title={title} />;
   },
   a({ href, children, ...rest }) {
+    const { onHttpLinkClick } = useContext(MarkdownContext);
     const url = String(href ?? "").trim();
     const external = /^https?:\/\//i.test(url);
     const localArtifactPath = external ? null : parseLocalArtifactPath(url);
@@ -609,6 +612,10 @@ export const chatMarkdownComponents: Partial<Components> = {
           external
             ? (event) => {
                 event.preventDefault();
+                if (onHttpLinkClick) {
+                  onHttpLinkClick(url);
+                  return;
+                }
                 openExternalUrl(url);
               }
             : rest.onClick

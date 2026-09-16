@@ -1,5 +1,5 @@
 import type { Message } from "../../store";
-import { useMemo, type ReactNode } from "react";
+import { useContext, useMemo, type ReactNode } from "react";
 import { Wrench } from "lucide-react";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
@@ -282,16 +282,37 @@ function assistantHandoff(
   };
 }
 
+function HandoffMarkdownContext({
+  paths,
+  onRevealPath,
+  children,
+}: {
+  paths: string[];
+  onRevealPath?: (path: string) => void;
+  children: ReactNode;
+}) {
+  const parent = useContext(MarkdownContext);
+  const value = useMemo(
+    () => ({
+      ...parent,
+      handoffPaths: paths,
+      onRevealPath: onRevealPath ?? parent.onRevealPath,
+    }),
+    [parent, paths, onRevealPath],
+  );
+  if (paths.length === 0) return children;
+  return <MarkdownContext.Provider value={value}>{children}</MarkdownContext.Provider>;
+}
+
 function withHandoffContext(
   paths: string[],
   onRevealPath: ((path: string) => void) | undefined,
   node: ReactNode,
 ): ReactNode {
-  if (paths.length === 0) return node;
   return (
-    <MarkdownContext.Provider value={{ handoffPaths: paths, onRevealPath }}>
+    <HandoffMarkdownContext paths={paths} onRevealPath={onRevealPath}>
       {node}
-    </MarkdownContext.Provider>
+    </HandoffMarkdownContext>
   );
 }
 

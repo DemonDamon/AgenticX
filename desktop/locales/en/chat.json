@@ -894,6 +894,14 @@
     "statusRunning": "In progress",
     "statusDone": "Done"
   },
+  "externalLink": {
+    "title": "Open this external website?",
+    "open": "Open",
+    "copy": "Copy",
+    "copied": "Copied",
+    "alwaysAllow": "Always allow this domain",
+    "cancel": "Cancel"
+  },
   "loopReview": {
     "title": "Session health check",
     "close": "Close",

@@ -110,6 +110,8 @@ import {
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { MarkdownContext } from "./messages/markdown-components";
+import { requestChatHttpLink } from "../utils/chat-external-link";
 import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
@@ -3447,6 +3449,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!sid) return;
     return registerBrowserAgentOpenFallback(sid, async (url) => ensureInAppBrowserOpenRef.current(url));
   }, [pane.sessionId]);
+  const chatHttpLinkMarkdown = useMemo(
+    () => ({
+      onHttpLinkClick: (url: string) => {
+        requestChatHttpLink(url, () => {
+          ensureInAppBrowserOpenRef.current(url);
+        });
+      },
+    }),
+    [],
+  );
 
   // 会话是否有过真实的用户轮——用于抑制「空会话孤立中断占位」。旧数据里可能残留
   // 一条无用户消息的 turn_interrupted（continuation 误触发在新会话上），不应展示为
@@ -8416,6 +8428,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {t("layout.selectUpToHere")}
               </button>
             )}
+            <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
             <MessageRenderer
               message={message}
               highlightTerms={pane.historySearchTerms}
@@ -8540,6 +8553,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 void resolveActionConfirmation(confirmation, decision, "button")
               }
             />
+            </MarkdownContext.Provider>
           </div>
         );
       }

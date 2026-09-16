@@ -37,6 +37,9 @@ import {
   normalizeFinalAssistantPayload,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { MarkdownContext } from "./messages/markdown-components";
+import { requestChatHttpLink } from "../utils/chat-external-link";
+import { openExternalUrl } from "../utils/open-external";
 import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
@@ -388,6 +391,14 @@ function MessageActions({
 
 export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarification, mode = "pro" }: Props) {
   const { t } = useTranslation("chat");
+  const chatHttpLinkMarkdown = useMemo(
+    () => ({
+      onHttpLinkClick: (url: string) => {
+        requestChatHttpLink(url, () => openExternalUrl(url));
+      },
+    }),
+    [],
+  );
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -2681,6 +2692,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 const m = row.message;
                 return (
                   <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                    <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
                     <MessageRenderer
                       message={m}
                       assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
@@ -2695,6 +2707,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       onOpenClarification={onOpenClarification}
                       onSubmitClarification={onSubmitClarification}
                     />
+                    </MarkdownContext.Provider>
                     {!isLite && (
                       <MessageActions
                         msg={m}
