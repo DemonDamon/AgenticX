@@ -1,8 +1,9 @@
 import type { AppLocale } from "../i18n/locales";
-import type { Message } from "../store";
+import type { Message, MessageAttachment } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { messagePlainTextForClipboard } from "./markdown-copy-format";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
+import { isWorkspaceReferenceAttachment } from "./reference-attachment";
 
 export const SHARE_WIDGET_HINT = "（含图表，请以应用内为准）";
 
@@ -16,9 +17,14 @@ export type ShareAssistantPart =
   | { kind: "graphic"; source: ShareImageGraphicSource };
 
 export type ShareImageTurn =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; attachments?: MessageAttachment[] }
   | { kind: "assistant"; parts: ShareAssistantPart[] }
   | { kind: "widget"; source: ShareImageGraphicSource };
+
+/** Upload chips shown above the user bubble — same filter as ImBubble displayAttachments. */
+export function shareVisibleUserAttachments(message: Message): MessageAttachment[] {
+  return (message.attachments ?? []).filter((att) => !isWorkspaceReferenceAttachment(att));
+}
 
 const MERMAID_FENCE_RE = /```(?:mermaid|mmd)[^\n]*\n([\s\S]*?)```/gi;
 
@@ -88,7 +94,12 @@ export function buildShareImageTurns(messages: Message[]): ShareImageTurn[] {
       continue;
     }
     if (message.role === "user") {
-      out.push({ kind: "user", text: messagePlainTextForClipboard(message) });
+      const attachments = shareVisibleUserAttachments(message);
+      out.push({
+        kind: "user",
+        text: messagePlainTextForClipboard(message),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      });
       continue;
     }
     if (message.role !== "assistant") continue;

@@ -1,5 +1,6 @@
 import { adaptSvgMarkupColors } from "./adapt-svg-theme";
 import { mermaidThemeFromApp, renderMermaidSvg } from "./mermaid-render";
+import type { MessageAttachment } from "../store";
 import type { ShareImageGraphicSource, ShareImageTurn } from "./share-image-model";
 
 export type HydratedShareGraphic =
@@ -11,7 +12,7 @@ export type HydratedAssistantPart =
   | { kind: "graphic"; graphic: HydratedShareGraphic };
 
 export type HydratedShareTurn =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; attachments?: MessageAttachment[] }
   | { kind: "assistant"; parts: HydratedAssistantPart[] }
   | { kind: "widget"; graphic: HydratedShareGraphic };
 

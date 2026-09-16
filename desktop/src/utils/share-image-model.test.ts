@@ -12,6 +12,46 @@ function msg(partial: Partial<Message> & Pick<Message, "id" | "role" | "content"
 }
 
 describe("buildShareImageTurns", () => {
+  it("keeps visible upload attachments on the user turn", () => {
+    const image = {
+      name: "bef8f1feac621ff46.jpg",
+      mimeType: "image/jpeg",
+      size: 1200,
+      dataUrl: "data:image/jpeg;base64,abc",
+    };
+    const turns = buildShareImageTurns([
+      msg({
+        id: "u1",
+        role: "user",
+        content: "看看这张图",
+        attachments: [image],
+      }),
+    ]);
+    expect(turns).toEqual([
+      { kind: "user", text: "看看这张图", attachments: [image] },
+    ]);
+  });
+
+  it("omits workspace reference chips from share attachments", () => {
+    const turns = buildShareImageTurns([
+      msg({
+        id: "u1",
+        role: "user",
+        content: "看这个文件",
+        attachments: [
+          {
+            name: "notes.md",
+            mimeType: "text/markdown",
+            size: 80,
+            sourcePath: "/tmp/notes.md",
+            referenceToken: true,
+          },
+        ],
+      }),
+    ]);
+    expect(turns).toEqual([{ kind: "user", text: "看这个文件" }]);
+  });
+
   it("pairs user bubble text with assistant markdown and drops ordinary tools", () => {
     const turns = buildShareImageTurns([
       msg({ id: "u1", role: "user", content: "分析 AgenticX" }),

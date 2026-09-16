@@ -15,6 +15,7 @@ import {
 } from "../utils/share-image-graphics";
 import { APP_DISPLAY_NAME, APP_TAGLINE } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { AttachmentCard } from "./messages/AttachmentCard";
 
 export type ShareImagePreviewModalProps = {
   open: boolean;
@@ -225,14 +226,28 @@ export function ShareImagePreviewModal({
                     hydrated.map((turn, idx) =>
                       turn.kind === "user" ? (
                         <div key={`u-${idx}`} className="flex justify-end">
-                          <div
-                            className="max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
-                            style={{
-                              backgroundColor:
-                                "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
-                            }}
-                          >
-                            {turn.text}
+                          <div className="flex max-w-[78%] flex-col items-end gap-1.5">
+                            {turn.attachments?.length ? (
+                              <div className="flex flex-wrap justify-end gap-2">
+                                {turn.attachments.map((attachment, attIdx) => (
+                                  <AttachmentCard
+                                    key={`${attachment.name}:${attachment.size}:${attachment.mimeType}:${attIdx}`}
+                                    attachment={attachment}
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                            {turn.text.trim() ? (
+                              <div
+                                className="whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
+                                style={{
+                                  backgroundColor:
+                                    "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
+                                }}
+                              >
+                                {turn.text}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       ) : turn.kind === "widget" ? (
