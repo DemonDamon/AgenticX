@@ -243,44 +243,108 @@ body {
   color: rgb(37, 99, 235);
 }
 
-/* 消息元数据行：Apple 液态玻璃模型徽标 (Liquid Glass Chip) */
+/* 模型徽标：Originkit Moving Gradient — mask 固定，只转 conic 角度 */
+@property --agx-chip-spin {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
 .agx-liquid-glass-chip {
+  --agx-chip-spin: 0deg;
+  --agx-chip-ring: 1.5px;
+  --agx-chip-head: #e8fff4;
+  --agx-chip-trail: #4338ff;
+  position: relative;
+  isolation: isolate;
   width: max-content;
   max-width: none;
   min-width: max-content;
   box-sizing: border-box;
   overflow: visible;
-  /* backdrop-filter clips descendants to the rounded mask — do not use it here */
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(192, 132, 252, 0.08) 80%, rgba(56, 189, 248, 0.06) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
-              inset 1px 0 1px 0 rgba(56, 189, 248, 0.3),
-              inset -1px -1px 1.5px 0 rgba(244, 114, 182, 0.25),
-              0 1px 3px 0 rgba(0, 0, 0, 0.35);
-  color: rgba(254, 243, 199, 0.95);
+  border: none;
+  background: #0a0a0c;
+  box-shadow: none;
+  color: #f8fafc;
+  animation: agx-liquid-glass-chip-spin 4s linear infinite;
 }
-.agx-liquid-glass-chip:hover {
-  border-color: rgba(255, 255, 255, 0.28);
+
+.agx-liquid-glass-chip::before,
+.agx-liquid-glass-chip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  padding: var(--agx-chip-ring);
+  box-sizing: border-box;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-clip: border-box, content-box;
+  -webkit-mask-composite: xor;
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-clip: border-box, content-box;
+  mask-composite: exclude;
 }
+
+.agx-liquid-glass-chip::before {
+  background: repeating-conic-gradient(
+    from var(--agx-chip-spin),
+    var(--agx-chip-trail) 0deg,
+    var(--agx-chip-trail) 99deg,
+    var(--agx-chip-head) 180deg
+  );
+}
+
+.agx-liquid-glass-chip::after {
+  background: conic-gradient(
+    from var(--agx-chip-spin),
+    var(--agx-chip-trail),
+    var(--agx-chip-head),
+    var(--agx-chip-trail),
+    var(--agx-chip-head),
+    var(--agx-chip-trail)
+  );
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.agx-liquid-glass-chip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.agx-liquid-glass-chip:hover::after {
+  opacity: 1;
+}
+
 .agx-liquid-glass-chip .agx-chip-sparkle {
-  color: rgba(253, 230, 138, 0.9);
-  fill: rgba(253, 230, 138, 0.35);
+  color: #e8fff4;
+  fill: rgba(0, 255, 148, 0.35);
 }
 
 :root[data-theme="light"] .agx-liquid-glass-chip {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.75) 100%);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
-              0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  color: #1e293b;
+  --agx-chip-head: #fde68a;
+  --agx-chip-trail: #b45309;
+  background: #ffffff;
+  color: #1c1917;
 }
-:root[data-theme="light"] .agx-liquid-glass-chip:hover {
-  border-color: rgba(0, 0, 0, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(241, 245, 249, 0.85) 100%);
-}
+
 :root[data-theme="light"] .agx-liquid-glass-chip .agx-chip-sparkle {
   color: #b45309;
-  fill: rgba(217, 119, 6, 0.2);
+  fill: rgba(180, 83, 9, 0.2);
+}
+
+@keyframes agx-liquid-glass-chip-spin {
+  to {
+    --agx-chip-spin: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agx-liquid-glass-chip {
+    animation: none;
+  }
 }
 
 
