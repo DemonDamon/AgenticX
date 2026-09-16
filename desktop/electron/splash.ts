@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, ipcMain, screen, type BrowserWindowConstructorOptions } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -21,7 +21,6 @@ let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;
 let rendererReadyReceived = false;
 let splashForceShowTimer: NodeJS.Timeout | null = null;
-let splashAlwaysOnTopTimer: NodeJS.Timeout | null = null;
 
 type LayoutThemeReader = () => "light" | "dark";
 
@@ -56,8 +55,27 @@ function resolveSplashTheme(): "light" | "dark" {
   return theme === "light" ? "light" : "dark";
 }
 
-function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#f4f6fb" : "#05060c";
+function splashGlassOptions(theme: "light" | "dark"): BrowserWindowConstructorOptions {
+  const glass: BrowserWindowConstructorOptions = {
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: true,
+    roundedCorners: true,
+  };
+  if (process.platform === "darwin") {
+    return {
+      ...glass,
+      vibrancy: theme === "light" ? "popover" : "under-window",
+      visualEffectState: "active",
+    };
+  }
+  if (process.platform === "win32") {
+    return {
+      ...glass,
+      backgroundMaterial: "acrylic",
+    };
+  }
+  return glass;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -66,11 +84,12 @@ function clamp(value: number, min: number, max: number): number {
 
 function centerSplashBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
-  const availableWidth = Math.max(360, workArea.width - 48);
-  const availableHeight = Math.max(280, workArea.height - 48);
-  const targetWidth = clamp(Math.round(workArea.width * 0.38), 520, 620);
+  // Pixel Drift wordmark needs a wider stage than the old 620x360 card.
+  const availableWidth = Math.max(480, workArea.width - 48);
+  const availableHeight = Math.max(360, workArea.height - 48);
+  const targetWidth = clamp(Math.round(workArea.width * 0.48), 800, 960);
   const width = Math.min(targetWidth, availableWidth);
-  const targetHeight = clamp(Math.round(width * 0.58), 300, 360);
+  const targetHeight = clamp(Math.round(width * 0.58), 500, 600);
   const height = Math.min(targetHeight, availableHeight);
   return {
     width,
@@ -84,10 +103,6 @@ function clearSplashTimers(): void {
   if (splashForceShowTimer) {
     clearTimeout(splashForceShowTimer);
     splashForceShowTimer = null;
-  }
-  if (splashAlwaysOnTopTimer) {
-    clearTimeout(splashAlwaysOnTopTimer);
-    splashAlwaysOnTopTimer = null;
   }
 }
 
@@ -172,6 +187,7 @@ export function createSplashWindow(): BrowserWindow | null {
 
   splashWindow = new BrowserWindow({
     ...centerSplashBounds(),
+    ...splashGlassOptions(theme),
     frame: false,
     resizable: false,
     movable: false,
@@ -180,9 +196,8 @@ export function createSplashWindow(): BrowserWindow | null {
     fullscreenable: false,
     show: false,
     alwaysOnTop: true,
+    focusable: true,
     skipTaskbar: true,
-    transparent: false,
-    backgroundColor: splashBackgroundColor(theme),
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolveSplashPreloadPath(),
@@ -194,15 +209,10 @@ export function createSplashWindow(): BrowserWindow | null {
 
   splashWindow.once("ready-to-show", () => {
     splashWindow?.show();
+    splashWindow?.setAlwaysOnTop(true);
+    splashWindow?.setIgnoreMouseEvents(false);
     updateSplashStage("initializing");
   });
-
-  splashAlwaysOnTopTimer = setTimeout(() => {
-    splashAlwaysOnTopTimer = null;
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.setAlwaysOnTop(false);
-    }
-  }, 5000);
 
   const htmlPath = resolveSplashHtmlPath();
   const query: Record<string, string> = {
