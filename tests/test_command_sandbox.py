@@ -6,6 +6,10 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,22 +138,36 @@ def test_git_credential_paths_only_when_present(tmp_path: Path, monkeypatch: pyt
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     assert _git_credential_read_paths({"HOME": str(home)}) == ()
-    creds = home / ".git-credentials"
-    creds.write_text("https://x:y@host\n", encoding="utf-8")
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
     ssh = home / ".ssh"
     ssh.mkdir()
     paths = _git_credential_read_paths({"HOME": str(home)})
     texts = {str(p) for p in paths}
-    assert str(creds) in texts
     assert str(ssh) in texts
+    assert not any(str(p).endswith(".git-credentials") for p in paths)
 
 
-def test_git_in_writable_workspace_reads_credentials(
+def _assert_sandboxed_git_uses_temp_store(plan, home: Path, secret: str) -> None:
+    assert plan.env["GIT_TERMINAL_PROMPT"] == "0"
+    assert plan.env["GIT_CONFIG_COUNT"] == "2"
+    assert plan.env["GIT_CONFIG_KEY_0"] == "credential.helper"
+    assert plan.env["GIT_CONFIG_VALUE_0"] == ""
+    assert plan.env["GIT_CONFIG_KEY_1"] == "credential.helper"
+    store_file = Path(plan.env["GIT_CONFIG_VALUE_1"].removeprefix("store --file="))
+    assert store_file.is_file()
+    assert secret in store_file.read_text(encoding="utf-8")
+    assert store_file.parent == plan.temp_dir
+    profile = " ".join(plan.argv)
+    assert str(home / ".git-credentials") not in profile
+
+
+def test_git_in_writable_workspace_stages_store_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    secret = "https://x:y@example.com\n"
+    (home / ".git-credentials").write_text(secret, encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -161,8 +179,9 @@ def test_git_in_writable_workspace_reads_credentials(
         environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
         platform_name="darwin",
     )
+    _assert_sandboxed_git_uses_temp_store(plan, home, secret)
     profile = " ".join(plan.argv)
-    assert ".git-credentials" in profile
+    assert ".ssh" not in profile
 
 
 def test_non_git_command_gets_no_credential_grant(
@@ -184,14 +203,17 @@ def test_non_git_command_gets_no_credential_grant(
     )
     profile = " ".join(plan.argv)
     assert ".git-credentials" not in profile
+    assert "GIT_CONFIG_COUNT" not in plan.env
+    assert plan.env.get("GIT_TERMINAL_PROMPT") != "0"
 
 
-def test_git_outside_writable_workspace_gets_no_credential_grant(
+def test_git_outside_writable_workspace_still_avoids_keychain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    secret = "https://x:y@example.com\n"
+    (home / ".git-credentials").write_text(secret, encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -205,5 +227,65 @@ def test_git_outside_writable_workspace_gets_no_credential_grant(
         environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
         platform_name="darwin",
     )
+    _assert_sandboxed_git_uses_temp_store(plan, home, secret)
     profile = " ".join(plan.argv)
-    assert ".git-credentials" not in profile
+    assert str(home / ".ssh") not in profile
+
+
+def test_git_in_writable_workspace_grants_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    ssh = home / ".ssh"
+    ssh.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    plan = build_command_sandbox_plan(
+        ["git", "pull"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    assert str(ssh.resolve()) in " ".join(plan.argv)
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("sandbox-exec") is None,
+    reason="needs macOS sandbox-exec",
+)
+def test_sandboxed_git_credential_fill_uses_store_not_keychain(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".git-credentials").write_text(
+        "https://sandbox-user:sandbox-token@example.com\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    plan = build_command_sandbox_plan(
+        ["git", "credential", "fill"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={
+            "HOME": str(home),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        },
+        platform_name="darwin",
+    )
+    proc = subprocess.run(
+        list(plan.argv),
+        input="protocol=https\nhost=example.com\n\n",
+        env=dict(plan.env),
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "sandbox-user" in proc.stdout
+    assert "sandbox-token" in proc.stdout

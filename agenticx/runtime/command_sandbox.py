@@ -254,6 +254,13 @@ def build_command_sandbox_plan(
     base_env["TMPDIR"] = str(temp_dir)
 
     host = (platform_name or sys.platform).strip().lower()
+    # Confined git must not talk to the macOS login keychain. The system
+    # gitconfig from Xcode CLT registers ``osxkeychain`` first; seatbelt
+    # cannot reach ``login``, so the host pops「找不到钥匙串」and the
+    # command hangs. Force the store helper onto a file inside this
+    # invocation's temp dir (already writable) and never prompt.
+    if _argv_is_git_invocation(raw_argv):
+        _apply_sandboxed_git_auth(base_env, temp_dir, host=host)
     # Readable set = session read mounts + toolchain/system dirs. Workspace
     # roots are not listed here because they are writable; each backend
     # expresses "writable implies readable". Home is not included -- that
@@ -264,9 +271,10 @@ def build_command_sandbox_plan(
     allowed_read_roots = _normalize_writable_roots(readable_roots)
     toolchain_read_roots = _toolchain_read_roots(base_env, raw_argv, host=host)
     toolchain_read_files = _toolchain_read_files(base_env)
-    # Git auth: only when this invocation is git running inside a writable
-    # workspace root. ``cwd`` is where the command starts; a git command run
-    # from elsewhere (or a non-git command) gets no credential read grant.
+    # SSH keys: only when this invocation is git running inside a writable
+    # workspace root. HTTPS store credentials are staged above; this grant
+    # is ``~/.ssh`` only. A git command started elsewhere, or a non-git
+    # command, gets no home ``.ssh`` read.
     git_credential_paths: tuple[Path, ...] = ()
     if (
         resolved_permissions == WORKSPACE_WRITE
@@ -631,14 +639,13 @@ _HOME_TOOL_CONFIG_NAMES: tuple[str, ...] = (
     ".config/git",
 )
 
-#: Home-dir files git needs to authenticate to a remote. These are granted
-#: read-only only when the command is git running inside a writable mounted
-#: workspace root -- never as a blanket home read, and never for non-git
-#: commands. ``.git-credentials`` is the store helper file; ``.ssh`` covers
-#: SSH remotes (config + keys). Do not add ``~/.aws`` / ``~/.netrc`` here:
-#: those are not git auth.
+#: Home-dir files git needs for SSH remotes. Granted read-only only when
+#: the command is git running inside a writable workspace root -- never as
+#: a blanket home read, and never for non-git commands. HTTPS credentials
+#: are staged into the private temp dir (see ``_apply_sandboxed_git_auth``)
+#: so the store helper can lock the file; do not grant ``~/.git-credentials``
+#: here. Do not add ``~/.aws`` / ``~/.netrc``.
 _GIT_CREDENTIAL_READ_NAMES: tuple[str, ...] = (
-    ".git-credentials",
     ".ssh",
 )
 
@@ -785,13 +792,90 @@ def _toolchain_read_files(environ: Mapping[str, str]) -> tuple[Path, ...]:
     return tuple(out)
 
 
+def _stage_git_store_credentials(temp_dir: Path, environ: Mapping[str, str]) -> Path:
+    """Copy ``~/.git-credentials`` into the sandbox temp dir (or create empty).
+
+    The store helper needs to lock the file. Home is not writable, so the
+    lock must live on a path already inside ``temp_dir``.
+    """
+    dest = Path(temp_dir) / ".git-credentials"
+    home_text = str(environ.get("HOME", "") or "").strip()
+    if home_text:
+        src = (Path(home_text) / ".git-credentials").expanduser()
+        try:
+            if src.is_file():
+                dest.write_bytes(src.read_bytes())
+                dest.chmod(0o600)
+                return dest
+        except OSError:
+            pass
+    dest.touch(exist_ok=True)
+    dest.chmod(0o600)
+    return dest
+
+
+def _macos_unwrapped_git_bindir() -> Optional[Path]:
+    """Directory of a real git binary, not the ``/usr/bin/git`` xcrun stub.
+
+    The stub writes ``xcrun_db-*`` under Darwin's user temp, which seatbelt
+    refuses. Prefer Homebrew; fall back to ``xcrun -f git`` (parent, unsandboxed).
+    """
+    for candidate in (Path("/opt/homebrew/bin/git"), Path("/usr/local/bin/git")):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.parent
+    xcrun = Path("/usr/bin/xcrun")
+    if not xcrun.is_file():
+        return None
+    try:
+        out = subprocess.check_output(
+            [str(xcrun), "-f", "git"],
+            text=True,
+            timeout=8,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    binary = Path(out)
+    if binary.is_file():
+        return binary.parent
+    return None
+
+
+def _apply_sandboxed_git_auth(
+    env: dict[str, str],
+    temp_dir: Path,
+    *,
+    host: str,
+) -> None:
+    """Keep confined git off the macOS keychain and off a home-dir store lock.
+
+    Xcode's system gitconfig registers ``osxkeychain`` first. Clearing the
+    helper list and pinning ``store --file=<temp>`` is what stops the
+    「找不到钥匙串」dialog. ``GIT_TERMINAL_PROMPT=0`` fails fast if the
+    staged file has no matching host.
+    """
+    store_file = _stage_git_store_credentials(temp_dir, env)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_COUNT"] = "2"
+    env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_0"] = ""
+    env["GIT_CONFIG_KEY_1"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_1"] = f"store --file={store_file}"
+    if host == "darwin":
+        bindir = _macos_unwrapped_git_bindir()
+        if bindir is not None:
+            path = str(env.get("PATH", "") or "")
+            prefix = str(bindir)
+            env["PATH"] = prefix if not path else f"{prefix}{os.pathsep}{path}"
+
+
 def _argv_is_git_invocation(argv: Sequence[str]) -> bool:
     """True when the command is git (possibly via a shell wrapper).
 
     Only the first meaningful token is inspected so ``cd repo && git pull``
     still qualifies, while ``git config credential.helper '!cat …'`` is left
-    to the deny rules and the confirm gate -- the file grant below is
-    read-only, it does not stop git from *using* the credential.
+    to the deny rules and the confirm gate. HTTPS credentials are staged
+    into the private temp dir; this detector only decides whether to do that.
     """
     if not argv:
         return False
