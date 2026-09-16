@@ -107,7 +107,8 @@ function mountModeBadge(mode?: TaskspaceMountMode): { label: string; className: 
   }
   return {
     label: i18n.t("mountMode.direct", { ns: "workspace" }),
-    className: "bg-surface-hover text-rose-300",
+    className:
+      "bg-rose-500/10 text-rose-300 [html[data-theme=light]_&]:bg-rose-600/12 [html[data-theme=light]_&]:text-rose-700",
   };
 }
 
