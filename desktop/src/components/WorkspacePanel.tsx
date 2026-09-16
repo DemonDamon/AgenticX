@@ -26,6 +26,7 @@ import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
+import { mountModeSwitchForEntry } from "../utils/workspace-mount-mode";
 import {
   findTaskspaceForAbsPath,
   relativePathFromRoot,
@@ -300,6 +301,7 @@ export function WorkspacePanel({
     setPendingMountMode,
     adding,
     confirmMountModeAndAttach,
+    linkSourcesIntoDefault,
   } = attachWorkspace;
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
@@ -1031,6 +1033,56 @@ export function WorkspacePanel({
     setErrorText("");
   };
 
+  const changeEntryMountMode = async (entry: TaskspaceFile, next: "link" | "reference") => {
+    const browseSessionId = getBrowseSessionId();
+    const source = String(entry.source_path || "").trim();
+    const previous = entry.mount_mode === "link" || entry.mount_mode === "reference"
+      ? entry.mount_mode
+      : null;
+    if (!browseSessionId || !source) {
+      setErrorText(t("panel.changeMountFailed"));
+      return;
+    }
+    const unlink = window.agenticxDesktop.unlinkFromSessionWorkspace;
+    if (typeof unlink !== "function" || typeof window.agenticxDesktop.linkIntoSessionWorkspace !== "function") {
+      setErrorText(t("panel.changeMountNeedRestart"));
+      return;
+    }
+    if (next === "link") {
+      const confirmResult =
+        typeof window.agenticxDesktop.confirmDialog === "function"
+          ? await window.agenticxDesktop.confirmDialog({
+              title: i18n.t("composer.directMountTitle", { ns: "chat" }),
+              message: i18n.t("composer.directMountMessage", { ns: "chat" }),
+              detail: i18n.t("composer.directMountDetail", { ns: "chat", path: source }),
+              confirmText: i18n.t("composer.directMountConfirm", { ns: "chat" }),
+              cancelText: t("cancel", { ns: "common" }),
+              destructive: true,
+            })
+          : { ok: true, confirmed: false };
+      if (!confirmResult.confirmed) return;
+    }
+    const unlinked = await unlink({ sessionId: browseSessionId, sources: [source] });
+    if (!unlinked.ok) {
+      setErrorText(unlinked.error ?? t("panel.changeMountFailed"));
+      return;
+    }
+    const linked = await linkSourcesIntoDefault([source], next);
+    if (!linked && previous && previous !== next) {
+      await linkSourcesIntoDefault([source], previous);
+      setErrorText(t("panel.changeMountFailed"));
+      await refreshListAndActiveTaskspace();
+      return;
+    }
+    if (!linked) {
+      setErrorText(t("panel.changeMountFailed"));
+      await refreshListAndActiveTaskspace();
+      return;
+    }
+    setErrorText("");
+    await refreshListAndActiveTaskspace();
+  };
+
   const openFile = async (taskspaceId: string, relPath: string, entry?: TaskspaceFile) => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
@@ -1380,6 +1432,9 @@ export function WorkspacePanel({
     addPaneTerminalTab(paneId, cwd, activeTaskspace?.label);
     onFocusTerminalTab?.();
   };
+
+  const entryMountSwitch =
+    ctxMenu?.kind === "entry" ? mountModeSwitchForEntry(ctxMenu.entry) : null;
 
   return (
     <div
@@ -1856,6 +1911,17 @@ export function WorkspacePanel({
                         {
                           label: t("panel.writebackTitle"),
                           onSelect: () => void applyCopyBack(ctxMenu.entry),
+                        },
+                      ]
+                    : []),
+                  ...(entryMountSwitch
+                    ? [
+                        { separator: true },
+                        {
+                          label: t(entryMountSwitch.labelKey),
+                          danger: entryMountSwitch.next === "link",
+                          onSelect: () =>
+                            void changeEntryMountMode(ctxMenu.entry, entryMountSwitch.next),
                         },
                       ]
                     : []),
