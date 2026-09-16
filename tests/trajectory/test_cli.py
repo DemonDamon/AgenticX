@@ -3,7 +3,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from test_harbor_collector import make_trial
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_harbor_collector import make_trial  # noqa: E402
 
 def run_cli(*args):
     return subprocess.run(

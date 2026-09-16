@@ -1,5 +1,10 @@
+import sys
+from pathlib import Path
+
 from agenticx.learning.trajectory.store import TrajectoryStore
-from test_schema import _traj
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_schema import _traj  # noqa: E402
 
 def test_append_writes_and_dedups(tmp_path):
     store = TrajectoryStore(tmp_path)
