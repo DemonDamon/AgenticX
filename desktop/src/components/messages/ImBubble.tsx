@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
-import { NearBuddy } from "../brand/NearBuddy";
+import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
@@ -139,7 +139,7 @@ function StreamingDots({ compact = false }: { compact?: boolean }) {
       aria-live="polite"
       aria-label={t("status.processingAria")}
     >
-      <NearBuddy mood="working" size={compact ? 28 : 32} />
+      <OrbBurst width={compact ? 28 : 32} height={compact ? 28 : 32} />
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
         style={{ background: "var(--text-faint)" }}

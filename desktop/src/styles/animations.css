@@ -44,6 +44,11 @@
   flex-shrink: 0;
 }
 
+.agx-orb-burst {
+  display: block;
+  flex-shrink: 0;
+}
+
 /* Typographic "working..." — same glyph size as the status sentence, sequential fade. */
 @keyframes agx-working-ellipsis {
   0%,
