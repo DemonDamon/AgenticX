@@ -27,7 +27,10 @@ def response_logprobs(lm: nn.Module, samples: list[RolloutSample],
     outs = []
     for s in samples:
         ids = torch.cat([s.prompt_ids, s.response_ids]).to(device).unsqueeze(0)
-        logits = lm(ids)[0]                                   # (L, V)
+        logits = lm(ids)
+        if hasattr(logits, "logits"):      # HF ModelOutput → (B, L, V)
+            logits = logits.logits
+        logits = logits[0]                                   # (L, V)
         logp = torch.log_softmax(logits[:-1], dim=-1)
         seg = logp[len(s.prompt_ids) - 1: ids.shape[1] - 1]
         tgt = s.response_ids.to(device).unsqueeze(1)
@@ -100,6 +103,9 @@ class GRPOTrainer:
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
         self.opt.step()
+        sync = getattr(self.rollout, "sync_weights", None)   # vLLM 离线模式热同步
+        if callable(sync):
+            sync(self.lm)
         return {"loss": float(loss.detach()),
                 "reward_mean": float(np.mean(rewards)),
                 "n_samples": len(samples)}

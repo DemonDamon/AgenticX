@@ -78,3 +78,53 @@ def test_trainer_kl_beta_uses_frozen_ref():
     m = tr.train_step([[1, 2]], n_samples=4, max_new_tokens=5)
     assert np.isfinite(m["loss"])
     assert all(p.grad is None for p in ref.parameters())   # ref 冻结
+
+
+# ---- SP11 追加：真架构闭环 + 离线引擎权重同步钩子 ----
+from agenticx.rl.hf_rollout import HFRolloutEngine
+from transformers import GPT2Config, GPT2LMHeadModel
+
+
+def _tiny_gpt2():
+    torch.manual_seed(0)
+    cfg = GPT2Config(n_embd=32, n_layer=1, n_head=4, vocab_size=128,
+                     bos_token_id=1, eos_token_id=2,
+                     resid_pdrop=0.0, embd_pdrop=0.0, attn_pdrop=0.0)
+    return GPT2LMHeadModel(cfg)
+
+
+def test_grpo_learns_on_real_attention_arch():
+    """GRPO 闭环在真注意力架构（GPT2，dropout=0 对齐 LLM RL 实践）上成立。"""
+    torch.manual_seed(0)
+    lm = _tiny_gpt2()
+    eng = HFRolloutEngine(lm)
+    target = 7
+    tr = GRPOTrainer(lm, eng, lambda p, r: float((r == target).sum().item()),
+                     lr=5e-3)
+    prompts = [[10, 11, 12], [4, 5]]
+    first = tr.train_step(prompts, n_samples=8, max_new_tokens=6)
+    for _ in range(59):
+        last = tr.train_step(prompts, n_samples=8, max_new_tokens=6)
+    assert last["reward_mean"] > first["reward_mean"] + 1.0
+    assert last["reward_mean"] > 2.0
+
+
+def test_trainer_syncs_offline_engine_weights():
+    """rollout 引擎带 sync_weights（vLLM 离线模式）时，每步训练后同步一次。"""
+    lm = TinyLM()
+    local = LocalRolloutEngine(lm)
+    synced = []
+
+    class OfflineEngine:
+        def generate(self, prompts, *, n_samples, max_new_tokens,
+                     temperature=1.0, eos_id=None):
+            return local.generate(prompts, n_samples=n_samples,
+                                  max_new_tokens=max_new_tokens,
+                                  temperature=temperature, eos_id=eos_id)
+
+        def sync_weights(self, model):
+            synced.append(model)
+
+    tr = GRPOTrainer(lm, OfflineEngine(), lambda p, r: 0.0, lr=1e-3)
+    tr.train_step([[1, 2]], n_samples=2, max_new_tokens=3)
+    assert synced == [lm]                # 恰好一次，传的是训练模型本体
