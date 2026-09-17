@@ -85,3 +85,91 @@ class PolicyRegistry:
 
     def versions(self) -> list[dict[str, Any]]:
         return list(self._versions)
+
+
+import re
+
+
+@dataclass
+class EvolutionReport:
+    iterations: int
+    accepted: int
+    rejected: int
+    best_score: float
+    best_version: int
+
+
+def evolve_loop(registry: PolicyRegistry,
+                evaluate_fn: Callable[[Any], float],
+                propose_fn: Callable[[str, str], str],
+                n_iters: int = 5,
+                min_improve: float = 0.0) -> EvolutionReport:
+    """离线演化主循环（论文 Dreaming-based Policy Improvement）。
+
+    evaluate_fn 只允许绑定 train 区任务树（SP7 隔离纪律）。
+    择优规则：new_score > best + min_improve 才 register+promote。
+    坏代码（语法错/缺 NAME/缺 act）与劣质变体一律丢弃, 不影响当前策略。
+    """
+    current = registry.current()
+    if current is None:
+        raise ValueError("注册表无 promoted 策略, 请先注册并 promote 种子策略")
+    best_score, best_version = current["score"], current["version"]
+    accepted = rejected = 0
+    for _ in range(n_iters):
+        proposal = propose_fn(current["source"], f"current_score={best_score}")
+        try:
+            policy = compile_policy(proposal)
+        except Exception:
+            rejected += 1
+            continue
+        score = evaluate_fn(policy)
+        if score > best_score + min_improve:
+            v = registry.register(proposal, score=score, lineage="evolved")
+            registry.promote(v)
+            best_score, best_version = score, v
+            current = registry.current()
+            accepted += 1
+        else:
+            rejected += 1
+    return EvolutionReport(n_iters, accepted, rejected, best_score, best_version)
+
+
+def mutate_policy_source(source: str) -> str:
+    """dry-run 提议器：把源码中第一个 `= <int>` 的整数字面量 +1（确定性爬坡）。"""
+    m = re.search(r"=\s*(\d+)", source)
+    if not m:
+        return source
+        # 无数字可变时原样返回, evolve_loop 会按"无提升"拒绝, 循环安全
+    old, new = m.group(0), f"= {int(m.group(1)) + 1}"
+    return source.replace(old, new, 1)
+
+
+_PROPOSER_PROMPT = """你是探索策略优化器（Dream-RSI 式离线策略改进）。
+当前策略源码与其在历史轨迹回放上的得分如下。请提出一个改进变体,
+只输出一个 python 代码块（```python ... ```）, 代码必须定义:
+NAME: str 与 act(obs, ctx) -> str（返回 "continue" 或 "abort"）。
+可用类型: obs: StepFeatures(step, n_messages, n_tool_calls, tool_success_rate,
+consecutive_failures, rounds_since_progress, est_tokens);
+ctx: AttemptContext(task_id, attempt_index, attempts_remaining, spent_so_far)。
+
+当前策略源码:
+```python
+{source}
+```
+
+{feedback}
+"""
+
+
+def _extract_code(text: str) -> str:
+    m = re.search(r"```(?:python)?\s*\n(.*?)```", text, re.DOTALL)
+    return m.group(1).strip() if m else text.strip()
+
+
+def make_llm_proposer(llm: Any) -> Callable[[str, str], str]:
+    """用仓库 LLM provider 构造提议器：llm.invoke(prompt) -> LLMResponse(.content)。"""
+    def propose(current_source: str, feedback: str) -> str:
+        prompt = _PROPOSER_PROMPT.format(source=current_source, feedback=feedback)
+        resp = llm.invoke(prompt)
+        return _extract_code(getattr(resp, "content", "") or "")
+    return propose
