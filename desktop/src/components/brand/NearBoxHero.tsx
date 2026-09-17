@@ -24,6 +24,8 @@ import {
 } from "./near-box-moods";
 import "./near-box-hero.css";
 
+const LOGO_MARK_URL = new URL("../../../assets/near-box-logo-face.png", import.meta.url).href;
+
 function SensorMarkView({ mark }: { mark: SensorMark }) {
   return (
     <ellipse
@@ -34,7 +36,7 @@ function SensorMarkView({ mark }: { mark: SensorMark }) {
       cy={mark.cy}
       rx={mark.rx}
       ry={mark.ry}
-      fill="#FFF9F6"
+      fill="#FFFFFF"
       transform={`rotate(${mark.rotate} ${mark.cx} ${mark.cy})`}
     />
   );
@@ -56,7 +58,8 @@ function prefersReducedMotion(): boolean {
 }
 
 const OUTER_SHELL =
-  "M80 18C86 18 91 20 97 23L136 46C141 49 144 53 144 58V108C144 119 138 124 130 129L92 151C84 156 76 156 68 151L30 129C22 124 16 119 16 108V58C16 53 19 49 24 46L63 23C69 20 74 18 80 18Z";
+  "M64.1 17.1C71.4 12.1 83.4 11.8 90.9 16.5L133.0 42.6C140.5 47.3 146.3 58.3 145.9 67.1L144.7 97.4C144.3 106.2 137.8 117.1 130.3 121.6L93.0 143.8C85.5 148.3 73.1 148.3 65.6 143.7L29.9 121.9C22.4 117.3 15.9 106.4 15.5 97.6L14.1 68.1C13.7 59.3 19.3 48.0 26.6 43.0L64.1 17.1Z";
+const LOGO_MARK_BOX = { x: 13.4, y: 8, width: 133.2, height: 144 } as const;
 const BURST_DURATION_MS = 2200;
 
 const CONFETTI_COLORS = [
@@ -215,8 +218,6 @@ export function NearBoxHero({
   };
 
   const launchConfetti = () => {
-    setParallax(0, 0);
-    if (sensorRef.current) sensorRef.current.style.transform = "translate(0px, 17px)";
     setBursting(true);
     setBurstKey((value) => value + 1);
     if (burstTimerRef.current !== null) window.clearTimeout(burstTimerRef.current);
@@ -292,61 +293,20 @@ export function NearBoxHero({
             </clipPath>
           </defs>
           <g className="near-box-character">
-            <g className="near-box-cube">
-              <path data-part="outer-shell" d={OUTER_SHELL} fill="#FF7A45" />
-              <g clipPath={`url(#${clipId})`}>
-                <path
-                  data-part="left-face"
-                  d="M16 58L80 96V166H0V58Z"
-                  fill="#FF7A45"
-                />
-                <path
-                  data-part="right-face"
-                  d="M80 96L144 58V166H80Z"
-                  fill="#F4662E"
-                />
-                <path
-                  data-part="top-face"
-                  className="near-box-top"
-                  d="M80 18C86 18 91 20 97 23L136 46C141 49 144 53 144 58L80 96L16 58C16 53 19 49 24 46L63 23C69 20 74 18 80 18Z"
-                  fill="#FF965F"
+            <g className="near-box-cube" data-part="cube" data-finish="logo">
+              <path data-part="outer-shell" d={OUTER_SHELL} fill="none" />
+              <g>
+                <image
+                  data-part="logo-mark"
+                  href={LOGO_MARK_URL}
+                  x={LOGO_MARK_BOX.x}
+                  y={LOGO_MARK_BOX.y}
+                  width={LOGO_MARK_BOX.width}
+                  height={LOGO_MARK_BOX.height}
+                  preserveAspectRatio="xMidYMid meet"
                 />
               </g>
             </g>
-            {bursting ? (
-              <g className="near-box-flaps" aria-hidden>
-                <path
-                  data-part="box-flap"
-                  className="near-box-flap near-box-flap-back-left"
-                  d="M80 18L16 58L-2 33L62 -5Z"
-                  fill="#FFAA78"
-                />
-                <path
-                  data-part="box-flap"
-                  className="near-box-flap near-box-flap-back-right"
-                  d="M80 18L144 58L162 33L98 -5Z"
-                  fill="#FF9864"
-                />
-                <path
-                  data-part="box-cavity"
-                  className="near-box-cavity"
-                  d="M16 58L80 18L144 58L80 96Z"
-                  fill="#B94319"
-                />
-                <path
-                  data-part="box-flap"
-                  className="near-box-flap near-box-flap-front-left"
-                  d="M16 58L80 96L66 116L-3 76Z"
-                  fill="#FF8D59"
-                />
-                <path
-                  data-part="box-flap"
-                  className="near-box-flap near-box-flap-front-right"
-                  d="M144 58L80 96L94 116L163 76Z"
-                  fill="#F77640"
-                />
-              </g>
-            ) : null}
             <g
               ref={sensorRef}
               data-part="sensor-group"

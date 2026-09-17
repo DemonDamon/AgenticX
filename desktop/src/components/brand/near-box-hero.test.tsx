@@ -22,9 +22,10 @@ describe("NearBoxHero", () => {
     expect(outerShell).toBeTruthy();
     expect(outerShell?.getAttribute("stroke")).toBeNull();
     expect(svg?.querySelector('[data-part="shell-clip"]')).toBeTruthy();
-    expect(svg?.querySelector('[data-part="top-face"]')).toBeTruthy();
-    expect(svg?.querySelector('[data-part="left-face"]')).toBeTruthy();
-    expect(svg?.querySelector('[data-part="right-face"]')).toBeTruthy();
+    expect(svg?.querySelector('[data-part="logo-mark"]')).toBeTruthy();
+    expect(svg?.querySelector('[data-part="top-face"]')).toBeNull();
+    expect(svg?.querySelector('[data-part="left-face"]')).toBeNull();
+    expect(svg?.querySelector('[data-part="right-face"]')).toBeNull();
     expect(svg?.querySelector('[data-part="top-wing"]')).toBeNull();
     expect(svg?.querySelectorAll('[data-part="sensor"]')).toHaveLength(2);
     expect(svg?.querySelector('[data-part="core"]')).toBeNull();
@@ -32,8 +33,8 @@ describe("NearBoxHero", () => {
     expect(svg?.querySelector('[data-part="pupil"]')).toBeNull();
     expect(svg?.querySelector('[data-part="mouth"]')).toBeNull();
     const sensors = svg?.querySelectorAll('[data-part="sensor"]');
-    expect(sensors?.[0]?.getAttribute("cy")).toBe("108");
-    expect(sensors?.[1]?.getAttribute("cy")).toBe("97");
+    expect(sensors?.[0]?.getAttribute("cy")).toBe("104");
+    expect(sensors?.[1]?.getAttribute("cy")).toBe("92");
     expect(root.getAttribute("data-gaze")).toBe("wander");
     expect(root.getAttribute("data-mood")).toBe("rest");
     expect(root.getAttribute("data-eye-shape")).toBe("restSoft");
@@ -47,6 +48,23 @@ describe("NearBoxHero", () => {
     expect(queryByRole("img")?.tagName.toLowerCase()).toBe("svg");
     expect(root.querySelector('[data-part="box-flap"]')).toBeNull();
     expect(root.querySelector('[data-part="confetti"]')).toBeNull();
+  });
+
+  it("uses the owned isometric logo mark as the cube body", () => {
+    const { getByTestId } = render(<NearBoxHero size={160} />);
+    const svg = getByTestId("near-box-hero").querySelector("svg");
+    const cube = svg?.querySelector('[data-part="cube"]');
+    const mark = svg?.querySelector('[data-part="logo-mark"]');
+    const href = mark?.getAttribute("href") ?? mark?.getAttribute("xlink:href") ?? "";
+
+    expect(cube?.getAttribute("data-finish")).toBe("logo");
+    expect(mark).toBeTruthy();
+    expect(href).toMatch(/near-box-logo-face/);
+    expect(svg?.querySelector('[data-part="ridge-blend"]')).toBeNull();
+    expect(svg?.querySelectorAll('[data-part="dot-cover"]')).toHaveLength(0);
+    const restSensor = svg?.querySelector('[data-part="sensor"]');
+    expect(restSensor?.getAttribute("transform")).toMatch(/^rotate\(1 /);
+    expect(restSensor?.getAttribute("fill")).toBe("#FFFFFF");
   });
 
   it("shows the orange brand tagline under the box", () => {
@@ -151,7 +169,7 @@ describe("NearBoxHero", () => {
     const root = getByTestId("near-box-hero");
     const home = root.querySelector('[data-part="sensor"]')?.getAttribute("cx");
     expect(root.getAttribute("data-mood")).toBe("rest");
-    expect(home).toBe("104");
+    expect(home).toBe("106");
 
     act(() => {
       vi.advanceTimersByTime(wanderMs("rest", 0.9));
@@ -180,7 +198,7 @@ describe("NearBoxHero", () => {
     expect(root.querySelector('[data-part="sensor"]')?.getAttribute("data-kind")).toBe("oval");
   });
 
-  it("opens the lid and launches confetti when clicked", () => {
+  it("keeps the closed cube and only launches confetti when clicked", () => {
     const { getByTestId } = render(<NearBoxHero />);
     const root = getByTestId("near-box-hero");
 
@@ -195,19 +213,11 @@ describe("NearBoxHero", () => {
     );
     expect(Math.min(...spread)).toBeLessThan(-160);
     expect(Math.max(...spread)).toBeGreaterThan(160);
+    expect(root.querySelector('[data-part="logo-mark"]')).toBeTruthy();
     expect(root.querySelector('[data-part="burst-ring"]')).toBeNull();
-    expect(root.querySelectorAll('[data-part="box-flap"]')).toHaveLength(4);
-    expect(root.querySelector('[data-part="box-cavity"]')).toBeTruthy();
+    expect(root.querySelector('[data-part="box-flap"]')).toBeNull();
+    expect(root.querySelector('[data-part="box-cavity"]')).toBeNull();
     expect(root.querySelector('[data-part="box-inner-wall"]')).toBeNull();
-    const flapPaths = Array.from(root.querySelectorAll('[data-part="box-flap"]')).map((node) =>
-      node.getAttribute("d"),
-    );
-    expect(flapPaths).toEqual([
-      expect.stringContaining("M80 18L16 58"),
-      expect.stringContaining("M80 18L144 58"),
-      expect.stringContaining("M16 58L80 96"),
-      expect.stringContaining("M144 58L80 96"),
-    ]);
     expect(root.querySelector('[data-part="firework"]')).toBeNull();
   });
 });

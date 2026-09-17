@@ -75,8 +75,11 @@ describe("near-box-moods", () => {
     expect(aspect(surpriseL)).toBeLessThan(1.15);
     expect(aspect(laughL)).toBeGreaterThan(2);
     expect(laughL.ry).toBeGreaterThan(laughL.rx);
-    expect(restL.rx).toBeLessThanOrEqual(5.4);
-    expect(restL.ry).toBeLessThanOrEqual(10);
+    expect(restL.rx).toBeLessThanOrEqual(6.2);
+    expect(restL.ry).toBeLessThanOrEqual(12);
+    expect(restL.rotate).toBeGreaterThanOrEqual(0);
+    expect(restL.rotate).toBeLessThanOrEqual(3);
+    expect(restL.ry / restL.rx).toBeGreaterThan(1.85);
     expect(surpriseL.rx).toBeLessThanOrEqual(6.4);
   });
 

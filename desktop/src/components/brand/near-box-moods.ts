@@ -35,8 +35,8 @@ export type SensorMark = {
 
 export type Gaze = { x: number; y: number };
 
-export const FACE_LEFT = { cx: 104, cy: 108 } as const;
-export const FACE_RIGHT = { cx: 123, cy: 97 } as const;
+export const FACE_LEFT = { cx: 106, cy: 104 } as const;
+export const FACE_RIGHT = { cx: 128, cy: 92 } as const;
 
 /** Conservative AABB of the right-front cube face, in viewBox units. */
 export const RIGHT_FACE_BOUNDS = {
@@ -93,8 +93,8 @@ export const GAZE_WANDER_MS: Record<NearBoxMoodId, readonly [number, number]> = 
 };
 
 export const EYE_SHAPES: Record<EyeShapeId, { rx: number; ry: number; rotate: number }> = {
-  restSoft: { rx: 5.0, ry: 9.2, rotate: 8 },
-  restLean: { rx: 4.6, ry: 8.6, rotate: 10 },
+  restSoft: { rx: 5.8, ry: 11.6, rotate: 1 },
+  restLean: { rx: 5.4, ry: 11.0, rotate: 2 },
   listenTall: { rx: 3.8, ry: 12.2, rotate: 14 },
   listenLean: { rx: 3.6, ry: 12.8, rotate: 16 },
   listenSoft: { rx: 4.0, ry: 11.2, rotate: 12 },
