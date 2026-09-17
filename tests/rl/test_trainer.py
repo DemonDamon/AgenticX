@@ -213,3 +213,17 @@ def test_train_step_episodes_shaping_hook():
     tr = GRPOTrainer(lm, eng, lambda p, r: 0.0, lr=1e-3)
     m = tr.train_step_episodes(eps, shaping=lambda rewards, tasks: [0.0] * len(rewards))
     assert m["loss"] == 0.0
+
+
+def test_response_logprobs_batched_equals_per_sample():
+    """批量前向 = 逐样本前向（右 padding 在因果模型下不影响前缀）——DDP 前置条件。"""
+    torch.manual_seed(2)
+    lm = TinyLM()
+    samples = LocalRolloutEngine(lm).generate(
+        [[1, 2], [3, 4, 5, 6]], n_samples=3, max_new_tokens=5)
+    assert len(samples) == 6
+    batched = response_logprobs(lm, samples, torch.device("cpu"))
+    per = torch.cat([response_logprobs(lm, [s], torch.device("cpu"))
+                     for s in samples])
+    assert batched.shape == per.shape
+    assert torch.allclose(batched.detach(), per, atol=1e-5)

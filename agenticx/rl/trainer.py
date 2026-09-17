@@ -21,19 +21,30 @@ def response_logprobs(lm: nn.Module, samples: list[RolloutSample],
                       device: torch.device) -> torch.Tensor:
     """当前 lm 对各 sample response 段的 token logp（带梯度，拼接为 (ΣLr,)）。
 
-    位置对齐: logits[i] 预测 token i+1，response token j（全局位置 P+j）
-    的 logp 取自位置 P+j-1 的 log_softmax。
+    批量实现: 右侧 padding 到同长一次前向（因果模型下 padding 不影响
+    前缀位置 logits）。位置对齐: logits[i] 预测 token i+1，response token j
+    （全局位置 P+j）的 logp 取自位置 P+j-1 的 log_softmax。
+    DDP 契约: 每次 backward 只对应一个带梯度 forward——逐样本循环 forward
+    会触发 DDP "Expected to have finished reduction" 错误，故必须批量化。
     """
+    if not samples:
+        return torch.zeros(0, device=device)
+    lens = [s.prompt_ids.shape[0] + s.response_ids.shape[0] for s in samples]
+    max_len = max(lens)
+    ids = torch.zeros(len(samples), max_len, dtype=torch.long)      # 0 = pad
+    for i, s in enumerate(samples):
+        seq = torch.cat([s.prompt_ids, s.response_ids])
+        ids[i, : seq.shape[0]] = seq
+    ids = ids.to(device)
+    logits = lm(ids)
+    if hasattr(logits, "logits"):      # HF ModelOutput → (B, L, V)
+        logits = logits.logits
     outs = []
-    for s in samples:
-        ids = torch.cat([s.prompt_ids, s.response_ids]).to(device).unsqueeze(0)
-        logits = lm(ids)
-        if hasattr(logits, "logits"):      # HF ModelOutput → (B, L, V)
-            logits = logits.logits
-        logits = logits[0]                                   # (L, V)
-        logp = torch.log_softmax(logits[:-1], dim=-1)
-        seg = logp[len(s.prompt_ids) - 1: ids.shape[1] - 1]
-        tgt = s.response_ids.to(device).unsqueeze(1)
+    for i, s in enumerate(samples):
+        logp = torch.log_softmax(logits[i, :-1], dim=-1)
+        p, t = s.prompt_ids.shape[0], s.response_ids.shape[0]
+        seg = logp[p - 1: p + t - 1]                   # (t, V)
+        tgt = s.response_ids.to(device).unsqueeze(1)   # (t, 1)
         outs.append(seg.gather(1, tgt).squeeze(1))
     return torch.cat(outs)
 
