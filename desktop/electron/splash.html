@@ -18,15 +18,15 @@
         --text-muted: rgba(206, 220, 246, 0.62);
         --track: rgba(255, 255, 255, 0.14);
         --shimmer: rgba(226, 238, 255, 0.9);
-        --glass-tint: rgba(8, 10, 16, 0.52);
+        --glass-tint: rgba(8, 10, 16, 0.16);
         --glass-sheen: linear-gradient(
           160deg,
-          rgba(255, 255, 255, 0.14) 0%,
-          rgba(255, 255, 255, 0.04) 38%,
-          rgba(8, 12, 22, 0.18) 100%
+          rgba(255, 255, 255, 0.22) 0%,
+          rgba(255, 255, 255, 0.05) 34%,
+          rgba(8, 12, 22, 0.08) 100%
         );
-        --glass-stroke: rgba(255, 255, 255, 0.18);
-        --glass-highlight: rgba(255, 255, 255, 0.3);
+        --glass-stroke: rgba(255, 255, 255, 0.28);
+        --glass-highlight: rgba(255, 255, 255, 0.42);
       }
 
       :root[data-theme="light"] {
@@ -34,15 +34,15 @@
         --text-muted: rgba(38, 48, 68, 0.58);
         --track: rgba(24, 34, 56, 0.12);
         --shimmer: rgba(74, 104, 168, 0.9);
-        --glass-tint: rgba(255, 255, 255, 0.48);
+        --glass-tint: rgba(255, 255, 255, 0.14);
         --glass-sheen: linear-gradient(
           160deg,
-          rgba(255, 255, 255, 0.58) 0%,
-          rgba(255, 255, 255, 0.22) 40%,
-          rgba(220, 228, 244, 0.16) 100%
+          rgba(255, 255, 255, 0.42) 0%,
+          rgba(255, 255, 255, 0.1) 38%,
+          rgba(220, 228, 244, 0.06) 100%
         );
-        --glass-stroke: rgba(255, 255, 255, 0.5);
-        --glass-highlight: rgba(255, 255, 255, 0.62);
+        --glass-stroke: rgba(255, 255, 255, 0.46);
+        --glass-highlight: rgba(255, 255, 255, 0.72);
       }
 
       * {
@@ -56,14 +56,14 @@
         height: 100%;
         overflow: hidden;
         /* Near-opaque so Electron hit-tests the whole pane (fully transparent pixels click through). */
-        background: rgba(8, 10, 16, 0.04);
+        background: rgba(8, 10, 16, 0.02);
         font-family: "SF Pro Display", "Helvetica Neue", "PingFang SC", sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
       :root[data-theme="light"] html,
       :root[data-theme="light"] body {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(255, 255, 255, 0.03);
       }
 
       /*
@@ -89,8 +89,21 @@
         inset: 0;
         pointer-events: none;
         background:
-          radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.22), transparent 36%),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.08), transparent 42%, rgba(255, 255, 255, 0.06));
+          radial-gradient(circle at 16% -8%, rgba(255, 255, 255, 0.38), transparent 42%),
+          radial-gradient(circle at 88% 112%, rgba(255, 255, 255, 0.1), transparent 40%),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.1), transparent 46%, rgba(255, 255, 255, 0.08));
+      }
+
+      .glass::after {
+        content: "";
+        position: absolute;
+        inset: -18%;
+        pointer-events: none;
+        background:
+          radial-gradient(ellipse 46% 28% at 30% 18%, rgba(255, 255, 255, 0.22), transparent 70%),
+          radial-gradient(ellipse 38% 24% at 72% 78%, rgba(210, 232, 255, 0.1), transparent 72%);
+        filter: blur(18px);
+        animation: liquid-shift 11s ease-in-out infinite;
       }
 
       .glass-specular {
@@ -100,15 +113,15 @@
         pointer-events: none;
         mix-blend-mode: screen;
         background: linear-gradient(
-          112deg,
-          transparent 30%,
-          rgba(226, 240, 255, 0.05) 43%,
-          rgba(255, 255, 255, 0.1) 50%,
-          rgba(190, 218, 255, 0.04) 57%,
-          transparent 70%
+          118deg,
+          transparent 28%,
+          rgba(226, 240, 255, 0.08) 42%,
+          rgba(255, 255, 255, 0.2) 50%,
+          rgba(190, 218, 255, 0.07) 58%,
+          transparent 72%
         );
-        background-size: 240% 100%;
-        animation: specular 14s ease-in-out infinite;
+        background-size: 260% 100%;
+        animation: specular 9s ease-in-out infinite;
       }
 
       @keyframes specular {
@@ -118,6 +131,18 @@
         }
         50% {
           background-position: -30% 0;
+        }
+      }
+
+      @keyframes liquid-shift {
+        0%,
+        100% {
+          transform: translate3d(-4%, -2%, 0) scale(1.02);
+          opacity: 0.7;
+        }
+        50% {
+          transform: translate3d(5%, 3%, 0) scale(1.08);
+          opacity: 1;
         }
       }
 
@@ -318,14 +343,20 @@
       :root[data-theme="light"] .glass-specular {
         mix-blend-mode: soft-light;
         background: linear-gradient(
-          112deg,
-          transparent 30%,
-          rgba(255, 255, 255, 0.28) 43%,
-          rgba(255, 255, 255, 0.52) 50%,
-          rgba(255, 255, 255, 0.24) 57%,
-          transparent 70%
+          118deg,
+          transparent 28%,
+          rgba(255, 255, 255, 0.34) 42%,
+          rgba(255, 255, 255, 0.62) 50%,
+          rgba(255, 255, 255, 0.3) 58%,
+          transparent 72%
         );
-        background-size: 240% 100%;
+        background-size: 260% 100%;
+      }
+
+      :root[data-theme="light"] .glass::after {
+        background:
+          radial-gradient(ellipse 46% 28% at 30% 18%, rgba(255, 255, 255, 0.4), transparent 70%),
+          radial-gradient(ellipse 38% 24% at 72% 78%, rgba(255, 255, 255, 0.16), transparent 72%);
       }
 
       @media (prefers-reduced-transparency: reduce) {
@@ -341,7 +372,8 @@
       @media (prefers-reduced-motion: reduce) {
         .progress-fill::after,
         .log-line,
-        .glass-specular {
+        .glass-specular,
+        .glass::after {
           animation: none;
         }
       }
@@ -399,7 +431,6 @@
         };
         var MAX_LOG_LINES = 2;
 
-        var theme = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
         var reduceMotion =
           typeof window.matchMedia === "function" &&
           window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -476,10 +507,7 @@
           if (!ctx) return function () {};
 
           opts = opts || {};
-          var palette =
-            theme === "light"
-              ? ["#1C1C1E", "#F9731A", "#1C1C1E"]
-              : ["#FFFFFF", "#F9731A", "#FFFFFF"];
+          var palette = ["#FFFFFF", "#F9731A", "#FFFFFF"];
           var text = opts.text || "NEAR";
           var particleSize = typeof opts.particleSize === "number" ? opts.particleSize : 10;
           var particleCount = typeof opts.particleCount === "number" ? opts.particleCount : 32;
