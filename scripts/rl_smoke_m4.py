@@ -30,6 +30,8 @@ def main() -> int:
     ap.add_argument("--trials-dir", default="/tmp/agenticx_rl_m4_smoke")
     ap.add_argument("--timeout", type=float, default=1200.0)
     ap.add_argument("--lr", type=float, default=1e-5)
+    ap.add_argument("--replay-from-jobs", default="harness-lab/jobs",
+                    help="用真实轨迹算回放分（'' 时退回占位 0.0）")
     args = ap.parse_args()
 
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -57,7 +59,19 @@ def main() -> int:
 
     tr = GRPOTrainer(lm, eng, lambda p, r: 0.0, lr=args.lr)
 
-    replay_scores = {args.task: 0.0}          # 冒烟用占位回放分（真源=SP6 evaluate_policy）
+    if args.replay_from_jobs:
+        from agenticx.rl.replay_bridge import task_replay_scores_from_jobs
+        all_scores = task_replay_scores_from_jobs(Path(args.replay_from_jobs))
+        # episode.task 是路径；回放分 key 是 terminal-bench/<name> —— basename 匹配
+        name = Path(args.task).name
+        keys = [k for k in all_scores if k.endswith(f"/{name}") or k == name]
+        task_score = all_scores[keys[0]] if keys else None
+        print(f"[m4] replay scores: {len(all_scores)} tasks "
+              f"from {args.replay_from_jobs}; this task -> {task_score}")
+        # 无该任务回放分 → 空 dict → shaping 回退组内基线（真实验证回退路径）
+        replay_scores = {args.task: task_score} if task_score is not None else {}
+    else:
+        replay_scores = {args.task: 0.0}          # 占位（调试用）
     m = tr.train_step_episodes(
         [ep], shaping=lambda rs, ts: replay_shaped_advantage(
             rs, ts, replay_scores, replay_weight=1.0))
