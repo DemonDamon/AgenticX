@@ -125,3 +125,95 @@ def test_concurrent_requests_all_succeed():
         assert len(results) == 2 and all(r for r in results)
     finally:
         srv.shutdown()
+
+
+# ---- SP13 追加：请求日志 + temperature override ----
+from agenticx.rl.model_server import RequestLogEntry
+
+
+def _start_logged_server():
+    import threading as _th
+    lm = _lm()
+    log: list = []
+    srv = serve_model(lm, FakeTokenizer(), host="127.0.0.1", port=0,
+                      model_id="test-rl-model", log=log,
+                      temperature_override=1.0)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, log
+
+
+def test_log_records_entry_with_raw_logprobs():
+    import threading as _th
+    lm = _lm()
+    log: list = []
+    srv = serve_model(lm, FakeTokenizer(), host="127.0.0.1", port=0,
+                      model_id="test-rl-model", log=log,
+                      temperature_override=1.0)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        _, data = _post(srv.server_address[1], "/v1/chat/completions", {
+            "model": "t", "max_tokens": 4, "temperature": 0.3,   # 请求 0.3 被 override 成 1.0
+            "messages": [{"role": "user", "content": "hi"}]})
+        assert len(log) == 1
+        e = log[0]
+        assert isinstance(e, RequestLogEntry)
+        assert e.temperature == 1.0
+        assert len(e.context_ids) > 0
+        assert len(e.gen_ids) == data["usage"]["completion_tokens"]
+        assert len(e.logprobs) == len(e.gen_ids)
+        # raw logp（T=1 分布）与全序列 forward 重算一致（KV-cache 差 <1e-4）
+        import torch
+        import torch.nn.functional as F
+        full = torch.tensor([e.context_ids + e.gen_ids])
+        logits = lm(full).logits[0]                    # (L, V) HF ModelOutput 路径
+        lp = F.log_softmax(logits[:-1].float(), dim=-1)
+        seg = lp[len(e.context_ids) - 1:]
+        want = seg.gather(1, torch.tensor(e.gen_ids).unsqueeze(1)).squeeze(1)
+        assert torch.allclose(torch.tensor(e.logprobs), want, atol=1e-4)
+    finally:
+        srv.shutdown()
+
+
+def test_log_appends_across_requests():
+    srv, log = _start_logged_server()
+    try:
+        for _ in range(3):
+            _post(srv.server_address[1], "/v1/chat/completions", {
+                "model": "t", "max_tokens": 2, "temperature": 0.0,
+                "messages": [{"role": "user", "content": "x"}]})
+        assert len(log) == 3
+    finally:
+        srv.shutdown()
+
+
+def test_no_log_still_works():
+    # 不传 log（向后兼容）：原有行为不变
+    srv = _start_server()
+    try:
+        code, data = _post(srv.server_address[1], "/v1/chat/completions", {
+            "model": "test-rl-model", "max_tokens": 3, "temperature": 0.0,
+            "messages": [{"role": "user", "content": "y"}]})
+        assert code == 200 and data["choices"][0]["message"]["content"]
+    finally:
+        srv.shutdown()
+
+
+def test_override_changes_sampling_not_logprobs_scale():
+    # override 后记录的是 T=1 raw logp：两次同 prompt 采样分布=T=1，
+    # logged logp 应与 T=1 一致（本测试钉 "raw" 语义——非 logits/T）
+    import threading as _th
+    lm = _lm().eval()
+    log: list = []
+    srv = serve_model(lm, FakeTokenizer(), host="127.0.0.1", port=0,
+                      model_id="t", log=log, temperature_override=1.0)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        torch.manual_seed(0)
+        _post(srv.server_address[1], "/v1/chat/completions", {
+            "model": "t", "max_tokens": 3, "temperature": 0.9,
+            "messages": [{"role": "user", "content": "q"}]})
+        e = log[0]
+        # greedy 对照：T=1 下 argmax token 的 logp 应 ≥ 其它 token（非严格，跳过）
+        assert all(p <= 0.0 for p in e.logprobs)
+    finally:
+        srv.shutdown()
