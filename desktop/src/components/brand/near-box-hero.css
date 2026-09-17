@@ -1,0 +1,31 @@
+.near-box-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.near-box-hero {
+  width: var(--near-box-size, 160px);
+  height: var(--near-box-size, 160px);
+  cursor: default;
+}
+
+.near-box-hero svg {
+  display: block;
+  overflow: visible;
+  color-scheme: light;
+  --fg: #ff7a45;
+  --bg: #f9f9f9;
+  --ink: #ff7a45;
+}
+
+.near-box-tagline {
+  margin: 0;
+  color: #ff7a45;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  user-select: none;
+}
