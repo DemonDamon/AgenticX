@@ -69,3 +69,39 @@ def test_grpo_loss_combines_pg_and_kl():
         logprobs=[0.0], old_logprobs=[0.0], ref_logprobs=[-1.0],
         advantages=[0.0], response_mask=[1], kl_beta=0.04)
     assert np.allclose(total2, 0.04 * np.exp(-1.0))
+
+def test_bandit_learns_best_arm_via_grpo_loss():
+    """端到端 sanity：最小化 grpo_loss ⇔ 策略向高 reward 动作倾斜。"""
+    rng = np.random.default_rng(0)
+    K, G, iters, lr = 4, 8, 60, 2.0
+    arm_values = np.array([0.0, 0.2, 0.8, 1.0])
+    logits = np.zeros(K)
+
+    def probs_of(z):
+        e = np.exp(z - z.max())
+        return e / e.sum()
+
+    for _ in range(iters):
+        probs = probs_of(logits)
+        actions = rng.choice(K, size=G, p=probs)
+        rewards = arm_values[actions]
+        adv = grpo_outcome_advantage(rewards, group_size=G)
+        old_lp = np.log(probs)[actions]          # on-policy 锚点：z==logits 处 ratio=1
+
+        def loss_fn(z):
+            p = probs_of(z)
+            lp = np.log(p)[actions]
+            return grpo_loss(lp, old_lp, lp, adv, np.ones(G))
+
+        # 中心有限差分求 logits 梯度
+        grad = np.zeros(K)
+        for k in range(K):
+            h = 1e-5
+            zp, zm = logits.copy(), logits.copy()
+            zp[k] += h; zm[k] -= h
+            grad[k] = (loss_fn(zp) - loss_fn(zm)) / (2 * h)
+        logits -= lr * grad
+
+    final = probs_of(logits)
+    assert final.argmax() == 3                   # 最优臂胜出
+    assert final[3] > 0.4                        # 且明显占优
