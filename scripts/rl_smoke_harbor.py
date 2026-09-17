@@ -42,14 +42,7 @@ def _chat(port, model_id):
 
 
 def _harbor_runner(cmd, env, timeout):
-    """真实 runner：harbor 0.22 的 TrialConfig 要求 task 为 TaskConfig 对象，
-    而 make_trial_config 落盘的是字符串路径（agenticx/rl 已提交、不改）——
-    在调 CLI 前把 config.json 规范化为 {"task": {"path": ...}}。"""
-    cfg_path = Path(cmd[cmd.index("-c") + 1])
-    cfg = json.loads(cfg_path.read_text())
-    if isinstance(cfg.get("task"), str):
-        cfg["task"] = {"path": cfg["task"]}
-        cfg_path.write_text(json.dumps(cfg))
+    """真实 runner（schema 规范化已下沉到 make_trial_config，此处直跑）。"""
     subprocess.run(cmd, env=env, timeout=timeout, check=True)
 
 

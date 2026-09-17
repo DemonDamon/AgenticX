@@ -16,9 +16,11 @@ def test_make_agent_env_overrides_openai_vars():
 
 
 def test_make_trial_config_matches_harbor_schema():
-    cfg = make_trial_config("/tasks/foo", "test-rl-model")
-    assert cfg["task"] == "/tasks/foo"
-    assert cfg["agent"] == {"name": "agenticx", "model_name": "test-rl-model"}
+    cfg = make_trial_config("/tasks/foo", "openai/test-rl-model")
+    # harbor 0.22 TrialConfig：task 为 TaskConfig 对象（真机冒烟实测）
+    assert cfg["task"] == {"path": "/tasks/foo"}
+    assert cfg["agent"] == {"name": "agenticx",
+                            "model_name": "openai/test-rl-model"}
 
 
 def test_extract_reward_from_result_json(tmp_path):

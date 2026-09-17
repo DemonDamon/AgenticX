@@ -23,8 +23,13 @@ def make_agent_env(base_url: str, api_key: str = "dummy") -> dict[str, str]:
 
 
 def make_trial_config(task_path: str, model_name: str) -> dict[str, Any]:
-    """harbor trial config（schema 同 harness-lab/jobs/*/config.json 的子集）。"""
-    return {"task": task_path,
+    """harbor trial config（schema 同 harness-lab/jobs/*/config.json 的子集）。
+
+    task 为 TaskConfig 对象 {"path": ...}——harbor 0.22 TrialConfig 校验拒绝
+    字符串形式（真机冒烟实测）。model_name 须带 provider 前缀（如
+    "openai/agenticx-rl"，agenticx adapter 按前缀路由 API 风格）。
+    """
+    return {"task": {"path": task_path},
             "agent": {"name": "agenticx", "model_name": model_name}}
 
 
