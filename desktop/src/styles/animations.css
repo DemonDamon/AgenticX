@@ -39,6 +39,11 @@
   animation: agx-dot-pulse 1.1s infinite ease-in-out;
 }
 
+.agx-near-buddy {
+  display: block;
+  flex-shrink: 0;
+}
+
 /* Typographic "working..." — same glyph size as the status sentence, sequential fade. */
 @keyframes agx-working-ellipsis {
   0%,

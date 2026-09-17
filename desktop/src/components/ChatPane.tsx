@@ -413,7 +413,7 @@ import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
-import machiEmptyState from "../assets/machi-logo-transparent.png";
+import { ParticleWordmark } from "./brand/ParticleWordmark";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
@@ -13552,25 +13552,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           workExpandedLayout
             ? "shrink-0 px-3 pt-2.5 pb-3"
             : liftComposer
-              ? "flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10"
+              ? "flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 pt-8 pb-[20vh]"
               : "shrink-0 px-4 pt-2.5 pb-4"
         }>
           {liftComposer ? (
-            <div className="mb-8 flex flex-col items-center gap-3 text-center text-xs">
-              <img
-                src={machiEmptyState}
-                alt={`${APP_DISPLAY_NAME} Empty State`}
-                className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
-                draggable={false}
-              />
-              <div className="space-y-2 select-none">
-                <div className="text-[22px] font-semibold text-text-primary tracking-[0.24em]">
-                  {APP_DISPLAY_NAME.toUpperCase()}
-                </div>
-                <div className="text-text-faint tracking-[0.22em] uppercase text-[12px]">
-                  {APP_TAGLINE}
-                </div>
-              </div>
+            <div className="mb-10 flex w-full max-w-4xl flex-col items-center gap-3 text-center text-xs">
+              <ParticleWordmark title={APP_DISPLAY_NAME.toUpperCase()} tagline={APP_TAGLINE} />
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>
@@ -13651,9 +13638,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           ) : null}
           <div
-            className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
+            className={`agx-pane-composer-shell relative mx-auto min-w-0 w-full ${
               workExpandedLayout ? "max-w-none" : "max-w-4xl"
-            }`}
+            } ${!liftComposer && !workExpandedLayout ? "mt-4" : ""}`}
           >
           <StickyTaskBar
             messages={pane.messages ?? []}
