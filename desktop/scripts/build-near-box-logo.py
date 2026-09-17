@@ -21,6 +21,8 @@ TRANSPARENT_OUT = SRC_ASSETS_DIR / "machi-logo-transparent.png"
 AVATAR_OUT = ASSETS_DIR / "export_embedded.png"
 SIZE = 1024
 PLATE = (255, 247, 240)
+# dock.setIcon() fills the tile; native .app marks sit slightly inset.
+DOCK_MARK_SCALE = 0.86
 
 
 def _luma(rgb: np.ndarray) -> np.ndarray:
@@ -86,16 +88,43 @@ def fit_square(mark: Image.Image, size: int, fill: float) -> Image.Image:
     return canvas
 
 
+def mac_icon_mask(size: int) -> np.ndarray:
+    """macOS-style superellipse so Dock PNGs keep rounded corners."""
+    axis = np.linspace(-1.0, 1.0, size, dtype=np.float64)
+    yy, xx = np.meshgrid(axis, axis, indexing="ij")
+    n = 5.0
+    radius = (np.abs(xx) ** n + np.abs(yy) ** n) ** (1.0 / n)
+    aa = 2.5 / size
+    return np.clip((1.0 - radius) / aa + 0.5, 0.0, 1.0)
+
+
+def apply_icon_mask(rgb: np.ndarray | Image.Image) -> np.ndarray:
+    if isinstance(rgb, Image.Image):
+        arr = np.array(rgb.convert("RGB"), dtype=np.uint8)
+    else:
+        arr = rgb
+    size = arr.shape[0]
+    alpha = (mac_icon_mask(size) * 255.0).astype(np.uint8)
+    return np.dstack((arr, alpha))
+
+
 def fill_icon(mark: Image.Image, size: int) -> Image.Image:
-    """Cream plate + isometric cube so the three faces still read in the Dock."""
-    canvas = Image.new("RGB", (size, size), PLATE)
-    target = int(size * 0.78)
+    """Cream plate + cube, inset so the Dock mark matches neighboring apps."""
+    inner = int(round(size * DOCK_MARK_SCALE))
+    if inner % 2:
+        inner -= 1
+    canvas = Image.new("RGB", (inner, inner), PLATE)
+    target = int(inner * 0.78)
     fitted = mark.copy()
     fitted.thumbnail((target, target), Image.Resampling.LANCZOS)
-    x = (size - fitted.width) // 2
-    y = (size - fitted.height) // 2 + int(size * 0.02)
+    x = (inner - fitted.width) // 2
+    y = (inner - fitted.height) // 2 + int(inner * 0.02)
     canvas.paste(fitted, (x, y), fitted)
-    return canvas
+    masked = Image.fromarray(apply_icon_mask(canvas))
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    origin = (size - inner) // 2
+    out.paste(masked, (origin, origin), masked)
+    return out
 
 
 def main() -> None:
