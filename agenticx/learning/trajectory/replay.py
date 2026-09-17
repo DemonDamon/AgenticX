@@ -59,3 +59,59 @@ class ReplayAttempt:
         return ReplayResult(False, None,
                             1.0 if self.node.passed else 0.0,
                             self.node.total_est_tokens)
+
+@dataclass
+class AttemptContext:
+    task_id: str
+    attempt_index: int
+    attempts_remaining: int
+    spent_so_far: int
+
+@dataclass
+class PolicyScore:
+    task_id: str
+    passed: bool
+    total_cost: int
+    n_attempts_used: int
+
+def evaluate_policy_on_tree(policy, tree: TaskTree, max_attempts: int = 3) -> PolicyScore:
+    """按 attempt_id 顺序重放（论文的分支调度在 P0.5 退化为顺序调度）。"""
+    ordered = tree.attempts[:max_attempts]
+    spent = 0
+    used = 0
+    for i, node in enumerate(ordered):
+        if node.n_steps == 0:
+            continue
+        used = i + 1
+        ctx = AttemptContext(task_id=tree.task_id, attempt_index=i,
+                             attempts_remaining=len(ordered) - i - 1,
+                             spent_so_far=spent)
+        r = ReplayAttempt(node)
+        obs = r.reset()
+        while True:
+            obs = r.step(policy.act(obs, ctx))
+            if obs is None:
+                break
+        res = r.result
+        spent += res.virtual_cost
+        if res.achieved_reward >= 1.0:
+            return PolicyScore(tree.task_id, True, spent, used)
+    return PolicyScore(tree.task_id, False, spent, used)
+
+def evaluate_policy(policy, forest: TrialForest,
+                    task_ids: list[str] | None = None,
+                    max_attempts: int = 3) -> list[PolicyScore]:
+    ids = sorted(task_ids) if task_ids is not None else sorted(forest.trees)
+    return [evaluate_policy_on_tree(policy, forest.trees[t], max_attempts)
+            for t in ids if t in forest.trees]
+
+def summarize(scores: list[PolicyScore]) -> dict[str, Any]:
+    n = len(scores)
+    passed = sum(s.passed for s in scores)
+    total = sum(s.total_cost for s in scores)
+    return {"n_tasks": n, "pass_rate": passed / n if n else 0.0,
+            "total_cost": total, "avg_cost": total / n if n else 0.0}
+
+def forest_score(scores: list[PolicyScore]) -> float:
+    """论文式复合得分：结果优先,代价为tiebreak（1 个任务通过 >> 千级 token 节省）。"""
+    return sum(s.passed for s in scores) * 10000 - sum(s.total_cost for s in scores)
