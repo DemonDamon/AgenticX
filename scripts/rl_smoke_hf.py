@@ -42,7 +42,9 @@ def main() -> int:
     dev = info.torch_device
 
     tok = AutoTokenizer.from_pretrained(args.model)
-    target = tok.encode(" GOOD", add_special_tokens=False)[0]
+    # 目标 token 选中等频率词 ' the'（探测：15/24 rollout 命中、计数 0~3 有方差）
+    # ——组内 reward 有方差 GRPO 才有梯度；高频到全命中/低频到全 miss 都学不动
+    target = tok.encode(" the", add_special_tokens=False)[0]
     print(f"[smoke-hf] target token id={target} ({tok.decode([target])!r})")
 
     lm = AutoModelForCausalLM.from_pretrained(args.model)
