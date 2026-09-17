@@ -340,17 +340,17 @@ export function ParticleWordmark({
   const tagCanvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const palette =
-      theme === "light"
-        ? ["#1C1C1E", "#F9731A", "#1C1C1E"]
-        : ["#FFFFFF", "#F9731A", "#FFFFFF"];
+    const light = theme === "light";
+    const palette = light
+      ? ["#F9731A", "#FF8A3D", "#6D737C"]
+      : ["#FFFFFF", "#F9731A", "#FFFFFF"];
     const stops: Array<() => void> = [];
     if (titleWrap.current && titleCanvas.current) {
       stops.push(
         startDrift(titleWrap.current, titleCanvas.current, {
           text: title,
           fontSize: 112,
-          particleSize: 9,
+          particleSize: light ? 10 : 9,
           particleCount: 50,
           maxParticles: 2200,
         }, palette),
@@ -361,7 +361,7 @@ export function ParticleWordmark({
         startDrift(tagWrap.current, tagCanvas.current, {
           text: tagline.toUpperCase(),
           fontSize: 26,
-          particleSize: 6,
+          particleSize: light ? 7 : 6,
           particleCount: 70,
           maxParticles: 1300,
           letterSpacing: "0.08em",
