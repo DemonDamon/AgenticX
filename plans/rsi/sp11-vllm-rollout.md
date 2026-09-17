@@ -253,7 +253,24 @@ def test_trainer_syncs_offline_engine_weights():
 
 - [ ] **Step 2: 跑测试确认失败**（新增 2 FAIL：GPT2 闭环可能直接过——那也先跑，确认基线；sync 钩子必 FAIL）
 
-- [ ] **Step 3: 最小实现（trainer.py train_step 的 opt.step() 之后追加）**
+- [ ] **Step 3: 最小实现**
+
+**3a. response_logprobs 的 HF 兼容修复**（T1 发现的形状 bug：TinyLM 的 `lm(ids)` 返回裸张量 (B,L,V)，`[0]` 取 batch 维得 (L,V)；HF 模型 `lm(ids)` 返回 ModelOutput，`[0]` 取 logits 字段得 (B,L,V)——原代码对 HF 模型会在 gather 处炸）。把 `response_logprobs` 开头的：
+
+```python
+        logits = lm(ids)[0]                                   # (L, V)
+```
+
+替换为：
+
+```python
+        logits = lm(ids)
+        if hasattr(logits, "logits"):      # HF ModelOutput → (B, L, V)
+            logits = logits.logits
+        logits = logits[0]                                   # (L, V)
+```
+
+**3b. train_step 的 opt.step() 之后追加同步钩子**（把原 `self.opt.step()` 与 `return` 之间插入 3 行）：
 
 ```python
         self.opt.step()
@@ -262,8 +279,6 @@ def test_trainer_syncs_offline_engine_weights():
             sync(self.lm)
         return {"loss": float(loss.detach()),
 ```
-
-（即把原 `self.opt.step()` 与 `return` 之间插入 3 行。）
 
 - [ ] **Step 4: 跑测试确认通过**（原有 5 + 新增 2 = 7 PASS）
 
