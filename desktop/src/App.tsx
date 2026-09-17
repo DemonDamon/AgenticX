@@ -585,6 +585,26 @@ export function App() {
 
       setConfigLoaded(true);
 
+      const revealMainWindow = async () => {
+        if (startupRendererReadyRef.current) return;
+        startupRendererReadyRef.current = true;
+        try {
+          await window.agenticxDesktop.startupRendererReady();
+        } catch (err) {
+          console.warn("[App init] startupRendererReady failed:", err);
+          startupRendererReadyRef.current = false;
+        }
+      };
+
+      // Close the glass splash on the first real paint. Waiting for core
+      // preload used to leave an always-on-top transparent pane that ate
+      // clicks while other apps showed through.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void revealMainWindow();
+        });
+      });
+
       // Background: drop historically visible models that the current key cannot call
       // (gateway Model Auth). Must not block splash / startupRendererReady.
       void (async () => {
@@ -658,18 +678,10 @@ export function App() {
         }
       })();
 
-      // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息，再关 splash 进主窗。
+      // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息。
+      // 主窗已在首帧露出；这里只补数据，不再挡住启动页关闭。
       await runSplashCorePreload();
-
-      if (!startupRendererReadyRef.current) {
-        startupRendererReadyRef.current = true;
-        try {
-          await window.agenticxDesktop.startupRendererReady();
-        } catch (err) {
-          console.warn("[App init] startupRendererReady failed:", err);
-          startupRendererReadyRef.current = false;
-        }
-      }
+      await revealMainWindow();
 
       // Fallback when splash preload did not populate avatars (timeout / disabled).
       if (useAppStore.getState().avatars.length === 0) {

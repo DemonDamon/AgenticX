@@ -133,6 +133,16 @@ export async function closeSplash(options?: { fade?: boolean }): Promise<void> {
     } catch {
       // ignore
     }
+    try {
+      // Opacity-0 glass still hit-tests; pass clicks through to the main window.
+      win.setIgnoreMouseEvents(true, { forward: true });
+    } catch {
+      try {
+        win.setIgnoreMouseEvents(true);
+      } catch {
+        // ignore
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, SPLASH_FADE_MS));
   }
   destroySplashWindow();
@@ -146,8 +156,8 @@ export function registerSplashIpcHandlers(deps: {
     if (rendererReadyReceived) return { ok: true, duplicate: true };
     rendererReadyReceived = true;
     updateSplashStage("ready");
-    await closeSplash({ fade: true });
     deps.showMainWindow();
+    await closeSplash({ fade: true });
     return { ok: true };
   });
 
@@ -172,8 +182,8 @@ export function scheduleSplashForceShowFallback(showMainWindow: () => void): voi
     splashForceShowTimer = null;
     if (rendererReadyReceived) return;
     void (async () => {
-      await closeSplash({ fade: false });
       showMainWindow();
+      await closeSplash({ fade: false });
     })();
   }, SPLASH_FORCE_SHOW_MS);
 }
