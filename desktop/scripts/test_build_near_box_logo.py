@@ -20,6 +20,7 @@ _SPEC.loader.exec_module(_MOD)
 mac_icon_mask = _MOD.mac_icon_mask
 apply_icon_mask = _MOD.apply_icon_mask
 fill_icon = _MOD.fill_icon
+defringe_white_matte = _MOD.defringe_white_matte
 
 
 class MacIconMaskTest(unittest.TestCase):
@@ -51,6 +52,30 @@ class MacIconMaskTest(unittest.TestCase):
         span = int(max(ys.max() - ys.min(), xs.max() - xs.min()) + 1)
         self.assertLess(span, int(128 * 0.92))
         self.assertGreater(span, int(128 * 0.78))
+
+    def test_defringe_clears_cream_rim_on_a_dark_matte(self) -> None:
+        arr = np.zeros((16, 16, 4), dtype=np.uint8)
+        arr[3:13, 3:13] = (249, 115, 26, 255)
+        arr[3, 3:13] = (255, 247, 227, 255)
+        arr[12, 3:13] = (255, 247, 227, 255)
+        arr[3:13, 3] = (255, 247, 227, 255)
+        arr[3:13, 12] = (255, 247, 227, 255)
+        out = np.array(defringe_white_matte(Image.fromarray(arr)))
+        luma = (
+            0.2126 * out[..., 0].astype(np.float32)
+            + 0.7152 * out[..., 1].astype(np.float32)
+            + 0.0722 * out[..., 2].astype(np.float32)
+        )
+        opaque = out[..., 3] > 128
+        trans = out[..., 3] == 0
+        pad = np.pad(trans, 1, constant_values=True)
+        edge = opaque & (
+            pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+        )
+        self.assertTrue(bool(opaque.any()))
+        self.assertLess(float(luma[edge].max()), 200.0)
+        self.assertGreater(int(out[7, 7, 3]), 250)
+        self.assertGreater(int(out[7, 7, 0]), 200)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = SCRIPT_DIR.parent / "assets"
 SRC_ASSETS_DIR = SCRIPT_DIR.parent / "src" / "assets"
 MASTER_SRC = ASSETS_DIR / "near-box-logo-source.png"
+FACE_OUT = ASSETS_DIR / "near-box-logo-face.png"
 MASTER_OUT = ASSETS_DIR / "icon-master.png"
 TRANSPARENT_OUT = SRC_ASSETS_DIR / "machi-logo-transparent.png"
 AVATAR_OUT = ASSETS_DIR / "export_embedded.png"
@@ -74,7 +75,27 @@ def extract_mark(src: Image.Image) -> Image.Image:
     crop = rgba[y0:y1, x0:x1].copy()
     crop_bg = bg[y0:y1, x0:x1]
     crop[..., 3] = np.where(crop_bg, 0.0, 255.0)
-    return Image.fromarray(np.clip(crop, 0, 255).astype(np.uint8))
+    return defringe_white_matte(Image.fromarray(np.clip(crop, 0, 255).astype(np.uint8)))
+
+
+def defringe_white_matte(mark: Image.Image) -> Image.Image:
+    """Peel cream/peach rims left by a white studio matte so dark UIs stay clean."""
+    rgba = np.array(mark.convert("RGBA"), dtype=np.uint8)
+    rgb = rgba[..., :3].astype(np.float32)
+    luma = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+    alpha = rgba[..., 3].copy()
+    for _ in range(8):
+        trans = alpha == 0
+        pad = np.pad(trans, 1, constant_values=True)
+        near = pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+        peel = (alpha > 0) & near & (luma >= 185.0)
+        if not np.any(peel):
+            break
+        alpha[peel] = 0
+        rgba[peel] = 0
+        luma[peel] = 0
+    rgba[..., 3] = alpha
+    return Image.fromarray(rgba)
 
 
 def fit_square(mark: Image.Image, size: int, fill: float) -> Image.Image:
@@ -136,6 +157,9 @@ def main() -> None:
     transparent = fit_square(mark, SIZE, fill=0.90)
     transparent.save(TRANSPARENT_OUT, "PNG")
     transparent.save(AVATAR_OUT, "PNG")
+    if FACE_OUT.exists():
+        defringe_white_matte(Image.open(FACE_OUT)).save(FACE_OUT, "PNG")
+        print(f"Wrote {FACE_OUT}")
     print(f"Wrote {MASTER_OUT}")
     print(f"Wrote {TRANSPARENT_OUT}")
     print(f"Wrote {AVATAR_OUT}")
