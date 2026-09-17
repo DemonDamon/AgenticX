@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { LottieSvg } from "lottie-react";
 import thinkingQuestions from "../../assets/empty-state/thinking-questions.json";
 import workingLaptop from "../../assets/empty-state/working-laptop.json";
@@ -17,40 +17,55 @@ function usePrefersReducedMotion(): boolean {
   return reduce;
 }
 
-export function EmptyStateCornerLotties() {
+export function EmptyStateCornerLotties({
+  children,
+  stageSize = 200,
+}: {
+  children?: ReactNode;
+  stageSize?: number;
+}) {
   const reduce = usePrefersReducedMotion();
   const workingSrc = useMemo(() => recolorEmptyLottieClothes(workingLaptop, "work"), []);
   const thinkingSrc = useMemo(() => recolorEmptyLottieClothes(thinkingQuestions, "think"), []);
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[2] overflow-hidden [@media(max-height:560px)]:hidden"
-      aria-hidden
+      data-testid="empty-lottie-row"
+      className="relative mx-auto [@media(max-height:560px)]:[&_[data-testid=empty-lottie-slot]]:hidden"
+      style={{ width: stageSize }}
     >
+      <div className="pointer-events-auto relative z-10 w-full">{children}</div>
       <div
-        data-testid="empty-lottie-slot"
-        data-side="left"
-        className="absolute bottom-2 left-6 hidden h-[200px] w-[132px] overflow-hidden min-[720px]:block"
+        data-testid="empty-lottie-horizon"
+        className="pointer-events-none absolute inset-0 z-20"
       >
-        <LottieSvg
-          src={workingSrc}
-          autoplay={!reduce}
-          loop={!reduce}
-          className="absolute bottom-0 left-0 w-[132px] opacity-90"
-          style={{ height: 132 * (918 / 496) }}
-        />
-      </div>
-      <div
-        data-testid="empty-lottie-slot"
-        data-side="right"
-        className="absolute bottom-2 right-6 hidden h-[188px] w-[168px] overflow-hidden min-[720px]:block"
-      >
-        <LottieSvg
-          src={thinkingSrc}
-          autoplay={!reduce}
-          loop={!reduce}
-          className="absolute bottom-0 right-0 w-[168px] opacity-90"
-          style={{ height: 168 * (876 / 824) }}
-        />
+        <div
+          data-testid="empty-lottie-slot"
+          data-side="left"
+          className="absolute bottom-0 left-[-84px] w-[96px]"
+          aria-hidden
+        >
+          <LottieSvg
+            src={thinkingSrc}
+            autoplay={!reduce}
+            loop={!reduce}
+            className="block w-[96px] opacity-90"
+            style={{ height: 96 * (876 / 824) }}
+          />
+        </div>
+        <div
+          data-testid="empty-lottie-slot"
+          data-side="right"
+          className="absolute bottom-0 left-[96%] z-20 w-[64px]"
+          aria-hidden
+        >
+          <LottieSvg
+            src={workingSrc}
+            autoplay={!reduce}
+            loop={!reduce}
+            className="block w-[64px] opacity-90"
+            style={{ height: 64 * (918 / 496) }}
+          />
+        </div>
       </div>
     </div>
   );

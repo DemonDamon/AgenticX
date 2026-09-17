@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import thinkingQuestions from "../../assets/empty-state/thinking-questions.json";
 import workingLaptop from "../../assets/empty-state/working-laptop.json";
 import {
+  NEAR_LIGHT_ORANGE,
   NEAR_SKIRT_GREEN,
   NEAR_VITAL_ORANGE,
   recolorEmptyLottieClothes,
@@ -69,7 +70,7 @@ describe("recolorEmptyLottieClothes", () => {
     expect(stool.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
   });
 
-  it("turns the thinking shirt orange and the shorts skirt-green", () => {
+  it("paints the thinking shirt the same vital orange as the question bubbles", () => {
     const out = recolorEmptyLottieClothes(thinkingQuestions, "think");
     const colors = collectColors(out);
     const shirt = colors.find(
@@ -77,6 +78,7 @@ describe("recolorEmptyLottieClothes", () => {
     );
     expect(shirt).toBeTruthy();
     expect(matches(shirt!.rgb, NEAR_VITAL_ORANGE)).toBe(true);
+    expect(matches(shirt!.rgb, NEAR_LIGHT_ORANGE)).toBe(false);
 
     const shorts = colors.filter(
       (c) => c.layers.includes("man") && c.layers.includes("leg") && c.layers.includes("Group 6"),

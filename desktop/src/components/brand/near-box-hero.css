@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
 .near-box-hero {
@@ -334,7 +334,7 @@
 .near-box-tagline {
   margin: 0;
   color: #ff7a45;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: 0.06em;
   line-height: 1.2;

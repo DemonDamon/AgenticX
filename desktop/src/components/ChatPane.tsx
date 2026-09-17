@@ -13227,7 +13227,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
         style={workExpandedLayout ? undefined : { minWidth: CHAT_COLUMN_MIN_WIDTH }}
       >
-        {liftComposer ? <EmptyStateCornerLotties /> : null}
         <div
           className={
             workExpandedLayout
@@ -13556,12 +13555,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           workExpandedLayout
             ? "shrink-0 px-3 pt-2.5 pb-3"
             : liftComposer
-              ? "relative flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 pt-8 pb-[20vh]"
+              ? "relative flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 pt-6 pb-[8vh]"
               : "shrink-0 px-4 pt-2.5 pb-4"
         }>
           {liftComposer ? (
-            <div className="relative z-10 mb-6 flex w-full max-w-4xl flex-col items-center gap-3 text-center text-xs">
-              <NearBoxHero size={160} />
+            <div className="relative z-10 mb-11 w-full max-w-5xl text-center text-xs">
+              <EmptyStateCornerLotties stageSize={200}>
+                <NearBoxHero size={200} className="w-full" />
+              </EmptyStateCornerLotties>
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>

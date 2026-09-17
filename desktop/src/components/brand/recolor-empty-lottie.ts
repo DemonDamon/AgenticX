@@ -1,5 +1,7 @@
 /** Brand orange matching the empty-state box (`#FF7A45`). */
 export const NEAR_VITAL_ORANGE = [1, 122 / 255, 69 / 255] as const;
+/** Shirt orange light enough to separate from the cube (`#FFC4A3`). */
+export const NEAR_LIGHT_ORANGE = [1, 196 / 255, 163 / 255] as const;
 /** Skirt green paired with the brand orange. */
 export const NEAR_SKIRT_GREEN = [42 / 255, 138 / 255, 98 / 255] as const;
 
