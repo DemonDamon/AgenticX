@@ -37,13 +37,18 @@ from agenticx.rl.trainer import GRPOTrainer  # noqa: E402
 
 
 def _full_state_dict(module, strategy: str) -> dict:
-    """收集完整 state_dict: fsdp 需要全 rank 集体调用 FULL_STATE_DICT 上下文。"""
+    """收集完整 state_dict（键名与原始模块一致）。
+
+    fsdp: 需要全 rank 集体调用 FULL_STATE_DICT 上下文（返回原始键名）。
+    ddp: state_dict() 键带 'module.' 前缀，取内层模块去前缀。
+    """
     if strategy == "fsdp":
         from torch.distributed.fsdp import (FullyShardedDataParallel as FSDP,
                                             StateDictType)
         with FSDP.state_dict_type(module, StateDictType.FULL_STATE_DICT):
             return module.state_dict()
-    return module.state_dict()
+    inner = getattr(module, "module", module)          # DDP 去前缀
+    return inner.state_dict()
 
 
 def main() -> int:
