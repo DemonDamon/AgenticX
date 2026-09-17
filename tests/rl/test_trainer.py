@@ -128,3 +128,88 @@ def test_trainer_syncs_offline_engine_weights():
     tr = GRPOTrainer(lm, OfflineEngine(), lambda p, r: 0.0, lr=1e-3)
     tr.train_step([[1, 2]], n_samples=2, max_new_tokens=3)
     assert synced == [lm]                # 恰好一次，传的是训练模型本体
+
+
+# ---- SP13 追加：episode 级 GRPO ----
+from dataclasses import dataclass, field
+
+from agenticx.rl.rollout import RolloutSample as _RS
+
+
+@dataclass
+class _Episode:
+    """harbor_rollout.Episode 的鸭子类型替身（task/reward/segments 同构）。"""
+    task: str
+    reward: float
+    segments: list = field(default_factory=list)
+
+
+def _ep(task, reward, segs):
+    return _Episode(task=task, reward=reward, segments=segs)
+
+
+def _seg(ctx, resp):
+    return _RS(prompt_ids=torch.tensor(ctx, dtype=torch.long),
+               response_ids=torch.tensor(resp, dtype=torch.long),
+               old_logprobs=torch.zeros(len(resp), dtype=torch.float32))
+
+
+def test_grouped_episode_advantage_by_task():
+    from agenticx.rl.trainer import grouped_episode_advantage
+    # task A: rewards [1,0] → [+1,-1]；task B: [0.5,0.5] → [0,0]
+    adv = grouped_episode_advantage([1.0, 0.0, 0.5, 0.5],
+                                    ["a", "a", "b", "b"])
+    assert np.allclose(adv, [1.0, -1.0, 0.0, 0.0])
+
+
+def test_train_step_episodes_loss_finite_and_grads():
+    torch.manual_seed(0)
+    lm = TinyLM()
+    eng = LocalRolloutEngine(lm)
+    eps = []
+    for task in ["t1", "t2"]:
+        for _ in range(2):
+            segs = eng.generate([[1, 2, 3]], n_samples=1, max_new_tokens=4)
+            eps.append(_ep(task, 1.0 if len(eps) % 2 == 0 else 0.0, segs))
+    tr = GRPOTrainer(lm, eng, lambda p, r: 0.0, lr=1e-3)
+    m = tr.train_step_episodes(eps)
+    assert np.isfinite(m["loss"]) and m["n_episodes"] == 4
+    assert m["n_tokens"] > 0
+
+
+def test_train_step_episodes_learns_multitask():
+    """多任务多段 episode 的 GRPO 闭环学习门。"""
+    torch.manual_seed(0)
+    lm = TinyLM()
+    eng = LocalRolloutEngine(lm)
+    target = 7
+    prompts = {"t1": [1, 2, 3], "t2": [4, 5]}
+
+    def reward_of(segs):
+        return float(sum((s.response_ids == target).sum().item() for s in segs))
+
+    tr = GRPOTrainer(lm, eng, lambda p, r: 0.0, lr=5e-3)
+    first = None
+    for _ in range(60):
+        eps = []
+        for task, p in prompts.items():
+            for _k in range(4):
+                segs = eng.generate([p], n_samples=1, max_new_tokens=6)
+                eps.append(_ep(task, reward_of(segs), segs))
+        m = tr.train_step_episodes(eps)
+        first = first if first is not None else m
+    assert m["reward_mean"] > first["reward_mean"] + 1.0
+    assert m["reward_mean"] > 2.0
+
+
+def test_train_step_episodes_shaping_hook():
+    """shaping 钩子替换默认优势：置零 shaper + kl_beta=0 → loss=0。"""
+    torch.manual_seed(0)
+    lm = TinyLM()
+    eng = LocalRolloutEngine(lm)
+    eps = [_ep("t", float(i % 2), eng.generate([[1, 2]], n_samples=1,
+                                                max_new_tokens=4))
+           for i in range(2)]
+    tr = GRPOTrainer(lm, eng, lambda p, r: 0.0, lr=1e-3)
+    m = tr.train_step_episodes(eps, shaping=lambda rewards, tasks: [0.0] * len(rewards))
+    assert m["loss"] == 0.0

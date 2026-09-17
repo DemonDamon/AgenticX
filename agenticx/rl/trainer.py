@@ -55,6 +55,18 @@ def torch_grpo_loss(logprobs, old_logprobs, ref_logprobs, advantages, response_m
     return (per_tok * m).sum() / m.sum().clamp_min(1.0)
 
 
+def grouped_episode_advantage(rewards, task_ids) -> np.ndarray:
+    """按任务分组的 episode 级优势（组内归一化，grpo_outcome_advantage 语义）。"""
+    rewards = list(rewards)
+    task_ids = list(task_ids)
+    adv = np.zeros(len(rewards))
+    for task in dict.fromkeys(task_ids):               # 保序去重
+        idx = [i for i, t in enumerate(task_ids) if t == task]
+        adv[idx] = grpo_outcome_advantage([rewards[i] for i in idx],
+                                          group_size=len(idx))
+    return adv
+
+
 class GRPOTrainer:
     """单进程 GRPO：rollout → reward → 组归一化优势 → torch loss → AdamW。
 
@@ -109,3 +121,50 @@ class GRPOTrainer:
         return {"loss": float(loss.detach()),
                 "reward_mean": float(np.mean(rewards)),
                 "n_samples": len(samples)}
+
+    def train_step_episodes(self, episodes, *, shaping=None) -> dict:
+        """episode 级 GRPO：优势在 episode 粒度（按任务分组），广播到段内全部 token。
+
+        episodes: list[harbor_rollout.Episode]（segments 为 RolloutSample，鸭子类型）。
+        shaping: Callable[[rewards, task_ids], advantages]，替换默认分组优势
+        （M4 回放基线塑形从这里注入）。
+        """
+        device = next(self.lm.parameters()).device
+        rewards = [float(e.reward) for e in episodes]
+        task_ids = [e.task for e in episodes]
+        if shaping is not None:
+            adv = np.asarray(shaping(rewards, task_ids), dtype=np.float64)
+        else:
+            adv = grouped_episode_advantage(rewards, task_ids)
+
+        samples, ep_of_sample = [], []
+        for i, e in enumerate(episodes):
+            samples.extend(e.segments)
+            ep_of_sample.extend([i] * len(e.segments))
+        if not samples:
+            return {"loss": 0.0, "reward_mean": float(np.mean(rewards)) if rewards else 0.0,
+                    "n_episodes": len(episodes), "n_tokens": 0}
+
+        logprobs = response_logprobs(self.lm, samples, device)
+        with torch.no_grad():
+            old = torch.cat([s.old_logprobs for s in samples]).to(device)
+            ref = (response_logprobs(self.ref_lm, samples, device)
+                   if self.ref_lm is not None else old.clone())
+        # episode 优势 → 段 → token 广播
+        tok_adv = np.concatenate([
+            np.repeat(adv[ep_of_sample[k]], s.response_ids.shape[0])
+            for k, s in enumerate(samples)])
+        adv_t = torch.tensor(tok_adv, dtype=logprobs.dtype, device=device)
+        mask = torch.ones_like(logprobs)
+        loss = torch_grpo_loss(logprobs, old, ref, adv_t, mask,
+                               clip_eps=self.clip_eps, kl_beta=self.kl_beta)
+        self.opt.zero_grad(set_to_none=True)
+        loss.backward()
+        self.opt.step()
+        sync = getattr(self.rollout, "sync_weights", None)
+        if callable(sync):
+            sync(self.lm)
+        return {"loss": float(loss.detach()),
+                "reward_mean": float(np.mean(rewards)),
+                "n_episodes": len(episodes),
+                "n_tokens": int(mask.sum().item())}
