@@ -7230,7 +7230,7 @@ export function SettingsPanel({
                           { id: "blue", color: "bg-blue-500", label: t("display.accentBlue") },
                           { id: "green", color: "bg-emerald-500", label: t("display.accentGreen") },
                           { id: "pink", color: "bg-pink-500", label: t("display.accentPink") },
-                          { id: "yellow", color: "bg-amber-500", label: t("display.accentYellow") },
+                          { id: "yellow", color: "bg-[#F9731A]", label: t("display.accentYellow") },
                           {
                             id: "white",
                             color: theme === "light" ? "bg-slate-900" : "bg-white",

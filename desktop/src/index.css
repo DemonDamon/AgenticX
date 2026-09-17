@@ -781,7 +781,7 @@ body.agx-settings-nav-resizing {
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="yellow"] {
-  --theme-color-rgb: 245, 158, 11;
+  --theme-color-rgb: 249, 115, 26;
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="white"] {
