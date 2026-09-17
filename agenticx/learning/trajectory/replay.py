@@ -2,7 +2,7 @@
 """回放模拟器（P0.5 · Dream-RSI 的 Evolving World 等价物）。
 
 零推理成本：候选策略在已记录轨迹上重调度，回放只"揭开"历史数据。
-P0.5 动作空间 = {continue, abort}；fork/switch 需工作区快照，属 P1。
+SP16 动作空间 = {continue, abort, inject_hint::text}；fork/switch 需工作区快照，属 P1。
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 from .forest import AttemptNode, StepFeatures, TaskTree, TrialForest
 
-Action = str  # "continue" | "abort"
+Action = str  # "continue" | "abort" | "inject_hint::text"
 
 @dataclass
 class ReplayResult:
@@ -19,6 +19,7 @@ class ReplayResult:
     abort_step: int | None
     achieved_reward: float
     virtual_cost: int
+    hint_tokens: int = 0
 
 class ReplayAttempt:
     """单条轨迹的回放：观察前缀特征 → 动作 → 揭示已记录的后继。"""
@@ -30,19 +31,25 @@ class ReplayAttempt:
         self._pos = 0
         self._done = False
         self._aborted = False
+        self._hint_tokens = 0
 
     def reset(self) -> StepFeatures:
         self._pos, self._done, self._aborted = 0, False, False
+        self._hint_tokens = 0
         return self.node.steps[0]
 
     def step(self, action: Action) -> StepFeatures | None:
         if self._done:
             raise RuntimeError("episode 已终结, 请 reset")
+        if isinstance(action, str) and action.startswith("inject_hint::"):
+            # SP16: hint 不改变已记录的未来, 只按文本长度计价（防刷分）
+            self._hint_tokens += len(action[len("inject_hint::"):]) // 4
+            action = "continue"
         if action == "abort":
             self._done, self._aborted = True, True
             return None
         if action != "continue":
-            raise ValueError(f"未知动作 '{action}'（P0.5 仅支持 continue/abort）")
+            raise ValueError(f"未知动作 '{action}'（支持 continue/abort/inject_hint::）")
         self._pos += 1
         if self._pos >= self.node.n_steps:
             self._done = True
@@ -55,10 +62,13 @@ class ReplayAttempt:
             raise RuntimeError("episode 未终结, 无结果")
         if self._aborted:
             return ReplayResult(True, self._pos, 0.0,
-                                self.node.steps[self._pos].est_tokens)
+                                self.node.steps[self._pos].est_tokens
+                                + self._hint_tokens,
+                                hint_tokens=self._hint_tokens)
         return ReplayResult(False, None,
                             1.0 if self.node.passed else 0.0,
-                            self.node.total_est_tokens)
+                            self.node.total_est_tokens + self._hint_tokens,
+                            hint_tokens=self._hint_tokens)
 
 @dataclass
 class AttemptContext:
