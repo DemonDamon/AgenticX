@@ -38,8 +38,26 @@ def _render_prompt(tokenizer, messages) -> str:
     return "\n".join(parts) + "\nAssistant:"
 
 
+def inject_system_extra(messages, extra: str | None):
+    """把冻结经验文本并入消息列表（live 注入点, RSIAgent 测试时记忆复用）。
+
+    已有 system 消息则追加其 content; 否则插首条 system。extra 为空原样返回
+    （同一对象, 零拷贝）。返回新列表, 不改调用方传入的原列表。
+    """
+    if not extra:
+        return messages
+    msgs = [dict(m) if isinstance(m, dict) else {"role": "user", "content": str(m)}
+            for m in messages]
+    for m in msgs:
+        if m.get("role") == "system":
+            m["content"] = f"{m['content']}\n\n{extra}" if m.get("content") else extra
+            return msgs
+    return [{"role": "system", "content": extra}, *msgs]
+
+
 def _make_handler(lm, tokenizer, model_id: str, log: list | None = None,
-                  temperature_override: float | None = None):
+                  temperature_override: float | None = None,
+                  system_extra: str | None = None):
     lock = threading.Lock()
     device = next(lm.parameters()).device
 
@@ -74,7 +92,9 @@ def _make_handler(lm, tokenizer, model_id: str, log: list | None = None,
             except json.JSONDecodeError:
                 self._json(400, {"error": {"message": "bad json"}})
                 return
-            text = _render_prompt(tokenizer, req.get("messages", []))
+            text = _render_prompt(tokenizer,
+                                  inject_system_extra(req.get("messages", []),
+                                                      system_extra))
             max_tokens = min(int(req.get("max_tokens", 32)), 512)
             temperature = float(req.get("temperature", 1.0))
             try:
@@ -133,13 +153,15 @@ def _make_handler(lm, tokenizer, model_id: str, log: list | None = None,
 def serve_model(lm, tokenizer, *, host: str = "127.0.0.1", port: int = 0,
                 model_id: str = "agenticx-rl",
                 log: list | None = None,
-                temperature_override: float | None = None) -> ThreadingHTTPServer:
+                temperature_override: float | None = None,
+                system_extra: str | None = None) -> ThreadingHTTPServer:
     """起 OpenAI 兼容服务（阻塞前先返回 server 对象；调用方线程跑 serve_forever）。
 
     log: 传入 list 则每次成功 completion 追加一条 RequestLogEntry
     （context_ids/gen_ids/raw logprobs/实际温度——M4 episode 段原材料）。
     temperature_override: 非 None 时忽略请求温度，强制采样温度（训练 rollout
     传 1.0，使记录的 raw logp 与策略分布精确对齐）。
+    system_extra: 非 None 时把该文本注入每个请求的系统提示（SP16 冻结经验复用）。
 
     用法:
         srv = serve_model(lm, tok, port=8000)
@@ -148,7 +170,8 @@ def serve_model(lm, tokenizer, *, host: str = "127.0.0.1", port: int = 0,
         srv.shutdown()
     """
     handler = _make_handler(lm, tokenizer, model_id, log=log,
-                            temperature_override=temperature_override)
+                            temperature_override=temperature_override,
+                            system_extra=system_extra)
     srv = ThreadingHTTPServer((host, port), handler)
     srv.daemon_threads = True
     return srv
