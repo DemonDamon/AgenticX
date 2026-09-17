@@ -9,9 +9,6 @@ export default defineConfig(({ command }) => ({
   server: {
     port: Number(process.env.AGX_DEV_PORT) || 5713,
     strictPort: true,
-    fs: {
-      allow: [".."],
-    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8000",
