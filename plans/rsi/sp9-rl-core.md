@@ -10,14 +10,14 @@
 - M2 (SP11): vLLM rollout 引擎 + 权重同步（先离线 sync，后 colocate）
 - M3 (SP12): harbor env 适配器 + verifier reward（RSI 任务进训练）
 - M4 (SP13): 回放混合 GRPO + 演化策略塑形 rollout（**我们的论文贡献点**）
-- M5 (SP14): 多卡扩展（torchrun/FSDP）+ 尺寸配方
+- M5 (SP15): ✅ 代码就绪 — distributed/lora/parallel/recipes + torchrun 冒烟（CPU 双进程门已过，FSDP 真机验证待 GPU 到位）
 
 **M5 硬件现实核查（诚实版）:**
 | 目标 | 8×4090 24G（消费级） | 8×A100/H100 80G |
 |---|---|---|
 | 8B LoRA GRPO | 舒适 | 舒适 |
 | 8B 全参 GRPO | ZeRO-3 offload 勉强、慢 | 舒适 |
-| 27B LoRA GRPO | 不行（权重 54G 放不下） | 舒适 |
+| 27B LoRA GRPO | 可行（FSDP 分片 ~13.5G/卡，无 NVLink 慢） | 舒适 |
 | 27B 全参 GRPO | 不行 | FSDP+offload 可行但紧 |
 
 **移植纪律:** 数学逐行对照 verl `trainer/ppo/core_algos.py`（`compute_grpo_outcome_advantage` / `compute_policy_loss` / `kl_penalty`），不做重推导；实现框架无关（输入输出全是 numpy array），SP10 的 torch trainer 直接消费这些函数。
