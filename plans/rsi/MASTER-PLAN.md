@@ -58,6 +58,21 @@ python -m agenticx.trainer registry promote agent-coding-v1
 - `resolve("agent-coding-v1")` 返回 promoted 版本的具体模型 spec
 - 全部单测通过；构建器在 held-out 任务上抛错（防污染守卫生效）
 
+## P0.5 阶段：对齐 Dream-RSI（arXiv 2609.14858）的回放式策略演化
+
+P0 完成后（PR #54），基于已落地的 TrajectoryStore 增设回放模拟器与策略演化能力。设计映射与决策：
+
+| 论文组件 | 本仓库等价物 | Sub Plan |
+|---|---|---|
+| 发现树持久化 | TrialForest（任务→attempt 森林 + 逐步特征；不做文件快照） | SP5 |
+| Replay Simulator（Evolving World） | ReplayAttempt/evaluate_policy（零推理成本回放 + continue/abort 动作） | SP6 |
+| 探索策略 + 固定基线 | Policy 协议 + never_abort（论文基线）+ 3 个早停启发式；train/held-out 双区报告 | SP7 |
+| Dreaming-based Policy Improvement | evolve_loop：提议（LLM/变异）→回放评分→择优 promote；PolicyRegistry 版本化 | SP8 |
+
+- 动作空间 P0.5 = {continue, abort}；fork/switch 需工作区快照，属 P1
+- 演化评分只允许绑定 train 区任务树（复用 SP2 held-out 隔离）；held-out 仅作验收报告
+- 分支：继续用 `feat/rsi-data-flywheel`（P0 PR 合入前在同一分支追加，或视 PR 状态切新分支——以执行时 git 状态为准）
+
 ## 明确不做（YAGNI / 属后续阶段）
 
 - 运营商场景采集器（P0 用 TB 4.0 内部验证场，场景切换在 harness-lab 适配后）
