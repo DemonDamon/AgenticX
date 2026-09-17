@@ -54,3 +54,40 @@ class ProgressStallPolicy:
 
     def act(self, obs: StepFeatures, ctx: AttemptContext) -> str:
         return "abort" if obs.rounds_since_progress >= self.max_stall else "continue"
+
+
+from agenticx.trainer.heldout import heldout_split  # noqa: E402  (③评测隔离复用)
+
+
+def baseline_policies() -> list[Policy]:
+    """基线策略目录：论文基线 + 3 个启发式早停。"""
+    return [
+        NeverAbortPolicy(),
+        FixedHorizonPolicy(max_steps=10),
+        ErrorStreakPolicy(max_streak=3),
+        ProgressStallPolicy(max_stall=8),
+    ]
+
+
+def policy_report(policies: list[Policy], forest: TrialForest,
+                  seed: str = "v1", ratio: float = 0.2,
+                  max_attempts: int = 3) -> dict[str, Any]:
+    """train/held-out 双区评测报告。
+
+    纪律（对齐论文严谨性）：held-out 区成绩仅用于验收报告,
+    策略演化与选择（SP8）只允许引用 train 区——防止"策略过拟合历史树"。
+    """
+    split = heldout_split(sorted(forest.trees), seed=seed, ratio=ratio)
+    out: dict[str, Any] = {
+        "seed": seed,
+        "max_attempts": max_attempts,
+        "heldout_tasks": list(split.heldout),
+        "train": {},
+        "heldout": {},
+    }
+    for p in policies:
+        out["train"][p.name] = summarize(
+            evaluate_policy(p, forest, task_ids=list(split.train), max_attempts=max_attempts))
+        out["heldout"][p.name] = summarize(
+            evaluate_policy(p, forest, task_ids=list(split.heldout), max_attempts=max_attempts))
+    return out
