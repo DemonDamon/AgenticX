@@ -27,3 +27,44 @@ def grpo_outcome_advantage(rewards, group_size: int, *,
         std = r.std(axis=1, keepdims=True)
         adv = adv / np.maximum(std, eps)
     return adv.reshape(-1)
+
+
+def clipped_policy_loss(logprobs, old_logprobs, advantages, *,
+                        clip_eps: float = 0.2) -> np.ndarray:
+    """PPO 式 clip surrogate（GRPO 无 critic，无 value 项）。返回 per-token loss。"""
+    logp = np.asarray(logprobs, dtype=np.float64)
+    old = np.asarray(old_logprobs, dtype=np.float64)
+    adv = np.asarray(advantages, dtype=np.float64)
+    ratio = np.exp(logp - old)
+    surr1 = ratio * adv
+    surr2 = np.clip(ratio, 1 - clip_eps, 1 + clip_eps) * adv
+    return -np.minimum(surr1, surr2)
+
+
+def kl_k1(logprobs, ref_logprobs) -> np.ndarray:
+    """朴素 KL 估计 k1 = ref - logp（可负，高方差）。"""
+    return np.asarray(ref_logprobs, dtype=np.float64) - np.asarray(logprobs, dtype=np.float64)
+
+
+def kl_k3(logprobs, ref_logprobs) -> np.ndarray:
+    """低方差无偏 k3 = exp(ref-logp) - (ref-logp) - 1，恒非负（verl 默认）。"""
+    d = np.asarray(ref_logprobs, dtype=np.float64) - np.asarray(logprobs, dtype=np.float64)
+    return np.exp(d) - d - 1.0
+
+
+def masked_mean(values, mask) -> float:
+    """token 级掩码均值（response_mask 忽略 padding/prompt 段）。"""
+    m = np.asarray(mask, dtype=np.float64)
+    v = np.asarray(values, dtype=np.float64)
+    return float((v * m).sum() / max(m.sum(), 1.0))
+
+
+def grpo_loss(logprobs, old_logprobs, ref_logprobs, advantages, response_mask, *,
+              clip_eps: float = 0.2, kl_beta: float = 0.0,
+              kl_estimator=kl_k3) -> float:
+    """GRPO 总损失 = masked_mean( clip PG + beta * KL )。"""
+    pg = clipped_policy_loss(logprobs, old_logprobs, advantages, clip_eps=clip_eps)
+    if kl_beta:
+        kl = kl_estimator(logprobs, ref_logprobs)
+        return masked_mean(pg + kl_beta * kl, response_mask)
+    return masked_mean(pg, response_mask)
