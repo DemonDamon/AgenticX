@@ -2720,6 +2720,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 );
               }
               return (
+                <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
                 <TurnToolGroupCard
                   key={`tg-${row.groupId}`}
                   messages={row.messages}
@@ -2732,6 +2733,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   omitLeadingSpacer={reactWorkCol}
                   flat={reactWorkCol}
                 />
+                </MarkdownContext.Provider>
               );
             };
 

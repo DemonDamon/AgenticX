@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -29,6 +29,7 @@ import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessag
 import { extractPartialShowWidgetArgs, finalizePartialSvg, type PartialShowWidget } from "./show-widget-partial";
 import { parseBashBgStart } from "./bash-bg-preview";
 import { openExternalUrl } from "../../utils/open-external";
+import { MarkdownContext } from "./markdown-components";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 import {
   formatToolElapsedSeconds,
@@ -233,7 +234,29 @@ function highlightTextSegment(text: string, terms: string[]): ReactNode {
   });
 }
 
-// URL 整体保持完整可点击，不被关键词高亮拆散；点击走系统默认浏览器。
+function ToolResultLink({ url }: { url: string }) {
+  const { onHttpLinkClick } = useContext(MarkdownContext);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+      onClick={(event) => {
+        event.preventDefault();
+        if (onHttpLinkClick) {
+          onHttpLinkClick(url);
+          return;
+        }
+        openExternalUrl(url);
+      }}
+    >
+      {url}
+    </a>
+  );
+}
+
+// URL 整体保持完整可点击，不被关键词高亮拆散。
 function renderHighlightedText(content: string, terms: string[]): ReactNode {
   if (!content) return null;
   const segments: Array<{ type: "text" | "url"; value: string }> = [];
@@ -257,21 +280,7 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
 
   return segments.map((seg, i) => {
     if (seg.type === "url") {
-      return (
-        <a
-          key={`tool-link-${i}`}
-          href={seg.value}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
-          onClick={(e) => {
-            e.preventDefault();
-            openExternalUrl(seg.value);
-          }}
-        >
-          {seg.value}
-        </a>
-      );
+      return <ToolResultLink key={`tool-link-${i}`} url={seg.value} />;
     }
     return <span key={`tool-text-${i}`}>{highlightTextSegment(seg.value, terms)}</span>;
   });
