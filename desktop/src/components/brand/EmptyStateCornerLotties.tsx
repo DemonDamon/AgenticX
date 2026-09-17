@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { LottieSvg } from "lottie-react";
 import thinkingQuestions from "../../assets/empty-state/thinking-questions.json";
 import workingLaptop from "../../assets/empty-state/working-laptop.json";
-import { recolorEmptyLottieClothes } from "./recolor-empty-lottie";
+import { useAppStore } from "../../store";
+import { accentBottomRgb, accentPrimaryRgb, recolorEmptyLottieClothes } from "./recolor-empty-lottie";
 
 function usePrefersReducedMotion(): boolean {
   const [reduce, setReduce] = useState(false);
@@ -25,11 +26,22 @@ export function EmptyStateCornerLotties({
   stageSize?: number;
 }) {
   const reduce = usePrefersReducedMotion();
-  const workingSrc = useMemo(() => recolorEmptyLottieClothes(workingLaptop, "work"), []);
-  const thinkingSrc = useMemo(() => recolorEmptyLottieClothes(thinkingQuestions, "think"), []);
+  const themeColor = useAppStore((s) => s.themeColor);
+  const theme = useAppStore((s) => s.theme);
+  const primary = accentPrimaryRgb(themeColor, theme);
+  const bottom = accentBottomRgb(themeColor);
+  const workingSrc = useMemo(
+    () => recolorEmptyLottieClothes(workingLaptop, "work", primary, bottom),
+    [primary, bottom],
+  );
+  const thinkingSrc = useMemo(
+    () => recolorEmptyLottieClothes(thinkingQuestions, "think", primary, bottom),
+    [primary, bottom],
+  );
   return (
     <div
       data-testid="empty-lottie-row"
+      data-accent={themeColor}
       className="relative mx-auto [@media(max-height:560px)]:[&_[data-testid=empty-lottie-slot]]:hidden"
       style={{ width: stageSize }}
     >

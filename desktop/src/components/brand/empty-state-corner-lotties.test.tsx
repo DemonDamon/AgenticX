@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAppStore } from "../../store";
 import { EmptyStateCornerLotties } from "./EmptyStateCornerLotties";
 
 vi.mock("lottie-react", () => ({
@@ -19,6 +20,10 @@ vi.mock("lottie-react", () => ({
     />
   ),
 }));
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("EmptyStateCornerLotties", () => {
   it("moves the woman further left and the man a little left without crowding", () => {
@@ -63,5 +68,17 @@ describe("EmptyStateCornerLotties", () => {
     for (const node of nodes) {
       expect(node.dataset.loop).toBe("true");
     }
+  });
+
+  it("follows the display accent so shirts rematch the cube", () => {
+    const previous = useAppStore.getState().themeColor;
+    useAppStore.setState({ themeColor: "blue" });
+    const { getByTestId } = render(
+      <EmptyStateCornerLotties>
+        <div />
+      </EmptyStateCornerLotties>,
+    );
+    expect(getByTestId("empty-lottie-row").getAttribute("data-accent")).toBe("blue");
+    useAppStore.setState({ themeColor: previous });
   });
 });

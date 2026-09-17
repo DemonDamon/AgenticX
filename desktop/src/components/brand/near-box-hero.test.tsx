@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAppStore } from "../../store";
 import { NearBoxHero } from "./NearBoxHero";
 import { NEAR_BOX_MOOD_CYCLE, holdMs, hopMs, wanderMs } from "./near-box-moods";
 
@@ -72,6 +73,14 @@ describe("NearBoxHero", () => {
     const tagline = getByTestId("near-box-tagline");
     expect(tagline.textContent).toBe("Near, Always Near.");
     expect(tagline.className).toContain("near-box-tagline");
+  });
+
+  it("follows the display accent on the cube", () => {
+    const previous = useAppStore.getState().themeColor;
+    useAppStore.setState({ themeColor: "blue" });
+    const { getByTestId } = render(<NearBoxHero />);
+    expect(getByTestId("near-box-hero").getAttribute("data-accent")).toBe("blue");
+    useAppStore.setState({ themeColor: previous });
   });
 
   it("becomes active when the pointer is on the box", () => {

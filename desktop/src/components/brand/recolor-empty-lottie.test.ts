@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import thinkingQuestions from "../../assets/empty-state/thinking-questions.json";
 import workingLaptop from "../../assets/empty-state/working-laptop.json";
 import {
+  accentBottomRgb,
+  NEAR_ACCENT_BLUE,
+  NEAR_ACCENT_PINK,
   NEAR_LIGHT_ORANGE,
+  NEAR_SKIN,
   NEAR_SKIRT_GREEN,
   NEAR_VITAL_ORANGE,
   recolorEmptyLottieClothes,
@@ -48,6 +52,57 @@ function matches(rgb: number[], target: readonly number[]): boolean {
 }
 
 describe("recolorEmptyLottieClothes", () => {
+  it("uses the display accent swatches for orange, green, and pink", () => {
+    expect(hex([...NEAR_VITAL_ORANGE])).toBe("#f9731a");
+    expect(hex([...NEAR_SKIRT_GREEN])).toBe("#10b981");
+    expect(hex([...NEAR_ACCENT_PINK])).toBe("#ec4899");
+    expect(hex([...NEAR_ACCENT_BLUE])).toBe("#3b82f6");
+  });
+
+  it("paints shirts the given accent when the display color is blue", () => {
+    const out = recolorEmptyLottieClothes(workingLaptop, "work", NEAR_ACCENT_BLUE);
+    const colors = collectColors(out);
+    const body = colors.filter((c) => c.layers.includes("body"));
+    expect(body.some((c) => matches(c.rgb, NEAR_ACCENT_BLUE))).toBe(true);
+    expect(body.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(false);
+    expect(body.some((c) => matches(c.rgb, NEAR_SKIRT_GREEN))).toBe(true);
+
+    const think = recolorEmptyLottieClothes(thinkingQuestions, "think", NEAR_ACCENT_BLUE);
+    const shirt = collectColors(think).find(
+      (c) => c.layers.includes("man") && c.layers.includes("body") && c.layers.includes("Group 3"),
+    );
+    expect(shirt).toBeTruthy();
+    expect(matches(shirt!.rgb, NEAR_ACCENT_BLUE)).toBe(true);
+  });
+
+  it("swaps pants and skirt to orange when the display color is green", () => {
+    expect(hex([...accentBottomRgb("green")])).toBe("#f9731a");
+    expect(hex([...accentBottomRgb("blue")])).toBe("#10b981");
+
+    const work = recolorEmptyLottieClothes(
+      workingLaptop,
+      "work",
+      NEAR_SKIRT_GREEN,
+      accentBottomRgb("green"),
+    );
+    const workBody = collectColors(work).filter((c) => c.layers.includes("body"));
+    expect(workBody.some((c) => matches(c.rgb, NEAR_SKIRT_GREEN))).toBe(true);
+    expect(workBody.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
+
+    const think = recolorEmptyLottieClothes(
+      thinkingQuestions,
+      "think",
+      NEAR_SKIRT_GREEN,
+      accentBottomRgb("green"),
+    );
+    const shorts = collectColors(think).filter(
+      (c) => c.layers.includes("man") && c.layers.includes("leg") && c.layers.includes("Group 6"),
+    );
+    expect(shorts.length).toBeGreaterThan(0);
+    expect(shorts.every((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
+    expect(shorts.some((c) => matches(c.rgb, NEAR_SKIRT_GREEN))).toBe(false);
+  });
+
   it("turns the working top orange and the skirt green", () => {
     const out = recolorEmptyLottieClothes(workingLaptop, "work");
     const colors = collectColors(out);
@@ -56,18 +111,58 @@ describe("recolorEmptyLottieClothes", () => {
     expect(body.some((c) => matches(c.rgb, NEAR_SKIRT_GREEN))).toBe(true);
     expect(body.filter((c) => hex(c.rgb) === "#ff337f" || hex(c.rgb) === "#ffc046")).toHaveLength(0);
 
-    const leftoverPink = colors.filter((c) => hex(c.rgb) === "#ff337f");
+    const leftoverPink = colors.filter((c) => matches(c.rgb, NEAR_ACCENT_PINK));
     expect(leftoverPink.length).toBeGreaterThan(0);
-    expect(leftoverPink.every((c) => c.layers.includes("head"))).toBe(true);
+    expect(leftoverPink.every((c) => c.layers.includes("head") || c.layers.includes("l shoe") || c.layers.includes("r leg"))).toBe(true);
+    expect(leftoverPink.some((c) => c.layers.includes("Layer-8"))).toBe(false);
+    expect(colors.filter((c) => hex(c.rgb) === "#ff337f")).toHaveLength(0);
 
     const laptopLogo = colors.filter((c) => c.layers.includes("laptop") && c.layers.includes("Group 1"));
     expect(laptopLogo.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
 
-    const laces = colors.filter((c) => c.layers.includes("l shoe"));
+    const laces = colors.filter((c) => c.layers.includes("l shoe") && c.layers.includes("Group 1"));
     expect(laces.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
 
     const stool = colors.filter((c) => c.layers.includes("Layer 1"));
     expect(stool.some((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
+  });
+
+  it("paints the working face and wrists skin, and fills the white shoes pink", () => {
+    expect(hex([...NEAR_SKIN])).toBe("#d37e3a");
+
+    const work = recolorEmptyLottieClothes(workingLaptop, "work");
+    const colors = collectColors(work);
+    const face = colors.find((c) => c.layers.includes("head") && c.layers.includes("Layer-14"));
+    expect(face).toBeTruthy();
+    expect(matches(face!.rgb, NEAR_SKIN)).toBe(true);
+
+    const wrist = colors.filter((c) => c.layers.includes("l wrist"));
+    expect(wrist.some((c) => matches(c.rgb, NEAR_SKIN))).toBe(true);
+
+    const laptopHand = colors.filter((c) => c.layers.includes("laptop") && c.layers.includes("Layer-6"));
+    expect(laptopHand.some((c) => matches(c.rgb, NEAR_SKIN))).toBe(true);
+    const laptopBody = colors.filter(
+      (c) => c.layers.includes("laptop") && c.layers.includes("Group 2") && !c.layers.includes("Layer-6"),
+    );
+    expect(laptopBody.some((c) => matches(c.rgb, [1, 1, 1]))).toBe(true);
+
+    const elbow = colors.find((c) => c.layers.includes("l hand") && c.layers.includes("Group 2"));
+    expect(elbow).toBeTruthy();
+    expect(matches(elbow!.rgb, NEAR_VITAL_ORANGE)).toBe(true);
+
+    const sleeve = colors.find((c) => c.layers.includes("l hand") && c.layers.includes("Layer-9"));
+    expect(sleeve).toBeTruthy();
+    expect(matches(sleeve!.rgb, NEAR_VITAL_ORANGE)).toBe(true);
+
+    const skirtBlock = colors.find((c) => c.layers.includes("r leg") && c.layers.includes("Layer-8"));
+    expect(skirtBlock).toBeTruthy();
+    expect(matches(skirtBlock!.rgb, NEAR_ACCENT_PINK)).toBe(false);
+
+    const rightShoe = colors.filter((c) => c.layers.includes("r leg") && c.layers.includes("Group 3"));
+    expect(rightShoe.some((c) => matches(c.rgb, NEAR_ACCENT_PINK))).toBe(true);
+
+    const leftShoe = colors.filter((c) => c.layers.includes("l shoe") && c.layers.includes("Group 3"));
+    expect(leftShoe.some((c) => matches(c.rgb, NEAR_ACCENT_PINK))).toBe(true);
   });
 
   it("paints the thinking shirt the same vital orange as the question bubbles", () => {
@@ -114,13 +209,9 @@ describe("recolorEmptyLottieClothes", () => {
     expect(questions.every((c) => matches(c.rgb, NEAR_VITAL_ORANGE))).toBe(true);
 
     const socks = colors.filter(
-      (c) => c.layers.includes("man") && c.layers.includes("leg") && hex(c.rgb) === "#be607a",
+      (c) => c.layers.includes("man") && c.layers.includes("leg") && matches(c.rgb, NEAR_ACCENT_PINK),
     );
     expect(socks.length).toBeGreaterThan(0);
-
-    const dustySocks = colors.filter(
-      (c) => c.layers.includes("man") && c.layers.includes("leg") && hex(c.rgb) === "#a17296",
-    );
-    expect(dustySocks.length).toBeGreaterThan(0);
+    expect(colors.filter((c) => hex(c.rgb) === "#be607a" || hex(c.rgb) === "#a17296")).toHaveLength(0);
   });
 });

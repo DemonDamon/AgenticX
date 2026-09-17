@@ -7,6 +7,7 @@ import {
   type PointerEvent,
 } from "react";
 import { APP_TAGLINE } from "../../constants/branding";
+import { useAppStore } from "../../store";
 import {
   EYE_PLAYLIST,
   applyLid,
@@ -63,12 +64,11 @@ const LOGO_MARK_BOX = { x: 13.4, y: 8, width: 133.2, height: 144 } as const;
 const BURST_DURATION_MS = 2200;
 
 const CONFETTI_COLORS = [
-  "#FF6038",
-  "#FFC533",
-  "#159B65",
-  "#F72585",
-  "#20C7D6",
-  "#7657FF",
+  "#3B82F6",
+  "#10B981",
+  "#EC4899",
+  "#F9731A",
+  "#0F172A",
 ] as const;
 const CONFETTI_KINDS = ["tile", "dot", "star", "ribbon"] as const;
 const CONFETTI = Array.from({ length: 58 }, (_, index) => {
@@ -81,7 +81,7 @@ const CONFETTI = Array.from({ length: 58 }, (_, index) => {
     x: Math.round(Math.sin(radians) * distance),
     y: -Math.round(Math.cos(radians) * distance),
     r: ((index * 67) % 360) - 180,
-    color: CONFETTI_COLORS[index % CONFETTI_COLORS.length] ?? "#FF7A45",
+    color: CONFETTI_COLORS[index % CONFETTI_COLORS.length] ?? "#F9731A",
     kind: CONFETTI_KINDS[index % CONFETTI_KINDS.length] ?? "tile",
     delay: (index % 11) * 29,
   };
@@ -94,6 +94,7 @@ export function NearBoxHero({
   size?: number;
   className?: string;
 }) {
+  const themeColor = useAppStore((s) => s.themeColor);
   const clipId = `near-box-shell-${useId().replace(/:/g, "")}`;
   const sensorRef = useRef<SVGGElement>(null);
   const burstTimerRef = useRef<number | null>(null);
@@ -230,11 +231,12 @@ export function NearBoxHero({
   };
 
   return (
-    <div className={`near-box-stack ${className}`.trim()}>
+    <div className={`near-box-stack ${className}`.trim()} data-accent={themeColor}>
       <button
         type="button"
         className="near-box-hero"
         data-testid="near-box-hero"
+        data-accent={themeColor}
         data-state={hovered ? "active" : "idle"}
         data-gaze={gaze}
         data-mood={mood}
