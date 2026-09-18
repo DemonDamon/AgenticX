@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isPeerHumanSpeakerId } from "./peer-human-speaker";
 import {
   continueMessageIdForRequest,
   mapLoadedSessionMessage,
@@ -152,5 +153,33 @@ describe("continueMessageIdForRequest", () => {
       { id: "live-uid-user", role: "user", content: "你好" },
       assistant,
     ], assistant)).toBe(`${sid}-i1`);
+  });
+});
+
+describe("mapLoadedSessionMessage peer speaker", () => {
+  it("maps group peer human sender onto Message", () => {
+    const mapped = mapLoadedSessionMessage(
+      {
+        role: "user",
+        content: "进度如何",
+        sender_id: "human:feishu:ou_1",
+        sender_name: "甲",
+      },
+      "sess-g",
+      0,
+    );
+    expect(mapped.role).toBe("user");
+    expect(mapped.speakerUserId).toBe("human:feishu:ou_1");
+    expect(mapped.speakerName).toBe("甲");
+  });
+
+  it("leaves owner user rows without peer speaker id", () => {
+    const mapped = mapLoadedSessionMessage(
+      { role: "user", content: "hello", sender_id: "user", sender_name: "我" },
+      "sess-1",
+      1,
+    );
+    expect(mapped.speakerUserId).toBe("user");
+    expect(isPeerHumanSpeakerId(mapped.speakerUserId)).toBe(false);
   });
 });

@@ -17,6 +17,7 @@ import { CitationSourcesCard } from "./WebSearchSources";
 import { withBibliographyFallback } from "./source-attribution-parse";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
+import { isPeerHumanSpeakerId, resolveUserBubbleName } from "../../utils/peer-human-speaker";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { InlineImageBlock } from "./InlineImageBlock";
@@ -255,7 +256,15 @@ export function ImBubble({
   void userAvatarUrl;
   const isUser = message.role === "user";
   const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
-  const displayName = isUser ? (userName || t("actions.me")) : (assistantName || "AI");
+  const fallbackMe = userName || t("actions.me");
+  const displayName = isUser
+    ? resolveUserBubbleName({
+        speakerUserId: message.speakerUserId,
+        speakerName: message.speakerName,
+        fallbackMe,
+      })
+    : (assistantName || "AI");
+  const isPeerHuman = isUser && isPeerHumanSpeakerId(message.speakerUserId);
   const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
@@ -713,6 +722,11 @@ export function ImBubble({
         className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
       >
         {isGroupAssistant ? (
+          <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
+            {displayName}
+          </div>
+        ) : null}
+        {isPeerHuman ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
             {displayName}
           </div>

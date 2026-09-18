@@ -3318,6 +3318,7 @@ def create_studio_app() -> FastAPI:
                         quoted_message_id=quoted_message_id,
                         should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
+                        speaker_user_id=str(getattr(payload, "speaker_user_id", None) or "").strip() or None,
                         image_inputs=image_inputs,
                         history_image_attachments=history_image_attachments,
                     ):
@@ -6447,6 +6448,23 @@ def create_studio_app() -> FastAPI:
         if config is None:
             raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True, "group": config.to_dict()}
+
+    @app.post("/api/groups/{group_id}/human-members")
+    async def add_group_human_member(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            cfg = group_registry.add_human_member(
+                group_id, payload if isinstance(payload, dict) else {},
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        return {"ok": True, "group": cfg.to_dict()}
 
     # ── Group Team Events SSE + Action endpoints ──────────────────────────────
     # Registered event buses keyed by (group_id, session_id).

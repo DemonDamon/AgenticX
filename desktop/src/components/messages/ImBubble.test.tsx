@@ -469,3 +469,38 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(user).not.toContain(continueMark);
   });
 });
+
+describe("ImBubble peer human speaker", () => {
+  it("shows the peer display name on a user bubble", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "peer-1",
+          role: "user",
+          content: "进度如何",
+          speakerUserId: "human:feishu:ou_1",
+          speakerName: "甲",
+        }}
+      />,
+    );
+    expect(html).toContain("甲");
+    expect(html).toContain("进度如何");
+    expect(html).not.toContain("agx-im-group-bubble");
+  });
+
+  it("keeps owner user rows labeled as me", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "owner-1",
+          role: "user",
+          content: "hello",
+        }}
+      />,
+    );
+    expect(html).toContain("hello");
+    expect(html).toContain("agx-im-user-bubble");
+    expect(html).not.toContain("甲");
+    expect(html).not.toContain("text-text-faint");
+  });
+});

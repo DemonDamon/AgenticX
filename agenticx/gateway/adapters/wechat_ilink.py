@@ -28,6 +28,12 @@ from agenticx.gateway.im_confirm import (
     format_pending_hint,
     parse_confirm_command,
 )
+from agenticx.gateway.im_group_speaker import (
+    format_im_group_reply,
+    merge_im_group_chat_fields,
+    merge_im_sse_reply_text,
+    register_human_member_best_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -445,6 +451,17 @@ class WeChatILinkAdapter:
             pass
         return "", None, None
 
+    def _resolve_bound_avatar_id(self) -> str:
+        binding_file = _AGX_DIR / "wechat_binding.json"
+        try:
+            data = json.loads(binding_file.read_text("utf-8"))
+            desk = data.get("_desktop")
+            if isinstance(desk, dict):
+                return str(desk.get("avatar_id") or "").strip()
+        except (FileNotFoundError, ValueError, KeyError, OSError, TypeError):
+            pass
+        return ""
+
     async def _submit_confirm(
         self,
         *,
@@ -593,7 +610,28 @@ class WeChatILinkAdapter:
                 body["provider"] = provider
             if model:
                 body["model"] = model
+            session_avatar_id = self._resolve_bound_avatar_id()
+            try:
+                body = merge_im_group_chat_fields(
+                    body,
+                    platform="wechat",
+                    external_id=sender_key.rsplit(":", 1)[-1] if sender_key else "",
+                    display_name=sender_name or "微信用户",
+                    session_avatar_id=session_avatar_id,
+                )
+            except ValueError:
+                pass
+            await register_human_member_best_effort(
+                client=client,
+                studio_base=studio_base,
+                headers=headers,
+                session_avatar_id=session_avatar_id,
+                platform="wechat",
+                external_id=sender_key.rsplit(":", 1)[-1] if sender_key else "",
+                display_name=sender_name or "微信用户",
+            )
             final_text = ""
+            group_chunks: list[str] = []
             progress_lines: list[str] = []
             saw_final = False
             async with client.stream(
@@ -632,6 +670,10 @@ class WeChatILinkAdapter:
                                 if t:
                                     final_text = t
                                 saw_final = True
+                            elif et in {"group_reply", "group_clarification"}:
+                                chunk = format_im_group_reply(data)
+                                if chunk:
+                                    group_chunks.append(chunk)
                             elif et == "tool_call":
                                 tname = str(data.get("tool_name") or data.get("name") or "tool")
                                 progress_lines.append(f"开始：{tname}")
@@ -670,7 +712,7 @@ class WeChatILinkAdapter:
                                 raise RuntimeError(
                                     str(data.get("text") or "chat error")
                                 )
-        out = final_text.strip()
+        out = merge_im_sse_reply_text(final_text, group_chunks)
         if progress_lines:
             unique_progress = list(dict.fromkeys(progress_lines))
             progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])

@@ -52,17 +52,19 @@ class GroupChatContext:
         text: str,
         *,
         sender_name: str = "我",
+        sender_id: str = "user",
         quoted_message_id: str = "",
         quoted_content: str = "",
         attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         label = str(sender_name or "").strip() or "我"
+        sid = str(sender_id or "").strip() or "user"
         row: dict[str, Any] = {
             "role": "user",
             "content": str(text or ""),
-            "sender_id": "user",
+            "sender_id": sid,
             "sender_name": label,
-            "agent_id": "user",
+            "agent_id": sid,
             "quoted_message_id": str(quoted_message_id or ""),
             "quoted_content": str(quoted_content or ""),
         }

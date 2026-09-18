@@ -276,6 +276,9 @@ export type Message = {
    * can never surface under the wrong conversation. */
   ownerSessionId?: string;
   agentId?: string;
+  /** Group-room human speaker. Absent/"user" = desktop owner. */
+  speakerUserId?: string;
+  speakerName?: string;
   avatarName?: string;
   avatarUrl?: string;
   /** Centered muted system line (rename confirmation, etc.). */

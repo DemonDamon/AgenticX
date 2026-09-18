@@ -243,6 +243,13 @@ type GroupItem = {
   name: string;
   avatar_ids: string[];
   routing?: string;
+  human_members?: Array<{
+    id: string;
+    platform: string;
+    external_id: string;
+    display_name: string;
+    joined_at?: string;
+  }>;
 };
 type ForwardedHistoryItem = {
   sender: string;

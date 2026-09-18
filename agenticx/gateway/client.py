@@ -24,6 +24,12 @@ from agenticx.gateway.im_confirm import (
     format_pending_hint,
     parse_confirm_command,
 )
+from agenticx.gateway.im_group_speaker import (
+    format_im_group_reply,
+    merge_im_group_chat_fields,
+    merge_im_sse_reply_text,
+    register_human_member_best_effort,
+)
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.user_device_map import UserDeviceMap
 
@@ -244,13 +250,40 @@ class GatewayClient:
             )
             if r.status_code >= 400:
                 raise RuntimeError(f"session bootstrap failed: {r.status_code} {r.text[:200]}")
+            session_avatar_id = ""
+            try:
+                sess_json = r.json()
+                if isinstance(sess_json, dict):
+                    session_avatar_id = str(sess_json.get("avatar_id") or "").strip()
+            except Exception:
+                session_avatar_id = ""
 
             body = {
                 "session_id": session_id,
                 "user_input": text,
                 "user_display_name": msg.sender_name or msg.sender_id,
             }
+            try:
+                body = merge_im_group_chat_fields(
+                    body,
+                    platform=str(msg.source or "").strip().lower(),
+                    external_id=msg.sender_id,
+                    display_name=msg.sender_name or msg.sender_id,
+                    session_avatar_id=session_avatar_id,
+                )
+            except ValueError:
+                pass
+            await register_human_member_best_effort(
+                client=client,
+                studio_base=self._settings.studio_base_url,
+                headers=headers,
+                session_avatar_id=session_avatar_id,
+                platform=str(msg.source or "").strip().lower(),
+                external_id=msg.sender_id,
+                display_name=msg.sender_name or msg.sender_id,
+            )
             final_text = ""
+            group_chunks: list[str] = []
             progress_lines: list[str] = []
             saw_final = False
             async with client.stream(
@@ -283,6 +316,10 @@ class GatewayClient:
                                 if t:
                                     final_text = t
                                 saw_final = True
+                            elif et in {"group_reply", "group_clarification"}:
+                                chunk = format_im_group_reply(data)
+                                if chunk:
+                                    group_chunks.append(chunk)
                             elif et == "tool_call":
                                 tname = str(data.get("tool_name") or data.get("name") or "tool")
                                 progress_lines.append(f"开始：{tname}")
@@ -319,7 +356,7 @@ class GatewayClient:
                                 return ((prefix + "\n\n") if prefix else "") + hint
                             elif et == "error":
                                 raise RuntimeError(str(data.get("text") or "chat error"))
-            out = final_text.strip()
+            out = merge_im_sse_reply_text(final_text, group_chunks)
             if progress_lines:
                 unique_progress = list(dict.fromkeys(progress_lines))
                 progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])

@@ -3199,6 +3199,7 @@ class GroupChatRouter:
         quoted_message_id: str = "",
         should_stop: Callable[[], Any],
         user_display_name: str | None = None,
+        speaker_user_id: str | None = None,
         image_inputs: Sequence[Mapping[str, Any]] | None = None,
         history_image_attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> AsyncGenerator[GroupReply, None]:
@@ -3228,6 +3229,7 @@ class GroupChatRouter:
                 quoted_message_id=quoted_message_id,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
+                speaker_user_id=speaker_user_id,
                 turn_history=turn_history,
             ):
                 yield reply
@@ -3250,14 +3252,17 @@ class GroupChatRouter:
         quoted_message_id: str,
         should_stop: Callable[[], Any],
         user_display_name: str | None,
+        speaker_user_id: str | None,
         turn_history: list[dict[str, Any]],
     ) -> AsyncGenerator[GroupReply, None]:
         setattr(base_session, "__group_avatar_ids", list(group_avatar_ids))
         context = GroupChatContext(base_session, max_items=24)
         udn = str(user_display_name or "").strip() or "我"
+        speaker = str(speaker_user_id or "").strip() or "user"
         context.append_user(
             user_input,
             sender_name=udn,
+            sender_id=speaker,
             quoted_message_id=quoted_message_id,
             quoted_content=quoted_content,
             attachments=turn_history or None,

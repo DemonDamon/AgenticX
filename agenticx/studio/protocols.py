@@ -37,6 +37,8 @@ class ChatRequest(BaseModel):
     meta_leader_display_name: Optional[str] = None
     # Human user's display name in group chat (shown in dialogue context; optional).
     user_display_name: Optional[str] = None
+    # Group-room speaker. Empty/omitted => sender_id "user" (desktop owner).
+    speaker_user_id: Optional[str] = None
     # Global user nickname (applies to all chats, not just group). Overrides user_display_name when set.
     user_nickname: Optional[str] = None
     # Free-text user preferences/style injected into agent system prompts. Max 500 chars.

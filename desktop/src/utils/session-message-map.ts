@@ -271,6 +271,8 @@ export type LoadedSessionMessage = {
   role: MsgRole | "system";
   content: string;
   agent_id?: string;
+  sender_id?: string;
+  sender_name?: string;
   avatar_name?: string;
   avatar_url?: string;
   provider?: string;
@@ -365,6 +367,8 @@ export function mapLoadedSessionMessage(
     content: injectRow && !rawContent.trim() ? "" : rawContent,
     ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
+    speakerUserId: item.sender_id != null ? String(item.sender_id).trim() || undefined : undefined,
+    speakerName: item.sender_name != null ? String(item.sender_name).trim() || undefined : undefined,
     avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
     avatarUrl: item.avatar_url,
     provider: item.provider,
