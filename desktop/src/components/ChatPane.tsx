@@ -8423,6 +8423,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <div
             key={message.id}
             data-message-id={message.id}
+            data-im-align={message.role === "user" ? "end" : message.role === "assistant" ? "start" : undefined}
             className={`group/sel relative${actionRhythmBodyTail ? ` ${ASSISTANT_BODY_TAIL_CLASS}` : ""}`}
           >
             {rowSelectable && !isSelected && (

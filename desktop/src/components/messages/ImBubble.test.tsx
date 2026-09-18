@@ -500,6 +500,8 @@ describe("ImBubble peer human speaker", () => {
     );
     expect(html).toContain("hello");
     expect(html).toContain("agx-im-user-bubble");
+    expect(html).not.toContain("rounded-tr-[4px]");
+    expect(html).not.toContain("rounded-xl");
     expect(html).not.toContain("甲");
     expect(html).not.toContain("text-text-faint");
   });

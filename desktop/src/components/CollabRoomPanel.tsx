@@ -467,7 +467,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                           className={[
                             "max-w-[80%] rounded-2xl px-3 py-2 text-sm",
                             mine
-                              ? "bg-[var(--chat-im-user-bg)] text-text-strong"
+                              ? "bg-[var(--chat-im-user-bg)] text-[var(--chat-im-user-text)]"
                               : kind === "meta"
                                 ? "border border-border bg-surface-card text-text-primary"
                                 : "bg-surface-card text-text-primary",

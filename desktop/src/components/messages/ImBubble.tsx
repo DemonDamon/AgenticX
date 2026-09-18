@@ -800,7 +800,7 @@ export function ImBubble({
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
             <div
-              className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+              className="agx-im-user-bubble relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -921,7 +921,7 @@ export function ImBubble({
                   : isMetaPendingWork
                     ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : isGroupAssistant
-                      ? `agx-im-group-bubble relative min-w-0 rounded-2xl px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      ? `agx-im-group-bubble relative min-w-0 px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
                         ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                         : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
@@ -931,7 +931,7 @@ export function ImBubble({
                   ? undefined
                   : isGroupAssistant
                     ? {
-                        background: "var(--chat-im-group-bg)",
+                        background: "var(--chat-im-assistant-bg)",
                         color: "var(--chat-im-assistant-text)",
                         width: "fit-content",
                         maxWidth: "min(100%, 760px)",

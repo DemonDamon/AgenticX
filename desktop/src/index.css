@@ -17,6 +17,8 @@
   border: none;
   box-shadow: none;
   box-sizing: border-box;
+  border-radius: 18px;
+  border-bottom-left-radius: 8px;
 }
 
 body {
@@ -794,8 +796,9 @@ body.agx-settings-nav-resizing {
 }
 
 :root[data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.15);
-  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.16);
+  --chat-im-user-bg: rgb(var(--theme-color-rgb));
+  --chat-im-user-text: var(--theme-color-text);
+  --chat-im-user-border: transparent;
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --chat-im-avatar-fg: var(--theme-color-text);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
@@ -863,7 +866,7 @@ body.agx-settings-nav-resizing {
   white-space: nowrap;
 }
 
-/* 用户气泡内 @file chip：柔和 pill，避免「框套框」与重阴影 */
+/* 用户气泡内 @file chip：只跟 user-text 混色，避免实心底上叠页面浅灰 */
 .agx-im-user-bubble .agx-composer-inline-chip {
   display: inline-flex;
   align-items: center;
@@ -874,10 +877,10 @@ body.agx-settings-nav-resizing {
   padding-block: 0.12rem;
   border-radius: 0.4rem;
   font-weight: 500;
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-  border-color: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--chat-im-user-text) 16%, transparent);
+  border-color: color-mix(in srgb, var(--chat-im-user-text) 22%, transparent);
   box-shadow: none;
-  color: color-mix(in srgb, var(--chat-im-user-text) 78%, var(--text-faint) 22%);
+  color: color-mix(in srgb, var(--chat-im-user-text) 88%, transparent);
 }
 
 .agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-name {
@@ -885,7 +888,7 @@ body.agx-settings-nav-resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: color-mix(in srgb, var(--chat-im-user-text) 88%, var(--text-muted) 12%);
+  color: color-mix(in srgb, var(--chat-im-user-text) 88%, transparent);
 }
 
 .agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-sep {
@@ -997,10 +1000,20 @@ body.agx-settings-nav-resizing {
   background: var(--surface-hover);
 }
 
-/* 用户气泡：纯填充、无描边（描边会在浅色主题下叠出双层边缘） */
+/* 用户气泡：实心填充胶囊；圆角只放这里，避免和 Tailwind 抢 border-radius */
 .agx-im-user-bubble {
   border: none;
   box-shadow: none;
+  border-radius: 18px;
+  border-bottom-right-radius: 8px;
+}
+
+[data-im-align="end"] + [data-im-align="end"] .agx-im-user-bubble {
+  border-top-right-radius: 8px;
+}
+
+[data-im-align="start"] + [data-im-align="start"] .agx-im-group-bubble {
+  border-top-left-radius: 8px;
 }
 
 input[type="checkbox"],
@@ -1008,13 +1021,8 @@ input[type="radio"] {
   accent-color: rgb(var(--theme-color-rgb));
 }
 :root[data-theme="light"][data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.22);
-  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.14);
   --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 6%, var(--surface-card));
   --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
-}
-:root[data-theme="dim"][data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);
 }
 
 .agx-theme-focus-ring:focus-within {
