@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Search provider implementations (DuckDuckGo HTML + paid APIs).
+"""Search provider implementations (DuckDuckGo HTML + paid APIs + You.com keyless MCP).
 
 Author: Damon Li
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from html import unescape
@@ -272,6 +273,83 @@ def search_google_cse(api_key: str, cx: str, query: str, max_results: int, snipp
         url = str(item.get("link") or "")
         title = str(item.get("title") or "")[:200]
         sn = str(item.get("snippet") or "")
+        sn = _strip_html_fragment(sn, max_len=snippet_chars)
+        if url:
+            results.append(WebSearchResult(title=title or url, url=url, snippet=sn))
+    return results
+
+
+YOUCOM_MCP_URL = "https://api.you.com/mcp"
+YOUCOM_MCP_FREE_URL = "https://api.you.com/mcp?profile=free"
+
+
+def _parse_mcp_reply(response: "httpx.Response") -> dict:
+    """Decode one You.com MCP reply (plain JSON or text/event-stream)."""
+    content_type = response.headers.get("Content-Type", "")
+    if "text/event-stream" not in content_type:
+        return response.json()
+    payload: dict = {}
+    for line in (response.text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+    return payload
+
+
+def search_youcom(api_key: str, query: str, max_results: int, snippet_chars: int) -> List[WebSearchResult]:
+    """You.com search via its remote MCP server (keyless free profile without a key)."""
+    results: List[WebSearchResult] = []
+    key = (api_key or "").strip()
+    endpoint = YOUCOM_MCP_URL if key else YOUCOM_MCP_FREE_URL
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                endpoint,
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "you-search",
+                        "arguments": {"query": query, "count": max_results},
+                    },
+                },
+            )
+            resp.raise_for_status()
+            data = _parse_mcp_reply(resp)
+    except Exception as exc:
+        logger.warning("You.com search failed: %s", exc)
+        return results
+    if not isinstance(data, dict) or "error" in data:
+        logger.warning("You.com search returned an error payload")
+        return results
+    blocks = (data.get("result") or {}).get("content") or []
+    texts = [str(b.get("text", "") or "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+    body = "\n".join(t for t in texts if t)
+    web: list = []
+    try:
+        parsed = json.loads(body)
+        if isinstance(parsed, dict):
+            web = (parsed.get("results") or {}).get("web") or []
+    except (json.JSONDecodeError, TypeError):
+        web = []
+    for item in web[:max_results]:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        title = str(item.get("title") or "")[:200]
+        sn = str(item.get("description") or "")
         sn = _strip_html_fragment(sn, max_len=snippet_chars)
         if url:
             results.append(WebSearchResult(title=title or url, url=url, snippet=sn))

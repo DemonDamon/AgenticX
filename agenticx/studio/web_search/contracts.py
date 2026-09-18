@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
-ProviderName = Literal["duckduckgo", "bocha", "tavily", "serper", "google", "bing"]
+ProviderName = Literal["duckduckgo", "bocha", "tavily", "serper", "google", "bing", "youcom"]
 
 # Upper bound for configured/tool-requested result counts (providers may return fewer).
 WEB_SEARCH_MAX_RESULTS_CAP = 50
@@ -44,7 +44,7 @@ class WebSearchRuntimeConfig:
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
         dp = str(data.get("default_provider", "duckduckgo") or "duckduckgo").lower().strip()
-        if dp not in {"duckduckgo", "bocha", "tavily", "serper", "google", "bing"}:
+        if dp not in {"duckduckgo", "bocha", "tavily", "serper", "google", "bing", "youcom"}:
             dp = "duckduckgo"
         mr = int(data.get("max_results", 5) or 5)
         mr = max(1, min(WEB_SEARCH_MAX_RESULTS_CAP, mr))

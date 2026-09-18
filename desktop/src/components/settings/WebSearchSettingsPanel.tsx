@@ -30,6 +30,7 @@ const PROVIDERS: { id: string; label: string; needsKey: boolean }[] = [
   { id: "serper", label: "Serper (Google)", needsKey: true },
   { id: "google", label: "Google CSE", needsKey: true },
   { id: "bing", label: "Bing Web Search API", needsKey: true },
+  { id: "youcom", label: "You.com (no key needed)", needsKey: false },
 ];
 
 function normalizeWebSearchConfig(cfg: WebSearchConfig): WebSearchConfig {

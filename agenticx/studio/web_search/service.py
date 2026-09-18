@@ -66,6 +66,9 @@ class WebSearchService:
         elif prov == "bing":
             b = pconf.get("bing") if isinstance(pconf.get("bing"), dict) else {}
             primary = providers.search_bing(str(b.get("api_key", "")), q, n, snip)
+        elif prov == "youcom":
+            b = pconf.get("youcom") if isinstance(pconf.get("youcom"), dict) else {}
+            primary = providers.search_youcom(str(b.get("api_key", "")), q, n, snip)
         else:
             primary = providers.search_duckduckgo_html(q, n, snip)
 
