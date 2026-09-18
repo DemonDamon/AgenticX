@@ -2,9 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildLoginItemSettings,
+  buildOsascriptNotificationArgs,
   parseTaskCompleteNotifyPayload,
+  planTaskCompleteDelivery,
   playCompletionSound,
+  resolveTaskCompleteBanner,
   shouldStartHidden,
+  resolveBannerTransport,
   welcomeNotificationCopy,
 } from "../electron/desktop-notify";
 
@@ -81,6 +85,51 @@ describe("shouldStartHidden", () => {
       wasOpenedAsHidden: true,
       isPackaged: true,
     })).toBe(true);
+  });
+});
+
+describe("resolveTaskCompleteBanner", () => {
+  it("matches Trae: banner only when notify is on and the window is not active", () => {
+    expect(resolveTaskCompleteBanner({ desktopNotify: true, windowActive: false })).toBe(true);
+    expect(resolveTaskCompleteBanner({ desktopNotify: true, windowActive: true })).toBe(false);
+    expect(resolveTaskCompleteBanner({ desktopNotify: false, windowActive: false })).toBe(false);
+  });
+});
+
+describe("resolveBannerTransport", () => {
+  it("prefers Electron Notification when the OS has enabled it", () => {
+    expect(resolveBannerTransport({ notificationSupported: true, platform: "darwin" })).toBe("electron");
+    expect(resolveBannerTransport({ notificationSupported: false, platform: "darwin" })).toBe("osascript");
+    expect(resolveBannerTransport({ notificationSupported: false, platform: "win32" })).toBe("none");
+  });
+});
+
+describe("buildOsascriptNotificationArgs", () => {
+  it("escapes quotes for display notification", () => {
+    expect(buildOsascriptNotificationArgs('任务完成 · 日常对话', '你好 "Near"')).toEqual([
+      "-e",
+      'display notification "你好 \\"Near\\"" with title "任务完成 · 日常对话"',
+    ]);
+  });
+});
+
+describe("planTaskCompleteDelivery", () => {
+  it("plays a standalone system sound even when a banner is requested", () => {
+    expect(planTaskCompleteDelivery({ showBanner: true, playSound: true })).toEqual({
+      useNotification: true,
+      playStandaloneSound: true,
+      notificationSilent: true,
+    });
+    expect(planTaskCompleteDelivery({ showBanner: false, playSound: true })).toEqual({
+      useNotification: false,
+      playStandaloneSound: true,
+      notificationSilent: true,
+    });
+    expect(planTaskCompleteDelivery({ showBanner: true, playSound: false })).toEqual({
+      useNotification: true,
+      playStandaloneSound: false,
+      notificationSilent: true,
+    });
   });
 });
 

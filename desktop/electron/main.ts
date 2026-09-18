@@ -62,8 +62,13 @@ import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 import {
   buildLoginItemSettings,
   deliverTaskCompleteNotification,
+  isMainWindowActive,
   parseTaskCompleteNotifyPayload,
+  planTaskCompleteDelivery,
   playCompletionSound,
+  resolveBannerTransport,
+  resolveTaskCompleteBanner,
+  showOsascriptNotification,
   shouldStartHidden,
   welcomeNotificationCopy,
 } from "./desktop-notify";
@@ -748,6 +753,16 @@ function persistNotifyBootstrapped(cfg: AgxConfig): void {
 function bootstrapWelcomeNotification(): void {
   const copy = welcomeNotificationCopy(resolveMenuLocale() === "en" ? "en" : "zh");
   try {
+    const via = resolveBannerTransport({
+      notificationSupported: Notification.isSupported(),
+      platform: process.platform,
+    });
+    console.warn("[desktop-notify] welcome", { via });
+    if (via === "osascript") {
+      showOsascriptNotification(execFile, copy.title, copy.body);
+      return;
+    }
+    if (via === "none") return;
     const note = new Notification({
       title: copy.title,
       body: copy.body,
@@ -6968,27 +6983,53 @@ function registerEarlyIpc(): void {
   ipcMain.handle("notify-task-complete", async (_event, raw: unknown) => {
     const parsed = parseTaskCompleteNotifyPayload(raw);
     if (!parsed.ok) return parsed;
-    if (!parsed.showBanner && !parsed.playSound) return { ok: true, skipped: true };
-    if (parsed.showBanner) {
+    const cfg = loadAutomationConfigFromAgx(loadAgxConfig());
+    const osFocused = BrowserWindow.getFocusedWindow() != null;
+    const windowActive = osFocused && !parsed.showBanner;
+    const showBanner = resolveTaskCompleteBanner({
+      desktopNotify: cfg.desktop_notify,
+      windowActive,
+    });
+    const playSound = parsed.playSound;
+    if (!showBanner && !playSound) return { ok: true, skipped: true };
+    const delivery = planTaskCompleteDelivery({ showBanner, playSound });
+    const via = resolveBannerTransport({
+      notificationSupported: Notification.isSupported(),
+      platform: process.platform,
+    });
+    console.warn("[desktop-notify] deliver", {
+      showBanner,
+      playSound,
+      osFocused,
+      rendererWantsBanner: parsed.showBanner,
+      via,
+    });
+    if (delivery.useNotification) {
       try {
-        deliverTaskCompleteNotification({
-          NotificationCtor: Notification,
-          payload: parsed,
-          onClick: () => {
-            showMainWindowSafely();
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send("desktop-notify:activate", {
-                paneId: parsed.paneId,
-                sessionId: parsed.sessionId,
-              });
-            }
-          },
-        });
+        if (via === "osascript") {
+          showOsascriptNotification(execFile, parsed.title, parsed.body);
+        } else if (via === "electron") {
+          deliverTaskCompleteNotification({
+            NotificationCtor: Notification,
+            payload: parsed,
+            silent: delivery.notificationSilent,
+            onClick: () => {
+              showMainWindowSafely();
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("desktop-notify:activate", {
+                  paneId: parsed.paneId,
+                  sessionId: parsed.sessionId,
+                });
+              }
+            },
+          });
+        }
       } catch (err) {
         console.warn("[desktop-notify] notification failed:", err);
         return { ok: false, error: String(err) };
       }
-    } else if (parsed.playSound) {
+    }
+    if (delivery.playStandaloneSound) {
       playCompletionSound(execFile, process.platform);
     }
     return { ok: true };

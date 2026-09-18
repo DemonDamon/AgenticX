@@ -96,6 +96,76 @@ export function shouldStartHidden(input: {
   return input.argv.includes("--hidden") || input.wasOpenedAtLogin || input.wasOpenedAsHidden === true;
 }
 
+export function resolveTaskCompleteBanner(input: {
+  desktopNotify: boolean;
+  windowActive: boolean;
+}): boolean {
+  return input.desktopNotify && !input.windowActive;
+}
+
+export function isMainWindowActive(input: {
+  exists: boolean;
+  visible: boolean;
+  focused: boolean;
+}): boolean {
+  return input.exists && input.visible && input.focused;
+}
+
+export function shouldUseOsascriptBanner(input: {
+  platform: NodeJS.Platform;
+  isPackaged: boolean;
+}): boolean {
+  return input.platform === "darwin" && !input.isPackaged;
+}
+
+export function resolveBannerTransport(input: {
+  notificationSupported: boolean;
+  platform: NodeJS.Platform;
+}): "electron" | "osascript" | "none" {
+  if (input.notificationSupported) return "electron";
+  if (input.platform === "darwin") return "osascript";
+  return "none";
+}
+
+export function escapeOsascriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ");
+}
+
+export function buildOsascriptNotificationArgs(title: string, body: string): string[] {
+  return [
+    "-e",
+    `display notification "${escapeOsascriptString(body)}" with title "${escapeOsascriptString(title)}"`,
+  ];
+}
+
+export function showOsascriptNotification(
+  execFileFn: typeof import("node:child_process").execFile,
+  title: string,
+  body: string,
+): void {
+  execFileFn("/usr/bin/osascript", buildOsascriptNotificationArgs(title, body), (err) => {
+    if (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("[desktop-notify] osascript banner failed:", message);
+    }
+  });
+}
+
+export function planTaskCompleteDelivery(input: {
+  showBanner: boolean;
+  playSound: boolean;
+}): {
+  useNotification: boolean;
+  playStandaloneSound: boolean;
+  notificationSilent: boolean;
+} {
+  return {
+    useNotification: input.showBanner,
+    playStandaloneSound: input.playSound,
+    notificationSilent: true,
+  };
+}
+
 export function playCompletionSound(
   execFileFn: typeof import("node:child_process").execFile,
   platform: NodeJS.Platform,
@@ -133,11 +203,12 @@ export function deliverTaskCompleteNotification(opts: {
   NotificationCtor: NotificationConstructor;
   payload: Extract<ParsedTaskCompleteNotify, { ok: true }>;
   onClick: () => void;
+  silent?: boolean;
 }): void {
   const note = new opts.NotificationCtor({
     title: opts.payload.title,
     body: opts.payload.body,
-    silent: !opts.payload.playSound,
+    silent: opts.silent ?? !opts.payload.playSound,
   });
   note.on("click", opts.onClick);
   note.show();
