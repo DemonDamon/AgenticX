@@ -340,13 +340,44 @@ def build_sidecar_file_payload(
     target = Path(path)
     raw = target.read_bytes()
     filename = target.name
-    return {
+    payload = {
         "recipient": recipient,
         "context_token": context_token,
         "file": base64.standard_b64encode(raw).decode("ascii"),
         "filename": filename,
-        "caption": (caption or filename).strip() or filename,
     }
+    caption_text = str(caption or "").strip()
+    if caption_text:
+        payload["caption"] = caption_text
+    return payload
+
+
+_SENT_NOTICE_PREFIX = "已通过微信附件发送："
+_SPEAKER_PREFIX_RE = re.compile(r"^[^\n：:]{1,32}[：:]\s*")
+
+
+def is_redundant_wechat_file_text(text: str, paths: Sequence[Path]) -> bool:
+    """True when a text bubble would only repeat the file names being sent."""
+    names = {Path(p).name for p in paths if Path(p).name}
+    if not names:
+        return False
+    body = str(text or "").strip()
+    if not body:
+        return True
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        line = _SPEAKER_PREFIX_RE.sub("", line, count=1).strip()
+        if line.startswith(_SENT_NOTICE_PREFIX):
+            rest = line[len(_SENT_NOTICE_PREFIX) :].strip()
+            parts = [part.strip() for part in re.split(r"[、,，]", rest) if part.strip()]
+            if any(part not in names for part in parts):
+                return False
+            continue
+        if line not in names:
+            return False
+    return True
 
 
 def append_sent_files_notice(text: str, paths: Sequence[Path]) -> str:

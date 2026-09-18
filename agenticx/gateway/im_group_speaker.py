@@ -7,7 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from agenticx.avatar.group_members import make_human_member_id
 
@@ -72,12 +72,50 @@ def format_im_group_reply(data: Mapping[str, Any] | None) -> str:
     return f"{name}：{content}" if name else content
 
 
-def merge_im_sse_reply_text(final_text: str, group_chunks: list[str]) -> str:
+def merge_im_sse_reply_text(
+    final_text: str,
+    group_chunks: list[str],
+    token_text: str = "",
+) -> str:
     out = str(final_text or "").strip()
     grouped = "\n\n".join(str(c).strip() for c in group_chunks if str(c).strip())
     if out and grouped:
         return f"{out}\n\n{grouped}"
-    return out or grouped
+    if out or grouped:
+        return out or grouped
+    return str(token_text or "").strip()
+
+
+def latest_assistant_reply_after_user(
+    messages: Sequence[Mapping[str, Any]] | None,
+    user_text: str,
+) -> str:
+    """Pick assistant text written after the latest matching user row.
+
+    Used when IM SSE closed empty but Studio already persisted the reply.
+    """
+    rows = [row for row in (messages or []) if isinstance(row, Mapping)]
+    needle = str(user_text or "").strip()
+    if not needle:
+        return ""
+    last_user_idx = -1
+    for idx, row in enumerate(rows):
+        if str(row.get("role") or "").strip() != "user":
+            continue
+        if str(row.get("content") or "").strip() == needle:
+            last_user_idx = idx
+    if last_user_idx < 0:
+        return ""
+    parts: list[str] = []
+    for row in rows[last_user_idx + 1 :]:
+        if str(row.get("role") or "").strip() != "assistant":
+            continue
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        name = str(row.get("avatar_name") or row.get("sender_name") or "").strip()
+        parts.append(f"{name}：{content}" if name else content)
+    return "\n\n".join(parts)
 
 
 async def register_human_member_best_effort(

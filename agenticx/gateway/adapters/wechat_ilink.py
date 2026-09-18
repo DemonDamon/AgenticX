@@ -30,6 +30,7 @@ from agenticx.gateway.im_confirm import (
 )
 from agenticx.gateway.im_group_speaker import (
     format_im_group_reply,
+    latest_assistant_reply_after_user,
     merge_im_group_chat_fields,
     merge_im_sse_reply_text,
     register_human_member_best_effort,
@@ -39,6 +40,7 @@ from agenticx.gateway.im_wechat_files import (
     append_sent_files_notice,
     build_sidecar_file_payload,
     coerce_chat_result,
+    is_redundant_wechat_file_text,
     is_sendable_file,
     paths_from_sse_payload,
     select_outbound_files,
@@ -112,6 +114,50 @@ def _markdown_to_wechat_text(md: str) -> str:
     return text.strip()
 
 
+_SPEAKER_LINE_RE = re.compile(r"^(?P<name>[^\n：:]{1,32})[：:]\s*\S")
+
+
+def _leading_speaker_name(text: str) -> str:
+    first = str(text or "").lstrip().split("\n", 1)[0]
+    match = _SPEAKER_LINE_RE.match(first)
+    if not match:
+        return ""
+    name = match.group("name").strip()
+    if not name or name.isdigit():
+        return ""
+    return name
+
+
+def _strip_redundant_meta_speaker(body: str, reply_name: str) -> str:
+    name = str(reply_name or "").strip()
+    if not name:
+        return body
+    stripped = body.lstrip()
+    for sep in ("：", ":"):
+        prefix = f"{name}{sep}"
+        if not stripped.startswith(prefix):
+            continue
+        rest = stripped[len(prefix) :].lstrip()
+        inner = _leading_speaker_name(rest)
+        if inner and inner != name:
+            return rest
+    return body
+
+
+def format_wechat_outbound_text(text: str, reply_name: str) -> str:
+    """Plain-text WeChat body. Keep group speaker; do not wrap Meta around it."""
+    body = _markdown_to_wechat_text(text)
+    if not body:
+        return ""
+    body = _strip_redundant_meta_speaker(body, reply_name)
+    if _leading_speaker_name(body):
+        return body
+    name = str(reply_name or "").strip()
+    if not name:
+        return body
+    return f"{name}：\n{body}"
+
+
 def _is_model_param_compat_error(exc: Exception) -> bool:
     text = str(exc or "").lower()
     return (
@@ -137,6 +183,41 @@ def _read_sidecar_port() -> int:
         return int(port_file.read_text().strip())
     except (FileNotFoundError, ValueError):
         return 0
+
+
+def build_wechat_chat_body(
+    *,
+    session_id: str = "",
+    text: str,
+    sender_name: str,
+    sender_key: str = "",
+    session_avatar_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> Dict[str, Any]:
+    """Build /api/chat JSON. Keep runtime after SSE disconnect like Feishu IM."""
+    display = sender_name or "微信用户"
+    body: Dict[str, Any] = {
+        "user_input": text,
+        "user_display_name": display,
+        "keep_runtime_after_disconnect": True,
+    }
+    if session_id:
+        body["session_id"] = session_id
+    if provider:
+        body["provider"] = provider
+    if model:
+        body["model"] = model
+    try:
+        return merge_im_group_chat_fields(
+            body,
+            platform="wechat",
+            external_id=sender_key.rsplit(":", 1)[-1] if sender_key else "",
+            display_name=display,
+            session_avatar_id=session_avatar_id,
+        )
+    except ValueError:
+        return body
 
 
 class WeChatILinkAdapter:
@@ -333,6 +414,7 @@ class WeChatILinkAdapter:
                 )
             return
 
+        chat_session_id = effective_session_id
         try:
             reply = await self._chat_turn(
                 user_input,
@@ -349,6 +431,7 @@ class WeChatILinkAdapter:
                     effective_session_id
                 )
             if recovered_session_id:
+                chat_session_id = recovered_session_id
                 try:
                     reply = await self._chat_turn(
                         user_input,
@@ -405,10 +488,21 @@ class WeChatILinkAdapter:
                 reply = "处理消息时出错，请稍后重试。"
 
         result = coerce_chat_result(reply)
-        outbound_text = append_sent_files_notice(
-            result.text,
-            [Path(p) for p in result.file_paths],
-        )
+        file_paths = [Path(p) for p in result.file_paths]
+        outbound_text = append_sent_files_notice(result.text, file_paths)
+        if not outbound_text.strip() and chat_session_id:
+            persisted = await self._load_persisted_im_reply(
+                chat_session_id, user_input
+            )
+            if persisted:
+                logger.info(
+                    "WeChat outbound fallback to persisted assistant text session=%s",
+                    chat_session_id[:8],
+                )
+                outbound_text = persisted
+        if outbound_text and is_redundant_wechat_file_text(outbound_text, file_paths):
+            logger.info("WeChat text skipped: filename-only body with outbound file")
+            outbound_text = ""
         if outbound_text:
             await self._send_reply(
                 sidecar_url=sidecar_url,
@@ -418,6 +512,8 @@ class WeChatILinkAdapter:
                 session_id=session_id,
                 group_id=group_id,
             )
+        elif not file_paths:
+            logger.info("WeChat send skipped: empty SSE text and no persisted assistant")
         for file_path in result.file_paths:
             await self._send_file(
                 sidecar_url=sidecar_url,
@@ -487,6 +583,44 @@ class WeChatILinkAdapter:
                 return str(desk.get("avatar_id") or "").strip()
         except (FileNotFoundError, ValueError, KeyError, OSError, TypeError):
             pass
+        return ""
+
+    async def _load_persisted_im_reply(self, session_id: str, user_text: str) -> str:
+        """Read Studio messages when SSE closed before a sendable group_reply."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return ""
+        studio_base, headers = self._resolve_studio()
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(),
+                timeout=15.0,
+            ) as client:
+                for delay in (0.0, 0.4, 1.0, 2.0):
+                    if delay:
+                        await asyncio.sleep(delay)
+                    try:
+                        resp = await client.get(
+                            f"{studio_base}/api/session/messages",
+                            headers=headers,
+                            params={"session_id": sid},
+                        )
+                    except Exception:
+                        continue
+                    if resp.status_code >= 400:
+                        continue
+                    try:
+                        payload = resp.json()
+                    except ValueError:
+                        continue
+                    messages = (
+                        payload.get("messages") if isinstance(payload, dict) else None
+                    )
+                    text = latest_assistant_reply_after_user(messages, user_text)
+                    if text:
+                        return text
+        except Exception:
+            logger.exception("WeChat persisted reply lookup failed")
         return ""
 
     async def _submit_confirm(
@@ -627,27 +761,16 @@ class WeChatILinkAdapter:
         async with httpx.AsyncClient(
             transport=transport, timeout=timeout
         ) as client:
-            body: Dict[str, Any] = {
-                "user_input": text,
-                "user_display_name": sender_name or "微信用户",
-            }
-            if session_id:
-                body["session_id"] = session_id
-            if provider:
-                body["provider"] = provider
-            if model:
-                body["model"] = model
             session_avatar_id = self._resolve_bound_avatar_id()
-            try:
-                body = merge_im_group_chat_fields(
-                    body,
-                    platform="wechat",
-                    external_id=sender_key.rsplit(":", 1)[-1] if sender_key else "",
-                    display_name=sender_name or "微信用户",
-                    session_avatar_id=session_avatar_id,
-                )
-            except ValueError:
-                pass
+            body = build_wechat_chat_body(
+                session_id=session_id,
+                text=text,
+                sender_name=sender_name,
+                sender_key=sender_key,
+                session_avatar_id=session_avatar_id,
+                provider=provider,
+                model=model,
+            )
             await register_human_member_best_effort(
                 client=client,
                 studio_base=studio_base,
@@ -659,6 +782,8 @@ class WeChatILinkAdapter:
             )
             final_text = ""
             group_chunks: list[str] = []
+            token_parts: list[str] = []
+            token_name = ""
             progress_lines: list[str] = []
             produced_paths: list[str] = []
             referenced_paths: list[str] = []
@@ -706,6 +831,15 @@ class WeChatILinkAdapter:
                                 chunk = format_im_group_reply(data)
                                 if chunk:
                                     group_chunks.append(chunk)
+                            elif et == "group_token":
+                                delta = str(data.get("content") or "")
+                                if delta:
+                                    token_parts.append(delta)
+                                    name = str(
+                                        data.get("avatar_name") or data.get("agent_id") or ""
+                                    ).strip()
+                                    if name:
+                                        token_name = name
                             elif et == "tool_call":
                                 tname = str(data.get("tool_name") or data.get("name") or "tool")
                                 progress_lines.append(f"开始：{tname}")
@@ -746,7 +880,10 @@ class WeChatILinkAdapter:
                                 raise RuntimeError(
                                     str(data.get("text") or "chat error")
                                 )
-        out = merge_im_sse_reply_text(final_text, group_chunks)
+        token_text = "".join(token_parts).strip()
+        if token_text and token_name and not token_text.startswith(f"{token_name}："):
+            token_text = f"{token_name}：{token_text}"
+        out = merge_im_sse_reply_text(final_text, group_chunks, token_text=token_text)
         if progress_lines:
             unique_progress = list(dict.fromkeys(progress_lines))
             progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
@@ -817,8 +954,9 @@ class WeChatILinkAdapter:
         extra = {
             "file": base["file"],
             "filename": base["filename"],
-            "caption": base["caption"],
         }
+        if base.get("caption"):
+            extra["caption"] = base["caption"]
         await self._post_sidecar_send(
             sidecar_url,
             extra=extra,
@@ -955,15 +1093,7 @@ class WeChatILinkAdapter:
 
     def _format_outbound_text(self, text: str) -> str:
         """Format outbound content for readability in WeChat client."""
-        body = _markdown_to_wechat_text(text)
-        if not body:
-            return ""
-        if not self._reply_name:
-            return body
-        prefixed = f"{self._reply_name}："
-        if body.lstrip().startswith(prefixed):
-            return body
-        return f"{self._reply_name}：\n{body}"
+        return format_wechat_outbound_text(text, self._reply_name)
 
     @staticmethod
     def _dedup_nonempty(values: list[str]) -> list[str]:

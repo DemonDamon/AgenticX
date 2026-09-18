@@ -3203,6 +3203,11 @@ def create_studio_app() -> FastAPI:
             import asyncio as _asyncio_group
 
             group_use_event_hub = live_reattach_enabled()
+            keep_runtime_after_disconnect = bool(
+                getattr(payload, "keep_runtime_after_disconnect", False)
+            )
+            if group_use_event_hub:
+                keep_runtime_after_disconnect = True
             group_event_hub = (
                 manager.ensure_event_hub(payload.session_id) if group_use_event_hub else None
             )
@@ -3404,7 +3409,8 @@ def create_studio_app() -> FastAPI:
                         while True:
                             if await request.is_disconnected():
                                 client_disconnected = True
-                                break
+                                if not keep_runtime_after_disconnect:
+                                    break
                             try:
                                 buffered = await _asyncio_group.wait_for(
                                     hub_sub_q.get(), timeout=0.1
@@ -3423,7 +3429,8 @@ def create_studio_app() -> FastAPI:
                         while True:
                             if await request.is_disconnected():
                                 client_disconnected = True
-                                break
+                                if not keep_runtime_after_disconnect:
+                                    break
                             try:
                                 evt = await _asyncio_group.wait_for(
                                     group_fallback_queue.get(), timeout=0.1
@@ -3445,9 +3452,11 @@ def create_studio_app() -> FastAPI:
                     if hub_sub_id is not None and group_event_hub is not None:
                         group_event_hub.unsubscribe(hub_sub_id)
                     if group_runtime_task is not None and not group_runtime_task.done():
-                        if group_event_hub is not None and client_disconnected:
+                        if client_disconnected and (
+                            group_event_hub is not None or keep_runtime_after_disconnect
+                        ):
                             logger.info(
-                                "[group] client disconnected, runtime continues (hub) session=%s",
+                                "[group] client disconnected, runtime continues session=%s",
                                 payload.session_id,
                             )
                         else:

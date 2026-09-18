@@ -19,6 +19,7 @@ from agenticx.gateway.im_wechat_files import (
     coerce_chat_result,
     extract_absolute_paths,
     extract_mentioned_filenames,
+    is_redundant_wechat_file_text,
     is_sendable_file,
     paths_from_sse_payload,
     resolve_filename,
@@ -167,12 +168,19 @@ def test_build_sidecar_file_payload_and_notice(tmp_path: Path) -> None:
     assert payload["recipient"] == "wx-user"
     assert payload["context_token"] == "ctx"
     assert payload["filename"] == "a.pdf"
-    assert payload["caption"] == "a.pdf"
+    assert "caption" not in payload
     assert "text" not in payload
     assert base64.b64decode(payload["file"]) == raw
 
     notice = append_sent_files_notice("先看文字", [path])
     assert "已通过微信附件发送：a.pdf" in notice
+    labeled = build_sidecar_file_payload(
+        path,
+        recipient="wx-user",
+        context_token="ctx",
+        caption="请查收合同",
+    )
+    assert labeled["caption"] == "请查收合同"
     assert coerce_chat_result("hi") == WeChatChatResult(text="hi", file_paths=())
     wrapped = WeChatChatResult(text="x", file_paths=(str(path),))
     assert coerce_chat_result(wrapped) is wrapped
@@ -192,3 +200,13 @@ def test_select_caps_at_five(tmp_path: Path) -> None:
         search_roots=[tmp_path],
     )
     assert len(sent) == 5
+
+
+def test_redundant_file_text_is_filename_or_notice_only(tmp_path: Path) -> None:
+    path = tmp_path / "幻影旅团壁纸_翻译_v2.docx"
+    path.write_bytes(b"PK")
+    assert is_redundant_wechat_file_text(path.name, [path])
+    assert is_redundant_wechat_file_text(f"后端·北辰：{path.name}", [path])
+    assert is_redundant_wechat_file_text(f"已通过微信附件发送：{path.name}", [path])
+    assert not is_redundant_wechat_file_text("Word 版已经生成好了", [path])
+    assert not is_redundant_wechat_file_text("", [])

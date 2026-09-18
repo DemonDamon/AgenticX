@@ -15,12 +15,14 @@ from agenticx.gateway.im_group_speaker import (
     format_im_group_reply,
     group_id_from_session_avatar_id,
     human_member_payload,
+    latest_assistant_reply_after_user,
     merge_im_group_chat_fields,
     merge_im_sse_reply_text,
     register_human_member_best_effort,
     should_register_human,
     speaker_user_id,
 )
+from agenticx.gateway.adapters.wechat_ilink import build_wechat_chat_body
 
 
 def test_speaker_user_id_feishu() -> None:
@@ -226,3 +228,35 @@ def test_merge_im_sse_reply_text_prefers_group_chunks() -> None:
         "Nearer：你好\n\n架构师·阿析：在的"
     )
     assert merge_im_sse_reply_text("plain", ["群：补一句"]) == "plain\n\n群：补一句"
+
+
+def test_merge_im_sse_reply_text_uses_group_token_when_reply_missing() -> None:
+    assert merge_im_sse_reply_text("", [], token_text="南沙明天多云") == "南沙明天多云"
+    assert merge_im_sse_reply_text("", ["北辰：终局"], token_text="半句") == "北辰：终局"
+
+
+def test_latest_assistant_reply_after_user_skips_stale_and_progress() -> None:
+    messages = [
+        {"role": "user", "content": "转成word发给我吧"},
+        {"role": "assistant", "content": "Word 版已经生成好了", "avatar_name": "Near"},
+        {"role": "user", "content": "明天天气怎么样南沙"},
+        {"role": "assistant", "content": "南沙明天多云转晴", "avatar_name": "后端·北辰"},
+    ]
+    assert latest_assistant_reply_after_user(messages, "明天天气怎么样南沙") == (
+        "后端·北辰：南沙明天多云转晴"
+    )
+    assert latest_assistant_reply_after_user(messages, "没问过这个问题") == ""
+
+
+def test_build_wechat_chat_body_keeps_runtime_after_disconnect() -> None:
+    body = build_wechat_chat_body(
+        session_id="sess-g",
+        text="明天天气怎么样南沙",
+        sender_name="wx-user",
+        sender_key="wechat:wx-user",
+        session_avatar_id="",
+    )
+    assert body["session_id"] == "sess-g"
+    assert body["user_input"] == "明天天气怎么样南沙"
+    assert body["keep_runtime_after_disconnect"] is True
+    assert "group_id" not in body
