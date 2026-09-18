@@ -56,6 +56,11 @@ import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import {
+  announceDesktopTaskComplete,
+  isDesktopWindowFocusedAndVisible,
+  shouldAnnounceTaskComplete,
+} from "../utils/desktop-task-notify";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -1410,6 +1415,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       queries: [] as string[],
     };
 
+    let full = "";
+    let receivedFinalEvent = false;
+
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
       body.keep_runtime_after_disconnect = true;
@@ -1442,12 +1450,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       const decoder = new TextDecoder();
       if (!reader) { if (isCurrentRequest()) { setStatus("idle"); setStreaming(false); } return; }
 
-      let full = "";
       let cumulativeFull = "";
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
-      let receivedFinalEvent = false;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       const syncTurnRefsSnapshot = () => {
@@ -2212,6 +2218,24 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       scrollToBottom();
       void syncSubAgents();
 
+      if (shouldAnnounceTaskComplete({
+        aborted: abortController.signal.aborted,
+        hasQueuedFollowup: Boolean(nextQueued),
+        isGroupPane: false,
+        receivedFinalEvent,
+        receivedGroupDone: false,
+        text: full,
+      })) {
+        void announceDesktopTaskComplete({
+          kind: "success",
+          label: "Near",
+          text: full,
+          paneId: liteQueueKey,
+          sessionId,
+          windowFocusedAndVisible: isDesktopWindowFocusedAndVisible(),
+          locale: i18n.language?.startsWith("en") ? "en" : "zh",
+        });
+      }
       if (nextQueued) {
         requestAnimationFrame(() => void sendChat(nextQueued.text));
       }

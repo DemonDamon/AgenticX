@@ -32,6 +32,8 @@ mac:
     - target: dmg
   icon: assets/icon.icns
   category: public.app-category.developer-tools
+  extendInfo:
+    NSUserNotificationAlertStyle: banner
   # 勿写 identity: null — macPackager 会整包跳过签名，主程序残留 linker-signed adhoc 导致公证失败
   # 不写 identity 时由 CSC_LINK + CSC_IDENTITY_AUTO_DISCOVERY 自动匹配 Developer ID
   type: distribution

@@ -477,8 +477,26 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     halflife_days: number;
   }) => ipcRenderer.invoke("save-turn-archive-config", payload),
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
-  saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
-    ipcRenderer.invoke("save-automation-config", payload),
+  saveAutomationConfig: async (payload: {
+    prevent_sleep?: boolean;
+    open_at_login?: boolean;
+    desktop_notify?: boolean;
+    desktop_sound?: boolean;
+    notify_bootstrapped?: boolean;
+  }) => ipcRenderer.invoke("save-automation-config", payload),
+  notifyTaskComplete: async (payload: {
+    title: string;
+    body: string;
+    paneId?: string;
+    sessionId?: string;
+    showBanner: boolean;
+    playSound: boolean;
+  }) => ipcRenderer.invoke("notify-task-complete", payload),
+  onDesktopNotifyActivate: (cb: (payload: { paneId?: string; sessionId?: string }) => void) => {
+    const listener = (_e: unknown, payload: { paneId?: string; sessionId?: string }) => cb(payload);
+    ipcRenderer.on("desktop-notify:activate", listener);
+    return () => ipcRenderer.removeListener("desktop-notify:activate", listener);
+  },
   writeWorkspacePerfLog: async (payload: unknown) =>
     ipcRenderer.invoke("workspace-perf-log", payload) as Promise<{ ok: boolean; path?: string }>,
   confirmDialog: async (payload: {

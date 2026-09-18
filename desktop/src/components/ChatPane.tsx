@@ -143,6 +143,11 @@ import {
 } from "./messages/react-blocks";
 import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import {
+  announceDesktopTaskComplete,
+  isDesktopWindowFocusedAndVisible,
+  shouldAnnounceTaskComplete,
+} from "../utils/desktop-task-notify";
+import {
   hasImageBlock,
   markGeneratingBlocksCancelled,
 } from "../utils/content-blocks";
@@ -10120,6 +10125,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       queries: [] as string[],
     };
 
+    let full = "";
+    let receivedFinalEvent = false;
+    let receivedDoneEvent = false;
+
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: outboundMessageText };
       // Keep backend turn alive across brief SSE drops (network blip / sleep).
@@ -10363,10 +10372,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return;
       }
 
-      let full = "";
       let cumulativeFull = "";
-      let receivedFinalEvent = false;
-      let receivedDoneEvent = false;
       let receivedGroupTerminalEvent = false;
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
@@ -12332,6 +12338,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
 
+      if (
+        stillOwnsStream &&
+        shouldAnnounceTaskComplete({
+          aborted: abortController.signal.aborted,
+          hasQueuedFollowup: Boolean(nextQueued),
+          isGroupPane,
+          receivedFinalEvent,
+          receivedGroupDone: receivedDoneEvent,
+          text: full,
+        })
+      ) {
+        void announceDesktopTaskComplete({
+          kind: "success",
+          label: (paneAvatarMeta.name || pane.avatarName || "Near").trim(),
+          text: full,
+          paneId: pane.id,
+          sessionId: requestSessionId,
+          windowFocusedAndVisible: isDesktopWindowFocusedAndVisible(),
+          locale: i18n.language?.startsWith("en") ? "en" : "zh",
+        });
+      }
       if (nextQueued) {
         requestAnimationFrame(() => {
           void sendChatRef.current(nextQueued.text, {

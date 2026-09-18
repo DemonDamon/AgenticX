@@ -7,6 +7,7 @@ import {
   Menu,
   MenuItemConstructorOptions,
   nativeImage,
+  Notification,
   powerSaveBlocker,
   screen,
   session,
@@ -58,6 +59,14 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import {
+  buildLoginItemSettings,
+  deliverTaskCompleteNotification,
+  parseTaskCompleteNotifyPayload,
+  playCompletionSound,
+  shouldStartHidden,
+  welcomeNotificationCopy,
+} from "./desktop-notify";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
@@ -350,7 +359,13 @@ type AgxConfig = {
     learning_nudge_interval?: number;
     learning_min_tool_calls?: number;
   };
-  automation?: { prevent_sleep?: boolean };
+  automation?: {
+    prevent_sleep?: boolean;
+    open_at_login?: boolean;
+    desktop_notify?: boolean;
+    desktop_sound?: boolean;
+    notify_bootstrapped?: boolean;
+  };
   skills?: { non_high_risk_auto_install?: boolean };
   ops?: Record<string, unknown>;
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
@@ -401,6 +416,10 @@ type TrinityConfig = {
 
 type AutomationConfig = {
   prevent_sleep: boolean;
+  open_at_login: boolean;
+  desktop_notify: boolean;
+  desktop_sound: boolean;
+  notify_bootstrapped: boolean;
 };
 
 type TurnArchiveConfig = {
@@ -630,6 +649,10 @@ const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
 
 const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
   prevent_sleep: false,
+  open_at_login: true,
+  desktop_notify: true,
+  desktop_sound: true,
+  notify_bootstrapped: false,
 };
 
 const TURN_ARCHIVE_CONFIG_KEYS = new Set([
@@ -662,6 +685,13 @@ function loadAutomationConfigFromAgx(cfg: AgxConfig): AutomationConfig {
   const row = raw as Record<string, unknown>;
   return {
     prevent_sleep: parseBooleanLoose(row.prevent_sleep, DEFAULT_AUTOMATION_CONFIG.prevent_sleep),
+    open_at_login: parseBooleanLoose(row.open_at_login, DEFAULT_AUTOMATION_CONFIG.open_at_login),
+    desktop_notify: parseBooleanLoose(row.desktop_notify, DEFAULT_AUTOMATION_CONFIG.desktop_notify),
+    desktop_sound: parseBooleanLoose(row.desktop_sound, DEFAULT_AUTOMATION_CONFIG.desktop_sound),
+    notify_bootstrapped: parseBooleanLoose(
+      row.notify_bootstrapped,
+      DEFAULT_AUTOMATION_CONFIG.notify_bootstrapped,
+    ),
   };
 }
 
@@ -688,6 +718,44 @@ function applyPreventSleepFromConfig(cfg: AgxConfig): void {
   } else if (preventSleepBlockerId !== null) {
     powerSaveBlocker.stop(preventSleepBlockerId);
     preventSleepBlockerId = null;
+  }
+}
+
+function applyLoginItemFromConfig(cfg: AgxConfig): void {
+  const openAtLogin = loadAutomationConfigFromAgx(cfg).open_at_login;
+  try {
+    app.setLoginItemSettings(buildLoginItemSettings({
+      openAtLogin,
+      platform: process.platform,
+    }));
+  } catch (err) {
+    console.warn("[desktop-notify] setLoginItemSettings failed:", err);
+  }
+}
+
+function persistNotifyBootstrapped(cfg: AgxConfig): void {
+  const root = cfg as Record<string, unknown>;
+  const prev = root.automation;
+  const merged =
+    prev && typeof prev === "object" && !Array.isArray(prev)
+      ? { ...(prev as Record<string, unknown>) }
+      : {};
+  merged.notify_bootstrapped = true;
+  root.automation = merged;
+  saveAgxConfig(cfg);
+}
+
+function bootstrapWelcomeNotification(): void {
+  const copy = welcomeNotificationCopy(resolveMenuLocale() === "en" ? "en" : "zh");
+  try {
+    const note = new Notification({
+      title: copy.title,
+      body: copy.body,
+      silent: true,
+    });
+    note.show();
+  } catch (err) {
+    console.warn("[desktop-notify] welcome notification failed:", err);
   }
 }
 
@@ -1899,8 +1967,10 @@ function showMainWindowSafely(): void {
 
 async function revealMainWindowAfterSplash(options?: { fade?: boolean }): Promise<void> {
   await closeSplash({ fade: options?.fade ?? true });
+  if (startHidden) return;
   showMainWindowSafely();
 }
+let startHidden = false;
 let tray: Tray | null = null;
 const WIN_TITLE_BAR_OVERLAY_HEIGHT = 44;
 type WinTitleBarTheme = "dark" | "light" | "dim";
@@ -2238,7 +2308,10 @@ function markStudioReady(): void {
   notifyRendererStudioReady();
   // Only arm splash force-show after backend is ready so the main window
   // does not appear with empty avatars/sessions during cold start.
-  scheduleSplashForceShowFallback(showMainWindowSafely);
+  scheduleSplashForceShowFallback(() => {
+    if (startHidden) return;
+    showMainWindowSafely();
+  });
 }
 
 function resetStudioReady(): void {
@@ -6594,6 +6667,7 @@ function createWindow(): void {
   // still visible. That's the "two Near windows on DMG launch" bug.
   // Bail out early when a live main window already exists.
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (startHidden) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
@@ -6891,6 +6965,34 @@ function createTray(): void {
  */
 function registerEarlyIpc(): void {
   registerChromeCookieImportIpc();
+  ipcMain.handle("notify-task-complete", async (_event, raw: unknown) => {
+    const parsed = parseTaskCompleteNotifyPayload(raw);
+    if (!parsed.ok) return parsed;
+    if (!parsed.showBanner && !parsed.playSound) return { ok: true, skipped: true };
+    if (parsed.showBanner) {
+      try {
+        deliverTaskCompleteNotification({
+          NotificationCtor: Notification,
+          payload: parsed,
+          onClick: () => {
+            showMainWindowSafely();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("desktop-notify:activate", {
+                paneId: parsed.paneId,
+                sessionId: parsed.sessionId,
+              });
+            }
+          },
+        });
+      } catch (err) {
+        console.warn("[desktop-notify] notification failed:", err);
+        return { ok: false, error: String(err) };
+      }
+    } else if (parsed.playSound) {
+      playCompletionSound(execFile, process.platform);
+    }
+    return { ok: true };
+  });
   ipcMain.handle("open-external", async (_event, url: unknown) => {
     const href = String(url ?? "").trim();
     if (!/^https?:\/\//i.test(href)) {
@@ -9379,25 +9481,34 @@ function registerIpc(): void {
 
   ipcMain.handle("save-automation-config", async (_event, payload: unknown) => {
     if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
-    const p = payload as { prevent_sleep?: unknown };
-    let preventSleep: boolean;
-    try {
-      preventSleep = parseBooleanStrict(p.prevent_sleep, "prevent_sleep");
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
+    const p = payload as Record<string, unknown>;
+    const keys = [
+      "prevent_sleep",
+      "open_at_login",
+      "desktop_notify",
+      "desktop_sound",
+      "notify_bootstrapped",
+    ] as const;
     try {
       const cfg = loadAgxConfig();
       const root = cfg as Record<string, unknown>;
+      const loaded = loadAutomationConfigFromAgx(cfg);
+      const merged: AutomationConfig = { ...loaded };
+      for (const key of keys) {
+        if (p[key] !== undefined) {
+          merged[key] = parseBooleanStrict(p[key], key);
+        }
+      }
       const prev = root.automation;
-      const merged =
-        prev && typeof prev === "object" && !Array.isArray(prev)
-          ? { ...(prev as Record<string, unknown>) }
-          : {};
-      merged.prevent_sleep = preventSleep;
-      root.automation = merged;
+      root.automation = {
+        ...(prev && typeof prev === "object" && !Array.isArray(prev)
+          ? (prev as Record<string, unknown>)
+          : {}),
+        ...merged,
+      };
       saveAgxConfig(cfg);
       applyPreventSleepFromConfig(cfg);
+      applyLoginItemFromConfig(cfg);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -12570,10 +12681,28 @@ if (!gotTheLock) {
         return theme === "light" ? "light" : "dark";
       });
       registerSplashIpcHandlers({
-        showMainWindow: showMainWindowSafely,
+        showMainWindow: () => {
+          if (startHidden) return;
+          showMainWindowSafely();
+        },
         quitApp: () => app.quit(),
       });
-      createSplashWindow();
+      const presence = loadAutomationConfigFromAgx(loadAgxConfig());
+      const loginInfo = app.getLoginItemSettings();
+      startHidden = shouldStartHidden({
+        argv: process.argv,
+        wasOpenedAtLogin: Boolean(loginInfo.wasOpenedAtLogin),
+        wasOpenedAsHidden: Boolean((loginInfo as { wasOpenedAsHidden?: boolean }).wasOpenedAsHidden),
+        isPackaged: app.isPackaged,
+      });
+      applyLoginItemFromConfig(loadAgxConfig());
+      if (!presence.notify_bootstrapped) {
+        bootstrapWelcomeNotification();
+        persistNotifyBootstrapped(loadAgxConfig());
+      }
+      if (!startHidden) {
+        createSplashWindow();
+      }
 
       // Register basic IPC handlers immediately so the renderer never hits
       // "No handler registered" errors during the agx serve startup delay.
@@ -12718,6 +12847,7 @@ if (!gotTheLock) {
       // renderer can't hit "No handler registered" when `app.on("activate")`
       // races with the studio-serve cold start.
       applyPreventSleepFromConfig(loadAgxConfig());
+      applyLoginItemFromConfig(loadAgxConfig());
       // HA mode: server 侧调度器启用时，Electron 侧不再启动，避免双触发。
       if (!isServerAutomationScheduler(loadAgxConfig())) {
         automationScheduler.start();

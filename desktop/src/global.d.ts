@@ -123,6 +123,10 @@ type TurnArchiveConfig = {
 
 type AutomationConfig = {
   prevent_sleep: boolean;
+  open_at_login: boolean;
+  desktop_notify: boolean;
+  desktop_sound: boolean;
+  notify_bootstrapped: boolean;
 };
 
 type RuntimeConfig = {
@@ -1023,7 +1027,16 @@ declare global {
       loadTurnArchiveConfig: () => Promise<{ ok: boolean; config?: TurnArchiveConfig; error?: string }>;
       saveTurnArchiveConfig: (payload: TurnArchiveConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
-      saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      saveAutomationConfig: (payload: Partial<AutomationConfig>) => Promise<{ ok: boolean; error?: string }>;
+      notifyTaskComplete: (payload: {
+        title: string;
+        body: string;
+        paneId?: string;
+        sessionId?: string;
+        showBanner: boolean;
+        playSound: boolean;
+      }) => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
+      onDesktopNotifyActivate: (cb: (payload: { paneId?: string; sessionId?: string }) => void) => () => void;
       writeWorkspacePerfLog: (payload: unknown) => Promise<{ ok: boolean; path?: string }>;
       confirmDialog: (payload: {
         title?: string;

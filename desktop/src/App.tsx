@@ -24,6 +24,7 @@ import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/sess
 import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
 import { i18n } from "./i18n/i18n";
+import { announceDesktopTaskComplete, isDesktopWindowFocusedAndVisible } from "./utils/desktop-task-notify";
 import { LOCALE_STORAGE_KEY, isAppLocale } from "./i18n/locales";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
@@ -988,6 +989,23 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
+
+  useEffect(() => {
+    const off = window.agenticxDesktop.onDesktopNotifyActivate?.((payload) => {
+      const paneId = String(payload.paneId ?? "").trim();
+      const sessionId = String(payload.sessionId ?? "").trim();
+      if (paneId) useAppStore.getState().setActivePaneId(paneId);
+      if (paneId && sessionId) {
+        const pane = useAppStore.getState().panes.find((p) => p.id === paneId);
+        if (pane && (pane.sessionId || "").trim() !== sessionId) {
+          useAppStore.getState().setPaneSessionId(paneId, sessionId);
+        }
+      }
+    });
+    return () => {
+      off?.();
+    };
+  }, []);
 
   useEffect(() => {
     const off = window.agenticxDesktop.onStudioReady(() => {
@@ -2291,6 +2309,17 @@ export function App() {
       }
       void refreshSessionMessages(sid);
       stopAutomationPollIfIdle();
+      if (payload.phase === "success" || payload.phase === "error") {
+        void announceDesktopTaskComplete({
+          kind: payload.phase === "error" ? "error" : "success",
+          label: String(payload.taskName || payload.taskId || "Near"),
+          text: payload.phase === "error" ? "定时任务执行失败" : "定时任务已完成",
+          paneId: paneId ?? "",
+          sessionId: sid,
+          windowFocusedAndVisible: isDesktopWindowFocusedAndVisible(),
+          locale: i18n.language?.startsWith("en") ? "en" : "zh",
+        });
+      }
     });
 
     return () => {
