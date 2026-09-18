@@ -21,7 +21,7 @@ const PROVIDER_BRAND_TEXT_COLOR: Record<string, string> = {
   ollama: "#18181b",
   deepseek: "#4d6bfe",
   kimi: "#111111",
-  zhipu: "#3859FF",
+  zhipu: "#111111",
 };
 
 const PALETTE = [

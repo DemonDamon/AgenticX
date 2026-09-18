@@ -64,11 +64,10 @@ export const BailianIcon = ({ size, className }: SvgProps) => (
   </SvgIcon>
 );
 
-/** Geometric Z mark (智谱), not the ChatGLM atom. */
+/** Official filled Z mark (智谱). Ink follows currentColor (dark on light, white on dark). */
 export const ZhipuIcon = ({ size, className }: SvgProps) => (
-  <SvgIcon size={size} viewBox="0 0 24 24" fill="none" className={className}>
-    <path fill="#3859FF" d="M5.1 3.4h14.6l-1.2 3.7H3.9z" />
-    <path fill="#3859FF" d="M16.5 8.5h2.9L10.9 16.2H20.1v4.4H3.8v-4.4H8z" />
+  <SvgIcon size={size} viewBox="0 0 200 200" fill="none" className={className}>
+    <path fill="currentColor" d="M6 13h193l-17 25-84 120h97v26H0l17-25 85-121H6z" />
   </SvgIcon>
 );
 

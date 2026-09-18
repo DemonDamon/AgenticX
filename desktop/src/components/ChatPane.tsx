@@ -1225,8 +1225,8 @@ function ProviderGlyph({
   model?: string;
 }) {
   return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-strong" aria-hidden>
-      <ProviderIcon provider={provider} model={model} className="h-[15px] w-[15px]" />
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center overflow-visible text-text-strong" aria-hidden>
+      <ProviderIcon provider={provider} model={model} className="h-4 w-4 overflow-visible" />
     </span>
   );
 }
@@ -1544,7 +1544,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
         type="button"
-        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-none transition-colors focus:outline-none focus-visible:bg-surface-hover ${
+        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-5 transition-colors focus:outline-none focus-visible:bg-surface-hover ${
           pickerLock.disabled
             ? "cursor-not-allowed opacity-60"
             : open
@@ -1562,7 +1562,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       >
         <ProviderGlyph provider={currentProvider} model={currentModel} />
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left">
-          <span className="min-w-0 truncate text-text-strong">
+          <span className="min-w-0 truncate pl-px text-text-strong">
             {currentParts?.modelName ?? currentLabel}
           </span>
           {currentParts && ambiguousModelNames.has(currentParts.modelName) ? (
@@ -1651,7 +1651,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   type="button"
                                   role="option"
                                   aria-selected={isActive}
-                                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
+                                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-5 transition-colors ${
                                     isActive || isHover
                                       ? "bg-surface-cardStrong"
                                       : "hover:bg-surface-hover"
@@ -1665,7 +1665,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   onClick={() => handleSelect(opt.provider, opt.model)}
                                 >
                                   <ProviderGlyph provider={opt.provider} model={opt.model} />
-                                  <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
+                                  <span className="min-w-0 flex-1 truncate pl-px font-semibold text-text-strong">
                                     {modelName}
                                   </span>
                                   <span className="flex w-3.5 shrink-0 justify-end">

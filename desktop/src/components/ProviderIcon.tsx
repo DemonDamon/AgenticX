@@ -90,7 +90,14 @@ function Svg({
   children: ReactNode;
 }) {
   return (
-    <svg viewBox={viewBox} fill={fill} className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden>
+    <svg
+      viewBox={viewBox}
+      fill={fill}
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      overflow="visible"
+    >
       {children}
     </svg>
   );
@@ -151,9 +158,11 @@ function IconMiniMax({ className }: { className?: string }) {
 
 function IconZhipu({ className }: { className?: string }) {
   return (
-    <Svg className={className} fill="none">
-      <path fill="#3859FF" d="M5.1 3.4h14.6l-1.2 3.7H3.9z" />
-      <path fill="#3859FF" d="M16.5 8.5h2.9L10.9 16.2H20.1v4.4H3.8v-4.4H8z" />
+    <Svg className={className} fill="none" viewBox="-50 -50 300 300">
+      <path
+        fill="currentColor"
+        d="M6 13h193l-17 25-84 120h97v26H0l17-25 85-121H6z"
+      />
     </Svg>
   );
 }
