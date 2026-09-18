@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "trainer",
-  "generation": "8474b930482143ddb9482fa390ba8786",
+  "generation": "9e4eddf88b9a40768d3675cc7a0a03fc",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:1d3b7b242b0d0189dfdae23d499bb38797545dac94fd343e9798b29cbecf4926",
   "summary_path": "conclusions/trainer_module_conclusion.md",
   "summary_sha256": "sha256:86763bf392d5b3b94e31706f22f195c6d7646f78b7d6e5d4290914fcb5d9598e",
-  "updated_at": "2026-09-01T05:50:24.386519+00:00"
+  "updated_at": "2026-09-17T23:49:44.152008+00:00"
 }

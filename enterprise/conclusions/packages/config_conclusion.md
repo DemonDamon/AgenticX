@@ -55,3 +55,15 @@ packages/config/
 | `packages/ui` | 类型消费（计划） | `BrandConfigSchema` 喂给 UI 运行时 brand 覆盖 |
 | `packages/branding` | 互补 | branding 仅版本标签；本包的 schemas 是事实 brand 定义源 |
 | `plugins/theme-default` | 默认 manifest | 本包 loader 直接寻址该 manifest（best-effort） |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+`src/index.ts` 现额外导出能力开关契约（不再「仅 re-export schemas」）：
+
+- `capability-id.ts`：稳定 capability id 解析/规范化。
+- `capability-state.ts`：能力开关状态机。
+- `opt-out-subject.ts`：用户/主体 opt-out 主语。
+- `desktop-capability-policy.ts`：桌面端能力策略（与 Near `enterprise-capabilities` 对齐）。
+
+配套 vitest：`capability-id*.test.ts`、`capability-state.test.ts`、`opt-out-subject.test.ts`、`desktop-capability-policy.test.ts`。Brand YAML loader 行为未改。

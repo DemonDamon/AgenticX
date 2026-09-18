@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "learning",
-  "generation": "74347d2fbc384c5fa777ed944d8f3a03",
+  "generation": "6b3e31c67beb47138a46b714ce9a590d",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:f7bb2a1e29c4238ace495641bd8db666f3cbf09211d22e5cfb78f0447cf56665",
   "summary_path": "conclusions/learning_module_conclusion.md",
   "summary_sha256": "sha256:15fd55bde6fb8fa0387c63fbdfe4d8507cc9ac32b4e998ec9eaa46cce6f63bf9",
-  "updated_at": "2026-09-01T06:08:37.630206+00:00"
+  "updated_at": "2026-09-17T23:49:39.970282+00:00"
 }

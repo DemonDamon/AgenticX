@@ -32,6 +32,7 @@ AgenticX/
 ├── deploy/            # Docker Compose 部署配置
 ├── scripts/           # 构建 / 发布脚本
 ├── research/          # 调研资料（codedeepresearch、legacy_v1）
+├── harness-lab/       # 实验台架（本控制面 exclude，不写 module conclusion）
 ├── discussions/       # 讨论记录
 ├── rules/             # 项目约定与规范
 ├── skills/            # 顶层 skill 定义
@@ -57,6 +58,8 @@ AgenticX/
 | **llms** | LLM 统一接入层：多 provider 适配（OpenAI / 百炼 / Kimi / Ollama / Ark）、failover、流式、缓存 | [llms_module_conclusion.md](llms_module_conclusion.md) |
 | **configs** | 静态 GraphRAG / knowledge graphers YAML 样例（无运行时加载逻辑） | [configs_module_conclusion.md](configs_module_conclusion.md) |
 | **package_root** | 包门面：版本 / 品牌 / 预设与 `__init__` 条件导出；`pyproject.toml` / `requirements.txt` 契约 | [package_root_conclusion.md](package_root_conclusion.md) |
+| **ops** | 只读运维查询：TelemetryQuery / OPS_TOOLS / ChangePlane / UModel | [ops_module_conclusion.md](ops_module_conclusion.md) |
+| **reliability** | 工具调用身份、CallLedger、RunState、崩溃重放 veto（无 Studio 依赖） | [reliability_module_conclusion.md](reliability_module_conclusion.md) |
 | **utils** | 跨模块原子写盘与受限 / 签名 pickle 工具 | [utils_module_conclusion.md](utils_module_conclusion.md) |
 | **workspace** | 用户 / 分身 / 群聊工作区 bootstrap、Markdown 记忆与 favorites 磁盘读写 | [workspace_module_conclusion.md](workspace_module_conclusion.md) |
 
@@ -123,6 +126,7 @@ AgenticX/
 | **embodiment** | GUI Agent / 具身智能：动作反思、卡住检测、动作缓存、Device-Cloud 路由、DAG 验证 | [embodiment_conclusion.md](embodiment_conclusion.md) |
 | **extensions** | AGX Bundle 扩展生态：bundle 定义、本地安装卸载、多源注册表聚合搜索 | [extensions_module_conclusion.md](extensions_module_conclusion.md) |
 | **cc_bridge** | 本机 Claude Code 桥接：受 Token 保护的本地 HTTP/NDJSON 控制面、headless / TUI 双模 | [cc_bridge_module_conclusion.md](cc_bridge_module_conclusion.md) |
+| **wb_bridge** | 本机 CodeBuddy CLI 桥：Bearer HTTP + stream-json，无 permission-prompt 通道 | [wb_bridge_module_conclusion.md](wb_bridge_module_conclusion.md) |
 | **desktop** | Near 桌面应用（Electron + React）：多窗格、群聊、工作区、焦点语音、远程后端 | [desktop_conclusion.md](../desktop/conclusions/desktop_conclusion.md) |
 | **integrations** | 第三方适配层：Volcengine AgentKit 桥接与 vendored mem0 记忆引擎 | [integrations_module_conclusion.md](integrations_module_conclusion.md) |
 | **delivery** | Near Desktop 交付 POC：git worktree 沙箱 + 五阶段 `plan.mdc` 流水线 | [delivery_module_conclusion.md](delivery_module_conclusion.md) |

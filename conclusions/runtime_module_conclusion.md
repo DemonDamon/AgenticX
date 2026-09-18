@@ -1,6 +1,6 @@
 # AgenticX Runtime 模块总结
 
-> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 
 ## 目录路径
 
@@ -74,7 +74,13 @@ agenticx/runtime/
 ├── provider_fallback.py    # 超时兜底切换 + 禁止兜底判定（附件路由锁 / 企业托管）
 ├── truncated_final.py      # 截断终答检测（finish_reason=length、未闭合 Markdown、路径截断）
 ├── widget_flow_guard.py    # 正文 ASCII 流程图检测与重写提示（每会话至多 1 次重试）
-└── usage_metadata.py       # 用量元数据（Token SSE）+ 多厂商 cached/reasoning 归一化
+├── usage_metadata.py       # 用量元数据（Token SSE）+ 多厂商 cached/reasoning 归一化
+├── isolate_run.py          # (NEW) 单次 git worktree 隔离（Multitask，不复用 delivery.worktree）
+├── plan_mode.py            # (NEW) Plan mode 回合意图：工具白名单 + 系统提示块
+├── plan_artifacts.py       # (NEW) 项目本地 Markdown Plan 产物
+├── work_items.py           # (NEW) 群级 work items（非 session todos）
+├── replay_ledger/          # (NEW) 耐久语义回放账本（store/recorder/export/branch）
+└── subagent_runs/resolver.py  # (NEW) 磁盘 run + 同会话 live overlay
 ```
 
 ---
@@ -544,3 +550,48 @@ GroupChatRouter.run_group_turn(routing="team")
 - **truncated_final.py**：截断终答检测增强——厂商显式 `finish_reason`（`length` / `max_tokens` / `max_output_tokens` / `max_completion_tokens`）必续一次；新增未闭合 Markdown（奇数个 ``` 或 `**`）与路径中间截断（如 `补 T4/T`）启发式。
 - **assistant_output.py**：`<followups>` 保留标签兼容 MiniMax 等模型的别名拼写（`followflows` / `follow-ups` / `follow_ups` / `followup`），统一归一为 `followups` 且不再把已知别名误判为非规范标签。
 - **tool_search.py**：默认模式从 `off` 改为 `auto`；`CORE_ALWAYS_LOAD_TOOLS` 新增 `web_search` 与 `update_self_identity`（`show_widget` 移出延迟白名单）；模型直接调用未加载工具时自动 load 并提示下轮重试（`TOOL_AUTO_LOADED_TEMPLATE`，无需先调 `tool_search`）。
+
+---
+
+## 2026-09-18 增量（replay / plan / isolate / work items）
+
+### Durable replay ledger（replay_ledger/）
+
+语义回放账本，与 `reliability.CallLedger` 互补（后者是工具调用身份；本包是整轮 RuntimeEvent 流）。
+
+- **contracts.py**：`SCHEMA_VERSION=1`；`EFFECT_CLASSES` = `{none, read, local_write, external_write, unknown}`；`RUN_STATUSES` / `EVENT_TYPES`（含 `ledger_gap`）；`validate_ledger_id` 拒绝 path 穿越。
+- **store.py / recorder.py**：`ReplayLedgerStore` 按 run 追加事件；`ReplayRecorder` 把 `RuntimeEvent` 录成 `RunEvent`。
+- **context_checkpoint.py / workspace_snapshot.py**：上下文检查点与工作区快照引用。
+- **export.py**：`export_run_json` / `export_run_markdown`（Studio 只读导出上限见 `run_replay_routes`）。
+- **branch_service.py**：从已完成 run 的某 `source_event_id` 开对话分支（`BranchServiceError`）。
+- **effects.py**：`classify_tool_effect` 供未声明 `BaseTool.effect_class` 的名称/命令分类。
+
+Studio 只读路由：`register_run_replay_routes`（鉴权 + 嵌套 subagent_runs）。
+
+### Plan mode（plan_mode.py + plan_artifacts.py）
+
+- `TURN_INTENT_ALLOWED_TOOLS`：只读检索 + `plan_create`/`plan_update`（与 `tools.policy.PlanModeLayer` 对齐）。
+- `apply_turn_intent_to_session`：自动化会话与 isolate_run **强制关闭** plan_mode。
+- `filter_tools_for_turn_intent` / `turn_intent_denial_message`：剥离写工具；模型连否决两次后 `plan_mode_retry_limit_reached`。
+- `PlanArtifact`：项目本地 Markdown（frontmatter + body），状态 `ready`/`building`/`completed`/`cancelled`；todos 上限 20。
+
+### Isolate run（isolate_run.py）
+
+单次 git worktree 隔离（**不** import `agenticx.delivery.worktree`，因该助手拒绝脏树）。根目录 `AGX_ISOLATE_ROOT` 或 `~/.agenticx/isolates`。状态挂 session scratchpad `isolate_json`。Studio `/chat` 在 `isolate_run=true` 时 `ensure_isolate`；另有 adopt/discard 路径。
+
+### Work items（work_items.py）
+
+群级组织对象（不是 session todos）。落 `groups/<group_id>/work_items.json`。状态机：`open` → `in_progress` → `submitted` → `accepted`（accepted/cancelled 终态）。`OWNER_KINDS`：human / avatar / meta。
+
+### Sub-agent run resolver（subagent_runs/resolver.py）
+
+`apply_live_overrides`：磁盘 `SubAgentRunStore` 与同会话内存行合并；**不复活**已终态 run；live 行不够新则忽略。
+
+### AgentRuntime / meta / 预算
+
+- `agent_runtime.py`：接入 replay recorder、plan_mode 工具过滤、isolate 路径重写、用量/截断增强（本区间约 +780 行，细节以源码为准）。
+- `meta_tools.py`：委派/fresh_round 与 plan/isolate 门控协同。
+- `tool_result_budget.py`：预算/归档阈值显著加厚（本区间约 +599 行）。
+- `usage_metadata.py` / `usage_store.py`：继续归一化 cached/reasoning，并服务 `studio.usage_alive` 的截断窗口。
+- `command_sandbox.py`：沙箱计划/能力上报补强。
+- `group_router.py`：与 work_items / 图事件收敛继续对齐。

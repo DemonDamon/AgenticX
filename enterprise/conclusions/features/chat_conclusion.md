@@ -179,3 +179,17 @@ export * from "./components/atoms/ToolCallCard";
 | `packages/core-api` | **类型契约** | 消息/会话类型 + 错误码翻译 + session-title 启发式 |
 | `packages/ui` | **UI 基础** | 全套 shadcn 组件 + brand 主题变量 |
 | `packages/config` | **类型契约** | `BrandConfig` / `FeatureFlags` |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+`store.ts` 大幅扩展（+1300 行量级），配套单测覆盖：
+
+- **Web Search**：引用渲染 `web-search-citation.ts`、favicon、store.web-search。
+- **Deep Research**：hydrate / reconnect / plan-chat composer / clarify-resume / interaction pref；`store.deep-research.test.ts`。
+- **多会话 / 模型切换 / 中断 / trace-id**：`store.switch-model`、`store.interrupt`、`store.trace-id`、`store.multi-session`。
+- **历史**：持久化队列与粘性错误（`store.history-persistence-queue` / `history-error-sticky`）。
+- **附件**：`attachment-link`、`compress-image`、`composer-attachment` 类型。
+- Markdown：`assistant-markdown-components.tsx` 大改（引用/代码/链接）。
+
+Portal 的 deep-research / web-search **编排实现**在 `apps/web-portal/src/lib/*`，本包负责工作区状态与 UI。

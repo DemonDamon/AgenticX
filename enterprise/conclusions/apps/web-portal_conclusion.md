@@ -240,3 +240,20 @@ apps/web-portal/
 - `portal-copy.ts`：已废弃 shim
 
 
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+员工前台从「薄适配器」扩成多条真实服务端能力（约 +257 路径）：
+
+- **协作房间**：`/api/rooms/**`、`/rooms` 页、`components/rooms/*`、`lib/collab-room/*`（PG/MySQL）。桌面经 `/api/desktop/rooms/**` 同源。
+- **桌面设备登录**：`/api/desktop/auth/device/{init,poll,approve,cancel}` + `/auth/desktop`；`desktop-device-auth.ts`、`desktop-token-policy.ts`。
+- **桌面 bootstrap / capabilities**：`/api/desktop/bootstrap`、`/api/desktop/capabilities`；`capability-packs-reader` / `capability-opt-outs-store`。
+- **Deep Research**：`src/lib/deep-research/*` 编排器 + `/api/chat/deep-research/runs/**`（stream/export/resume）。
+- **Web Search**：`src/lib/web-search/*` 工具循环、page-fetch、providers、tenant-config；`/api/me/web-search`。
+- **附件 / 产物**：parse、original-store、`/api/chat/attachments/**`、`/api/chat/artifacts/**`、会话 artifacts、batch-delete。
+- **改密**：`/api/auth/change-password` + `/auth/change-password`。
+- **可观测**：`instrumentation.ts`、`lib/observability/*`（portal_request_logs）。
+- Workspace UI：`HistorySessionsPanel`、`ComposerPlusMenu`、`NearEmptyWordmark`；completions 补 platform-features / sanitize / current-time。
+
+旧「portal 故意做得很薄」需修正：会话与登录仍薄，但 web-search / deep-research / collab / desktop-auth 已是本 app 内的一等实现。

@@ -4,7 +4,7 @@
 >
 > **原则**：只覆盖到一级目录 / 一级子模块，不下钻到文件级。需要文件级细节时，查阅对应 `conclusions/<dimension>/<module>_conclusion.md`。
 >
-> **最近全量刷新**：2026-07-21（target `8ebec3b5`，`code-module-summaries` custom 布局 + `state/` 基线）。本目录与主仓 `AgenticX/conclusions/` 平行，专门覆盖 `enterprise/` monorepo。注意：`enterprise/.gitignore` 忽略整个 `conclusions/`（含 `registry.json` / `state/`），默认不进 git。
+> **最近增量刷新**：2026-09-18（target `30e57496`，相对基线 `8ebec3b5`）。控制面 `layout: custom`。映射补 `skill-registry`、`enterprise-root`；`exclude_paths` 收仓外路径与 `enterprise/docs`。
 
 ---
 
@@ -29,6 +29,7 @@ enterprise/
 │   ├── web-portal/            #  员工前台（Next.js 15，端口 3000）
 │   ├── admin-console/         #  管理后台（Next.js 15，端口 3001）
 │   ├── gateway/               #  AI 网关（Go，端口 8088，OpenAI 兼容）
+│   ├── skill-registry/        #  窄技能注册服务（Python，端口 8090）
 │   └── edge-agent/            #  端侧 sidecar（Go，端口 127.0.0.1:7420）
 │
 ├── features/                  🧩 业务功能域 workspace 包（11 个）
@@ -94,6 +95,7 @@ enterprise/
 | **web-portal** | 员工前台 Next.js app：登录 / 对话 / 设置 / 配额 | TS | 3000 | [apps/web-portal_conclusion.md](apps/web-portal_conclusion.md) |
 | **admin-console** | 管理后台 Next.js app：IAM / metering / policy / 审计 / 模型 / channel / MCP | TS | 3001 | [apps/admin-console_conclusion.md](apps/admin-console_conclusion.md) |
 | **gateway** | AI 控制平面网关（Go + Chi）：多 vendor adaptor / channel 池 / 配额 / 缓存 / wasm 插件 / MCP host&proxy / 防篡改审计 | Go | 8088 | [apps/gateway_conclusion.md](apps/gateway_conclusion.md) |
+| **skill-registry** | 窄技能注册服务：search + fetch/scan，不连租户库 | Python | 8090 | [apps/skill-registry_conclusion.md](apps/skill-registry_conclusion.md) |
 | **edge-agent** | 端侧 sidecar（Go）：沙箱执行 + trace 落盘/上送（v0.2.0 MVP；Desktop 尚未接线）| Go | 127.0.0.1:7420 | [apps/edge-agent_conclusion.md](apps/edge-agent_conclusion.md) |
 
 ---
@@ -157,6 +159,7 @@ enterprise/
 |---|---|---|
 | **plugins/** | 10 个运行时插件：3 个 PII/合规规则包 + 4 个 wasm 网关插件 + 2 个工具 CLI + 1 个主题（合订一篇）| [plugins/plugins_overview_conclusion.md](plugins/plugins_overview_conclusion.md) |
 | **deploy/** | 部署资产：Docker Compose dev/prod + K8s deployment/service/hpa + Nginx 公网入口 + 公私混合部署 | [deploy/deploy_conclusion.md](deploy/deploy_conclusion.md) |
+| **enterprise-root** | monorepo 胶水：pnpm/turbo、start-dev、方言迁移、e2e/压测脚本 | [enterprise_root_conclusion.md](enterprise_root_conclusion.md) |
 
 ---
 

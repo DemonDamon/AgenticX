@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "flow",
-  "generation": "c5ad9b5c01954b1db773f4076cb0f80b",
+  "generation": "40b0cab44d7c41329f6fd97e338d038d",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:d6ab5eeeaf25157d39c1b31a63cd19b0371b7b931ae8580009c2bf4d5e43bf08",
   "summary_path": "conclusions/flow_module_conclusion.md",
   "summary_sha256": "sha256:49bc1359b35484f89d3e2c5648e3e751af6227fcbf84103cc19c9fbfa692f42a",
-  "updated_at": "2026-09-01T06:08:42.820630+00:00"
+  "updated_at": "2026-09-17T23:49:38.455567+00:00"
 }

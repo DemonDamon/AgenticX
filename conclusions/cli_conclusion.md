@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 
 ## 目录路径
 
@@ -36,7 +36,9 @@ agenticx/cli/
 ├── skills_commands.py       # skills 子命令
 ├── volcengine_commands.py   # 火山引擎专属命令
 ├── log_config.py            # 日志配置
-├── main.py                  # Typer CLI 主程序入口
+├── main.py                  # Typer CLI 主程序入口（含延迟注册 `wb-bridge`）
+├── wb_bridge_commands.py    # (NEW) `agx wb-bridge serve`
+├── browser_bridge_settings.py  # (NEW) Near WorkPanel 浏览器桥 URL/Token
 ├── client.py                # AgenticXClient / AsyncAgenticXClient SDK
 ├── debug.py                 # DebugServer 调试工具
 ├── deploy.py                # DeployManager 部署工具
@@ -118,7 +120,10 @@ agenticx/cli/
 | 任务经验 | **(NEW)** `task_experience_learn` / `task_experience_retrieve` / `task_experience_clear`（随 routing="team" Workforce 桥接引入） |
 | 代码生成 | **(NEW)** `codegen` |
 | Claude Code 桥接 | **(NEW)** `cc_bridge_start` / `cc_bridge_send` / `cc_bridge_list` / `cc_bridge_stop` / `cc_bridge_permission` |
+| CodeBuddy / WB 桥接 | **(NEW，2026-09)** `wb_bridge_start` / `wb_bridge_send` / `wb_bridge_list` / `wb_bridge_describe` / `wb_bridge_stop`（本机 `codebuddy` 子进程；进行中重发由桥返回 409，须 poll `describe`） |
+| 计划产物 | **(NEW，2026-09)** `plan_create` / `plan_update`（项目本地 Markdown Plan；Plan mode 白名单） |
 | 桌面操控（Computer Use） | **(NEW)** `desktop_screenshot`, `desktop_mouse_click`, `desktop_keyboard_type` |
+| Ops 只读排障 | **(NEW，2026-09)** 经 `agenticx.ops.tools.merge_ops_tools_into` 注入 `get_trace` / `get_logs` / `get_recent_changes` / `get_session_review` / `get_umodel` / `sync_changeplane` / `get_trace_parity` / `get_channel_slo`（`ops.tools_enabled` 默认开） |
 
 **dispatch_tool_async(tool_name, arguments, session, confirm_gate, event_callback, team_manager)**：
 - 按 tool_name 路由到对应工具实现
@@ -240,6 +245,7 @@ agenticx/cli/
 - **(NEW)** `web_search`：内置 Web 搜索配置（DuckDuckGo 默认 + 可选 API providers）；导出时对 `providers.*.api_key` 做掩码（参见 Studio `web_search` 路由）
 - **(NEW)** `longrun`（`LongRunSettings`）：Symphony 风格长任务编排开关——`enabled` / `workspace_root`（默认 `~/.agenticx/task-workspaces`）/ `stall_threshold_sec`（300s）/ `poll_interval_sec`（30s）/ `worker_session_id` / `linear_api_key` / `linear_team_ids`
 - **(NEW，2026-09)** `permissions.command_permissions`：OS 命令沙箱档位——`read-only` / `workspace-write`（默认）/ `danger-full-access`；`permissions.unattended_allow_workspace_scripts`（默认关）：无人值守（含 `automation:*` 定时任务）是否可执行工作区内已存在脚本，仅对非 never 类别、可执行文件在 writable roots 内且调用前已存在的调用生效；`permissions.allowed_tools` 语义明确为「跳过确认」（沙箱仍生效）
+- **(NEW，2026-09)** `OpsSettings.tools_enabled`（`ops.tools_enabled`，默认 True）：是否把 Ops 只读工具并入 STUDIO 表；`set_wb_bridge_field()` 写 `wb_bridge.*`（与 cc_bridge 对称）
 
 ---
 
@@ -259,6 +265,7 @@ agenticx/cli/
 - `generate`：代码生成（来自 generate_commands.py）
 - `skills`：Skill 管理（来自 skills_commands.py）
 - **(NEW)** `harness`：会话工作循环健康审查（来自 harness_app.py，延迟导入注册）
+- **(NEW，2026-09)** `wb-bridge`：延迟导入 `wb_bridge_commands.wb_bridge_app`，`agx wb-bridge serve`（`--host`/`--port`/`--token`，默认 9743）
 
 **(NEW，2026-09)** `loop` 命令构造系统提示时传 `include_volatile=False`（`build_meta_agent_system_prompt`），保持系统前缀稳定以利于 prompt 缓存。
 

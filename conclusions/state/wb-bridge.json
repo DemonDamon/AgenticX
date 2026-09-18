@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "wb-bridge",
+  "generation": "ef190be1ec7740fdae4f66482ebcf58c",
+  "mapping_revision": 1,
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:c5ede50c4f73433ed40108857cd7cd9145004fbe94a4716088f016a7351a211f",
+  "summary_path": "conclusions/wb_bridge_module_conclusion.md",
+  "summary_sha256": "sha256:92cfdb359361d6217a9d2786202c5d187006e7791a3a892a4ff5f59d51f3d58a",
+  "updated_at": "2026-09-17T23:48:11.113666+00:00"
+}

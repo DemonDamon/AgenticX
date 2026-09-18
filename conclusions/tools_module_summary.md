@@ -1,6 +1,6 @@
 # AgenticX Tools 模块完整结构分析
 
-> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/tools`
@@ -71,9 +71,9 @@ agenticx/tools/
 #### agenticx/tools/base.py
 **文件功能**：AgenticX 工具系统的抽象基类定义。
 **技术实现**：基于 `abc.ABC` 定义了 `BaseTool`，使用 Pydantic 进行参数校验，支持同步/异步执行切换，并内置了 Bash 语法静态预检功能。
-**关键组件**：`BaseTool` (核心抽象类), `ToolError` (异常基类), `validate_bash_syntax` (语法检查方法), `process_llm_request` (ADK 增强方法)。
+**关键组件**：`BaseTool` (核心抽象类), `ToolError` (异常基类), `validate_bash_syntax` (语法检查方法), `process_llm_request` (ADK 增强方法)。 **(NEW)** 类属性 `effect_class` + `resolve_effect_class(arguments)`：声明副作用类别（须属于 `runtime.replay_ledger.contracts.EFFECT_CLASSES`：`none`/`read`/`local_write`/`external_write`/`unknown`）；未声明则走 `classify_tool_effect`，最终默认 `unknown`（fail-closed）。函数内延迟导入 runtime，避免 tools→runtime 循环依赖。供 `reliability.replay_policy` 决定崩溃后能否重跑。
 **业务逻辑**：定义了工具的生命周期契约，包括参数验证、回调触发、LLM 请求修改等，赋予工具“感知和主动修改环境”的能力。
-**依赖关系**：被所有具体工具实现继承，依赖 `..core.message`。
+**依赖关系**：被所有具体工具实现继承，依赖 `..core.message`；`resolve_effect_class` 可选依赖 `runtime.replay_ledger`。
 
 #### agenticx/tools/builtin.py
 **文件功能**：提供开箱即用的基础内置工具集。
@@ -286,3 +286,10 @@ AgenticX Tools 模块在保留原有强类型校验和 MCP 灵活性的基础上
 **VeADK 内化**：
 - **SkillExecutionBackend 抽象与实现（P2-1）**：新增 `skill_execution_backend.py` 定义技能执行后端的抽象接口，支持 `LocalSkillBackend`（本地执行）和 `SandboxSkillBackend`（沙箱隔离执行），通过与 AgenticX 现有 Sandbox 模块的集成，实现灵活的技能执行策略选择
 - **SkillBundleLoader 后端支持（P2-1）**：扩展 `SkillBundleLoader.__init__` 接受 `execution_backend` 参数，允许为技能包指定执行后端，实现本地和沙箱执行的无缝切换
+
+### 2026-09 增量（replay / 取消解析 / Plan mode）
+
+- **`BaseTool.effect_class`**：见上文 `base.py`；未声明则 `unknown`，禁止默认当只读。
+- **`document_text.read_document_text(..., cancel_event=)`**：把取消事件传给 `LiteParseAdapter.parse_to_text`；`LiteParseCancelled` 映射为 `DocumentTextError("cancelled", "解析已取消")`。`read_document_text_sync` 同步透传。供 KB/Brain job `request_cancel`。
+- **`adapters/liteparse.py`**：解析过程可协作取消（与 document_text 的 `cancel_event` 对齐）。
+- **`policy.PlanModeLayer.read_only_tools`**：去掉 `skill_list`/`skill_use`（Plan mode 禁止靠 skill 绕过写工具）；加入 `knowledge_search`/`code_search`/`plan_create`/`plan_update`，与 `runtime.plan_mode.TURN_INTENT_ALLOWED_TOOLS` 对齐。

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "storage",
-  "generation": "057092db61f14ceca439696cc2693215",
+  "generation": "2ebde3b292b14f168fe4735cccdfd08a",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:38b1900569ed4c3edf850cdc768e292e01671688ddd484ed8db127109c37911c",
   "summary_path": "conclusions/storage_module_conclusion.md",
   "summary_sha256": "sha256:286b77fae54c54861614d51fbe6058c3e333b19d1f131aed20f65edc407d5669",
-  "updated_at": "2026-09-01T05:50:23.060756+00:00"
+  "updated_at": "2026-09-17T23:49:43.866772+00:00"
 }

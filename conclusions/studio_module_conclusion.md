@@ -1,6 +1,6 @@
 # AgenticX Studio 模块总结
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 
 ## 目录路径
 
@@ -29,9 +29,13 @@ agenticx/studio/
 ├── attachment_routing.py  # (NEW) 企业附件自动路由：文档附件锁定私有部署模型的运行时判定
 ├── document_pages.py      # (NEW) PDF 页图渲染（PyMuPDF），替代抽文本的有损通路
 ├── vision_autodescribe.py # (NEW) 纯文本模型下本轮图片的视觉兜底自动解读
+├── run_replay_routes.py   # (NEW) 耐久 run 回放只读 API + 分支
+├── conversation_continue.py  # (NEW) 从某条消息切开继续（对话分支，非状态恢复）
+├── changeplane_routes.py  # (NEW) ChangePlane webhook 入站
+├── usage_alive.py         # (NEW) retry/edit 截断后的用量时间窗
 ├── code_index/            # (NEW) 代码索引 HTTP 路由（config/status，serve 期模型预载）
 ├── web_search/            # (NEW) 内置 Web 搜索子包（contracts/providers/service/routes）
-└── kb/                    # 本地知识库（manager/runtime/routes）
+└── kb/                    # 本地知识库（manager/runtime/routes；job 可 cancel）
 ```
 
 ---
@@ -245,7 +249,7 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 
 ### protocols.py
 
-定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。
+定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。
 
 ---
 
@@ -293,6 +297,34 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 ### 中断失败提示 — turn_interruption.py
 
 `_last_failure_summary()` 保留 `模型调用失败 (provider/model):` 前缀（卡片可见是哪个模型失败），新增剥离 `litellm.UnsupportedParamsError:`，摘要上限从 120 放宽到 160 字符。
+
+---
+
+## 2026-09-18 增量
+
+### Run replay（run_replay_routes.py）
+
+`register_run_replay_routes(app, manager, check_token)`：Desktop token 保护的只读回放。列出/读取 `ReplayLedgerStore` 事件，嵌套 `SubAgentRunStore` 活动；`export_run_json` / `export_run_markdown`（事件上限 10000、解析字节上限 32MiB）；`CreateRunBranchRequest` 走 `BranchService`（`source_event_id` + instruction）。
+
+### Conversation continue（conversation_continue.py）
+
+从指定消息切开后续对话（**不是** checkpoint 状态恢复）。解析 Desktop 加载 id（`{sessionId}-i{index}[-{storedId}]`）、`id` / `metadata.client_turn_id`。`ConversationContinueError` 带稳定 `code`。server 在对应会话 API 捕获后映射为 HTTP 错误。
+
+### ChangePlane webhook（changeplane_routes.py）
+
+`POST /api/ops/changeplane/webhook`：`AGENTICX_CHANGEPLANE_WEBHOOK_SECRET` 未设或 HMAC 不匹配 → 403 `{reason: webhook_disabled}`（不区分「未配置」与「密钥错」，避免探测）。body 交给 `ops.changeplane.webhook.apply_webhook_payload`。`mount_changeplane_routes` 在 `create_studio_app()` 注册。
+
+### KB / Brain job 取消
+
+`kb/jobs.py` 增加 `request_cancel`；`kb/routes.py` 暴露取消；`kb/runtime.py` 把 `cancel_event` 传到 `read_document_text` / LiteParse。与 Brain `POST /api/brains/{id}/jobs/{job_id}/cancel` 同语义（404 / 409 已终态）。
+
+### usage_alive.py + context_usage
+
+`as_timestamp_ms` / `keep_before_ms_from_messages`：retry/edit 截断后，用量事件只保留截断点及之前的历史，丢掉被丢弃世代。`context_usage.py` 本区间继续收紧缓存与窗口估算（约 +251 行）。
+
+### server.py / session_manager.py
+
+`/chat` 前置：`plan_mode` + `isolate_run`（`ensure_isolate`；另有 adopt/discard isolate 路由）。`session_manager` 本区间约 +406 行：与 replay 落账、续跑切开、用量窗口对齐。`subagent_review.py` 随 resolver live overlay 小幅修订。
 
 ---
 

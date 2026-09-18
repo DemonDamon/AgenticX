@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "policy",
-  "generation": "f15db67bc79645469f3c199b19b65418",
+  "generation": "31c7a88e0b7d455d8c9e6b5fa17bf14f",
   "mapping_revision": 1,
-  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
-  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:3630998bf15d03a8892449daeb74900ee4edef9b8da84cde40dbd23d04b3015c",
   "summary_path": "enterprise/conclusions/features/policy_conclusion.md",
   "summary_sha256": "sha256:5173ab0e77be1959e0ac8aa90b70204cd4ef4d1c60fbcae3da42d5b054340d5d",
-  "updated_at": "2026-07-21T07:39:23.238169+00:00"
+  "updated_at": "2026-09-17T23:53:59.901314+00:00"
 }

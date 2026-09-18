@@ -235,3 +235,15 @@ export * as mysql from "./mysql";
 
 - 主仓 `agenticx` 框架无独立的 SQL schema 包；存储后端通过 `agenticx/storage` 抽象（多后端：文件 / Redis / Postgres / SQLite），schema 由各业务方自带
 - 本包是 **Enterprise 专用**的一套生产级双方言（PostgreSQL + MySQL）Drizzle schema，承载企业平台业务事实，并通过 `contracts/` 提供方言中立 DTO
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+双方言同步新增域（`src/schema/index.ts` 现导出这些文件）：
+
+- `desktop-device-auth`、`capability-packs`、`user-groups`、`user-opt-outs`、`collab-rooms`
+- `chat-artifacts`、`chat-attachments`、`chat-history-operations`、`deep-research-runs`、`portal-request-logs`
+- `users.mustChangePassword` / `chat-sessions.pinned_at` / `gateway-audit-events.trace_id`
+- `runtime-config`：web-search / deep-research 开关列
+
+PG 迁移自 `0030_*` 起；MySQL 自 `0002_*` 起，journal 同步加长。旧文「23 域 / journal 29 / MySQL 2 条」已过时，以 `schema/index.ts` + 两边 `meta/_journal.json` 为准。

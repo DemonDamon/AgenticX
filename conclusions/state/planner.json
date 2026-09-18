@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "planner",
-  "generation": "09ce5c7817bd40ec94f039cc155a3ed2",
+  "generation": "4ed148ea46314b29ba485cb3ae5d1712",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:b5460f7b91c8542c2f5382b98216256e40e6e49812bbeea3d4c2c37cca7a1ffd",
   "summary_path": "conclusions/planner_module_conclusion.md",
   "summary_sha256": "sha256:9fd52892d11aa0f3a201b72f387d61bbf77e32c011c8c7268fe9025f9d9f437b",
-  "updated_at": "2026-09-01T05:50:20.801295+00:00"
+  "updated_at": "2026-09-17T23:49:41.117092+00:00"
 }

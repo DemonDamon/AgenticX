@@ -217,3 +217,13 @@ vitest，运行 `pnpm --filter @agenticx/iam-core test`：
 | `apps/web-portal` | 主消费者 | session 加载、chat 数据访问 |
 | `apps/admin-console` | 主消费者 | 所有 admin/* 数据 store；snapshot 生成 |
 | `apps/gateway`（Go） | snapshot 消费者 | 通过 admin-console `/api/internal/*` 拉 PAT 吊销 / session grants / compliance snapshot；本包是 snapshot 的源头 |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `desktop-device-auth-service.ts`：桌面设备码登录（init / poll / approve / cancel）+ `desktop-device-auth-service.test.ts`。
+- `repos/user-groups.ts` + MySQL 镜像：用户组 CRUD/成员。
+- `repos/user-opt-outs.ts` + MySQL：能力 opt-out 持久化。
+- `repos/assignment-keys.ts`：分配键规范化。
+- users / refresh-token store：补 `mustChangePassword` 等列读写。
+- barrel 导出上述服务与 repo。

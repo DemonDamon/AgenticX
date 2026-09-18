@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "retrieval",
-  "generation": "67825db7d15c44df82d8b123d79f43f3",
+  "generation": "4341938c70854ada9a6ecb275571af32",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:e6f6126ce5cb2774cd7cbab3d1072b06925e2966e19c67699c63a629fee9aad3",
   "summary_path": "conclusions/retrieval_module_conclusion.md",
   "summary_sha256": "sha256:b0dc99fa641cb18f8e75fa1b4a7f23fc4289dd8cac04b126cb3ce449120d76c9",
-  "updated_at": "2026-09-01T05:50:21.757818+00:00"
+  "updated_at": "2026-09-17T23:49:42.037462+00:00"
 }

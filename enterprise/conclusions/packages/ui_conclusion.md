@@ -54,3 +54,8 @@ packages/ui/
 | `apps/admin-console`、`apps/web-portal`、所有 `features/*`、`customers/*` | 直接 import | 全平台统一 UI 原语与 token |
 | `packages/branding` | 互补 | branding 是空 stub；本包包含真实 branding 组件 |
 | `packages/config` | 间接 | `BrandConfigSchema` 喂给 `buildBrandThemeVars` 做运行时品牌覆盖 |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `src/components/data/DataTable.tsx`：表格交互增强（分页/空态与列状态；仍为 `@tanstack/react-table` 包装）。无新原语、无 token 体系变更。

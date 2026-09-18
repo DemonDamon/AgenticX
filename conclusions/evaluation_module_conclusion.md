@@ -4,7 +4,7 @@
 > **创建日期**: 2024-12-27
 > **核心价值**: 将智能体评估从"手工测试"升级为"工程化、自动化、标准化"的流程
 
-> 结论更新时间：2026-09-01（覆盖上一基线 f3ba65001c29 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 
 ---
 
@@ -23,8 +23,11 @@ agenticx/evaluation/
 ├── trajectory_matcher.py    # 轨迹匹配器
 ├── runner.py                # 评估执行器
 ├── llm_judge.py (NEW)       # LLM-as-a-Judge 评测器（内化自 Pydantic AI）
-└── span_evaluator.py (NEW)  # 基于 Span 的细粒度评测器（内化自 Pydantic AI）
+├── span_evaluator.py (NEW)  # 基于 Span 的细粒度评测器（内化自 Pydantic AI）
 ├── trace_converter.py (NEW) # Trace 转 EvalSet 转换器（参考 VeADK）
+├── fault_injection.py (NEW) # 可靠性台架：确定性故障注入 + ScriptedFakeLLM
+├── reliability_runner.py (NEW) # 驱动 ReActAgent 的故障注入 runner
+└── benchmarks/reliability_v1.json  # 可靠性用例清单
 ```
 
 ---
@@ -218,4 +221,14 @@ AgenticX Evaluation 模块通过内化 Google ADK 的评估系统设计，为智
 
 **VeADK 内化**：
 - **TraceToEvalSetConverter（P1-2）**：新增 `trace_converter.py` 实现从 `ExecutionTrajectory` 到 `EvalSet` 的自动转换，支持从执行轨迹自动提取查询、工具调用和参考答案，形成完整的评测闭环，加速评估数据集的构建
+
+### 可靠性台架（fault_injection.py + reliability_runner.py，2026-09）
+
+与 `EvalRunner` 并列、驱动规范 `ReActAgent`（不经 AgentExecutor）：
+
+- **FaultKind**：`kill_before_tool_result` / `kill_after_tool_result_before_persist` / `persist_failure` / `llm_timeout_mid_stream` / `duplicate_tool_call_id` / `changed_args_same_id`。
+- **`_InjectedCrash`**：继承 `BaseException`（不是 Exception），避免被 agent 内 `except Exception` 吞掉，模拟真进程被杀。
+- **FaultInjector**：单实例至多开火一次；可按 `at_call_index` / `tool_name` 过滤。
+- **ReliabilityRunner**：跑 `benchmarks/reliability_v1.json`；接入 `CallLedger` + `RunStateStore`；`check_history_consistency()` 校验 assistant/tool 配对；可诊断错误必须含工具名且命中中文/英文理由标记（拒绝裸 `_type` / `KeyError`）。
+- 导出：`ReliabilityCase` / `ReliabilityMetrics` / `ReliabilityRunner` 及故障注入类型（见 `__init__.__all__`）。
 

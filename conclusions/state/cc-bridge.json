@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "cc-bridge",
-  "generation": "f9e3b2450c5b48e391747ad7e108d51e",
+  "generation": "605fec188ef1485cb92e814d8f6fed84",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:0f130cb285f3d9e8529f6c0f2b5c1f525376e957f78b489c32b660a24af4db19",
   "summary_path": "conclusions/cc_bridge_module_conclusion.md",
   "summary_sha256": "sha256:a80ab20444327a9e519513c04229d8d82b0ce9a63fd654d165b78ce473434e6e",
-  "updated_at": "2026-09-01T05:50:17.262981+00:00"
+  "updated_at": "2026-09-17T23:49:35.171593+00:00"
 }

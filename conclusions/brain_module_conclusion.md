@@ -1,6 +1,6 @@
 # AgenticX Brain 模块总结
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更；首次创建于 2026-05-29）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更；首次创建于 2026-05-29）
 
 ## 模块概述
 
@@ -68,6 +68,8 @@ agenticx/brain/
 ### REST 路由（routes.py）
 
 `register_brain_routes()` 注册 `/api/brains` 等接口（幂等注册保护），对外暴露脑列表（文档脑会附带实时 stats）与脑管理能力；`_require_docs_brain()` 做类型校验后返回对应 runtime。
+
+**(NEW，2026-09)** `POST /api/brains/{brain_id}/jobs/{job_id}/cancel`：对文档脑入库 job 调用 `rt.jobs.request_cancel(job_id, rt.runtime)`。job 不存在 → 404；已终态 → 409 `job already finished`；成功返回更新后的 `job.to_dict()`。与 Studio KB `jobs.request_cancel` / LiteParse `cancel_event` 同一取消语义。
 
 ## 设计模式
 

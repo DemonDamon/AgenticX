@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "observability",
-  "generation": "b43597def7ec41e7a262f3c421dbd4d1",
+  "generation": "00ceda5189614a9a8b2d3c84e8bedddc",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
-  "source_fingerprint": "sha256:6c65666ccb4017fc5e07749557813d815cdec694c43dbf4d2c4690d32364420f",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:605536a2365123d1e5f0c36d2c91e70b7dbd8ad28c0877bacd2c913299941698",
   "summary_path": "conclusions/observability_module_conclusion.md",
-  "summary_sha256": "sha256:a35b5d31470aedf1e865de4922775a169251a3c7bca59b0a7af42d7716b39377",
-  "updated_at": "2026-09-01T06:08:38.900364+00:00"
+  "summary_sha256": "sha256:0e86d16c096067c506f160752ea3b162c5d3c81b711ab3b1f2247437e73dec8f",
+  "updated_at": "2026-09-17T23:48:09.427529+00:00"
 }

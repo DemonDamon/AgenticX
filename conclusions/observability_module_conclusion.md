@@ -1,8 +1,8 @@
 # AgenticX Observability模块完整结构分析
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
 >
-> 本轮重大变更：修复 `logging.py` 中 `StructuredLogger.log()` **每次调用必抛 `KeyError`** 的缺陷——`extra` 载荷恒定携带 `message` 键，与 `LogRecord` 内建字段撞名；新增 `_RESERVED_LOGRECORD_ATTRS` 常量与 `_log_extra()` 过滤辅助函数，五个级别分支统一改传过滤后的 `extra`。
+> 本轮新增 `correlation.py`：请求级 ContextVar（session/tenant/deployment/gateway_trace）并写入 OTel span 属性。此前已修复 `StructuredLogger.log()` `extra` 与 `LogRecord` 撞名的 `KeyError`。
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\observability`
@@ -20,6 +20,7 @@
 ├── monitoring.py (7,123 bytes)         # PrometheusExporter 支持 OTel 命名（向后兼容）
 ├── span_tree.py (NEW) ← 层级化 Span 管理（内化自 Pydantic AI）
 ├── ai_attributes.py (NEW) ← GenAI 语义约定属性常量（内化自 Spring AI）
+├── correlation.py (NEW) ← 请求级 session/tenant/deployment/gateway_trace ContextVar
 ├── trajectory.py (6,789 bytes)
 ├── utils.py (15,234 bytes)
 ├── websocket.py (8,456 bytes)
@@ -255,7 +256,19 @@
 
 **业务逻辑**：统一 LLM 调用的可观测性指标命名，避免各 Provider 各自为政
 
-**依赖关系**：纯常量/枚举定义，被 `otel/handler.py` 与 `monitoring.py` 引用
+**依赖关系**：纯常量/枚举定义，被 `otel/handler.py` 与 `monitoring.py` 引用。**(NEW)** 增补 `AGENTICX_SESSION_ID` / `AGENTICX_TENANT_ID` / `AGENTICX_DEPLOYMENT_ID` / `AGENTICX_GATEWAY_TRACE_ID`，供 `correlation.apply_correlation_attributes` 使用。
+
+#### 15. `correlation.py`（NEW，2026-09）
+
+**文件功能**：请求作用域关联键，用 `contextvars.ContextVar` 保存 `session_id` / `tenant_id` / `deployment_id` / `gateway_trace_id`。
+
+**关键函数**：
+- `bind_correlation(...)` / `reset_correlation(tokens)`：set/reset 成对使用。
+- `bind_correlation_from_session(session)`：从 session 字段、`TenantContext.get_tenant_id()`、`AGENTICX_DEPLOYMENT_ID`、`session.metadata.gateway_trace_id` 填充。
+- `current_correlation()`：只返回非空键。
+- `apply_correlation_attributes(span)`：把当前关联键写到 span（`otel/handler.py` 与 `otel/hooks.py` 在建 span 后调用）。
+
+**依赖关系**：`ai_attributes`；可选 `agenticx.server.tenant`（导入失败则 tenant 为空）。
 
 #### 14. `mineru/` 子模块（既有，本轮非新增）
 

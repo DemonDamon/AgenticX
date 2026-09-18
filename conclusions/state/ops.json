@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "ops",
+  "generation": "a4ff68f9bdb242b3810b9b8c385a5bb7",
+  "mapping_revision": 1,
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:880b5fb7d6519180f44900735343d3aeddc18fa4d709a4b689ebe5bbddb80664",
+  "summary_path": "conclusions/ops_module_conclusion.md",
+  "summary_sha256": "sha256:61c318dc4679d0ff3033216c40c4dd123252e074a0f94b070cdeb7a7168ced44",
+  "updated_at": "2026-09-17T23:48:10.608880+00:00"
+}

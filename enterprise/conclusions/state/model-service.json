@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "model-service",
-  "generation": "8d483dd2d4124c86ad29c1097fdd4ab4",
+  "generation": "188dc806f7864be2b58e8075d44e24d5",
   "mapping_revision": 1,
-  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
-  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:d4e46bad2fcea3da5cca293105c99152f16172d2ccb8d6f9e7551ed532ff9a24",
   "summary_path": "enterprise/conclusions/features/model-service_conclusion.md",
   "summary_sha256": "sha256:6a844e5b0e992bbc5ffa47cf9535535337bea81b4f07d04ebb10e02ff34ee7c9",
-  "updated_at": "2026-07-21T07:46:53.510998+00:00"
+  "updated_at": "2026-09-17T23:53:59.387888+00:00"
 }

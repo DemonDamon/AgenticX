@@ -297,3 +297,14 @@ apps/gateway/
 4. **README 部分内容陈旧**：`README.md:9` 称审计写 "ClickHouse / 本地文件"，但实际代码写 PG `gateway_audit_events`（或 jsonl），**无 ClickHouse 集成**；`README.md:15` 称 "Go 1.22+"，`go.mod:3` 实为 `go 1.25.0`。
 5. **edge-agent 侧未硬接**：默认 `local` 路由指向 Ollama 风格的 `http://127.0.0.1:11434/v1`；`packaging/edge-agent` Go 单二进制是空壳 skeleton，网关进程内**没有**专门对接 edge-agent sidecar 的代码路径，描述端侧闭环时宜用「本地后端服务」等中性措辞。
 6. **配额维度以租户/角色/模型为主**：`quota/Config` 支持 `users` / `departments` / `apiTokens` map，但 admin-console「额度控制」页仍偏查询展示；按部门/用户级 TPM/QPM/并发**真正限流落地**需独立 plan，不可在客户对接中口头承诺「已支持」。
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `internal/mcphost/entitlement.go`：MCP 能力授权链（schema/chain 单测齐全）；`secret_envelope.go` 信封密钥。
+- `internal/gatewayinternal/secret.go`：内部凭据从 env / file 读取。
+- `server.go` / `cache_integration.go` / `health.go`：缓存与健康检查加厚；流式 usage 结算测试。
+- `trace_context.go`：入站 trace / span 贯通；审计 writer 写 `trace_id`。
+- `metering/redact.go`：计量日志脱敏；`pricing.go` 计费乘数测试。
+- `database/missing_relation.go`：缺表/缺关系可诊断，避免裸 SQL 报错。
+- `provider/openai_http.go`：上游 HTTP 客户端行为收紧。

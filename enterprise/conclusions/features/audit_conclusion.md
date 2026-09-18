@@ -144,3 +144,9 @@ interface AuditStore {
 | `packages/iam-core` | **运行时依赖** | `resolveDatabaseConfig()` / `getIamDb()` / `getAuditRetentionCutoff` |
 | `packages/core-api` | **类型契约** | 所有 audit 类型源头 |
 | `features/metering` | **未对接** | 四维查询与 metering 全量对接为进行中项 |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- PG / MySQL / Local store：查询支持 `trace_id` 过滤（`local-store.trace-filter.test.ts`）。
+- `factory.ts`：`createAuditStore()` **仅** `postgresql` | `mysql`（`never` 穷尽）；`verifyConfiguredAuditChain` 按方言走全表链校验。Local 仍在包内，但不再作为 factory 默认回退。

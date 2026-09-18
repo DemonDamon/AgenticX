@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "avatar",
-  "generation": "9197911022ca44708bfa8e2cbc332945",
+  "generation": "972bbe50044249fb81d31d1dba3dce7c",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:24184f61343129ebddd771e5d357f427596d527bf6b168a601359caeffea24f4",
   "summary_path": "conclusions/avatar_module_conclusion.md",
   "summary_sha256": "sha256:7fc68a61b98725cbc0988b3d8345059145a99189f15d34f66bf39397bb34bd4f",
-  "updated_at": "2026-09-01T06:08:34.830717+00:00"
+  "updated_at": "2026-09-17T23:49:34.873317+00:00"
 }

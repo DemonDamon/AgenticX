@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "agents",
-  "generation": "b7ef69d54aff418dad7e2ed42dfa653b",
+  "generation": "45ccf71ad4c3470898d06ae066c43a10",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
-  "source_fingerprint": "sha256:0c582e3a161d42bfa9694e178c71b9b24a664ed7ffbb62b8b4897c615db0b5ea",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:645ca9c9a05bb914a3ec528aa1670d1ce74048c180fe3c9d74e29c0b7743d190",
   "summary_path": "conclusions/agents_module_conclusion.md",
-  "summary_sha256": "sha256:b6da307a2aa5ae13718fdc3e890675c9c9d9f4fe343528f1f37ae0b3c213fe55",
-  "updated_at": "2026-09-01T05:50:16.833099+00:00"
+  "summary_sha256": "sha256:f0ed36b6c7562878eb965aa55102215aa449cccd274fe67f132238fd8493a593",
+  "updated_at": "2026-09-17T23:48:11.788551+00:00"
 }
