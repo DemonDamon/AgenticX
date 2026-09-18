@@ -98,12 +98,20 @@ export default function TraceRuntimePage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" asChild>
-              <Link href={`/portal-logs?trace_id=${encodeURIComponent(traceId)}`}>
+              <Link
+                href={`/portal-logs?trace_id=${encodeURIComponent(traceId)}`}
+                prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+              >
                 {t("backPortalLogs")}
               </Link>
             </Button>
             <Button type="button" variant="outline" size="sm" asChild>
-              <Link href={`/audit?trace_id=${encodeURIComponent(traceId)}`}>{t("backAudit")}</Link>
+              <Link
+                href={`/audit?trace_id=${encodeURIComponent(traceId)}`}
+                prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+              >
+                {t("backAudit")}
+              </Link>
             </Button>
           </div>
         }
