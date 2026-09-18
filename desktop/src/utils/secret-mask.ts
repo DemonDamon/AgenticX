@@ -7,6 +7,11 @@ interface SecretPattern {
   re: RegExp;
   /** 需要遮蔽的捕获组下标（1-based）；缺省表示遮蔽整段匹配。 */
   group?: number;
+  /**
+   * 高熵兜底专用：跳过 URL 路径段（`/` 后的公开 ID）。
+   * 已知厂商前缀 / 标注密钥仍会遮蔽，包括出现在 query 里的情况。
+   */
+  skipInsideUrlPath?: boolean;
 }
 
 const HEAD_LEN = 3;
@@ -36,16 +41,49 @@ const SECRET_PATTERNS: SecretPattern[] = [
   },
   // 通用高熵 token 兜底：无法归入已知厂商前缀（如自定义 "agx-pat-xxx"）的随机密钥/口令，
   // 要求长度>=20 且同时包含大写、小写、数字，降低对普通单词/十六进制哈希的误伤。
-  { re: /\b(?=[A-Za-z0-9_-]{20,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{20,}\b/g },
+  // 不遮蔽 URL 路径段（如微信公众号短链 /s/<id>），否则气泡点击/复制会变成无效地址。
+  {
+    re: /\b(?=[A-Za-z0-9_-]{20,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{20,}\b/g,
+    skipInsideUrlPath: true,
+  },
 ];
+
+/** http(s) / www. / 带路径的裸域名，用于判断高熵匹配是否落在 URL 里。 */
+const URL_SPAN_RE =
+  /(?:https?:\/\/|www\.)[^\s<>"'）】)\]>]+|\b[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}\/[^\s<>"'）】)\]>]+/gi;
+
+function findUrlRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const match of text.matchAll(URL_SPAN_RE)) {
+    if (match.index == null) continue;
+    ranges.push([match.index, match.index + match[0].length]);
+  }
+  return ranges;
+}
+
+function isInsideUrlPath(text: string, offset: number, urlRanges: Array<[number, number]>): boolean {
+  if (offset <= 0 || text[offset - 1] !== "/") return false;
+  return urlRanges.some(([start, end]) => offset >= start && offset < end);
+}
+
+function replaceOffset(args: unknown[]): number {
+  const last = args[args.length - 1];
+  const offsetArg = typeof last === "string" ? args[args.length - 2] : args[args.length - 3];
+  return typeof offsetArg === "number" ? offsetArg : -1;
+}
 
 /** 对文本做展示层遮蔽：识别常见密钥/口令格式并替换为掐头去尾的星号形式。 */
 export function maskSecretsForDisplay(text: string): string {
   if (!text) return text;
   let result = text;
   for (const pattern of SECRET_PATTERNS) {
+    const urlRanges = pattern.skipInsideUrlPath ? findUrlRanges(result) : [];
     result = result.replace(pattern.re, (...args: unknown[]) => {
       const match = String(args[0]);
+      const offset = replaceOffset(args);
+      if (pattern.skipInsideUrlPath && isInsideUrlPath(result, offset, urlRanges)) {
+        return match;
+      }
       if (!pattern.group) return maskToken(match);
       const value = String(args[pattern.group] ?? "");
       if (!value) return match;
