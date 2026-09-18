@@ -39,10 +39,6 @@ from agenticx.skills.manifest import (
 
 logger = logging.getLogger(__name__)
 
-# Default cache root; MUST stay excluded from filesystem skill discovery
-# (see agenticx.tools.skill_bundle.SKILL_DISCOVERY_EXCLUDED_DIRS).
-DEFAULT_SKILL_CACHE_ROOT = Path.home() / ".agenticx" / "skills" / "cache"
-
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -95,7 +91,14 @@ class RemoteSkillProvider:
     ) -> None:
         self.client = client
         self.server_id = server_id
-        self.cache_root = Path(cache_root) if cache_root else DEFAULT_SKILL_CACHE_ROOT
+        # Default cache root is resolved lazily (not module-level) so tests can
+        # monkeypatch Path.home; it MUST stay excluded from filesystem skill
+        # discovery (see agenticx.tools.skill_bundle.SKILL_DISCOVERY_EXCLUDED_DIRS).
+        self.cache_root = (
+            Path(cache_root)
+            if cache_root
+            else Path.home() / ".agenticx" / "skills" / "cache"
+        )
         # uri -> retained manifest ("acting on a skill" window)
         self._retained: Dict[str, SkillManifest] = {}
 

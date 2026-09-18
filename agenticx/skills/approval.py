@@ -36,8 +36,6 @@ from agenticx.skills.manifest import SkillManifest
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_APPROVALS_PATH = Path.home() / ".agenticx" / "skills" / "approvals.json"
-
 _SKILL_URI_RE = re.compile(r"skill://[A-Za-z0-9._\-]+(?:/[A-Za-z0-9._\-]+)*")
 _TRAILING_PUNCT = ".,;:!?)\"'`]>}"
 _KEY_SEPARATOR = "::"
@@ -114,7 +112,12 @@ class ApprovalStore:
     """Persistent approval records at ``~/.agenticx/skills/approvals.json``."""
 
     def __init__(self, path: Optional[Path] = None) -> None:
-        self.path = Path(path) if path is not None else DEFAULT_APPROVALS_PATH
+        # Lazy (not module-level) so tests can monkeypatch Path.home.
+        self.path = (
+            Path(path)
+            if path is not None
+            else Path.home() / ".agenticx" / "skills" / "approvals.json"
+        )
 
     # ------------------------------------------------------------- persistence
 

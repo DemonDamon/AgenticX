@@ -68,6 +68,24 @@ SKILLS_CACHE_SCOPE = "public"
 # gate dict key compared by --include-gate (see RegistrySkillSource).
 GATE_LEVEL_KEY = "level"
 
+# Content types served for resources/read / resources/list (v2 multi-file).
+_MIME_BY_SUFFIX: Dict[str, str] = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".py": "text/x-python",
+    ".json": "application/json",
+    ".yaml": "text/yaml",
+    ".yml": "text/yaml",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+}
+
+
+def _mime_for(uri: str) -> str:
+    name = uri.rsplit("/", 1)[-1]
+    suffix = name.rsplit(".", 1)[1].lower() if "." in name else ""
+    return _MIME_BY_SUFFIX.get(f".{suffix}", "text/plain")
+
 
 # ---------------------------------------------------------------------------
 # Task 1: registry name <-> skill:// URI mapping
@@ -125,10 +143,12 @@ class SkillUrnMapper:
 class RegistrySkillSource:
     """Reads registry entries and computes manifests from the stored bytes.
 
-    Registry v1 entries carry a single ``skill_content`` document; the
-    manifest therefore lists exactly one ``SKILL.md`` resource whose digest
-    is computed on the fly. (Multi-file entries arrive with SP3 and extend
-    this source.)
+    v2 entries (``files`` is not None, SEP-2640 governance) carry the full
+    file manifest plus inline text payloads: every file is servable and the
+    digests are recomputed from the stored bytes (never trusted from the
+    stored ``files`` list — a drift is logged and the computed value served).
+    v1 entries carry a single ``skill_content`` document; the manifest then
+    lists exactly one ``SKILL.md`` resource (single-file view, no write-back).
 
     Entries whose size exceeds the spec limits are refused from the served
     surface (the spec SHOULD limits become MUST on our own egress).
@@ -156,7 +176,8 @@ class RegistrySkillSource:
         """Latest version per skill name, gate-filtered, sorted by name."""
         latest: Dict[str, RegistrySkillEntry] = {}
         for entry in self.storage.list_entries():
-            # list_entries sorts by (name, version, created_at): last wins.
+            # list_entries sorts by (name, version, created_at, origin):
+            # last wins.
             latest[entry.name] = entry
         visible = [e for e in latest.values() if self._gate_allows(e)]
         visible.sort(key=lambda e: e.name)
@@ -172,6 +193,11 @@ class RegistrySkillSource:
 
     def manifest_for(self, entry: RegistrySkillEntry) -> Optional[SkillManifest]:
         """Compute the manifest for one entry, or None when not servable."""
+        if entry.files is not None:
+            return self._manifest_v2(entry)
+        return self._manifest_v1(entry)
+
+    def _manifest_v1(self, entry: RegistrySkillEntry) -> Optional[SkillManifest]:
         uri = self.mapper.skill_md_uri(entry.name)
         try:
             content = entry.skill_content.encode("utf-8")
@@ -214,6 +240,76 @@ class RegistrySkillSource:
             cacheScope=SKILLS_CACHE_SCOPE,
         )
 
+    def _manifest_v2(self, entry: RegistrySkillEntry) -> Optional[SkillManifest]:
+        """Full manifest for a v2 (multi-file) registry entry."""
+        uri = self.mapper.skill_md_uri(entry.name)
+        contents = entry.file_contents if entry.file_contents is not None else {}
+        md_text = contents.get("SKILL.md")
+        if md_text is None:
+            logger.warning(
+                "Skill %s has a v2 manifest but no stored SKILL.md content, not served",
+                entry.name,
+            )
+            return None
+        root = self.mapper.skill_root(entry.name)
+        resources: List[SkillFileEntry] = []
+        total = 0
+        for row in entry.files or []:
+            rel = str(row.get("path", ""))
+            text = contents.get(rel)
+            if text is None:
+                logger.warning(
+                    "Skill %s is missing stored content for %r, not served",
+                    entry.name,
+                    rel,
+                )
+                return None
+            raw = text.encode("utf-8")
+            digest = compute_digest(raw)
+            stored = str(row.get("digest", ""))
+            if stored and stored != digest:
+                logger.warning(
+                    "Skill %s file %r digest drift (stored=%s computed=%s); "
+                    "serving the computed digest",
+                    entry.name,
+                    rel,
+                    stored,
+                    digest,
+                )
+            total += len(raw)
+            resources.append(
+                SkillFileEntry(uri=f"{root}/{rel}", digest=digest, size=len(raw))
+            )
+        if len(resources) > MAX_SKILL_FILES:
+            logger.warning(
+                "Skill %s exceeds the %d-file limit (%d files), not served",
+                entry.name,
+                MAX_SKILL_FILES,
+                len(resources),
+            )
+            return None
+        if total > MAX_SKILL_BYTES:
+            logger.warning(
+                "Skill %s exceeds the %d-byte limit (%d bytes), not served",
+                entry.name,
+                MAX_SKILL_BYTES,
+                total,
+            )
+            return None
+        frontmatter = parse_frontmatter_from_markdown(md_text)
+        if not isinstance(frontmatter, dict):
+            frontmatter = {}
+        frontmatter = dict(frontmatter)
+        frontmatter["name"] = entry.name
+        return SkillManifest(
+            uri=uri,
+            frontmatter=frontmatter,
+            resources=resources,
+            resultType="complete",
+            ttlMs=SKILLS_TTL_MS,
+            cacheScope=SKILLS_CACHE_SCOPE,
+        )
+
     def manifests(self) -> List[SkillManifest]:
         out: List[SkillManifest] = []
         for entry in self.latest_entries():
@@ -235,15 +331,22 @@ class RegistrySkillSource:
     # ---------------------------------------------------------------- bytes
 
     def read_file(self, uri: str) -> Optional[bytes]:
-        """Serve one file's bytes; only SKILL.md exists for v1 entries."""
+        """Serve one file's bytes (any manifest file for v2, SKILL.md for v1)."""
         parsed = SkillUrnMapper.parse(uri)
         if parsed is None:
             return None
         name, relative = parsed
-        if relative != "SKILL.md":
-            return None
         entry = self.get_latest(name)
         if entry is None:
+            return None
+        if entry.files is not None:
+            if not relative:
+                return None
+            text = (entry.file_contents or {}).get(relative)
+            if text is None:
+                return None
+            return text.encode("utf-8")
+        if relative != "SKILL.md":
             return None
         try:
             return entry.skill_content.encode("utf-8")
@@ -409,7 +512,7 @@ class SkillMCPServer(Server):  # type: ignore[misc, valid-type]
             contents=[
                 mcp_types.TextResourceContents(
                     uri=uri,
-                    mimeType="text/markdown",
+                    mimeType=_mime_for(uri),
                     text=text,
                 )
             ]
@@ -437,7 +540,7 @@ class SkillMCPServer(Server):  # type: ignore[misc, valid-type]
             mcp_types.Resource(
                 uri=uri,
                 name=uri.rsplit("/", 1)[-1],
-                mimeType="text/markdown",
+                mimeType=_mime_for(uri),
             )
             for uri in page
         ]
@@ -502,7 +605,7 @@ class SkillMCPServer(Server):  # type: ignore[misc, valid-type]
                 children[child_uri] = mcp_wire.DirectoryReadResource(
                     uri=child_uri,
                     name=first,
-                    mimeType="text/markdown",
+                    mimeType=_mime_for(child_uri),
                     size=entry.size if entry else None,
                 )
         return sorted(children.values(), key=lambda r: r.uri)

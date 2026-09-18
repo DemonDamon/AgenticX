@@ -9,6 +9,7 @@ Three layers:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -123,13 +124,38 @@ def test_source_gate_filter(tmp_path) -> None:
 
 
 def test_source_refuses_oversized_entries(tmp_path) -> None:
+    # Oversized entries are refused at publish time (registry gate); write one
+    # straight to the JSON store to verify the serving layer still refuses
+    # hand-edited registries.
     storage = _storage(tmp_path)
     big = "x" * (MAX_SKILL_BYTES + 1)
-    _publish(storage, "big", big)
+    storage.storage_path.write_text(
+        json.dumps(
+            {
+                "skills": {
+                    "big": [
+                        {
+                            "name": "big",
+                            "version": "0.1.0",
+                            "skill_content": big,
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     source = RegistrySkillSource(storage)
 
     assert source.manifests() == []
     assert source.get_manifest("skill://big/SKILL.md") is None
+
+
+def test_publish_refuses_oversized_entry(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    big = "x" * (MAX_SKILL_BYTES + 1)
+    with pytest.raises(ValueError, match="byte limit"):
+        _publish(storage, "big", big)
 
 
 def test_source_fills_missing_frontmatter_name(tmp_path) -> None:
