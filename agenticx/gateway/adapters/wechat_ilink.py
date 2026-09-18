@@ -34,6 +34,15 @@ from agenticx.gateway.im_group_speaker import (
     merge_im_sse_reply_text,
     register_human_member_best_effort,
 )
+from agenticx.gateway.im_wechat_files import (
+    WeChatChatResult,
+    append_sent_files_notice,
+    build_sidecar_file_payload,
+    coerce_chat_result,
+    is_sendable_file,
+    paths_from_sse_payload,
+    select_outbound_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -379,11 +388,15 @@ class WeChatILinkAdapter:
                         provider=_IM_FALLBACK_PROVIDER,
                         model=_IM_FALLBACK_MODEL,
                     )
+                    fallback = coerce_chat_result(fallback_reply)
                     notice = (
                         "⚠️ 当前模型不兼容，已自动回退到 "
                         f"`{_IM_FALLBACK_PROVIDER}/{_IM_FALLBACK_MODEL}`。"
                     )
-                    reply = f"{notice}\n\n{fallback_reply}" if fallback_reply else notice
+                    reply = WeChatChatResult(
+                        text=f"{notice}\n\n{fallback.text}" if fallback.text else notice,
+                        file_paths=fallback.file_paths,
+                    )
                 except Exception:
                     logger.exception("chat_turn fallback failed for WeChat message")
                     reply = "处理消息时出错，请稍后重试。"
@@ -391,10 +404,24 @@ class WeChatILinkAdapter:
                 logger.exception("chat_turn failed for WeChat message")
                 reply = "处理消息时出错，请稍后重试。"
 
-        if reply:
+        result = coerce_chat_result(reply)
+        outbound_text = append_sent_files_notice(
+            result.text,
+            [Path(p) for p in result.file_paths],
+        )
+        if outbound_text:
             await self._send_reply(
                 sidecar_url=sidecar_url,
-                text=reply,
+                text=outbound_text,
+                context_token=context_token,
+                sender=sender,
+                session_id=session_id,
+                group_id=group_id,
+            )
+        for file_path in result.file_paths:
+            await self._send_file(
+                sidecar_url=sidecar_url,
+                path=Path(file_path),
                 context_token=context_token,
                 sender=sender,
                 session_id=session_id,
@@ -592,8 +619,8 @@ class WeChatILinkAdapter:
         sender_key: str = "",
         provider: str | None = None,
         model: str | None = None,
-    ) -> str:
-        """Send message to agx serve /api/chat and collect reply."""
+    ) -> WeChatChatResult:
+        """Send message to agx serve /api/chat and collect reply plus files."""
         studio_base, headers = self._resolve_studio()
         timeout = httpx.Timeout(600.0, connect=30.0)
         transport = httpx.AsyncHTTPTransport()
@@ -633,6 +660,8 @@ class WeChatILinkAdapter:
             final_text = ""
             group_chunks: list[str] = []
             progress_lines: list[str] = []
+            produced_paths: list[str] = []
+            referenced_paths: list[str] = []
             saw_final = False
             async with client.stream(
                 "POST",
@@ -663,6 +692,9 @@ class WeChatILinkAdapter:
                                 if isinstance(msg.get("data"), dict)
                                 else {}
                             )
+                            produced, referenced = paths_from_sse_payload(et, data)
+                            produced_paths.extend(produced)
+                            referenced_paths.extend(referenced)
                             if et == "token":
                                 final_text += str(data.get("text") or "")
                             elif et == "final":
@@ -707,7 +739,9 @@ class WeChatILinkAdapter:
                                         f"- {line}" for line in progress_lines[-6:]
                                     )
                                 hint = format_pending_hint(pending)
-                                return ((prefix + "\n\n") if prefix else "") + hint
+                                return WeChatChatResult(
+                                    text=((prefix + "\n\n") if prefix else "") + hint,
+                                )
                             elif et == "error":
                                 raise RuntimeError(
                                     str(data.get("text") or "chat error")
@@ -720,7 +754,18 @@ class WeChatILinkAdapter:
                 out = f"{progress_block}\n\n{out}"
             elif saw_final:
                 out = progress_block
-        return out.strip() or ""
+        text_out = out.strip()
+        files = select_outbound_files(
+            user_input=text,
+            produced_paths=produced_paths,
+            referenced_paths=referenced_paths,
+            reply_text=text_out,
+            session_id=session_id,
+        )
+        return WeChatChatResult(
+            text=text_out,
+            file_paths=tuple(str(p) for p in files),
+        )
 
     async def _send_reply(
         self,
@@ -736,6 +781,67 @@ class WeChatILinkAdapter:
         if not text.strip():
             logger.info("WeChat send skipped: empty formatted text")
             return
+        await self._post_sidecar_send(
+            sidecar_url,
+            extra={"text": text},
+            context_token=context_token,
+            sender=sender,
+            session_id=session_id,
+            group_id=group_id,
+            timeout=30.0,
+            kind="text",
+        )
+
+    async def _send_file(
+        self,
+        sidecar_url: str,
+        path: Path,
+        context_token: str,
+        sender: str,
+        session_id: str,
+        group_id: str,
+    ) -> None:
+        """Forward one workspace file to WeChat via sidecar /send file fields."""
+        if not is_sendable_file(path):
+            logger.warning("WeChat file send skipped: not sendable path=%s", path)
+            return
+        try:
+            base = build_sidecar_file_payload(
+                Path(path),
+                recipient="",
+                context_token="",
+            )
+        except OSError:
+            logger.exception("WeChat file send skipped: cannot read path=%s", path)
+            return
+        extra = {
+            "file": base["file"],
+            "filename": base["filename"],
+            "caption": base["caption"],
+        }
+        await self._post_sidecar_send(
+            sidecar_url,
+            extra=extra,
+            context_token=context_token,
+            sender=sender,
+            session_id=session_id,
+            group_id=group_id,
+            timeout=120.0,
+            kind="file",
+        )
+
+    async def _post_sidecar_send(
+        self,
+        sidecar_url: str,
+        extra: dict[str, Any],
+        *,
+        context_token: str,
+        sender: str,
+        session_id: str,
+        group_id: str,
+        timeout: float,
+        kind: str,
+    ) -> None:
         recipient_candidates = self._dedup_nonempty([group_id, session_id, sender])
         token_candidates = self._dedup_preserve(
             [context_token.strip(), ""]
@@ -745,9 +851,10 @@ class WeChatILinkAdapter:
 
         logger.info(
             (
-                "WeChat send route snapshot sender=%s session_id=%s group_id=%s "
+                "WeChat send route snapshot kind=%s sender=%s session_id=%s group_id=%s "
                 "ctx_token=%s recipients=%d token_modes=%d"
             ),
+            kind,
             self._mask_route_id(sender),
             self._mask_route_id(session_id),
             self._mask_route_id(group_id),
@@ -757,14 +864,17 @@ class WeChatILinkAdapter:
         )
 
         if not recipient_candidates:
-            logger.error("WeChat send skipped: no recipient candidates")
+            logger.error("WeChat send skipped: no recipient candidates kind=%s", kind)
             return
 
         attempt_logs: list[str] = []
         last_error_snippet = ""
 
         try:
-            async with httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(), timeout=30.0) as client:
+            async with httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(),
+                timeout=timeout,
+            ) as client:
                 for recipient in recipient_candidates:
                     recipient_kind = self._recipient_kind(
                         recipient=recipient,
@@ -775,12 +885,12 @@ class WeChatILinkAdapter:
                     for token in token_candidates:
                         used_context = bool(token)
                         payload = {
-                            "text": text,
+                            **extra,
                             "context_token": token,
                             "recipient": recipient,
                         }
                         combo_tag = (
-                            f"{recipient_kind}:{self._mask_route_id(recipient)}:"
+                            f"{kind}:{recipient_kind}:{self._mask_route_id(recipient)}:"
                             f"ctx={'1' if used_context else '0'}"
                         )
                         try:
@@ -805,9 +915,10 @@ class WeChatILinkAdapter:
                         except ValueError:
                             logger.info(
                                 (
-                                    "WeChat send success recipient_kind=%s "
+                                    "WeChat send success kind=%s recipient_kind=%s "
                                     "used_context_token=%s status=%d non_json=true"
                                 ),
+                                kind,
                                 recipient_kind,
                                 used_context,
                                 resp.status_code,
@@ -817,9 +928,10 @@ class WeChatILinkAdapter:
                         if isinstance(data, dict) and data.get("ok") is True:
                             logger.info(
                                 (
-                                    "WeChat send success recipient_kind=%s "
+                                    "WeChat send success kind=%s recipient_kind=%s "
                                     "used_context_token=%s status=%d"
                                 ),
+                                kind,
                                 recipient_kind,
                                 used_context,
                                 resp.status_code,
@@ -831,11 +943,12 @@ class WeChatILinkAdapter:
                             f"{combo_tag}=JSON_OK_FALSE(status={resp.status_code})"
                         )
         except Exception:
-            logger.exception("Failed to send reply via sidecar")
+            logger.exception("Failed to send %s via sidecar", kind)
             return
 
         logger.error(
-            "WeChat send failed after attempts=%s last_error=%s",
+            "WeChat send failed kind=%s after attempts=%s last_error=%s",
+            kind,
             " | ".join(attempt_logs)[:1200],
             last_error_snippet[:200],
         )
