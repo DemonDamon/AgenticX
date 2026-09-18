@@ -19,6 +19,8 @@ describe("ImBubble streaming wait mark", () => {
     const orb = container.querySelector('[data-part="orb-burst"]');
     expect(orb).toBeTruthy();
     expect(orb?.getAttribute("data-orb")).toBe("winding");
+    expect(orb?.getAttribute("data-optical-x")).toBe("-3");
+    expect((orb as HTMLElement | null)?.style.transform).toContain("translateX(-3px)");
     expect(orb?.getAttribute("data-dot-color")).toBe("#3b82f6");
     expect(container.querySelector(".agx-near-buddy")).toBeNull();
     useAppStore.setState({ themeColor: previous });

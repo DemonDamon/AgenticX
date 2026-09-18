@@ -261,6 +261,7 @@ export function OrbBurst({
     <div
       data-part="orb-burst"
       data-orb="winding"
+      data-optical-x="-3"
       data-accent={themeColor}
       data-dot-color={colors.dot}
       data-accent-color={colors.accent}
@@ -271,6 +272,7 @@ export function OrbBurst({
         width,
         height,
         flexShrink: 0,
+        transform: "translateX(-3px)",
       }}
       aria-hidden
     >
