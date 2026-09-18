@@ -222,6 +222,12 @@ _SKILL_SOURCE_FRAGMENTS: List[tuple[str, str]] = [
     ("/.claude/plugins", "claude"),
 ]
 
+# Directories that must never surface through filesystem skill discovery.
+# ``~/.agenticx/skills/cache/`` holds Skills-over-MCP download caches: remote
+# skills keep their MCP origin and are served via UnifiedSkillIndex with
+# digest verification + approval, never re-discovered as local skills.
+SKILL_DISCOVERY_EXCLUDED_DIRS: Set[str] = {"cache"}
+
 
 def infer_skill_source(base_dir: Path, builtin_root: Optional[Path] = None) -> str:
     """Derive a stable ``source`` label from the skill package directory.
@@ -751,8 +757,13 @@ class SkillBundleLoader:
                             logger.debug("Skip skill under disabled preset root: %s", skill_dir)
                             continue
                     
-                    # 跳过隐藏目录
+                    # Skip hidden directories
                     if skill_dir.name.startswith("."):
+                        continue
+
+                    # Skip discovery-excluded directories (e.g. remote skill caches)
+                    if skill_dir.name in SKILL_DISCOVERY_EXCLUDED_DIRS:
+                        logger.debug("Skip discovery-excluded dir: %s", skill_dir)
                         continue
 
                     # Collect candidate (skill_dir, skill_md) pairs.
@@ -767,6 +778,8 @@ class SkillBundleLoader:
                         try:
                             for sub in skill_dir.iterdir():
                                 if not sub.is_dir() or sub.name.startswith("."):
+                                    continue
+                                if sub.name in SKILL_DISCOVERY_EXCLUDED_DIRS:
                                     continue
                                 sub_md = sub / "SKILL.md"
                                 if sub_md.exists():
@@ -1256,14 +1269,17 @@ class SkillTool(BaseTool):
         self,
         loader: Optional[SkillBundleLoader] = None,
         auto_scan: bool = True,
+        unified_index: Optional[Any] = None,
         **kwargs,
     ):
         """
         初始化技能管理工具。
-        
+
         Args:
             loader: SkillBundleLoader 实例（None 则自动创建）
             auto_scan: 是否在初始化时自动扫描技能
+            unified_index: UnifiedSkillIndex 实例（可选，聚合 Skills over MCP
+                远端技能；None 时行为与现状完全一致）
             **kwargs: BaseTool 的其他参数
         """
         super().__init__(
@@ -1277,7 +1293,8 @@ class SkillTool(BaseTool):
             **kwargs,
         )
         self.loader = loader or SkillBundleLoader()
-        
+        self.unified_index = unified_index
+
         if auto_scan:
             self.loader.scan()
     
@@ -1304,25 +1321,38 @@ class SkillTool(BaseTool):
     def _handle_list(self) -> str:
         """处理 list 操作。"""
         skills = self.loader.list_skills()
-        
-        if not skills:
+        # Remote skills (Skills over MCP) — origin-tagged, never replacing local
+        remote_views = self._remote_views()
+
+        if not skills and not remote_views:
             return (
                 "No skills installed.\n"
                 "Skills can be installed to:\n"
                 "  ./.agents/skills/ (project)\n"
                 "  ./.agent/skills/ (project)\n"
-                "  ~/.agents/skills/ (global)\n"
-                "  ~/.agent/skills/ (global)\n"
+                "~/.agents/skills/ (global)\n"
+                "~/.agent/skills/ (global)\n"
                 "  ./.claude/skills/ (project)\n"
-                "  ~/.claude/skills/ (global)"
+                "~/.claude/skills/ (global)"
             )
-        
-        # 按位置分组
+
+        if skills:
+            lines = ["Available skills:\n"]
+        else:
+            lines = [
+                "No local skills installed.",
+                "Skills can be installed to:",
+                "  ./.agents/skills/ (project)",
+                "  ./.agent/skills/ (project)",
+                "  ~/.agents/skills/ (global)",
+                "  ~/.agent/skills/ (global)",
+                "  ./.claude/skills/ (project)",
+                "  ~/.claude/skills/ (global)",
+                "",
+            ]
         project_skills = [s for s in skills if s.location == "project"]
         global_skills = [s for s in skills if s.location == "global"]
-        
-        lines = ["Available skills:\n"]
-        
+
         if project_skills:
             lines.append("Project skills:")
             for s in project_skills:
@@ -1345,19 +1375,45 @@ class SkillTool(BaseTool):
                     extra.append(f"icon={s.icon}")
                 suffix = f" ({', '.join(extra)})" if extra else ""
                 lines.append(f"  - {s.name}: {s.description}{suffix}")
-        
-        lines.append(f"\nTotal: {len(skills)} skill(s)")
+
+        # Remote skills (Skills over MCP) — origin-tagged, never replacing local
+        if remote_views:
+            lines.append("")
+            lines.append("Remote skills (MCP):")
+            for view in remote_views:
+                lines.append(
+                    f"  - {view.name}: {view.description} "
+                    f"[mcp:{view.server_id}]"
+                )
+
+        if skills:
+            lines.append(f"\nTotal: {len(skills)} skill(s)")
         lines.append("Use action='read' with skill_name to load skill instructions.")
-        
+
         return "\n".join(lines)
-    
+
+    def _remote_views(self) -> List[Any]:
+        """Remote SkillViews from the unified index (empty when unavailable)."""
+        if self.unified_index is None:
+            return []
+        try:
+            return self.unified_index.list_skills_sync(origin="mcp")
+        except Exception as exc:
+            logger.warning("Failed to list remote skills: %s", exc)
+            return []
+
     def _handle_read(self, skill_name: Optional[str]) -> str:
         """处理 read 操作。"""
         if not skill_name:
             return "Error: skill_name is required for 'read' action."
-        
+
         content = self.loader.get_skill_content(skill_name)
-        
+
+        if content is None and self.unified_index is not None:
+            remote = self._read_remote_skill(skill_name)
+            if remote is not None:
+                return remote
+
         if content is None:
             # 提供友好的错误提示
             available = [s.name for s in self.loader.list_skills()]
@@ -1372,8 +1428,36 @@ class SkillTool(BaseTool):
                     f"Error: Skill '{skill_name}' not found.\n"
                     "No skills are currently installed."
                 )
-        
+
         return content
+
+    def _read_remote_skill(self, skill_name: str) -> Optional[str]:
+        """Read a remote skill through the activation gate (digest + approval)."""
+        try:
+            result = self.unified_index.read_remote_skill_sync(skill_name)
+        except Exception as exc:
+            logger.warning("Failed to read remote skill '%s': %s", skill_name, exc)
+            return None
+        if result is None:
+            return None
+        if result.status == "ok" and result.content is not None:
+            view_origin = "mcp"
+            return (
+                f"Reading: {skill_name}\n"
+                f"Origin: {view_origin}\n"
+                f"\n"
+                f"{result.content}\n"
+                f"\n"
+                f"Skill read: {skill_name}"
+            )
+        if result.status == "denied":
+            reasons = "; ".join(result.reasons) if result.reasons else "unknown"
+            return (
+                f"Error: Remote skill '{skill_name}' is not activated.\n"
+                f"Reasons: {reasons}\n"
+                "Approve it with `agx skills approve <skill_uri>` first."
+            )
+        return None
     
     async def process_llm_request(
         self,

@@ -47,6 +47,24 @@ except ImportError:
 
 from .base import BaseTool, ToolError
 
+# Skills over MCP (SEP-2640) protocol layer — degrades to None without the mcp extra.
+try:
+    from agenticx.skills.manifest import (
+        SkillExtensionNotDeclaredError,
+        SkillIntegrityError,
+        SkillManifest,
+        SkillManifestError,
+        SkillNotFoundError,
+    )
+    from agenticx.skills import mcp_wire
+except ImportError:  # pragma: no cover
+    SkillExtensionNotDeclaredError = None  # type: ignore[assignment,misc]
+    SkillIntegrityError = None  # type: ignore[assignment,misc]
+    SkillManifest = None  # type: ignore[assignment,misc]
+    SkillManifestError = None  # type: ignore[assignment,misc]
+    SkillNotFoundError = None  # type: ignore[assignment,misc]
+    mcp_wire = None  # type: ignore[assignment]
+
 # 类型导入（用于 Sampling）
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -198,6 +216,8 @@ class MCPClientV2:
         self._tools_cache: Optional[List[MCPToolInfo]] = None
         self._initialized = False
         self._closed = False
+        # InitializeResult from the last successful handshake (capability probing).
+        self._init_result: Optional[Any] = None
 
     async def _reset_mcp_connection_unlocked(self) -> None:
         """Tear down stdio stack and session. Caller must hold ``_session_lock``."""
@@ -214,6 +234,7 @@ class MCPClientV2:
         self._session = None
         self._initialized = False
         self._tools_cache = None
+        self._init_result = None
 
     async def _ensure_session(self) -> ClientSession:
         """确保会话已初始化（线程安全）"""
@@ -336,10 +357,11 @@ class MCPClientV2:
                 f"MCP session initialized: protocol={init_result.protocolVersion}, "
                 f"server={init_result.serverInfo.name}"
             )
-            
+
             # 保存会话引用（exit_stack 会保持所有 context 打开）
             self._session = session
             self._initialized = True
+            self._init_result = init_result
             
         except Exception as e:
             # Log without leaking headers (may contain Bearer token / PAT).
@@ -437,6 +459,158 @@ class MCPClientV2:
                     break
             assert last_exc is not None
             raise ToolError(f"Tool call failed: {last_exc}", name) from last_exc
+
+    # ------------------------------------------------------------------
+    # Skills over MCP (io.modelcontextprotocol/skills, SEP-2640)
+    # ------------------------------------------------------------------
+
+    def _skills_capabilities(self) -> Optional[Dict[str, Any]]:
+        """Return the server's declared ``extensions`` mapping, if any."""
+        init_result = self._init_result
+        if init_result is None:
+            return None
+        capabilities = getattr(init_result, "capabilities", None)
+        if capabilities is None:
+            return None
+        extensions = getattr(capabilities, "extensions", None)
+        return extensions if isinstance(extensions, dict) else None
+
+    def _skills_extension_settings(self) -> Optional[Dict[str, Any]]:
+        extensions = self._skills_capabilities()
+        if not extensions:
+            return None
+        settings = extensions.get(mcp_wire.SKILLS_EXTENSION_ID) if mcp_wire else None
+        return settings if isinstance(settings, dict) else None
+
+    async def _probe_session(self) -> None:
+        """Ensure a session exists so capability declarations can be read."""
+        if self._init_result is None:
+            async with self._stdio_lock:
+                await self._ensure_session()
+
+    def supports_skills(self) -> bool:
+        """True when the server declared the skills extension in capabilities."""
+        return self._skills_extension_settings() is not None
+
+    def supports_directory_read(self) -> bool:
+        """True when the skills extension declares ``directoryRead: true``."""
+        settings = self._skills_extension_settings() or {}
+        return bool(settings.get("directoryRead", False))
+
+    def _require_skills_support(self) -> None:
+        if mcp_wire is None or SkillExtensionNotDeclaredError is None:
+            raise RuntimeError(
+                "Skills over MCP requires the mcp SDK: pip install 'mcp>=1.0.0,<2'"
+            )
+        if self._init_result is None:
+            raise SkillExtensionNotDeclaredError(
+                f"server '{self.server_config.name}' is not connected yet; "
+                "capabilities unknown"
+            )
+        if not self.supports_skills():
+            raise SkillExtensionNotDeclaredError(
+                f"server '{self.server_config.name}' did not declare the "
+                f"{mcp_wire.SKILLS_EXTENSION_ID} extension"
+            )
+
+    async def list_skills(
+        self,
+        cursor: Optional[str] = None,
+        *,
+        max_pages: int = 100,
+    ) -> List["SkillManifest"]:
+        """
+        Call ``skills/list`` and follow ``nextCursor`` pagination to completion.
+
+        The server must have declared the skills extension, otherwise
+        :class:`SkillExtensionNotDeclaredError` is raised without any request.
+        """
+        self._require_skills_support()
+        manifests: List["SkillManifest"] = []
+        next_cursor: Optional[str] = cursor
+        async with self._stdio_lock:
+            for _ in range(max_pages):
+                session = await self._ensure_session()
+                params: Optional[Any] = None
+                if next_cursor:
+                    params = mcp_wire.SkillsListRequestParams(cursor=next_cursor)
+                result = await session.send_request(
+                    mcp_wire.SkillsListRequest(params=params),
+                    mcp_wire.SkillsListResult,
+                )
+                for entry in result.skills:
+                    manifests.append(SkillManifest.from_skill_entry(entry))
+                next_cursor = result.nextCursor
+                if not next_cursor:
+                    return manifests
+        return manifests
+
+    async def get_skill(self, uri: str) -> "SkillManifest":
+        """
+        Call ``skills/get`` for one skill URI.
+
+        A JSON-RPC ``-32602`` (invalid params) answer — the spec's signal for
+        an unknown skill URI — is translated to :class:`SkillNotFoundError`.
+        """
+        self._require_skills_support()
+        async with self._stdio_lock:
+            session = await self._ensure_session()
+            try:
+                result = await session.send_request(
+                    mcp_wire.SkillsGetRequest(
+                        params=mcp_wire.SkillsGetRequestParams(uri=uri)
+                    ),
+                    mcp_wire.SkillsGetResult,
+                )
+            except Exception as exc:
+                code = getattr(exc, "error", None)
+                code = getattr(code, "code", None) if code is not None else None
+                if code == -32602:
+                    raise SkillNotFoundError(f"unknown skill URI: {uri}") from exc
+                raise
+        return SkillManifest.from_skill_entry(result.skill)
+
+    async def read_resource(self, uri: str) -> Any:
+        """
+        Read one resource via the standard ``resources/read`` channel.
+
+        Used for ``skill://`` URIs; the SDK accepts arbitrary URI schemes.
+        Returns the SDK ``ReadResourceResult``.
+        """
+        async with self._stdio_lock:
+            session = await self._ensure_session()
+            return await session.read_resource(uri)
+
+    async def read_directory(self, uri: str) -> List[Any]:
+        """
+        Call ``resources/directory/read`` (direct children, non-recursive).
+
+        Only allowed when the server declared ``directoryRead: true`` — per the
+        spec clients MUST NOT call it otherwise.
+        """
+        self._require_skills_support()
+        if not self.supports_directory_read():
+            raise SkillExtensionNotDeclaredError(
+                f"server '{self.server_config.name}' did not declare "
+                "directoryRead=true for the skills extension"
+            )
+        next_cursor: Optional[str] = None
+        entries: List[Any] = []
+        async with self._stdio_lock:
+            for _ in range(100):
+                session = await self._ensure_session()
+                params = mcp_wire.DirectoryReadRequestParams(uri=uri)
+                if next_cursor:
+                    params.cursor = next_cursor
+                result = await session.send_request(
+                    mcp_wire.DirectoryReadRequest(params=params),
+                    mcp_wire.DirectoryReadResult,
+                )
+                entries.extend(result.resources)
+                next_cursor = result.nextCursor
+                if not next_cursor:
+                    return entries
+        return entries
 
     def _create_pydantic_model_from_schema(
         self,

@@ -461,7 +461,10 @@ class TestDiscoveryBusIntegration:
         
         # 处理同步队列中的发现
         import asyncio
-        asyncio.get_event_loop().run_until_complete(bus.process_pending())
+        # asyncio.run instead of get_event_loop().run_until_complete():
+        # the deprecated get_event_loop() raises RuntimeError on Python 3.12+
+        # when any pytest-asyncio test ran earlier in the same session.
+        asyncio.run(bus.process_pending())
         
         # 应该有 2 个技能发现事件
         assert len(discoveries) == 2
