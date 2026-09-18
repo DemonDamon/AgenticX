@@ -52,3 +52,20 @@ def test_run_round_evolve_smoke(tmp_path):
                        trials_root=tmp_path / "trials", dry=True, evolve=True)
     assert report["evolution"] is not None     # evolve_loop 真实执行
     assert "accepted" in report["evolution"]
+
+
+def test_run_round_rejects_stale_memory_from_previous_run(tmp_path):
+    """真跑踩坑回归门: 既往运行的冻结记忆必须响亮报错, 不许静默丢新经验。"""
+    import pytest
+    from agenticx.learning.trajectory.memory import Lesson
+
+    exp_dir = tmp_path / "experience"
+    stale = ExperienceMemory(exp_dir / "round_1.json")
+    stale.add([Lesson("old-task", "failure_pattern", "stale lesson")], 1)
+    stale.freeze()
+
+    store = TrajectoryStore(tmp_path / "store")
+    with pytest.raises(RuntimeError, match="残留既往运行状态"):
+        run_round(1, _tasks(tmp_path), stale, store,
+                  trials_root=tmp_path / "trials", dry=True)
+    assert sum(1 for _ in store.iter_trajectories()) == 0   # 失败在 trial 之前

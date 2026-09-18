@@ -103,6 +103,13 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
     if round_no > 1 and prev.exists():
         hints = format_hints(ExperienceMemory(prev).all_lessons(k=8))
 
+    if memory.path.exists() and (memory.is_frozen or memory.all_lessons()):
+        # 真跑踩坑修复: 既往运行的冻结记忆会让本轮 add() 被静默跳过,
+        # 真实经验无声丢失——宁可响亮失败, 不许静默污染。
+        raise RuntimeError(
+            f"{memory.path} 残留既往运行状态（frozen={memory.is_frozen}, "
+            f"lessons={len(memory.all_lessons())}）——换新 --out 目录或清理后重跑")
+
     srv = None
     base_url = None
     if not dry:
