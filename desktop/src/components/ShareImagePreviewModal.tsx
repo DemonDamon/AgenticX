@@ -216,8 +216,9 @@ export function ShareImagePreviewModal({
               style={{ backgroundColor: "var(--surface-base-fallback)" }}
             >
               <div className="text-[20px] font-semibold">{t("share.shareConversation")}</div>
-              <div className="mt-1.5 text-[13px] text-text-muted">{dateLabel}</div>
-              <div className="mt-0.5 text-[13px] text-text-muted">{t("share.aiDisclaimer")}</div>
+              <div className="mt-1.5 text-[13px] text-text-muted">
+                {dateLabel} · {t("share.aiDisclaimer")}
+              </div>
               <div className="mt-5 border-t border-border pt-5">
                 <div className="flex flex-col gap-4">
                   {!hydrated ? (
@@ -239,10 +240,10 @@ export function ShareImagePreviewModal({
                             ) : null}
                             {turn.text.trim() ? (
                               <div
-                                className="whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
+                                className="agx-im-user-bubble whitespace-pre-wrap border-0 px-4 py-2.5 text-[14px] leading-relaxed"
                                 style={{
-                                  backgroundColor:
-                                    "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
+                                  background: "var(--chat-im-user-bg)",
+                                  color: "var(--chat-im-user-text)",
                                 }}
                               >
                                 {turn.text}

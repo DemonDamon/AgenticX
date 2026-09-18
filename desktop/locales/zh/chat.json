@@ -88,7 +88,7 @@
     "rasterFailed": "栅格化失败：{{detail}}",
     "previewTitle": "分享图片预览",
     "shareConversation": "分享对话",
-    "aiDisclaimer": "内容由 AI 生成，不能完全保障真实",
+    "aiDisclaimer": "内容由 AI 生成，请注意核实",
     "renderingCharts": "正在渲染图表…",
     "copying": "复制中…",
     "copyImage": "复制图片",
