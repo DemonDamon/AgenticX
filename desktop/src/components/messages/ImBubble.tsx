@@ -45,6 +45,10 @@ import {
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  isBundledMetaAvatarUrl,
+} from "../../constants/meta-avatar";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
@@ -182,6 +186,20 @@ export function ChatImAvatar({
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
   if (imageUrl) {
+    if (isBundledMetaAvatarUrl(imageUrl)) {
+      return (
+        <span
+          className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-hidden ${rounded}`}
+          data-avatar-fit="logo"
+        >
+          <img
+            src={imageUrl}
+            alt={label}
+            className={`h-full w-full origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`}
+          />
+        </span>
+      );
+    }
     return (
       <img
         src={imageUrl}

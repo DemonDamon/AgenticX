@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { ChatImAvatar, ImBubble } from "./ImBubble";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  DEFAULT_META_AVATAR_URL,
+} from "../../constants/meta-avatar";
 
 const baseVisible = {
   hideActions: false,
@@ -225,6 +229,26 @@ describe("ChatImAvatar", () => {
     expect(html).toContain("agx-im-avatar");
     expect(html).toContain("h-8 w-8");
     expect(html).toContain("N");
+  });
+
+  it("zooms the bundled Near logo inside the same 28px circle as expert portraits", () => {
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="Near" imageUrl={DEFAULT_META_AVATAR_URL} size="sm" />,
+    );
+    expect(html).toContain("agx-im-avatar");
+    expect(html).toContain("h-7 w-7");
+    expect(html).toContain("overflow-hidden");
+    expect(html).toContain('data-avatar-fit="logo"');
+    expect(html).toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
+    expect(html).toContain(DEFAULT_META_AVATAR_URL);
+  });
+
+  it("does not zoom a regular expert portrait", () => {
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="调研" imageUrl="https://example.test/r.png" size="sm" />,
+    );
+    expect(html).not.toContain('data-avatar-fit="logo"');
+    expect(html).not.toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
   });
 });
 
