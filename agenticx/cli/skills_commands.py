@@ -510,6 +510,49 @@ def serve_registry(
     server.run()
 
 
+@skills_app.command("serve-mcp")
+def serve_mcp(
+    registry: Optional[Path] = typer.Option(
+        None,
+        "--registry",
+        help="Registry JSON path (default ~/.agenticx/registry.json)",
+    ),
+    port: Optional[int] = typer.Option(
+        None,
+        "--port",
+        help="Serve streamable HTTP on this port (default: stdio)",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="HTTP listen host"),
+    token: Optional[str] = typer.Option(
+        None,
+        "--token",
+        help="Bearer token for the HTTP transport",
+    ),
+    include_gate: Optional[str] = typer.Option(
+        None,
+        "--include-gate",
+        help="Only expose skills whose gate level equals this value",
+    ),
+) -> None:
+    """Expose the local skill registry over MCP (skills extension, SEP-2640).
+
+    stdio by default (host-managed subprocess); --port switches to
+    streamable HTTP for team distribution.
+    """
+    import asyncio
+
+    from agenticx.skills.mcp_server import RegistrySkillSource, run_http, serve_stdio
+    from agenticx.skills.registry import RegistryStorage
+
+    storage = RegistryStorage(registry)
+    source = RegistrySkillSource(storage, include_gate=include_gate)
+    if port is None:
+        asyncio.run(serve_stdio(source))
+    else:
+        console.print(f"Serving skills over MCP on http://{host}:{port}")
+        run_http(source, host=host, port=port, token=token)
+
+
 @skills_app.command("uninstall")
 def uninstall_skill(
     name: str = typer.Argument(..., help="Skill name"),
