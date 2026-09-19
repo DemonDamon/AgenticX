@@ -92,7 +92,8 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
               store: TrajectoryStore, *, trials_root: Path, dry: bool = False,
               evolve: bool = False, lm=None, tokenizer=None,
               model_name: str = "dry-model", min_votes: int = 1,
-              timeout: float = 1800.0) -> dict:
+              timeout: float = 1800.0,
+              skip_split_guard: bool = False) -> dict:
     """跑一轮自探索。返回 {"results": [...], "evolution": ...} 形报告。
 
     记忆语义（对齐 RSIAgent frozen memory）: 本轮注入的是【上一轮冻结】的
@@ -124,6 +125,12 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
     results = []
     for task_path in tasks:
         task_name = Path(task_path).name
+        if not skip_split_guard:
+            # SP18: 考试题禁止进自探索/训练（响亮报错; dry 冒烟用开关绕过）
+            from agenticx.learning.trajectory.task_split import (
+                assert_trainable_task, load_split,
+            )
+            assert_trainable_task(task_name, load_split())
         tdir = trials_root / f"round_{round_no}"
         if dry:
             reward, trial_dir = _fake_trial(tdir, task_path, round_no)
@@ -175,6 +182,8 @@ def main() -> int:
     ap.add_argument("--out", default="datasets/explore")
     ap.add_argument("--min-votes", type=int, default=1,
                     help="hints 注入的跨任务票数门槛（SP17）")
+    ap.add_argument("--skip-split-guard", action="store_true",
+                    help="绕过任务集拆分守卫（仅供 dry 冒烟; 真跑禁止）")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -195,7 +204,8 @@ def main() -> int:
         rep = run_round(r, args.task, memory, store, trials_root=out / "trials",
                         dry=args.dry, evolve=args.evolve, lm=lm,
                         tokenizer=tokenizer, model_name=args.model,
-                        min_votes=args.min_votes)
+                        min_votes=args.min_votes,
+                        skip_split_guard=args.skip_split_guard)
         rep["seconds"] = round(time.time() - t0, 1)
         summary.append(rep)
         print(json.dumps(rep, ensure_ascii=False))

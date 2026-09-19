@@ -29,7 +29,7 @@ def test_two_rounds_dry(tmp_path):
 
     m1 = ExperienceMemory(exp_dir / "round_1.json")
     rep1 = run_round(1, tasks, m1, store, trials_root=trials_root,
-                     dry=True, evolve=False)
+                     dry=True, evolve=False, skip_split_guard=True)
     assert len(rep1["results"]) == 2
     assert all("reward" in r and "hints" in r for r in rep1["results"])
     assert rep1["results"][0]["hints"] == ""    # 第 1 轮无记忆 → 不注入
@@ -38,7 +38,7 @@ def test_two_rounds_dry(tmp_path):
 
     m2 = ExperienceMemory(exp_dir / "round_2.json")
     rep2 = run_round(2, tasks, m2, store, trials_root=trials_root,
-                     dry=True, evolve=False)
+                     dry=True, evolve=False, skip_split_guard=True)
     # 第 1 轮错误经验注入第 2 轮
     assert "FileNotFoundError" in rep2["results"][0]["hints"]
     # 新一轮记忆是独立实例（驱动器每轮独立轮次文件, 注入读上一轮冻结文件）
@@ -50,7 +50,8 @@ def test_run_round_evolve_smoke(tmp_path):
     memory = ExperienceMemory(tmp_path / "exp.json")
     store = TrajectoryStore(tmp_path / "store")
     report = run_round(1, _tasks(tmp_path), memory, store,
-                       trials_root=tmp_path / "trials", dry=True, evolve=True)
+                       trials_root=tmp_path / "trials", dry=True, evolve=True,
+                       skip_split_guard=True)
     assert report["evolution"] is not None     # evolve_loop 真实执行
     assert "accepted" in report["evolution"]
 
@@ -91,7 +92,8 @@ def test_round_uses_contrastive_when_history_mixed(tmp_path):
     _seed_pass_traj(store, "fakeA")          # 历史成功且无报错
 
     rep = run_round(1, ["/tmp/fakeA"], memory, store,
-                    trials_root=tmp_path / "trials", dry=True)
+                    trials_root=tmp_path / "trials", dry=True,
+                    skip_split_guard=True)
     kinds = [l["kind"] for l in
              __import__("json").loads(
                  (tmp_path / "experience" / "round_1.json").read_text())["lessons"]]
@@ -106,15 +108,18 @@ def test_min_votes_filters_hints(tmp_path):
         memory = ExperienceMemory(tmp_path / "experience" / f"round_{r}.json")
         store = TrajectoryStore(tmp_path / "store")
         run_round(r, tasks, memory, store,
-                  trials_root=tmp_path / "trials", dry=True)
+                  trials_root=tmp_path / "trials", dry=True,
+                  skip_split_guard=True)
 
     store = TrajectoryStore(tmp_path / "store")
     m2 = ExperienceMemory(tmp_path / "experience" / "round_2.json")
     rep = run_round(2, tasks, m2, store,
-                    trials_root=tmp_path / "trials", dry=True, min_votes=3)
+                    trials_root=tmp_path / "trials", dry=True, min_votes=3,
+                    skip_split_guard=True)
     assert rep["results"][0]["hints"] == ""   # 快照最高 2 票 < 3 → 全过滤
 
     m2b = ExperienceMemory(tmp_path / "experience" / "round_2b.json")
     rep2 = run_round(2, tasks, m2b, store,
-                     trials_root=tmp_path / "trials", dry=True, min_votes=2)
+                     trials_root=tmp_path / "trials", dry=True, min_votes=2,
+                     skip_split_guard=True)
     assert "FileNotFoundError" in rep2["results"][0]["hints"]  # 快照 2 票 ≥ 2 → 注入
