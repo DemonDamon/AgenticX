@@ -115,6 +115,40 @@ test("Plan artifact tools stay ungrouped for the standalone Plan card", () => {
   assert.equal(rows[1]?.kind, "message");
 });
 
+test("in-progress show_widget placeholder is dropped when a later widget exists", () => {
+  const firstPlaceholder = toolMessage("w1", "running", "show_widget");
+  const retryPlaceholder = {
+    ...toolMessage("w2", "running", "show_widget"),
+    toolArgs: { title: "Claude Code 兼容 AGENTS.md" },
+  };
+  const rows = groupConsecutiveToolMessages([
+    { id: "u1", role: "user", content: "看图" },
+    firstPlaceholder,
+    retryPlaceholder,
+  ]);
+  const widgetIds = rows
+    .filter((row) => row.kind === "message")
+    .map((row) => row.message.id);
+  assert.deepEqual(widgetIds, ["u1", "w2"]);
+});
+
+test("finished show_widget stays when a later widget starts", () => {
+  const finished: Message = {
+    ...toolMessage("w1", "done", "show_widget"),
+    content: JSON.stringify({ type: "widget", title: "图一", widget_code: "<svg></svg>" }),
+  };
+  const nextPlaceholder = toolMessage("w2", "running", "show_widget");
+  const rows = groupConsecutiveToolMessages([
+    { id: "u1", role: "user", content: "再画一张" },
+    finished,
+    nextPlaceholder,
+  ]);
+  const widgetIds = rows
+    .filter((row) => row.kind === "message")
+    .map((row) => row.message.id);
+  assert.deepEqual(widgetIds, ["u1", "w1", "w2"]);
+});
+
 test("auto-approve confirm receipts are dropped from grouped chat rows", () => {
   const receipt: Message = {
     id: "receipt-1",

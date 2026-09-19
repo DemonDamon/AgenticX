@@ -19,6 +19,7 @@ import {
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
 import { SkillPatchPreviewCard } from "./SkillPatchPreviewCard";
+import { ShowWidgetDrawingPlaceholder } from "./ShowWidgetDrawingPlaceholder";
 import { WidgetBlock } from "./WidgetBlock";
 import {
   parseSkillManageError,
@@ -437,9 +438,10 @@ export function ToolCallCard({
     const statusLabel =
       showWidgetPartial.widgetFormat === "mermaid" ? t("tool.composingChart") : t("tool.drawing");
     return (
-      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}{statusLabel}
-      </div>
+      <ShowWidgetDrawingPlaceholder
+        title={showWidgetPartial.title}
+        statusLabel={statusLabel}
+      />
     );
   }
   if (
@@ -447,11 +449,7 @@ export function ToolCallCard({
     && (message.toolStatus === "running" || message.toolStatus === "pending")
     && !showWidgetPartial
   ) {
-    return (
-      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        {t("tool.drawing")}
-      </div>
-    );
+    return <ShowWidgetDrawingPlaceholder statusLabel={t("tool.drawing")} />;
   }
 
   // show_widget with truncated/broken content → amber warning inline

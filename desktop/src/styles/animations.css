@@ -150,6 +150,25 @@
   animation: agx-stream-caret 1s steps(1) infinite;
 }
 
+@keyframes agx-widget-draw-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.agx-widget-draw-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-faint) 16%, transparent),
+    transparent
+  );
+  animation: agx-widget-draw-sweep 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -187,5 +206,10 @@
   .agx-stream-caret {
     animation: none;
     opacity: 0.4;
+  }
+
+  .agx-widget-draw-sweep {
+    animation: none;
+    background: none;
   }
 }

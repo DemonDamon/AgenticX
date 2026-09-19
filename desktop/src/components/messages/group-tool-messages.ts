@@ -1,6 +1,7 @@
 import type { Message } from "../../store";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
+import { isShowWidgetToolMessage, parseWidgetPayload } from "./widget-preview";
 
 export type GroupedChatRow =
   | { kind: "message"; message: Message }
@@ -30,9 +31,30 @@ function canGroupToolMessage(message: Message): boolean {
  * Legacy rows without structured tool metadata are kept as individual rows so
  * history replay does not collapse the whole ReAct trace into one large group.
  */
+function isInProgressShowWidgetPlaceholder(message: Message): boolean {
+  if (!isShowWidgetToolMessage(message)) return false;
+  if (message.toolStatus !== "running" && message.toolStatus !== "pending") return false;
+  return parseWidgetPayload(String(message.content ?? "")) == null;
+}
+
+/** Keep only the latest in-progress show_widget slot in the current user turn. */
+function omitSupersededShowWidgetPlaceholders(messages: Message[]): Message[] {
+  return messages.filter((message, index) => {
+    if (!isInProgressShowWidgetPlaceholder(message)) return true;
+    for (let i = index + 1; i < messages.length; i += 1) {
+      const later = messages[i];
+      if (later.role === "user") return true;
+      if (isShowWidgetToolMessage(later)) return false;
+    }
+    return true;
+  });
+}
+
 export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRow[] {
   const out: GroupedChatRow[] = [];
-  const visibleMessages = messages.filter((m) => !isNoisyToolStatusMessage(m));
+  const visibleMessages = omitSupersededShowWidgetPlaceholders(
+    messages.filter((m) => !isNoisyToolStatusMessage(m)),
+  );
   let i = 0;
   while (i < visibleMessages.length) {
     const m = visibleMessages[i];
