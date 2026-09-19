@@ -189,3 +189,28 @@ def format_hints(lessons: list[Lesson]) -> str:
     for l in lessons:
         lines.append(f"- [{l.kind}] {l.task_id}: {l.content}")
     return "\n".join(lines)
+
+
+def contrastive_lessons_from_trajectories(trajectories, *,
+                                          min_pass: int = 1, min_fail: int = 1,
+                                          max_lessons_per_task: int = 3
+                                          ) -> list[Lesson]:
+    """轨迹级对比挖掘: 按 task 分组, pass/fail 双组齐备(达门槛)才做对比提取。
+
+    partial 状态不进对比组（verifier 分数非 0/1, 语义模糊）。
+    """
+    passes: dict[str, list] = {}
+    fails: dict[str, list] = {}
+    for t in trajectories:
+        msgs = getattr(t, "messages", None) or []
+        if getattr(t, "status", "") == "pass":
+            passes.setdefault(t.task_id, []).append(msgs)
+        elif getattr(t, "status", "") == "fail":
+            fails.setdefault(t.task_id, []).append(msgs)
+    lessons: list[Lesson] = []
+    for task_id in sorted(set(passes) & set(fails)):
+        if len(passes[task_id]) >= min_pass and len(fails[task_id]) >= min_fail:
+            lessons.extend(extract_contrastive_lessons(
+                task_id, passes[task_id], fails[task_id],
+                max_lessons=max_lessons_per_task))
+    return lessons

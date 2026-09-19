@@ -52,3 +52,47 @@ def test_contrastive_caps_lessons():
     many_fail = [[{"role": "tool", "content": f"error: RuntimeError: r{i}"}]
                  for i in range(6)]
     assert len(extract_contrastive_lessons("t1", PASS_A, many_fail)) == 3
+
+
+# --- SP17 T2: 轨迹级对比挖掘 ---
+from agenticx.learning.trajectory.memory import (
+    contrastive_lessons_from_trajectories,
+)
+from agenticx.learning.trajectory.schema import RewardRecord, RSITrajectory
+
+
+def _traj(task: str, status: str, tool_contents: list) -> RSITrajectory:
+    msgs = [{"role": "user", "content": "go"}]
+    for c in tool_contents:
+        msgs.append({"role": "tool", "content": c})
+    return RSITrajectory(
+        source="test", task_id=task, session_id=f"{task}-{status}-{len(tool_contents)}",
+        model="m", status=status,
+        reward=RewardRecord(label=1.0 if status == "pass" else 0.0),
+        messages=msgs)
+
+
+def test_mine_contrastive_from_trajectories():
+    trajs = [
+        _traj("t1", "pass", ["error: FileNotFoundError: cfg"]),
+        _traj("t1", "fail", ["error: FileNotFoundError: cfg",
+                             "error: TimeoutError: npm"]),
+        _traj("t2", "pass", ["ok"]),                 # t2 无失败组 → 不产出
+        _traj("t3", "fail", ["error: TimeoutError: npm"]),
+        _traj("t3", "fail", ["error: TimeoutError: npm"]),   # t3 无成功组 → 不产出
+        _traj("t4", "partial", ["error: X"]),        # partial 不进对比组
+    ]
+    lessons = contrastive_lessons_from_trajectories(trajs)
+    assert [l.task_id for l in lessons] == ["t1"]
+    assert lessons[0].kind == "contrastive_failure"
+    assert "TimeoutError" in lessons[0].content
+
+
+def test_mine_min_group_size_gate():
+    # min_fail=2: t1 只有 1 条失败轨迹 → 被门槛拦下
+    trajs = [
+        _traj("t1", "pass", []),
+        _traj("t1", "fail", ["error: TimeoutError: x"]),
+    ]
+    assert contrastive_lessons_from_trajectories(trajs, min_fail=2) == []
+    assert len(contrastive_lessons_from_trajectories(trajs)) == 1
