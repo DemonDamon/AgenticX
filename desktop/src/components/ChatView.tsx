@@ -2701,7 +2701,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             </div>
           </div>
         )}
-        <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
+        <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[var(--agx-chat-im-body-font-size)]" : ""}`}>
           {(() => {
             const lastFlatToolGroupIdx = groupedVisibleMessages.reduce(
               (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
@@ -2715,7 +2715,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               if (row.kind === "message") {
                 const m = row.message;
                 return (
-                  <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                  <div key={m.id} className={`${isLite ? "text-[var(--agx-chat-im-body-font-size)]" : "text-sm"}`}>
                     <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
                     <MessageRenderer
                       message={m}
@@ -2820,7 +2820,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <WidgetFlowRewriteStatusLine />
           ) : null}
           {streaming && !hideStreamOverlayAsDuplicate && (
-            <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
+            <div className={["!mt-1.5", isLite ? "text-[var(--agx-chat-im-body-font-size)]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (
                 <TerminalLine
                   message={streamAssistantMessage}

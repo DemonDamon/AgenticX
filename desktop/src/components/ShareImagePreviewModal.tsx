@@ -240,7 +240,7 @@ export function ShareImagePreviewModal({
                             ) : null}
                             {turn.text.trim() ? (
                               <div
-                                className="agx-im-user-bubble whitespace-pre-wrap border-0 px-4 py-2.5 text-[14px] leading-relaxed"
+                                className="agx-im-user-bubble agx-im-body-type whitespace-pre-wrap border-0 px-4 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)]"
                                 style={{
                                   background: "var(--chat-im-user-bg)",
                                   color: "var(--chat-im-user-text)",
@@ -256,7 +256,7 @@ export function ShareImagePreviewModal({
                           <ShareGraphicView graphic={turn.graphic} />
                         </div>
                       ) : (
-                        <div key={`a-${idx}`} className="msg-content w-full text-left text-[14px] leading-relaxed">
+                        <div key={`a-${idx}`} className="agx-im-body-type msg-content w-full text-left text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)]">
                           {turn.parts.map((part, partIdx) =>
                             part.kind === "md" ? (
                               <div

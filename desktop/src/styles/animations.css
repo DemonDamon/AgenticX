@@ -128,6 +128,28 @@
   animation: agx-working-shimmer 5.4s linear infinite;
 }
 
+@keyframes agx-stream-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.agx-stream-body > :nth-last-child(2) > :last-child:is(p, h1, h2, h3, h4, li, span) {
+  display: inline;
+}
+
+.agx-stream-caret {
+  display: inline-block;
+  width: 0.42em;
+  height: 1.05em;
+  margin-left: 0.12em;
+  vertical-align: -0.12em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.5;
+  animation: agx-stream-caret 1s steps(1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -160,5 +182,10 @@
   .agx-working-ellipsis > span {
     animation: none;
     opacity: 1;
+  }
+
+  .agx-stream-caret {
+    animation: none;
+    opacity: 0.4;
   }
 }

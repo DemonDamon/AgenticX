@@ -59,6 +59,8 @@ import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/gr
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
+import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
+import { usePacedStreamText } from "./usePacedStreamText";
 
 type Props = {
   message: Message;
@@ -345,6 +347,9 @@ export function ImBubble({
     showExpertLabel && !isUser
       ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
       : strippedBody;
+  const groupStreamActive = isGroupAssistant && isStreaming;
+  const pacedBodyText = usePacedStreamText(String(bodyText ?? ""), groupStreamActive);
+  const assistantBodyText = groupStreamActive ? pacedBodyText : bodyText;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
@@ -762,8 +767,14 @@ export function ImBubble({
           />
         </div>
       ) : null}
-      <div
-        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
+      <MaybeConversationBubble
+        active={isGroupAssistant}
+        align="start"
+        className={
+          isGroupAssistant
+            ? `items-start${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`
+            : `flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`
+        }
       >
         {isGroupAssistant ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
@@ -830,7 +841,12 @@ export function ImBubble({
             </div>
           </div>
         ) : isUser ? (
-          <div className="agx-im-user-stack" style={userStackStyle}>
+          <MaybeConversationBubble
+            active={isUser && showSenderIdentity}
+            align="end"
+            className="agx-im-user-stack"
+            style={userStackStyle}
+          >
             {/* Trae-style: attachment chips sit above the text bubble, not inside it. */}
             {displayAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap justify-end gap-2">
@@ -843,8 +859,9 @@ export function ImBubble({
               </div>
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
-            <div
-              className="agx-im-user-bubble relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+            <MaybeConversationContent
+              active={showSenderIdentity}
+              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -881,7 +898,7 @@ export function ImBubble({
                   </div>
                 ) : null}
               </div>
-            </div>
+            </MaybeConversationContent>
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}
@@ -955,20 +972,21 @@ export function ImBubble({
                 </div>
               </div>
             )}
-          </div>
+          </MaybeConversationBubble>
         ) : (
           <>
-            <div
+            <MaybeConversationContent
+              active={isGroupAssistant}
               className={
                 compactAssistant && noBubbleBorder
-                  ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                  ? `agx-im-body-type relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isMetaPendingWork
-                    ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    ? `agx-im-body-type relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : isGroupAssistant
-                      ? `agx-im-group-bubble relative min-w-0 px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      ? `agx-im-group-bubble agx-im-body-type relative min-w-0 px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}${isStreaming ? " agx-streaming" : ""}`
                       : (message.references?.length ?? 0) > 0
-                        ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                        : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        ? `agx-im-body-type relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        : `agx-im-body-type relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
               }
               style={
                 compactAssistant && noBubbleBorder
@@ -978,7 +996,7 @@ export function ImBubble({
                         background: "var(--chat-im-assistant-bg)",
                         color: "var(--chat-im-assistant-text)",
                         width: "fit-content",
-                        maxWidth: "min(100%, 760px)",
+                        maxWidth: "100%",
                       }
                     : userBubbleStyle
               }
@@ -1073,7 +1091,7 @@ export function ImBubble({
                     ) : null}
                     {hasBody ? (
                       <div
-                        className={showExpertLabel ? undefined : assistantTextClassName}
+                        className={`${showExpertLabel ? "" : assistantTextClassName ?? ""}${groupStreamActive ? " agx-stream-body" : ""}`.trim() || undefined}
                         style={assistantTextStyle}
                       >
                         {renderInlineBlocks ? (
@@ -1084,7 +1102,7 @@ export function ImBubble({
                                     block.text.trim() ? (
                                       <CitationMarkdownBody
                                         key={`text-${idx}`}
-                                        content={block.text}
+                                        content={groupStreamActive ? assistantBodyText : block.text}
                                         references={citationReferences}
                                         isStreaming={isStreaming}
                                         onQuoteText={(text) => onQuoteMessage?.(message, text)}
@@ -1097,9 +1115,9 @@ export function ImBubble({
                                 )
                               : (
                                 <>
-                                  {bodyText.trim() ? (
+                                  {assistantBodyText.trim() ? (
                                     <CitationMarkdownBody
-                                      content={bodyText}
+                                      content={assistantBodyText}
                                       references={citationReferences}
                                       isStreaming={isStreaming}
                                       onQuoteText={(text) => onQuoteMessage?.(message, text)}
@@ -1116,19 +1134,22 @@ export function ImBubble({
                           </>
                         ) : (
                           <CitationMarkdownBody
-                            content={bodyText}
+                            content={assistantBodyText}
                             references={citationReferences}
                             isStreaming={isStreaming}
                             onQuoteText={(text) => onQuoteMessage?.(message, text)}
                             onRevealPath={onRevealPath}
                           />
                         )}
+                        {groupStreamActive && !streamStalled ? (
+                          <span className="agx-stream-caret" aria-hidden="true" />
+                        ) : null}
                       </div>
                     ) : null}
                     {isStreaming && hasBody && (!hasThinkTag || reasoningClosed) ? (
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
-                      ) : (
+                      ) : isGroupAssistant ? null : (
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
@@ -1140,7 +1161,7 @@ export function ImBubble({
                   </>
                 )}
               </div>
-            </div>
+            </MaybeConversationContent>
             {afterBody ? (
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>
@@ -1173,7 +1194,7 @@ export function ImBubble({
             )}
           </>
         )}
-      </div>
+      </MaybeConversationBubble>
       {menuOpen ? createPortal(
         <div
           ref={menuRef}

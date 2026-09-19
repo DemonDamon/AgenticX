@@ -147,10 +147,52 @@ describe("ImBubble group expert identity", () => {
     expect(html).toContain("agx-im-avatar");
     expect(html).toContain("https://example.test/avatar.png");
     expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain('data-slot="conversation-bubble"');
+    expect(html).toContain('data-slot="conversation-content"');
+    expect(html).toContain("max-w-[var(--agx-conversation-bubble-max)]");
     expect(html).toContain("架构师");
     expect(html).toContain("结论：建议采用方案 A。");
     expect(html).not.toContain("展开");
     expect(html).not.toContain("折叠");
+  });
+
+  it("marks a live group stream bubble for paced output", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "__group_stream__:architect",
+          role: "assistant",
+          content: "结论：建议采用方案 A。",
+          avatarName: "架构师",
+        }}
+        showSenderIdentity
+        senderAvatarId="architect"
+        assistantName="架构师"
+      />,
+    );
+    expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain("agx-streaming");
+    expect(html).toContain("agx-stream-caret");
+    expect(html).not.toContain("agx-dot-pulse");
+  });
+
+  it("caps group user bubbles in the conversation column", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "u-group",
+          role: "user",
+          content: "采用方案 A",
+        }}
+        showSenderIdentity
+        userName="我"
+      />,
+    );
+    expect(html).toContain("agx-im-user-bubble");
+    expect(html).toContain('data-slot="conversation-bubble"');
+    expect(html).toContain('data-align="end"');
+    expect(html).toContain('data-slot="conversation-content"');
+    expect(html).toContain("采用方案 A");
   });
 
   it("keeps copy/quote on a group reply while the session is still running", () => {
@@ -212,6 +254,8 @@ describe("ImBubble group expert identity", () => {
     expect(metaHtml).toContain("我来帮你看一下这段代码。");
     expect(metaHtml).not.toContain("agx-im-avatar");
     expect(metaHtml).not.toContain("agx-im-group-bubble");
+    expect(metaHtml).not.toContain('data-slot="conversation-bubble"');
+    expect(metaHtml).not.toContain('data-slot="conversation-content"');
   });
 });
 

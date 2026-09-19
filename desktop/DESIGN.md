@@ -30,7 +30,7 @@ colors:
 typography:
   body-md:
     fontFamily: SF Pro Text
-    fontSize: 14px
+    fontSize: 15px
     fontWeight: "400"
     lineHeight: 1.625
   body-sm:
@@ -167,7 +167,7 @@ not global brand primaries.
 One family stack: **SF Pro Text → PingFang SC → Helvetica Neue → sans-serif** (see
 `:root` in `index.css`). Chinese and Latin must feel equally native on macOS.
 
-- **body-md ({typography.body-md})** — canonical IM bubble and markdown body at **14px /
+- **body-md ({typography.body-md})** — canonical IM bubble and markdown body at **15px /
   1.625**. Model picker and composer metadata must not exceed this size.
 - **body-sm** — code blocks, settings dense rows, terminal embed.
 - **h1–h3** — markdown headings inside bubbles only; restrained scale (20 / 18 / 16px),
@@ -238,7 +238,7 @@ cyan hex.
 
 ### Chat bubbles (`chat-bubble-user`, `chat-bubble-assistant`)
 
-WeChat-influenced: soft neutral fills, 1px border, 14px body. User bubbles may pick up
+WeChat-influenced: soft neutral fills, 1px border, 15px body. User bubbles may pick up
 accent tint via `--theme-color-rgb` when accent mode demands; assistant bubbles stay
 neutral so tool cards and markdown remain the focal layer. Reasoning blocks fold inside
 the bubble — no separate white card chrome.

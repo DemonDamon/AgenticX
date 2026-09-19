@@ -39,13 +39,56 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Markdown content styles */
+/* Markdown content styles — inherit size from parent so reasoning / preview stay compact. */
 .msg-content {
-  font-size: var(--agx-chat-im-body-font-size);
   line-height: 1.625;
 }
 .msg-content p {
   margin: 0.5em 0;
+}
+
+/* Chat IM body only: larger, brighter, less dense long-form reading. */
+.agx-im-body-type {
+  font-size: var(--agx-chat-im-body-font-size);
+  line-height: var(--agx-chat-im-body-line-height);
+  font-optical-sizing: auto;
+}
+.agx-im-body-type .msg-content {
+  font-size: inherit;
+  line-height: inherit;
+}
+.agx-im-body-type .msg-content p {
+  margin: var(--agx-chat-im-body-paragraph-gap) 0;
+}
+.agx-im-body-type .msg-content > :first-child {
+  margin-top: 0;
+}
+.agx-im-body-type .msg-content > :last-child {
+  margin-bottom: 0;
+}
+.agx-im-body-type .msg-content ul,
+.agx-im-body-type .msg-content ol {
+  margin: var(--agx-chat-im-body-paragraph-gap) 0;
+  margin-left: 0;
+  padding-left: 1.35em;
+  list-style-position: outside;
+}
+.agx-im-body-type .msg-content li {
+  margin: 0.4em 0;
+}
+.agx-im-body-type .msg-content h1,
+.agx-im-body-type .msg-content h2,
+.agx-im-body-type .msg-content h3 {
+  margin-top: 1.15em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.01em;
+}
+.agx-im-body-type .msg-content h3 {
+  font-size: 1.0625em;
+  line-height: 1.45;
+}
+.agx-im-body-type .msg-content > :is(h1, h2, h3):first-child {
+  margin-top: 0;
 }
 .msg-content pre {
   @apply overflow-x-auto rounded p-3 text-[13px];
@@ -109,8 +152,8 @@ body {
   margin: 0 !important;
 }
 .agx-expert-body .msg-content :is(h1, h2, h3):first-of-type {
-  /* Match .msg-content p { margin: 0.5em 0 } so ## titles sit like “收到。” openers. */
-  margin-top: 0.5em !important;
+  /* Match chat paragraph gap so ## titles sit like “收到。” openers. */
+  margin-top: var(--agx-chat-im-body-paragraph-gap) !important;
 }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */

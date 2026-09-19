@@ -110,6 +110,7 @@ import {
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { Conversation } from "./messages/Conversation";
 import { MarkdownContext } from "./messages/markdown-components";
 import { requestChatHttpLink } from "../utils/chat-external-link";
 import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
@@ -2984,6 +2985,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const userBubbleLabel = useMemo(() => userNickname.trim() || t("actions.me"), [userNickname, t]);
   const groupChatUserLabel = useMemo(() => userNickname.trim() || t("actions.user"), [userNickname, t]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
+  const MessageThread = isGroupPane ? Conversation : "div";
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
   const isMachiMetaPane = pane.avatarId === null;
   const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
@@ -13478,7 +13480,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           ) : !isBrandEmptyState ? (
-            <div className="mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3">
+            <MessageThread
+              className={
+                isGroupPane
+                  ? "mx-auto w-full max-w-4xl"
+                  : "mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3"
+              }
+            >
               {pane.loadingOlderMessages || (pane.hasOlderMessages && (pane.oldestLoadedIndex ?? 0) > 0) ? (
                 <div className="flex justify-center py-2">
                   {pane.loadingOlderMessages ? (
@@ -13495,7 +13503,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 </div>
               ) : null}
               {renderedMessages}
-            </div>
+            </MessageThread>
           ) : null}
           {debateNudgeText ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-4">
@@ -14183,7 +14191,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void sendChat(composerText);
                 }
               }}
-              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[15px] leading-relaxed text-text-primary outline-none ${
+              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)] text-text-primary outline-none ${
                 // 收起时右侧留白需覆盖「展开输入」角标（absolute right-3 + w-8），pr-4 会导致首行末字与按钮重叠
                 composerExpanded
                   ? "max-h-[62vh] min-h-[260px] pr-40"
@@ -14193,7 +14201,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }`}
             />
             {!composerHasText && quoteTargets.length === 0 ? (
-              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
+              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[var(--agx-chat-im-body-font-size)] text-text-faint">
                 {pane.turnIntent === "plan"
                   ? t("composer.placeholderPlan")
                   : t("composer.placeholder")}
