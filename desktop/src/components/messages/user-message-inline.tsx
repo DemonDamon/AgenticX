@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { SkillPuzzleIcon } from "../icons/SkillPuzzleIcon";
 import {
@@ -24,11 +24,13 @@ import {
   formatReferenceChipLabel,
   resolveReferenceSourcePath,
 } from "../../utils/chat-file-mention";
+import { openExternalUrl } from "../../utils/open-external";
 import {
   chatMarkdownComponents,
   chatRehypePlugins,
   chatRemarkPlugins,
   chatUrlTransform,
+  MarkdownContext,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 import { maskSecretsForDisplay } from "../../utils/secret-mask";
@@ -48,6 +50,35 @@ const SKILL_SLUG_RE = /^([^\s@,，。！？\n]+)/;
 const userInlineMarkdownComponents: Partial<Components> = {
   ...chatMarkdownComponents,
   p: ({ children }) => <span className="inline">{children}</span>,
+  // User bubble fill is theme-color; shared `.msg-content a` uses the same token and vanishes.
+  a({ href, children, ...rest }) {
+    const { onHttpLinkClick } = useContext(MarkdownContext);
+    const url = String(href ?? "").trim();
+    const external = /^https?:\/\//i.test(url);
+    return (
+      <a
+        {...rest}
+        href={url || undefined}
+        target={external ? "_blank" : rest.target}
+        rel={external ? "noopener noreferrer" : rest.rel}
+        className="text-[var(--chat-im-user-text)] underline underline-offset-2 decoration-current hover:opacity-90"
+        onClick={
+          external
+            ? (event) => {
+                event.preventDefault();
+                if (onHttpLinkClick) {
+                  onHttpLinkClick(url);
+                  return;
+                }
+                openExternalUrl(url);
+              }
+            : rest.onClick
+        }
+      >
+        {children}
+      </a>
+    );
+  },
 };
 
 function tryConsumeSkillRef(text: string, at: number): { slug: string; len: number } | null {

@@ -933,6 +933,12 @@ body.agx-settings-nav-resizing {
   padding: 0;
 }
 
+/* Solid user bubble uses theme fill; default .msg-content a is the same fill and disappears. */
+.agx-im-user-bubble .msg-content a {
+  color: var(--chat-im-user-text);
+  text-decoration-color: color-mix(in srgb, var(--chat-im-user-text) 55%, transparent);
+}
+
 /*
  * 用户气泡 + 操作栏（locked — 详见 desktop/DESIGN.md「User message action bar」）：
  * gutter 在 stack 上；操作栏 width:0;min-width:100% 与气泡同宽右对齐；

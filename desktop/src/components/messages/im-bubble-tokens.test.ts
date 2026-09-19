@@ -44,4 +44,13 @@ describe("IM bubble tokens", () => {
     expect(chipBlock).not.toContain("var(--text-faint)");
     expect(chipBlock).not.toContain("var(--text-muted)");
   });
+
+  it("paints user-bubble links with on-color text, not the fill color", () => {
+    const start = indexCss.indexOf(".agx-im-user-bubble .msg-content a");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const close = indexCss.indexOf("}", start);
+    const block = indexCss.slice(start, close + 1);
+    expect(block).toContain("color: var(--chat-im-user-text)");
+    expect(block).not.toContain("theme-color-rgb");
+  });
 });

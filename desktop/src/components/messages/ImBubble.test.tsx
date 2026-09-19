@@ -556,4 +556,23 @@ describe("ImBubble peer human speaker", () => {
     expect(html).not.toContain("甲");
     expect(html).not.toContain("text-text-faint");
   });
+
+  it("keeps bare article URLs visible on the solid user bubble", () => {
+    const url = "https://mp.weixin.qq.com/s/u3oTtbEFuTUAPWsEYZSXkw";
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "owner-url",
+          role: "user",
+          content: `你看下 ${url}\n\n其实他们两个厂商所谓的统一`,
+        }}
+      />,
+    );
+    expect(html).toContain(url);
+    expect(html).toContain(`href="${url}"`);
+    const anchor = html.match(/<a\b[^>]*>https:\/\/mp\.weixin\.qq\.com\/s\/u3oTtbEFuTUAPWsEYZSXkw<\/a>/);
+    expect(anchor?.[0]).toBeTruthy();
+    expect(anchor?.[0]).not.toContain("theme-color-rgb");
+    expect(anchor?.[0]).toMatch(/chat-im-user-text|text-inherit/);
+  });
 });
