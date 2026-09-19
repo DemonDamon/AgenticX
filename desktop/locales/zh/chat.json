@@ -150,6 +150,11 @@
     "thought": "思考过程",
     "thoughtSeconds": "思考了 {{seconds}} 秒"
   },
+  "groupReport": {
+    "title": "完整说明",
+    "expand": "展开",
+    "collapse": "收起"
+  },
   "tool": {
     "confirmed": "已确认执行",
     "cancelled": "已取消",

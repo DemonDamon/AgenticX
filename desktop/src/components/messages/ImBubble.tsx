@@ -60,7 +60,9 @@ import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
 import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
+import { GroupTalkReportCard } from "./GroupTalkReportCard";
 import { usePacedStreamText } from "./usePacedStreamText";
+import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
 
 type Props = {
   message: Message;
@@ -108,6 +110,8 @@ type Props = {
    * User bubbles match Meta layout (no name/avatar chrome).
    */
   showSenderIdentity?: boolean;
+  /** Same sender as the previous visible group row: hide name/avatar. */
+  clusterContinue?: boolean;
   /** @deprecated Avatars removed from group chat; kept for API compat. */
   senderAvatarVariant?: "circle" | "rounded-square";
   /** Fallback tint when no imageUrl (avatar id for color hash). */
@@ -286,6 +290,7 @@ export function ImBubble({
   actionRhythmBodyTail = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
+  clusterContinue = false,
   senderAvatarVariant: _senderAvatarVariant = "circle",
   senderAvatarId,
   sessionBusy = false,
@@ -324,7 +329,8 @@ export function ImBubble({
     !isGroupTyping &&
     !isMetaPendingWork;
   const isGroupAssistant = showSenderIdentity && !isUser && !compactAssistant;
-  const showExpertLabel = isGroupAssistant;
+  const showGroupIdentityChrome = isGroupAssistant && !clusterContinue;
+  const showExpertLabel = showGroupIdentityChrome;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const protocolParsed = !isUser ? parseAssistantOutputForUi(message.content) : null;
@@ -344,12 +350,21 @@ export function ImBubble({
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
   const bodyText =
-    showExpertLabel && !isUser
+    isGroupAssistant
       ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
       : strippedBody;
   const groupStreamActive = isGroupAssistant && isStreaming;
   const pacedBodyText = usePacedStreamText(String(bodyText ?? ""), groupStreamActive);
-  const assistantBodyText = groupStreamActive ? pacedBodyText : bodyText;
+  const canPeelGroupReport =
+    isGroupAssistant &&
+    !isStreaming &&
+    !isGroupTyping &&
+    !isMetaPendingWork &&
+    !hasImageBlock(message.blocks);
+  const peeled = canPeelGroupReport
+    ? splitGroupTalkFromReport(String(bodyText ?? ""))
+    : { talk: String(bodyText ?? ""), report: null as string | null };
+  const assistantBodyText = groupStreamActive ? pacedBodyText : peeled.talk;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
@@ -756,7 +771,7 @@ export function ImBubble({
           </svg>
         </button>
       ) : null}
-      {isGroupAssistant ? (
+      {showGroupIdentityChrome ? (
         <div className="mt-[18px] shrink-0">
           <ChatImAvatar
             label={displayName}
@@ -765,6 +780,10 @@ export function ImBubble({
             variant="circle"
             size="sm"
           />
+        </div>
+      ) : isGroupAssistant && clusterContinue ? (
+        <div className="shrink-0" aria-hidden="true">
+          <div className="h-7 w-7" />
         </div>
       ) : null}
       <MaybeConversationBubble
@@ -776,12 +795,12 @@ export function ImBubble({
             : `flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`
         }
       >
-        {isGroupAssistant ? (
+        {showGroupIdentityChrome ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
             {displayName}
           </div>
         ) : null}
-        {isPeerHuman ? (
+        {isPeerHuman && !clusterContinue ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
             {displayName}
           </div>
@@ -1091,7 +1110,7 @@ export function ImBubble({
                     ) : null}
                     {hasBody ? (
                       <div
-                        className={`${showExpertLabel ? "" : assistantTextClassName ?? ""}${groupStreamActive ? " agx-stream-body" : ""}`.trim() || undefined}
+                        className={`${isGroupAssistant ? "" : assistantTextClassName ?? ""}${groupStreamActive ? " agx-stream-body" : ""}`.trim() || undefined}
                         style={assistantTextStyle}
                       >
                         {renderInlineBlocks ? (
@@ -1162,6 +1181,13 @@ export function ImBubble({
                 )}
               </div>
             </MaybeConversationContent>
+            {peeled.report ? (
+              <GroupTalkReportCard
+                content={peeled.report}
+                onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                onRevealPath={onRevealPath}
+              />
+            ) : null}
             {afterBody ? (
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>

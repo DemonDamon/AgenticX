@@ -171,6 +171,11 @@ import {
   shouldResetGroupStreamOnProgress,
   visibleGroupStreamBody,
 } from "../utils/group-stream-text";
+import {
+  clusterFlagsForGroupRows,
+  groupSenderClusterKey,
+  lastAdjacentClusterKey,
+} from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
@@ -3541,6 +3546,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => groupConsecutiveToolMessages(renderMessages),
     [renderMessages]
   );
+  const groupClusterByMessageId = useMemo(() => {
+    if (!isGroupPane) return new Map<string, { senderKey: string | null; clusterContinue: boolean }>();
+    return clusterFlagsForGroupRows(groupedVisibleMessages, (message) =>
+      groupSenderClusterKey(message, resolveGroupSender(message).avatarId),
+    );
+  }, [isGroupPane, groupedVisibleMessages, resolveGroupSender]);
   const hasLiveLocalSse = isLiveForegroundSse({
     streaming,
     streamingSessionId,
@@ -8452,6 +8463,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const rowSelectable = isSelecting && !reactCol;
         const isSelected = selectedMessageIds.has(message.id);
         const groupSender = isGroupPane ? resolveGroupSender(message) : null;
+        const cluster = isGroupPane ? groupClusterByMessageId.get(message.id) : undefined;
         const imUserName = isGroupPane ? groupChatUserLabel : userBubbleLabel;
         const imAssistantName = groupSender?.name ?? paneAvatarMeta.name;
         const imAssistantAvatarUrl = groupSender?.url ?? paneAvatarMeta.url;
@@ -8460,6 +8472,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             key={message.id}
             data-message-id={message.id}
             data-im-align={message.role === "user" ? "end" : message.role === "assistant" ? "start" : undefined}
+            data-im-sender={cluster?.senderKey || undefined}
+            data-im-cluster={cluster?.clusterContinue ? "continue" : undefined}
             className={`group/sel relative${actionRhythmBodyTail ? ` ${ASSISTANT_BODY_TAIL_CLASS}` : ""}`}
           >
             {rowSelectable && !isSelected && (
@@ -8524,6 +8538,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               userName={imUserName}
               userAvatarUrl={userAvatarUrl || undefined}
               showSenderIdentity={isGroupPane}
+              clusterContinue={Boolean(cluster?.clusterContinue)}
               senderAvatarVariant="rounded-square"
               senderAvatarId={groupSender?.avatarId}
               onCopyMessage={copyMessage}
@@ -8931,6 +8946,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             });
           });
 
+    const visibleGroupActivityCount = sortGroupExpertActivities(groupExpertActivities).filter(
+      (activity) => !visibleGroupStreamBody(groupStreamText[activity.agentId] ?? ""),
+    ).length;
+    const streamClusterFromHistory =
+      isGroupPane && visibleGroupActivityCount === 0
+        ? lastAdjacentClusterKey(groupClusterByMessageId, groupedVisibleMessages)
+        : null;
+
     return (
     <>
       {mainRows}
@@ -8957,9 +8980,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               avatarName: activity?.avatarName || groupTyping[agentId] || agentId,
               avatarUrl: activity?.avatarUrl,
             });
+            const streamKey = groupSenderClusterKey(
+              { role: "assistant", agentId, avatarName: sender.name },
+              sender.avatarId,
+            );
+            const clusterContinue = Boolean(streamKey && streamKey === streamClusterFromHistory);
             return (
-              <ImBubble
+              <div
                 key={`group-stream:${agentId}`}
+                data-im-align="start"
+                data-im-sender={streamKey || undefined}
+                data-im-cluster={clusterContinue ? "continue" : undefined}
+              >
+              <ImBubble
                 message={{
                   id: `__group_stream__:${agentId}`,
                   role: "assistant",
@@ -8971,10 +9004,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 assistantName={sender.name}
                 assistantAvatarUrl={sender.url}
                 showSenderIdentity
+                clusterContinue={clusterContinue}
                 senderAvatarVariant="rounded-square"
                 senderAvatarId={sender.avatarId}
                 sessionBusy
               />
+              </div>
             );
           })
         : null}
@@ -9074,7 +9109,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -13530,7 +13565,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <MessageThread
               className={
                 isGroupPane
-                  ? "mx-auto w-full max-w-4xl"
+                  ? "agx-group-thread mx-auto w-full max-w-4xl"
                   : "mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3"
               }
             >

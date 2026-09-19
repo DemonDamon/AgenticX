@@ -1073,8 +1073,20 @@ body.agx-settings-nav-resizing {
   border-top-right-radius: 8px;
 }
 
-[data-im-align="start"] + [data-im-align="start"] .agx-im-group-bubble {
+.agx-group-thread [data-im-align="end"] + [data-im-align="end"] .agx-im-user-bubble {
+  border-top-right-radius: 18px;
+}
+
+.agx-group-thread [data-im-cluster="continue"] {
+  margin-top: -0.25rem;
+}
+
+.agx-group-thread [data-im-cluster="continue"] .agx-im-group-bubble {
   border-top-left-radius: 8px;
+}
+
+.agx-group-thread [data-im-cluster="continue"] .agx-im-user-bubble {
+  border-top-right-radius: 8px;
 }
 
 input[type="checkbox"],

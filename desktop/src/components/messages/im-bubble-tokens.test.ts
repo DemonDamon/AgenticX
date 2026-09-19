@@ -30,6 +30,14 @@ describe("IM bubble tokens", () => {
     expect(indexCss).not.toContain("--chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4)");
   });
 
+  it("clusters group bubbles by sender continue, not left-side adjacency", () => {
+    expect(indexCss).not.toContain(
+      "[data-im-align=\"start\"] + [data-im-align=\"start\"] .agx-im-group-bubble",
+    );
+    expect(indexCss).toContain('.agx-group-thread [data-im-cluster="continue"] .agx-im-group-bubble');
+    expect(indexCss).toContain(".agx-group-thread [data-im-cluster=\"continue\"] .agx-im-user-bubble");
+  });
+
   it("keeps received assistant capsules on a neutral solid gray", () => {
     expect(readCss("styles/themes/dark.css")).toContain("--chat-im-assistant-bg: #3b3b3d");
     expect(readCss("styles/themes/dim.css")).toContain("--chat-im-assistant-bg: #3b3b3d");

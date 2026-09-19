@@ -119,6 +119,7 @@ type Props = {
   isFutileResume?: boolean;
   /** Group chat: avatar + name on each user/assistant bubble. */
   showSenderIdentity?: boolean;
+  clusterContinue?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
   senderAvatarId?: string;
   sessionBusy?: boolean;
@@ -400,6 +401,7 @@ export function MessageRenderer({
   resumeInFlight = false,
   isFutileResume = false,
   showSenderIdentity = false,
+  clusterContinue = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
   sessionBusy = false,
@@ -574,6 +576,7 @@ export function MessageRenderer({
             : false
         }
         showSenderIdentity={showSenderIdentity}
+        clusterContinue={clusterContinue}
         senderAvatarVariant={showSenderIdentity ? senderAvatarVariant : "circle"}
         senderAvatarId={senderAvatarId ?? (showSenderIdentity && message.role === "user" ? "user-self" : undefined)}
         sessionBusy={sessionBusy}

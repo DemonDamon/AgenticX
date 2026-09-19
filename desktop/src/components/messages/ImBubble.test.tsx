@@ -240,6 +240,74 @@ describe("ImBubble group expert identity", () => {
     expect(html).not.toContain("lucide-copy");
   });
 
+  it("hides expert avatar and name on a same-sender continuation", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "g-continue",
+          role: "assistant",
+          content: "再补一句：先改第 3 条。",
+          avatarName: "架构师",
+        }}
+        showSenderIdentity
+        clusterContinue
+        senderAvatarId="architect"
+        assistantName="架构师"
+      />,
+    );
+    expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain("再补一句：先改第 3 条。");
+    expect(html).toContain("h-7 w-7");
+    expect(html).not.toContain("agx-im-avatar");
+    expect(html).not.toContain("架构师");
+  });
+
+  it("peels a long group report into a write-up card", () => {
+    const lead = "结论：这块预算超了，超在差旅和外包。";
+    const section =
+      "本轮核对了差旅、外包和采购三类支出，下面按科目展开说明，便于对照合同与报销单。差旅超标主要来自临时改签和周末停留；外包超标来自两周的加急档期与驻场加班。采购基本持平，但发票尚未齐，不能当作本周可关闭项。若需要完整表格，我可以再补一版到工作区，不把细项继续堆在群里。建议先砍差旅改签，再谈外包档期，采购维持原单并催发票。这版先给结论和三块拆解，细表不进群气泡。";
+    const content = `${lead}\n\n## 背景\n${section}\n\n## 明细\n${section}\n\n## 建议\n${section}`;
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "g-report",
+          role: "assistant",
+          content,
+          avatarName: "财务",
+        }}
+        showSenderIdentity
+        senderAvatarId="finance"
+        assistantName="财务"
+      />,
+    );
+    expect(html).toContain("这块预算超了");
+    expect(html).toContain('data-slot="group-talk-report"');
+    expect(html).not.toContain("## 背景");
+  });
+
+  it("does not peel a live group stream into a write-up card", () => {
+    const lead = "结论：这块预算超了，超在差旅和外包。";
+    const section =
+      "本轮核对了差旅、外包和采购三类支出，下面按科目展开说明，便于对照合同与报销单。差旅超标主要来自临时改签和周末停留；外包超标来自两周的加急档期与驻场加班。采购基本持平，但发票尚未齐，不能当作本周可关闭项。若需要完整表格，我可以再补一版到工作区，不把细项继续堆在群里。建议先砍差旅改签，再谈外包档期，采购维持原单并催发票。这版先给结论和三块拆解，细表不进群气泡。";
+    const content = `${lead}\n\n## 背景\n${section}\n\n## 明细\n${section}\n\n## 建议\n${section}`;
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "__group_stream__:finance",
+          role: "assistant",
+          content,
+          avatarName: "财务",
+        }}
+        showSenderIdentity
+        senderAvatarId="finance"
+        assistantName="财务"
+      />,
+    );
+    expect(html).toContain("结论");
+    expect(html).toContain("agx-streaming");
+    expect(html).not.toContain('data-slot="group-talk-report"');
+  });
+
   it("keeps Meta single chat free of group avatar chrome", () => {
     const metaHtml = renderToStaticMarkup(
       <ImBubble

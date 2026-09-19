@@ -150,6 +150,11 @@
     "thought": "Thought",
     "thoughtSeconds": "Thought for {{seconds}}s"
   },
+  "groupReport": {
+    "title": "Full write-up",
+    "expand": "Expand",
+    "collapse": "Collapse"
+  },
   "tool": {
     "confirmed": "Approved",
     "cancelled": "Cancelled",
