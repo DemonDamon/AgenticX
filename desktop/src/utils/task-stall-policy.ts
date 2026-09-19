@@ -424,6 +424,27 @@ export function sessionMessagesHydrated(opts: {
   return opts.messageCount > 0;
 }
 
+/** True when this pane's own /api/chat fetch is the live SSE client. */
+export function isLiveForegroundSse(input: {
+  streaming: boolean;
+  streamingSessionId?: string;
+  sessionId?: string;
+}): boolean {
+  const sid = (input.sessionId || "").trim();
+  const streamSid = (input.streamingSessionId || "").trim();
+  return Boolean(input.streaming && sid && streamSid && sid === streamSid);
+}
+
+/** WeChat/Feishu owns the live SSE; Desktop silence is expected, not a stall. */
+export function isImOwnedBackgroundTurn(input: {
+  sseActive: boolean;
+  wechatBound?: boolean;
+  feishuBound?: boolean;
+}): boolean {
+  if (input.sseActive) return false;
+  return Boolean(input.wechatBound || input.feishuBound);
+}
+
 /** While the user requested stop, suppress stall re-detection until execution settles. */
 export function shouldSuppressStallDetection(
   runGuardSessionId: string | undefined,

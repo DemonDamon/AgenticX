@@ -82,6 +82,7 @@ _FILE_TOOLS_REFERENCED = frozenset({"file_read", "file_edit"})
 class WeChatChatResult:
     text: str
     file_paths: tuple[str, ...] = ()
+    bubbles: tuple[str, ...] = ()
 
 
 def user_wants_file_delivery(text: str) -> bool:

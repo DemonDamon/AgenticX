@@ -70,7 +70,20 @@ class GroupChatContext:
         }
         if attachments:
             row["attachments"] = [dict(item) for item in attachments]
-        self._history().append(row)
+        history = self._history()
+        if history:
+            last = history[-1]
+            if (
+                isinstance(last, dict)
+                and str(last.get("role") or "") == "user"
+                and str(last.get("content") or "") == row["content"]
+                and str(last.get("sender_id") or "") == row["sender_id"]
+                and str(last.get("quoted_message_id") or "") == row["quoted_message_id"]
+                and str(last.get("quoted_content") or "") == row["quoted_content"]
+                and list(last.get("attachments") or []) == list(row.get("attachments") or [])
+            ):
+                return
+        history.append(row)
 
     def append_agent(
         self,

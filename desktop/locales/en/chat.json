@@ -524,6 +524,8 @@
     "unattendedOn": "Unattended for this chat: on",
     "unattendedOff": "Unattended for this chat: off",
     "backgroundRunning": "Running in background",
+    "wechatAnswering": "WeChat is answering",
+    "feishuAnswering": "Feishu is answering",
     "retryNow": "Retry now",
     "switchModel": "Switch model",
     "stop": "Stop",

@@ -78,3 +78,24 @@ async def test_run_group_turn_passes_speaker_id() -> None:
         ):
             pass
     assert captured["speaker_user_id"] == "human:feishu:ou_1"
+
+
+def test_append_user_skips_identical_tail() -> None:
+    session = SimpleNamespace(chat_history=[])
+    ctx = GroupChatContext(session)
+    attachments = [{"name": "shot.jpg", "mime_type": "image/jpeg", "size": 12}]
+    ctx.append_user(
+        "把这个论文发给我",
+        sender_name="我",
+        sender_id="human:wechat:u1",
+        attachments=attachments,
+    )
+    ctx.append_user(
+        "把这个论文发给我",
+        sender_name="我",
+        sender_id="human:wechat:u1",
+        attachments=attachments,
+    )
+    assert len(session.chat_history) == 1
+    ctx.append_user("追问一句", sender_name="我", sender_id="human:wechat:u1")
+    assert len(session.chat_history) == 2

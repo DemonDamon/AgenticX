@@ -105,8 +105,8 @@ func handleMediaDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.EQP == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "eqp required"})
+	if req.EQP == "" && req.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "eqp or url required"})
 		return
 	}
 

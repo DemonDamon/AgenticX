@@ -81,6 +81,7 @@ from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_m
 from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
+from agenticx.runtime.group_context import GroupChatContext
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
     GroupChatRouter,
@@ -3311,6 +3312,22 @@ def create_studio_app() -> FastAPI:
                         await _emit_group_event(typing_evt)
 
                     u_display = str(getattr(payload, "user_display_name", None) or "").strip() or None
+                    # Desktop polls ~/.agenticx/sessions/<id>/messages.json and will
+                    # not see an IM-owned group turn until this flush. Do it before
+                    # routing/LLM, which can take minutes before the first reply.
+                    GroupChatContext(session).append_user(
+                        str(payload.user_input or ""),
+                        sender_name=str(u_display or "").strip() or "我",
+                        sender_id=str(getattr(payload, "speaker_user_id", None) or "").strip()
+                        or "user",
+                        quoted_message_id=quoted_message_id,
+                        quoted_content=quoted_content,
+                        attachments=history_image_attachments or None,
+                    )
+                    try:
+                        manager.incremental_persist(payload.session_id)
+                    except Exception:
+                        pass
                     async for reply in router.run_group_turn(
                         base_session=session,
                         group_id=group_id,

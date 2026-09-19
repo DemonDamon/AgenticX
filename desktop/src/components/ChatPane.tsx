@@ -271,6 +271,8 @@ import {
   sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
+  isImOwnedBackgroundTurn,
+  isLiveForegroundSse,
   shouldSuppressStallDetection,
   shouldTriggerIncompleteEndStall,
   STALL_MODEL_FALLBACKS,
@@ -3538,11 +3540,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => groupConsecutiveToolMessages(renderMessages),
     [renderMessages]
   );
-  const isStreamingCurrentSession =
-    streaming &&
-    !isGroupPane &&
-    !!streamingSessionId &&
-    streamingSessionId === (pane.sessionId || "").trim();
+  const hasLiveLocalSse = isLiveForegroundSse({
+    streaming,
+    streamingSessionId,
+    sessionId: pane.sessionId || "",
+  });
+  const isStreamingCurrentSession = hasLiveLocalSse && !isGroupPane;
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
   const streamAssistantMessage = useMemo((): Message => {
     const sid = (pane.sessionId || "").trim();
@@ -3912,7 +3915,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   ]);
 
   useEffect(() => {
-    if (isGroupPane || !pane?.sessionId || isAutomationTaskPane) {
+    if (!pane?.sessionId || isAutomationTaskPane) {
       boundSessionIdRef.current.feishu = "";
       boundSessionIdRef.current.wechat = "";
       setFeishuDesktopBound(false);
@@ -6842,23 +6845,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => paneHasPendingHumanGate(pane.messages),
     [pane.messages],
   );
+  const imOwnedBackground = isImOwnedBackgroundTurn({
+    sseActive: hasLiveLocalSse,
+    wechatBound: wechatDesktopBound,
+    feishuBound: feishuDesktopBound,
+  });
   const silenceTier = useMemo(
     () =>
-      awaitingHuman
+      awaitingHuman || imOwnedBackground
         ? "thinking"
         : resolveSilenceTier(silentSeconds, stallThresholdSeconds),
-    [awaitingHuman, silentSeconds, stallThresholdSeconds],
+    [awaitingHuman, imOwnedBackground, silentSeconds, stallThresholdSeconds],
   );
   const sessionHealth = useMemo(
     () =>
-      resolveSessionHealth(
-        silentSeconds,
-        stallThresholdSeconds,
-        sessionExecutionState,
-        stallState,
-        awaitingHuman,
-      ),
-    [awaitingHuman, silentSeconds, stallThresholdSeconds, sessionExecutionState, stallState],
+      imOwnedBackground
+        ? "normal"
+        : resolveSessionHealth(
+            silentSeconds,
+            stallThresholdSeconds,
+            sessionExecutionState,
+            stallState,
+            awaitingHuman,
+          ),
+    [
+      awaitingHuman,
+      imOwnedBackground,
+      silentSeconds,
+      stallThresholdSeconds,
+      sessionExecutionState,
+      stallState,
+    ],
   );
 
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
@@ -7919,6 +7936,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return;
       }
 
+      // WeChat/Feishu owns /api/chat SSE. Desktop silence is not a local stall —
+      // showing 立即重试/换模型 here stacks a second turn on the same session.
+      if (
+        isImOwnedBackgroundTurn({
+          sseActive,
+          wechatBound: wechatDesktopBound,
+          feishuBound: feishuDesktopBound,
+        })
+      ) {
+        setStallState("none");
+        return;
+      }
+
       if (isFutileResume(msgs)) {
         setStallState("none");
         setStallRejectReason("");
@@ -7985,6 +8015,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     sessionExecutionState,
     stallRuntimeConfig.stall_detect_silence_seconds,
     stallState,
+    wechatDesktopBound,
+    feishuDesktopBound,
   ]);
 
   useEffect(() => {
@@ -13844,7 +13876,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <span
                   className={`rounded-full px-2 py-0.5 ${
                     sessionHealth === "stuck"
-                      ? "bg-amber-500/15 text-amber-200"
+                      ? "bg-amber-500/15 text-amber-200 [html[data-theme=light]_&]:text-amber-900"
                       : "bg-surface-panel/75 text-text-muted"
                   }`}
                 >
@@ -13889,8 +13921,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   {sessionUnattended ? t("status.unattendedOn") : t("status.unattendedOff")}
                 </button>
               ) : null}
-              {!isStreamingCurrentSession && sessionExecutionState === "running" ? (
-                <span className="text-amber-300/90">{t("status.backgroundRunning")}</span>
+              {!hasLiveLocalSse && sessionExecutionState === "running" ? (
+                <span className="text-amber-300/90 [html[data-theme=light]_&]:text-amber-800">
+                  {wechatDesktopBound
+                    ? t("status.wechatAnswering")
+                    : feishuDesktopBound
+                      ? t("status.feishuAnswering")
+                      : t("status.backgroundRunning")}
+                </span>
               ) : null}
             </div>
           )}
@@ -13901,7 +13939,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <div
                 className={`inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-[12px] ${
                   silenceTier === "stuck"
-                    ? "border-amber-500/35 bg-amber-500/10 text-amber-100/95"
+                    ? "border-amber-500/35 bg-amber-500/10 text-amber-100/95 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900"
                     : "border-border bg-surface-panel/80 text-text-muted"
                 }`}
               >
@@ -13933,7 +13971,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {silenceTier === "stuck" ? (
                   <button
                     type="button"
-                    className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-100 transition hover:bg-amber-500/30"
+                    className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-100 transition hover:bg-amber-500/30 [html[data-theme=light]_&]:bg-amber-600/15 [html[data-theme=light]_&]:text-amber-950 [html[data-theme=light]_&]:hover:bg-amber-600/25"
                     onClick={() => void takeoverSession()}
                   >
                     {t("status.takeover")}
@@ -13944,7 +13982,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {voiceInputHint ? (
             <div className="mb-2 flex justify-center px-1">
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95">
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
                 <span aria-hidden>!</span>
                 <span className="truncate">{voiceInputHint}</span>
               </span>

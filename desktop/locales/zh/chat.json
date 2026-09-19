@@ -524,6 +524,8 @@
     "unattendedOn": "本会话无人值守：开",
     "unattendedOff": "本会话无人值守：关",
     "backgroundRunning": "后台运行中",
+    "wechatAnswering": "微信正在回答",
+    "feishuAnswering": "飞书正在回答",
     "retryNow": "立即重试",
     "switchModel": "换模型",
     "stop": "停止",

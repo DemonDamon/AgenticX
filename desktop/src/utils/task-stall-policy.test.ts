@@ -20,6 +20,8 @@ import {
   sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
+  isImOwnedBackgroundTurn,
+  isLiveForegroundSse,
   shouldSuppressStallDetection,
   shouldTriggerIncompleteEndStall,
 } from "./task-stall-policy";
@@ -117,6 +119,56 @@ describe("resolveStickyTodoDisplay", () => {
     const out = resolveStickyTodoDisplay(todo, "idle", "interrupted", { promotePending: true });
     expect(out.items[1]?.status).toBe("pending");
     expect(out.completed).toBe(1);
+  });
+});
+
+describe("isImOwnedBackgroundTurn", () => {
+  it("is true when WeChat owns the session and Desktop is not streaming", () => {
+    expect(
+      isImOwnedBackgroundTurn({ sseActive: false, wechatBound: true }),
+    ).toBe(true);
+  });
+
+  it("is false when Desktop has a live SSE subscription", () => {
+    expect(
+      isImOwnedBackgroundTurn({ sseActive: true, wechatBound: true }),
+    ).toBe(false);
+  });
+
+  it("is false when the pane is not IM-bound", () => {
+    expect(isImOwnedBackgroundTurn({ sseActive: false })).toBe(false);
+  });
+});
+
+describe("isLiveForegroundSse", () => {
+  it("is true for a Desktop-owned /api/chat even in a group pane", () => {
+    expect(
+      isLiveForegroundSse({
+        streaming: true,
+        streamingSessionId: "sid-1",
+        sessionId: "sid-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false when the stream belongs to another session", () => {
+    expect(
+      isLiveForegroundSse({
+        streaming: true,
+        streamingSessionId: "sid-a",
+        sessionId: "sid-b",
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when Desktop is not the SSE client", () => {
+    expect(
+      isLiveForegroundSse({
+        streaming: false,
+        streamingSessionId: "sid-1",
+        sessionId: "sid-1",
+      }),
+    ).toBe(false);
   });
 });
 
