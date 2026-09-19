@@ -84,3 +84,47 @@ def test_memory_all_lessons_for_driver(tmp_path):
     m = ExperienceMemory(tmp_path / "exp.json")
     m.add([Lesson("a", "failure_pattern", "x"), Lesson("b", "success_note", "y")], 1)
     assert len(m.all_lessons()) == 2
+
+
+# --- SP17: 跨任务投票 ---
+from agenticx.learning.trajectory.memory import Lesson, _vote_key  # noqa: E402
+
+
+def test_vote_key_normalizes_error_type():
+    assert _vote_key("error: FileNotFoundError: /a.yaml") == \
+           _vote_key("工具曾报错 ×2: error: FileNotFoundError: /b.yaml")
+    assert _vote_key("error: FileNotFoundError: /a.yaml") != \
+           _vote_key("error: TimeoutError: x")
+
+
+def test_votes_accumulate_across_tasks_not_within(tmp_path):
+    m = ExperienceMemory(tmp_path / "exp.json")
+    m.add([Lesson("task-a", "failure_pattern",
+                  "error: FileNotFoundError: /a")], 1)
+    m.add([Lesson("task-a", "failure_pattern",
+                  "error: FileNotFoundError: /a2")], 1)   # 同任务 → 不涨票
+    m.add([Lesson("task-b", "contrastive_failure",
+                  "error: FileNotFoundError: /b")], 1)    # 跨任务 → 2 票
+    voted = m.voted_lessons()
+    assert len(voted) == 3
+    assert m.voted_lessons(min_votes=2) == [Lesson(
+        "task-b", "contrastive_failure", "error: FileNotFoundError: /b")]
+    assert m.voted_lessons(min_votes=3) == []
+
+
+def test_votes_persist_and_backcompat(tmp_path):
+    p = tmp_path / "exp.json"
+    m = ExperienceMemory(p)
+    m.add([Lesson("a", "failure_pattern", "error: TimeoutError: t"),
+           Lesson("b", "failure_pattern", "error: TimeoutError: t2")], 1)
+    m.freeze()
+    m2 = ExperienceMemory(p)
+    assert len(m2.voted_lessons(min_votes=2)) == 1          # 票数持久化
+    # SP16 旧格式文件（无 votes 键）可读
+    import json as _json
+    old = tmp_path / "old.json"
+    old.write_text(_json.dumps(
+        {"lessons": [{"task_id": "a", "kind": "failure_pattern",
+                      "content": "x", "source": "rule", "round": 1}],
+         "frozen": True}))
+    assert len(ExperienceMemory(old).all_lessons()) == 1
