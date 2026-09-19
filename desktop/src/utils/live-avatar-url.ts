@@ -2,6 +2,7 @@
  * Prefer the current registry portrait over a snapshot baked into a message.
  * Author: Damon Li
  */
+import { isBundledMetaAvatarUrl } from "../constants/meta-avatar";
 
 export function preferLiveAvatarUrl(
   liveUrl?: string | null,
@@ -11,6 +12,19 @@ export function preferLiveAvatarUrl(
   if (live) return live;
   const stored = String(storedUrl ?? "").trim();
   return stored || undefined;
+}
+
+/** Official brand mark yields to the user's selected cube costume. */
+export function preferCostumeOverBrandMark(
+  imageUrl?: string | null,
+  userCostumeUrl?: string | null,
+): string | undefined {
+  const costume = String(userCostumeUrl ?? "").trim();
+  const resolved = String(imageUrl ?? "").trim();
+  if (costume && (!resolved || isBundledMetaAvatarUrl(resolved))) {
+    return costume;
+  }
+  return resolved || undefined;
 }
 
 export function isRegistryAvatarId(avatarId?: string | null): boolean {

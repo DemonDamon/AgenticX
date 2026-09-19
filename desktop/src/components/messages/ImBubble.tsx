@@ -7,7 +7,7 @@ import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
-import { isRegistryAvatarId, preferLiveAvatarUrl } from "../../utils/live-avatar-url";
+import { isRegistryAvatarId, preferCostumeOverBrandMark, preferLiveAvatarUrl } from "../../utils/live-avatar-url";
 import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
@@ -183,13 +183,17 @@ export function ChatImAvatar({
   color?: string;
   size?: "sm" | "md";
 }) {
-  const liveFromStore = useAppStore((s) => {
+  const userCostumeUrl = useAppStore((s) => s.userAvatarUrl);
+  const liveExpert = useAppStore((s) => {
     const id = String(avatarId ?? "").trim();
     if (!isRegistryAvatarId(id)) return undefined;
     return s.avatars.find((item) => item.id === id);
   });
-  const resolvedColor = color ?? liveFromStore?.color ?? "";
-  const resolvedImage = preferLiveAvatarUrl(liveFromStore?.avatarUrl, imageUrl);
+  const resolvedColor = color ?? liveExpert?.color ?? "";
+  const resolvedImage = preferCostumeOverBrandMark(
+    preferLiveAvatarUrl(liveExpert?.avatarUrl, imageUrl),
+    userCostumeUrl,
+  );
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
