@@ -108,7 +108,7 @@
     "costumeShuffle": "随机一套",
     "costumeBrand": "品牌橙",
     "costumeGachaLabel": "抽卡提示词",
-    "costumeGachaPrompt": "软胶潮玩立方体：两到三块干净大色，深盖浅身或柔和渐变。下半身不要纯白，眼睛必须和身体分得开。不要斑点、芝麻、大理石、碎点、颗粒。",
+    "costumeGachaPrompt": "干净大色，深盖浅身",
     "costumeGachaDraw": "抽卡",
     "costumeGachaDone": "抽到一套新皮肤。",
     "costumeGachaInvalid": "这次没抽出可用配色，再抽一次。",
