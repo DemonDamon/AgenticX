@@ -14,6 +14,8 @@ from .qianfan_provider import QianfanProvider
 from .minimax_provider import MiniMaxProvider
 from .deepseek_provider import DeepSeekProvider
 
+from agenticx.trainer.gateway import resolve_model_alias
+
 
 class LlmFactory:
     """A factory for creating LLM clients."""
@@ -31,6 +33,9 @@ class LlmFactory:
         Raises:
             ValueError: If the LLM type specified in the config is unknown.
         """
+        if getattr(config, "model", None):
+            config.model = resolve_model_alias(config.model)
+
         llm_type = config.type.lower()
 
         if llm_type == "litellm":
