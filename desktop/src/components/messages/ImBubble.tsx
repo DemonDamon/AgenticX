@@ -7,6 +7,8 @@ import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
+import { isRegistryAvatarId, preferLiveAvatarUrl } from "../../utils/live-avatar-url";
+import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
@@ -47,8 +49,11 @@ import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import {
   BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
+  resolveBundledMetaAvatarUrl,
   isBundledMetaAvatarUrl,
 } from "../../constants/meta-avatar";
+import { isNearCubePortraitUrl } from "../../utils/theme-portrait";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
@@ -178,31 +183,48 @@ export function ChatImAvatar({
   color?: string;
   size?: "sm" | "md";
 }) {
-  const storeColor = useAppStore((s) =>
-    avatarId ? s.avatars.find((a) => a.id === avatarId)?.color : undefined,
-  );
-  const resolvedColor = color ?? storeColor ?? "";
+  const liveFromStore = useAppStore((s) => {
+    const id = String(avatarId ?? "").trim();
+    if (!isRegistryAvatarId(id)) return undefined;
+    return s.avatars.find((item) => item.id === id);
+  });
+  const resolvedColor = color ?? liveFromStore?.color ?? "";
+  const resolvedImage = preferLiveAvatarUrl(liveFromStore?.avatarUrl, imageUrl);
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
-  if (imageUrl) {
-    if (isBundledMetaAvatarUrl(imageUrl)) {
+  if (resolvedImage) {
+    if (isBundledMetaAvatarUrl(resolvedImage)) {
       return (
         <span
           className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-hidden ${rounded}`}
           data-avatar-fit="logo"
         >
           <img
-            src={imageUrl}
+            src={resolveBundledMetaAvatarUrl(resolvedImage)}
             alt={label}
             className={`h-full w-full origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`}
           />
         </span>
       );
     }
+    if (isNearCubePortraitUrl(resolvedImage)) {
+      return (
+        <span
+          className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-visible`}
+          data-avatar-fit="cube"
+        >
+          <img
+            src={resolvedImage}
+            alt={label}
+            className={`h-full w-full ${NEAR_CUBE_AVATAR_FIT_CLASS}`}
+          />
+        </span>
+      );
+    }
     return (
-      <img
-        src={imageUrl}
+      <ThemedAvatarImage
+        src={resolvedImage}
         alt={label}
         className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
       />

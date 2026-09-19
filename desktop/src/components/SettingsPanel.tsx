@@ -68,7 +68,13 @@ import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store
 import { useAppStore } from "../store";
 import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
-import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  DEFAULT_META_AVATAR_URL,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
+} from "../constants/meta-avatar";
+import { BRAND_CUBE_COLORWAY_ID } from "../utils/cube-colorway";
+import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
 import {
   RECOMMENDED_SKILLS,
   type RecommendedSkillTier,
@@ -4940,7 +4946,8 @@ export function SettingsPanel({
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
-  const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
+  const userCubeColorwayId = useAppStore((s) => s.userCubeColorwayId);
+  const setUserCubeColorwayId = useAppStore((s) => s.setUserCubeColorwayId);
   const userPreference = useAppStore((s) => s.userPreference);
   const setUserPreference = useAppStore((s) => s.setUserPreference);
   const themeColor = useAppStore((s) => s.themeColor);
@@ -5188,7 +5195,6 @@ export function SettingsPanel({
   const [userNicknameDraft, setUserNicknameDraft] = useState("");
   const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
   const [userProfileMessage, setUserProfileMessage] = useState("");
-  const [userAvatarMessage, setUserAvatarMessage] = useState("");
   const [workspaceDirDraft, setWorkspaceDirDraft] = useState("~/.agenticx/workspace");
   const [workspaceDirSaved, setWorkspaceDirSaved] = useState("~/.agenticx/workspace");
   const [workspaceDirResolved, setWorkspaceDirResolved] = useState("");
@@ -5753,35 +5759,6 @@ export function SettingsPanel({
       }
     },
     [metaIdentity, metaSoul, userPreferenceDraft, defaultProvider, providers],
-  );
-
-  const handleProfileAvatarUpload = useCallback(
-    (file: File) => {
-      const maxBytes = 1.8 * 1024 * 1024;
-      if (!file.type.startsWith("image/")) {
-        setUserAvatarMessage(t("profile.pickImage"));
-        return;
-      }
-      if (file.size > maxBytes) {
-        setUserAvatarMessage(t("profile.imageTooLarge"));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = typeof reader.result === "string" ? reader.result : "";
-        if (!result) {
-          setUserAvatarMessage(t("profile.readImageFailed"));
-          return;
-        }
-        setUserAvatarUrl(result);
-        setUserAvatarMessage(t("profile.avatarUpdated"));
-      };
-      reader.onerror = () => {
-        setUserAvatarMessage(t("profile.readImageFailed"));
-      };
-      reader.readAsDataURL(file);
-    },
-    [setUserAvatarUrl]
   );
 
   useEffect(() => {
@@ -7264,17 +7241,15 @@ export function SettingsPanel({
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
                     <div className="relative shrink-0">
-                      {userAvatarUrl ? (
-                        <img
-                          src={userAvatarUrl}
-                          alt={t("profile.myAvatar")}
-                          className="h-12 w-12 rounded-full border border-border object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-base font-semibold text-[var(--theme-color-text)]">
-                          {(userNicknameDraft.trim().slice(0, 1) || t("profile.me")).toUpperCase()}
-                        </div>
-                      )}
+                      <img
+                        src={userAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
+                        alt={t("profile.myAvatar")}
+                        className={`h-12 w-12 ${
+                          userCubeColorwayId && userCubeColorwayId !== BRAND_CUBE_COLORWAY_ID
+                            ? NEAR_CUBE_AVATAR_FIT_CLASS
+                            : `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
+                        }`}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className={`truncate ${SETTINGS_LABEL_CLASS}`}>
@@ -7294,39 +7269,13 @@ export function SettingsPanel({
                     </button>
                   </div>
 
+                  <UserCubeColorwayPicker
+                    selectedId={userCubeColorwayId}
+                    onSelect={setUserCubeColorwayId}
+                  />
+
                   {userProfileEditing ? (
                     <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
-                      <div className="mb-4 flex items-center gap-3">
-                        <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary">
-                          {t("profile.changeAvatar")}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) handleProfileAvatarUpload(file);
-                              event.currentTarget.value = "";
-                            }}
-                          />
-                        </label>
-                        {userAvatarUrl ? (
-                          <button
-                            type="button"
-                            className="text-xs text-text-faint transition-colors hover:text-text-muted"
-                            onClick={() => {
-                              setUserAvatarUrl("");
-                              setUserAvatarMessage(t("profile.resetDefaultDone"));
-                            }}
-                          >
-                            {t("profile.resetDefault")}
-                          </button>
-                        ) : null}
-                        {userAvatarMessage ? (
-                          <span className="text-[11px] text-text-faint">{userAvatarMessage}</span>
-                        ) : null}
-                      </div>
-
                       <div className="space-y-4">
                       <div>
                         <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.nickname")}</div>

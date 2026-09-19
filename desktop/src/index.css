@@ -795,6 +795,18 @@ body.agx-settings-nav-resizing {
   --theme-color-text: #ffffff;
 }
 
+.agx-themed-portrait {
+  display: inline-block;
+  overflow: hidden;
+  line-height: 0;
+  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+}
+.agx-themed-portrait svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 :root[data-theme-color] {
   --chat-im-user-bg: rgb(var(--theme-color-rgb));
   --chat-im-user-text: var(--theme-color-text);

@@ -253,8 +253,8 @@ exclude = ["tests*", "examples*", "docs*", "thirdparty*", "researches*", "markma
 
 [tool.setuptools.package-data]
 agenticx = [
-    "*.yaml", "*.yml", "*.json", "*.toml", "*.txt", "*.md",
-    "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml", "**/*.txt", "**/*.md"
+    "*.yaml", "*.yml", "*.json", "*.toml", "*.txt", "*.md", "*.png",
+    "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml", "**/*.txt", "**/*.md", "**/*.png"
 ]
 
 [tool.black]

@@ -1,0 +1,213 @@
+[
+  {
+    "id": "matcha-lid",
+    "kind": "dual",
+    "body": "#86EFAC",
+    "lid": "#14532D",
+    "deep": "#166534",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "strawberry-milk",
+    "kind": "dual",
+    "body": "#FFE4E6",
+    "lid": "#FB7185",
+    "deep": "#FECDD3",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "ocean-lid",
+    "kind": "dual",
+    "body": "#38BDF8",
+    "lid": "#1E3A5F",
+    "deep": "#0369A1",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "honey-ink",
+    "kind": "dual",
+    "body": "#F59E0B",
+    "lid": "#1C1917",
+    "deep": "#B45309",
+    "eye": "#FFFBEB"
+  },
+  {
+    "id": "blueberry-cap",
+    "kind": "dual",
+    "body": "#C4B5FD",
+    "lid": "#312E81",
+    "deep": "#6D28D9",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "cocoa-foam",
+    "kind": "dual",
+    "body": "#F3E2D4",
+    "lid": "#5C3A24",
+    "deep": "#C4A892",
+    "eye": "#FFF7ED"
+  },
+  {
+    "id": "lemon-ink",
+    "kind": "dual",
+    "body": "#F5D76E",
+    "lid": "#1C1917",
+    "deep": "#D4A017",
+    "eye": "#1C1917"
+  },
+  {
+    "id": "rose-jade",
+    "kind": "dual",
+    "body": "#FDA4AF",
+    "lid": "#065F46",
+    "deep": "#BE123C",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "ink-coral",
+    "kind": "dual",
+    "body": "#FB7185",
+    "lid": "#0F172A",
+    "deep": "#E11D48",
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "moss-clay",
+    "kind": "dual",
+    "body": "#D97757",
+    "lid": "#3F4F2F",
+    "deep": "#9A3412",
+    "eye": "#FFF7ED"
+  },
+  {
+    "id": "aurora",
+    "kind": "dream",
+    "stops": [
+      "#A78BFA",
+      "#6EE7B7",
+      "#FDE68A"
+    ],
+    "angle": 48,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "sunset",
+    "kind": "dream",
+    "stops": [
+      "#FB7185",
+      "#FDBA74",
+      "#FDE68A"
+    ],
+    "angle": 32,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "cotton",
+    "kind": "dream",
+    "stops": [
+      "#FBCFE8",
+      "#DDD6FE",
+      "#BAE6FD"
+    ],
+    "angle": 64,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "galaxy",
+    "kind": "dream",
+    "stops": [
+      "#312E81",
+      "#7C3AED",
+      "#F472B6"
+    ],
+    "angle": 72,
+    "eye": "#F5F3FF"
+  },
+  {
+    "id": "peach-soda",
+    "kind": "dream",
+    "stops": [
+      "#FED7AA",
+      "#FBCFE8",
+      "#FDE68A"
+    ],
+    "angle": 20,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "tide",
+    "kind": "dream",
+    "stops": [
+      "#0EA5E9",
+      "#2DD4BF",
+      "#E0F2FE"
+    ],
+    "angle": 56,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "ember",
+    "kind": "dream",
+    "stops": [
+      "#F97316",
+      "#FB7185",
+      "#FDE68A"
+    ],
+    "angle": 28,
+    "eye": "#FFFFFF"
+  },
+  {
+    "id": "twilight",
+    "kind": "dream",
+    "stops": [
+      "#1E3A8A",
+      "#7C3AED",
+      "#F9A8D4"
+    ],
+    "angle": 70,
+    "eye": "#F5F3FF"
+  },
+  {
+    "id": "lime-soda",
+    "kind": "dream",
+    "stops": [
+      "#A3E635",
+      "#FDE68A",
+      "#6EE7B7"
+    ],
+    "angle": 24,
+    "eye": "#14532D"
+  },
+  {
+    "id": "near-orange",
+    "kind": "shade",
+    "body": "#F9731A",
+    "deep": "#C2410C",
+    "lite": "#FDBA74",
+    "eye": "#FFF7ED"
+  },
+  {
+    "id": "cream",
+    "kind": "shade",
+    "body": "#F3E2D4",
+    "deep": "#C4A892",
+    "lite": "#FFF6EE",
+    "eye": "#3F2A1D"
+  },
+  {
+    "id": "ink",
+    "kind": "shade",
+    "body": "#334155",
+    "deep": "#0F172A",
+    "lite": "#64748B",
+    "eye": "#F8FAFC"
+  },
+  {
+    "id": "mint",
+    "kind": "shade",
+    "body": "#6EE7B7",
+    "deep": "#047857",
+    "lite": "#BBF7D0",
+    "eye": "#FFFFFF"
+  }
+]

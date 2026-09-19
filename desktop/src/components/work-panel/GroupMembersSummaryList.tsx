@@ -8,6 +8,7 @@ import { deriveRunningToolByAgent } from "../graph/span-derive";
 import { useGraphRunStore } from "../graph/useGraphRun";
 import { CrewWorkstationWall } from "./CrewWorkstationWall";
 import { memberColorClass, memberInitials } from "./member-avatar";
+import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 
 const AVATAR_SIZE = 36;
 const NAME_CLASS = "text-[10px]";
@@ -283,7 +284,7 @@ export function GroupMembersSummaryList({
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
               >
                 {a?.avatarUrl ? (
-                  <img
+                  <ThemedAvatarImage
                     src={a.avatarUrl}
                     alt=""
                     className="h-full w-full rounded-xl object-cover"
@@ -400,7 +401,7 @@ export function GroupMembersSummaryList({
                               className="h-4 w-4 shrink-0 accent-cyan-500"
                             />
                             {a.avatarUrl ? (
-                              <img
+                              <ThemedAvatarImage
                                 src={a.avatarUrl}
                                 alt=""
                                 className="h-9 w-9 shrink-0 rounded-lg object-cover"
@@ -443,7 +444,7 @@ export function GroupMembersSummaryList({
                         return (
                           <div key={id} className="flex items-center gap-2 rounded-md px-1 py-1">
                             {a?.avatarUrl ? (
-                              <img
+                              <ThemedAvatarImage
                                 src={a.avatarUrl}
                                 alt=""
                                 className="h-7 w-7 shrink-0 rounded-md object-cover"

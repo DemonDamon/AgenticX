@@ -3,10 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Loader2, MoreHorizontal, Plus, Sparkles, Star } from "lucide-react";
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore } from "../../store";
-import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
+import {
+  avatarBgClass,
+  avatarFgClass,
+  resolveAvatarPaletteKey,
+} from "../../utils/avatar-color";
 import { AvatarCreateDialog } from "../AvatarCreateDialog";
 import { AvatarSettingsPanel } from "../AvatarSettingsPanel";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
+import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -208,6 +213,7 @@ export function AvatarGalleryView() {
           {sortedAvatars.map((avatar) => {
             const hasPane = panes.some((p) => p.avatarId === avatar.id);
             const isCardSelected = settingsAvatarId === avatar.id;
+            const paletteKey = resolveAvatarPaletteKey(avatar.id, avatar.color);
             return (
               <div
                 key={avatar.id}
@@ -225,14 +231,14 @@ export function AvatarGalleryView() {
                 <div className="flex items-start gap-3">
                   <div className="relative shrink-0">
                     {avatar.avatarUrl ? (
-                      <img
+                      <ThemedAvatarImage
                         src={avatar.avatarUrl}
                         alt={avatar.name}
                         className="h-14 w-14 rounded-2xl object-cover"
                       />
                     ) : (
                       <div
-                        className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold ${avatarBgClass(avatar.color)} ${avatarFgClass(avatar.color)}`}
+                        className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold ${avatarBgClass(paletteKey)} ${avatarFgClass(paletteKey)}`}
                       >
                         {avatarInitials(avatar.name)}
                       </div>

@@ -5,6 +5,7 @@ import type { Avatar, GroupChat } from "../store";
 import { useAppStore } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { ThemedAvatarImage } from "./ds/ThemedAvatarImage";
 import { i18n } from "../i18n/i18n";
 
 /** Resolved on confirm: either an existing session or avatar/group/meta to wake via createSession. */
@@ -87,7 +88,7 @@ function TargetAvatar({
 }) {
   const shape = squared ? "rounded-[6px]" : "rounded-full";
   if (avatarUrl) {
-    return <img src={avatarUrl} alt={title} className={`h-6 w-6 shrink-0 ${shape} object-cover`} />;
+    return <ThemedAvatarImage src={avatarUrl} alt={title} className={`h-6 w-6 shrink-0 ${shape} object-cover`} />;
   }
   return (
     <div

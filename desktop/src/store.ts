@@ -37,6 +37,11 @@ import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
+import {
+  avatarUrlForCubeColorway,
+  BRAND_CUBE_COLORWAY_ID,
+  isUserCubeColorwayId,
+} from "./utils/cube-colorway";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -591,8 +596,10 @@ type AppState = {
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
-  /** Custom avatar for current user. */
+  /** Custom avatar for current user. Derived from `userCubeColorwayId`. */
   userAvatarUrl: string;
+  /** User cube colorway. `brand` is the official orange mark. */
+  userCubeColorwayId: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
   /** 附件路由策略。无企业下发时保持关闭；真正 containment 在 Studio 侧。 */
@@ -696,6 +703,7 @@ type AppState = {
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
+  setUserCubeColorwayId: (colorwayId: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
   setRunMode: (v: RunMode) => void;
@@ -1011,6 +1019,7 @@ const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
+const USER_CUBE_COLORWAY_KEY = "agx-user-cube-colorway";
 const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
 const SESSION_TOKEN_CACHE_KEY = "agx-session-token-cache-v1";
 
@@ -1065,14 +1074,26 @@ function loadUserPreference(): string {
   return "";
 }
 
-function loadUserAvatarUrl(): string {
+function loadUserCubeColorwayId(): string {
   try {
-    const saved = window.localStorage.getItem(USER_AVATAR_URL_KEY);
-    if (typeof saved === "string") return saved;
+    const saved = window.localStorage.getItem(USER_CUBE_COLORWAY_KEY);
+    if (typeof saved === "string" && isUserCubeColorwayId(saved)) return saved;
   } catch {
     // ignore storage errors
   }
-  return "";
+  try {
+    const legacy = window.localStorage.getItem(USER_AVATAR_URL_KEY);
+    if (legacy && !legacy.startsWith("data:image/svg+xml")) {
+      window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return BRAND_CUBE_COLORWAY_ID;
+}
+
+function loadUserAvatarUrl(): string {
+  return avatarUrlForCubeColorway(loadUserCubeColorwayId());
 }
 
 function loadMetaAvatarUrl(): string {
@@ -1197,6 +1218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
+  userCubeColorwayId: loadUserCubeColorwayId(),
   userPreference: loadUserPreference(),
   attachmentRouting: ATTACHMENT_ROUTING_OFF,
   attachmentRoutingLock: null,
@@ -1516,6 +1538,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { userAvatarUrl: next };
+    }),
+  setUserCubeColorwayId: (colorwayId) =>
+    set(() => {
+      const next = isUserCubeColorwayId(colorwayId) ? colorwayId : BRAND_CUBE_COLORWAY_ID;
+      const avatarUrl = avatarUrlForCubeColorway(next);
+      try {
+        if (next === BRAND_CUBE_COLORWAY_ID) {
+          window.localStorage.removeItem(USER_CUBE_COLORWAY_KEY);
+          window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+        } else {
+          window.localStorage.setItem(USER_CUBE_COLORWAY_KEY, next);
+          window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return { userCubeColorwayId: next, userAvatarUrl: avatarUrl };
     }),
   setUserPreference: (pref) =>
     set(() => {

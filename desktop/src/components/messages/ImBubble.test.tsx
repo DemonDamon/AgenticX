@@ -5,6 +5,7 @@ import { ChatImAvatar, ImBubble } from "./ImBubble";
 import {
   BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
   DEFAULT_META_AVATAR_URL,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
 } from "../../constants/meta-avatar";
 
 const baseVisible = {
@@ -231,7 +232,7 @@ describe("ChatImAvatar", () => {
     expect(html).toContain("N");
   });
 
-  it("zooms the bundled Near logo inside the same 28px circle as expert portraits", () => {
+  it("zooms the official Near logo inside the same 28px circle as expert portraits", () => {
     const html = renderToStaticMarkup(
       <ChatImAvatar label="Near" imageUrl={DEFAULT_META_AVATAR_URL} size="sm" />,
     );
@@ -243,12 +244,38 @@ describe("ChatImAvatar", () => {
     expect(html).toContain(DEFAULT_META_AVATAR_URL);
   });
 
-  it("does not zoom a regular expert portrait", () => {
+  it("does not treat a regular photo portrait as the official logo", () => {
     const html = renderToStaticMarkup(
       <ChatImAvatar label="调研" imageUrl="https://example.test/r.png" size="sm" />,
     );
     expect(html).not.toContain('data-avatar-fit="logo"');
     expect(html).not.toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
+  });
+
+  it("keeps collectible cubes as cubes, not circular-cropped", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" data-portrait="near-cube-v3" data-colorway="cotton"></svg>';
+    const src = `data:image/svg+xml;base64,${btoa(svg)}`;
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="后端·北辰" imageUrl={src} size="sm" />,
+    );
+    expect(html).toContain("h-7 w-7");
+    expect(html).toContain('data-avatar-fit="cube"');
+    expect(html).toContain("overflow-visible");
+    expect(html).toContain("object-contain");
+    expect(html).toContain(NEAR_CUBE_AVATAR_FIT_CLASS);
+    expect(html).not.toContain("rounded-full");
+    expect(html).not.toContain("agx-themed-portrait");
+  });
+
+  it("rewrites generated line-art so ink follows the theme color", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1744 1744"><path fill="#ea580c"/></svg>';
+    const src = `data:image/svg+xml;base64,${btoa(svg)}`;
+    const html = renderToStaticMarkup(<ChatImAvatar label="后端·北辰" imageUrl={src} size="sm" />);
+    expect(html).toContain("agx-themed-portrait");
+    expect(html).toContain("currentColor");
+    expect(html).not.toContain("#ea580c");
   });
 });
 

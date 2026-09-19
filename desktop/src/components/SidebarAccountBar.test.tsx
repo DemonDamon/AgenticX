@@ -1,9 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
-  DEFAULT_META_AVATAR_URL,
-} from "../constants/meta-avatar";
+import { BUNDLED_META_AVATAR_IM_ZOOM_CLASS, DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { i18n } from "../i18n/i18n";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import { Topbar } from "./Topbar";
@@ -88,9 +85,10 @@ describe("sidebar account chrome", () => {
     try {
       const html = renderToStaticMarkup(<SidebarAccountBar />);
       expect(html).toContain("我");
-      expect(html).toContain(DEFAULT_META_AVATAR_URL);
       expect(html).toContain('data-avatar-fit="logo"');
       expect(html).toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
+      expect(html).toContain(DEFAULT_META_AVATAR_URL);
+      expect(html).not.toContain("agx-near-line-art");
       expect(html).toContain("账号菜单");
       expect(html).not.toContain("登录 Near 官网账号");
       expect(html).not.toContain("登录");
@@ -99,7 +97,8 @@ describe("sidebar account chrome", () => {
         <Topbar sidebarCollapsed onToggleSidebar={() => {}} />,
       );
       expect(collapsed).toContain("我");
-      expect(collapsed).toContain(DEFAULT_META_AVATAR_URL);
+      expect(collapsed).toContain('data-avatar-fit="logo"');
+      expect(collapsed).toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
       expect(collapsed).toContain("账号菜单");
       expect(collapsed).not.toContain("登录");
     } finally {

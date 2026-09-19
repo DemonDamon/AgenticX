@@ -423,6 +423,7 @@ import { NearBoxHero } from "./brand/NearBoxHero";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
+import { findLiveAvatar, preferLiveAvatarUrl } from "../utils/live-avatar-url";
 import { createKbApi } from "./settings/knowledge/api";
 import {
   clearPaneAwaitingFreshSession,
@@ -593,11 +594,11 @@ function resolveGroupChatSender(
     };
   }
   const url = String(message.avatarUrl ?? "").trim() || undefined;
-  const member = agentId ? opts.groupMembers.find((a) => a.id === agentId) : undefined;
+  const member = findLiveAvatar(opts.groupMembers, { avatarId: agentId, name: rawName });
   if (member) {
     return {
       name: member.name || rawName || agentId,
-      url: url || member.avatarUrl || undefined,
+      url: preferLiveAvatarUrl(member.avatarUrl, url),
       avatarId: member.id,
     };
   }

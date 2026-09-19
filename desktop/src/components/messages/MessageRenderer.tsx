@@ -37,6 +37,7 @@ import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-me
 import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
+import { preferLiveAvatarUrl } from "../../utils/live-avatar-url";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 import { collectSessionReferences } from "../../utils/session-references";
 import {
@@ -229,7 +230,7 @@ function wrapGroupIntervention(
   return (
     <GroupSenderRail
       name={name}
-      avatarUrl={message.avatarUrl || fallbackAvatarUrl}
+      avatarUrl={preferLiveAvatarUrl(fallbackAvatarUrl, message.avatarUrl)}
       avatarId={fallbackAvatarId || message.agentId}
     >
       {children}
@@ -531,9 +532,7 @@ export function MessageRenderer({
             ? resolveMetaDisplayName(rawAssist)
             : assistantName
         : assistantName;
-    const mergedAssistAvatarUrl = metaLeaderRow
-      ? assistantAvatarUrl || message.avatarUrl
-      : message.avatarUrl || assistantAvatarUrl;
+    const mergedAssistAvatarUrl = preferLiveAvatarUrl(assistantAvatarUrl, message.avatarUrl);
     const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,

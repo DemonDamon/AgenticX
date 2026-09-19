@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Illustrated portraits for digital avatars.
+"""Collectible cube portraits for digital avatars.
 
-Prefers DiceBear Notionists (quiet line-art busts). Falls back to a local
-SVG if the collection cannot be reached. Tests skip the network fetch.
+Same soft official Near mark, with gacha-style colorways (solid, dual, dream).
+Custom uploads are never overwritten.
 
 Author: Damon Li
 """
@@ -10,17 +10,25 @@ Author: Damon Li
 from __future__ import annotations
 
 import base64
+import colorsys
 import hashlib
-import html
 import os
 import re
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
-from typing import Iterable
+from pathlib import Path
 
 # Aligned with desktop/src/utils/avatar-color.ts AVATAR_PALETTE order.
+_PALETTE_KEYS: tuple[str, ...] = (
+    "cyan",
+    "violet",
+    "rose",
+    "amber",
+    "emerald",
+    "fuchsia",
+    "sky",
+    "orange",
+)
 _PALETTE_RGB: tuple[tuple[int, int, int], ...] = (
     (8, 145, 178),    # cyan
     (124, 58, 237),   # violet
@@ -31,24 +39,33 @@ _PALETTE_RGB: tuple[tuple[int, int, int], ...] = (
     (2, 132, 199),    # sky
     (234, 88, 12),    # orange
 )
+_PALETTE_HEX: dict[str, str] = {
+    key: f"{r:02x}{g:02x}{b:02x}"
+    for key, (r, g, b) in zip(_PALETTE_KEYS, _PALETTE_RGB, strict=True)
+}
 
-PORTRAIT_STYLE = "notionists-v1"
+PORTRAIT_STYLE = "near-cube-v3"
+PORTRAIT_STYLE_LEGACY_GENERATED = "notionists-v1"
 PORTRAIT_STYLE_CUSTOM = "custom"
 
-_COLLECTION_BASE = "https://api.dicebear.com/9.x/notionists/png"
+_COLLECTION_BASE = "https://api.dicebear.com/9.x/notionists/svg"
 _COLLECTION_TIMEOUT_SEC = 6.0
 _COLLECTION_MAX_BYTES = 180_000
 
-# Quiet line-art: no badges, gestures, or saturated cartoon backdrops.
+# Quiet line-art: transparent disc, ink/hair/borders tinted after download.
 _COLLECTION_QUERY = {
     "size": "256",
     "radius": "28",
-    "backgroundColor": "e8eef2,e8e8f0,ede9e3,e7efe9,efe7e9",
+    "backgroundColor": "transparent",
     "bodyIconProbability": "0",
     "gestureProbability": "0",
     "beardProbability": "8",
     "glassesProbability": "14",
 }
+_INK_RE = re.compile(
+    r"#000(?:000)?\b|#0a0a0a\b|#111(?:111)?\b|\bblack\b",
+    re.IGNORECASE,
+)
 _NOTIONISTS_TRAIT_KEYS = frozenset(
     {
         "beard",
@@ -100,8 +117,44 @@ def _hash_index(seed: str, mod: int) -> int:
     return int(digest[:8], 16) % mod
 
 
-def _pick_rgb(seed: str) -> tuple[int, int, int]:
-    return _PALETTE_RGB[_hash_index(seed, len(_PALETTE_RGB))]
+def _js_hash_index(text: str, mod: int) -> int:
+    """Match desktop/src/utils/avatar-color.ts hashToIndex (signed 32-bit)."""
+    h = 0
+    for ch in text:
+        h = ((h << 5) - h + ord(ch))
+        h = ((h + 2**31) % 2**32) - 2**31
+    return abs(h) % mod
+
+
+def resolve_portrait_palette_key(
+    *,
+    color: str = "",
+    avatar_id: str = "",
+    name: str = "",
+) -> str:
+    """Prefer an explicit palette key; otherwise hash id like the desktop swatches."""
+    key = str(color or "").strip().lower()
+    if key in _PALETTE_HEX:
+        return key
+    seed = str(avatar_id or "").strip() or str(name or "").strip() or "avatar"
+    return _PALETTE_KEYS[_js_hash_index(seed, len(_PALETTE_KEYS))]
+
+
+def portrait_ink_hex(
+    *,
+    color: str = "",
+    avatar_id: str = "",
+    name: str = "",
+) -> str:
+    """Hex without '#' for line-art / hair / border ink."""
+    key = resolve_portrait_palette_key(color=color, avatar_id=avatar_id, name=name)
+    return _PALETTE_HEX[key]
+
+
+def tint_line_art_svg(svg: str, hex_color: str) -> str:
+    """Recolor black Notionists ink (strokes, hair, outlines) to a palette color."""
+    ink = hex_color if hex_color.startswith("#") else f"#{hex_color}"
+    return _INK_RE.sub(ink, svg)
 
 
 def _portrait_blob(*, name: str, role: str, description: str, tags: list[str] | None) -> str:
@@ -167,98 +220,191 @@ def _infer_gender(*, name: str, blob: str, lower: str) -> str:
     return "female" if _hash_index(f"gender:{name}", 2) == 0 else "male"
 
 
+def _decode_svg_data_url(avatar_url: str) -> str:
+    raw = str(avatar_url or "").strip()
+    if not raw.startswith("data:image/svg+xml"):
+        return ""
+    try:
+        payload = raw.split(",", 1)[1]
+        if ";base64," in raw:
+            return base64.b64decode(payload).decode("utf-8", errors="ignore")
+        return urllib.parse.unquote(payload)
+    except (IndexError, ValueError, OSError):
+        return ""
+
+
+def is_local_fallback_svg(avatar_url: str) -> bool:
+    """True for the retired 128x128 geometric SVG, not a Near cube colorway."""
+    decoded = _decode_svg_data_url(avatar_url)
+    return 'viewBox="0 0 128 128"' in decoded and 'role="img"' in decoded
+
+
+def is_near_cube_svg(avatar_url: str) -> bool:
+    return 'data-portrait="near-cube' in _decode_svg_data_url(avatar_url)
+
+
+def extract_cube_colorway_id(avatar_url: str) -> str:
+    """Read data-colorway from a stored Near cube data URL."""
+    match = re.search(r'data-colorway="([^"]+)"', _decode_svg_data_url(avatar_url))
+    return str(match.group(1) or "").strip() if match else ""
+
+
 def needs_portrait_refresh(
     avatar_url: str,
     *,
     portrait_style: str = "",
 ) -> bool:
-    """True when the stored portrait should be replaced with Notionists line art."""
+    """True when the stored portrait should be replaced with a Near cube colorway."""
     url = str(avatar_url or "").strip()
     style = str(portrait_style or "").strip()
-    if not url or url.startswith("data:image/svg+xml"):
+    if not url:
         return True
-    if style in {PORTRAIT_STYLE_CUSTOM, PORTRAIT_STYLE}:
+    if style == PORTRAIT_STYLE_CUSTOM:
+        return False
+    if is_local_fallback_svg(url):
+        return True
+    if style == PORTRAIT_STYLE:
         return False
     return True
 
 
-def _initials(name: str) -> str:
-    text = str(name or "").strip()
-    if not text:
-        return "?"
-    parts = re.split(r"[\s·\-—]+", text)
-    parts = [p for p in parts if p]
-    if len(parts) >= 2:
-        return (parts[0][:1] + parts[1][:1]).upper()
-    if len(text) >= 2:
-        return text[:2]
-    return text[:1]
+# Official Near mark placement, same as desktop NearBoxHero LOGO_MARK_BOX.
+_LUMA_BOX = (13.4, 8.0, 133.2, 144.0)
+_LUMA_HREF: str | None = None
 
 
-def _role_glyph(role: str, seed: str) -> str:
-    """Pick a simple role motif index (0-5) from role text."""
-    role_text = str(role or "").lower()
-    keywords: Iterable[tuple[str, int]] = (
-        ("安全", 0),
-        ("测试", 1),
-        ("架构", 2),
-        ("后端", 3),
-        ("算法", 4),
-        ("美术", 5),
-        ("运营", 5),
-        ("engineer", 3),
-        ("architect", 2),
-        ("security", 0),
-        ("test", 1),
-        ("design", 5),
+def _luma_data_href() -> str:
+    """Grayscale lighting + alpha cut from the official cube mark."""
+    global _LUMA_HREF
+    if _LUMA_HREF is None:
+        path = Path(__file__).with_name("near_cube_luma.png")
+        _LUMA_HREF = (
+            "data:image/png;base64,"
+            + base64.b64encode(path.read_bytes()).decode("ascii")
+        )
+    return _LUMA_HREF
+
+# Rich finishes first in spirit; solids stay as a small fallback set.
+_COLORWAYS: tuple[dict[str, object], ...] = (
+    {"id": "matcha-lid", "kind": "dual", "body": "#86EFAC", "lid": "#14532D", "deep": "#166534", "eye": "#FFFFFF"},
+    {"id": "strawberry-milk", "kind": "dual", "body": "#FFE4E6", "lid": "#FB7185", "deep": "#FECDD3", "eye": "#FFFFFF"},
+    {"id": "ocean-lid", "kind": "dual", "body": "#38BDF8", "lid": "#1E3A5F", "deep": "#0369A1", "eye": "#FFFFFF"},
+    {"id": "honey-ink", "kind": "dual", "body": "#F59E0B", "lid": "#1C1917", "deep": "#B45309", "eye": "#FFFBEB"},
+    {"id": "blueberry-cap", "kind": "dual", "body": "#C4B5FD", "lid": "#312E81", "deep": "#6D28D9", "eye": "#FFFFFF"},
+    {"id": "cocoa-foam", "kind": "dual", "body": "#F3E2D4", "lid": "#5C3A24", "deep": "#C4A892", "eye": "#FFF7ED"},
+    {"id": "lemon-ink", "kind": "dual", "body": "#F5D76E", "lid": "#1C1917", "deep": "#D4A017", "eye": "#1C1917"},
+    {"id": "rose-jade", "kind": "dual", "body": "#FDA4AF", "lid": "#065F46", "deep": "#BE123C", "eye": "#FFFFFF"},
+    {"id": "ink-coral", "kind": "dual", "body": "#FB7185", "lid": "#0F172A", "deep": "#E11D48", "eye": "#FFFFFF"},
+    {"id": "moss-clay", "kind": "dual", "body": "#D97757", "lid": "#3F4F2F", "deep": "#9A3412", "eye": "#FFF7ED"},
+    {"id": "aurora", "kind": "dream", "stops": ("#A78BFA", "#6EE7B7", "#FDE68A"), "angle": 48, "eye": "#FFFFFF"},
+    {"id": "sunset", "kind": "dream", "stops": ("#FB7185", "#FDBA74", "#FDE68A"), "angle": 32, "eye": "#FFFFFF"},
+    {"id": "cotton", "kind": "dream", "stops": ("#FBCFE8", "#DDD6FE", "#BAE6FD"), "angle": 64, "eye": "#FFFFFF"},
+    {"id": "galaxy", "kind": "dream", "stops": ("#312E81", "#7C3AED", "#F472B6"), "angle": 72, "eye": "#F5F3FF"},
+    {"id": "peach-soda", "kind": "dream", "stops": ("#FED7AA", "#FBCFE8", "#FDE68A"), "angle": 20, "eye": "#FFFFFF"},
+    {"id": "tide", "kind": "dream", "stops": ("#0EA5E9", "#2DD4BF", "#E0F2FE"), "angle": 56, "eye": "#FFFFFF"},
+    {"id": "ember", "kind": "dream", "stops": ("#F97316", "#FB7185", "#FDE68A"), "angle": 28, "eye": "#FFFFFF"},
+    {"id": "twilight", "kind": "dream", "stops": ("#1E3A8A", "#7C3AED", "#F9A8D4"), "angle": 70, "eye": "#F5F3FF"},
+    {"id": "lime-soda", "kind": "dream", "stops": ("#A3E635", "#FDE68A", "#6EE7B7"), "angle": 24, "eye": "#14532D"},
+    {"id": "near-orange", "kind": "shade", "body": "#F9731A", "deep": "#C2410C", "lite": "#FDBA74", "eye": "#FFF7ED"},
+    {"id": "cream", "kind": "shade", "body": "#F3E2D4", "deep": "#C4A892", "lite": "#FFF6EE", "eye": "#3F2A1D"},
+    {"id": "ink", "kind": "shade", "body": "#334155", "deep": "#0F172A", "lite": "#64748B", "eye": "#F8FAFC"},
+    {"id": "mint", "kind": "shade", "body": "#6EE7B7", "deep": "#047857", "lite": "#BBF7D0", "eye": "#FFFFFF"},
+)
+
+# Official in-app Near mark. Same cube recipe as experts, reserved so no 分身
+# inherits the brand orange dual. Darker lid / brighter body matches gacha cubes.
+NEAR_MARK_COLORWAY_ID = "near-mark"
+NEAR_MARK_COLORWAY: dict[str, object] = {
+    "id": NEAR_MARK_COLORWAY_ID,
+    "kind": "dual",
+    "body": "#F97316",
+    "lid": "#7C2D12",
+    "deep": "#431407",
+    "eye": "#FFFFFF",
+}
+
+
+def cube_colorway_ids() -> tuple[str, ...]:
+    return tuple(str(item["id"]) for item in _COLORWAYS)
+
+
+def _colorway_is_rich(way: dict[str, object]) -> bool:
+    return str(way.get("kind") or "") != "shade"
+
+
+def _candidates_from(preferred: int) -> list[dict[str, object]]:
+    rotated = [_COLORWAYS[(preferred + offset) % len(_COLORWAYS)] for offset in range(len(_COLORWAYS))]
+    return [item for item in rotated if _colorway_is_rich(item)] + [
+        item for item in rotated if not _colorway_is_rich(item)
+    ]
+
+
+def _shift_hex(color: str, degrees: int) -> str:
+    raw = str(color or "").strip()
+    if not raw.startswith("#") or len(raw) != 7:
+        return raw
+    try:
+        red = int(raw[1:3], 16) / 255.0
+        green = int(raw[3:5], 16) / 255.0
+        blue = int(raw[5:7], 16) / 255.0
+    except ValueError:
+        return raw
+    hue, light, sat = colorsys.rgb_to_hls(red, green, blue)
+    if sat < 0.04:
+        return raw
+    shifted = colorsys.hls_to_rgb((hue + degrees / 360.0) % 1.0, light, sat)
+    return "#{:02X}{:02X}{:02X}".format(
+        max(0, min(255, round(shifted[0] * 255))),
+        max(0, min(255, round(shifted[1] * 255))),
+        max(0, min(255, round(shifted[2] * 255))),
     )
-    for key, idx in keywords:
-        if key in role_text:
-            return str(idx)
-    return str(_hash_index(f"{seed}:{role_text}", 6))
 
 
-def _svg_face_features(seed: str) -> str:
-    """Return SVG paths for abstract line-art facial features."""
-    variant = _hash_index(seed, 4)
-    if variant == 0:
-        return (
-            '<circle cx="64" cy="58" r="22" fill="none" stroke="#0a0a0a" stroke-width="3"/>'
-            '<circle cx="56" cy="54" r="2.5" fill="#0a0a0a"/>'
-            '<circle cx="72" cy="54" r="2.5" fill="#0a0a0a"/>'
-            '<path d="M56 66 Q64 72 72 66" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round"/>'
-        )
-    if variant == 1:
-        return (
-            '<rect x="42" y="40" width="44" height="36" rx="10" fill="none" stroke="#0a0a0a" stroke-width="3"/>'
-            '<line x1="52" y1="54" x2="60" y2="54" stroke="#0a0a0a" stroke-width="3" stroke-linecap="round"/>'
-            '<line x1="68" y1="54" x2="76" y2="54" stroke="#0a0a0a" stroke-width="3" stroke-linecap="round"/>'
-            '<line x1="58" y1="66" x2="70" y2="66" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round"/>'
-        )
-    if variant == 2:
-        return (
-            '<path d="M64 36 L82 52 L76 78 L52 78 L46 52 Z" fill="none" stroke="#0a0a0a" stroke-width="3" stroke-linejoin="round"/>'
-            '<circle cx="58" cy="56" r="2" fill="#0a0a0a"/>'
-            '<circle cx="70" cy="56" r="2" fill="#0a0a0a"/>'
-            '<path d="M58 67 L64 70 L70 67" fill="none" stroke="#0a0a0a" stroke-width="2" stroke-linecap="round"/>'
-        )
-    return (
-        '<ellipse cx="64" cy="58" rx="24" ry="26" fill="none" stroke="#0a0a0a" stroke-width="3"/>'
-        '<path d="M52 52 h6 M72 52 h6" stroke="#0a0a0a" stroke-width="3" stroke-linecap="round"/>'
-        '<path d="M58 68 Q64 73 70 68" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round"/>'
-    )
+def _shift_colorway(way: dict[str, object], *, new_id: str, degrees: int) -> dict[str, object]:
+    out = dict(way)
+    out["id"] = new_id
+    for key in ("body", "deep", "lite", "lid", "eye", "blob", "blob2"):
+        value = out.get(key)
+        if isinstance(value, str) and value.startswith("#"):
+            out[key] = _shift_hex(value, degrees)
+    stops = out.get("stops")
+    if isinstance(stops, tuple):
+        out["stops"] = tuple(_shift_hex(str(stop), degrees) for stop in stops)
+    return out
 
 
-def _svg_hair(seed: str) -> str:
-    variant = _hash_index(f"hair:{seed}", 3)
-    if variant == 0:
-        return '<path d="M36 52 C36 28 92 28 92 52" fill="none" stroke="#0a0a0a" stroke-width="4" stroke-linecap="round"/>'
-    if variant == 1:
-        return (
-            '<path d="M38 48 C42 24 86 24 90 48" fill="none" stroke="#0a0a0a" stroke-width="4"/>'
-            '<path d="M38 48 L38 58 M90 48 L90 58" stroke="#0a0a0a" stroke-width="3" stroke-linecap="round"/>'
-        )
-    return '<path d="M34 56 C40 30 88 30 94 56 L94 62 L34 62 Z" fill="#0a0a0a" opacity="0.12"/>'
+def colorway_by_id(colorway_id: str) -> dict[str, object] | None:
+    key = str(colorway_id or "").strip()
+    if not key:
+        return None
+    if key == NEAR_MARK_COLORWAY_ID:
+        return dict(NEAR_MARK_COLORWAY)
+    for item in _COLORWAYS:
+        if str(item["id"]) == key:
+            return dict(item)
+    return None
+
+
+def resolve_cube_colorway(
+    *,
+    avatar_id: str = "",
+    name: str = "",
+    taken: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Pick a unique colorway. Prefer unused rich finishes, then solids, then a hue shift."""
+    seed = str(avatar_id or "").strip() or str(name or "").strip() or "avatar"
+    taken_ids = {str(item).strip() for item in (taken or []) if str(item).strip()}
+    preferred = _hash_index(f"cube:{seed}", len(_COLORWAYS))
+    ordered = _candidates_from(preferred)
+    for way in ordered:
+        if str(way["id"]) not in taken_ids:
+            return dict(way)
+    base = next((item for item in ordered if _colorway_is_rich(item)), ordered[0])
+    for serial in range(1, 64):
+        derived_id = f"{base['id']}~{serial}"
+        if derived_id not in taken_ids:
+            return _shift_colorway(dict(base), new_id=derived_id, degrees=23 * serial)
+    return _shift_colorway(dict(base), new_id=f"{base['id']}~x{seed[-6:]}", degrees=17)
 
 
 def build_avatar_portrait_svg(
@@ -266,33 +412,116 @@ def build_avatar_portrait_svg(
     name: str,
     role: str = "",
     avatar_id: str = "",
+    color: str = "",
+    taken: set[str] | list[str] | tuple[str, ...] | None = None,
+    colorway_id: str = "",
 ) -> str:
-    """Build a square SVG portrait (128x128 viewBox). Used as offline fallback."""
-    seed = avatar_id or name or "avatar"
-    r, g, b = _pick_rgb(seed)
-    bg = f"rgb({r},{g},{b})"
-    label = html.escape(_initials(name))
-    motif = _role_glyph(role, seed)
-    accent_x = 18 + (_hash_index(f"accent:{seed}", 5) * 14)
-    features = _svg_face_features(seed)
-    hair = _svg_hair(seed)
+    """Build the Near cube portrait. Colorway is unique among `taken` siblings."""
+    del role, color
+    seed = str(avatar_id or "").strip() or str(name or "").strip() or "avatar"
+    forced = colorway_by_id(colorway_id)
+    way = forced or resolve_cube_colorway(avatar_id=avatar_id, name=name, taken=taken)
+    uid = f"n{_hash_index(seed, 16_777_619):x}"
+    kind = str(way["kind"])
+    eye = str(way["eye"])
+    luma = _luma_data_href()
+    lx, ly, lw, lh = _LUMA_BOX
+    luma_img = (
+        f'<image href="{luma}" x="{lx}" y="{ly}" width="{lw}" height="{lh}" '
+        f'preserveAspectRatio="xMidYMid meet"/>'
+    )
+    defs = [
+        f'<mask id="{uid}-cut" maskUnits="userSpaceOnUse" mask-type="alpha">{luma_img}</mask>'
+    ]
+    paint = f'<rect x="8" y="4" width="144" height="152" fill="{way.get("body", "#F9731A")}"/>'
+    if kind == "dream":
+        stops = way["stops"]
+        assert isinstance(stops, tuple)
+        angle = int(way["angle"])
+        defs.append(
+            f'<linearGradient id="{uid}-fill" x1="0%" y1="0%" x2="100%" y2="100%" '
+            f'gradientTransform="rotate({angle} 0.5 0.5)">'
+            f'<stop offset="0%" stop-color="{stops[0]}"/>'
+            f'<stop offset="52%" stop-color="{stops[1]}"/>'
+            f'<stop offset="100%" stop-color="{stops[2]}"/>'
+            f"</linearGradient>"
+        )
+        paint = f'<rect x="8" y="4" width="144" height="152" fill="url(#{uid}-fill)"/>'
+    elif kind == "dual":
+        defs.append(
+            f'<linearGradient id="{uid}-fill" x1="48%" y1="2%" x2="72%" y2="78%">'
+            f'<stop offset="0%" stop-color="{way["lid"]}"/>'
+            f'<stop offset="28%" stop-color="{way["lid"]}"/>'
+            f'<stop offset="58%" stop-color="{way["body"]}"/>'
+            f'<stop offset="100%" stop-color="{way["body"]}"/>'
+            f"</linearGradient>"
+        )
+        paint = f'<rect x="8" y="4" width="144" height="152" fill="url(#{uid}-fill)"/>'
+    elif kind == "marble":
+        speckle = str(way["id"]).split("~", 1)[0] in {"confetti-cream", "sesame"}
+        count = 9 if speckle else 6
+        defs.append(
+            f'<filter id="{uid}-soft" x="-20%" y="-20%" width="140%" height="140%">'
+            f'<feGaussianBlur stdDeviation="{"2.2" if speckle else "3.4"}"/>'
+            f"</filter>"
+        )
+        blobs: list[str] = []
+        for i in range(count):
+            cx = 36 + _hash_index(f"bx:{i}:{seed}", 88)
+            cy = 30 + _hash_index(f"by:{i}:{seed}", 96)
+            if speckle:
+                rx = 5 + _hash_index(f"brx:{i}:{seed}", 7)
+                ry = 4 + _hash_index(f"bry:{i}:{seed}", 6)
+                op = 0.78
+            else:
+                rx = 11 + _hash_index(f"brx:{i}:{seed}", 14)
+                ry = 9 + _hash_index(f"bry:{i}:{seed}", 12)
+                op = 0.38 + _hash_index(f"bo:{i}:{seed}", 16) / 100
+            fill = way["blob"] if i % 2 == 0 else way["blob2"]
+            blobs.append(
+                f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" '
+                f'fill="{fill}" opacity="{op:.2f}"/>'
+            )
+        paint = (
+            f'<rect x="8" y="4" width="144" height="152" fill="{way["body"]}"/>'
+            f'<g filter="url(#{uid}-soft)">{"".join(blobs)}</g>'
+        )
+    lean = _hash_index(f"eye:{seed}", 2)
+    rx, ry, rot = (5.4, 11.0, 2) if lean else (5.8, 11.6, 1)
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img">'
-        f'<rect width="128" height="128" rx="28" fill="{bg}"/>'
-        f'<circle cx="{accent_x}" cy="22" r="6" fill="#ffffff" opacity="0.22"/>'
-        f'<circle cx="{accent_x + 52}" cy="104" r="10" fill="#ffffff" opacity="0.14"/>'
-        f"{hair}"
-        f"{features}"
-        f'<text x="64" y="112" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" '
-        f'font-size="14" font-weight="700" fill="#ffffff" opacity="0.92">{label}</text>'
-        f'<text x="112" y="20" text-anchor="end" font-family="ui-monospace, monospace" '
-        f'font-size="9" fill="#0a0a0a" opacity="0.35">{motif}</text>'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" '
+        f'data-portrait="{PORTRAIT_STYLE}" data-colorway="{way["id"]}">'
+        f"<defs>{''.join(defs)}</defs>"
+        f'<g mask="url(#{uid}-cut)">{paint}</g>'
+        f'<g style="mix-blend-mode:soft-light" opacity="0.92">{luma_img}</g>'
+        f'<ellipse cx="106" cy="104" rx="{rx}" ry="{ry}" fill="{eye}" '
+        f'transform="rotate({rot} 106 104)"/>'
+        f'<ellipse cx="128" cy="92" rx="{rx}" ry="{ry}" fill="{eye}" '
+        f'transform="rotate({rot} 128 92)"/>'
         f"</svg>"
     )
 
 
-def _local_svg_data_url(*, name: str, role: str, avatar_id: str) -> str:
-    svg = build_avatar_portrait_svg(name=name, role=role, avatar_id=avatar_id)
+def build_near_mark_svg() -> str:
+    """Official Near in-app mark: same cube mold as experts, reserved orange dual."""
+    return build_avatar_portrait_svg(
+        name="Near",
+        avatar_id="near-mark",
+        colorway_id=NEAR_MARK_COLORWAY_ID,
+    )
+
+
+def _local_svg_data_url(
+    *,
+    name: str,
+    role: str,
+    avatar_id: str,
+    color: str = "",
+    taken: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> str:
+    svg = build_avatar_portrait_svg(
+        name=name, role=role, avatar_id=avatar_id, color=color, taken=taken
+    )
     encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{encoded}"
 
@@ -311,6 +540,7 @@ def build_collection_portrait_url(
     description: str = "",
     tags: list[str] | None = None,
     avatar_id: str = "",
+    color: str = "",
 ) -> str:
     """HTTP URL for the illustrated-people collection (deterministic by seed)."""
     params = dict(_COLLECTION_QUERY)
@@ -331,33 +561,18 @@ def fetch_collection_portrait_url(
     description: str = "",
     tags: list[str] | None = None,
     avatar_id: str = "",
+    color: str = "",
+    taken_colorways: list[str] | None = None,
 ) -> str | None:
-    """Download a PNG from the illustrated collection and return a data URL."""
-    url = build_collection_portrait_url(
+    """Return a local Near cube data URL. No network; custom uploads stay elsewhere."""
+    del description, tags
+    return _local_svg_data_url(
         name=name,
         role=role,
-        description=description,
-        tags=tags,
         avatar_id=avatar_id,
+        color=color,
+        taken=taken_colorways,
     )
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "AgenticX-avatar-portrait/1.0", "Accept": "image/png"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=_COLLECTION_TIMEOUT_SEC) as resp:
-            content_type = str(resp.headers.get("Content-Type") or "").lower()
-            data = resp.read(_COLLECTION_MAX_BYTES + 1)
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-        return None
-    if len(data) < 32 or len(data) > _COLLECTION_MAX_BYTES:
-        return None
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        return None
-    if content_type and "png" not in content_type and "octet-stream" not in content_type:
-        return None
-    encoded = base64.b64encode(data).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
 
 
 def generate_avatar_portrait_url(
@@ -367,16 +582,15 @@ def generate_avatar_portrait_url(
     description: str = "",
     tags: list[str] | None = None,
     avatar_id: str = "",
+    color: str = "",
+    taken_colorways: list[str] | None = None,
 ) -> str:
-    """Return a data URL suitable for AvatarConfig.avatar_url."""
-    if collection_fetch_enabled():
-        fetched = fetch_collection_portrait_url(
-            name=name,
-            role=role,
-            description=description,
-            tags=tags,
-            avatar_id=avatar_id,
-        )
-        if fetched:
-            return fetched
-    return _local_svg_data_url(name=name, role=role, avatar_id=avatar_id)
+    """Return a collectible cube data URL suitable for AvatarConfig.avatar_url."""
+    del description, tags
+    return _local_svg_data_url(
+        name=name,
+        role=role,
+        avatar_id=avatar_id,
+        color=color,
+        taken=taken_colorways,
+    )
