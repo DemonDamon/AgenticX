@@ -35,6 +35,7 @@ import {
   assistantVisibleBodyForUi,
   buildCommittedAssistantPatch,
   normalizeFinalAssistantPayload,
+  shouldReuseLastAssistantRow,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { MarkdownContext } from "./messages/markdown-components";
@@ -2134,7 +2135,20 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           : undefined;
       if (isCurrentRequest() && trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
-        if (mid !== null && trimmedFull === mid) {
+        const liveMessages = useAppStore.getState().messages ?? [];
+        let lastAssistantContent = "";
+        for (let i = liveMessages.length - 1; i >= 0; i -= 1) {
+          const row = liveMessages[i];
+          if (row.role === "user") break;
+          if (row.role === "assistant") {
+            lastAssistantContent = String(row.content ?? "");
+            break;
+          }
+        }
+        if (
+          (mid !== null && trimmedFull === String(mid).trim())
+          || shouldReuseLastAssistantRow(lastAssistantContent, trimmedFull)
+        ) {
           streamCommittedRef.current = true;
           if (turnExtras) {
             mergeLastMessageByRole("assistant", turnExtras);

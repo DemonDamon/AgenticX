@@ -165,3 +165,51 @@ def test_has_unexecuted_inline_tool_markup_true_for_invoke() -> None:
 
 def test_has_unexecuted_inline_tool_markup_false_for_plain_prose() -> None:
     assert _has_unexecuted_inline_tool_markup("团长，这是普通回复。") is False
+
+
+def test_extract_inline_tool_call_ignores_skip_todo_write_prose() -> None:
+    """Reasoning that mentions skip todo_write (...) is not a real tool call.
+
+    Session ae7b5446: GLM wrote a complete answer plus
+    ``skip todo_write (it's a simple answer task...)``. The parenthetical
+    fallback treated that as ``todo_write({})``, persisted the answer as a
+    mid-turn bubble, then regenerated the same final — the retry 拼接.
+    """
+    think_open = chr(60) + "think" + chr(62)
+    think_close = chr(60) + "/think" + chr(62)
+    text = (
+        f"{think_open}I have enough content. No todo needed really—"
+        "this is a Q&A; skip todo_write (it's a simple answer task, "
+        "per rules don't use todo for single-round Q&A)."
+        f"{think_close}"
+        "看完了，团长。结论先说：**所谓「统一」其实是兼容，不是合并**。"
+    )
+    parsed = _extract_inline_tool_call(
+        text, {"todo_write", "web_fetch", "near_browser_extract_text"}
+    )
+    assert parsed is None
+
+
+def test_extract_inline_tool_call_ignores_todo_write_english_parens() -> None:
+    text = (
+        "No todo needed; skip todo_write (it's a simple answer task).\n\n"
+        "看完了，团长。这是最终回复。"
+    )
+    parsed = _extract_inline_tool_call(text, {"todo_write", "web_search"})
+    assert parsed is None
+
+
+def test_extract_inline_tool_call_keeps_real_todo_write_json() -> None:
+    text = 'todo_write({"todos": [{"id": "1", "content": "读文章", "status": "in_progress"}]})'
+    parsed = _extract_inline_tool_call(text, {"todo_write"})
+    assert parsed == {
+        "name": "todo_write",
+        "arguments": {
+            "todos": [{"id": "1", "content": "读文章", "status": "in_progress"}]
+        },
+    }
+
+
+def test_extract_inline_tool_call_keeps_empty_check_resources() -> None:
+    parsed = _extract_inline_tool_call("print(check_resources())", {"check_resources"})
+    assert parsed == {"name": "check_resources", "arguments": {}}

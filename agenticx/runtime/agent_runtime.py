@@ -160,10 +160,72 @@ def _chat_history_tail_matches(
     return str(last.get("content", "")).strip() == str(content or "").strip()
 
 
+def _assistant_content_key(content: Any) -> str:
+    raw = str(content or "")
+    if not raw.strip():
+        return ""
+    return parse_assistant_output(raw).visible_body.strip()
+
+
+def _last_assistant_row_in_turn(
+    history: Sequence[Dict[str, Any]] | None,
+) -> Optional[Dict[str, Any]]:
+    """Return the latest assistant row in the current user turn, skipping tools."""
+    if not history:
+        return None
+    for item in reversed(list(history)):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").lower()
+        if role == "user":
+            return None
+        if role == "assistant":
+            return item
+    return None
+
+
+def _merge_assistant_history_row(existing: Dict[str, Any], row: Dict[str, Any]) -> None:
+    """Fold a duplicate assistant persist into the earlier bubble."""
+    incoming_content = row.get("content")
+    if _assistant_content_key(incoming_content):
+        existing["content"] = incoming_content
+    incoming_meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    existing_meta = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+    if incoming_meta or existing_meta:
+        merged_meta = dict(existing_meta)
+        merged_meta.update(incoming_meta)
+        existing["metadata"] = merged_meta
+    for key in (
+        "suggested_questions",
+        "reasoning",
+        "reasoning_seconds",
+        "references",
+        "searched_queries",
+        "usage",
+        "provider",
+        "model",
+        "model_selection",
+        "blocks",
+    ):
+        value = row.get(key)
+        if value not in (None, "", [], {}):
+            existing[key] = value
+
+
 def _chat_history_append_deduped(history: List[Dict[str, Any]], row: Dict[str, Any]) -> bool:
     """Append when tail role, content, or stable user-turn identity differs."""
     role = str(row.get("role", ""))
     content = row.get("content", "")
+    if role.lower() == "assistant":
+        last_assistant = _last_assistant_row_in_turn(history)
+        if (
+            last_assistant is not None
+            and _assistant_content_key(last_assistant.get("content"))
+            == _assistant_content_key(content)
+            and _assistant_content_key(content)
+        ):
+            _merge_assistant_history_row(last_assistant, row)
+            return False
     if _chat_history_tail_matches(history, role, content):
         last = history[-1] if history else {}
         row_metadata = row.get("metadata")
@@ -1554,6 +1616,70 @@ def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
     return {}
 
 
+_NOOP_ONLY_PROGRESS_TOOLS = frozenset({"todo_write"})
+
+
+def _tool_call_function_name(call: Dict[str, Any]) -> str:
+    function_obj = call.get("function") if isinstance(call.get("function"), dict) else {}
+    name = str(function_obj.get("name") or "").strip()
+    if name:
+        return name
+    return str(call.get("name") or "").strip()
+
+
+def _tool_call_arguments(call: Dict[str, Any]) -> Dict[str, Any]:
+    function_obj = call.get("function") if isinstance(call.get("function"), dict) else {}
+    if "arguments" in function_obj:
+        return _parse_tool_arguments(function_obj.get("arguments"))
+    if "arguments" in call:
+        return _parse_tool_arguments(call.get("arguments"))
+    return {}
+
+
+def _todo_write_is_noop(arguments: Dict[str, Any]) -> bool:
+    runtime_keys = {"__tool_call_id", "__agent_id"}
+    meaningful = {
+        key: value
+        for key, value in arguments.items()
+        if key not in runtime_keys
+    }
+    if not meaningful:
+        return True
+    for key in ("todos", "items", "tasks"):
+        if key not in meaningful:
+            continue
+        value = meaningful[key]
+        if value in (None, "", [], {}):
+            return True
+        if isinstance(value, list) and not value:
+            return True
+        return False
+    return False
+
+
+def _should_drop_noop_progress_tools(
+    tool_calls: Sequence[Dict[str, Any]],
+    visible_body: str,
+) -> bool:
+    """True when the only tools are empty todo_write after a public answer.
+
+    Native or inline empty todo_write after a finished reply used to persist
+    the answer as mid-turn, then regenerate the same final (any model).
+    """
+    if not str(visible_body or "").strip():
+        return False
+    if not tool_calls:
+        return False
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            return False
+        if _tool_call_function_name(call) not in _NOOP_ONLY_PROGRESS_TOOLS:
+            return False
+        if not _todo_write_is_noop(_tool_call_arguments(call)):
+            return False
+    return True
+
+
 def _summarize_tool_calls_for_history(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep only stable fields to avoid leaking runtime metadata ids into model context."""
     summarized: List[Dict[str, Any]] = []
@@ -2058,12 +2184,14 @@ def _extract_inline_tool_call(
         args = _normalize_file_tool_arg_aliases(name, args)
         return {"name": name, "arguments": args}
 
-    # Find the first allowed tool call anywhere in the snippet.
-    # This supports wrappers such as print(check_resources()).
+    # Parenthetical fallback: ``check_resources()`` / ``todo_write({...})``.
+    # Scan the visible body only — reasoning often says "skip todo_write (...)"
+    # and that used to become a fake empty tool call (session ae7b5446).
+    scan_text = parse_assistant_output(text).visible_body.strip() or snippet
     tool_name: Optional[str] = None
     raw_args = ""
     for name in sorted(allowed_tool_names, key=len, reverse=True):
-        match = re.search(rf"\b{re.escape(name)}\s*\((.*?)\)", snippet, re.S)
+        match = re.search(rf"\b{re.escape(name)}\s*\((.*?)\)", scan_text, re.S)
         if match:
             tool_name = name
             raw_args = (match.group(1) or "").strip()
@@ -2072,14 +2200,17 @@ def _extract_inline_tool_call(
         return None
 
     if not raw_args:
-        args_obj = {}
+        args_obj: Dict[str, Any] = {}
     else:
-        # Allow JSON object in parentheses: foo({"a":1})
+        # Real inline calls pass a JSON object. English/Chinese prose in
+        # parentheses (e.g. "skip todo_write (it's a simple Q&A)") is not.
         try:
             parsed = json.loads(raw_args)
-            args_obj = parsed if isinstance(parsed, dict) else {}
         except Exception:
-            args_obj = {}
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        args_obj = parsed
     return {
         "name": tool_name,
         "arguments": _normalize_file_tool_arg_aliases(tool_name, args_obj),
@@ -5373,6 +5504,14 @@ class AgentRuntime:
                     ]
                     ac_clean = _strip_inline_tool_markup(ac_clean)
                     response_text = ac_clean
+            if tool_calls and _should_drop_noop_progress_tools(tool_calls, ac_clean):
+                logger.info(
+                    "drop_noop_progress_tools session=%s round=%s body_len=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                    len(str(ac_clean or "").strip()),
+                )
+                tool_calls = []
             if (
                 not tool_calls
                 and _has_unexecuted_inline_tool_markup(response_text)

@@ -337,6 +337,7 @@ import {
   buildCommittedAssistantPatch,
   normalizeFinalAssistantPayload,
   reasoningDuplicatesVisibleBody,
+  shouldReuseLastAssistantRow,
 } from "../utils/assistant-output";
 import {
   buildContextFileKeyFromAttachment,
@@ -12201,7 +12202,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const streamBlockExtras = hasImageBlock(streamedBlocksRef.current)
           ? { blocks: streamedBlocksRef.current }
           : {};
-        if (mid !== null && trimmedFull === mid) {
+        const paneMsgs =
+          useAppStore.getState().panes.find((item) => item.id === pane.id)?.messages ?? [];
+        let lastAssistantContent = "";
+        for (let i = paneMsgs.length - 1; i >= 0; i -= 1) {
+          const row = paneMsgs[i];
+          if (row.role === "user") break;
+          if (row.role === "assistant") {
+            lastAssistantContent = String(row.content ?? "");
+            break;
+          }
+        }
+        if (
+          (mid !== null && trimmedFull === String(mid).trim())
+          || shouldReuseLastAssistantRow(lastAssistantContent, trimmedFull)
+        ) {
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
             ...turnExtras,
