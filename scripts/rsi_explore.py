@@ -29,7 +29,7 @@ from agenticx.learning.trajectory.evolution import (   # noqa: E402
 )
 from agenticx.learning.trajectory.forest import TrialForest      # noqa: E402
 from agenticx.learning.trajectory.memory import (     # noqa: E402
-    ExperienceMemory, extract_lessons, format_hints,
+    ExperienceMemory, extract_contrastive_lessons, extract_lessons, format_hints,
 )
 from agenticx.learning.trajectory.replay import evaluate_policy, forest_score  # noqa: E402
 from agenticx.learning.trajectory.schema import RSITrajectory, RewardRecord    # noqa: E402
@@ -91,7 +91,8 @@ def _evolve(store: TrajectoryStore, out_dir: Path, iters: int = 3):
 def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
               store: TrajectoryStore, *, trials_root: Path, dry: bool = False,
               evolve: bool = False, lm=None, tokenizer=None,
-              model_name: str = "dry-model", timeout: float = 1800.0) -> dict:
+              model_name: str = "dry-model", min_votes: int = 1,
+              timeout: float = 1800.0) -> dict:
     """跑一轮自探索。返回 {"results": [...], "evolution": ...} 形报告。
 
     记忆语义（对齐 RSIAgent frozen memory）: 本轮注入的是【上一轮冻结】的
@@ -101,7 +102,8 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
     prev = trials_root.parent / "experience" / f"round_{round_no - 1}.json"
     hints = ""
     if round_no > 1 and prev.exists():
-        hints = format_hints(ExperienceMemory(prev).all_lessons(k=8))
+        hints = format_hints(
+            ExperienceMemory(prev).voted_lessons(min_votes=min_votes, k=8))
 
     if memory.path.exists() and (memory.is_frozen or memory.all_lessons()):
         # 真跑踩坑修复: 既往运行的冻结记忆会让本轮 add() 被静默跳过,
@@ -133,10 +135,19 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
         store.append(_parse_trial(trial_dir, task_name, reward,
                                   model_name, "harbor-explore"
                                   if not dry else "dry-explore"))
-        lessons = extract_lessons(task_name, reward >= 1.0,
-                                  json.loads((trial_dir / "agent" /
-                                              "agenticx.trajectory.json")
-                                             .read_text())["messages"])
+        messages = json.loads((trial_dir / "agent" /
+                               "agenticx.trajectory.json")
+                              .read_text())["messages"]
+        task_trajs = [t for t in store.iter_trajectories()
+                      if t.task_id == task_name]
+        pass_msgs = [t.messages for t in task_trajs if t.status == "pass"]
+        fail_msgs = [t.messages for t in task_trajs if t.status == "fail"]
+        if pass_msgs and fail_msgs:
+            # SP17: 同任务成败对比 → 缺陷信号（含当前 trial, 已 append）
+            lessons = extract_contrastive_lessons(
+                task_name, pass_msgs, fail_msgs)
+        else:
+            lessons = extract_lessons(task_name, reward >= 1.0, messages)
         if not memory.is_frozen:
             memory.add(lessons, round_no)
         results.append({"task": task_name, "reward": float(reward),
@@ -162,6 +173,8 @@ def main() -> int:
     ap.add_argument("--evolve", action="store_true")
     ap.add_argument("--model", default="Qwen/Qwen3-0.6B")
     ap.add_argument("--out", default="datasets/explore")
+    ap.add_argument("--min-votes", type=int, default=1,
+                    help="hints 注入的跨任务票数门槛（SP17）")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -181,7 +194,8 @@ def main() -> int:
         t0 = time.time()
         rep = run_round(r, args.task, memory, store, trials_root=out / "trials",
                         dry=args.dry, evolve=args.evolve, lm=lm,
-                        tokenizer=tokenizer, model_name=args.model)
+                        tokenizer=tokenizer, model_name=args.model,
+                        min_votes=args.min_votes)
         rep["seconds"] = round(time.time() - t0, 1)
         summary.append(rep)
         print(json.dumps(rep, ensure_ascii=False))

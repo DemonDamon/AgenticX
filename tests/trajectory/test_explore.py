@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from rsi_explore import run_round   # noqa: E402
 
 from agenticx.learning.trajectory.memory import ExperienceMemory   # noqa: E402
+from agenticx.learning.trajectory.schema import RewardRecord, RSITrajectory  # noqa: E402
 from agenticx.learning.trajectory.store import TrajectoryStore     # noqa: E402
 
 
@@ -69,3 +70,51 @@ def test_run_round_rejects_stale_memory_from_previous_run(tmp_path):
         run_round(1, _tasks(tmp_path), stale, store,
                   trials_root=tmp_path / "trials", dry=True)
     assert sum(1 for _ in store.iter_trajectories()) == 0   # 失败在 trial 之前
+
+
+# --- SP17: 对比感知提取 + 投票过滤注入 ---
+
+
+def _seed_pass_traj(store, task_name: str):
+    store.append(RSITrajectory(
+        source="history", task_id=task_name, session_id=f"hist-{task_name}",
+        model="m", status="pass",
+        reward=RewardRecord(label=1.0),
+        messages=[{"role": "user", "content": "go"},
+                  {"role": "tool", "content": "ok done"}]))
+
+
+def test_round_uses_contrastive_when_history_mixed(tmp_path):
+    """store 里 fakeA 已有 pass 轨迹, dry 失败(带 FileNotFoundError) → 走对比提取。"""
+    memory = ExperienceMemory(tmp_path / "experience" / "round_1.json")
+    store = TrajectoryStore(tmp_path / "store")
+    _seed_pass_traj(store, "fakeA")          # 历史成功且无报错
+
+    rep = run_round(1, ["/tmp/fakeA"], memory, store,
+                    trials_root=tmp_path / "trials", dry=True)
+    kinds = [l["kind"] for l in
+             __import__("json").loads(
+                 (tmp_path / "experience" / "round_1.json").read_text())["lessons"]]
+    assert "contrastive_failure" in kinds    # 失败独有报错被对比捕获
+    assert rep["results"][0]["reward"] == 0.0
+
+
+def test_min_votes_filters_hints(tmp_path):
+    """dry 两任务同报 FileNotFoundError → 后 add 快照 2 票; min_votes=3 全过滤。"""
+    tasks = ["/tmp/fakeA", "/tmp/fakeB"]
+    for r in (1,):
+        memory = ExperienceMemory(tmp_path / "experience" / f"round_{r}.json")
+        store = TrajectoryStore(tmp_path / "store")
+        run_round(r, tasks, memory, store,
+                  trials_root=tmp_path / "trials", dry=True)
+
+    store = TrajectoryStore(tmp_path / "store")
+    m2 = ExperienceMemory(tmp_path / "experience" / "round_2.json")
+    rep = run_round(2, tasks, m2, store,
+                    trials_root=tmp_path / "trials", dry=True, min_votes=3)
+    assert rep["results"][0]["hints"] == ""   # 快照最高 2 票 < 3 → 全过滤
+
+    m2b = ExperienceMemory(tmp_path / "experience" / "round_2b.json")
+    rep2 = run_round(2, tasks, m2b, store,
+                     trials_root=tmp_path / "trials", dry=True, min_votes=2)
+    assert "FileNotFoundError" in rep2["results"][0]["hints"]  # 快照 2 票 ≥ 2 → 注入
