@@ -151,6 +151,9 @@ describe("ImBubble group expert identity", () => {
     expect(html).toContain('data-slot="conversation-content"');
     expect(html).toContain("max-w-[var(--agx-conversation-bubble-max)]");
     expect(html).toContain("架构师");
+    expect(html).toContain("text-text-strong");
+    expect(html).toContain("font-semibold");
+    expect(html).not.toContain("mt-[18px]");
     expect(html).toContain("结论：建议采用方案 A。");
     expect(html).not.toContain("展开");
     expect(html).not.toContain("折叠");

@@ -16,6 +16,7 @@ import {
   ASSISTANT_ICON_RAIL_CLASS,
   GROUP_INLINE_CARD_SHELL_CLASS,
   GROUP_SENDER_AVATAR_SLOT_CLASS,
+  GROUP_SENDER_NAME_CLASS,
   GROUP_STANDALONE_RAIL_ROW_CLASS,
 } from "./im-layout";
 import { TypesafeIcon } from "../../utils/provider-icons";
@@ -96,7 +97,7 @@ export function JevDecisionCard({
       <JevMark pending={pending} avatar={groupChatRail} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-[13px] font-semibold text-text-strong">Jev</span>
+          <span className={GROUP_SENDER_NAME_CLASS}>Jev</span>
           {model ? (
             <span className="font-mono text-[10px] text-text-faint">{model}</span>
           ) : null}

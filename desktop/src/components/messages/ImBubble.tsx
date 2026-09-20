@@ -42,6 +42,7 @@ import {
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   ASSISTANT_ICON_RAIL_CLASS,
+  GROUP_SENDER_NAME_CLASS,
   META_PENDING_ORB_PX,
   getAssistantActionStyle,
   getAssistantTextClassName,
@@ -786,7 +787,7 @@ export function ImBubble({
         </button>
       ) : null}
       {showGroupIdentityChrome ? (
-        <div className="mt-[18px] shrink-0">
+        <div className="shrink-0">
           <ChatImAvatar
             label={displayName}
             imageUrl={assistantAvatarUrl}
@@ -810,7 +811,7 @@ export function ImBubble({
         }
       >
         {showGroupIdentityChrome ? (
-          <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
+          <div className={`mb-0.5 ${GROUP_SENDER_NAME_CLASS}`}>
             {displayName}
           </div>
         ) : null}

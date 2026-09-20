@@ -111,6 +111,10 @@ export const GROUP_STANDALONE_RAIL_ROW_CLASS =
 /** Same slot as `ChatImAvatar` size="sm" / group speaker portraits (28px). */
 export const GROUP_SENDER_AVATAR_SLOT_CLASS = "h-7 w-7";
 
+/** Speaker / decision title — same weight and ink as the group Jev name. */
+export const GROUP_SENDER_NAME_CLASS =
+  "max-w-full truncate text-[13px] font-semibold leading-4 text-text-strong";
+
 /** Compact Meta pending orb — same 20px box as `ASSISTANT_ICON_RAIL_CLASS`. */
 export const META_PENDING_ORB_PX = 20;
 
