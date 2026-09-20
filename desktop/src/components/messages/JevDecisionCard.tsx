@@ -12,14 +12,15 @@ import {
   type JevDecisionPayload,
 } from "../../utils/jev-decision";
 import { GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
+import { TypesafeIcon } from "../../utils/provider-icons";
 
 function JevMark({ pending = false }: { pending?: boolean }) {
   return (
     <div
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-card-strong text-[11px] font-semibold text-text-strong"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#111] text-white"
       aria-hidden
     >
-      J
+      <TypesafeIcon size={13} />
       {pending ? (
         <span className="sr-only">pending</span>
       ) : null}

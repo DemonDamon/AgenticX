@@ -122,6 +122,23 @@ export const DeepSeekIcon = ({ size, className }: SvgProps) => (
   </SvgIcon>
 );
 
+/**
+ * Official TypeSafe hex-ring mark.
+ * Path traced from the typesafe.ai apple-touch / docs favicon
+ * (https://framerusercontent.com/images/kcuF2BEp5XaVfkmFB634IPRKQH0.png).
+ * Not a chat provider — do not add to PROVIDER_ICON_MAP.
+ */
+export const TypesafeIcon = ({ size, className }: SvgProps) => (
+  <SvgIcon size={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path
+      fill="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M11.88 0.61L4.14 5.67L4.14 14.26L7.74 16.64L7.74 20.63L11.65 23.23L12.12 23.39L19.86 18.33L19.86 9.66L16.26 7.28L16.26 3.37L12.35 0.77ZM17.79 17.94L17.64 18.17L12.04 21.78L11.19 21.32L9.74 20.32L9.81 20.17L15.49 16.49L15.80 16.56ZM8.36 12.42L8.89 12.65L10.66 13.88L10.58 14.03L8.43 15.41L6.21 13.96L6.44 13.65ZM9.20 9.05L9.58 9.20L11.35 10.43L11.35 12.50L11.27 12.58L9.12 11.19L9.12 9.12ZM16.33 8.97L18.48 10.43L18.48 16.56L18.40 16.64L16.26 15.26L16.26 9.05ZM14.80 8.97L14.88 9.05L14.88 15.26L9.20 18.94L9.12 18.86L9.12 16.64L9.35 16.41L12.65 14.26L12.65 10.43ZM12.12 6.21L14.26 7.67L14.03 7.90L11.96 9.20L9.74 7.67L11.88 6.21ZM12.73 2.68L14.88 4.06L14.88 6.29L14.80 6.36L12.65 4.91L12.65 2.76ZM11.27 2.68L11.35 2.76L11.35 4.91L10.66 5.44L7.74 7.28L7.74 11.19L5.60 12.58L5.52 12.50L5.52 6.44Z"
+    />
+  </SvgIcon>
+);
+
 /** Map from provider id to its icon component */
 export const PROVIDER_ICON_MAP: Record<string, React.ComponentType<SvgProps>> = {
   openai: OpenAIIcon,

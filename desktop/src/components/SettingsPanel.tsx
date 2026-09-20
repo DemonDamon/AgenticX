@@ -88,6 +88,7 @@ import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
 import { TypesafeConfigSection } from "./settings/typesafe/TypesafeConfigSection";
+import { useTypesafeSettings } from "../hooks/useTypesafeSettings";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
@@ -133,7 +134,7 @@ import {
   previewProviderApiEndpoint,
   type ProviderInterfaceKind,
 } from "../utils/provider-display";
-import { PROVIDER_ICON_MAP } from "../utils/provider-icons";
+import { PROVIDER_ICON_MAP, TypesafeIcon } from "../utils/provider-icons";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -4938,6 +4939,8 @@ export function SettingsPanel({
 }: Props) {
   const { t } = useTranslation("settings");
   const { t: tCommon } = useTranslation("common");
+  const { t: tw } = useTranslation("workspace");
+  const typesafeSettings = useTypesafeSettings();
   const locale = useAppStore((s) => s.locale);
   const setLocale = useAppStore((s) => s.setLocale);
   const tabs = useMemo(
@@ -5071,6 +5074,7 @@ export function SettingsPanel({
     window.addEventListener("mouseup", onUp);
   }, [navWidth, panelSize.width]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
+  const [providerNavIsJev, setProviderNavIsJev] = useState(false);
   const providerListScrollRef = useScrollbarOnScroll<HTMLDivElement>();
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [providerSavedSnapshot, setProviderSavedSnapshot] = useState<Record<string, ProviderEntry>>({});
@@ -7626,10 +7630,46 @@ export function SettingsPanel({
                     ref={providerListScrollRef}
                     className="agx-scrollbar-on-scroll min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-1.5 pt-2.5"
                   >
+                    {(() => {
+                      const jevOn = typesafeSettings.enabled && typesafeSettings.has_key;
+                      return (
+                        <button
+                          type="button"
+                          className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition ${
+                            providerNavIsJev
+                              ? "bg-[var(--settings-accent-row-bg)]"
+                              : "hover:bg-surface-hover"
+                          }`}
+                          onClick={() => {
+                            setProviderNavIsJev(true);
+                            setProviderEnableHint(null);
+                            setDefaultProvHint(null);
+                            setAddModelModalOpen(false);
+                            setAddServiceVendorModalOpen(false);
+                            setEditModelModalOpen(false);
+                          }}
+                        >
+                          <span
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111] text-white shadow-sm"
+                            aria-hidden
+                          >
+                            <TypesafeIcon size={18} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block truncate text-xs font-medium ${providerNavIsJev ? "text-[var(--settings-accent-fg)]" : "text-text-primary"}`}>
+                              {tw("typesafe.listName")}
+                            </span>
+                            <span className={`block text-[10px] ${jevOn ? "text-emerald-500" : "text-text-faint"}`}>
+                              {jevOn ? t("commonSettings.enabled") : t("commonSettings.notEnabled")}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })()}
                     {providerNames.map((name) => {
                       const entry = draft[name];
                       const isOn = providerEffectiveOn(entry);
-                      const isSelected = active === name;
+                      const isSelected = !providerNavIsJev && active === name;
                       return (
                         <button
                           key={name}
@@ -7639,6 +7679,7 @@ export function SettingsPanel({
                               : "hover:bg-surface-hover"
                           }`}
                           onClick={() => {
+                            setProviderNavIsJev(false);
                             if (name !== active) cancelInlineProviderRename();
                             setActive(name);
                             setProviderEnableHint(null);
@@ -7690,6 +7731,8 @@ export function SettingsPanel({
 
                 {/* Provider detail */}
                 <div className="min-h-0 flex-1 min-w-0 space-y-3 overflow-y-auto pr-0.5">
+                  {providerNavIsJev ? <TypesafeConfigSection variant="embedded" /> : null}
+                  <div className={providerNavIsJev ? "hidden" : "contents"}>
                   {/* ── Header: logo + name + toggles ── */}
                   <div className="flex items-center gap-3 pt-1">
                     <ProviderAvatar providerId={active} size={40} entry={current} />
@@ -8357,8 +8400,10 @@ export function SettingsPanel({
                           {t("provider.deleteConfirmAfter")}
                         </p>
                       </Modal>
+                  </div>
                 </div>
               </div>
+              {!providerNavIsJev ? (
               <div className="flex shrink-0 items-center justify-end gap-2 pt-2">
                 {providerConfigMessage ? (
                   <span
@@ -8380,6 +8425,7 @@ export function SettingsPanel({
                   {providerConfigSaving ? t("commonSettings.saving") : tCommon("save")}
                 </button>
               </div>
+              ) : null}
               </div>
             )}
 
@@ -8867,7 +8913,6 @@ export function SettingsPanel({
 
             {tab === "automation" && (
               <div className="space-y-4">
-                <TypesafeConfigSection />
                 <AutomationTab />
               </div>
             )}

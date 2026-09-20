@@ -6,6 +6,7 @@ import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typ
 import { SettingsSwitch } from "../SettingsSwitch";
 import { KB_FIELD_BASE } from "../knowledge/kb-field-classes";
 import { rememberTypesafeSettings } from "../../../hooks/useTypesafeSettings";
+import { TypesafeIcon } from "../../../utils/provider-icons";
 import {
   DEFAULT_TYPESAFE_PUBLIC_SETTINGS,
   parseTypesafePublicSettings,
@@ -23,7 +24,11 @@ function authHeaders(apiToken: string): HeadersInit {
   return headers;
 }
 
-export function TypesafeConfigSection() {
+export function TypesafeConfigSection({
+  variant = "panel",
+}: {
+  variant?: "panel" | "embedded";
+} = {}) {
   const { t } = useTranslation("workspace");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -154,11 +159,37 @@ export function TypesafeConfigSection() {
     void patchSettings({ [key]: next });
   };
 
-  return (
-    <Panel title={t("typesafe.title")}>
-      <p className={`${SETTINGS_HINT_CLASS} mb-3`}>{t("typesafe.hint")}</p>
-      <label className={`${SETTINGS_LABEL_CLASS} mb-1 block`}>{t("typesafe.apiKey")}</label>
-      <div className="flex flex-wrap items-center gap-2">
+  const body = (
+    <>
+      {variant === "embedded" ? (
+        <div className="flex items-center gap-3 pt-1">
+          <span
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#111] text-white shadow-sm"
+            aria-hidden
+          >
+            <TypesafeIcon size={24} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold leading-snug text-text-primary">{t("typesafe.listName")}</h2>
+            <p className={`${SETTINGS_HINT_CLASS} mt-0.5`}>{t("typesafe.hint")}</p>
+          </div>
+          <label className="flex cursor-pointer flex-col items-center gap-1">
+            <span className="text-[10px] text-text-faint">{t("typesafe.enabled")}</span>
+            <SettingsSwitch
+              checked={draft.enabled}
+              disabled={loading || patching}
+              onChange={(v) => toggle("enabled", v)}
+              aria-label={t("typesafe.enabled")}
+            />
+          </label>
+        </div>
+      ) : (
+        <p className={`${SETTINGS_HINT_CLASS} mb-3`}>{t("typesafe.hint")}</p>
+      )}
+      <label className={`${SETTINGS_LABEL_CLASS} ${variant === "embedded" ? "mt-4" : "mb-1"} block`}>
+        {t("typesafe.apiKey")}
+      </label>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         <input
           type="password"
           autoComplete="off"
@@ -182,12 +213,14 @@ export function TypesafeConfigSection() {
       {error ? <div className="mt-1 text-xs text-rose-400">{error}</div> : null}
 
       <div className="mt-4 space-y-3">
-        <SwitchRow
-          label={t("typesafe.enabled")}
-          checked={draft.enabled}
-          disabled={loading || patching}
-          onChange={(v) => toggle("enabled", v)}
-        />
+        {variant === "panel" ? (
+          <SwitchRow
+            label={t("typesafe.enabled")}
+            checked={draft.enabled}
+            disabled={loading || patching}
+            onChange={(v) => toggle("enabled", v)}
+          />
+        ) : null}
         <SwitchRow
           label={t("typesafe.groupRouting")}
           checked={draft.group_routing}
@@ -207,8 +240,13 @@ export function TypesafeConfigSection() {
           onChange={(v) => toggle("show_decision_card", v)}
         />
       </div>
-    </Panel>
+    </>
   );
+
+  if (variant === "embedded") {
+    return <div className="space-y-1">{body}</div>;
+  }
+  return <Panel title={t("typesafe.title")}>{body}</Panel>;
 }
 
 function SwitchRow({

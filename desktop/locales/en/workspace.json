@@ -994,6 +994,7 @@
   },
   "typesafe": {
     "title": "Structured decisions (Jev)",
+    "listName": "Jev",
     "hint": "Structured decisions, not a chat model",
     "apiKey": "API key",
     "apiKeyPlaceholder": "Paste TypeSafe token",

@@ -994,6 +994,7 @@
   },
   "typesafe": {
     "title": "结构化决策（Jev）",
+    "listName": "Jev",
     "hint": "结构化决策，不是对话模型",
     "apiKey": "密钥",
     "apiKeyPlaceholder": "粘贴 TypeSafe token",
