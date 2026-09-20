@@ -622,6 +622,8 @@ type Props = {
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Remote webview text selection → quote chip in current chat. */
   onQuoteBrowserSelection?: (payload: BrowserQuotePayload) => void;
+  /** Embedded terminal text selection → quote chip in current chat. */
+  onQuoteTerminalSelection?: (text: string) => void;
   /** Remote webview text selection → in-app Google search tab. */
   onSearchBrowserSelection?: (text: string) => void;
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
@@ -757,6 +759,7 @@ export function WorkPanel({
   onPickDirectoryForReference,
   onQuotePreviewSnippet,
   onQuoteBrowserSelection,
+  onQuoteTerminalSelection,
   onSearchBrowserSelection,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
@@ -2665,7 +2668,12 @@ export function WorkPanel({
               terminalTabs.map((tab) =>
                 tab.id === (activeTerminalTabId ?? terminalTabs[terminalTabs.length - 1]?.id) ? (
                   <div key={tab.id} className="min-h-0 flex-1">
-                    <TerminalEmbed tabId={tab.id} cwd={tab.cwd} ccBridgePty={tab.ccBridgePty} />
+                    <TerminalEmbed
+                      tabId={tab.id}
+                      cwd={tab.cwd}
+                      ccBridgePty={tab.ccBridgePty}
+                      onQuoteSelection={onQuoteTerminalSelection}
+                    />
                   </div>
                 ) : null
               )

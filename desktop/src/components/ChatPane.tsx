@@ -3252,6 +3252,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return [...prev, { id, message, body: cleanBody }];
     });
   }, []);
+  const quoteTerminalSelection = useCallback(
+    (text: string) => {
+      const clean = String(text || "").trim();
+      if (!clean) return;
+      addQuoteTarget(
+        {
+          id: `term-${crypto.randomUUID()}`,
+          role: "assistant",
+          content: clean,
+          avatarName: t("layout.terminal"),
+        },
+        clean,
+      );
+    },
+    [addQuoteTarget, t],
+  );
   const clearQuoteTargets = useCallback(() => {
     pendingCaretQuoteIdRef.current = null;
     setQuoteTargets([]);
@@ -14520,6 +14536,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
             onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+            onQuoteTerminalSelection={quoteTerminalSelection}
             onQuoteBrowserSelection={(payload) => {
               const text = String(payload.text || "").trim();
               if (!text) return;
@@ -14663,6 +14680,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
                 onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+                onQuoteTerminalSelection={quoteTerminalSelection}
                 onQuoteBrowserSelection={(payload) => {
                   const text = String(payload.text || "").trim();
                   if (!text) return;

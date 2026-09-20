@@ -822,7 +822,8 @@
     "searchTitle": "Search: {{query}}",
     "resizeWorkbench": "Drag to resize the workbench",
     "resizeMemoryGraph": "Drag to resize the memory graph",
-    "webPage": "Web page"
+    "webPage": "Web page",
+    "terminal": "Terminal"
   },
   "table": {
     "label": "Table",

@@ -822,7 +822,8 @@
     "searchTitle": "搜索：{{query}}",
     "resizeWorkbench": "拖拽调整工作台面板宽度",
     "resizeMemoryGraph": "拖拽调整记忆图谱面板宽度",
-    "webPage": "网页"
+    "webPage": "网页",
+    "terminal": "终端"
   },
   "table": {
     "label": "表格",

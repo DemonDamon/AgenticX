@@ -3,11 +3,28 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useAppStore, type PaneTerminalTab, type ThemeMode } from "../store";
+import {
+  SelectionQuotePopover,
+  computePopupAnchorFromRect,
+  type SelectionPopupAnchor,
+} from "./workspace/selection-quote-popover";
+import {
+  computeTerminalSelectionAnchor,
+  normalizeTerminalQuoteText,
+  readXtermSelectionOverlayRects,
+} from "./workspace/terminal-selection-quote";
 
 type Props = {
   tabId: string;
   cwd: string;
   ccBridgePty?: PaneTerminalTab["ccBridgePty"];
+  /** Selected terminal text → quote chip in the current chat composer. */
+  onQuoteSelection?: (text: string) => void;
+};
+
+type TerminalQuotePopup = {
+  text: string;
+  anchor: SelectionPopupAnchor;
 };
 
 /** Read the computed background color of the nearest ancestor with a solid bg. */
@@ -112,12 +129,15 @@ function newPtySessionId(tabId: string): string {
   return `${tabId}:${suffix}`;
 }
 
-export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
+export function TerminalEmbed({ tabId, cwd, ccBridgePty, onQuoteSelection }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const onQuoteSelectionRef = useRef(onQuoteSelection);
+  onQuoteSelectionRef.current = onQuoteSelection;
   const themeMode = useAppStore((s) => s.theme);
   const [exited, setExited] = useState(false);
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  const [quotePopup, setQuotePopup] = useState<TerminalQuotePopup | null>(null);
   // Increment to force re-spawn
   const [spawnGen, setSpawnGen] = useState(0);
   // Track whether spawn has completed successfully at least once this mount
@@ -168,8 +188,56 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
     };
     scheduleFit();
 
+    const lastPointerRef = { x: 0, y: 0, has: false };
+    const syncQuotePopup = () => {
+      if (!onQuoteSelectionRef.current) {
+        setQuotePopup(null);
+        return;
+      }
+      const text = normalizeTerminalQuoteText(term.getSelection());
+      if (!text) {
+        setQuotePopup(null);
+        return;
+      }
+      const overlayAnchor = computeTerminalSelectionAnchor(readXtermSelectionOverlayRects(el));
+      const fallbackAnchor = lastPointerRef.has
+        ? computePopupAnchorFromRect({
+            x: lastPointerRef.x,
+            y: lastPointerRef.y,
+            left: lastPointerRef.x,
+            top: lastPointerRef.y,
+            width: 1,
+            height: 1,
+            right: lastPointerRef.x + 1,
+            bottom: lastPointerRef.y + 1,
+            toJSON: () => ({}),
+          } as DOMRect)
+        : null;
+      const anchor = overlayAnchor ?? fallbackAnchor;
+      if (!anchor) {
+        setQuotePopup(null);
+        return;
+      }
+      setQuotePopup({ text, anchor });
+    };
+
+    const selSub = term.onSelectionChange(() => {
+      requestAnimationFrame(syncQuotePopup);
+    });
+    const onMouseUp = (event: MouseEvent) => {
+      lastPointerRef.x = event.clientX;
+      lastPointerRef.y = event.clientY;
+      lastPointerRef.has = true;
+      requestAnimationFrame(syncQuotePopup);
+    };
+    el.addEventListener("mouseup", onMouseUp);
+    const viewport = el.querySelector(".xterm-viewport");
+    const onViewportScroll = () => requestAnimationFrame(syncQuotePopup);
+    viewport?.addEventListener("scroll", onViewportScroll, { passive: true });
+
     const ro = new ResizeObserver(() => {
       scheduleFit();
+      requestAnimationFrame(syncQuotePopup);
       void window.agenticxDesktop.terminalResize({
         id: ptySessionId,
         cols: term.cols,
@@ -256,6 +324,10 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
       offData();
       offExit();
       dSub.dispose();
+      selSub.dispose();
+      el.removeEventListener("mouseup", onMouseUp);
+      viewport?.removeEventListener("scroll", onViewportScroll);
+      setQuotePopup(null);
       void window.agenticxDesktop.terminalKill(ptySessionId);
       term.dispose();
       termRef.current = null;
@@ -278,6 +350,34 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
     }
   }, []);
 
+  useEffect(() => {
+    if (exited || spawnError) setQuotePopup(null);
+  }, [exited, spawnError]);
+
+  useEffect(() => {
+    if (!quotePopup) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (containerRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".agx-selection-quote-btn")) return;
+      setQuotePopup(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [quotePopup]);
+
+  const commitQuote = useCallback(() => {
+    if (!quotePopup || !onQuoteSelection) return;
+    onQuoteSelection(quotePopup.text);
+    setQuotePopup(null);
+    try {
+      termRef.current?.clearSelection();
+    } catch {
+      /* ignore */
+    }
+  }, [onQuoteSelection, quotePopup]);
+
   return (
     <div
       className="relative h-full min-h-0 w-full overflow-hidden outline-none"
@@ -289,6 +389,9 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
       }}
     >
       <div ref={containerRef} className="h-full min-h-0 w-full cursor-text overflow-hidden px-1 py-1" />
+      {quotePopup && onQuoteSelection ? (
+        <SelectionQuotePopover anchor={quotePopup.anchor} onQuote={commitQuote} />
+      ) : null}
       {(exited || spawnError) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-card backdrop-blur-sm">
           <span className="text-xs text-status-warning">
