@@ -41,6 +41,7 @@ import {
   ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
+  META_PENDING_ORB_PX,
   getAssistantActionStyle,
   getAssistantTextClassName,
   getAssistantTextStyle,
@@ -155,7 +156,10 @@ function StreamingDots({ compact = false }: { compact?: boolean }) {
       aria-live="polite"
       aria-label={t("status.processingAria")}
     >
-      <OrbBurst width={compact ? 28 : 32} height={compact ? 28 : 32} />
+      <OrbBurst
+        width={compact ? META_PENDING_ORB_PX : 32}
+        height={compact ? META_PENDING_ORB_PX : 32}
+      />
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
         style={{ background: "var(--text-faint)" }}

@@ -133,7 +133,7 @@ describe("JevDecisionCard", () => {
     expect(html).not.toContain("h-5 w-5");
   });
 
-  it("keeps the compact 20px mark in Meta", () => {
+  it("aligns the Meta mark to the 20px thought/tool rail", () => {
     const html = renderToStaticMarkup(
       <JevDecisionCard
         message={msg({
@@ -148,7 +148,8 @@ describe("JevDecisionCard", () => {
       />,
     );
     expect(html).toContain('data-jev-rail="meta"');
-    expect(html).toContain("h-5 w-5");
+    expect(html).toContain("px-3");
+    expect(html).toContain("h-[20px] w-[20px]");
     expect(html).not.toContain("h-7 w-7");
   });
 });

@@ -13,6 +13,7 @@ import {
   type JevDecisionPayload,
 } from "../../utils/jev-decision";
 import {
+  ASSISTANT_ICON_RAIL_CLASS,
   GROUP_INLINE_CARD_SHELL_CLASS,
   GROUP_SENDER_AVATAR_SLOT_CLASS,
   GROUP_STANDALONE_RAIL_ROW_CLASS,
@@ -21,16 +22,16 @@ import { TypesafeIcon } from "../../utils/provider-icons";
 
 function JevMark({
   pending = false,
-  rail = false,
+  avatar = false,
 }: {
   pending?: boolean;
-  rail?: boolean;
+  avatar?: boolean;
 }) {
-  const box = rail ? GROUP_SENDER_AVATAR_SLOT_CLASS : "h-5 w-5";
-  const glyph = rail ? 18 : 13;
+  const box = avatar ? `flex ${GROUP_SENDER_AVATAR_SLOT_CLASS} shrink-0 items-center justify-center` : ASSISTANT_ICON_RAIL_CLASS;
+  const glyph = avatar ? 18 : 13;
   return (
     <div
-      className={`flex ${box} shrink-0 items-center justify-center rounded-full bg-[#111] text-white`}
+      className={`${box} rounded-full bg-[#111] text-white`}
       aria-hidden
     >
       <TypesafeIcon size={glyph} />
@@ -81,7 +82,7 @@ export function JevDecisionCard({
   const pct = jevConfidencePct(payload.confidence);
   const shell = groupChatRail
     ? `${GROUP_INLINE_CARD_SHELL_CLASS} ${GROUP_STANDALONE_RAIL_ROW_CLASS}`
-    : "my-2 flex min-w-0 w-full max-w-[520px] items-start gap-2 px-1";
+    : `my-2 min-w-0 w-full max-w-[520px] ${GROUP_STANDALONE_RAIL_ROW_CLASS}`;
   const pending = payload.phase === "pending";
   const fallback = !pending && payload.source !== "jev";
   const entries = Object.entries(payload.probabilities);
@@ -92,7 +93,7 @@ export function JevDecisionCard({
       data-slot="jev-decision-card"
       data-jev-rail={groupChatRail ? "group" : "meta"}
     >
-      <JevMark pending={pending} rail={groupChatRail} />
+      <JevMark pending={pending} avatar={groupChatRail} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-[13px] font-semibold text-text-strong">Jev</span>
