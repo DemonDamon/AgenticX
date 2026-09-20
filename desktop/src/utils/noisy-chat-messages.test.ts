@@ -115,3 +115,14 @@ test("isInterruptedAssistantPlaceholder hides barge-in assistant rows", () => {
     false,
   );
 });
+
+test("isNoisyToolStatusMessage keeps Jev decision rows", () => {
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "Jev（jev-1.13.0）→ 派给成员 财务 · 90% · 自动",
+      toolName: "jev",
+    }),
+    false,
+  );
+});

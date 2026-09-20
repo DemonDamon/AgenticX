@@ -769,6 +769,7 @@ type AppState = {
         | "blocks"
         | "usage"
         | "modelSelection"
+        | "id"
       >
     > &
       Partial<MessageToolExtras>

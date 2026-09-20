@@ -16,6 +16,9 @@ function canGroupToolMessage(message: Message): boolean {
   // Durable Plan artifacts own a standalone interactive card.
   if (["plan_create", "plan_update"].includes((message.toolName ?? "").trim())) return false;
   // Clarification cards must render as standalone interactive rows, not nested ToolCallCards.
+  if ((message.toolName ?? "").trim() === "jev") return false;
+  const jevKind = String(message.metadata?.kind ?? "").trim();
+  if (jevKind === "jev_decision" || jevKind === "jev_kb_gate") return false;
   if (message.clarificationPrompt) return false;
   // Action confirmation cards must also stay standalone (never fold into TurnToolGroupCard).
   if (message.actionConfirmation) return false;

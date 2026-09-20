@@ -991,5 +991,24 @@
     "tapdHint": "输入 TAPD Personal Access Token 以连接需求与缺陷管理。",
     "howToGetToken": "如何获取 Token？",
     "patLabel": "Personal Access Token"
+  },
+  "typesafe": {
+    "title": "结构化决策（Jev）",
+    "hint": "结构化决策，不是对话模型",
+    "apiKey": "密钥",
+    "apiKeyPlaceholder": "粘贴 TypeSafe token",
+    "hasKey": "已保存密钥",
+    "saveKey": "保存密钥",
+    "keySaved": "密钥已保存",
+    "keyCleared": "已清空密钥",
+    "test": "测试连通性",
+    "testing": "测试中…",
+    "connected": "已连通 · {{model}}",
+    "testFailed": "连通失败",
+    "enabled": "启用",
+    "groupRouting": "用于群聊路由",
+    "kbAuto": "用于知识库智能检索",
+    "showCard": "显示决策卡",
+    "saveFailed": "保存失败"
   }
 }

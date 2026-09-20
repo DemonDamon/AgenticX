@@ -28,6 +28,9 @@ import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
+import { JevDecisionCard } from "./JevDecisionCard";
+import { isJevDecisionMessage } from "../../utils/jev-decision";
+import { useTypesafeSettings } from "../../hooks/useTypesafeSettings";
 import { InlineConfirmCard } from "./InlineConfirmCard";
 import { GroupSenderRail } from "./GroupSenderRail";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
@@ -421,6 +424,7 @@ export function MessageRenderer({
   onContinueFromMessage,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const typesafeSettings = useTypesafeSettings();
   const resolvedReferences = useMemo(() => {
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
@@ -593,6 +597,15 @@ export function MessageRenderer({
   if (message.role === "tool") {
     if (isNoisyToolStatusMessage(message)) {
       return null;
+    }
+    if (isJevDecisionMessage(message)) {
+      if (!typesafeSettings.show_decision_card) return null;
+      return (
+        <JevDecisionCard
+          message={message}
+          groupChatRail={showSenderIdentity}
+        />
+      );
     }
     if (message.toolName === "group_progress") {
       return <GroupProgressLine message={message} />;

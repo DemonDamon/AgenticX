@@ -449,6 +449,47 @@ def _persist_clarification_prompt(
         logger.exception("[clarify] failed to persist clarification prompt")
 
 
+def _persist_jev_decision(session: Any, reply: Any) -> None:
+    """Append a UI-only Jev decision row. Pending events are not persisted."""
+    try:
+        ctx = dict(getattr(reply, "confirm_context", None) or {})
+        if str(ctx.get("kind") or "") != "jev_decision":
+            ctx["kind"] = "jev_decision"
+        history = getattr(session, "chat_history", None)
+        if history is None:
+            return
+        purpose = str(ctx.get("purpose") or "")
+        action = str(ctx.get("action") or "")
+        target_ids = list(ctx.get("target_ids") or [])
+        if history:
+            tail = history[-1]
+            meta = tail.get("metadata") if isinstance(tail, dict) else None
+            if (
+                isinstance(tail, dict)
+                and tail.get("role") == "tool"
+                and isinstance(meta, dict)
+                and meta.get("kind") == "jev_decision"
+                and str(meta.get("purpose") or "") == purpose
+                and str(meta.get("action") or "") == action
+                and list(meta.get("target_ids") or []) == target_ids
+            ):
+                return
+        history.append(
+            {
+                "role": "tool",
+                "tool_name": "jev",
+                "agent_id": "__jev__",
+                "sender_id": "__jev__",
+                "avatar_name": "Jev",
+                "sender_name": "Jev",
+                "content": str(getattr(reply, "content", "") or ""),
+                "metadata": ctx,
+            }
+        )
+    except Exception:
+        logger.exception("[jev] failed to persist decision card")
+
+
 def _parse_sse_since_seq(
     last_event_id: str | None,
     since_query: str | None,
@@ -3395,7 +3436,9 @@ def create_studio_app() -> FastAPI:
                                 agent_id=str(reply.agent_id or ""),
                                 avatar_name=str(reply.avatar_name or ""),
                             )
-                        if evt_type in {"group_reply", "group_skipped", "group_clarification"}:
+                        if evt_type == "group_jev_decision":
+                            _persist_jev_decision(session, reply)
+                        if evt_type in {"group_reply", "group_skipped", "group_clarification", "group_jev_decision"}:
                             try:
                                 manager.incremental_persist(payload.session_id)
                             except Exception:
@@ -8810,6 +8853,8 @@ def create_studio_app() -> FastAPI:
     from agenticx.studio.web_search.routes import register_web_search_routes
 
     register_web_search_routes(app)
+    from agenticx.studio.typesafe_routes import register_typesafe_routes
+    register_typesafe_routes(app)
 
     from agenticx.studio.delivery_api import register_delivery_routes
 

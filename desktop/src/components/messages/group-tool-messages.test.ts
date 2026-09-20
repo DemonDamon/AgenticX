@@ -105,6 +105,20 @@ test("actionConfirmation tool rows stay ungrouped", () => {
   }
 });
 
+test("Jev decision cards stay ungrouped", () => {
+  const jevRow: Message = {
+    ...toolMessage("jev-1", "done", "jev"),
+    metadata: { kind: "jev_decision", source: "jev" },
+  };
+  const rows = groupConsecutiveToolMessages([
+    toolMessage("t1", "done"),
+    jevRow,
+    toolMessage("t2", "done"),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1]?.kind, "message");
+});
+
 test("Plan artifact tools stay ungrouped for the standalone Plan card", () => {
   const rows = groupConsecutiveToolMessages([
     toolMessage("t1", "done"),

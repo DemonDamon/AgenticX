@@ -1782,6 +1782,8 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
                     "continuation_notice",
                     "futile_resume_guard",
                     "clarification",
+                    "jev_decision",
+                    "jev_kb_gate",
                 ):
                     idx += 1
                     continue
@@ -2858,6 +2860,186 @@ def _kb_retrieval_always_mode(session: Any) -> bool:
         return cfg_mode == "always"
     except Exception:
         return False
+
+
+def _kb_retrieval_effective_mode(session: Any) -> str:
+    mode = str(getattr(session, "kb_retrieval_mode", "") or "").strip().lower()
+    if mode in {"auto", "always", "manual", "off"}:
+        return mode
+    try:
+        from agenticx.studio.kb import KBManager
+
+        cfg = KBManager.instance().read_config()
+        if not bool(getattr(cfg, "enabled", True)):
+            return "off"
+        cfg_mode = str(
+            getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto"
+        ).strip().lower()
+        return cfg_mode if cfg_mode in {"auto", "always", "manual", "off"} else "auto"
+    except Exception:
+        return "auto"
+
+
+def _extract_need_search_noul(response: Any) -> float | None:
+    if not isinstance(response, Mapping):
+        return None
+    answers = response.get("answers")
+    if not isinstance(answers, Mapping):
+        return None
+    ans = answers.get("need_search")
+    if not isinstance(ans, Mapping):
+        return None
+    try:
+        return float(ans.get("noul"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _persist_jev_kb_gate(session: Any, payload: Dict[str, Any], content: str) -> None:
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        return
+    last = history[-1] if history else None
+    if isinstance(last, dict):
+        meta = last.get("metadata") if isinstance(last.get("metadata"), dict) else {}
+        if (
+            meta.get("kind") == "jev_kb_gate"
+            and meta.get("action") == payload.get("action")
+            and meta.get("source") == payload.get("source")
+        ):
+            return
+    history.append(
+        {
+            "role": "tool",
+            "tool_name": "jev",
+            "content": content,
+            "agent_id": "__jev__",
+            "sender_id": "__jev__",
+            "avatar_name": "Jev",
+            "sender_name": "Jev",
+            "tool_status": "done",
+            "metadata": dict(payload),
+        }
+    )
+
+
+async def _jev_kb_gate_events(
+    session: Any,
+    agent_id: str,
+    payload: Dict[str, Any],
+    content: str,
+) -> AsyncGenerator["RuntimeEvent", None]:
+    tool_call_id = str(payload.get("tool_call_id") or f"jev_kb_{uuid.uuid4().hex[:8]}")
+    args = dict(payload)
+    yield RuntimeEvent(
+        type=EventType.TOOL_CALL.value,
+        data={
+            "name": "jev",
+            "arguments": args,
+            "tool_call_id": tool_call_id,
+            "metadata": args,
+        },
+        agent_id=agent_id,
+    )
+    yield RuntimeEvent(
+        type=EventType.TOOL_RESULT.value,
+        data={
+            "name": "jev",
+            "result": content,
+            "tool_call_id": tool_call_id,
+            "tool_status": "done",
+            "metadata": args,
+        },
+        agent_id=agent_id,
+    )
+
+
+async def _kb_retrieval_jev_should_search(session: Any, user_input: str) -> bool | None:
+    """Jev Noul gate for KB auto. None = do not intervene (always / off / no key)."""
+    if _kb_retrieval_always_mode(session):
+        return None
+    if _kb_retrieval_effective_mode(session) != "auto":
+        return None
+    from agenticx.llms.typesafe_client import TypesafeHttpError, TypesafeTimeout, system_one
+    from agenticx.llms.typesafe_config import load_typesafe_settings, resolve_typesafe_api_key
+    from agenticx.runtime.jev_intent import format_jev_kb_content_line
+
+    settings = load_typesafe_settings()
+    api_key = resolve_typesafe_api_key()
+    if not settings.enabled or not settings.kb_auto or not api_key:
+        return None
+
+    started = time.perf_counter()
+    fallback_reason = ""
+    noul: float | None = None
+    model = settings.model
+    source = "fallback"
+    should: bool | None = None
+    try:
+        data = await system_one(
+            state={"user_message": str(user_input or "")},
+            questions={
+                "need_search": {
+                    "type": "noul",
+                    "instructions": (
+                        "Does this user question require searching the user's local document library?"
+                    ),
+                }
+            },
+            model=settings.model,
+            api_key=api_key,
+            timeout_sec=settings.timeout_sec,
+            base_url=settings.base_url,
+        )
+        model = str(data.get("model") or settings.model).strip() or settings.model
+        noul = _extract_need_search_noul(data)
+        if noul is not None and noul >= 0.7:
+            should = True
+            source = "jev"
+        elif noul is not None:
+            should = False
+            source = "jev"
+        else:
+            fallback_reason = "jev_http"
+    except TypesafeTimeout:
+        fallback_reason = "jev_timeout"
+    except TypesafeHttpError:
+        fallback_reason = "jev_http"
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    action = "search" if should is True else "skip"
+    content = format_jev_kb_content_line(
+        source=source,
+        model=model,
+        search=should is True,
+        fallback_reason=fallback_reason,
+    )
+    payload: Dict[str, Any] = {
+        "kind": "jev_kb_gate",
+        "phase": "done",
+        "purpose": "kb_auto",
+        "source": source,
+        "model": model,
+        "requested_model": settings.model,
+        "action": action,
+        "target_ids": [],
+        "target_labels": [],
+        "requires_execution": should is True,
+        "confidence": noul,
+        "gate": "auto" if source == "jev" else "",
+        "probabilities": {},
+        "noul_execution": noul,
+        "latency_ms": latency_ms,
+        "fallback_reason": fallback_reason,
+        "tool_call_id": f"jev_kb_{uuid.uuid4().hex[:8]}",
+        "content": content,
+    }
+    try:
+        setattr(session, "_jev_kb_gate", payload)
+    except Exception:
+        pass
+    _persist_jev_kb_gate(session, payload, content)
+    return should
 
 
 def _prepare_tool_result_for_context(
@@ -4220,8 +4402,25 @@ class AgentRuntime:
             # FR-C: 标记本轮是否需要因流式工具调用截断而强制进入下一轮，
             # 而不是把空 tool_calls 当作模型最终回答处理。每轮起始重置。
             force_retry_next_round = False
+            _jev_kb_search = None
             if (
-                _kb_force_always
+                not _kb_force_always
+                and round_idx == 1
+                and "knowledge_search" in allowed_tool_names
+                and not _is_system_trigger
+            ):
+                _jev_kb_search = await _kb_retrieval_jev_should_search(session, user_input)
+                _jev_gate = getattr(session, "_jev_kb_gate", None)
+                if isinstance(_jev_gate, dict):
+                    async for _jev_evt in _jev_kb_gate_events(
+                        session,
+                        agent_id,
+                        _jev_gate,
+                        str(_jev_gate.get("content") or "Jev"),
+                    ):
+                        yield _jev_evt
+            if (
+                (_kb_force_always or _jev_kb_search is True)
                 and round_idx == 1
                 and "knowledge_search" not in executed_tool_names
                 and not _is_system_trigger

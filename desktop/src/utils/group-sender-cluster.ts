@@ -15,10 +15,14 @@ export function groupSenderClusterKey(
     avatarName?: string;
     speakerUserId?: string;
     systemNotice?: boolean;
+    metadata?: Record<string, unknown>;
   },
   senderAvatarId?: string,
 ): string | null {
   if (message.systemNotice) return null;
+  if (String(message.agentId ?? "").trim() === "__jev__") return null;
+  const kind = String(message.metadata?.kind ?? "").trim();
+  if (kind === "jev_decision" || kind === "jev_kb_gate") return null;
   if (message.role === "user") {
     const peer = String(message.speakerUserId ?? "").trim();
     return peer ? `user:${peer}` : "user:self";

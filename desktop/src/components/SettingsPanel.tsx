@@ -87,6 +87,7 @@ import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { TypesafeConfigSection } from "./settings/typesafe/TypesafeConfigSection";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
@@ -8866,6 +8867,7 @@ export function SettingsPanel({
 
             {tab === "automation" && (
               <div className="space-y-4">
+                <TypesafeConfigSection />
                 <AutomationTab />
               </div>
             )}

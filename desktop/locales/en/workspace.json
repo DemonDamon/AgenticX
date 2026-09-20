@@ -991,5 +991,24 @@
     "tapdHint": "Enter a TAPD Personal Access Token to connect requirements and defects.",
     "howToGetToken": "How do I get a token?",
     "patLabel": "Personal Access Token"
+  },
+  "typesafe": {
+    "title": "Structured decisions (Jev)",
+    "hint": "Structured decisions, not a chat model",
+    "apiKey": "API key",
+    "apiKeyPlaceholder": "Paste TypeSafe token",
+    "hasKey": "Key saved",
+    "saveKey": "Save key",
+    "keySaved": "Key saved",
+    "keyCleared": "Key cleared",
+    "test": "Test connection",
+    "testing": "Testing…",
+    "connected": "Connected · {{model}}",
+    "testFailed": "Connection failed",
+    "enabled": "Enable",
+    "groupRouting": "Use for group routing",
+    "kbAuto": "Use for knowledge auto-retrieval",
+    "showCard": "Show decision card",
+    "saveFailed": "Save failed"
   }
 }

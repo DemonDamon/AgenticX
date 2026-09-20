@@ -39,6 +39,17 @@ describe("groupSenderClusterKey", () => {
     expect(groupSenderClusterKey({ role: "assistant", agentId: "meta", systemNotice: true })).toBeNull();
     expect(groupSenderClusterKey({ role: "tool", agentId: "legal" })).toBeNull();
   });
+
+  it("breaks clustering for Jev decision rows", () => {
+    expect(groupSenderClusterKey({ role: "assistant", agentId: "__jev__" })).toBeNull();
+    expect(
+      groupSenderClusterKey({
+        role: "assistant",
+        agentId: "legal",
+        metadata: { kind: "jev_decision" },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("clusterFlagsForGroupRows", () => {

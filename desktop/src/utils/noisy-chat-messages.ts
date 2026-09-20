@@ -100,6 +100,7 @@ export function isNoisyToolStatusMessage(
   if (isOrphanFormattedToolResultMessage(message)) return true;
   if (isEphemeralConfirmReceiptMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
+  if (toolName === "jev") return false;
   if (toolName === "check_resources") return true;
   // Identity updates surface as a centered system notice, not a tool card.
   if (toolName === "update_self_identity") {

@@ -110,6 +110,7 @@ import {
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { JevRouteChip } from "./messages/JevRouteChip";
 import { Conversation } from "./messages/Conversation";
 import { MarkdownContext } from "./messages/markdown-components";
 import { requestChatHttpLink } from "../utils/chat-external-link";
@@ -10665,6 +10666,91 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
               continue;
             }
+            if (payload.type === "group_jev_pending") {
+              const pendingId = `jev-pending:${pane.id}`;
+              const rawCtx = payload.data?.confirm_context;
+              const ctx =
+                rawCtx && typeof rawCtx === "object"
+                  ? (rawCtx as Record<string, unknown>)
+                  : { phase: "pending", purpose: "group_routing" };
+              const content = String(payload.data?.content ?? "Jev 正在判断谁来回复…");
+              const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+              const exists = (pan?.messages ?? []).some((m) => m.id === pendingId);
+              if (exists) {
+                useAppStore.setState((state) => ({
+                  panes: state.panes.map((p) =>
+                    p.id !== pane.id
+                      ? p
+                      : {
+                          ...p,
+                          messages: p.messages.map((m) =>
+                            m.id === pendingId
+                              ? {
+                                  ...m,
+                                  content,
+                                  metadata: ctx,
+                                  toolStatus: "running",
+                                  toolName: "jev",
+                                  agentId: "__jev__",
+                                  avatarName: "Jev",
+                                }
+                              : m,
+                          ),
+                        },
+                  ),
+                }));
+              } else {
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  content,
+                  "__jev__",
+                  undefined,
+                  undefined,
+                  undefined,
+                  {
+                    id: pendingId,
+                    avatarName: "Jev",
+                    toolName: "jev",
+                    toolStatus: "running",
+                    metadata: ctx,
+                  },
+                );
+              }
+              continue;
+            }
+            if (payload.type === "group_jev_decision") {
+              const pendingId = `jev-pending:${pane.id}`;
+              useAppStore.setState((state) => ({
+                panes: state.panes.map((p) =>
+                  p.id !== pane.id
+                    ? p
+                    : { ...p, messages: p.messages.filter((m) => m.id !== pendingId) },
+                ),
+              }));
+              const rawCtx = payload.data?.confirm_context;
+              const ctx =
+                rawCtx && typeof rawCtx === "object"
+                  ? (rawCtx as Record<string, unknown>)
+                  : { kind: "jev_decision", phase: "done", purpose: "group_routing" };
+              addPaneMessageIfSessionActive(
+                pane.id,
+                "tool",
+                String(payload.data?.content ?? "Jev"),
+                "__jev__",
+                undefined,
+                undefined,
+                undefined,
+                {
+                  id: `jev-decision:${pane.id}:${Date.now()}`,
+                  avatarName: "Jev",
+                  toolName: "jev",
+                  toolStatus: "done",
+                  metadata: { kind: "jev_decision", ...ctx },
+                },
+              );
+              continue;
+            }
             if (payload.type === "group_blocked") {
               clearGroupStreamForAgent(eventAgentId);
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
@@ -11259,11 +11345,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");
                   if (toolCallId) {
+                    const jevMeta =
+                      toolNameStr === "jev" && toolArgs && typeof toolArgs === "object"
+                        ? (toolArgs as Record<string, unknown>)
+                        : undefined;
                     const merged = updatePaneToolMessageForSession(toolCallId, {
                       content,
                       toolName: toolNameStr,
                       toolArgs,
                       toolStatus: "running",
+                      ...(jevMeta ? { metadata: jevMeta } : {}),
                     });
                     if (!merged) {
                       addPaneMessageIfSessionActive(
@@ -11280,6 +11371,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           toolArgs,
                           toolStatus: "running",
                           toolGroupId,
+                          ...(jevMeta ? { metadata: jevMeta } : {}),
                         }
                       );
                     }
@@ -13408,6 +13500,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     {t("toolbar.wechat")}
                   </span>
                 )}
+                {isGroupPane ? <JevRouteChip messages={pane.messages} visible /> : null}
               </div>
               {pane.contextInherited ? (
                 <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">

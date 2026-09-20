@@ -16,6 +16,7 @@ import pytest
 
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
+from agenticx.llms.typesafe_config import TypesafeSettings
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
     GroupChatRouter,
@@ -29,6 +30,14 @@ from agenticx.runtime.group_router import (
     _strip_visible_final_marker,
     _tool_result_succeeded,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_typesafe_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.load_typesafe_settings",
+        lambda: TypesafeSettings(),
+    )
 
 
 def test_strip_visible_final_marker_hides_control_token() -> None:
@@ -770,3 +779,275 @@ async def test_member_and_meta_prompts_share_control_plane_contract(
         assert "正在调用工具 / 已回答 / 等待追问" in prompt
         assert "web_search" in prompt
         assert "查了一圈" in prompt
+
+
+def _enable_jev(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
+    settings = TypesafeSettings(
+        enabled=True,
+        group_routing=True,
+        has_key=True,
+        model="jev-latest",
+        act_above=0.8,
+        review_above=0.5,
+        **overrides,
+    )
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.load_typesafe_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.resolve_typesafe_api_key",
+        lambda: "sk-test",
+    )
+
+
+def _jev_response(*, action: str, target: str, confidence: float, noul: float = 0.91) -> dict:
+    return {
+        "model": "jev-1.13.0",
+        "answers": {
+            "action": {
+                "type": "choice",
+                "choice": action,
+                "confidence": confidence,
+                "probabilities": {
+                    "route_to": 0.81,
+                    "meta_direct": 0.12,
+                    "continue_thread": 0.05,
+                    "open_floor": 0.02,
+                },
+            },
+            "target": {"type": "choice", "choice": target, "confidence": 0.9, "probabilities": {target: 1.0}},
+            "requires_execution": {"type": "noul", "noul": noul},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_jev_high_confidence_skips_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_jev(monkeypatch)
+    router = _make_router_with_spies(["a1", "a2"])
+    llm_calls = {"n": 0}
+
+    async def stub_llm(**kwargs):
+        llm_calls["n"] += 1
+        return '{"action":"meta_direct","target_ids":[],"reason":"should_not_run"}'
+
+    async def stub_system_one(**kwargs):
+        return _jev_response(action="route_to", target="a1", confidence=0.9)
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="帮财务看下这份对账单",
+        explicit_targets=[],
+    )
+    assert llm_calls["n"] == 0
+    assert decision.source == "jev"
+    assert decision.action == "route_to"
+    assert decision.target_ids == ["a1"]
+    assert decision.reason == "jev"
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_jev_abstain_falls_back_to_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_jev(monkeypatch)
+    router = _make_router_with_spies(["a1", "a2"])
+    llm_calls = {"n": 0}
+
+    async def stub_llm(**kwargs):
+        llm_calls["n"] += 1
+        return '{"action":"route_to","target_ids":["a2"],"requires_execution":true,"reason":"llm"}'
+
+    async def stub_system_one(**kwargs):
+        return _jev_response(action="route_to", target="a1", confidence=0.2)
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="查仓库并修复这个 bug",
+        explicit_targets=[],
+    )
+    assert llm_calls["n"] == 1
+    assert decision.source == "fallback"
+    assert decision.fallback_reason == "jev_fallback_llm"
+    assert decision.action == "route_to"
+    assert decision.target_ids == ["a2"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_llm_error_falls_back_to_meta_not_first_member() -> None:
+    router = _make_router_with_spies(["a1", "a2"])
+
+    async def boom(**kwargs):
+        raise RuntimeError("llm down")
+
+    router._call_llm_text = boom  # type: ignore[assignment]
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="随便聊聊",
+        explicit_targets=[],
+    )
+    assert decision.action == "meta_direct"
+    assert decision.target_ids == []
+    assert decision.reason == "intent_fallback_meta_direct"
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_jev_then_llm_error_is_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_jev(monkeypatch)
+    router = _make_router_with_spies(["a1", "a2"])
+
+    async def boom(**kwargs):
+        raise RuntimeError("llm down")
+
+    async def stub_system_one(**kwargs):
+        return _jev_response(action="route_to", target="a1", confidence=0.2)
+
+    router._call_llm_text = boom  # type: ignore[assignment]
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="随便聊聊",
+        explicit_targets=[],
+    )
+    assert decision.action == "meta_direct"
+    assert decision.target_ids == []
+    assert decision.fallback_reason == "jev_fallback_meta"
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_empty_route_to_uses_meta() -> None:
+    router = _make_router_with_spies(["a1", "a2"])
+
+    async def stub_llm(**kwargs):
+        return '{"action":"route_to","target_ids":[],"reason":"empty"}'
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="解释一下 MCP",
+        explicit_targets=[],
+    )
+    assert decision.action == "meta_direct"
+    assert decision.target_ids == []
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_no_key_uses_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.load_typesafe_settings",
+        lambda: TypesafeSettings(enabled=True, group_routing=True, has_key=False),
+    )
+    router = _make_router_with_spies(["a1", "a2"])
+    llm_calls = {"n": 0}
+
+    async def stub_llm(**kwargs):
+        llm_calls["n"] += 1
+        return '{"action":"route_to","target_ids":["a1"],"requires_execution":true,"reason":"llm"}'
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="查仓库并修复这个 bug",
+        explicit_targets=[],
+    )
+    assert llm_calls["n"] == 1
+    assert decision.source == "fallback"
+    assert decision.fallback_reason == "jev_no_key"
+    assert decision.action == "route_to"
+
+
+@pytest.mark.asyncio
+async def test_open_call_never_calls_system_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_jev(monkeypatch)
+    calls: list[object] = []
+
+    async def stub_system_one(**kwargs):
+        calls.append(kwargs)
+        return _jev_response(action="route_to", target="a1", confidence=0.9)
+
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    router = _make_router_with_spies(["a1", "a2"])
+    _install_turn_stubs(
+        router,
+        decision=IntentDecision("route_to", ["a1"], "should_not_analyze"),
+        stream_by_id={
+            META_LEADER_AGENT_ID: _reply(META_LEADER_AGENT_ID, "这是开放提问的主答。"),
+        },
+    )
+    events = await _collect_turn(
+        router,
+        avatar_ids=["a1", "a2"],
+        user_input="群里谁能一句话说下这个项目干啥的",
+    )
+    assert calls == []
+    assert any(e.agent_id == META_LEADER_AGENT_ID and e.event_type == "group_reply" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_intelligent_turn_yields_jev_pending_and_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_jev(monkeypatch)
+
+    async def stub_system_one(**kwargs):
+        return _jev_response(action="route_to", target="a1", confidence=0.9)
+
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    router = _make_router_with_spies(["a1", "a2"])
+
+    async def stub_llm(**kwargs):
+        raise AssertionError("LLM should not run")
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    stream_order: list[str] = []
+
+    async def _stub_one_target_stream(**kwargs):
+        aid = str(kwargs.get("avatar_id") or "")
+        stream_order.append(aid)
+        yield _reply(aid, "财务看完了对账单。")
+
+    async def _stub_team_turn(**kwargs):
+        if False:
+            yield _reply("x", "")
+        return
+
+    router._run_one_target_stream = _stub_one_target_stream  # type: ignore[assignment]
+    router._run_team_turn = _stub_team_turn  # type: ignore[assignment]
+    events = await _collect_turn(
+        router,
+        avatar_ids=["a1", "a2"],
+        user_input="帮财务看下这份对账单",
+    )
+    kinds = [e.event_type for e in events]
+    assert "group_jev_pending" in kinds
+    assert "group_jev_decision" in kinds
+    decision_evt = next(e for e in events if e.event_type == "group_jev_decision")
+    assert decision_evt.avatar_name == "Jev"
+    assert decision_evt.confirm_context.get("source") == "jev"
+    assert "Jev" in decision_evt.content
+    assert stream_order == ["a1"]

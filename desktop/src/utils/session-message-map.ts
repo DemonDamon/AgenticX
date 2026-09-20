@@ -510,6 +510,11 @@ export function mapLoadedSessionMessage(
       if (kind === "compaction_proactive" || kind === "compaction_reactive") {
         mapped.noticeKind = kind;
       }
+      if (kind === "jev_decision" || kind === "jev_kb_gate") {
+        mapped.toolName = mapped.toolName || "jev";
+        mapped.agentId = mapped.agentId || "__jev__";
+        mapped.avatarName = mapped.avatarName || "Jev";
+      }
     }
   }
   return mapped;
