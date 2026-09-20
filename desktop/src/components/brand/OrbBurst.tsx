@@ -163,10 +163,13 @@ export function OrbBurst({
   width = 32,
   height = 32,
   className = "",
+  opticalX = 0,
 }: {
   width?: number;
   height?: number;
   className?: string;
+  /** Decorative shift only. Meta ReAct rail must stay 0 so the orb shares the 20px icon axis. */
+  opticalX?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const themeColor = useAppStore((s) => s.themeColor);
@@ -261,7 +264,7 @@ export function OrbBurst({
     <div
       data-part="orb-burst"
       data-orb="winding"
-      data-optical-x="-3"
+      data-optical-x={String(opticalX)}
       data-accent={themeColor}
       data-dot-color={colors.dot}
       data-accent-color={colors.accent}
@@ -272,7 +275,7 @@ export function OrbBurst({
         width,
         height,
         flexShrink: 0,
-        transform: "translateX(-3px)",
+        ...(opticalX !== 0 ? { transform: `translateX(${opticalX}px)` } : {}),
       }}
       aria-hidden
     >

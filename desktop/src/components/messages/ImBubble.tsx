@@ -41,6 +41,7 @@ import {
   ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
+  ASSISTANT_ICON_RAIL_CLASS,
   META_PENDING_ORB_PX,
   getAssistantActionStyle,
   getAssistantTextClassName,
@@ -150,16 +151,25 @@ function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
 /** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
 function StreamingDots({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation("chat");
+  const orb = (
+    <OrbBurst
+      width={compact ? META_PENDING_ORB_PX : 32}
+      height={compact ? META_PENDING_ORB_PX : 32}
+    />
+  );
   return (
     <div
       className={`inline-flex items-center gap-2 ${compact ? "py-0" : "py-1.5"}`}
       aria-live="polite"
       aria-label={t("status.processingAria")}
     >
-      <OrbBurst
-        width={compact ? META_PENDING_ORB_PX : 32}
-        height={compact ? META_PENDING_ORB_PX : 32}
-      />
+      {compact ? (
+        <span className={ASSISTANT_ICON_RAIL_CLASS} data-pending-orb-rail="meta">
+          {orb}
+        </span>
+      ) : (
+        orb
+      )}
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
         style={{ background: "var(--text-faint)" }}

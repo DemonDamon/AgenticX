@@ -139,4 +139,17 @@ describe("GroupExpertActivityCard", () => {
     expect(html).toContain("w-fit");
     expect(html).not.toMatch(/agx-group-activity-status[^"]*flex-1/);
   });
+
+  it("hugs the copy column like the group Jev row instead of stretching a full-width card", () => {
+    const html = renderToStaticMarkup(
+      <GroupExpertActivityCard activity={activity} now={13_000} />,
+    );
+    expect(html).toContain("px-3");
+    expect(html).toContain("max-w-[520px]");
+    expect(html).toContain("w-fit max-w-full");
+    expect(html).not.toContain("max-w-[min(100%,680px)]");
+    expect(html).not.toContain("min-w-0 flex-1 rounded-xl");
+    expect(html).not.toContain("bg-surface-card/60");
+    expect(html).not.toContain("rounded-xl bg-surface-card/60 px-3 py-2");
+  });
 });

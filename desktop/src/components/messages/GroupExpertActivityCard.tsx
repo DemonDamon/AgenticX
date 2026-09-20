@@ -14,6 +14,7 @@ import {
 import "../../i18n/i18n";
 import { HoverTip } from "../ds/HoverTip";
 import { Shimmer } from "../ds/Shimmer";
+import { GROUP_STANDALONE_RAIL_ROW_CLASS } from "./im-layout";
 import { ChatImAvatar } from "./ImBubble";
 
 type Props = {
@@ -49,7 +50,7 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
 
   return (
     <div
-      className="agx-group-expert-activity ml-3 mb-2 flex max-w-[min(100%,680px)] items-start gap-2"
+      className={`agx-group-expert-activity mb-2 max-w-[520px] ${GROUP_STANDALONE_RAIL_ROW_CLASS}`}
       data-agent-id={activity.agentId}
       data-phase={activity.phase}
     >
@@ -60,7 +61,7 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
         avatarId={activity.agentId}
         size="sm"
       />
-      <div className="min-w-0 flex-1 rounded-xl bg-surface-card/60 px-3 py-2">
+      <div className="min-w-0 w-fit max-w-full">
         <div className="text-[12px] leading-none text-text-faint">{activity.avatarName}</div>
         <div className="agx-group-activity-status mt-1 flex w-fit max-w-full flex-wrap items-center gap-1.5">
           {waiting ? (
