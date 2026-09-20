@@ -12,6 +12,9 @@ from agenticx.runtime.jev_intent import (
     JevIntentMap,
     build_group_routing_questions,
     build_group_routing_state,
+    format_jev_content_line,
+    format_jev_fallback_line,
+    is_jev_hard_fallback,
     map_jev_to_intent,
     member_role_snippet,
 )
@@ -208,3 +211,29 @@ def test_continue_thread_and_open_floor() -> None:
     assert cont.action == "continue_thread"
     assert floor.action == "open_floor"
     assert floor.target_ids == []
+
+
+def test_fallback_line_soft_vs_hard() -> None:
+    assert is_jev_hard_fallback("jev_timeout") is True
+    assert is_jev_hard_fallback("jev_fallback_llm") is False
+    assert format_jev_fallback_line("jev_fallback_llm") == "改走主模型 · 置信不足"
+    assert format_jev_fallback_line("jev_soft_timeout") == "改走主模型 · 判定较慢"
+    assert format_jev_fallback_line("jev_no_key") == "未采用 · 未配置密钥"
+    assert "改走主模型" in format_jev_content_line(
+        source="fallback",
+        model="jev-1.13.0",
+        action="route_to",
+        target_label="财务",
+        confidence=0.2,
+        gate="abstain",
+        fallback_reason="jev_fallback_llm",
+    )
+    assert "未采用" in format_jev_content_line(
+        source="fallback",
+        model="",
+        action="",
+        target_label="",
+        confidence=None,
+        gate="",
+        fallback_reason="jev_timeout",
+    )

@@ -34,8 +34,26 @@ FALLBACK_CAUSE_ZH = {
     "jev_timeout": "超时",
     "jev_http": "请求失败",
     "jev_fallback_llm": "置信不足",
+    "jev_soft_timeout": "判定较慢",
     "jev_fallback_meta": "已回落 Near",
 }
+HARD_FALLBACK_REASONS = frozenset({"jev_no_key", "jev_timeout", "jev_http"})
+
+
+def is_jev_hard_fallback(reason: str) -> bool:
+    return str(reason or "").strip() in HARD_FALLBACK_REASONS
+
+
+def format_jev_fallback_line(reason: str) -> str:
+    code = str(reason or "").strip()
+    if code == "jev_fallback_llm":
+        return "改走主模型 · 置信不足"
+    if code == "jev_soft_timeout":
+        return "改走主模型 · 判定较慢"
+    if code == "jev_fallback_meta":
+        return "改走 Near · 已回落 Near"
+    cause = FALLBACK_CAUSE_ZH.get(code, code or "未采用")
+    return f"未采用 · {cause}"
 
 
 def format_jev_content_line(
@@ -52,6 +70,12 @@ def format_jev_content_line(
     if source != "jev":
         if fallback_reason == "jev_no_key":
             return "Jev 未配置密钥，已走原路由"
+        if fallback_reason == "jev_fallback_llm":
+            return "Jev 改走主模型（置信不足），已回落主模型"
+        if fallback_reason == "jev_soft_timeout":
+            return "Jev 改走主模型（判定较慢），已回落主模型"
+        if fallback_reason == "jev_fallback_meta":
+            return "Jev 改走 Near（已回落 Near）"
         cause = FALLBACK_CAUSE_ZH.get(fallback_reason, fallback_reason or "未采用")
         dest = "Near" if fallback_reason == "jev_fallback_meta" else "主模型"
         return f"Jev 未采用（{cause}），已回落{dest}"

@@ -3,6 +3,7 @@ import { useAppStore } from "../../store";
 import { useTypesafeSettings } from "../../hooks/useTypesafeSettings";
 import { HoverTip } from "../ds/HoverTip";
 import {
+  isJevHardFallback,
   jevFallbackCauseZh,
   latestJevDecision,
 } from "../../utils/jev-decision";
@@ -21,14 +22,18 @@ export function JevRouteChip({
 
   const last = latestJevDecision(messages);
   const ready = settings.group_routing && settings.has_key;
-  const fallback = last?.source === "fallback" || !ready;
-  const ok = !fallback && (last?.source === "jev" || ready);
+  const hardFallback = last?.source === "fallback" && isJevHardFallback(last.fallback_reason);
+  const softFallback = last?.source === "fallback" && !hardFallback;
+  const fallback = hardFallback || !ready;
+  const ok = !fallback && !softFallback && (last?.source === "jev" || ready);
   let tooltip = "未 @ 时由 Jev 判断谁来回复";
   if (!ready) tooltip = "未启用或未配置密钥";
   else if (last?.source === "jev") {
     tooltip = last.model ? `Jev（${last.model}）` : "未 @ 时由 Jev 判断谁来回复";
-  } else if (last?.source === "fallback") {
+  } else if (hardFallback) {
     tooltip = `Jev 未采用（${jevFallbackCauseZh(last.fallback_reason)}）`;
+  } else if (softFallback) {
+    tooltip = `Jev 改走主模型（${jevFallbackCauseZh(last.fallback_reason)}）`;
   }
 
   return (
@@ -41,7 +46,11 @@ export function JevRouteChip({
         }}
         aria-label="Jev"
       >
-        <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-500" : "bg-red-500"}`} />
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            ok ? "bg-emerald-500" : softFallback ? "bg-amber-400" : "bg-red-500"
+          }`}
+        />
         <span className="font-medium text-text-strong">Jev</span>
       </button>
     </HoverTip>

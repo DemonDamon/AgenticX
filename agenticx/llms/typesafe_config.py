@@ -18,6 +18,7 @@ from agenticx.cli.config_manager import ConfigManager
 DEFAULT_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_TYPESAFE_MODEL = "jev-latest"
 DEFAULT_TIMEOUT_SEC = 8.0
+DEFAULT_SOFT_TIMEOUT_SEC = 2.0
 DEFAULT_ACT_ABOVE = 0.8
 DEFAULT_REVIEW_ABOVE = 0.5
 
@@ -66,11 +67,20 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+def clamp_soft_timeout_sec(soft_timeout_sec: float, timeout_sec: float) -> float:
+    hard = max(0.1, float(timeout_sec or DEFAULT_TIMEOUT_SEC))
+    soft = float(soft_timeout_sec or 0.0)
+    if soft <= 0:
+        return min(DEFAULT_SOFT_TIMEOUT_SEC, hard)
+    return min(soft, hard)
+
+
 @dataclass(frozen=True)
 class TypesafeSettings:
     enabled: bool = False
     model: str = DEFAULT_TYPESAFE_MODEL
     timeout_sec: float = DEFAULT_TIMEOUT_SEC
+    soft_timeout_sec: float = DEFAULT_SOFT_TIMEOUT_SEC
     group_routing: bool = True
     kb_auto: bool = False
     show_decision_card: bool = True
@@ -95,10 +105,16 @@ def load_typesafe_settings() -> TypesafeSettings:
     api_key = resolve_typesafe_api_key(configured=str(section.get("api_key") or ""))
     model = str(section.get("model") or DEFAULT_TYPESAFE_MODEL).strip() or DEFAULT_TYPESAFE_MODEL
     base_url = str(section.get("base_url") or DEFAULT_TYPESAFE_BASE_URL).strip() or DEFAULT_TYPESAFE_BASE_URL
+    timeout_sec = _as_float(section.get("timeout_sec"), DEFAULT_TIMEOUT_SEC)
+    soft_timeout_sec = clamp_soft_timeout_sec(
+        _as_float(section.get("soft_timeout_sec"), DEFAULT_SOFT_TIMEOUT_SEC),
+        timeout_sec,
+    )
     return TypesafeSettings(
         enabled=_as_bool(section.get("enabled"), False),
         model=model,
-        timeout_sec=_as_float(section.get("timeout_sec"), DEFAULT_TIMEOUT_SEC),
+        timeout_sec=timeout_sec,
+        soft_timeout_sec=soft_timeout_sec,
         group_routing=_as_bool(section.get("group_routing"), True),
         kb_auto=_as_bool(section.get("kb_auto"), False),
         show_decision_card=_as_bool(section.get("show_decision_card"), True),
@@ -118,6 +134,7 @@ def typesafe_settings_public_dict(settings: TypesafeSettings | None = None) -> d
         "api_key": resolve_typesafe_api_key(),
         "model": current.model,
         "timeout_sec": current.timeout_sec,
+        "soft_timeout_sec": current.soft_timeout_sec,
         "group_routing": current.group_routing,
         "kb_auto": current.kb_auto,
         "show_decision_card": current.show_decision_card,

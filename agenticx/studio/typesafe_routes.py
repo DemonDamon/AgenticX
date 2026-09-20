@@ -24,6 +24,7 @@ _SETTABLE_FIELDS = (
     "enabled",
     "model",
     "timeout_sec",
+    "soft_timeout_sec",
     "group_routing",
     "kb_auto",
     "show_decision_card",

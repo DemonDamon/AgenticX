@@ -48,7 +48,11 @@ from agenticx.runtime.prompts.meta_agent import (
 )
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 from agenticx.llms.typesafe_client import TypesafeHttpError, TypesafeTimeout, system_one
-from agenticx.llms.typesafe_config import load_typesafe_settings, resolve_typesafe_api_key
+from agenticx.llms.typesafe_config import (
+    clamp_soft_timeout_sec,
+    load_typesafe_settings,
+    resolve_typesafe_api_key,
+)
 from agenticx.runtime.jev_intent import (
     build_group_routing_questions,
     build_group_routing_state,
@@ -1759,53 +1763,45 @@ class GroupChatRouter:
             session_id=resolve_studio_session_id(base_session),
         )
 
-    async def _analyze_intent(
+    async def _cancel_aio_task(self, task: asyncio.Task[Any] | None) -> None:
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    def _apply_jev_fallback(
+        self,
+        decision: IntentDecision,
+        *,
+        fallback_reason: str,
+        settings: Any,
+        jev_extra: Mapping[str, Any],
+    ) -> IntentDecision:
+        return self._stamp_jev_fallback(
+            decision,
+            fallback_reason=fallback_reason,
+            requested_model=str(jev_extra.get("requested_model") or getattr(settings, "model", "")),
+            latency_ms=int(jev_extra.get("latency_ms") or 0),
+            model=str(jev_extra.get("model") or ""),
+            confidence=jev_extra.get("confidence"),
+            probabilities=jev_extra.get("probabilities"),
+            noul_execution=jev_extra.get("noul_execution"),
+        )
+
+    async def _llm_intent_decision(
         self,
         *,
         base_session: StudioSession,
         context: GroupChatContext,
         group_name: str,
-        group_avatar_ids: Sequence[str],
         user_input: str,
-        explicit_targets: Sequence[str],
+        members: Sequence[Mapping[str, str]],
+        member_ids: set[str],
+        active_thread: Any,
     ) -> IntentDecision:
-        if explicit_targets:
-            return IntentDecision(
-                action="route_to",
-                target_ids=[str(x).strip() for x in explicit_targets if str(x).strip()],
-                reason="explicit_mention",
-                requires_execution=_looks_like_execution_request(user_input),
-            )
-        members = self._avatar_member_summary(group_avatar_ids)
-        member_ids = {item["id"] for item in members}
-        active_thread = context.get_active_thread()
-        settings = load_typesafe_settings()
-        jev_fallback = ""
-        jev_extra: dict[str, Any] = {
-            "requested_model": str(getattr(settings, "model", "") or "jev-latest"),
-            "latency_ms": 0,
-        }
-        if settings.enabled and settings.group_routing:
-            if settings.has_key:
-                mapped, jev_err, jev_extra = await self._try_jev_intent(
-                    context=context,
-                    group_name=group_name,
-                    group_avatar_ids=group_avatar_ids,
-                    user_input=user_input,
-                    member_ids=member_ids,
-                    settings=settings,
-                )
-                if mapped is not None and mapped.adopted():
-                    return self._intent_from_jev_map(
-                        mapped,
-                        requested_model=str(jev_extra.get("requested_model") or settings.model),
-                        latency_ms=int(jev_extra.get("latency_ms") or 0),
-                        member_ids=member_ids,
-                        active_thread=active_thread,
-                    )
-                jev_fallback = jev_err or "jev_fallback_llm"
-            else:
-                jev_fallback = "jev_no_key"
         provider = getattr(base_session, "provider_name", None)
         model = getattr(base_session, "model_name", None)
         thread_line = (
@@ -1844,42 +1840,13 @@ class GroupChatRouter:
             "- requires_execution=false：解释概念、打招呼、观点讨论、读取已有上下文即可回答。\n"
             "- 用户问「进度如何」本身不是新执行请求 => requires_execution=false。"
         )
-        try:
-            text = await self._call_llm_text(
-                provider=provider,
-                model=model,
-                prompt=prompt,
-                temperature=0.1,
-                max_tokens=group_intent_max_tokens(),
-            )
-        except Exception:
-            fallback_exec = _looks_like_execution_request(user_input)
-            if active_thread is not None and active_thread.partner_id in member_ids:
-                decision = IntentDecision(
-                    action="continue_thread",
-                    target_ids=[active_thread.partner_id],
-                    reason="intent_fallback_active_thread",
-                    requires_execution=fallback_exec,
-                )
-            else:
-                decision = IntentDecision(
-                    action="meta_direct",
-                    target_ids=[],
-                    reason="intent_fallback_meta_direct",
-                    requires_execution=fallback_exec,
-                )
-            if jev_fallback:
-                return self._stamp_jev_fallback(
-                    decision,
-                    fallback_reason="jev_fallback_meta",
-                    requested_model=str(jev_extra.get("requested_model") or settings.model),
-                    latency_ms=int(jev_extra.get("latency_ms") or 0),
-                    model=str(jev_extra.get("model") or ""),
-                    confidence=jev_extra.get("confidence"),
-                    probabilities=jev_extra.get("probabilities"),
-                    noul_execution=jev_extra.get("noul_execution"),
-                )
-            return decision
+        text = await self._call_llm_text(
+            provider=provider,
+            model=model,
+            prompt=prompt,
+            temperature=0.1,
+            max_tokens=group_intent_max_tokens(),
+        )
         payload = self._extract_json_object(text)
         if not payload:
             _log.warning(
@@ -1911,22 +1878,177 @@ class GroupChatRouter:
             action = "meta_direct"
             reason = f"{reason}|fallback_meta"
         requires_execution = _parse_requires_execution(payload, user_input)
-        decision = IntentDecision(
+        return IntentDecision(
             action=action,
             target_ids=target_ids,
             reason=reason,
             requires_execution=requires_execution,
         )
+
+    def _intent_unavailable_decision(
+        self,
+        *,
+        user_input: str,
+        member_ids: set[str],
+        active_thread: Any,
+    ) -> IntentDecision:
+        fallback_exec = _looks_like_execution_request(user_input)
+        if active_thread is not None and active_thread.partner_id in member_ids:
+            return IntentDecision(
+                action="continue_thread",
+                target_ids=[active_thread.partner_id],
+                reason="intent_fallback_active_thread",
+                requires_execution=fallback_exec,
+            )
+        return IntentDecision(
+            action="meta_direct",
+            target_ids=[],
+            reason="intent_fallback_meta_direct",
+            requires_execution=fallback_exec,
+        )
+
+    async def _await_llm_intent(
+        self,
+        llm_task: asyncio.Task[IntentDecision] | None,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_name: str,
+        user_input: str,
+        members: Sequence[Mapping[str, str]],
+        member_ids: set[str],
+        active_thread: Any,
+    ) -> tuple[IntentDecision, bool]:
+        try:
+            if llm_task is not None:
+                return await llm_task, False
+            return (
+                await self._llm_intent_decision(
+                    base_session=base_session,
+                    context=context,
+                    group_name=group_name,
+                    user_input=user_input,
+                    members=members,
+                    member_ids=member_ids,
+                    active_thread=active_thread,
+                ),
+                False,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return (
+                self._intent_unavailable_decision(
+                    user_input=user_input,
+                    member_ids=member_ids,
+                    active_thread=active_thread,
+                ),
+                True,
+            )
+
+    async def _analyze_intent(
+        self,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        user_input: str,
+        explicit_targets: Sequence[str],
+    ) -> IntentDecision:
+        if explicit_targets:
+            return IntentDecision(
+                action="route_to",
+                target_ids=[str(x).strip() for x in explicit_targets if str(x).strip()],
+                reason="explicit_mention",
+                requires_execution=_looks_like_execution_request(user_input),
+            )
+        members = self._avatar_member_summary(group_avatar_ids)
+        member_ids = {item["id"] for item in members}
+        active_thread = context.get_active_thread()
+        settings = load_typesafe_settings()
+        jev_fallback = ""
+        jev_extra: dict[str, Any] = {
+            "requested_model": str(getattr(settings, "model", "") or "jev-latest"),
+            "latency_ms": 0,
+        }
+        llm_task: asyncio.Task[IntentDecision] | None = None
+        if settings.enabled and settings.group_routing and not settings.has_key:
+            jev_fallback = "jev_no_key"
+        elif settings.enabled and settings.group_routing and settings.has_key:
+            jev_task = asyncio.create_task(
+                self._try_jev_intent(
+                    context=context,
+                    group_name=group_name,
+                    group_avatar_ids=group_avatar_ids,
+                    user_input=user_input,
+                    member_ids=member_ids,
+                    settings=settings,
+                )
+            )
+            soft = clamp_soft_timeout_sec(
+                float(getattr(settings, "soft_timeout_sec", 2) or 2),
+                float(getattr(settings, "timeout_sec", 8) or 8),
+            )
+            done, _pending = await asyncio.wait({jev_task}, timeout=soft)
+            if jev_task in done:
+                mapped, jev_err, jev_extra = jev_task.result()
+                if mapped is not None and mapped.adopted():
+                    return self._intent_from_jev_map(
+                        mapped,
+                        requested_model=str(jev_extra.get("requested_model") or settings.model),
+                        latency_ms=int(jev_extra.get("latency_ms") or 0),
+                        member_ids=member_ids,
+                        active_thread=active_thread,
+                    )
+                jev_fallback = jev_err or "jev_fallback_llm"
+            else:
+                llm_task = asyncio.create_task(
+                    self._llm_intent_decision(
+                        base_session=base_session,
+                        context=context,
+                        group_name=group_name,
+                        user_input=user_input,
+                        members=members,
+                        member_ids=member_ids,
+                        active_thread=active_thread,
+                    )
+                )
+                done, _pending = await asyncio.wait(
+                    {jev_task, llm_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if jev_task.done() and not jev_task.cancelled():
+                    mapped, jev_err, jev_extra = jev_task.result()
+                    if mapped is not None and mapped.adopted():
+                        await self._cancel_aio_task(llm_task)
+                        return self._intent_from_jev_map(
+                            mapped,
+                            requested_model=str(jev_extra.get("requested_model") or settings.model),
+                            latency_ms=int(jev_extra.get("latency_ms") or 0),
+                            member_ids=member_ids,
+                            active_thread=active_thread,
+                        )
+                    jev_fallback = jev_err or "jev_fallback_llm"
+                else:
+                    await self._cancel_aio_task(jev_task)
+                    jev_fallback = "jev_soft_timeout"
+        decision, llm_failed = await self._await_llm_intent(
+            llm_task,
+            base_session=base_session,
+            context=context,
+            group_name=group_name,
+            user_input=user_input,
+            members=members,
+            member_ids=member_ids,
+            active_thread=active_thread,
+        )
         if jev_fallback:
-            return self._stamp_jev_fallback(
+            return self._apply_jev_fallback(
                 decision,
-                fallback_reason=jev_fallback,
-                requested_model=str(jev_extra.get("requested_model") or settings.model),
-                latency_ms=int(jev_extra.get("latency_ms") or 0),
-                model=str(jev_extra.get("model") or ""),
-                confidence=jev_extra.get("confidence"),
-                probabilities=jev_extra.get("probabilities"),
-                noul_execution=jev_extra.get("noul_execution"),
+                fallback_reason="jev_fallback_meta" if llm_failed else jev_fallback,
+                settings=settings,
+                jev_extra=jev_extra,
             )
         return decision
 

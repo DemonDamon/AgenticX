@@ -36,8 +36,11 @@ const FALLBACK_CAUSE_ZH: Record<string, string> = {
   jev_timeout: "超时",
   jev_http: "请求失败",
   jev_fallback_llm: "置信不足",
+  jev_soft_timeout: "判定较慢",
   jev_fallback_meta: "已回落 Near",
 };
+
+const HARD_FALLBACK_REASONS = new Set(["jev_no_key", "jev_timeout", "jev_http"]);
 
 const GATE_LABEL_ZH: Record<string, string> = {
   auto: "自动",
@@ -118,6 +121,18 @@ export function jevKbActionLabel(payload: JevDecisionPayload): string {
 
 export function jevFallbackCauseZh(reason: string): string {
   return FALLBACK_CAUSE_ZH[reason] ?? (reason || "未采用");
+}
+
+export function isJevHardFallback(reason: string): boolean {
+  return HARD_FALLBACK_REASONS.has(String(reason || "").trim());
+}
+
+export function jevFallbackLineZh(reason: string): string {
+  const code = String(reason || "").trim();
+  if (code === "jev_fallback_llm") return "改走主模型 · 置信不足";
+  if (code === "jev_soft_timeout") return "改走主模型 · 判定较慢";
+  if (code === "jev_fallback_meta") return "改走 Near · 已回落 Near";
+  return `未采用 · ${jevFallbackCauseZh(code)}`;
 }
 
 export function jevGateLabelZh(gate: string): string {

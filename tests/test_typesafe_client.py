@@ -20,6 +20,7 @@ from agenticx.llms.typesafe_client import (
 from agenticx.llms.typesafe_config import (
     DEFAULT_TYPESAFE_BASE_URL,
     DEFAULT_TYPESAFE_MODEL,
+    clamp_soft_timeout_sec,
     resolve_typesafe_api_key,
     load_typesafe_settings,
 )
@@ -75,6 +76,7 @@ def test_load_typesafe_settings_defaults(tmp_path: Path, monkeypatch: pytest.Mon
     assert settings.enabled is False
     assert settings.model == DEFAULT_TYPESAFE_MODEL
     assert settings.timeout_sec == 8
+    assert settings.soft_timeout_sec == 2
     assert settings.group_routing is True
     assert settings.kb_auto is False
     assert settings.show_decision_card is True
@@ -82,6 +84,9 @@ def test_load_typesafe_settings_defaults(tmp_path: Path, monkeypatch: pytest.Mon
     assert settings.review_above == 0.5
     assert settings.has_key is False
     assert settings.base_url == DEFAULT_TYPESAFE_BASE_URL
+    assert clamp_soft_timeout_sec(2, 8) == 2
+    assert clamp_soft_timeout_sec(10, 8) == 8
+    assert clamp_soft_timeout_sec(0, 8) == 2
 
 
 @pytest.mark.asyncio

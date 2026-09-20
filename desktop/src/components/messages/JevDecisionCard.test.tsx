@@ -69,6 +69,26 @@ describe("JevDecisionCard", () => {
     expect(html).toContain("Jev");
     expect(html).toContain("未采用");
     expect(html).toContain("未配置密钥");
+    expect(html).toContain("text-red-400");
+  });
+
+  it("renders low-confidence fallback in amber, not red", () => {
+    const html = renderToStaticMarkup(
+      <JevDecisionCard
+        message={msg({
+          metadata: {
+            kind: "jev_decision",
+            phase: "done",
+            source: "fallback",
+            fallback_reason: "jev_fallback_llm",
+          },
+        })}
+      />,
+    );
+    expect(html).toContain("改走主模型");
+    expect(html).toContain("置信不足");
+    expect(html).toContain("text-amber-500");
+    expect(html).not.toContain("text-red-400");
   });
 
   it("renders kb_auto gate with literal Jev", () => {

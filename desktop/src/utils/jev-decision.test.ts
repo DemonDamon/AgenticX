@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  isJevHardFallback,
   jevActionLabelZh,
   jevFallbackCauseZh,
+  jevFallbackLineZh,
   jevKbActionLabel,
   parseJevDecision,
 } from "./jev-decision";
@@ -16,7 +18,13 @@ describe("jev-decision mappings", () => {
     expect(jevFallbackCauseZh("jev_timeout")).toBe("超时");
     expect(jevFallbackCauseZh("jev_http")).toBe("请求失败");
     expect(jevFallbackCauseZh("jev_fallback_llm")).toBe("置信不足");
+    expect(jevFallbackCauseZh("jev_soft_timeout")).toBe("判定较慢");
     expect(jevFallbackCauseZh("jev_fallback_meta")).toBe("已回落 Near");
+    expect(isJevHardFallback("jev_timeout")).toBe(true);
+    expect(isJevHardFallback("jev_fallback_llm")).toBe(false);
+    expect(jevFallbackLineZh("jev_fallback_llm")).toBe("改走主模型 · 置信不足");
+    expect(jevFallbackLineZh("jev_soft_timeout")).toBe("改走主模型 · 判定较慢");
+    expect(jevFallbackLineZh("jev_no_key")).toBe("未采用 · 未配置密钥");
   });
 
   it("maps kb_auto second-line labels", () => {

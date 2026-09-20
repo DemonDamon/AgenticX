@@ -9,6 +9,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -880,6 +881,74 @@ async def test_analyze_intent_jev_abstain_falls_back_to_llm(monkeypatch: pytest.
     assert llm_calls["n"] == 1
     assert decision.source == "fallback"
     assert decision.fallback_reason == "jev_fallback_llm"
+    assert decision.action == "route_to"
+    assert decision.target_ids == ["a2"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_jev_soft_timeout_races_llm_but_jev_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_jev(monkeypatch, soft_timeout_sec=0.05)
+    router = _make_router_with_spies(["a1", "a2"])
+    llm_calls = {"n": 0}
+
+    async def stub_llm(**kwargs):
+        llm_calls["n"] += 1
+        await asyncio.sleep(0.3)
+        return '{"action":"meta_direct","target_ids":[],"reason":"should_lose"}'
+
+    async def stub_system_one(**kwargs):
+        await asyncio.sleep(0.12)
+        return _jev_response(action="route_to", target="a1", confidence=0.9)
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="帮财务看下这份对账单",
+        explicit_targets=[],
+    )
+    assert decision.source == "jev"
+    assert decision.action == "route_to"
+    assert decision.target_ids == ["a1"]
+    assert llm_calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_jev_soft_timeout_uses_llm_when_jev_slower(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_jev(monkeypatch, soft_timeout_sec=0.05)
+    router = _make_router_with_spies(["a1", "a2"])
+    llm_calls = {"n": 0}
+
+    async def stub_llm(**kwargs):
+        llm_calls["n"] += 1
+        return '{"action":"route_to","target_ids":["a2"],"requires_execution":true,"reason":"llm"}'
+
+    async def stub_system_one(**kwargs):
+        await asyncio.sleep(0.4)
+        return _jev_response(action="route_to", target="a1", confidence=0.9)
+
+    router._call_llm_text = stub_llm  # type: ignore[assignment]
+    monkeypatch.setattr("agenticx.runtime.group_router.system_one", stub_system_one)
+    session = _make_session(["a1", "a2"])
+    decision = await router._analyze_intent(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_name="Control Room",
+        group_avatar_ids=["a1", "a2"],
+        user_input="查仓库并修复这个 bug",
+        explicit_targets=[],
+    )
+    assert llm_calls["n"] == 1
+    assert decision.source == "fallback"
+    assert decision.fallback_reason == "jev_soft_timeout"
     assert decision.action == "route_to"
     assert decision.target_ids == ["a2"]
 

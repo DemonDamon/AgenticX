@@ -3,6 +3,7 @@ export type TypesafePublicSettings = {
   has_key: boolean;
   model: string;
   timeout_sec: number;
+  soft_timeout_sec: number;
   group_routing: boolean;
   kb_auto: boolean;
   show_decision_card: boolean;
@@ -15,6 +16,7 @@ export const DEFAULT_TYPESAFE_PUBLIC_SETTINGS: TypesafePublicSettings = {
   has_key: false,
   model: "jev-latest",
   timeout_sec: 8,
+  soft_timeout_sec: 2,
   group_routing: true,
   kb_auto: false,
   show_decision_card: true,
@@ -35,6 +37,7 @@ export function parseTypesafePublicSettings(raw: unknown): TypesafePublicSetting
     has_key: rec.has_key === true,
     model: String(rec.model ?? "jev-latest").trim() || "jev-latest",
     timeout_sec: Number(rec.timeout_sec ?? 8) || 8,
+    soft_timeout_sec: Number(rec.soft_timeout_sec ?? 2) || 2,
     group_routing: rec.group_routing !== false,
     kb_auto: rec.kb_auto === true,
     show_decision_card: rec.show_decision_card !== false,

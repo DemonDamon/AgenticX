@@ -4,7 +4,8 @@ import type { Message } from "../../store";
 import {
   jevActionLabelZh,
   jevConfidencePct,
-  jevFallbackCauseZh,
+  jevFallbackLineZh,
+  isJevHardFallback,
   jevGateLabelZh,
   jevKbActionLabel,
   jevPayloadFromMessage,
@@ -93,8 +94,12 @@ export function JevDecisionCard({
               </span>
             </div>
           ) : fallback ? (
-            <div className="mt-0.5 text-[12px] text-red-400">
-              未采用 · {jevFallbackCauseZh(payload.fallback_reason)}
+            <div
+              className={`mt-0.5 text-[12px] ${
+                isJevHardFallback(payload.fallback_reason) ? "text-red-400" : "text-amber-500"
+              }`}
+            >
+              {jevFallbackLineZh(payload.fallback_reason)}
             </div>
           ) : (
             <>
