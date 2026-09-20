@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../../store";
 import { Panel } from "../../ds/Panel";
 import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsSwitch } from "../SettingsSwitch";
-import { KB_FIELD_BASE } from "../knowledge/kb-field-classes";
 import { rememberTypesafeSettings } from "../../../hooks/useTypesafeSettings";
 import { TypesafeIcon } from "../../../utils/provider-icons";
 import {
   DEFAULT_TYPESAFE_PUBLIC_SETTINGS,
+  parseTypesafeApiKey,
   parseTypesafePublicSettings,
   type TypesafePublicSettings,
 } from "../../../utils/typesafe-settings";
@@ -30,10 +31,12 @@ export function TypesafeConfigSection({
   variant?: "panel" | "embedded";
 } = {}) {
   const { t } = useTranslation("workspace");
+  const { t: ts } = useTranslation("settings");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const [draft, setDraft] = useState<TypesafePublicSettings>(DEFAULT_TYPESAFE_PUBLIC_SETTINGS);
   const [apiKey, setApiKey] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState(false);
   const [patching, setPatching] = useState(false);
@@ -64,8 +67,12 @@ export function TypesafeConfigSection({
         if (!base) return;
         const resp = await fetch(`${base}/api/typesafe/settings`, { headers: authHeaders(apiToken) });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const next = parseTypesafePublicSettings(await resp.json());
-        if (!cancelled) applyPublic(next);
+        const raw = await resp.json();
+        const next = parseTypesafePublicSettings(raw);
+        if (!cancelled) {
+          applyPublic(next);
+          setApiKey(parseTypesafeApiKey(raw));
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : t("typesafe.saveFailed"));
       } finally {
@@ -112,9 +119,10 @@ export function TypesafeConfigSection({
       });
       const text = await resp.text();
       if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
-      const next = parseTypesafePublicSettings(JSON.parse(text || "{}"));
+      const raw = JSON.parse(text || "{}");
+      const next = parseTypesafePublicSettings(raw);
       applyPublic(next);
-      setApiKey("");
+      setApiKey(parseTypesafeApiKey(raw));
       setKeyMessage(apiKey.trim() ? t("typesafe.keySaved") : t("typesafe.keyCleared"));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("typesafe.saveFailed"));
@@ -190,15 +198,30 @@ export function TypesafeConfigSection({
         {t("typesafe.apiKey")}
       </label>
       <div className="mt-1 flex flex-wrap items-center gap-2">
-        <input
-          type="password"
-          autoComplete="off"
-          className={`min-w-[220px] flex-1 ${KB_FIELD_BASE}`}
-          value={apiKey}
-          placeholder={draft.has_key ? t("typesafe.hasKey") : t("typesafe.apiKeyPlaceholder")}
-          onChange={(e) => setApiKey(e.target.value)}
-          disabled={loading}
-        />
+        <div className="relative min-w-0 flex-1">
+          <input
+            type={keyVisible ? "text" : "password"}
+            autoComplete="off"
+            className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-2 pr-11 text-sm text-text-primary placeholder:text-text-faint outline-none focus:border-[var(--settings-accent-focus)]"
+            value={apiKey}
+            placeholder={t("typesafe.apiKeyPlaceholder")}
+            onChange={(e) => setApiKey(e.target.value)}
+            disabled={loading}
+          />
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={keyVisible ? ts("commonSettings.hideKey") : ts("commonSettings.showKey")}
+            className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+            onClick={() => setKeyVisible((v) => !v)}
+          >
+            {keyVisible ? (
+              <EyeOff className="h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <Eye className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+          </button>
+        </div>
         <button type="button" className={GHOST_BTN} disabled={testing || loading} onClick={() => void testConnectivity()}>
           {testing ? t("typesafe.testing") : t("typesafe.test")}
         </button>

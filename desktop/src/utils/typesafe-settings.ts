@@ -22,6 +22,12 @@ export const DEFAULT_TYPESAFE_PUBLIC_SETTINGS: TypesafePublicSettings = {
   review_above: 0.5,
 };
 
+export function parseTypesafeApiKey(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const key = (raw as Record<string, unknown>).api_key;
+  return typeof key === "string" ? key : "";
+}
+
 export function parseTypesafePublicSettings(raw: unknown): TypesafePublicSettings {
   const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {

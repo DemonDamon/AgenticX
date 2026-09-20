@@ -110,11 +110,12 @@ def load_typesafe_settings() -> TypesafeSettings:
 
 
 def typesafe_settings_public_dict(settings: TypesafeSettings | None = None) -> dict[str, Any]:
-    """GET payload — never include the raw key."""
+    """Settings form payload. Includes api_key so Desktop can show/reveal it."""
     current = settings or load_typesafe_settings()
     return {
         "enabled": current.enabled,
         "has_key": current.has_key,
+        "api_key": resolve_typesafe_api_key(),
         "model": current.model,
         "timeout_sec": current.timeout_sec,
         "group_routing": current.group_routing,

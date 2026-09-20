@@ -34,7 +34,7 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_get_settings_never_returns_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_settings_returns_key_for_form(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_paths(tmp_path, monkeypatch)
     ConfigManager.set_value("typesafe.api_key", "secret-token-xyz", scope="global")
     ConfigManager.set_value("typesafe.enabled", True, scope="global")
@@ -42,8 +42,7 @@ def test_get_settings_never_returns_key(tmp_path: Path, monkeypatch: pytest.Monk
     assert resp.status_code == 200
     body = resp.json()
     assert body["has_key"] is True
-    assert "api_key" not in body
-    assert "secret-token-xyz" not in resp.text
+    assert body["api_key"] == "secret-token-xyz"
 
 
 def test_put_omits_key_keeps_existing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,6 +52,7 @@ def test_put_omits_key_keeps_existing(tmp_path: Path, monkeypatch: pytest.Monkey
     assert resp.status_code == 200
     assert resp.json()["enabled"] is True
     assert resp.json()["has_key"] is True
+    assert resp.json()["api_key"] == "keep-me"
     assert ConfigManager.get_value("typesafe.api_key") == "keep-me"
 
 
@@ -62,6 +62,7 @@ def test_put_empty_key_clears(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     resp = _client().put("/api/typesafe/settings", json={"api_key": ""})
     assert resp.status_code == 200
     assert resp.json()["has_key"] is False
+    assert resp.json()["api_key"] == ""
     assert ConfigManager.get_value("typesafe.api_key") == ""
 
 
