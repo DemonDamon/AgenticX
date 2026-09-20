@@ -186,6 +186,7 @@
     "copyLink": "Copy link",
     "authHint": "Finish authorization in the terminal to continue",
     "openInTerminal": "Open in terminal",
+    "commandFailed": "Command failed (exit code {{code}})",
     "unselect": "Deselect tool card",
     "selectTool": "Select tool card",
     "calledCount": "Called {{count}} times",

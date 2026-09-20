@@ -11,6 +11,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { fetchArtifactPreview, type ArtifactPreviewResponse } from "./subagent/run-drawer-api";
 import { previewBaseName } from "./workspace/workspace-preview-types";
 import { isSubAgentLiveStatus } from "../utils/stream-overlay-policy";
+import { formatBashExecUserView } from "./messages/bash-exec-result";
 import { CitationMarkdownBody } from "./messages/CitationMarkdownBody";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -951,16 +952,16 @@ function stringifyArgValue(v: unknown): string {
 }
 
 /**
- * 从 bash_exec / shell 类工具结果里提取可读 stdout 内容，剥除 exit_code / stderr 包裹。
- * 形如 "exit_code=0\nstdout:\nXXX\nstderr:\n(empty)" → "XXX"
+ * 从 bash_exec / shell 类工具结果里提取可读输出，剥除 exit_code / stderr 包裹。
+ * 空成功信封返回空串，不再把原文协议倒给时间线。
  */
 function extractShellOutput(raw: string): string {
-  // 先尝试匹配 "stdout:\nXXX" 到 "stderr:" 或字符串结尾
+  const view = formatBashExecUserView(raw);
+  if (view.matched) return view.output;
   const m = raw.match(/stdout:\s*\n([\s\S]*?)(?:\nstderr:|$)/);
   if (m) {
     const out = m[1].trim();
-    // 如果 stdout 本身是 (empty) 或空，降级返回原文
-    return out && out !== "(empty)" ? out : raw;
+    return out && out !== "(empty)" ? out : "";
   }
   return raw;
 }

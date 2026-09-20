@@ -186,6 +186,7 @@
     "copyLink": "复制链接",
     "authHint": "在终端完成授权后即可继续",
     "openInTerminal": "在终端中打开",
+    "commandFailed": "命令失败（退出码 {{code}}）",
     "unselect": "取消选择工具卡",
     "selectTool": "选择工具卡",
     "calledCount": "调用 {{count}} 次",

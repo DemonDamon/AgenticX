@@ -29,6 +29,7 @@ import {
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { extractPartialShowWidgetArgs, finalizePartialSvg, type PartialShowWidget } from "./show-widget-partial";
 import { parseBashBgStart } from "./bash-bg-preview";
+import { resolveBashExecCardText } from "./bash-exec-result";
 import { openExternalUrl } from "../../utils/open-external";
 import { MarkdownContext } from "./markdown-components";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
@@ -385,6 +386,12 @@ export function ToolCallCard({
     return best;
   }, [message.toolArgs, message.toolArgsPartial, message.toolStatus, toolName]);
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
+  const bashCard = useMemo(() => {
+    if (toolName !== "bash_exec") {
+      return { matched: false as const, text: message.content };
+    }
+    return resolveBashExecCardText(message.content, (code) => t("tool.commandFailed", { code }));
+  }, [message.content, t, toolName]);
   const skillPreviewPayload = useMemo(() => {
     if ((message.toolName ?? "").trim() !== "skill_manage") return null;
     return parseSkillPatchPreviewPayload(message.content);
@@ -471,7 +478,7 @@ export function ToolCallCard({
   const Icon = isHookBlocked
     ? ShieldAlert
     : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
-  const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
+  const hasDetail = !isHookBlocked && (bashCard.text.length > 0 || hasStream);
 
   const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
 
@@ -603,9 +610,9 @@ export function ToolCallCard({
           </button>
         </div>
       ) : null}
-      {message.content && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
+      {bashCard.text && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
         <span className="break-all whitespace-pre-wrap">
-          {renderHighlightedText(message.content, normalizedTerms)}
+          {renderHighlightedText(bashCard.text, normalizedTerms)}
         </span>
       ) : null}
       {action}
@@ -656,7 +663,7 @@ export function ToolCallCard({
             ) : null}
           </button>
 
-          {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+          {expanded && (hasDetail || action) && <div className={expandedDetailClass}>{detailBody}</div>}
           {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
         </div>
       </div>
@@ -682,7 +689,7 @@ export function ToolCallCard({
           ) : null}
         </button>
 
-        {expanded && (
+        {expanded && (hasDetail || action) && (
           <div className={expandedDetailClass}>
             <div className="pl-[28px]">{detailBody}</div>
           </div>
@@ -711,7 +718,7 @@ export function ToolCallCard({
           </button>
         </div>
 
-        {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+        {expanded && (hasDetail || action) && <div className={expandedDetailClass}>{detailBody}</div>}
 
         {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
       </div>
