@@ -399,6 +399,7 @@ import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
 import { workspacePanelOpenAfterNewTopic } from "../utils/workspace-session-visibility";
+import { shouldClearMessagesOnSessionSwitch } from "../utils/pane-session-switch";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -3440,6 +3441,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
   /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
   const [workPanelExpanded, setWorkPanelExpanded] = useState(false);
+  const prevWorkPanelSessionIdRef = useRef(pane.sessionId);
+  useEffect(() => {
+    const prevSid = prevWorkPanelSessionIdRef.current;
+    prevWorkPanelSessionIdRef.current = pane.sessionId;
+    if (!shouldClearMessagesOnSessionSwitch(prevSid, pane.sessionId)) return;
+    setWorkPanelExpanded(false);
+    setWorkPanelFocus(null);
+    setPendingWorkspacePreviewRequest(null);
+  }, [pane.sessionId]);
   const [sessionFindQuery, setSessionFindQuery] = useState("");
   const [sessionFindMatchIndex, setSessionFindMatchIndex] = useState(0);
   const [sessionFindMatchCount, setSessionFindMatchCount] = useState(0);

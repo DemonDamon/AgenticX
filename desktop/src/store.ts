@@ -13,6 +13,7 @@ import {
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
+import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
 import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
@@ -2345,7 +2346,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Switching to a *different* non-empty session clears the previous
         // session's messages here so no async path (history switch, 404
         // migration, binding re-bind, automation reuse, etc.) can leave a stale
-        // pane that visually merges two sessions. Callers that immediately
+        // pane that visually merges two sessions. The workspace chrome follows
+        // the same switch: close the panel so the previous session's file /
+        // terminal view does not stay on screen. Callers that immediately
         // re-apply messages (cache hit / reload) still work — React batches the
         // follow-up setPaneMessages within the same tick. This centralizes the
         // "one pane shows exactly one session" invariant instead of relying on
@@ -2365,6 +2368,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...p,
           sessionId,
           sessionTokens: baseTokens,
+          taskspacePanelOpen: nextTaskspacePanelOpenOnSessionBind({
+            prevSessionId: prevTrimmed,
+            nextSessionId: nextTrimmed,
+            currentlyOpen: !!p.taskspacePanelOpen,
+          }),
           ...(isSwitchToDifferentSession
             ? {
                 messages: [],

@@ -7,8 +7,10 @@ import {
 } from "./pane-fresh-session.ts";
 import {
   isNewTaskNavActive,
+  nextTaskspacePanelOpenOnSessionBind,
   shouldKeepWorkspaceVisibleWhenSessionMissing,
   workspacePanelOpenAfterNewTopic,
+  workspacePanelOpenAfterSessionSwitch,
 } from "./workspace-session-visibility.ts";
 
 test("keeps workspace visible while waiting for a fresh session", () => {
@@ -25,6 +27,62 @@ test("does not keep workspace when not awaiting fresh session", () => {
 
 test("new topic does not inherit an open workspace panel", () => {
   assert.equal(workspacePanelOpenAfterNewTopic(), false);
+});
+
+test("session switch does not inherit an open workspace panel", () => {
+  assert.equal(workspacePanelOpenAfterSessionSwitch(), false);
+});
+
+test("binding a different real session closes an open workspace panel", () => {
+  assert.equal(
+    nextTaskspacePanelOpenOnSessionBind({
+      prevSessionId: "sess-a",
+      nextSessionId: "sess-b",
+      currentlyOpen: true,
+    }),
+    false,
+  );
+});
+
+test("rebinding the same session keeps workspace visibility", () => {
+  assert.equal(
+    nextTaskspacePanelOpenOnSessionBind({
+      prevSessionId: "sess-a",
+      nextSessionId: "sess-a",
+      currentlyOpen: true,
+    }),
+    true,
+  );
+  assert.equal(
+    nextTaskspacePanelOpenOnSessionBind({
+      prevSessionId: "sess-a",
+      nextSessionId: "sess-a",
+      currentlyOpen: false,
+    }),
+    false,
+  );
+});
+
+test("lazy-create empty to real id keeps workspace visibility", () => {
+  assert.equal(
+    nextTaskspacePanelOpenOnSessionBind({
+      prevSessionId: "",
+      nextSessionId: "sess-a",
+      currentlyOpen: true,
+    }),
+    true,
+  );
+});
+
+test("unbinding to empty keeps workspace visibility for new-topic to own", () => {
+  assert.equal(
+    nextTaskspacePanelOpenOnSessionBind({
+      prevSessionId: "sess-a",
+      nextSessionId: "",
+      currentlyOpen: true,
+    }),
+    true,
+  );
 });
 
 test("new task nav active only for meta pane awaiting first send", () => {

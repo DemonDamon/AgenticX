@@ -1,4 +1,5 @@
 import { isPaneAwaitingFreshSession } from "./pane-fresh-session";
+import { shouldClearMessagesOnSessionSwitch } from "./pane-session-switch";
 
 export function shouldKeepWorkspaceVisibleWhenSessionMissing(
   sessionId: string,
@@ -10,6 +11,22 @@ export function shouldKeepWorkspaceVisibleWhenSessionMissing(
 /** 新建任务：工作区侧栏默认收起，不沿用上一会话的展开态。 */
 export function workspacePanelOpenAfterNewTopic(): boolean {
   return false;
+}
+
+/** 切换到另一会话：工作区默认收起，不沿用上一会话的文件/终端展示。 */
+export function workspacePanelOpenAfterSessionSwitch(): boolean {
+  return false;
+}
+
+export function nextTaskspacePanelOpenOnSessionBind(args: {
+  prevSessionId: string | null | undefined;
+  nextSessionId: string | null | undefined;
+  currentlyOpen: boolean;
+}): boolean {
+  if (shouldClearMessagesOnSessionSwitch(args.prevSessionId, args.nextSessionId)) {
+    return workspacePanelOpenAfterSessionSwitch();
+  }
+  return args.currentlyOpen;
 }
 
 export type NewTaskNavPane = {
