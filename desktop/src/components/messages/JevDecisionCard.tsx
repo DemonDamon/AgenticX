@@ -12,16 +12,28 @@ import {
   jevTargetLabel,
   type JevDecisionPayload,
 } from "../../utils/jev-decision";
-import { GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
+import {
+  GROUP_INLINE_CARD_SHELL_CLASS,
+  GROUP_SENDER_AVATAR_SLOT_CLASS,
+  GROUP_STANDALONE_RAIL_ROW_CLASS,
+} from "./im-layout";
 import { TypesafeIcon } from "../../utils/provider-icons";
 
-function JevMark({ pending = false }: { pending?: boolean }) {
+function JevMark({
+  pending = false,
+  rail = false,
+}: {
+  pending?: boolean;
+  rail?: boolean;
+}) {
+  const box = rail ? GROUP_SENDER_AVATAR_SLOT_CLASS : "h-5 w-5";
+  const glyph = rail ? 18 : 13;
   return (
     <div
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#111] text-white"
+      className={`flex ${box} shrink-0 items-center justify-center rounded-full bg-[#111] text-white`}
       aria-hidden
     >
-      <TypesafeIcon size={13} />
+      <TypesafeIcon size={glyph} />
       {pending ? (
         <span className="sr-only">pending</span>
       ) : null}
@@ -67,77 +79,79 @@ export function JevDecisionCard({
   if (!payload) return null;
   const model = payload.model || payload.requested_model;
   const pct = jevConfidencePct(payload.confidence);
-  const shell = groupChatRail ? GROUP_INLINE_CARD_SHELL_CLASS : "my-2 min-w-0 w-full max-w-[520px]";
+  const shell = groupChatRail
+    ? `${GROUP_INLINE_CARD_SHELL_CLASS} ${GROUP_STANDALONE_RAIL_ROW_CLASS}`
+    : "my-2 flex min-w-0 w-full max-w-[520px] items-start gap-2 px-1";
   const pending = payload.phase === "pending";
   const fallback = !pending && payload.source !== "jev";
   const entries = Object.entries(payload.probabilities);
 
   return (
-    <div className={`${shell} px-1`} data-slot="jev-decision-card">
-      <div className="flex min-w-0 items-start gap-2">
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center">
-          <JevMark pending={pending} />
+    <div
+      className={shell}
+      data-slot="jev-decision-card"
+      data-jev-rail={groupChatRail ? "group" : "meta"}
+    >
+      <JevMark pending={pending} rail={groupChatRail} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-[13px] font-semibold text-text-strong">Jev</span>
+          {model ? (
+            <span className="font-mono text-[10px] text-text-faint">{model}</span>
+          ) : null}
+          {!pending && !fallback ? <GateBadge gate={payload.gate} /> : null}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-[13px] font-semibold text-text-strong">Jev</span>
-            {model ? (
-              <span className="font-mono text-[10px] text-text-faint">{model}</span>
-            ) : null}
-            {!pending && !fallback ? <GateBadge gate={payload.gate} /> : null}
+        {pending ? (
+          <div className="mt-0.5 flex items-center gap-2 text-[12px] text-text-muted">
+            <ThinkingDots />
+            <span>
+              {payload.purpose === "kb_auto" ? "Jev 正在判断是否检索" : "Jev 正在判断谁来回复"}
+            </span>
           </div>
-          {pending ? (
-            <div className="mt-0.5 flex items-center gap-2 text-[12px] text-text-muted">
-              <ThinkingDots />
-              <span>
-                {payload.purpose === "kb_auto" ? "Jev 正在判断是否检索" : "Jev 正在判断谁来回复"}
-              </span>
-            </div>
-          ) : fallback ? (
-            <div
-              className={`mt-0.5 text-[12px] ${
-                isJevHardFallback(payload.fallback_reason) ? "text-red-400" : "text-amber-500"
-              }`}
-            >
-              {jevFallbackLineZh(payload.fallback_reason)}
-            </div>
-          ) : (
-            <>
-              <div className="mt-0.5 text-[12px] text-text-standard">{actionLine(payload)}</div>
-              {pct != null ? (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="text-[11px] text-text-muted">置信度 {pct}%</span>
-                  <div className="h-0.5 min-w-[64px] flex-1 overflow-hidden rounded-full bg-border">
-                    <div
-                      className="h-full bg-text-strong"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
+        ) : fallback ? (
+          <div
+            className={`mt-0.5 text-[12px] ${
+              isJevHardFallback(payload.fallback_reason) ? "text-red-400" : "text-amber-500"
+            }`}
+          >
+            {jevFallbackLineZh(payload.fallback_reason)}
+          </div>
+        ) : (
+          <>
+            <div className="mt-0.5 text-[12px] text-text-standard">{actionLine(payload)}</div>
+            {pct != null ? (
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="text-[11px] text-text-muted">置信度 {pct}%</span>
+                <div className="h-0.5 min-w-[64px] flex-1 overflow-hidden rounded-full bg-border">
+                  <div
+                    className="h-full bg-text-strong"
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
-              ) : null}
-              {entries.length > 0 ? (
-                <button
-                  type="button"
-                  className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-text-faint"
-                  onClick={() => setOpenProbs((v) => !v)}
-                >
-                  {openProbs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  概率
-                </button>
-              ) : null}
-              {openProbs ? (
-                <ul className="mt-0.5 space-y-0.5 text-[11px] text-text-muted">
-                  {entries.map(([key, value]) => (
-                    <li key={key} className="flex justify-between gap-3">
-                      <span>{jevActionLabelZh(key, payload.purpose)}</span>
-                      <span className="font-mono tabular-nums">{value.toFixed(2)}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </>
-          )}
-        </div>
+              </div>
+            ) : null}
+            {entries.length > 0 ? (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-text-faint"
+                onClick={() => setOpenProbs((v) => !v)}
+              >
+                {openProbs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                概率
+              </button>
+            ) : null}
+            {openProbs ? (
+              <ul className="mt-0.5 space-y-0.5 text-[11px] text-text-muted">
+                {entries.map(([key, value]) => (
+                  <li key={key} className="flex justify-between gap-3">
+                    <span>{jevActionLabelZh(key, payload.purpose)}</span>
+                    <span className="font-mono tabular-nums">{value.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

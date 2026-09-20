@@ -110,4 +110,45 @@ describe("JevDecisionCard", () => {
     expect(html).toContain("Jev");
     expect(html).toContain("跳过检索");
   });
+
+  it("aligns the group-chat mark to the 28px speaker rail", () => {
+    const html = renderToStaticMarkup(
+      <JevDecisionCard
+        groupChatRail
+        message={msg({
+          metadata: {
+            kind: "jev_decision",
+            phase: "done",
+            source: "fallback",
+            fallback_reason: "jev_fallback_llm",
+            model: "jev-1.13.0",
+          },
+        })}
+      />,
+    );
+    expect(html).toContain('data-jev-rail="group"');
+    expect(html).toContain("px-3");
+    expect(html).toContain("h-7 w-7");
+    expect(html).not.toContain("px-1");
+    expect(html).not.toContain("h-5 w-5");
+  });
+
+  it("keeps the compact 20px mark in Meta", () => {
+    const html = renderToStaticMarkup(
+      <JevDecisionCard
+        message={msg({
+          metadata: {
+            kind: "jev_kb_gate",
+            phase: "done",
+            purpose: "kb_auto",
+            source: "jev",
+            action: "skip",
+          },
+        })}
+      />,
+    );
+    expect(html).toContain('data-jev-rail="meta"');
+    expect(html).toContain("h-5 w-5");
+    expect(html).not.toContain("h-7 w-7");
+  });
 });

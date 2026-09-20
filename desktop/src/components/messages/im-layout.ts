@@ -99,6 +99,18 @@ export const ASSISTANT_INLINE_CARD_SHELL_CLASS =
 export const GROUP_INLINE_CARD_SHELL_CLASS =
   "my-1 min-w-0 w-full max-w-[520px]";
 
+/**
+ * Standalone group-chat system row that is NOT wrapped in GroupSenderRail
+ * (Jev decision). Must share ImBubble / GroupSenderRail speaker geometry:
+ * `px-3` + 28px (`h-7`) mark + `gap-2`, so the mark's vertical axis matches
+ * `ChatImAvatar` size="sm". Do not use a smaller 20px mark or `px-1` here.
+ */
+export const GROUP_STANDALONE_RAIL_ROW_CLASS =
+  "flex min-w-0 w-full items-start gap-2 px-3";
+
+/** Same slot as `ChatImAvatar` size="sm" / group speaker portraits. */
+export const GROUP_SENDER_AVATAR_SLOT_CLASS = "h-7 w-7";
+
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
 
