@@ -1117,7 +1117,7 @@ const TOOL_LABEL_IDS = [
   "lsp_goto_definition", "lsp_find_references", "lsp_hover", "lsp_diagnostics",
   "mcp_connect", "mcp_call", "mcp_import", "skill_use", "skill_list", "skill_manage",
   "todo_write", "scratchpad_write", "scratchpad_read", "memory_append", "memory_search",
-  "session_search", "code_search", "code_index_create", "code_index_status",
+  "session_search", "plugin_usage", "code_search", "code_index_create", "code_index_status",
   "code_index_clear", "code_index_cancel", "liteparse", "schedule_task",
   "list_scheduled_tasks", "cancel_scheduled_task", "spawn_subagent", "cancel_subagent",
   "retry_subagent", "query_subagent_status", "check_resources", "recommend_subagent_model",

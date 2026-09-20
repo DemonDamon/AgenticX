@@ -5645,7 +5645,7 @@ def create_studio_app() -> FastAPI:
             "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp",
             "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
-            "memory_append": "memory", "memory_search": "memory", "session_search": "memory",
+            "memory_append": "memory", "memory_search": "memory", "session_search": "memory", "plugin_usage": "memory",
             "liteparse": "document",
             "list_data_sources": "data_source", "query_data_source": "data_source",
             "schedule_task": "scheduling", "list_scheduled_tasks": "scheduling", "cancel_scheduled_task": "scheduling",

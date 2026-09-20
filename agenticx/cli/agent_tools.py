@@ -186,6 +186,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "memory_search",
         "memory_forget",
         "session_search",
+        "plugin_usage",
         "list_files",
         "liteparse",
         "video_understand",
@@ -1972,6 +1973,50 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "limit": {
                         "type": "integer",
                         "description": "Max sessions to return (1-5, default 3).",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plugin_usage",
+            "description": (
+                "Look up usage for a runtime plugin (models and providers are plugins). "
+                "Currently plugin=jev reads persisted Jev structured-decision cards: "
+                "call counts, adopted vs fallback, timeouts, HTTP/key failures, recent rows. "
+                "Use when the user asks how often Jev ran, which calls timed out or failed, "
+                "or the latest routing/KB-gate outcomes. Read-only; does not change settings. "
+                "These cards are stripped from normal chat context — this tool is the query path."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin": {
+                        "type": "string",
+                        "description": "Plugin id. Only 'jev' is implemented today.",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "all (default) or current session.",
+                    },
+                    "purpose": {
+                        "type": "string",
+                        "description": (
+                            "all (default), routing, kb, adopted, timeout, or failed "
+                            "(failed = no_key / timeout / http)."
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional session folder name. Required for scope=current if unknown.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max recent rows (1-30, default 8).",
                     },
                 },
                 "required": [],
@@ -8428,6 +8473,31 @@ def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSess
     return json.dumps({"mode": "search", "sessions": sessions_out}, ensure_ascii=False)
 
 
+def _tool_plugin_usage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    from agenticx.runtime.plugin_usage import query_plugin_usage
+
+    live_id = _studio_session_id(session)
+    live_messages = None
+    if session is not None:
+        history = getattr(session, "chat_history", None)
+        if isinstance(history, list):
+            live_messages = history
+    try:
+        limit = int(arguments.get("limit") or 8)
+    except (TypeError, ValueError):
+        limit = 8
+    payload = query_plugin_usage(
+        plugin=str(arguments.get("plugin") or "jev"),
+        scope=str(arguments.get("scope") or "all"),
+        purpose=str(arguments.get("purpose") or "all"),
+        session_id=str(arguments.get("session_id") or ""),
+        limit=limit,
+        live_messages=live_messages,
+        live_session_id=live_id,
+    )
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _should_queue_skill_write() -> bool:
     from agenticx.learning.config import get_learning_config
 
@@ -10230,6 +10300,8 @@ async def dispatch_tool_async(
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":
             return _tool_session_search(arguments, session)
+        if name == "plugin_usage":
+            return _tool_plugin_usage(arguments, session)
         if name == "code_search":
             return await asyncio.to_thread(_tool_code_search, arguments, session)
         if name == "code_index_create":

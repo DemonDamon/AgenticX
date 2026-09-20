@@ -47,6 +47,7 @@ export const TOOL_LABELS: Record<string, string> = {
   web_search: "网络检索",
   knowledge_search: "知识库检索",
   session_search: "历史检索",
+  plugin_usage: "插件用量",
 };
 
 const MAX_TOOL_STEPS = 6;
