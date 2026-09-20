@@ -44,6 +44,7 @@ import {
   closeSplash,
   configureSplashLayoutThemeReader,
   createSplashWindow,
+  focusSplashIfOpen,
   onMainWindowDidFinishLoad,
   registerSplashIpcHandlers,
   scheduleSplashForceShowFallback,
@@ -12673,6 +12674,7 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    if (focusSplashIfOpen()) return;
     if (mainWindow) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
@@ -12914,6 +12916,7 @@ if (!gotTheLock) {
   });
 
   app.on("activate", () => {
+    if (focusSplashIfOpen()) return;
     // Avoid creating the window before backend mode is resolved — otherwise
     // preload argv bakes in stale remote scope until a full reload.
     if (!studioReady) return;

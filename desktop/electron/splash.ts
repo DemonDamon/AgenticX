@@ -55,6 +55,22 @@ function resolveSplashTheme(): "light" | "dark" {
   return theme === "light" ? "light" : "dark";
 }
 
+/** Splash is a regular window — do not pin it above other apps during cold start. */
+export function buildSplashWindowLayerOptions(): Pick<
+  BrowserWindowConstructorOptions,
+  "alwaysOnTop"
+> {
+  return { alwaysOnTop: false };
+}
+
+export function focusSplashIfOpen(): boolean {
+  if (!splashWindow || splashWindow.isDestroyed()) return false;
+  if (splashWindow.isMinimized()) splashWindow.restore();
+  splashWindow.show();
+  splashWindow.focus();
+  return true;
+}
+
 function splashGlassOptions(theme: "light" | "dark"): BrowserWindowConstructorOptions {
   const glass: BrowserWindowConstructorOptions = {
     transparent: true,
@@ -198,14 +214,14 @@ export function createSplashWindow(): BrowserWindow | null {
   splashWindow = new BrowserWindow({
     ...centerSplashBounds(),
     ...splashGlassOptions(theme),
+    ...buildSplashWindowLayerOptions(),
     frame: false,
     resizable: false,
-    movable: false,
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
     show: false,
-    alwaysOnTop: true,
     focusable: true,
     skipTaskbar: true,
     autoHideMenuBar: true,
@@ -218,8 +234,8 @@ export function createSplashWindow(): BrowserWindow | null {
   });
 
   splashWindow.once("ready-to-show", () => {
+    splashWindow?.setAlwaysOnTop(false);
     splashWindow?.show();
-    splashWindow?.setAlwaysOnTop(true);
     splashWindow?.setIgnoreMouseEvents(false);
     updateSplashStage("initializing");
   });
