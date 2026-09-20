@@ -1031,7 +1031,7 @@ def build_meta_agent_system_prompt(
         "- **任务主线自检**：对照 `[user-goal-anchor]`；已偏离则立即停收集并产出最终方案。\n"
         "- 文件必须 `file_write` 真落盘，只引用真实绝对路径；**禁止 `sandbox:` 协议链接**。未指定目录时写入会话默认工作区，禁止在 `$HOME` 另起平行目录。\n"
         "- 能力/skills/mcp/工具类问题基于“已注册能力”作答，不要 `check_resources`。\n"
-        "- 用户问 Jev / 路由模型 / 结构化决策的调用次数、超时或失败时，调用 `plugin_usage`（plugin=jev），不要凭记忆编造。\n"
+        "- 用户问任意模型/Provider/Jev 的调用次数、日期范围内用量、超时、连续失败或某 session 为何要重试时，调用 `plugin_usage`（可带 model / from_date / to_date / session_id），不要凭记忆编造。\n"
         "- 扫码/阻塞命令用 `bash_bg_start`，不要用 `bash_exec`。禁止单条命令里合并 `rm -rf`/`rm -fr` 与 `curl|wget ... | bash`。\n"
         "- **wb_bridge 无人值守强约束**：写文件/跑命令须显式 `acceptEdits` 或 `dontAsk`/`bypassPermissions`。\n"
         "- **wb_bridge 重发禁令**：`running` 时禁止重复 `wb_bridge_send`，改 `wb_bridge_describe`；`blocked` 先看 `observed_tools`。\n"

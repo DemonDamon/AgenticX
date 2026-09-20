@@ -587,6 +587,41 @@ def _spawn_usage_persist_task(coro: "Coroutine[Any, Any, None]") -> "asyncio.Tas
     return task
 
 
+def _log_model_fault(
+    session: Any,
+    *,
+    provider: str,
+    model: str,
+    kind: str,
+    phase: str,
+    message: str = "",
+    attempt: int = 1,
+    retryable: bool = False,
+    usage_session_id: str = "",
+    usage_avatar_id: str = "",
+) -> None:
+    try:
+        from agenticx.runtime.usage_store import log_model_fault
+
+        sid = (usage_session_id or "").strip() or str(
+            getattr(session, "_usage_owner_session_id", "") or ""
+        ).strip()
+        log_model_fault(
+            session,
+            session_id=sid,
+            avatar_id=(usage_avatar_id or "").strip(),
+            provider=provider,
+            model=model,
+            kind=kind,
+            phase=phase,
+            attempt=attempt,
+            retryable=retryable,
+            message=message,
+        )
+    except Exception:
+        logger.debug("model fault persist skipped", exc_info=True)
+
+
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
     if len(text) <= limit:
         return text
@@ -4962,6 +4997,17 @@ class AgentRuntime:
                             provider_name,
                             fault=classify_provider_fault(stream_exc),
                         )
+                        _log_model_fault(
+                            session,
+                            provider=provider_name,
+                            model=model_name,
+                            kind=classify_provider_fault(stream_exc),
+                            phase="stream",
+                            message=str(stream_exc)[:300],
+                            retryable=True,
+                            usage_session_id=str(usage_session_id or ""),
+                            usage_avatar_id=str(usage_avatar_id or ""),
+                        )
                         used_stream_path = False
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:
@@ -5023,7 +5069,20 @@ class AgentRuntime:
                                 raise last_exc
                             raise
 
-                    _retry_policy = LLMRetryPolicy()
+                    _retry_policy = LLMRetryPolicy(
+                        on_retry=lambda info: _log_model_fault(
+                            session,
+                            provider=provider_name,
+                            model=model_name,
+                            kind=str((info or {}).get("category") or "unknown"),
+                            phase="retry",
+                            message=str((info or {}).get("error") or "")[:300],
+                            attempt=int((info or {}).get("attempt") or 1),
+                            retryable=True,
+                            usage_session_id=str(usage_session_id or ""),
+                            usage_avatar_id=str(usage_avatar_id or ""),
+                        )
+                    )
 
                     def _invoke_with_retry() -> Any:
                         return _retry_policy.call_sync_with_retry(_invoke_once_with_fallback)
@@ -5261,6 +5320,18 @@ class AgentRuntime:
                 provider_hint = provider_name or "(unknown)"
                 model_hint = model_name or "(unknown)"
                 streak = record_provider_timeout(session)
+                _log_model_fault(
+                    session,
+                    provider=provider_name,
+                    model=model_name,
+                    kind="timeout",
+                    phase="timeout",
+                    message=f"no response within {int(round_timeout)}s",
+                    attempt=retries + 1,
+                    retryable=retries < LLM_ROUND_TIMEOUT_RETRY_LIMIT,
+                    usage_session_id=str(usage_session_id or ""),
+                    usage_avatar_id=str(usage_avatar_id or ""),
+                )
                 applied, fallback_msg = maybe_apply_provider_fallback(session)
                 if applied and fallback_msg:
                     fallback_reloaded = False
@@ -5395,6 +5466,17 @@ class AgentRuntime:
                     session,
                     provider_name,
                     fault=fault,
+                )
+                _log_model_fault(
+                    session,
+                    provider=provider_name,
+                    model=model_name,
+                    kind=fault,
+                    phase="invoke",
+                    message=str(exc)[:300],
+                    retryable=fault in {"rate_limit", "transient", "unknown"},
+                    usage_session_id=str(usage_session_id or ""),
+                    usage_avatar_id=str(usage_avatar_id or ""),
                 )
                 # 智谱视觉模型「多模态 + 工具」请求偶发 1210 invalid input（上游抖动）。
                 # 同请求重试常成功，做一次会话级一次性重试再放弃。

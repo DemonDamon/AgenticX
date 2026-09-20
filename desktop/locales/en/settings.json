@@ -406,7 +406,7 @@
       "memory_append": "Append a memory to the workspace journal or long-term MEMORY.md.",
       "memory_search": "Search indexed workspace memory with full-text, vector, or hybrid mode.",
       "session_search": "Search past session messages. An empty query returns recent sessions.",
-      "plugin_usage": "Look up runtime plugin usage (Jev structured decisions): call counts, adopted vs fallback, timeouts, and failures. Read-only.",
+      "plugin_usage": "Look up any model/plugin usage by name, date range, or session: call counts, timeouts, retries, and consecutive failure reasons. Read-only.",
       "code_search": "Semantic/hybrid search on an indexed codebase. Prefer this while exploring; use grep for exact strings.",
       "code_index_create": "Build a semantic index for a codebase in the background.",
       "code_index_status": "Check code-index progress and stats.",

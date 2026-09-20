@@ -1985,19 +1985,40 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "plugin_usage",
             "description": (
-                "Look up usage for a runtime plugin (models and providers are plugins). "
-                "Currently plugin=jev reads persisted Jev structured-decision cards: "
-                "call counts, adopted vs fallback, timeouts, HTTP/key failures, recent rows. "
-                "Use when the user asks how often Jev ran, which calls timed out or failed, "
-                "or the latest routing/KB-gate outcomes. Read-only; does not change settings. "
-                "These cards are stripped from normal chat context — this tool is the query path."
+                "Look up usage for any model/provider plugin. "
+                "Pass a model name, date range, and/or session_id to see call counts, "
+                "timeouts, retries, consecutive failures, and why a session failed. "
+                "plugin=all (default) reads the local usage ledger; plugin=jev reads "
+                "structured-decision cards. Use when the user asks how often a model "
+                "ran, which calls timed out or failed, or why a session needs retry. "
+                "Read-only; these rows are not injected into normal chat context."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "plugin": {
                         "type": "string",
-                        "description": "Plugin id. Only 'jev' is implemented today.",
+                        "description": "all (default), jev, a provider id, or a model name.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name or substring, e.g. gpt-4o, claude, jev-1.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Provider id, e.g. openai, anthropic, zhipu.",
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": "Start day YYYY-MM-DD, or today/yesterday.",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": "End day YYYY-MM-DD, or today/yesterday.",
+                    },
+                    "range": {
+                        "type": "string",
+                        "description": "day, week, month (default for all models), or total.",
                     },
                     "scope": {
                         "type": "string",
@@ -2006,13 +2027,13 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "purpose": {
                         "type": "string",
                         "description": (
-                            "all (default), routing, kb, adopted, timeout, or failed "
-                            "(failed = no_key / timeout / http)."
+                            "all (default), failed, timeout, retry, adopted/ok, "
+                            "routing, or kb."
                         ),
                     },
                     "session_id": {
                         "type": "string",
-                        "description": "Optional session folder name. Required for scope=current if unknown.",
+                        "description": "Session folder name. Use with model to diagnose that pair.",
                     },
                     "limit": {
                         "type": "integer",
@@ -8487,10 +8508,15 @@ def _tool_plugin_usage(arguments: Dict[str, Any], session: Optional[StudioSessio
     except (TypeError, ValueError):
         limit = 8
     payload = query_plugin_usage(
-        plugin=str(arguments.get("plugin") or "jev"),
+        plugin=str(arguments.get("plugin") or "all"),
         scope=str(arguments.get("scope") or "all"),
         purpose=str(arguments.get("purpose") or "all"),
         session_id=str(arguments.get("session_id") or ""),
+        model=str(arguments.get("model") or ""),
+        provider=str(arguments.get("provider") or ""),
+        from_date=str(arguments.get("from_date") or ""),
+        to_date=str(arguments.get("to_date") or ""),
+        range_key=str(arguments.get("range") or ""),
         limit=limit,
         live_messages=live_messages,
         live_session_id=live_id,

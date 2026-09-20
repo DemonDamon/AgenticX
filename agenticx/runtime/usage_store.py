@@ -41,6 +41,23 @@ CREATE TABLE IF NOT EXISTS usage_session_window (
     keep_before_ms INTEGER NOT NULL DEFAULT 0,
     alive_after_ms INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS usage_faults (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_ms INTEGER NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    avatar_id TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    phase TEXT NOT NULL DEFAULT '',
+    attempt INTEGER NOT NULL DEFAULT 1,
+    retryable INTEGER NOT NULL DEFAULT 0,
+    recovered INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_fault_ts ON usage_faults(ts_ms);
+CREATE INDEX IF NOT EXISTS idx_fault_session ON usage_faults(session_id, ts_ms);
+CREATE INDEX IF NOT EXISTS idx_fault_model_ts ON usage_faults(model, ts_ms);
 """
 
 
@@ -741,8 +758,452 @@ class UsageStore:
         }
 
 
+    def record_fault_sync(
+        self,
+        *,
+        session_id: str,
+        avatar_id: str,
+        provider: str,
+        model: str,
+        kind: str,
+        phase: str = "",
+        attempt: int = 1,
+        retryable: bool = False,
+        recovered: bool = False,
+        message: str = "",
+        ts_ms: int | None = None,
+    ) -> None:
+        sid = (session_id or "").strip()
+        aid = (avatar_id or "").strip()
+        prov = (provider or "").strip().lower()
+        mdl = (model or "").strip()
+        fault_kind = (kind or "unknown").strip() or "unknown"
+        fault_phase = (phase or "").strip()
+        try:
+            attempt_n = max(1, int(attempt or 1))
+        except (TypeError, ValueError):
+            attempt_n = 1
+        note = str(message or "").strip()[:400]
+        try:
+            event_ts = int(ts_ms) if ts_ms is not None else 0
+        except (TypeError, ValueError):
+            event_ts = 0
+        if event_ts <= 0:
+            event_ts = int(time.time() * 1000)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO usage_faults (
+                        ts_ms, session_id, avatar_id, provider, model,
+                        kind, phase, attempt, retryable, recovered, message
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_ts,
+                        sid,
+                        aid,
+                        prov,
+                        mdl,
+                        fault_kind,
+                        fault_phase,
+                        attempt_n,
+                        1 if retryable else 0,
+                        1 if recovered else 0,
+                        note,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def _filter_clause(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+        table: str = "usage_events",
+    ) -> tuple[str, list[Any]]:
+        _ = table
+        clauses = ["ts_ms >= ?", "ts_ms <= ?"]
+        params: list[Any] = [int(start_ms), int(end_ms)]
+        sid = (session_id or "").strip()
+        if sid:
+            clauses.append("session_id = ?")
+            params.append(sid)
+        prov = (provider or "").strip().lower()
+        if prov:
+            clauses.append("LOWER(provider) = ?")
+            params.append(prov)
+        needle = (model or "").strip().lower()
+        if needle:
+            clauses.append("LOWER(model) LIKE ?")
+            params.append(f"%{needle}%")
+        return " AND ".join(clauses), params
+
+    def query_calls_sync(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where, params = self._filter_clause(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+        )
+        cap = max(1, min(200, int(limit or 50)))
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT ts_ms, session_id, provider, model,
+                           input_tokens, output_tokens, cached_tokens,
+                           reasoning_tokens, total_tokens, cost_usd
+                    FROM usage_events
+                    WHERE {where}
+                    ORDER BY ts_ms DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (*params, cap),
+                ).fetchall()
+            finally:
+                conn.close()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "ts_ms": int(row[0] or 0),
+                    "session_id": str(row[1] or ""),
+                    "provider": str(row[2] or ""),
+                    "model": str(row[3] or ""),
+                    "input_tokens": int(row[4] or 0),
+                    "output_tokens": int(row[5] or 0),
+                    "cached_tokens": int(row[6] or 0),
+                    "reasoning_tokens": int(row[7] or 0),
+                    "total_tokens": int(row[8] or 0),
+                    "cost_usd": float(row[9] or 0.0),
+                    "outcome": "ok",
+                    "kind": "call",
+                }
+            )
+        return out
+
+    def summarize_calls_sync(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+    ) -> dict[str, Any]:
+        where, params = self._filter_clause(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*),
+                        COALESCE(SUM(total_tokens), 0),
+                        COALESCE(SUM(input_tokens), 0),
+                        COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(cached_tokens), 0),
+                        COALESCE(SUM(cost_usd), 0)
+                    FROM usage_events
+                    WHERE {where}
+                    """,
+                    params,
+                ).fetchone()
+                by_model = conn.execute(
+                    f"""
+                    SELECT model, COUNT(*), COALESCE(SUM(total_tokens), 0)
+                    FROM usage_events
+                    WHERE {where} AND model != ''
+                    GROUP BY model
+                    ORDER BY COUNT(*) DESC
+                    LIMIT 20
+                    """,
+                    params,
+                ).fetchall()
+                by_provider = conn.execute(
+                    f"""
+                    SELECT provider, COUNT(*), COALESCE(SUM(total_tokens), 0)
+                    FROM usage_events
+                    WHERE {where} AND provider != ''
+                    GROUP BY provider
+                    ORDER BY COUNT(*) DESC
+                    LIMIT 20
+                    """,
+                    params,
+                ).fetchall()
+            finally:
+                conn.close()
+        return {
+            "calls": int(row[0] or 0) if row else 0,
+            "tokens": int(row[1] or 0) if row else 0,
+            "input_tokens": int(row[2] or 0) if row else 0,
+            "output_tokens": int(row[3] or 0) if row else 0,
+            "cached_tokens": int(row[4] or 0) if row else 0,
+            "cost_usd": round(float(row[5] or 0.0), 6) if row else 0.0,
+            "by_model": {str(r[0]): {"calls": int(r[1] or 0), "tokens": int(r[2] or 0)} for r in by_model},
+            "by_provider": {str(r[0]): {"calls": int(r[1] or 0), "tokens": int(r[2] or 0)} for r in by_provider},
+        }
+
+    def query_faults_sync(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+        kind: str = "",
+        phase: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where, params = self._filter_clause(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            table="usage_faults",
+        )
+        fault_kind = (kind or "").strip()
+        if fault_kind:
+            where += " AND kind = ?"
+            params.append(fault_kind)
+        fault_phase = (phase or "").strip()
+        if fault_phase:
+            where += " AND phase = ?"
+            params.append(fault_phase)
+        cap = max(1, min(200, int(limit or 50)))
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT ts_ms, session_id, provider, model, kind, phase,
+                           attempt, retryable, recovered, message
+                    FROM usage_faults
+                    WHERE {where}
+                    ORDER BY ts_ms DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (*params, cap),
+                ).fetchall()
+            finally:
+                conn.close()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "ts_ms": int(row[0] or 0),
+                    "session_id": str(row[1] or ""),
+                    "provider": str(row[2] or ""),
+                    "model": str(row[3] or ""),
+                    "kind": str(row[4] or ""),
+                    "phase": str(row[5] or ""),
+                    "attempt": int(row[6] or 1),
+                    "retryable": bool(row[7]),
+                    "recovered": bool(row[8]),
+                    "message": str(row[9] or ""),
+                    "outcome": "failed",
+                }
+            )
+        return out
+
+    def summarize_faults_sync(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+    ) -> dict[str, Any]:
+        where, params = self._filter_clause(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            table="usage_faults",
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*),
+                        COALESCE(SUM(CASE WHEN phase = 'retry' THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN retryable = 1 THEN 1 ELSE 0 END), 0)
+                    FROM usage_faults
+                    WHERE {where}
+                    """,
+                    params,
+                ).fetchone()
+                by_kind = conn.execute(
+                    f"""
+                    SELECT kind, COUNT(*)
+                    FROM usage_faults
+                    WHERE {where} AND kind != ''
+                    GROUP BY kind
+                    ORDER BY COUNT(*) DESC
+                    """,
+                    params,
+                ).fetchall()
+            finally:
+                conn.close()
+        return {
+            "faults": int(row[0] or 0) if row else 0,
+            "retries": int(row[1] or 0) if row else 0,
+            "retryable": int(row[2] or 0) if row else 0,
+            "by_kind": {str(r[0]): int(r[1] or 0) for r in by_kind},
+        }
+
+    def consecutive_fault_streaks_sync(
+        self,
+        *,
+        start_ms: int,
+        end_ms: int,
+        session_id: str = "",
+        provider: str = "",
+        model: str = "",
+        min_streak: int = 2,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        faults = self.query_faults_sync(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            limit=200,
+        )
+        successes = self.query_calls_sync(
+            start_ms=start_ms,
+            end_ms=end_ms,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            limit=200,
+        )
+        timeline: dict[tuple[str, str], list[tuple[int, str, dict[str, Any]]]] = {}
+        for row in successes:
+            key = (str(row.get("session_id") or ""), str(row.get("model") or ""))
+            timeline.setdefault(key, []).append((int(row.get("ts_ms") or 0), "ok", row))
+        for row in faults:
+            key = (str(row.get("session_id") or ""), str(row.get("model") or ""))
+            timeline.setdefault(key, []).append((int(row.get("ts_ms") or 0), "failed", row))
+        streaks: list[dict[str, Any]] = []
+        floor = max(2, int(min_streak or 2))
+        for (sid, mdl), items in timeline.items():
+            items.sort(key=lambda item: item[0])
+            run_kind = ""
+            run_count = 0
+            run_last: dict[str, Any] | None = None
+            for _ts, outcome, row in items:
+                if outcome == "failed":
+                    kind = str(row.get("kind") or "unknown")
+                    if run_count and kind == run_kind:
+                        run_count += 1
+                    else:
+                        run_kind = kind
+                        run_count = 1
+                    run_last = row
+                else:
+                    run_kind = ""
+                    run_count = 0
+                    run_last = None
+            if run_count >= floor and run_last is not None:
+                streaks.append(
+                    {
+                        "session_id": sid,
+                        "model": mdl,
+                        "provider": str(run_last.get("provider") or ""),
+                        "count": run_count,
+                        "kind": run_kind,
+                        "latest_ts_ms": int(run_last.get("ts_ms") or 0),
+                        "latest_message": str(run_last.get("message") or ""),
+                        "retryable": bool(run_last.get("retryable")),
+                    }
+                )
+        streaks.sort(key=lambda item: (int(item.get("count") or 0), int(item.get("latest_ts_ms") or 0)), reverse=True)
+        return streaks[: max(1, min(20, int(limit or 8)))]
+
+
 _store_singleton: UsageStore | None = None
 _store_lock = threading.Lock()
+
+
+def log_model_fault(
+    session: Any | None = None,
+    *,
+    session_id: str = "",
+    avatar_id: str = "",
+    provider: str = "",
+    model: str = "",
+    kind: str = "unknown",
+    phase: str = "",
+    attempt: int = 1,
+    retryable: bool = False,
+    recovered: bool = False,
+    message: str = "",
+) -> None:
+    """Best-effort persist of a model/provider fault. Never raises to callers."""
+    sid = (session_id or "").strip()
+    aid = (avatar_id or "").strip()
+    prov = (provider or "").strip()
+    mdl = (model or "").strip()
+    if session is not None:
+        if not sid:
+            for attr in ("_usage_owner_session_id", "_session_id", "session_id"):
+                raw = getattr(session, attr, None)
+                if raw is not None and str(raw).strip():
+                    sid = str(raw).strip()
+                    break
+        if not prov:
+            prov = str(getattr(session, "provider_name", "") or "")
+        if not mdl:
+            mdl = str(getattr(session, "model_name", "") or "")
+    if not kind and not message:
+        return
+    try:
+        get_usage_store().record_fault_sync(
+            session_id=sid,
+            avatar_id=aid,
+            provider=prov,
+            model=mdl,
+            kind=kind,
+            phase=phase,
+            attempt=attempt,
+            retryable=retryable,
+            recovered=recovered,
+            message=message,
+        )
+    except Exception as exc:
+        _log.debug("usage_store.log_model_fault skipped: %s", exc)
 
 
 def get_usage_store() -> UsageStore:
