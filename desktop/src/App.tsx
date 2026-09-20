@@ -1516,10 +1516,12 @@ export function App() {
                   full += tokenText;
                   const s = useAppStore.getState();
                   if (!placeholderAdded) {
-                    s.addPaneMessage(matchingPane.id, "assistant", full, "meta");
+                    s.addPaneMessage(matchingPane.id, "assistant", full, "meta", undefined, undefined, undefined, {
+                      ownerSessionId: sid,
+                    });
                     placeholderAdded = true;
                   } else {
-                    s.updateLastPaneMessage(matchingPane.id, full);
+                    s.updateLastPaneMessage(matchingPane.id, full, sid);
                   }
                 }
                 if (payload.type === "final") {
@@ -1528,9 +1530,11 @@ export function App() {
                     reportResponded = true;
                     const s = useAppStore.getState();
                     if (!placeholderAdded) {
-                      s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta");
+                      s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta", undefined, undefined, undefined, {
+                        ownerSessionId: sid,
+                      });
                     } else {
-                      s.updateLastPaneMessage(matchingPane.id, finalText);
+                      s.updateLastPaneMessage(matchingPane.id, finalText, sid);
                     }
                   }
                 }

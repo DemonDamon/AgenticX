@@ -15,6 +15,7 @@ import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import { findLastOwnedMessageIndex } from "./utils/message-ownership";
 import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
@@ -772,8 +773,13 @@ type AppState = {
     > &
       Partial<MessageToolExtras>
   ) => void;
-  /** Merge *patch* into the last pane message with the given *role* (search from end). */
-  mergeLastPaneMessageByRole: (paneId: string, role: MsgRole, patch: Partial<Message>) => boolean;
+  /** Merge *patch* into the last pane message with the given *role* owned by *ownerSessionId*. */
+  mergeLastPaneMessageByRole: (
+    paneId: string,
+    role: MsgRole,
+    patch: Partial<Message>,
+    ownerSessionId: string,
+  ) => boolean;
   /** Merge fields into an existing pane `tool` message by `toolCallId`. */
   updatePaneMessageByToolCallId: (
     paneId: string,
@@ -826,7 +832,7 @@ type AppState = {
   cancelInFlightPaneTools: (paneId: string, ownerSessionId?: string) => number;
   /** Lite / global `messages` counterpart of {@link cancelInFlightPaneTools}. */
   cancelInFlightLiteTools: (ownerSessionId?: string) => number;
-  updateLastPaneMessage: (paneId: string, content: string) => void;
+  updateLastPaneMessage: (paneId: string, content: string, ownerSessionId: string) => void;
   /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
   markClarificationAnswered: (
     requestId: string,
@@ -2183,13 +2189,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     return cancelledCount;
   },
-  updateLastPaneMessage: (paneId, content) =>
+  updateLastPaneMessage: (paneId, content, ownerSessionId) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
         if (pane.messages.length === 0) return pane;
+        const owner = String(ownerSessionId ?? "").trim();
         const msgs = [...pane.messages];
-        msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content };
+        const idx = findLastOwnedMessageIndex(msgs, "assistant", owner);
+        if (idx < 0) return pane;
+        msgs[idx] = { ...msgs[idx], content };
         return { ...pane, messages: msgs };
       }),
     })),
@@ -2241,19 +2250,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
     }));
   },
-  mergeLastPaneMessageByRole: (paneId, role, patch) => {
+  mergeLastPaneMessageByRole: (paneId, role, patch, ownerSessionId) => {
     let found = false;
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
+        const owner = String(ownerSessionId ?? "").trim();
         const msgs = [...pane.messages];
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === role && !msgs[i].systemNotice) {
-            msgs[i] = { ...msgs[i], ...patch };
-            found = true;
-            break;
-          }
-        }
+        const idx = findLastOwnedMessageIndex(msgs, role, owner);
+        if (idx < 0) return pane;
+        msgs[idx] = { ...msgs[idx], ...patch };
+        found = true;
         return { ...pane, messages: msgs };
       }),
     }));

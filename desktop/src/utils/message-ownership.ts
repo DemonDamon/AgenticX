@@ -20,6 +20,7 @@ import { dedupeContinuationNotices } from "./continuation-notice";
 export interface OwnedMessage {
   ownerSessionId?: string;
   role?: string;
+  systemNotice?: unknown;
 }
 
 /**
@@ -105,4 +106,33 @@ export function visibleMessagesForSession<T extends OwnedMessage>(
   const filtered = messages.filter((m) => messageBelongsToSession(m, sessionId));
   const deduped = dedupeConsecutiveUserMessages(filtered as (T & { role: string; content?: unknown })[]);
   return dedupeContinuationNotices(dedupeSupervisorNotices(deduped)) as T[];
+}
+
+/**
+ * Last index of *role* owned by *ownerSessionId*.
+ *
+ * Used by in-place stream patches (`mergeLastPaneMessageByRole`,
+ * `updateLastPaneMessage`). Those helpers used to walk from the end of
+ * `pane.messages` with no owner check, so a late SSE frame from session A
+ * could overwrite session B's last assistant after the user switched
+ * conversations in the same pane.
+ *
+ * Untagged rows are skipped when a real session is requested — they are the
+ * historical leak vector. Empty owner returns -1 so callers cannot "default"
+ * to the pane tail.
+ */
+export function findLastOwnedMessageIndex<T extends OwnedMessage>(
+  messages: readonly T[],
+  role: string,
+  ownerSessionId: string | undefined | null,
+): number {
+  const owner = String(ownerSessionId ?? "").trim();
+  if (!owner) return -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const row = messages[i];
+    if (row.role !== role || row.systemNotice) continue;
+    if (String(row.ownerSessionId ?? "").trim() !== owner) continue;
+    return i;
+  }
+  return -1;
 }

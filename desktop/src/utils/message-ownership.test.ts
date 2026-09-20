@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findLastOwnedMessageIndex,
   messageBelongsToSession,
   visibleMessagesForSession,
 } from "./message-ownership";
@@ -126,5 +127,46 @@ describe("visibleMessagesForSession", () => {
       "S",
     );
     expect(out.map((m) => m.id)).toEqual(["disk"]);
+  });
+});
+
+describe("findLastOwnedMessageIndex", () => {
+  const kobra = {
+    role: "assistant",
+    ownerSessionId: "cf861f94-acf6-4bbf-9c2f-3a31ee55595d",
+    content: "团长，结论先给：kobra.systems",
+  };
+  const jevUser = {
+    role: "user",
+    ownerSessionId: "11da05da-cf24-40fb-bea7-85a8c16b9777",
+    content: "啥情况",
+  };
+  const jev = {
+    role: "assistant",
+    ownerSessionId: "11da05da-cf24-40fb-bea7-85a8c16b9777",
+    content: "团长，情况说明：",
+  };
+
+  it("returns the last assistant owned by the requested session", () => {
+    expect(findLastOwnedMessageIndex([kobra, jevUser, jev], "assistant", jev.ownerSessionId)).toBe(2);
+    expect(findLastOwnedMessageIndex([kobra, jevUser, jev], "assistant", kobra.ownerSessionId)).toBe(0);
+  });
+
+  it("does not let a late foreign stream patch the other session's last assistant", () => {
+    expect(findLastOwnedMessageIndex([jev], "assistant", kobra.ownerSessionId)).toBe(-1);
+  });
+
+  it("skips systemNotice rows and untagged assistants when a session is specified", () => {
+    const rows = [
+      { role: "assistant", ownerSessionId: "A", content: "owned" },
+      { role: "assistant", ownerSessionId: "A", content: "notice", systemNotice: true },
+      { role: "assistant", content: "untagged" },
+    ];
+    expect(findLastOwnedMessageIndex(rows, "assistant", "A")).toBe(0);
+  });
+
+  it("returns -1 when the owner session is empty", () => {
+    expect(findLastOwnedMessageIndex([jev], "assistant", "")).toBe(-1);
+    expect(findLastOwnedMessageIndex([jev], "assistant", "   ")).toBe(-1);
   });
 });

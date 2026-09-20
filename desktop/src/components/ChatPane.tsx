@@ -356,7 +356,7 @@ import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "../utils/workspace-sidebar-even
 import { isLikelyTextFile } from "../utils/text-attachment";
 import { isViewImageInjectMessage } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
-import { visibleMessagesForSession } from "../utils/message-ownership";
+import { findLastOwnedMessageIndex, visibleMessagesForSession } from "../utils/message-ownership";
 import {
   bindMessagesToRun,
   sliceMessagesForPresentation,
@@ -12091,7 +12091,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   provider: p || undefined,
                   model: m || undefined,
                   modelSelection: "manual",
-                });
+                }, requestSessionId);
               }
             }
             if (payload.type === "compaction") {
@@ -12250,9 +12250,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       };
       const completedAt = Date.now();
       const stampLastAssistantCompletedAt = () => {
-        useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
-          timestamp: completedAt,
-        });
+        useAppStore.getState().mergeLastPaneMessageByRole(
+          pane.id,
+          "assistant",
+          { timestamp: completedAt },
+          requestSessionId,
+        );
       };
       if (
         trimmedFull &&
@@ -12265,15 +12268,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           : {};
         const paneMsgs =
           useAppStore.getState().panes.find((item) => item.id === pane.id)?.messages ?? [];
-        let lastAssistantContent = "";
-        for (let i = paneMsgs.length - 1; i >= 0; i -= 1) {
-          const row = paneMsgs[i];
-          if (row.role === "user") break;
-          if (row.role === "assistant") {
-            lastAssistantContent = String(row.content ?? "");
-            break;
-          }
-        }
+        const lastOwnedIdx = findLastOwnedMessageIndex(paneMsgs, "assistant", requestSessionId);
+        const lastAssistantContent =
+          lastOwnedIdx >= 0 ? String(paneMsgs[lastOwnedIdx].content ?? "") : "";
         if (
           (mid !== null && trimmedFull === String(mid).trim())
           || shouldReuseLastAssistantRow(lastAssistantContent, trimmedFull)
@@ -12283,7 +12280,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             ...turnExtras,
             ...streamBlockExtras,
             timestamp: completedAt,
-          });
+          }, requestSessionId);
         } else {
           addPaneMessageIfSessionActive(
             pane.id,
@@ -12314,7 +12311,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ? { blocks: streamedBlocksRef.current }
               : {}),
             timestamp: completedAt,
-          });
+          }, requestSessionId);
         } else {
           stampLastAssistantCompletedAt();
         }
@@ -12412,7 +12409,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             turnRefsSnapshot.queries,
           );
           if (refPatch && !abortController.signal.aborted) {
-            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
+            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch, requestSessionId);
           }
           syncStreamingUiForCurrentSession();
           // Only transition to idle if there is no queued continuation. A queued
