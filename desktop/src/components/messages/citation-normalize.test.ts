@@ -57,6 +57,56 @@ test("splitCitationParagraphBlocks: splits on blank lines only", () => {
   );
 });
 
+test("splitCitationParagraphBlocks: keeps fenced code with inner blank lines intact", () => {
+  const input = [
+    "## 怎么调用",
+    "",
+    "**端点**：`POST https://api.typesafe.ai/v1/systemone`，Bearer 鉴权 [1]",
+    "",
+    "```python",
+    "import os, requests",
+    "",
+    "resp = requests.post(",
+    '    "https://api.typesafe.ai/v1/systemone",',
+    '    headers={"Authorization": f"Bearer {os.environ[\'TYPESAFE_API_KEY\']}"},',
+    ")",
+    "```",
+    "",
+    "## 帮你测试的路径",
+  ].join("\n");
+  const blocks = splitCitationParagraphBlocks(input);
+  assert.equal(blocks.length, 4);
+  assert.equal(blocks[0], "## 怎么调用");
+  assert.match(blocks[1], /Bearer 鉴权 \[1\]$/);
+  assert.match(blocks[2], /^```python\nimport os, requests\n\nresp = requests\.post\(/);
+  assert.match(blocks[2], /TYPESAFE_API_KEY/);
+  assert.match(blocks[2], /\n```$/);
+  assert.equal(blocks[3], "## 帮你测试的路径");
+});
+
+test("splitCitationParagraphBlocks: keeps the session-11da05da python sample in one block", () => {
+  const input = [
+    "**端点**：`POST https://api.typesafe.ai/v1/systemone`，Bearer 鉴权 [1]",
+    "",
+    "请求体 = `state`（当前状态文本）+ `questions` [1]。",
+    "",
+    "```python",
+    "import os, requests",
+    "",
+    "resp = requests.post(",
+    '    "https://api.typesafe.ai/v1/systemone",',
+    ")",
+    'print(resp.json())',
+    "```",
+    "",
+    "## 帮你测试的路径",
+  ].join("\n");
+  const python = splitCitationParagraphBlocks(input).find((block) => block.startsWith("```python"));
+  assert.ok(python);
+  assert.match(python!, /import os, requests\n\nresp = requests\.post\(/);
+  assert.match(python!, /print\(resp\.json\(\)\)\n```$/);
+});
+
 test("stripOrphanCitationMarkers: preserves markdown links like [1](url)", () => {
   const input = "参见 [1](https://example.com) 与文末[2]";
   assert.equal(
