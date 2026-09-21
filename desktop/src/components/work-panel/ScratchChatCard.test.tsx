@@ -70,6 +70,7 @@ describe("ScratchChatCard", () => {
     expect(html).toContain('data-slot="message-scroller"');
     expect(html).toContain('data-scroll-anchor="true"');
     expect(html).toContain('role="log"');
+    expect(html).not.toContain("data-scratch-scroller-spacer");
     expect(html).toContain('data-slot="scratch-composer-quote"');
     expect(html).not.toContain('data-message-id="scratch-context"');
     expect(html).not.toContain(i18n.t("work.scratchEmpty", { ns: "workspace" }));

@@ -1,7 +1,7 @@
 /**
  * Scratch-chat transcript scroller.
- * Composition and behaviors follow shadcn MessageScroller:
- * user-turn anchors, live-edge follow only, jump-to-latest, last-anchor open.
+ * Live-edge follow, jump-to-latest, last-anchor open.
+ * Do not pad the list with a viewport-tall spacer — short chats must not scroll into blank.
  *
  * Author: Damon Li
  */
@@ -137,9 +137,7 @@ export function ScratchMessageScrollerProvider({
       scrollToEnd();
       return;
     }
-    const spacer = el.querySelector<HTMLElement>("[data-scratch-scroller-spacer]");
-    const contentHeight = el.scrollHeight - (spacer?.offsetHeight ?? 0);
-    if (contentHeight <= el.clientHeight + 4) {
+    if (el.scrollHeight <= el.clientHeight + 4) {
       scrollToEnd();
       return;
     }
@@ -268,7 +266,7 @@ export function ScratchMessageScrollerViewport({
       role="region"
       tabIndex={0}
       aria-label={t("work.scratchMessagesAria")}
-      className={`min-h-0 flex-1 overflow-y-auto outline-none ${
+      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none ${
         pendingScroll ? "invisible" : ""
       } ${className}`.trim()}
       onScroll={onViewportScroll}
@@ -287,17 +285,6 @@ export function ScratchMessageScrollerContent({
   busy?: boolean;
   className?: string;
 }) {
-  const { viewportRef, peek } = useScratchMessageScroller();
-  const [spacer, setSpacer] = useState(0);
-
-  useLayoutEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const anchor = lastAnchorEl(el);
-    const next = Math.max(0, el.clientHeight - peek - (anchor?.offsetHeight ?? 0));
-    setSpacer((prev) => (prev === next ? prev : next));
-  });
-
   return (
     <div
       data-slot="message-scroller-content"
@@ -307,12 +294,6 @@ export function ScratchMessageScrollerContent({
       className={`flex min-h-full flex-col gap-3 px-3 py-3 ${className}`.trim()}
     >
       {children}
-      <div
-        data-scratch-scroller-spacer=""
-        aria-hidden
-        className="pointer-events-none shrink-0"
-        style={{ height: spacer }}
-      />
     </div>
   );
 }
