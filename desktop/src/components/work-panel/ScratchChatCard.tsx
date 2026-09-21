@@ -19,6 +19,7 @@ type Props = {
   onRetry?: (userMessageId: string) => void;
   sending?: boolean;
   error?: string;
+  hideHeader?: boolean;
 };
 
 function fileLabel(path: string): string {
@@ -104,6 +105,7 @@ export function ScratchChatCard({
   onRetry,
   sending = false,
   error,
+  hideHeader = false,
 }: Props) {
   const { t } = useTranslation("workspace");
   const [draft, setDraft] = useState("");
@@ -128,31 +130,33 @@ export function ScratchChatCard({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
-      <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
-        <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.7} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-medium text-text-strong">{chat.title}</div>
-          <div className="mt-0.5 text-[11px] text-text-faint">{t(sourceKey(chat.sourceKind))}</div>
-        </div>
-        {!chat.floating && onFloat ? (
+      {!hideHeader ? (
+        <div data-slot="scratch-header" className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
+          <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.7} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-medium text-text-strong">{chat.title}</div>
+            <div className="mt-0.5 text-[11px] text-text-faint">{t(sourceKey(chat.sourceKind))}</div>
+          </div>
+          {!chat.floating && onFloat ? (
+            <button
+              type="button"
+              className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={onFloat}
+              aria-label={t("work.scratchFloat")}
+            >
+              <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
-            onClick={onFloat}
-            aria-label={t("work.scratchFloat")}
+            onClick={onClose}
+            aria-label={t("work.closeScratchTab")}
           >
-            <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
-          onClick={onClose}
-          aria-label={t("work.closeScratchTab")}
-        >
-          <X className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
-      </div>
+        </div>
+      ) : null}
 
       {chat.floating ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">

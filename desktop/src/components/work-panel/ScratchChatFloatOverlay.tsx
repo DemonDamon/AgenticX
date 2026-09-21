@@ -62,12 +62,13 @@ export function ScratchChatFloatOverlay({ chat, paneId, onDock, onSend, onRetry,
       }}
     >
       <div
-        className="flex h-8 shrink-0 cursor-grab items-center justify-end gap-1 border-b border-border bg-surface-panel px-2 active:cursor-grabbing"
+        className="flex h-8 shrink-0 cursor-grab items-center gap-2 bg-surface-panel px-3 active:cursor-grabbing"
         onPointerDown={(event) => {
           if ((event.target as HTMLElement).closest("button")) return;
           dragRef.current = { dx: event.clientX - pos.left, dy: event.clientY - pos.top };
         }}
       >
+        <div className="min-w-0 flex-1 truncate text-[12px] text-text-subtle">{chat.title}</div>
         <button
           type="button"
           className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -81,6 +82,7 @@ export function ScratchChatFloatOverlay({ chat, paneId, onDock, onSend, onRetry,
         <ScratchChatCard
           chat={{ ...chat, floating: false }}
           paneId={paneId}
+          hideHeader
           onClose={onDock}
           onSend={onSend}
           onRetry={onRetry}

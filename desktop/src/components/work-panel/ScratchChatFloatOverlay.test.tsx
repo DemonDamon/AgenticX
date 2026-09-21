@@ -31,6 +31,9 @@ describe("ScratchChatFloatOverlay", () => {
     expect(screen.getByText("引用正文")).toBeTruthy();
     expect(screen.getByPlaceholderText(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" }))).toBeTruthy();
     expect(screen.queryByText(i18n.t("work.scratchFloated", { ns: "workspace" }))).toBeNull();
+    expect(screen.queryByLabelText(i18n.t("work.closeScratchTab", { ns: "workspace" }))).toBeNull();
+    expect(screen.queryByText(i18n.t("work.scratchSource.message", { ns: "workspace" }))).toBeNull();
+    expect(document.querySelector('[data-slot="scratch-header"]')).toBeNull();
     fireEvent.click(screen.getByLabelText(i18n.t("work.scratchDock", { ns: "workspace" })));
     expect(onDock).toHaveBeenCalledTimes(1);
   });

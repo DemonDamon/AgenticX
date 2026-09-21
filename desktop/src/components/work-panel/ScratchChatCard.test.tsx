@@ -30,6 +30,7 @@ describe("ScratchChatCard", () => {
       />,
     );
     expect(html).toContain("关于这段回复");
+    expect(html).toContain('data-slot="scratch-header"');
     expect(html).toContain("选中的原文片段");
     expect(html).toContain('data-slot="scratch-composer-quote"');
     expect(html).toContain('data-slot="scratch-composer"');
@@ -157,6 +158,21 @@ describe("ScratchChatCard", () => {
     expect(html).toContain(i18n.t("work.scratchFloatedHint", { ns: "workspace" }));
     expect(html).not.toContain(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" }));
     expect(html).not.toContain(i18n.t("work.scratchEmpty", { ns: "workspace" }));
+  });
+
+  it("hides the title chrome when hideHeader is set", () => {
+    const html = renderToStaticMarkup(
+      <ScratchChatCard
+        chat={sample()}
+        paneId="pane-1"
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    expect(html).not.toContain('data-slot="scratch-header"');
+    expect(html).not.toContain(`aria-label="${i18n.t("work.closeScratchTab", { ns: "workspace" })}"`);
+    expect(html).toContain('data-slot="scratch-composer"');
   });
 
   it("exposes a float control only when docked and onFloat is provided", () => {
