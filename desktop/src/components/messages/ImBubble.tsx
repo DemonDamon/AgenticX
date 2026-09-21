@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus } from "lucide-react";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
@@ -88,6 +88,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onWebSearchMessage?: (message: Message, selectedText: string) => void;
   onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
+  onOpenScratchChat?: (message: Message, selectedText?: string) => void;
   onContinueFromMessage?: (message: Message) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
@@ -288,6 +289,7 @@ export function ImBubble({
   onQuoteMessage,
   onWebSearchMessage,
   onQuoteToNewPane,
+  onOpenScratchChat,
   onContinueFromMessage,
   onFavoriteMessage,
   onToggleSelectMessage,
@@ -459,6 +461,11 @@ export function ImBubble({
   const runQuoteToNewPane = () => {
     const picked = getContainedSelectionText(msgContentRef.current);
     onQuoteToNewPane?.(message, picked ?? undefined);
+  };
+
+  const runOpenScratchChat = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onOpenScratchChat?.(message, picked ?? undefined);
   };
 
   const runSelectAll = () => {
@@ -643,6 +650,19 @@ export function ImBubble({
             <Quote size={14} strokeWidth={2} />
           </button>
         </HoverTip>
+        {onOpenScratchChat ? (
+          <HoverTip label={t("actions.openScratch")}>
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={runOpenScratchChat}
+              aria-label={t("actions.openScratch")}
+            >
+              <MessageSquare size={14} strokeWidth={2} />
+            </button>
+          </HoverTip>
+        ) : null}
         <HoverTip label={t("actions.favorite")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
             <Bookmark size={14} strokeWidth={2} />
@@ -954,6 +974,18 @@ export function ImBubble({
                       <Quote size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
+                  {onOpenScratchChat ? (
+                    <HoverTip label={t("actions.openScratch")}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={runOpenScratchChat}
+                        aria-label={t("actions.openScratch")}
+                      >
+                        <MessageSquare size={14} strokeWidth={2} />
+                      </button>
+                    </HoverTip>
+                  ) : null}
                   <HoverTip label={t("actions.favorite")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
                       <Bookmark size={14} strokeWidth={2} />
@@ -1261,6 +1293,15 @@ export function ImBubble({
           >
             <Quote size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToCurrent")}
           </button>
+          {onOpenScratchChat ? (
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setMenuOpen(false); runOpenScratchChat(); }}
+            >
+              <MessageSquare size={12} className="shrink-0 text-text-faint" />{t("actions.openScratch")}
+            </button>
+          ) : null}
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}

@@ -374,6 +374,7 @@ import {
 import { resolveSendSessionId } from "../utils/send-lock";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
+import { buildMessageScratchDraft, clipScratchTitleSnippet } from "../utils/scratch-chat-open";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
@@ -2877,6 +2878,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
   const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
   const setPanePendingQuote = useAppStore((s) => s.setPanePendingQuote);
+  const upsertScratchChat = useAppStore((s) => s.upsertScratchChat);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
@@ -8608,6 +8610,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   label,
                 });
                 setActivePaneId(newPaneId);
+              }}
+              onOpenScratchChat={(msg, selectedText) => {
+                const selected = String(selectedText ?? "").trim();
+                const body = resolveQuoteBody(msg, selected || undefined);
+                const snippet = clipScratchTitleSnippet(body);
+                const { chatId } = upsertScratchChat(
+                  pane.id,
+                  buildMessageScratchDraft({
+                    messageId: msg.id,
+                    quotedContent: resolveQuoteBody(msg),
+                    selectedText: selected || undefined,
+                    title: snippet ? t("actions.scratchAbout", { snippet }) : t("actions.openScratch"),
+                  }),
+                );
+                if (!chatId) return;
+                if (!pane.taskspacePanelOpen) {
+                  openWorkspaceSidebarForPane(
+                    pane.id,
+                    paneRef.current?.clientWidth ?? paneWidth,
+                    openSidePanel,
+                  );
+                }
+                setWorkPanelFocus({ kind: "scratch", chatId });
               }}
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}

@@ -99,6 +99,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onWebSearchMessage?: (message: Message, selectedText: string) => void;
   onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
+  onOpenScratchChat?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
@@ -381,6 +382,7 @@ export function MessageRenderer({
   onQuoteMessage,
   onWebSearchMessage,
   onQuoteToNewPane,
+  onOpenScratchChat,
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
@@ -561,6 +563,7 @@ export function MessageRenderer({
         onQuoteMessage={onQuoteMessage}
         onWebSearchMessage={onWebSearchMessage}
         onQuoteToNewPane={onQuoteToNewPane}
+        onOpenScratchChat={onOpenScratchChat}
         onContinueFromMessage={onContinueFromMessage}
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}

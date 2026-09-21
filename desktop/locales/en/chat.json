@@ -137,6 +137,8 @@
     "selectAll": "Select all",
     "webSearch": "Web search",
     "quoteToNew": "Quote in a new chat",
+    "openScratch": "Open scratch chat",
+    "scratchAbout": "About {{snippet}}",
     "continueFrom": "Continue in a new task",
     "reanswer": "Retry with another model",
     "reanswerAt": "@Switch model",

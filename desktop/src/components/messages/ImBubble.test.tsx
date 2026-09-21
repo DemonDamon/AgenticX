@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { i18n } from "../../i18n/i18n";
 import { ChatImAvatar, ImBubble } from "./ImBubble";
 import {
   BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
@@ -689,5 +690,44 @@ describe("ImBubble peer human speaker", () => {
     expect(anchor?.[0]).toBeTruthy();
     expect(anchor?.[0]).not.toContain("theme-color-rgb");
     expect(anchor?.[0]).toMatch(/chat-im-user-text|text-inherit/);
+  });
+
+  it("shows the scratch action beside quote-to-new without replacing it", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "scratch-entry",
+          role: "assistant",
+          content: "可以先从工作区打开。",
+        }}
+        assistantName="Near"
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onQuoteToNewPane={() => {}}
+        onOpenScratchChat={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
+    expect(html).toContain("lucide-message-square");
+    expect(html).toContain("lucide-quote");
+  });
+
+  it("hides the scratch action when the callback is missing", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "no-scratch",
+          role: "assistant",
+          content: "只引用到新对话。",
+        }}
+        assistantName="Near"
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onQuoteToNewPane={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).not.toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
   });
 });

@@ -137,6 +137,8 @@
     "selectAll": "全选",
     "webSearch": "网页搜索",
     "quoteToNew": "引用到新对话",
+    "openScratch": "开临时对话",
+    "scratchAbout": "关于 {{snippet}}",
     "continueFrom": "在新任务继续",
     "reanswer": "换模型回答",
     "reanswerAt": "@换模型",
