@@ -79,20 +79,45 @@ function clampPopupAnchor(
 type SelectionQuotePopoverProps = {
   anchor: SelectionPopupAnchor;
   onQuote: () => void;
+  onOpenScratch?: () => void;
 };
 
-export function SelectionQuotePopover({ anchor, onQuote }: SelectionQuotePopoverProps) {
+const pillClass =
+  "flex h-7 items-center justify-center whitespace-nowrap px-2.5 text-[11px] font-normal leading-none transition-[background-color,border-color,color]";
+
+export function SelectionQuotePopover({ anchor, onQuote, onOpenScratch }: SelectionQuotePopoverProps) {
   const { t } = useTranslation("workspace");
+  const scratchLabel = t("preview.openScratch");
   return createPortal(
-    <button
-      type="button"
-      className="agx-selection-quote-btn fixed z-[100] flex h-7 w-max max-w-[calc(100vw-16px)] -translate-x-1/2 items-center justify-center whitespace-nowrap rounded-full border px-2.5 text-[11px] font-normal leading-none transition-[background-color,border-color,color,box-shadow]"
-      style={{ top: anchor.top, left: anchor.left }}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onQuote}
-    >
-      {t("preview.quoteToChat")}
-    </button>,
+    onOpenScratch ? (
+      <div
+        className="agx-selection-quote-btn fixed z-[100] flex w-max max-w-[calc(100vw-16px)] -translate-x-1/2 items-center overflow-hidden rounded-full border"
+        style={{ top: anchor.top, left: anchor.left }}
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        <button type="button" className={`${pillClass} hover:bg-surface-hover`} onClick={onQuote}>
+          {t("preview.quoteToChat")}
+        </button>
+        <button
+          type="button"
+          className={`${pillClass} border-l border-border hover:bg-surface-hover`}
+          onClick={onOpenScratch}
+          aria-label={scratchLabel}
+        >
+          {scratchLabel}
+        </button>
+      </div>
+    ) : (
+      <button
+        type="button"
+        className="agx-selection-quote-btn fixed z-[100] flex h-7 w-max max-w-[calc(100vw-16px)] -translate-x-1/2 items-center justify-center whitespace-nowrap rounded-full border px-2.5 text-[11px] font-normal leading-none transition-[background-color,border-color,color,box-shadow]"
+        style={{ top: anchor.top, left: anchor.left }}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onQuote}
+      >
+        {t("preview.quoteToChat")}
+      </button>
+    ),
     document.body
   );
 }

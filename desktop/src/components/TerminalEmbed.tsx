@@ -20,6 +20,7 @@ type Props = {
   ccBridgePty?: PaneTerminalTab["ccBridgePty"];
   /** Selected terminal text → quote chip in the current chat composer. */
   onQuoteSelection?: (text: string) => void;
+  onOpenScratchSelection?: (text: string) => void;
 };
 
 type TerminalQuotePopup = {
@@ -129,11 +130,19 @@ function newPtySessionId(tabId: string): string {
   return `${tabId}:${suffix}`;
 }
 
-export function TerminalEmbed({ tabId, cwd, ccBridgePty, onQuoteSelection }: Props) {
+export function TerminalEmbed({
+  tabId,
+  cwd,
+  ccBridgePty,
+  onQuoteSelection,
+  onOpenScratchSelection,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const onQuoteSelectionRef = useRef(onQuoteSelection);
   onQuoteSelectionRef.current = onQuoteSelection;
+  const onOpenScratchSelectionRef = useRef(onOpenScratchSelection);
+  onOpenScratchSelectionRef.current = onOpenScratchSelection;
   const themeMode = useAppStore((s) => s.theme);
   const [exited, setExited] = useState(false);
   const [spawnError, setSpawnError] = useState<string | null>(null);
@@ -190,7 +199,7 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty, onQuoteSelection }: Pro
 
     const lastPointerRef = { x: 0, y: 0, has: false };
     const syncQuotePopup = () => {
-      if (!onQuoteSelectionRef.current) {
+      if (!onQuoteSelectionRef.current && !onOpenScratchSelectionRef.current) {
         setQuotePopup(null);
         return;
       }
@@ -367,16 +376,26 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty, onQuoteSelection }: Pro
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [quotePopup]);
 
-  const commitQuote = useCallback(() => {
-    if (!quotePopup || !onQuoteSelection) return;
-    onQuoteSelection(quotePopup.text);
+  const dismissQuotePopup = useCallback(() => {
     setQuotePopup(null);
     try {
       termRef.current?.clearSelection();
     } catch {
       /* ignore */
     }
-  }, [onQuoteSelection, quotePopup]);
+  }, []);
+
+  const commitQuote = useCallback(() => {
+    if (!quotePopup || !onQuoteSelection) return;
+    onQuoteSelection(quotePopup.text);
+    dismissQuotePopup();
+  }, [dismissQuotePopup, onQuoteSelection, quotePopup]);
+
+  const commitScratch = useCallback(() => {
+    if (!quotePopup || !onOpenScratchSelection) return;
+    onOpenScratchSelection(quotePopup.text);
+    dismissQuotePopup();
+  }, [dismissQuotePopup, onOpenScratchSelection, quotePopup]);
 
   return (
     <div
@@ -389,8 +408,12 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty, onQuoteSelection }: Pro
       }}
     >
       <div ref={containerRef} className="h-full min-h-0 w-full cursor-text overflow-hidden px-1 py-1" />
-      {quotePopup && onQuoteSelection ? (
-        <SelectionQuotePopover anchor={quotePopup.anchor} onQuote={commitQuote} />
+      {quotePopup && (onQuoteSelection || onOpenScratchSelection) ? (
+        <SelectionQuotePopover
+          anchor={quotePopup.anchor}
+          onQuote={commitQuote}
+          onOpenScratch={onOpenScratchSelection ? commitScratch : undefined}
+        />
       ) : null}
       {(exited || spawnError) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-card backdrop-blur-sm">

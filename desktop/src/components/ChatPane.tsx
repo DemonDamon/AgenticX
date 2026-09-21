@@ -375,6 +375,7 @@ import { resolveSendSessionId } from "../utils/send-lock";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { buildMessageScratchDraft, clipScratchTitleSnippet } from "../utils/scratch-chat-open";
+import type { ScratchChatDraft } from "../utils/scratch-chat";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
@@ -3469,6 +3470,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [crewSettingsAvatarId, isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
+  const openScratchFromDraft = useCallback(
+    (draft: ScratchChatDraft) => {
+      const { chatId } = upsertScratchChat(pane.id, draft);
+      if (!chatId) return;
+      if (!pane.taskspacePanelOpen) {
+        openWorkspaceSidebarForPane(
+          pane.id,
+          paneRef.current?.clientWidth ?? paneWidth,
+          openSidePanel,
+        );
+      }
+      setWorkPanelFocus({ kind: "scratch", chatId });
+    },
+    [openSidePanel, pane.id, pane.taskspacePanelOpen, paneWidth, upsertScratchChat],
+  );
   const ensureInAppBrowserOpenRef = useRef<(url: string) => { ok: true; url: string } | { ok: false; error: string }>(
     () => ({ ok: false, error: "no_browser_pane" }),
   );
@@ -8615,8 +8631,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const selected = String(selectedText ?? "").trim();
                 const body = resolveQuoteBody(msg, selected || undefined);
                 const snippet = clipScratchTitleSnippet(body);
-                const { chatId } = upsertScratchChat(
-                  pane.id,
+                openScratchFromDraft(
                   buildMessageScratchDraft({
                     messageId: msg.id,
                     quotedContent: resolveQuoteBody(msg),
@@ -8624,15 +8639,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     title: snippet ? t("actions.scratchAbout", { snippet }) : t("actions.openScratch"),
                   }),
                 );
-                if (!chatId) return;
-                if (!pane.taskspacePanelOpen) {
-                  openWorkspaceSidebarForPane(
-                    pane.id,
-                    paneRef.current?.clientWidth ?? paneWidth,
-                    openSidePanel,
-                  );
-                }
-                setWorkPanelFocus({ kind: "scratch", chatId });
               }}
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}
@@ -14690,6 +14696,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
             onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+            onOpenScratchChat={openScratchFromDraft}
             onQuoteTerminalSelection={quoteTerminalSelection}
             onQuoteBrowserSelection={(payload) => {
               const text = String(payload.text || "").trim();
@@ -14834,6 +14841,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
                 onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+                onOpenScratchChat={openScratchFromDraft}
                 onQuoteTerminalSelection={quoteTerminalSelection}
                 onQuoteBrowserSelection={(payload) => {
                   const text = String(payload.text || "").trim();

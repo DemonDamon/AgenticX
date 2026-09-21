@@ -16,6 +16,7 @@ type SpreadsheetPreviewProps = {
   mimeType: string;
   onCopyPath: () => void;
   onQuoteSelection?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSelection?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
 };
@@ -30,6 +31,7 @@ export function SpreadsheetPreview({
   mimeType,
   onCopyPath,
   onQuoteSelection,
+  onOpenScratchSelection,
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: SpreadsheetPreviewProps) {
@@ -166,8 +168,8 @@ export function SpreadsheetPreview({
     return () => scrollEl.removeEventListener("scroll", updateSelectionAnchor);
   }, [updateSelectionAnchor]);
 
-  const quoteSelection = () => {
-    if (!selection || !activeSheet || !onQuoteSelection) return;
+  const buildSelectionPayload = (): WorkspacePreviewQuotePayload | null => {
+    if (!selection || !activeSheet) return null;
     const top = Math.min(selection.r1, selection.r2);
     const bottom = Math.max(selection.r1, selection.r2);
     const left = Math.min(selection.c1, selection.c2);
@@ -176,12 +178,12 @@ export function SpreadsheetPreview({
       .slice(top - 1, bottom)
       .map((row) => row.slice(left - 1, right).map((cell) => String(cell ?? "")));
     const snippet = matrix.map((line) => line.join("\t")).join("\n").trimEnd();
-    if (!snippet) return;
+    if (!snippet) return null;
     const a1Start = `${toColLetters(left)}${top}`;
     const a1End = `${toColLetters(right)}${bottom}`;
     const a1 = a1Start === a1End ? a1Start : `${a1Start}:${a1End}`;
     const baseName = path.split(/[\\/]/).pop() || path || absolutePath;
-    onQuoteSelection({
+    return {
       kind: "spreadsheet-range",
       path,
       absolutePath,
@@ -189,7 +191,19 @@ export function SpreadsheetPreview({
       a1,
       snippet,
       label: `${baseName} · ${activeSheet} · ${a1}`,
-    });
+    };
+  };
+
+  const quoteSelection = () => {
+    const payload = buildSelectionPayload();
+    if (!payload) return;
+    onQuoteSelection?.(payload);
+  };
+
+  const openScratchSelection = () => {
+    const payload = buildSelectionPayload();
+    if (!payload) return;
+    onOpenScratchSelection?.(payload);
   };
 
   if (loading) {
@@ -237,8 +251,12 @@ export function SpreadsheetPreview({
       {truncatedHint ? (
         <div className="shrink-0 border-b border-border px-4 py-1.5 text-[11px] text-text-faint">{truncatedHint}</div>
       ) : null}
-      {selection && selectionAnchor && onQuoteSelection ? (
-        <SelectionQuotePopover anchor={selectionAnchor} onQuote={quoteSelection} />
+      {selection && selectionAnchor && (onQuoteSelection || onOpenScratchSelection) ? (
+        <SelectionQuotePopover
+          anchor={selectionAnchor}
+          onQuote={quoteSelection}
+          onOpenScratch={onOpenScratchSelection ? openScratchSelection : undefined}
+        />
       ) : null}
       <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-auto">
         <table className="min-w-full border-collapse text-left text-[12px] text-text-primary">

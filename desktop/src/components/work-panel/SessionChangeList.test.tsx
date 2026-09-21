@@ -41,4 +41,18 @@ describe("SessionChangeList", () => {
     expect(html).toContain('data-file-mark="code"');
     expect(html).toContain("h-4 w-4");
   });
+
+  it("adds a scratch control only when the callback is provided", () => {
+    const without = renderToStaticMarkup(
+      <SessionChangeList rows={[{ path: "/tmp/a.txt", added: 1, removed: 0 }]} />,
+    );
+    expect(without).not.toContain(i18n.t("work.openScratch", { ns: "workspace" }));
+    const withScratch = renderToStaticMarkup(
+      <SessionChangeList
+        rows={[{ path: "/tmp/a.txt", added: 1, removed: 0 }]}
+        onOpenScratch={() => undefined}
+      />,
+    );
+    expect(withScratch).toContain(`aria-label="${i18n.t("work.openScratch", { ns: "workspace" })}"`);
+  });
 });

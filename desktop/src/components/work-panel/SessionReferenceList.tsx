@@ -7,16 +7,24 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Library } from "lucide-react";
+import { BookOpen, Library, MessageSquare } from "lucide-react";
 import type { SessionReferenceBundle } from "../../utils/session-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
 import type { SearchReference } from "../../types/search-references";
 import { SiteFavicon } from "./SiteFavicon";
 
+export type SessionReferenceScratchInput = {
+  sourceKey: string;
+  title: string;
+  quotedContent: string;
+  path?: string;
+};
+
 type Props = {
   bundle: SessionReferenceBundle;
   /** Prefer in-app WorkPanel browser for http(s) links when provided. */
   onOpenWebUrl?: (url: string, title: string) => void;
+  onOpenScratchRef?: (input: SessionReferenceScratchInput) => void;
 };
 
 function RefRow({
@@ -25,12 +33,16 @@ function RefRow({
   title,
   onClick,
   muted,
+  onOpenScratch,
+  scratchLabel,
 }: {
   icon: ReactNode;
   label: string;
   title?: string;
   onClick?: () => void;
   muted?: boolean;
+  onOpenScratch?: () => void;
+  scratchLabel?: string;
 }) {
   const className = [
     "flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] transition",
@@ -40,19 +52,31 @@ function RefRow({
     .filter(Boolean)
     .join(" ");
 
-  if (onClick) {
-    return (
-      <button type="button" className={className} title={title || label} onClick={onClick}>
-        <span className="shrink-0 text-text-faint">{icon}</span>
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-      </button>
-    );
-  }
-
-  return (
-    <div className={className} title={title || label}>
+  const body = onClick ? (
+    <button type="button" className={`${className} flex-1`} title={title || label} onClick={onClick}>
       <span className="shrink-0 text-text-faint">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  ) : (
+    <div className={`${className} flex-1`} title={title || label}>
+      <span className="shrink-0 text-text-faint">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </div>
+  );
+
+  return (
+    <div className="flex min-w-0 items-center gap-0.5">
+      {body}
+      {onOpenScratch ? (
+        <button
+          type="button"
+          className="shrink-0 rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+          onClick={onOpenScratch}
+          aria-label={scratchLabel}
+        >
+          <MessageSquare className="h-3 w-3" strokeWidth={1.7} />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -74,8 +98,9 @@ function openWeb(ref: SearchReference, onOpenWebUrl?: Props["onOpenWebUrl"]) {
   openSearchReference(ref);
 }
 
-export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
+export function SessionReferenceList({ bundle, onOpenWebUrl, onOpenScratchRef }: Props) {
   const { t } = useTranslation("workspace");
+  const scratchLabel = t("work.openScratch");
   if (bundle.isEmpty) return null;
 
   return (
@@ -89,6 +114,17 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
                 key={`skill-${skill.name}`}
                 icon={<BookOpen className="h-3.5 w-3.5 text-sky-500" strokeWidth={1.7} />}
                 label={skill.name}
+                scratchLabel={scratchLabel}
+                onOpenScratch={
+                  onOpenScratchRef
+                    ? () =>
+                        onOpenScratchRef({
+                          sourceKey: `skill:${skill.name}`,
+                          title: skill.name,
+                          quotedContent: skill.name,
+                        })
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -115,6 +151,17 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
                   label={label}
                   title={ref.url || label}
                   onClick={() => openWeb(ref, onOpenWebUrl)}
+                  scratchLabel={scratchLabel}
+                  onOpenScratch={
+                    onOpenScratchRef
+                      ? () =>
+                          onOpenScratchRef({
+                            sourceKey: ref.url || group.docKey,
+                            title: label,
+                            quotedContent: [ref.title, ref.url].filter(Boolean).join("\n"),
+                          })
+                      : undefined
+                  }
                 />
               );
             })}
@@ -135,6 +182,18 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
                   label={ref.title}
                   title={ref.kbSourcePath || ref.title}
                   onClick={() => openSearchReference(ref)}
+                  scratchLabel={scratchLabel}
+                  onOpenScratch={
+                    onOpenScratchRef
+                      ? () =>
+                          onOpenScratchRef({
+                            sourceKey: ref.kbSourcePath || ref.title || group.docKey,
+                            title: ref.title,
+                            quotedContent: ref.title,
+                            path: ref.kbSourcePath || undefined,
+                          })
+                      : undefined
+                  }
                 />
               );
             })}

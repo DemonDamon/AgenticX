@@ -67,7 +67,15 @@ import { ScratchChatFloatOverlay } from "./ScratchChatFloatOverlay";
 import {
   shouldConfirmCloseScratch,
   type ScratchChat,
+  type ScratchChatDraft,
 } from "../../utils/scratch-chat";
+import {
+  buildPathScratchDraft,
+  buildPreviewScratchDraft,
+  buildQuotedScratchDraft,
+  clipScratchTitleSnippet,
+  fileLabelFromPath,
+} from "../../utils/scratch-chat-open";
 import {
   resolveActiveScratchId,
   resolveScratchFocusId,
@@ -231,6 +239,7 @@ function RemoteBrowserPane({
   onNavigate,
   onQuoteSelection,
   onSearchSelection,
+  onOpenScratchSelection,
   onWebviewReady,
 }: {
   title: string;
@@ -240,6 +249,7 @@ function RemoteBrowserPane({
   onNavigate?: (nextUrl: string) => void;
   onQuoteSelection?: (payload: BrowserQuotePayload) => void;
   onSearchSelection?: (text: string) => void;
+  onOpenScratchSelection?: (payload: BrowserQuotePayload) => void;
   onWebviewReady?: (wv: NearElectronWebview | null) => void;
 }) {
   const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
@@ -467,6 +477,16 @@ function RemoteBrowserPane({
             onQuoteSelection?.({ text, url, title });
             setSelectionUi(null);
           }}
+          onOpenScratch={
+            onOpenScratchSelection
+              ? () => {
+                  const text = selectionUi.text.trim();
+                  if (!text) return;
+                  onOpenScratchSelection({ text, url, title });
+                  setSelectionUi(null);
+                }
+              : undefined
+          }
         />
       ) : null}
     </div>
@@ -640,6 +660,7 @@ type Props = {
     label: string;
   }) => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchChat?: (draft: ScratchChatDraft) => void;
   /** Remote webview text selection → quote chip in current chat. */
   onQuoteBrowserSelection?: (payload: BrowserQuotePayload) => void;
   /** Embedded terminal text selection → quote chip in current chat. */
@@ -778,6 +799,7 @@ export function WorkPanel({
   onPickFileForReference,
   onPickDirectoryForReference,
   onQuotePreviewSnippet,
+  onOpenScratchChat,
   onQuoteBrowserSelection,
   onQuoteTerminalSelection,
   onSearchBrowserSelection,
@@ -1289,6 +1311,22 @@ export function WorkPanel({
       return;
     }
     commitCloseScratch(chat.id);
+  };
+
+  const scratchAbout = (snippet: string) =>
+    t("work.scratchAbout", { snippet: clipScratchTitleSnippet(snippet) || snippet });
+
+  const openPreviewScratch = (payload: WorkspacePreviewQuotePayload) => {
+    const abs = String(payload.absolutePath || payload.path || "").trim();
+    if (!abs) return;
+    const snippet = "snippet" in payload ? String(payload.snippet || "").trim() : "";
+    onOpenScratchChat?.(
+      buildPreviewScratchDraft({
+        absolutePath: abs,
+        snippet: snippet || undefined,
+        title: scratchAbout(snippet || fileLabelFromPath(abs)),
+      }),
+    );
   };
 
   const sendScratch = async (chat: ScratchChat, text: string): Promise<boolean> => {
@@ -2537,7 +2575,22 @@ export function WorkPanel({
                   subtitle={t("work.emptyTodosHint")}
                 />
               ) : (
-                <SessionTodoList todo={sessionTodo} />
+                <SessionTodoList
+                  todo={sessionTodo}
+                  onOpenScratch={
+                    onOpenScratchChat
+                      ? (item) =>
+                          onOpenScratchChat(
+                            buildQuotedScratchDraft({
+                              kind: "todo",
+                              rawKey: `${item.index}:${item.content}`,
+                              quotedContent: item.content,
+                              title: scratchAbout(item.content),
+                            }),
+                          )
+                      : undefined
+                  }
+                />
               )}
             </Section>
 
@@ -2582,6 +2635,18 @@ export function WorkPanel({
                   paths={presentArtifactPaths}
                   highlightPath={artifactHighlightPath}
                   onHighlightHandled={() => setArtifactHighlightPath(null)}
+                  onOpenScratch={
+                    onOpenScratchChat
+                      ? (path) =>
+                          onOpenScratchChat(
+                            buildPathScratchDraft({
+                              kind: "artifact",
+                              path,
+                              title: scratchAbout(fileLabelFromPath(path)),
+                            }),
+                          )
+                      : undefined
+                  }
                   onOpenPath={(path) => {
                     if (isInAppHtmlPreviewPath(path)) {
                       openLocalHtmlPreview(path);
@@ -2618,6 +2683,18 @@ export function WorkPanel({
               ) : (
                 <SessionChangeList
                   rows={changeRows}
+                  onOpenScratch={
+                    onOpenScratchChat
+                      ? (path) =>
+                          onOpenScratchChat(
+                            buildPathScratchDraft({
+                              kind: "change",
+                              path,
+                              title: scratchAbout(fileLabelFromPath(path)),
+                            }),
+                          )
+                      : undefined
+                  }
                   onOpenPath={(path) => {
                     if (isInAppHtmlPreviewPath(path)) {
                       openLocalHtmlPreview(path);
@@ -2658,6 +2735,32 @@ export function WorkPanel({
                 <SessionReferenceList
                   bundle={referenceBundle}
                   onOpenWebUrl={openWebReferenceInBrowser}
+                  onOpenScratchRef={
+                    onOpenScratchChat
+                      ? (input) => {
+                          const path = String(input.path || "").trim();
+                          if (path) {
+                            onOpenScratchChat(
+                              buildPathScratchDraft({
+                                kind: "reference",
+                                path,
+                                title: scratchAbout(input.title || fileLabelFromPath(path)),
+                                quotedContent: input.quotedContent,
+                              }),
+                            );
+                            return;
+                          }
+                          onOpenScratchChat(
+                            buildQuotedScratchDraft({
+                              kind: "reference",
+                              rawKey: input.sourceKey,
+                              quotedContent: input.quotedContent,
+                              title: scratchAbout(input.title || input.quotedContent),
+                            }),
+                          );
+                        }
+                      : undefined
+                  }
                 />
               )}
             </Section>
@@ -2774,6 +2877,7 @@ export function WorkPanel({
                   previewRequestLeaveRef.current = fn;
                 }}
                 onQuoteSnippet={onQuotePreviewSnippet}
+                onOpenScratchSnippet={onOpenScratchChat ? openPreviewScratch : undefined}
                 onRevealInFileManager={(abs) => {
                   void window.agenticxDesktop?.shellShowItemInFolder?.(abs);
                 }}
@@ -2798,6 +2902,7 @@ export function WorkPanel({
             onPickFileForReference={onPickFileForReference}
             onPickDirectoryForReference={onPickDirectoryForReference}
             onQuotePreviewSnippet={onQuotePreviewSnippet}
+            onOpenScratchSnippet={onOpenScratchChat ? openPreviewScratch : undefined}
             previewOpenRequest={previewOpenRequest}
             onPreviewOpenRequestHandled={onPreviewOpenRequestHandled}
             onEnsureSessionForWorkspace={onEnsureSessionForWorkspace}
@@ -2852,6 +2957,22 @@ export function WorkPanel({
                       cwd={tab.cwd}
                       ccBridgePty={tab.ccBridgePty}
                       onQuoteSelection={onQuoteTerminalSelection}
+                      onOpenScratchSelection={
+                        onOpenScratchChat
+                          ? (text) => {
+                              const clean = String(text || "").trim();
+                              if (!clean) return;
+                              onOpenScratchChat(
+                                buildQuotedScratchDraft({
+                                  kind: "terminal",
+                                  rawKey: "selection",
+                                  quotedContent: clean,
+                                  title: scratchAbout(clean),
+                                }),
+                              );
+                            }
+                          : undefined
+                      }
                     />
                   </div>
                 ) : null
@@ -2970,6 +3091,22 @@ export function WorkPanel({
                   reloadKey={activeBrowser.reloadNonce ?? 0}
                   onQuoteSelection={onQuoteBrowserSelection}
                   onSearchSelection={onSearchBrowserSelection}
+                  onOpenScratchSelection={
+                    onOpenScratchChat
+                      ? (payload) => {
+                          const text = String(payload.text || "").trim();
+                          if (!text) return;
+                          onOpenScratchChat(
+                            buildQuotedScratchDraft({
+                              kind: "browser",
+                              rawKey: payload.url || "page",
+                              quotedContent: text,
+                              title: scratchAbout(text),
+                            }),
+                          );
+                        }
+                      : undefined
+                  }
                   onWebviewReady={(wv) => {
                     agentWebviewRef.current = wv;
                   }}

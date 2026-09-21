@@ -46,3 +46,64 @@ export function buildMessageScratchDraft(input: {
     quotedContent: String(input.quotedContent ?? ""),
   };
 }
+
+export function fileLabelFromPath(path: string): string {
+  const normalized = String(path ?? "").replace(/\\/g, "/").trim();
+  return normalized.split("/").filter(Boolean).pop() || normalized || "file";
+}
+
+export function buildPathScratchDraft(input: {
+  kind: "file" | "artifact" | "change" | "reference";
+  path: string;
+  title: string;
+  quotedContent?: string;
+}): ScratchChatDraft {
+  const abs = String(input.path ?? "").trim() || "unknown";
+  const quoted = String(input.quotedContent ?? "").trim();
+  return {
+    title: String(input.title ?? "").trim(),
+    sourceKind: input.kind,
+    sourceKey: scratchSourceKey(input.kind, abs),
+    ...(quoted ? { quotedContent: quoted } : {}),
+    contextFiles: [{ path: abs, sourcePath: abs }],
+  };
+}
+
+export function buildQuotedScratchDraft(input: {
+  kind: "terminal" | "browser" | "todo" | "reference";
+  rawKey: string;
+  quotedContent: string;
+  title: string;
+}): ScratchChatDraft {
+  const quoted = String(input.quotedContent ?? "").trim();
+  const rawKey = String(input.rawKey ?? "").trim() || "unknown";
+  const hashed = input.kind === "terminal" || input.kind === "browser";
+  return {
+    title: String(input.title ?? "").trim(),
+    sourceKind: input.kind,
+    sourceKey: hashed
+      ? scratchSourceKey(input.kind, rawKey, hashScratchSnippet(quoted))
+      : scratchSourceKey(input.kind, rawKey),
+    quotedContent: quoted,
+  };
+}
+
+export function buildPreviewScratchDraft(input: {
+  absolutePath: string;
+  snippet?: string;
+  title: string;
+}): ScratchChatDraft {
+  const abs = String(input.absolutePath ?? "").trim() || "unknown";
+  const snippet = String(input.snippet ?? "").trim();
+  const title = String(input.title ?? "").trim();
+  if (!snippet) {
+    return buildPathScratchDraft({ kind: "file", path: abs, title });
+  }
+  return {
+    title,
+    sourceKind: "file",
+    sourceKey: scratchSourceKey("file", abs, hashScratchSnippet(snippet)),
+    quotedContent: snippet,
+    contextFiles: [{ path: abs, sourcePath: abs }],
+  };
+}

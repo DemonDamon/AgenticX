@@ -145,6 +145,7 @@ type Props = {
   /** WorkPanel 嵌入时：开终端后让父级切到顶栏 terminal tab */
   onFocusTerminalTab?: () => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
@@ -246,6 +247,7 @@ export function WorkspacePanel({
   tintColor,
   onFocusTerminalTab,
   onQuotePreviewSnippet,
+  onOpenScratchSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
@@ -2007,6 +2009,7 @@ export function WorkspacePanel({
           }}
           initialLineRange={previewFocusLineRange ?? undefined}
           onQuoteSnippet={onQuotePreviewSnippet}
+          onOpenScratchSnippet={onOpenScratchSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
           taskspaceRoot={previewTaskspaceRoot}

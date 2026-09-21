@@ -110,6 +110,7 @@ export type WorkspaceFilePreviewProps = {
   onCopy: (text?: string) => void;
   onClose: () => void;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
   initialLineRange?: WorkspacePreviewLineRange;
@@ -181,12 +182,14 @@ function OfficePreviewBody({
   preview,
   onCopy,
   onQuoteSnippet,
+  onOpenScratchSnippet,
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: {
   preview: OfficePreview;
   onCopy: () => void;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
 }) {
@@ -210,6 +213,7 @@ function OfficePreviewBody({
         mimeType={preview.mimeType}
         onCopyPath={onCopy}
         onQuoteSelection={onQuoteSnippet}
+        onOpenScratchSelection={onOpenScratchSnippet}
         onRevealInFileManager={onRevealInFileManager}
         revealInFileManagerLabel={revealInFileManagerLabel}
       />
@@ -655,6 +659,7 @@ function replaceAllOccurrences(
 function TextualPreviewBody({
   preview,
   onQuoteSnippet,
+  onOpenScratchSnippet,
   initialLineRange,
   viewMode,
   editContent,
@@ -669,6 +674,7 @@ function TextualPreviewBody({
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   initialLineRange?: WorkspacePreviewLineRange;
   viewMode: TextualViewMode;
   editContent: string;
@@ -718,6 +724,19 @@ function TextualPreviewBody({
     }
     return line;
   }, []);
+
+  const textRangeQuote = (range: NonNullable<typeof selectionRange>): WorkspacePreviewQuotePayload => ({
+    kind: "text-range",
+    path: preview.path,
+    absolutePath: preview.absolutePath,
+    startLine: range.startLine,
+    endLine: range.endLine,
+    snippet: range.snippet,
+    label:
+      range.startLine && range.endLine
+        ? `${previewBaseName(preview.path)} (${range.startLine}-${range.endLine})`
+        : t("preview.snippetSuffix", { name: previewBaseName(preview.path) }),
+  });
 
   useEffect(() => {
     setSelectionRange(null);
@@ -843,22 +862,12 @@ function TextualPreviewBody({
   if (preview.kind === "markdown") {
     return (
       <div className="relative">
-        {selectionRange && onQuoteSnippet ? (
+        {selectionRange && (onQuoteSnippet || onOpenScratchSnippet) ? (
           <SelectionQuotePopover
             anchor={selectionRange.anchor}
-            onQuote={() =>
-              onQuoteSnippet({
-                kind: "text-range",
-                path: preview.path,
-                absolutePath: preview.absolutePath,
-                startLine: selectionRange.startLine,
-                endLine: selectionRange.endLine,
-                snippet: selectionRange.snippet,
-                label:
-                  selectionRange.startLine && selectionRange.endLine
-                    ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
-                    : t("preview.snippetSuffix", { name: previewBaseName(preview.path) }),
-              })
+            onQuote={() => onQuoteSnippet?.(textRangeQuote(selectionRange))}
+            onOpenScratch={
+              onOpenScratchSnippet ? () => onOpenScratchSnippet(textRangeQuote(selectionRange)) : undefined
             }
           />
         ) : null}
@@ -885,22 +894,12 @@ function TextualPreviewBody({
 
   return (
     <div className="relative">
-      {selectionRange && onQuoteSnippet ? (
+      {selectionRange && (onQuoteSnippet || onOpenScratchSnippet) ? (
         <SelectionQuotePopover
           anchor={selectionRange.anchor}
-          onQuote={() =>
-            onQuoteSnippet({
-              kind: "text-range",
-              path: preview.path,
-              absolutePath: preview.absolutePath,
-              startLine: selectionRange.startLine,
-              endLine: selectionRange.endLine,
-              snippet: selectionRange.snippet,
-              label:
-                selectionRange.startLine && selectionRange.endLine
-                  ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
-                  : t("preview.snippetSuffix", { name: previewBaseName(preview.path) }),
-            })
+          onQuote={() => onQuoteSnippet?.(textRangeQuote(selectionRange))}
+          onOpenScratch={
+            onOpenScratchSnippet ? () => onOpenScratchSnippet(textRangeQuote(selectionRange)) : undefined
           }
         />
       ) : null}
@@ -923,6 +922,7 @@ export function WorkspaceFilePreview({
   onCopy,
   onClose,
   onQuoteSnippet,
+  onOpenScratchSnippet,
   onRevealInFileManager,
   revealInFileManagerLabel,
   initialLineRange,
@@ -1695,6 +1695,7 @@ export function WorkspaceFilePreview({
               preview={preview as OfficePreview}
               onCopy={onCopy}
               onQuoteSnippet={onQuoteSnippet}
+              onOpenScratchSnippet={onOpenScratchSnippet}
               onRevealInFileManager={onRevealInFileManager}
               revealInFileManagerLabel={revealInFileManagerLabel}
             />
@@ -1709,6 +1710,7 @@ export function WorkspaceFilePreview({
             <TextualPreviewBody
               preview={preview as TextualPreview}
               onQuoteSnippet={onQuoteSnippet}
+              onOpenScratchSnippet={onOpenScratchSnippet}
               initialLineRange={initialLineRange}
               viewMode={isEditableText || isHtmlFile ? viewMode : "preview"}
               editContent={editContent}
