@@ -71,6 +71,10 @@ import {
   resolveActiveScratchId,
   resolveScratchFocusId,
 } from "../../utils/scratch-chat-panel";
+import {
+  defaultScratchChatTransport,
+  runScratchChatTurn,
+} from "../../utils/scratch-chat-runtime";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
@@ -818,6 +822,15 @@ export function WorkPanel({
     (s) => s.panes.find((p) => p.id === paneId)?.scratchChats ?? EMPTY_SCRATCH_CHATS,
   );
   const closeScratchChat = useAppStore((s) => s.closeScratchChat);
+  const patchScratchChat = useAppStore((s) => s.patchScratchChat);
+  const scratchPaneMeta = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return {
+      avatarId: pane?.avatarId ?? null,
+      modelProvider: pane?.modelProvider ?? "",
+      modelName: pane?.modelName ?? "",
+    };
+  });
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
@@ -832,6 +845,9 @@ export function WorkPanel({
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
   const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
   const [pendingCloseScratch, setPendingCloseScratch] = useState<ScratchChat | null>(null);
+  const [scratchSendingIds, setScratchSendingIds] = useState<string[]>([]);
+  const [scratchSendErrors, setScratchSendErrors] = useState<Record<string, string>>({});
+  const scratchAbortRef = useRef<Map<string, AbortController>>(new Map());
   const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
     sessionId: string;
     runId: string;
@@ -1245,11 +1261,20 @@ export function WorkPanel({
   }, [scratchChats]);
 
   const commitCloseScratch = (chatId: string) => {
+    scratchAbortRef.current.get(chatId)?.abort();
+    scratchAbortRef.current.delete(chatId);
     closeScratchChat(paneId, chatId);
     if (activeKind === "scratch" && activeScratchId === chatId) {
       setActiveKind(resolveFallbackKind({ excludeScratchId: chatId }));
     }
     setPendingCloseScratch(null);
+    setScratchSendingIds((prev) => prev.filter((id) => id !== chatId));
+    setScratchSendErrors((prev) => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
   };
 
   const requestCloseScratch = (chat: ScratchChat) => {
@@ -1258,6 +1283,53 @@ export function WorkPanel({
       return;
     }
     commitCloseScratch(chat.id);
+  };
+
+  const sendScratch = async (chat: ScratchChat, text: string): Promise<boolean> => {
+    const chatId = chat.id;
+    if (scratchSendingIds.includes(chatId)) return false;
+    scratchAbortRef.current.get(chatId)?.abort();
+    const abort = new AbortController();
+    scratchAbortRef.current.set(chatId, abort);
+    setScratchSendingIds((prev) => (prev.includes(chatId) ? prev : [...prev, chatId]));
+    setScratchSendErrors((prev) => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    const latest =
+      useAppStore.getState().panes.find((item) => item.id === paneId)?.scratchChats?.find((item) => item.id === chatId) ??
+      chat;
+    const result = await runScratchChatTurn({
+      chat: latest,
+      userText: text,
+      paneAvatarId: scratchPaneMeta.avatarId,
+      provider: scratchPaneMeta.modelProvider,
+      model: scratchPaneMeta.modelName,
+      apiBase,
+      apiToken,
+      ids: {
+        userId: crypto.randomUUID(),
+        assistantId: crypto.randomUUID(),
+        clientTurnId: crypto.randomUUID(),
+      },
+      transport: defaultScratchChatTransport,
+      signal: abort.signal,
+      onMessages: (messages) => patchScratchChat(paneId, chatId, { messages }),
+      onSessionId: (sessionId) => patchScratchChat(paneId, chatId, { sessionId }),
+    });
+    scratchAbortRef.current.delete(chatId);
+    setScratchSendingIds((prev) => prev.filter((id) => id !== chatId));
+    if (!result.ok) {
+      const message =
+        result.error === "createSession failed"
+          ? t("work.scratchCreateFailed")
+          : result.error;
+      setScratchSendErrors((prev) => ({ ...prev, [chatId]: message }));
+      return false;
+    }
+    return true;
   };
 
   const silentReloadPreviewTab = useCallback(async (tabId: string, path: string) => {
@@ -2932,6 +3004,9 @@ export function WorkPanel({
             <ScratchChatCard
               chat={activeScratch}
               onClose={() => requestCloseScratch(activeScratch)}
+              onSend={(text) => sendScratch(activeScratch, text)}
+              sending={scratchSendingIds.includes(activeScratch.id)}
+              error={scratchSendErrors[activeScratch.id]}
             />
           </div>
         ) : null}

@@ -232,6 +232,8 @@
     "scratchEmptyHint": "Type a question to send. The selection is quoted and will not be sent automatically.",
     "scratchComposerPlaceholder": "Follow up…",
     "scratchSend": "Send",
+    "scratchSendError": "Send failed: {{error}}",
+    "scratchCreateFailed": "Could not create the scratch session",
     "scratchFloated": "Floated",
     "scratchFloatedHint": "Closing the float docks it back here",
     "scratchCloseConfirmTitle": "Close this scratch chat?",

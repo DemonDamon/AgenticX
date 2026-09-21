@@ -232,6 +232,8 @@
     "scratchEmptyHint": "输入问题后发送。选中内容已作为引用，不会自动发出。",
     "scratchComposerPlaceholder": "接着问…",
     "scratchSend": "发送",
+    "scratchSendError": "发送失败：{{error}}",
+    "scratchCreateFailed": "无法创建临时会话",
     "scratchFloated": "已浮出",
     "scratchFloatedHint": "关闭浮窗后会收回这里",
     "scratchCloseConfirmTitle": "关闭临时对话？",

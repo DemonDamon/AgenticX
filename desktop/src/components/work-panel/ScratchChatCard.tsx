@@ -1,4 +1,5 @@
 import { MessageSquare, X } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ds/Button";
 import type { ScratchChat, ScratchChatSourceKind } from "../../utils/scratch-chat";
@@ -6,6 +7,9 @@ import type { ScratchChat, ScratchChatSourceKind } from "../../utils/scratch-cha
 type Props = {
   chat: ScratchChat;
   onClose: () => void;
+  onSend?: (text: string) => Promise<boolean>;
+  sending?: boolean;
+  error?: string;
 };
 
 function fileLabel(path: string): string {
@@ -17,10 +21,21 @@ function sourceKey(kind: ScratchChatSourceKind): `work.scratchSource.${ScratchCh
   return `work.scratchSource.${kind}`;
 }
 
-export function ScratchChatCard({ chat, onClose }: Props) {
+export function ScratchChatCard({ chat, onClose, onSend, sending = false, error }: Props) {
   const { t } = useTranslation("workspace");
+  const [draft, setDraft] = useState("");
   const quote = String(chat.quotedContent ?? "").trim();
   const files = chat.contextFiles ?? [];
+  const messages = chat.messages ?? [];
+  const showEmpty = messages.length === 0 && !sending;
+  const composerLocked = sending || !onSend;
+
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text || !onSend || sending) return;
+    const ok = await onSend(text);
+    if (ok) setDraft("");
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
@@ -74,21 +89,56 @@ export function ScratchChatCard({ chat, onClose }: Props) {
                 </div>
               </div>
             ) : null}
-            <div className="flex min-h-[160px] flex-col items-center justify-center text-center">
-              <div className="text-[13px] text-text-subtle">{t("work.scratchEmpty")}</div>
-              <div className="mt-1 max-w-[260px] text-[11px] leading-relaxed text-text-faint">
-                {t("work.scratchEmptyHint")}
+            {showEmpty ? (
+              <div className="flex min-h-[160px] flex-col items-center justify-center text-center">
+                <div className="text-[13px] text-text-subtle">{t("work.scratchEmpty")}</div>
+                <div className="mt-1 max-w-[260px] text-[11px] leading-relaxed text-text-faint">
+                  {t("work.scratchEmptyHint")}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {messages.map((message) =>
+                  message.role === "user" ? (
+                    <div
+                      key={message.id}
+                      className="ml-8 rounded-lg bg-surface-card-strong px-2.5 py-1.5 text-[12px] leading-relaxed text-text-strong"
+                    >
+                      {message.content}
+                    </div>
+                  ) : (
+                    <div
+                      key={message.id}
+                      className="mr-6 whitespace-pre-wrap text-[12px] leading-relaxed text-text-subtle"
+                    >
+                      {message.content || (sending ? "…" : "")}
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
           </div>
+          {error ? (
+            <div className="shrink-0 px-3 pb-1 text-[11px] leading-relaxed text-rose-400">
+              {t("work.scratchSendError", { error })}
+            </div>
+          ) : null}
           <div className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-2.5">
             <input
               type="text"
-              disabled
+              value={draft}
+              disabled={composerLocked}
               placeholder={t("work.scratchComposerPlaceholder")}
               className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-[13px] text-text-strong outline-none placeholder:text-text-faint disabled:opacity-60"
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
             />
-            <Button variant="primary" disabled>
+            <Button variant="primary" disabled={composerLocked || !draft.trim()} onClick={() => void submit()}>
               {t("work.scratchSend")}
             </Button>
           </div>
