@@ -63,6 +63,41 @@ export function buildSplashWindowLayerOptions(): Pick<
   return { alwaysOnTop: false };
 }
 
+export type SplashMouseIgnoreState = {
+  fading?: boolean;
+  captureClicks?: boolean;
+};
+
+/** Glass splash is visual-only: forward clicks so the app underneath can come forward. */
+export function buildSplashMouseIgnoreOptions(
+  state: SplashMouseIgnoreState = {},
+): { ignore: boolean; forward?: boolean } {
+  if (state.captureClicks) {
+    return { ignore: false };
+  }
+  return { ignore: true, forward: true };
+}
+
+function applySplashMouseIgnore(
+  win: BrowserWindow,
+  state: SplashMouseIgnoreState = {},
+): void {
+  const options = buildSplashMouseIgnoreOptions(state);
+  try {
+    if (options.ignore) {
+      win.setIgnoreMouseEvents(true, options.forward ? { forward: true } : undefined);
+    } else {
+      win.setIgnoreMouseEvents(false);
+    }
+  } catch {
+    try {
+      win.setIgnoreMouseEvents(options.ignore);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function focusSplashIfOpen(): boolean {
   if (!splashWindow || splashWindow.isDestroyed()) return false;
   if (splashWindow.isMinimized()) splashWindow.restore();
@@ -149,16 +184,7 @@ export async function closeSplash(options?: { fade?: boolean }): Promise<void> {
     } catch {
       // ignore
     }
-    try {
-      // Opacity-0 glass still hit-tests; pass clicks through to the main window.
-      win.setIgnoreMouseEvents(true, { forward: true });
-    } catch {
-      try {
-        win.setIgnoreMouseEvents(true);
-      } catch {
-        // ignore
-      }
-    }
+    applySplashMouseIgnore(win, { fading: true });
     await new Promise((resolve) => setTimeout(resolve, SPLASH_FADE_MS));
   }
   destroySplashWindow();
@@ -236,7 +262,9 @@ export function createSplashWindow(): BrowserWindow | null {
   splashWindow.once("ready-to-show", () => {
     splashWindow?.setAlwaysOnTop(false);
     splashWindow?.show();
-    splashWindow?.setIgnoreMouseEvents(false);
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      applySplashMouseIgnore(splashWindow);
+    }
     updateSplashStage("initializing");
   });
 
