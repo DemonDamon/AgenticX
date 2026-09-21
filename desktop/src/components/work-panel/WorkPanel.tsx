@@ -2390,7 +2390,28 @@ export function WorkPanel({
             <span className="truncate">{chat.title}</span>
             {chat.floating ? (
               <span className="shrink-0 text-[10px] text-text-faint">{t("work.scratchFloated")}</span>
-            ) : null}
+            ) : (
+              <span
+                role="button"
+                tabIndex={0}
+                data-slot="scratch-tab-float"
+                className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setScratchChatFloating(paneId, chat.id, true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setScratchChatFloating(paneId, chat.id, true);
+                  }
+                }}
+                aria-label={t("work.scratchFloat")}
+              >
+                <Maximize2 className="h-3 w-3" strokeWidth={2} />
+              </span>
+            )}
             <span
               role="button"
               tabIndex={0}
@@ -3073,8 +3094,8 @@ export function WorkPanel({
             <ScratchChatCard
               chat={activeScratch}
               paneId={paneId}
+              hideHeader
               onClose={() => requestCloseScratch(activeScratch)}
-              onFloat={() => setScratchChatFloating(paneId, activeScratch.id, true)}
               onSend={(text) => sendScratch(activeScratch, text)}
               onRetry={(userMessageId) => sendScratch(activeScratch, "", { retryUserId: userMessageId })}
               sending={scratchSendingIds.includes(activeScratch.id)}

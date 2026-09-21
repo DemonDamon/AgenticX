@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { i18n } from "../../i18n/i18n";
@@ -189,5 +192,11 @@ describe("ScratchChatCard", () => {
       />,
     );
     expect(floated).not.toContain(floatLabel);
+  });
+
+  it("docks without a second title chrome and keeps float on the tab", () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "WorkPanel.tsx"), "utf8");
+    expect(src).toContain("hideHeader");
+    expect(src).toContain('data-slot="scratch-tab-float"');
   });
 });
