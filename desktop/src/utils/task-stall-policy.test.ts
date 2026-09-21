@@ -481,7 +481,7 @@ describe("isFutileResume", () => {
     expect(isFutileResume(messages)).toBe(true);
   });
 
-  it("returns false when todos are not all done", () => {
+  it("returns false when a leftover todo is still in_progress", () => {
     const messages: Message[] = [
       msg({ id: "u1", role: "user", content: "生成视频" }),
       msg({ id: "t1", role: "tool", content: "[x] 初始化 [>] 渲染 (1/2 completed)" }),
@@ -494,6 +494,95 @@ describe("isFutileResume", () => {
       }),
     ];
     expect(isFutileResume(messages)).toBe(false);
+  });
+
+  it("returns true when leftover todos are pending-only after a complete reply", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "对比 Laya 和 Jev" }),
+      msg({
+        id: "t1",
+        role: "tool",
+        content: [
+          "[x] 定位 fan-out 适配场景",
+          "[x] 落盘 fan-out 试点脚本",
+          "[x] 校验两份交付物语法与完整性",
+          "[x] 增加 --report 校准视图与骑墙值标记",
+          "[x] 抓取 Laya 模型卡与 README",
+          "[x] 产出 Laya vs Jev 对比结论",
+          "[ ] 用真实 API 输出校准问题措辞（待团长提供运行结果）",
+          "(6/7 completed)",
+        ].join("\n"),
+      }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content:
+          "无可自主推进的代码任务——唯一未完成项卡在你这边的真实 API 输出，我无法替你跑。",
+      }),
+      msg({
+        id: "t2",
+        role: "tool",
+        content: "已按用户请求中断当前生成。可点「恢复执行」继续。",
+        metadata: { kind: "turn_interrupted", cause: "user_interrupt" },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(true);
+  });
+
+  it("returns true when a later complete parked reply follows an older incomplete interrupt", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "看下 huggingface laya" }),
+      msg({
+        id: "cut",
+        role: "tool",
+        content: "本轮生成已取消，未收到模型最终响应。可点「恢复执行」继续。",
+        metadata: { kind: "turn_interrupted", cause: "no_final" },
+      }),
+      msg({
+        id: "todo",
+        role: "tool",
+        content: [
+          "[x] 定位 fan-out 适配场景",
+          "[x] 落盘 fan-out 试点脚本",
+          "[x] 校验两份交付物语法与完整性",
+          "[x] 增加 --report 校准视图与骑墙值标记",
+          "[x] 抓取 Laya 模型卡与 README",
+          "[x] 产出 Laya vs Jev 对比结论",
+          "[ ] 用真实 API 输出校准问题措辞（待团长提供运行结果）",
+          "(6/7 completed)",
+        ].join("\n"),
+      }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "无可自主推进的代码任务——唯一未完成项卡在你这边的真实 API 输出。",
+        metadata: { turn_terminal: true },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(true);
+  });
+
+  it("returns true when leftover todos are pending-only even without turn_interrupted", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "对比 Laya 和 Jev" }),
+      msg({
+        id: "t1",
+        role: "tool",
+        content: [
+          "[x] 抓取 Laya 模型卡与 README",
+          "[x] 产出 Laya vs Jev 对比结论",
+          "[ ] 用真实 API 输出校准问题措辞（待团长提供运行结果）",
+          "(2/3 completed)",
+        ].join("\n"),
+      }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "无可自主推进的代码任务，等你贴真实 API 输出。",
+        metadata: { turn_terminal: true },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(true);
   });
 
   it("returns false when no turn_interrupted message exists", () => {

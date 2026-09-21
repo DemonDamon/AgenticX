@@ -3,6 +3,7 @@
  */
 
 import {
+  parseTodoMessage,
   pickLatestTodoFromMessages,
   type ParsedTodo,
   type TodoItem,
@@ -227,61 +228,52 @@ function parseTodoCompletedCounts(content: string): { done: number; total: numbe
   return { done, total };
 }
 
+/** Latest todo snapshot in `(afterExclusive, beforeExclusive)`: parked when no item is in_progress. */
+function latestTodoIsParked(
+  messages: Message[],
+  afterExclusive: number,
+  beforeExclusive: number,
+): boolean | null {
+  for (let i = beforeExclusive - 1; i > afterExclusive; i -= 1) {
+    const m = messages[i];
+    if (m?.role !== "tool") continue;
+    const content = String(m.content ?? "");
+    const parsed = parseTodoMessage(content);
+    if (parsed && parsed.items.length > 0) {
+      return parsed.items.every((item) => item.status !== "in_progress");
+    }
+    const counts = parseTodoCompletedCounts(content);
+    if (counts) return counts.done === counts.total;
+  }
+  return null;
+}
+
 /**
  * Returns true when triggering a resume/continuation would be futile:
- * the last turn_interrupted follows a complete assistant reply, there
- * are no pending (non-done) tool rows, and the latest todo snapshot
- * shows all items completed. In that state, resuming only makes the
- * model re-announce "task done" and re-verify outputs — a known loop.
+ * the current user turn already has a complete assistant reply, there
+ * are no pending/running tool rows, and the latest todo snapshot has
+ * no in_progress item (all completed, or leftover pending-only = parked
+ * on the user). An older incomplete interrupt does not reopen resume
+ * after a later continue already parked the turn.
  */
 export function isFutileResume(messages: Message[]): boolean {
   if (!messages.length) return false;
 
-  // Locate the last turn_interrupted tool message.
-  let lastInterruptedIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i];
-    if (
-      m?.role === "tool" &&
-      (m.metadata as Record<string, unknown> | undefined)?.kind === "turn_interrupted"
-    ) {
-      lastInterruptedIdx = i;
-      break;
-    }
-  }
-  if (lastInterruptedIdx < 0) return false;
-
-  // Only treat interruptions in the active (last user) turn as futile.
   let lastUserIdx = -1;
   for (let i = 0; i < messages.length; i += 1) {
     if (messages[i]?.role === "user") lastUserIdx = i;
   }
-  if (lastInterruptedIdx < lastUserIdx) return false;
+  if (lastUserIdx < 0) return false;
+  if (!lastTurnHasCompletedAssistantReply(messages)) return false;
 
-  // The turn before the interruption must have produced a complete
-  // assistant reply — otherwise a resume is genuinely needed.
-  const beforeInterrupt = messages.slice(0, lastInterruptedIdx);
-  if (!lastTurnHasCompletedAssistantReply(beforeInterrupt)) return false;
-
-  // Reject if any tool row in the last turn is still pending/running.
-  for (let i = 0; i < beforeInterrupt.length; i += 1) {
-    const m = beforeInterrupt[i];
+  for (let i = lastUserIdx + 1; i < messages.length; i += 1) {
+    const m = messages[i];
     if (m?.role !== "tool") continue;
     const status = (m.toolStatus ?? "").trim();
     if (status === "pending" || status === "running") return false;
   }
 
-  // The most recent todo snapshot before the interruption must show
-  // all items completed. Conservative: if no snapshot found, allow resume.
-  for (let i = lastInterruptedIdx - 1; i >= 0; i -= 1) {
-    const m = messages[i];
-    if (m?.role !== "tool") continue;
-    const counts = parseTodoCompletedCounts(String(m.content ?? ""));
-    if (counts) {
-      return counts.done === counts.total;
-    }
-  }
-  return false;
+  return latestTodoIsParked(messages, lastUserIdx, messages.length) === true;
 }
 
 /** Whether desktop auto-nudge may fire for the current stall + execution state. */

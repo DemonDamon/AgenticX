@@ -263,7 +263,7 @@ import {
 import {
   TURN_INTERRUPTED_TOAST,
   isTurnInterruptionNoticeMessage,
-  shouldAutoResumeTruncationInterruption,
+  findCurrentTurnTruncationAutoResume,
   shouldShowTurnInterruptedSyncToast,
 } from "../utils/turn-interruption-notice";
 import {
@@ -8263,16 +8263,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (userStoppedSessionRef.current[sid]) return;
     if ((truncationAutoResumeCountRef.current[sid] ?? 0) >= 2) return;
     const msgs = pane.messages ?? [];
-    for (let i = msgs.length - 1; i >= 0; i -= 1) {
-      const m = msgs[i];
-      if (!m || !shouldAutoResumeTruncationInterruption(m)) continue;
-      if (truncationAutoResumeNoticeRef.current[sid] === m.id) return;
-      truncationAutoResumeNoticeRef.current[sid] = m.id;
-      truncationAutoResumeCountRef.current[sid] =
-        (truncationAutoResumeCountRef.current[sid] ?? 0) + 1;
-      void resumeCurrentTask();
-      return;
-    }
+    if (isFutileResume(msgs)) return;
+    const notice = findCurrentTurnTruncationAutoResume(msgs);
+    if (!notice) return;
+    const noticeId = String(notice.id || "").trim() || `trunc:${String(notice.content ?? "").slice(0, 80)}`;
+    if (truncationAutoResumeNoticeRef.current[sid] === noticeId) return;
+    truncationAutoResumeNoticeRef.current[sid] = noticeId;
+    truncationAutoResumeCountRef.current[sid] =
+      (truncationAutoResumeCountRef.current[sid] ?? 0) + 1;
+    void resumeCurrentTask();
   }, [pane.messages, pane.sessionId, resumeCurrentTask]);
 
   const sendFollowupChip = useCallback(
