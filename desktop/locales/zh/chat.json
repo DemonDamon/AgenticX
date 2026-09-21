@@ -901,7 +901,10 @@
   "groupActivity": {
     "viewRecentSteps": "查看最近工具步骤",
     "statusRunning": "进行中",
-    "statusDone": "已完成"
+    "statusDone": "已完成",
+    "statusWaiting": "等待确认",
+    "approve": "同意",
+    "reject": "拒绝"
   },
   "externalLink": {
     "title": "要打开这个外部网页吗？",

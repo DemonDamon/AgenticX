@@ -16,6 +16,13 @@ export type GroupExpertToolStep = {
   output?: string;
 };
 
+export type GroupExpertPendingConfirm = {
+  requestId: string;
+  question: string;
+  sessionId?: string;
+  context?: Record<string, unknown>;
+};
+
 export type GroupExpertActivity = {
   agentId: string;
   avatarName: string;
@@ -25,6 +32,7 @@ export type GroupExpertActivity = {
   startedAt: number;
   updatedAt: number;
   toolSteps: GroupExpertToolStep[];
+  pendingConfirm?: GroupExpertPendingConfirm;
 };
 
 export type GroupExpertActivityEvent = {
@@ -37,6 +45,9 @@ export type GroupExpertActivityEvent = {
   toolPhase?: string;
   toolCallId?: string;
   toolDetail?: string;
+  confirmRequestId?: string;
+  confirmSessionId?: string;
+  confirmContext?: Record<string, unknown>;
   now: number;
 };
 
@@ -67,6 +78,26 @@ export function formatActivityElapsed(startedAt: number, now: number): string {
 /** Drop typographic ellipsis; the card already shows animated dots on the right. */
 export function stripTrailingStatusEllipsis(text: string): string {
   return String(text ?? "").replace(/(?:\.{3}|…)+\s*$/u, "").trimEnd();
+}
+
+const BLOCKED_QUESTION_PREFIX = /^(?:等待确认后继续执行)[：:]\s*/u;
+
+/** Command / question shown on the waiting card, without the status prefix. */
+export function blockedConfirmQuestion(content?: string): string {
+  const text = String(content ?? "").trim();
+  const stripped = text.replace(BLOCKED_QUESTION_PREFIX, "").trim();
+  return stripped || text || "等待确认后继续执行";
+}
+
+export function groupActivityConfirmRequestIds(
+  activities: Record<string, GroupExpertActivity>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const activity of Object.values(activities)) {
+    const requestId = String(activity.pendingConfirm?.requestId ?? "").trim();
+    if (requestId) ids.add(requestId);
+  }
+  return ids;
 }
 
 export function hasActiveGroupExpertActivities(
@@ -154,17 +185,32 @@ export function reduceGroupExpertActivity(
   let phase: GroupExpertActivityPhase = current?.phase ?? "thinking";
   let summary = current?.summary ?? "正在思考";
   let toolSteps = current?.toolSteps ? current.toolSteps.map((step) => ({ ...step })) : [];
+  let pendingConfirm = current?.pendingConfirm;
 
   if (event.type === "typing") {
     phase = "thinking";
     summary = "正在思考";
+    pendingConfirm = undefined;
   } else if (event.type === "blocked") {
     phase = "waiting";
     summary = "等待你的确认…";
+    const requestId = String(event.confirmRequestId ?? "").trim();
+    pendingConfirm = requestId
+      ? {
+          requestId,
+          question: blockedConfirmQuestion(event.content),
+          ...(String(event.confirmSessionId ?? "").trim()
+            ? { sessionId: String(event.confirmSessionId).trim() }
+            : {}),
+          ...(event.confirmContext ? { context: event.confirmContext } : {}),
+        }
+      : undefined;
   } else if (event.type === "clarification") {
     phase = "waiting";
     summary = "需要你补充信息…";
+    pendingConfirm = undefined;
   } else if (event.type === "progress") {
+    pendingConfirm = undefined;
     const parsedName =
       String(event.toolName ?? "").trim() || parseToolNameFromProgressText(event.content ?? "");
     const parsedPhase =
@@ -209,5 +255,6 @@ export function reduceGroupExpertActivity(
     startedAt,
     updatedAt: now,
     toolSteps,
+    ...(pendingConfirm ? { pendingConfirm } : {}),
   };
 }

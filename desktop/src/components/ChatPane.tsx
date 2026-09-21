@@ -162,6 +162,7 @@ import { StallWaitChip } from "./messages/StallWaitChip";
 import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
 import { parseGroupArtifacts } from "../utils/group-artifacts";
 import {
+  groupActivityConfirmRequestIds,
   hasActiveGroupExpertActivities,
   reduceGroupExpertActivity,
   sortGroupExpertActivities,
@@ -3521,13 +3522,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       // during a session switch. Untagged user echoes still show; untagged
       // assistants/tools stay hidden.
       visibleMessagesForSession(pane?.messages ?? [], pane?.sessionId).filter((item) => {
-        if (isGroupPane) return true;
+        if (isGroupPane) {
+          const ownedIds = groupActivityConfirmRequestIds(groupExpertActivities);
+          const confirmId = String(item.inlineConfirm?.requestId ?? "").trim();
+          return !(confirmId && ownedIds.has(confirmId));
+        }
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
         if (isInterruptedAssistantPlaceholder(item)) return false;
         if (!paneHasUserMessage && isTurnInterruptionNoticeMessage(item)) return false;
         return !item.agentId || item.agentId === "meta";
       }),
-    [isGroupPane, paneHasUserMessage, pane?.messages, pane?.sessionId]
+    [groupExpertActivities, isGroupPane, paneHasUserMessage, pane?.messages, pane?.sessionId]
   );
   // Render-only list: inline the sub-agent cluster card into the conversation
   // flow (like the clarification card). Kept separate from `visibleMessages` so
@@ -8994,6 +8999,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           key={activity.agentId}
           activity={activity}
           now={activityClockNow}
+          onResolveConfirm={
+            activity.pendingConfirm
+              ? (approved) => {
+                  const pending = activity.pendingConfirm;
+                  if (!pending) return;
+                  void resolveGroupInlineConfirm(
+                    {
+                      requestId: pending.requestId,
+                      question: pending.question,
+                      agentId: activity.agentId,
+                      sessionId: pending.sessionId || pane.sessionId,
+                      context: pending.context,
+                    },
+                    approved,
+                  );
+                }
+              : undefined
+          }
         />
       ))}
       {isGroupPane
@@ -10777,6 +10800,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 avatarName: blockedSender.name,
                 avatarUrl: blockedSender.url,
                 content: blockedText,
+                confirmRequestId: requestId,
+                confirmSessionId: requestSessionId,
+                confirmContext,
                 now: Date.now(),
               });
               setGroupTyping((prev) => {
@@ -13095,9 +13121,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   async function resolveGroupInlineConfirm(confirm: PendingConfirm, approved: boolean) {
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const targetSessionId = (confirm.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    const paneMessages =
+      useAppStore.getState().panes.find((item) => item.id === pane.id)?.messages ?? [];
     setPaneMessages(
       pane.id,
-      visibleMessages.map((msg) => {
+      paneMessages.map((msg) => {
         if (msg.inlineConfirm?.requestId !== confirm.requestId) return msg;
         return { ...msg, inlineConfirm: undefined };
       })

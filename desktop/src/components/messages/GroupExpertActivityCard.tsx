@@ -22,6 +22,7 @@ type Props = {
   now: number;
   /** Test hook so static markup can assert the expanded tool list. */
   defaultExpanded?: boolean;
+  onResolveConfirm?: (approved: boolean) => void;
 };
 
 function WorkingEllipsis() {
@@ -38,15 +39,28 @@ function toolStepLabel(toolName: string, fallback: string): string {
   return formatGroupToolLabel(toolName) || fallback;
 }
 
-export function GroupExpertActivityCard({ activity, now, defaultExpanded = false }: Props) {
+export function GroupExpertActivityCard({
+  activity,
+  now,
+  defaultExpanded = false,
+  onResolveConfirm,
+}: Props) {
   const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const elapsed = formatActivityElapsed(activity.startedAt, now);
   const waiting = activity.phase === "waiting";
+  const pendingConfirm = waiting ? activity.pendingConfirm : undefined;
   const hasSteps = activity.toolSteps.length > 0;
   const summaryText = waiting
     ? activity.summary
     : stripTrailingStatusEllipsis(activity.summary);
+
+  const resolveConfirm = (approved: boolean) => {
+    if (!pendingConfirm || confirmBusy || !onResolveConfirm) return;
+    setConfirmBusy(true);
+    onResolveConfirm(approved);
+  };
 
   return (
     <div
@@ -110,17 +124,22 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
             {activity.toolSteps.map((step) => {
               const label = toolStepLabel(step.toolName, t("tool.tool"));
               const running = step.phase !== "done";
-              const status = running ? t("groupActivity.statusRunning") : t("groupActivity.statusDone");
+              const waitingStep = running && waiting;
+              const status = waitingStep
+                ? t("groupActivity.statusWaiting")
+                : running
+                  ? t("groupActivity.statusRunning")
+                  : t("groupActivity.statusDone");
               const title = `${label} · ${status}`;
               return (
                 <li key={step.callId} className="min-w-0 text-[11px] leading-snug text-text-muted">
-                  {running ? (
+                  {running && !waitingStep ? (
                     <Shimmer variant="status" text={title} className="text-[11px]" />
                   ) : (
                     <div className="text-text-muted">{title}</div>
                   )}
                   {step.detail ? (
-                    running ? (
+                    running && !waitingStep ? (
                       <Shimmer
                         variant="status"
                         text={step.detail}
@@ -137,6 +156,33 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
               );
             })}
           </ul>
+        ) : null}
+        {pendingConfirm ? (
+          <div className="mt-2 border-t border-border/40 pt-2">
+            <p className="break-all text-[11px] leading-snug text-text-muted">
+              {pendingConfirm.question}
+            </p>
+            {onResolveConfirm ? (
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md bg-[var(--ui-btn-primary-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ui-btn-primary-text)] hover:opacity-90 disabled:opacity-50"
+                  disabled={confirmBusy}
+                  onClick={() => resolveConfirm(true)}
+                >
+                  {t("groupActivity.approve")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-border bg-surface-hover px-2.5 py-1 text-[11px] text-text-strong hover:opacity-90 disabled:opacity-50"
+                  disabled={confirmBusy}
+                  onClick={() => resolveConfirm(false)}
+                >
+                  {t("groupActivity.reject")}
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

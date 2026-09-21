@@ -901,7 +901,10 @@
   "groupActivity": {
     "viewRecentSteps": "View recent tool steps",
     "statusRunning": "In progress",
-    "statusDone": "Done"
+    "statusDone": "Done",
+    "statusWaiting": "Waiting for confirm",
+    "approve": "Allow",
+    "reject": "Deny"
   },
   "externalLink": {
     "title": "Open this external website?",

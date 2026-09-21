@@ -3,8 +3,10 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  blockedConfirmQuestion,
   formatActivityElapsed,
   formatGroupToolLabel,
+  groupActivityConfirmRequestIds,
   hasActiveGroupExpertActivities,
   parseToolNameFromProgressText,
   reduceGroupExpertActivity,
@@ -140,10 +142,35 @@ describe("reduceGroupExpertActivity", () => {
     expect(blocked.phase).toBe("waiting");
     expect(blocked.summary).toBe("等待你的确认…");
     expect(blocked.startedAt).toBe(1_000);
+    expect(blocked.pendingConfirm).toBeUndefined();
 
     const clarifying = reduce(typed, { type: "clarification", content: "哪个仓库？", now: 5_000 });
     expect(clarifying.phase).toBe("waiting");
     expect(clarifying.summary).toBe("需要你补充信息…");
+    expect(clarifying.pendingConfirm).toBeUndefined();
+  });
+
+  it("attaches pending confirm on blocked and clears it when thinking resumes", () => {
+    const typed = reduce(undefined, { type: "typing" });
+    const blocked = reduce(typed, {
+      type: "blocked",
+      content: "等待确认后继续执行：grep -n include_router app/main.py",
+      confirmRequestId: "cfm_9",
+      confirmSessionId: "sess_1",
+      confirmContext: { risk: "non_whitelisted", tool: "bash_exec" },
+      now: 4_000,
+    });
+    expect(blocked.pendingConfirm).toEqual({
+      requestId: "cfm_9",
+      question: "grep -n include_router app/main.py",
+      sessionId: "sess_1",
+      context: { risk: "non_whitelisted", tool: "bash_exec" },
+    });
+    expect(groupActivityConfirmRequestIds({ researcher: blocked }).has("cfm_9")).toBe(true);
+
+    const resumed = reduce(blocked, { type: "typing", now: 9_000 });
+    expect(resumed.pendingConfirm).toBeUndefined();
+    expect(groupActivityConfirmRequestIds({ researcher: resumed }).size).toBe(0);
   });
 
   it("caps tool steps at the latest 6", () => {
@@ -178,6 +205,11 @@ describe("reduceGroupExpertActivity", () => {
 });
 
 describe("activity helpers", () => {
+  it("strips the blocked status prefix from the confirm question", () => {
+    expect(blockedConfirmQuestion("等待确认后继续执行：grep foo")).toBe("grep foo");
+    expect(blockedConfirmQuestion("rm -rf /tmp")).toBe("rm -rf /tmp");
+  });
+
   it("strips trailing typographic ellipsis from in-progress copy", () => {
     expect(stripTrailingStatusEllipsis("已完成文件读取，继续处理中…")).toBe(
       "已完成文件读取，继续处理中",
