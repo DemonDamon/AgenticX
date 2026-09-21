@@ -288,121 +288,22 @@ body {
   color: rgb(37, 99, 235);
 }
 
-/* 模型徽标：Originkit Moving Gradient — mask 固定，只转 conic 角度 */
-@property --agx-chip-spin {
-  syntax: "<angle>";
-  inherits: true;
-  initial-value: 0deg;
-}
-
+/* 模型徽标：仅主题色填充，无描边、无图标 */
 .agx-liquid-glass-chip {
-  --agx-chip-spin: 0deg;
-  --agx-chip-ring: 1.5px;
-  position: relative;
-  isolation: isolate;
   width: max-content;
   max-width: none;
   min-width: max-content;
   box-sizing: border-box;
-  overflow: visible;
   border: none;
-  background: #0a0a0c;
+  background: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 36%, var(--surface-popover));
   box-shadow: none;
-  color: #f8fafc;
+  color: var(--text-strong);
   font-weight: 400;
-  animation: agx-liquid-glass-chip-spin 4s linear infinite;
-}
-
-.agx-liquid-glass-chip::before,
-.agx-liquid-glass-chip::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  padding: var(--agx-chip-ring);
-  box-sizing: border-box;
-  pointer-events: none;
-  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
-  -webkit-mask-clip: border-box, content-box;
-  -webkit-mask-composite: xor;
-  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
-  mask-clip: border-box, content-box;
-  mask-composite: exclude;
-}
-
-.agx-liquid-glass-chip::before {
-  background: repeating-conic-gradient(
-    from var(--agx-chip-spin),
-    #ffffff 0deg,
-    #ffffff 70deg,
-    #5b4dff 84deg,
-    #22d3ee 88deg,
-    #00ff94 90deg,
-    #ffffff 96deg,
-    #ffffff 180deg
-  );
-}
-
-.agx-liquid-glass-chip::after {
-  background: conic-gradient(
-    from var(--agx-chip-spin),
-    #5b4dff,
-    #22d3ee,
-    #00ff94,
-    #5b4dff
-  );
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-
-.agx-liquid-glass-chip > * {
-  position: relative;
-  z-index: 1;
-}
-
-.agx-liquid-glass-chip:hover::after {
-  opacity: 1;
-}
-
-.agx-liquid-glass-chip .agx-chip-sparkle {
-  color: #f8fafc;
-  fill: rgba(0, 255, 148, 0.28);
 }
 
 :root[data-theme="light"] .agx-liquid-glass-chip {
-  background: #ffffff;
-  color: #334155;
-}
-
-:root[data-theme="light"] .agx-liquid-glass-chip::before {
-  background: repeating-conic-gradient(
-    from var(--agx-chip-spin),
-    #cbd5e1 0deg,
-    #cbd5e1 70deg,
-    #5b4dff 84deg,
-    #22d3ee 88deg,
-    #00ff94 90deg,
-    #cbd5e1 96deg,
-    #cbd5e1 180deg
-  );
-}
-
-:root[data-theme="light"] .agx-liquid-glass-chip .agx-chip-sparkle {
-  color: #64748b;
-  fill: rgba(91, 77, 255, 0.18);
-}
-
-@keyframes agx-liquid-glass-chip-spin {
-  to {
-    --agx-chip-spin: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agx-liquid-glass-chip {
-    animation: none;
-  }
+  background: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 16%, var(--surface-popover));
+  color: var(--text-strong);
 }
 
 :root[data-theme="light"] [data-turn-usage-arrow] {

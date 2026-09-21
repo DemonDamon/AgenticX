@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Sparkle } from "lucide-react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { MessageUsage, ModelSelection } from "../../store";
@@ -78,11 +78,6 @@ export function MessageTurnMeta({
       className="agx-liquid-glass-chip inline-flex h-5 w-max shrink-0 items-center gap-1 rounded-full px-3.5 text-[12px] font-normal leading-none cursor-default select-none"
       title={modelLabel}
     >
-      <Sparkle
-        size={12}
-        className="agx-chip-sparkle shrink-0"
-        strokeWidth={2}
-      />
       {isAuto ? <span className="shrink-0 text-amber-200/70 [html[data-theme=light]_&]:text-amber-700/70 text-[10px]">auto</span> : null}
       <span className="whitespace-nowrap leading-none">
         {bareModel}

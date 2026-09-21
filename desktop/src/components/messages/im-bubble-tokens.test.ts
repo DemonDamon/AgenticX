@@ -53,6 +53,21 @@ describe("IM bubble tokens", () => {
     expect(chipBlock).not.toContain("var(--text-muted)");
   });
 
+  it("fills the model chip with theme color only, no ring or sparkle", () => {
+    const block = ruleBlock(indexCss, ".agx-liquid-glass-chip {");
+    expect(block).toContain("rgb(var(--theme-color-rgb, 59, 130, 246)) 36%");
+    expect(block).toContain("var(--surface-popover)");
+    expect(block).toContain("var(--text-strong)");
+    expect(block).toContain("border: none");
+    expect(indexCss).not.toContain("--agx-chip-spin");
+    expect(indexCss).not.toContain("agx-chip-sparkle");
+    expect(indexCss).not.toContain(".agx-liquid-glass-chip::before");
+    expect(indexCss).not.toContain("background: #0a0a0c");
+    expect(indexCss).not.toContain("#5b4dff");
+    expect(indexCss).not.toContain("#00ff94");
+    expect(indexCss).not.toContain("#22d3ee");
+  });
+
   it("paints user-bubble links with on-color text, not the fill color", () => {
     const start = indexCss.indexOf(".agx-im-user-bubble .msg-content a");
     expect(start).toBeGreaterThanOrEqual(0);
