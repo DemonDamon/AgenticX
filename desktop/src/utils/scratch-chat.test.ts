@@ -4,10 +4,12 @@ import {
   collectScratchSessionIds,
   excludeScratchSessionsFromHistory,
   normalizePersistedScratchChats,
+  resolveScratchChatModel,
   scratchSourceKey,
   setScratchFloating,
   shouldConfirmCloseScratch,
   upsertScratchChatList,
+  withoutScratchContextFile,
   type ScratchChat,
 } from "./scratch-chat";
 
@@ -100,6 +102,8 @@ describe("scratch-chat helpers", () => {
         floating: true,
         messages: [{ id: "m", role: "user", content: "q" }],
         contextFiles: [{ path: "/tmp/report.md", sourcePath: "/tmp/report.md" }],
+        modelProvider: "openai",
+        modelName: "gpt-test",
       },
       { id: "", title: "bad", sourceKind: "file", sourceKey: "file:x" },
       { title: "no-id", sourceKind: "message", sourceKey: "message:x" },
@@ -110,6 +114,34 @@ describe("scratch-chat helpers", () => {
     expect(chats[0]?.floating).toBe(false);
     expect(chats[0]?.sessionId).toBe("sid-1");
     expect(chats[0]?.messages).toHaveLength(1);
+    expect(chats[0]?.modelProvider).toBe("openai");
+    expect(chats[0]?.modelName).toBe("gpt-test");
     expect(closeScratchChatList(chats, "c1")).toEqual([]);
+  });
+
+  it("resolves the scratch model override before the pane model", () => {
+    expect(
+      resolveScratchChatModel(
+        { modelProvider: "openai", modelName: "gpt-test" },
+        { modelProvider: "anthropic", modelName: "sonnet" },
+      ),
+    ).toEqual({ provider: "openai", model: "gpt-test" });
+    expect(resolveScratchChatModel({}, { modelProvider: "anthropic", modelName: "sonnet" })).toEqual({
+      provider: "anthropic",
+      model: "sonnet",
+    });
+  });
+
+  it("drops a context file by path", () => {
+    expect(
+      withoutScratchContextFile(
+        [
+          { path: "/tmp/a.md", sourcePath: "/tmp/a.md" },
+          { path: "/tmp/b.md" },
+        ],
+        "/tmp/a.md",
+      ),
+    ).toEqual([{ path: "/tmp/b.md" }]);
+    expect(withoutScratchContextFile([{ path: "/tmp/a.md" }], "/tmp/a.md")).toBeUndefined();
   });
 });

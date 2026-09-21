@@ -13,13 +13,15 @@ import { ScratchChatCard } from "./ScratchChatCard";
 
 type Props = {
   chat: ScratchChat;
+  paneId: string;
   onDock: () => void;
   onSend?: (text: string) => Promise<boolean>;
+  onRetry?: (userMessageId: string) => void;
   sending?: boolean;
   error?: string;
 };
 
-export function ScratchChatFloatOverlay({ chat, onDock, onSend, sending, error }: Props) {
+export function ScratchChatFloatOverlay({ chat, paneId, onDock, onSend, onRetry, sending, error }: Props) {
   const { t } = useTranslation("workspace");
   const [pos, setPos] = useState(() =>
     defaultScratchFloatPosition({ width: window.innerWidth, height: window.innerHeight }),
@@ -78,8 +80,10 @@ export function ScratchChatFloatOverlay({ chat, onDock, onSend, sending, error }
       <div className="min-h-0 flex-1">
         <ScratchChatCard
           chat={{ ...chat, floating: false }}
+          paneId={paneId}
           onClose={onDock}
           onSend={onSend}
+          onRetry={onRetry}
           sending={sending}
           error={error}
         />

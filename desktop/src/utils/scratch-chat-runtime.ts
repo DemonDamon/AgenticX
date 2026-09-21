@@ -4,10 +4,17 @@
  * Author: Damon Li
  */
 
-import type { Message } from "../store";
+import type { Message, ToolCallStatus } from "../store";
 import { sessionCreateAvatarId } from "./session-create-avatar";
 import { parseSseFrame } from "./session-reattach";
 import type { ScratchChat, ScratchChatContextFile } from "./scratch-chat";
+
+const SILENT_SCRATCH_TOOLS = new Set(["check_resources"]);
+
+export function isScratchAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  return String((err as { name?: string }).name ?? "") === "AbortError";
+}
 
 export type ScratchChatCreateSession = (payload: {
   avatar_id?: string;
@@ -87,10 +94,102 @@ export function appendScratchTurn(
   ];
 }
 
+export function scratchVisibleReplyText(content: string): string {
+  return String(content ?? "")
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
+    .trim();
+}
+
+export function lastScratchUserMessage(messages: Message[]): Message | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return messages[i];
+  }
+  return null;
+}
+
+export function isScratchReplyIncomplete(messages: Message[]): boolean {
+  const user = lastScratchUserMessage(messages);
+  if (!user) return false;
+  const idx = messages.findIndex((item) => item.id === user.id);
+  const after = idx >= 0 ? messages.slice(idx + 1) : [];
+  const assistant = [...after].reverse().find((item) => item.role === "assistant");
+  if (!assistant) return true;
+  return !scratchVisibleReplyText(assistant.content);
+}
+
+export function prepareScratchRetry(
+  messages: Message[],
+  userId: string,
+): { messages: Message[]; userText: string } | null {
+  const idx = messages.findIndex((item) => item.id === userId && item.role === "user");
+  if (idx < 0) return null;
+  const userText = String(messages[idx]?.content ?? "").trim();
+  if (!userText) return null;
+  return { messages: messages.slice(0, idx + 1), userText };
+}
+
+function appendScratchAssistant(
+  messages: Message[],
+  input: { assistantId: string; sessionId: string },
+): Message[] {
+  return [
+    ...messages,
+    {
+      id: input.assistantId,
+      role: "assistant",
+      content: "",
+      ownerSessionId: input.sessionId,
+      timestamp: Date.now(),
+    },
+  ];
+}
+
 function sseData(payload: Record<string, unknown>): Record<string, unknown> {
   return payload.data && typeof payload.data === "object"
     ? (payload.data as Record<string, unknown>)
     : {};
+}
+
+function scratchToolCallId(data: Record<string, unknown>): string {
+  return String(data.tool_call_id ?? data.id ?? "").trim();
+}
+
+function scratchToolName(data: Record<string, unknown>): string {
+  return String(data.name ?? data.tool ?? "tool").trim() || "tool";
+}
+
+function finishRunningScratchTools(messages: Message[], status: ToolCallStatus = "done"): Message[] {
+  return messages.map((item) =>
+    item.role === "tool" && (item.toolStatus === "running" || item.toolStatus === "pending")
+      ? { ...item, toolStatus: status }
+      : item,
+  );
+}
+
+function upsertScratchToolMessage(
+  messages: Message[],
+  assistantId: string,
+  patch: Partial<Message> & { toolCallId?: string; toolName?: string },
+): Message[] {
+  const callId = String(patch.toolCallId ?? "").trim();
+  const existing = messages.findIndex(
+    (item) => item.role === "tool" && callId && item.toolCallId === callId,
+  );
+  if (existing >= 0) {
+    return messages.map((item, index) => (index === existing ? { ...item, ...patch } : item));
+  }
+  const tool: Message = {
+    id: callId ? `scratch-tool:${callId}` : `scratch-tool:${assistantId}:${messages.length}`,
+    role: "tool",
+    content: "",
+    timestamp: Date.now(),
+    ...patch,
+  };
+  const assistantIdx = messages.findIndex((item) => item.id === assistantId);
+  if (assistantIdx >= 0) {
+    return [...messages.slice(0, assistantIdx), tool, ...messages.slice(assistantIdx)];
+  }
+  return [...messages, tool];
 }
 
 export function applyScratchSsePayload(
@@ -112,22 +211,115 @@ export function applyScratchSsePayload(
       ),
     };
   }
+  if (type === "tool_call") {
+    const name = scratchToolName(data);
+    if (SILENT_SCRATCH_TOOLS.has(name)) return { messages };
+    const callId = scratchToolCallId(data);
+    const args = (data.arguments ?? data.args ?? {}) as Record<string, unknown>;
+    return {
+      messages: upsertScratchToolMessage(messages, assistantId, {
+        toolCallId: callId || undefined,
+        toolName: name,
+        toolArgs: args && typeof args === "object" ? args : {},
+        toolStatus: "running",
+      }),
+    };
+  }
+  if (type === "tool_progress") {
+    const callId = scratchToolCallId(data);
+    const preview = String(data.text ?? data.message ?? data.preview ?? "").trim();
+    if (!callId && !preview) return { messages };
+    return {
+      messages: messages.map((item) => {
+        if (item.role !== "tool") return item;
+        if (callId && item.toolCallId !== callId) return item;
+        if (!callId && item.toolStatus !== "running") return item;
+        const lines = preview
+          ? [...(item.toolStreamLines ?? []), preview].slice(-20)
+          : item.toolStreamLines;
+        return {
+          ...item,
+          toolStatus: "running",
+          toolResultPreview: preview || item.toolResultPreview,
+          toolStreamLines: lines,
+        };
+      }),
+    };
+  }
+  if (type === "tool_result") {
+    const name = scratchToolName(data);
+    if (SILENT_SCRATCH_TOOLS.has(name)) return { messages };
+    const callId = scratchToolCallId(data);
+    const isError = data.is_error === true;
+    const raw = data.result ?? data.content ?? data.text ?? "";
+    const content = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const preview = content.replace(/\s+/g, " ").trim().slice(0, 160);
+    const status: ToolCallStatus = isError ? "error" : "done";
+    const matched = messages.some(
+      (item) => item.role === "tool" && callId && item.toolCallId === callId,
+    );
+    if (matched || callId) {
+      return {
+        messages: upsertScratchToolMessage(messages, assistantId, {
+          toolCallId: callId || undefined,
+          toolName: name,
+          content,
+          toolStatus: status,
+          toolResultPreview: preview,
+          toolStreamLines: [],
+        }),
+      };
+    }
+    const fallback = [...messages]
+      .reverse()
+      .find(
+        (item) =>
+          item.role === "tool" &&
+          (item.toolStatus === "running" || item.toolStatus === "pending") &&
+          (!name || name === "tool" || item.toolName === name),
+      );
+    if (!fallback) {
+      return {
+        messages: upsertScratchToolMessage(messages, assistantId, {
+          toolName: name,
+          content,
+          toolStatus: status,
+          toolResultPreview: preview,
+        }),
+      };
+    }
+    return {
+      messages: messages.map((item) =>
+        item.id === fallback.id
+          ? {
+              ...item,
+              content,
+              toolStatus: status,
+              toolResultPreview: preview,
+              toolStreamLines: [],
+            }
+          : item,
+      ),
+    };
+  }
   if (type === "final") {
     const text = String(data.text ?? data.content ?? "").trim();
     return {
-      messages: messages.map((item) =>
-        item.id === assistantId ? { ...item, content: text || item.content } : item,
+      messages: finishRunningScratchTools(
+        messages.map((item) =>
+          item.id === assistantId ? { ...item, content: text || item.content } : item,
+        ),
       ),
       done: true,
     };
   }
   if (type === "error") {
     return {
-      messages,
+      messages: finishRunningScratchTools(messages, "error"),
       error: String(data.text ?? data.error ?? row.error ?? "unknown chat error"),
     };
   }
-  if (type === "done") return { messages, done: true };
+  if (type === "done") return { messages: finishRunningScratchTools(messages), done: true };
   return { messages };
 }
 
@@ -195,6 +387,10 @@ export const defaultScratchChatTransport: ScratchChatTransport = {
   },
 };
 
+export type ScratchTurnResult =
+  | { ok: true }
+  | { ok: false; error: string; committed?: boolean };
+
 export async function runScratchChatTurn(opts: {
   chat: ScratchChat;
   userText: string;
@@ -206,9 +402,10 @@ export async function runScratchChatTurn(opts: {
   ids: { userId: string; assistantId: string; clientTurnId: string };
   transport: ScratchChatTransport;
   signal?: AbortSignal;
+  reuseUser?: boolean;
   onMessages: (messages: Message[]) => void;
   onSessionId: (sessionId: string) => void;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<ScratchTurnResult> {
   const userText = String(opts.userText ?? "").trim();
   if (!userText) return { ok: false, error: "empty" };
 
@@ -220,6 +417,7 @@ export async function runScratchChatTurn(opts: {
       createSession: opts.transport.createSession,
     });
   } catch (err) {
+    if (isScratchAbortError(err)) return { ok: false, error: "aborted" };
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   opts.onSessionId(sessionId);
@@ -241,18 +439,24 @@ export async function runScratchChatTurn(opts: {
       signal: opts.signal,
     });
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    if (isScratchAbortError(err)) return { ok: false, error: "aborted", committed: opts.reuseUser };
+    return { ok: false, error: err instanceof Error ? err.message : String(err), committed: opts.reuseUser };
   }
   if (!resp.ok || !resp.body) {
-    return { ok: false, error: `HTTP ${resp.status}` };
+    return { ok: false, error: `HTTP ${resp.status}`, committed: opts.reuseUser };
   }
 
-  let messages = appendScratchTurn(opts.chat.messages ?? [], {
-    userId: opts.ids.userId,
-    assistantId: opts.ids.assistantId,
-    text: userText,
-    sessionId,
-  });
+  let messages = opts.reuseUser
+    ? appendScratchAssistant(opts.chat.messages ?? [], {
+        assistantId: opts.ids.assistantId,
+        sessionId,
+      })
+    : appendScratchTurn(opts.chat.messages ?? [], {
+        userId: opts.ids.userId,
+        assistantId: opts.ids.assistantId,
+        text: userText,
+        sessionId,
+      });
   opts.onMessages(messages);
 
   try {
@@ -263,7 +467,12 @@ export async function runScratchChatTurn(opts: {
       if (next.error) throw new Error(next.error);
     });
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    if (isScratchAbortError(err)) return { ok: false, error: "aborted", committed: true };
+    return { ok: false, error: err instanceof Error ? err.message : String(err), committed: true };
+  }
+  const assistant = messages.find((item) => item.id === opts.ids.assistantId);
+  if (!scratchVisibleReplyText(assistant?.content ?? "")) {
+    return { ok: false, error: "empty_reply", committed: true };
   }
   return { ok: true };
 }

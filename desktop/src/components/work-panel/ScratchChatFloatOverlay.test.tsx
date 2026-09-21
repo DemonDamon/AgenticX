@@ -25,7 +25,7 @@ describe("ScratchChatFloatOverlay", () => {
   it("renders the docked body and docks without destroying", () => {
     const onDock = vi.fn();
     render(
-      <ScratchChatFloatOverlay chat={chat} onDock={onDock} onSend={async () => true} />,
+      <ScratchChatFloatOverlay chat={chat} paneId="pane-1" onDock={onDock} onSend={async () => true} />,
     );
     expect(screen.getByText("关于这段回复")).toBeTruthy();
     expect(screen.getByText("引用正文")).toBeTruthy();

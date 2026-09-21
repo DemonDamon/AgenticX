@@ -33,6 +33,9 @@ export type ScratchChat = {
   sessionId: string;
   messages: Message[];
   floating: boolean;
+  /** Per-card override. Empty = inherit the host pane model. */
+  modelProvider?: string;
+  modelName?: string;
 };
 
 export type ScratchChatDraft = {
@@ -134,6 +137,27 @@ export function patchScratchChatList(
   return chats.map((chat) => (chat.id === id ? { ...chat, ...patch, id: chat.id } : chat));
 }
 
+export function resolveScratchChatModel(
+  chat: Pick<ScratchChat, "modelProvider" | "modelName">,
+  pane: { modelProvider?: string; modelName?: string },
+): { provider: string; model: string } {
+  const provider = String(chat.modelProvider || pane.modelProvider || "").trim();
+  const model = String(chat.modelName || pane.modelName || "").trim();
+  return { provider, model };
+}
+
+export function withoutScratchContextFile(
+  files: ScratchChatContextFile[] | undefined,
+  path: string,
+): ScratchChatContextFile[] | undefined {
+  const target = String(path ?? "").trim();
+  const next = (files ?? []).filter((file) => {
+    const key = String(file.sourcePath || file.path || "").trim();
+    return key !== target;
+  });
+  return next.length > 0 ? next : undefined;
+}
+
 export function shouldConfirmCloseScratch(
   chat: Pick<ScratchChat, "sessionId" | "messages">
 ): boolean {
@@ -200,6 +224,8 @@ export function normalizePersistedScratchChats(raw: unknown): ScratchChat[] {
     if (seen.has(id)) continue;
     seen.add(id);
     const quoted = String(row.quotedContent ?? "");
+    const modelProvider = String(row.modelProvider ?? "").trim();
+    const modelName = String(row.modelName ?? "").trim();
     out.push({
       id,
       title,
@@ -210,6 +236,8 @@ export function normalizePersistedScratchChats(raw: unknown): ScratchChat[] {
       sessionId: String(row.sessionId ?? "").trim(),
       messages: normalizeMessages(row.messages),
       floating: false,
+      ...(modelProvider ? { modelProvider } : {}),
+      ...(modelName ? { modelName } : {}),
     });
   }
   return out;

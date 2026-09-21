@@ -63,7 +63,7 @@ import { HoverTip } from "../ds/HoverTip";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
 import { ScratchChatCard } from "./ScratchChatCard";
-import { ScratchChatFloatOverlay } from "./ScratchChatFloatOverlay";
+import { useScratchChatRuntime } from "./use-scratch-chat-runtime";
 import {
   shouldConfirmCloseScratch,
   type ScratchChat,
@@ -80,10 +80,6 @@ import {
   resolveActiveScratchId,
   resolveScratchFocusId,
 } from "../../utils/scratch-chat-panel";
-import {
-  defaultScratchChatTransport,
-  runScratchChatTurn,
-} from "../../utils/scratch-chat-runtime";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
@@ -845,16 +841,9 @@ export function WorkPanel({
     (s) => s.panes.find((p) => p.id === paneId)?.scratchChats ?? EMPTY_SCRATCH_CHATS,
   );
   const closeScratchChat = useAppStore((s) => s.closeScratchChat);
-  const patchScratchChat = useAppStore((s) => s.patchScratchChat);
   const setScratchChatFloating = useAppStore((s) => s.setScratchChatFloating);
-  const scratchPaneMeta = useAppStore((s) => {
-    const pane = s.panes.find((item) => item.id === paneId);
-    return {
-      avatarId: pane?.avatarId ?? null,
-      modelProvider: pane?.modelProvider ?? "",
-      modelName: pane?.modelName ?? "",
-    };
-  });
+  const { sendScratch, sendingIds: scratchSendingIds, errors: scratchSendErrors, clearScratchRuntime } =
+    useScratchChatRuntime(paneId);
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
@@ -869,9 +858,6 @@ export function WorkPanel({
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
   const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
   const [pendingCloseScratch, setPendingCloseScratch] = useState<ScratchChat | null>(null);
-  const [scratchSendingIds, setScratchSendingIds] = useState<string[]>([]);
-  const [scratchSendErrors, setScratchSendErrors] = useState<Record<string, string>>({});
-  const scratchAbortRef = useRef<Map<string, AbortController>>(new Map());
   const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
     sessionId: string;
     runId: string;
@@ -1279,30 +1265,17 @@ export function WorkPanel({
     () => scratchChats.find((chat) => chat.id === activeScratchId) ?? scratchChats[0] ?? null,
     [scratchChats, activeScratchId],
   );
-  const floatingChat = useMemo(
-    () => scratchChats.find((chat) => chat.floating) ?? null,
-    [scratchChats],
-  );
-
   useEffect(() => {
     setActiveScratchId((current) => resolveActiveScratchId(scratchChats, current));
   }, [scratchChats]);
 
   const commitCloseScratch = (chatId: string) => {
-    scratchAbortRef.current.get(chatId)?.abort();
-    scratchAbortRef.current.delete(chatId);
+    clearScratchRuntime(chatId);
     closeScratchChat(paneId, chatId);
     if (activeKind === "scratch" && activeScratchId === chatId) {
       setActiveKind(resolveFallbackKind({ excludeScratchId: chatId }));
     }
     setPendingCloseScratch(null);
-    setScratchSendingIds((prev) => prev.filter((id) => id !== chatId));
-    setScratchSendErrors((prev) => {
-      if (!(chatId in prev)) return prev;
-      const next = { ...prev };
-      delete next[chatId];
-      return next;
-    });
   };
 
   const requestCloseScratch = (chat: ScratchChat) => {
@@ -1327,53 +1300,6 @@ export function WorkPanel({
         title: scratchAbout(snippet || fileLabelFromPath(abs)),
       }),
     );
-  };
-
-  const sendScratch = async (chat: ScratchChat, text: string): Promise<boolean> => {
-    const chatId = chat.id;
-    if (scratchSendingIds.includes(chatId)) return false;
-    scratchAbortRef.current.get(chatId)?.abort();
-    const abort = new AbortController();
-    scratchAbortRef.current.set(chatId, abort);
-    setScratchSendingIds((prev) => (prev.includes(chatId) ? prev : [...prev, chatId]));
-    setScratchSendErrors((prev) => {
-      if (!(chatId in prev)) return prev;
-      const next = { ...prev };
-      delete next[chatId];
-      return next;
-    });
-    const latest =
-      useAppStore.getState().panes.find((item) => item.id === paneId)?.scratchChats?.find((item) => item.id === chatId) ??
-      chat;
-    const result = await runScratchChatTurn({
-      chat: latest,
-      userText: text,
-      paneAvatarId: scratchPaneMeta.avatarId,
-      provider: scratchPaneMeta.modelProvider,
-      model: scratchPaneMeta.modelName,
-      apiBase,
-      apiToken,
-      ids: {
-        userId: crypto.randomUUID(),
-        assistantId: crypto.randomUUID(),
-        clientTurnId: crypto.randomUUID(),
-      },
-      transport: defaultScratchChatTransport,
-      signal: abort.signal,
-      onMessages: (messages) => patchScratchChat(paneId, chatId, { messages }),
-      onSessionId: (sessionId) => patchScratchChat(paneId, chatId, { sessionId }),
-    });
-    scratchAbortRef.current.delete(chatId);
-    setScratchSendingIds((prev) => prev.filter((id) => id !== chatId));
-    if (!result.ok) {
-      const message =
-        result.error === "createSession failed"
-          ? t("work.scratchCreateFailed")
-          : result.error;
-      setScratchSendErrors((prev) => ({ ...prev, [chatId]: message }));
-      return false;
-    }
-    return true;
   };
 
   const silentReloadPreviewTab = useCallback(async (tabId: string, path: string) => {
@@ -3146,25 +3072,17 @@ export function WorkPanel({
           <div className="flex h-full min-h-0 flex-col">
             <ScratchChatCard
               chat={activeScratch}
+              paneId={paneId}
               onClose={() => requestCloseScratch(activeScratch)}
               onFloat={() => setScratchChatFloating(paneId, activeScratch.id, true)}
               onSend={(text) => sendScratch(activeScratch, text)}
+              onRetry={(userMessageId) => sendScratch(activeScratch, "", { retryUserId: userMessageId })}
               sending={scratchSendingIds.includes(activeScratch.id)}
               error={scratchSendErrors[activeScratch.id]}
             />
           </div>
         ) : null}
       </div>
-
-      {floatingChat ? (
-        <ScratchChatFloatOverlay
-          chat={floatingChat}
-          onDock={() => setScratchChatFloating(paneId, floatingChat.id, false)}
-          onSend={(text) => sendScratch(floatingChat, text)}
-          sending={scratchSendingIds.includes(floatingChat.id)}
-          error={scratchSendErrors[floatingChat.id]}
-        />
-      ) : null}
 
       <Modal
         open={!!pendingCloseScratch}

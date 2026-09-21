@@ -93,6 +93,7 @@ import {
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
 import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
+import { ScratchChatFloatHost } from "./work-panel/ScratchChatFloatHost";
 import {
   ensureBrowserAgentIpc,
   registerBrowserAgentOpenFallback,
@@ -14985,6 +14986,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         userBubbleLabel={userBubbleLabel}
         onClose={() => setShareImageOpen(false)}
         onToast={(msg) => setStallHintToast(msg)}
+      />
+      <ScratchChatFloatHost
+        paneId={pane.id}
+        onDock={(chatId) => {
+          if (!pane.taskspacePanelOpen) {
+            openWorkspaceSidebarForPane(
+              pane.id,
+              paneRef.current?.clientWidth ?? paneWidth,
+              openSidePanel,
+            );
+          }
+          setWorkPanelFocus({ kind: "scratch", chatId });
+        }}
       />
       {avatarSettingsOpen && paneSettingsAvatar ? (
         <AvatarSettingsPanel
