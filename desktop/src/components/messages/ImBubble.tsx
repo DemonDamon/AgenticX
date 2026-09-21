@@ -204,7 +204,7 @@ export function ChatImAvatar({
   color?: string;
   size?: "sm" | "md";
 }) {
-  const userCostumeUrl = useAppStore((s) => s.userAvatarUrl);
+  const metaCostumeUrl = useAppStore((s) => s.metaAvatarUrl);
   const liveExpert = useAppStore((s) => {
     const id = String(avatarId ?? "").trim();
     if (!isRegistryAvatarId(id)) return undefined;
@@ -213,7 +213,7 @@ export function ChatImAvatar({
   const resolvedColor = color ?? liveExpert?.color ?? "";
   const resolvedImage = preferCostumeOverBrandMark(
     preferLiveAvatarUrl(liveExpert?.avatarUrl, imageUrl),
-    userCostumeUrl,
+    metaCostumeUrl,
   );
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";

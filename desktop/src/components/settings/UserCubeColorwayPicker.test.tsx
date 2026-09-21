@@ -15,9 +15,27 @@ describe("UserCubeColorwayPicker", () => {
       <UserCubeColorwayPicker selectedId={BRAND_CUBE_COLORWAY_ID} onSelect={() => {}} />,
     );
     expect(html).toContain("服装定制");
-    expect(html).toContain("同一套方块模板");
+    expect(html).toContain("给 Near 换一套滑板配色");
     expect(html).toContain(DEFAULT_META_AVATAR_URL);
+    expect(html).toContain("px-3 py-3");
+    expect(html).toContain("rounded-md");
+    expect(html).toContain("品牌橙");
     expect(html).not.toContain("随机一套");
     expect(html).not.toContain("type=\"file\"");
+    expect(html).not.toContain("用户档案");
+  });
+
+  it("keeps the expanded costume tools inside the same row chrome", () => {
+    const html = renderToStaticMarkup(
+      <UserCubeColorwayPicker
+        selectedId={BRAND_CUBE_COLORWAY_ID}
+        onSelect={() => {}}
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    expect(html).toContain("随机一套");
+    expect(html).toContain("抽卡提示词");
+    expect(html).toContain("bg-surface-hover/30");
   });
 });

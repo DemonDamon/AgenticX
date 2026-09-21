@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, Loader2, Shuffle, Sparkles } from "lucide-react";
+import { ChevronRight, Loader2, Shuffle, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
@@ -21,6 +21,8 @@ import { useAppStore } from "../../store";
 type Props = {
   selectedId: string;
   onSelect: (colorwayId: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 function CubeSwatch({
@@ -61,9 +63,14 @@ function CubeSwatch({
   );
 }
 
-export function UserCubeColorwayPicker({ selectedId, onSelect }: Props) {
+export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChange }: Props) {
   const { t } = useTranslation("settings");
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const expanded = onOpenChange ? Boolean(open) : uncontrolledOpen;
+  const setExpanded = (next: boolean) => {
+    if (onOpenChange) onOpenChange(next);
+    else setUncontrolledOpen(next);
+  };
   const [prompt, setPrompt] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [drawMessage, setDrawMessage] = useState("");
@@ -129,34 +136,50 @@ export function UserCubeColorwayPicker({ selectedId, onSelect }: Props) {
     }
   };
 
+  const previewLabel =
+    currentId === BRAND_CUBE_COLORWAY_ID ? t("profile.costumeBrand") : currentId;
+
   return (
-    <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
+    <div>
       <button
         type="button"
-        className="flex w-full items-center gap-3 text-left"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
+        className={`flex w-full items-center gap-3 px-3 py-3 text-left transition-colors ${
+          expanded ? "bg-surface-hover/80" : "bg-surface-panel/45 hover:bg-surface-hover"
+        }`}
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
       >
-        <img
-          src={previewSrc}
-          alt=""
-          className={`h-8 w-8 shrink-0 ${
-            previewBrand
-              ? `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
-              : NEAR_CUBE_AVATAR_FIT_CLASS
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-hover ${
+            previewBrand ? "overflow-hidden" : "overflow-visible"
           }`}
-        />
+        >
+          <img
+            src={previewSrc}
+            alt=""
+            className={`h-8 w-8 ${
+              previewBrand
+                ? `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
+                : NEAR_CUBE_AVATAR_FIT_CLASS
+            }`}
+          />
+        </div>
         <span className="min-w-0 flex-1">
           <span className={`block ${SETTINGS_LABEL_CLASS}`}>{t("profile.costumeTitle")}</span>
           <span className={`mt-0.5 block ${SETTINGS_HINT_CLASS}`}>{t("profile.costumeHint")}</span>
         </span>
-        <ChevronDown
-          className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${open ? "rotate-180" : ""}`}
+        <span className="hidden max-w-[32%] truncate text-[11px] text-text-faint md:block">
+          {previewLabel}
+        </span>
+        <ChevronRight
+          className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${
+            expanded ? "rotate-90" : ""
+          }`}
         />
       </button>
 
-      {open ? (
-        <div className="mt-3">
+      {expanded ? (
+        <div className="border-t border-[var(--border-muted)] bg-surface-hover/30 px-3 pb-3 pt-2.5">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-text-muted">
               {t("profile.costumeGachaLabel")}

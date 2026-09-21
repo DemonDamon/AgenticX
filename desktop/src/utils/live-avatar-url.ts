@@ -14,7 +14,7 @@ export function preferLiveAvatarUrl(
   return stored || undefined;
 }
 
-/** Official brand mark yields to the user's selected cube costume. */
+/** Official brand mark yields to the meta-agent cube costume. */
 export function preferCostumeOverBrandMark(
   imageUrl?: string | null,
   userCostumeUrl?: string | null,

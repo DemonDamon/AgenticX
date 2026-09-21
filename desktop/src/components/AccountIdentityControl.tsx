@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { LogIn, LogOut, User } from "lucide-react";
 import {
   BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
-  DEFAULT_META_AVATAR_URL,
   NEAR_CUBE_AVATAR_FIT_CLASS,
   isBundledMetaAvatarUrl,
   resolveBundledMetaAvatarUrl,
@@ -152,16 +151,16 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
     setUserMenuOpen((v) => !v);
   };
 
-  const rawAvatarSrc = userAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
-  const cubeMark = isNearCubePortraitUrl(rawAvatarSrc);
-  const bundledLogo = !cubeMark && isBundledMetaAvatarUrl(rawAvatarSrc);
+  const rawAvatarSrc = userAvatarUrl.trim();
+  const cubeMark = rawAvatarSrc ? isNearCubePortraitUrl(rawAvatarSrc) : false;
+  const bundledLogo = Boolean(rawAvatarSrc) && !cubeMark && isBundledMetaAvatarUrl(rawAvatarSrc);
   const avatarSrc = bundledLogo ? resolveBundledMetaAvatarUrl(rawAvatarSrc) : rawAvatarSrc;
-  const avatar = (
+  const avatar = rawAvatarSrc ? (
     <span
       className={`relative inline-flex h-5 w-5 shrink-0 ${
         cubeMark ? "overflow-visible" : "overflow-hidden rounded-full"
       }`}
-      data-avatar-fit={cubeMark ? "cube" : bundledLogo ? "logo" : undefined}
+      data-avatar-fit={cubeMark ? "cube" : bundledLogo ? "logo" : "user"}
     >
       <img
         src={avatarSrc}
@@ -172,6 +171,13 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
             : `origin-center object-cover${bundledLogo ? ` ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}` : ""}`
         }`}
       />
+    </span>
+  ) : (
+    <span
+      className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-text-muted"
+      data-avatar-fit="user"
+    >
+      <User className="h-3 w-3" strokeWidth={2} />
     </span>
   );
 

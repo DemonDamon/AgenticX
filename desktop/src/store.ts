@@ -40,10 +40,13 @@ import { normalizeTurnIntent } from "./utils/turn-intent";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
 import {
-  avatarUrlForCubeColorway,
   BRAND_CUBE_COLORWAY_ID,
   isUserCubeColorwayId,
 } from "./utils/cube-colorway";
+import {
+  isPersistedUserAvatarUrl,
+  resolveMetaAvatarFromColorway,
+} from "./utils/identity-avatar";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -598,9 +601,9 @@ type AppState = {
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
-  /** Custom avatar for current user. Derived from `userCubeColorwayId`. */
+  /** Custom avatar for the human user (group chats). Independent of Near's cube costume. */
   userAvatarUrl: string;
-  /** User cube colorway. `brand` is the official orange mark. */
+  /** Near cube colorway. Drives `metaAvatarUrl`. `brand` is the official orange mark. */
   userCubeColorwayId: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
@@ -1089,29 +1092,27 @@ function loadUserCubeColorwayId(): string {
   } catch {
     // ignore storage errors
   }
-  try {
-    const legacy = window.localStorage.getItem(USER_AVATAR_URL_KEY);
-    if (legacy && !legacy.startsWith("data:image/svg+xml")) {
-      window.localStorage.removeItem(USER_AVATAR_URL_KEY);
-    }
-  } catch {
-    // ignore storage errors
-  }
   return BRAND_CUBE_COLORWAY_ID;
 }
 
 function loadUserAvatarUrl(): string {
-  return avatarUrlForCubeColorway(loadUserCubeColorwayId());
+  try {
+    const saved = window.localStorage.getItem(USER_AVATAR_URL_KEY);
+    if (isPersistedUserAvatarUrl(saved)) return String(saved).trim();
+  } catch {
+    // ignore storage errors
+  }
+  return "";
 }
 
 function loadMetaAvatarUrl(): string {
   try {
     const saved = window.localStorage.getItem(META_AVATAR_URL_KEY);
-    if (typeof saved === "string") return saved;
+    if (typeof saved === "string" && saved.trim()) return saved;
   } catch {
     // ignore storage errors
   }
-  return "";
+  return resolveMetaAvatarFromColorway(loadUserCubeColorwayId());
 }
 
 export type SessionTokens = {
@@ -1550,19 +1551,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setUserCubeColorwayId: (colorwayId) =>
     set(() => {
       const next = isUserCubeColorwayId(colorwayId) ? colorwayId : BRAND_CUBE_COLORWAY_ID;
-      const avatarUrl = avatarUrlForCubeColorway(next);
+      const avatarUrl = resolveMetaAvatarFromColorway(next);
       try {
         if (next === BRAND_CUBE_COLORWAY_ID) {
           window.localStorage.removeItem(USER_CUBE_COLORWAY_KEY);
-          window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+          window.localStorage.removeItem(META_AVATAR_URL_KEY);
         } else {
           window.localStorage.setItem(USER_CUBE_COLORWAY_KEY, next);
-          window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+          window.localStorage.setItem(META_AVATAR_URL_KEY, avatarUrl);
         }
       } catch {
         // ignore storage errors
       }
-      return { userCubeColorwayId: next, userAvatarUrl: avatarUrl };
+      return { userCubeColorwayId: next, metaAvatarUrl: avatarUrl };
     }),
   setUserPreference: (pref) =>
     set(() => {

@@ -68,12 +68,7 @@ import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store
 import { useAppStore } from "../store";
 import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
-import {
-  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
-  DEFAULT_META_AVATAR_URL,
-  NEAR_CUBE_AVATAR_FIT_CLASS,
-} from "../constants/meta-avatar";
-import { BRAND_CUBE_COLORWAY_ID } from "../utils/cube-colorway";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
 import {
   RECOMMENDED_SKILLS,
@@ -4950,6 +4945,7 @@ export function SettingsPanel({
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
+  const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
   const userCubeColorwayId = useAppStore((s) => s.userCubeColorwayId);
   const setUserCubeColorwayId = useAppStore((s) => s.setUserCubeColorwayId);
   const userPreference = useAppStore((s) => s.userPreference);
@@ -4967,6 +4963,7 @@ export function SettingsPanel({
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const metaWorkspaceHydratedRef = useRef(false);
+  const userAvatarFileRef = useRef<HTMLInputElement>(null);
   const [aiAssistLoading, setAiAssistLoading] = useState<"identity" | "soul" | "preference" | null>(null);
   const metaIdentityDraftRef = useRef("");
   const metaIdentitySavedRef = useRef("");
@@ -4980,7 +4977,7 @@ export function SettingsPanel({
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
-  const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
+  const [metaEditorKind, setMetaEditorKind] = useState<"costume" | "identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
     loadSettingsNavWidth(loadSettingsPanelSize().width),
@@ -5430,6 +5427,33 @@ export function SettingsPanel({
     void window.agenticxDesktop.saveUserMd({ content: userMdContent });
     setUserProfileMessage(t("profile.savedToast"));
   }, [setUserNickname, setUserPreference, t, userNicknameDraft, userPreferenceDraft]);
+
+  const handlePickUserAvatar = useCallback(
+    (file: File) => {
+      const maxBytes = 1.8 * 1024 * 1024;
+      if (!file.type.startsWith("image/")) {
+        setUserProfileMessage(t("profile.pickImage"));
+        return;
+      }
+      if (file.size > maxBytes) {
+        setUserProfileMessage(t("profile.imageTooLarge"));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === "string" ? reader.result : "";
+        if (!result) {
+          setUserProfileMessage(t("profile.readImageFailed"));
+          return;
+        }
+        setUserAvatarUrl(result);
+        setUserProfileMessage(t("profile.avatarUpdated"));
+      };
+      reader.onerror = () => setUserProfileMessage(t("profile.readImageFailed"));
+      reader.readAsDataURL(file);
+    },
+    [setUserAvatarUrl, t],
+  );
 
   const metaSoulDirty = metaSoul !== metaSoulSaved;
   const metaIdentityDirty = metaIdentity !== metaIdentitySaved;
@@ -7245,17 +7269,22 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
-                    <div className="relative shrink-0">
-                      <img
-                        src={userAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
-                        alt={t("profile.myAvatar")}
-                        className={`h-12 w-12 ${
-                          userCubeColorwayId && userCubeColorwayId !== BRAND_CUBE_COLORWAY_ID
-                            ? NEAR_CUBE_AVATAR_FIT_CLASS
-                            : `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
-                        }`}
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-text-muted transition-colors hover:bg-surface-card-strong"
+                      onClick={() => userAvatarFileRef.current?.click()}
+                      aria-label={t("profile.changeAvatar")}
+                    >
+                      {userAvatarUrl.trim() ? (
+                        <img
+                          src={userAvatarUrl.trim()}
+                          alt={t("profile.myAvatar")}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <User className="h-5 w-5" />
+                      )}
+                    </button>
                     <div className="min-w-0 flex-1">
                       <div className={`truncate ${SETTINGS_LABEL_CLASS}`}>
                         {userNicknameDraft.trim() || t("profile.me")}
@@ -7273,11 +7302,46 @@ export function SettingsPanel({
                       {userProfileEditing ? t("commonSettings.collapse") : tCommon("edit")}
                     </button>
                   </div>
-
-                  <UserCubeColorwayPicker
-                    selectedId={userCubeColorwayId}
-                    onSelect={setUserCubeColorwayId}
+                  <input
+                    ref={userAvatarFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) handlePickUserAvatar(file);
+                      event.currentTarget.value = "";
+                    }}
                   />
+                  <div className="mt-2 flex items-start justify-between gap-3">
+                    <p className={SETTINGS_HINT_CLASS}>{t("profile.avatarHint")}</p>
+                    {userAvatarUrl.trim() ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-[11px] text-text-faint transition-colors hover:text-text-muted"
+                        onClick={() => {
+                          setUserAvatarUrl("");
+                          setUserProfileMessage(t("profile.resetDefaultDone"));
+                        }}
+                      >
+                        {t("profile.resetDefault")}
+                      </button>
+                    ) : null}
+                  </div>
+                  {userProfileMessage && !userProfileEditing ? (
+                    <p
+                      className={`mt-1.5 text-right text-[11px] ${
+                        userProfileMessage.startsWith(t("profile.saved")) ||
+                        userProfileMessage.startsWith(t("profile.aiDonePrefix")) ||
+                        userProfileMessage === t("profile.avatarUpdated") ||
+                        userProfileMessage === t("profile.resetDefaultDone")
+                          ? "text-text-subtle"
+                          : "text-rose-400"
+                      }`}
+                    >
+                      {userProfileMessage}
+                    </p>
+                  ) : null}
 
                   {userProfileEditing ? (
                     <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
@@ -7358,6 +7422,12 @@ export function SettingsPanel({
                   </p>
 
                   <div className="mt-4 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
+                    <UserCubeColorwayPicker
+                      selectedId={userCubeColorwayId}
+                      onSelect={setUserCubeColorwayId}
+                      open={metaEditorKind === "costume"}
+                      onOpenChange={(next) => setMetaEditorKind(next ? "costume" : null)}
+                    />
                     {[
                       {
                         kind: "identity" as const,
@@ -7371,7 +7441,7 @@ export function SettingsPanel({
                         description: t("meta.soulHint"),
                         preview: metaSoul,
                       },
-                    ].map((item, index) => {
+                    ].map((item) => {
                       const open = metaEditorKind === item.kind;
                       const preview =
                         item.preview
@@ -7381,7 +7451,7 @@ export function SettingsPanel({
                       return (
                         <div
                           key={item.kind}
-                          className={index > 0 ? "border-t border-[var(--border-muted)]" : ""}
+                          className="border-t border-[var(--border-muted)]"
                         >
                           <button
                             type="button"
