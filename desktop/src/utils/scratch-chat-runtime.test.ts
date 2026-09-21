@@ -7,6 +7,7 @@ import {
   consumeScratchSse,
   ensureScratchSessionId,
   isScratchReplyIncomplete,
+  precedingScratchUserId,
   prepareScratchRetry,
   runScratchChatTurn,
   type ScratchChatTransport,
@@ -21,6 +22,7 @@ const chat: ScratchChat = {
   quotedContent: "选中的原文",
   contextFiles: [{ path: "/tmp/a.md", sourcePath: "/tmp/a.md" }],
   sessionId: "",
+  hostSessionId: "",
   messages: [],
   floating: false,
 };
@@ -320,6 +322,11 @@ describe("scratch retry helpers", () => {
     expect(isScratchReplyIncomplete([{ id: "u1", role: "user", content: "q" }, { id: "a1", role: "assistant", content: "答" }])).toBe(
       false,
     );
+    expect(precedingScratchUserId(rows, "a1")).toBe("u1");
+    expect(prepareScratchRetry(rows, "u1", "改成 fan-in")).toEqual({
+      messages: [{ id: "u1", role: "user", content: "改成 fan-in" }],
+      userText: "改成 fan-in",
+    });
   });
 });
 

@@ -57,7 +57,7 @@ import {
   type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
-import { collectScratchSessionIds, excludeScratchSessionsFromHistory } from "../../utils/scratch-chat";
+import { excludeScratchSessionsFromHistory, scratchHistoryBlocklist } from "../../utils/scratch-chat";
 import { HoverTip } from "../ds/HoverTip";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
 import { SidebarSessionFileManage } from "./SidebarSessionFileManage";
@@ -131,6 +131,7 @@ export function SidebarSessionHistory() {
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
   const panes = useAppStore((s) => s.panes);
+  const hiddenScratchSessionIds = useAppStore((s) => s.hiddenScratchSessionIds);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
   const sessionHistoryHints = useAppStore((s) => s.sessionHistoryHints);
@@ -378,10 +379,13 @@ export function SidebarSessionHistory() {
   const sessionsWithHints = useMemo(
     () =>
       applySidebarSessionHistoryHints(
-        excludeScratchSessionsFromHistory(sessions, collectScratchSessionIds(panes)),
+        excludeScratchSessionsFromHistory(
+          sessions,
+          scratchHistoryBlocklist(panes, hiddenScratchSessionIds)
+        ),
         sessionHistoryHints
       ),
-    [sessions, sessionHistoryHints, panes]
+    [sessions, sessionHistoryHints, panes, hiddenScratchSessionIds]
   );
 
   const wechatRow = useMemo(() => {

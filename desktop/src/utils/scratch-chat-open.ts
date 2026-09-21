@@ -88,6 +88,15 @@ export function buildQuotedScratchDraft(input: {
   };
 }
 
+export function buildBlankScratchDraft(title: string): ScratchChatDraft {
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    title: String(title ?? "").trim() || "临时对话",
+    sourceKind: "selection",
+    sourceKey: scratchSourceKey("selection", `blank:${stamp}`),
+  };
+}
+
 export function buildPreviewScratchDraft(input: {
   absolutePath: string;
   snippet?: string;

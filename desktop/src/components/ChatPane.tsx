@@ -695,6 +695,7 @@ const FALLBACK_PANE: ChatPaneState = {
   historySearchTerms: [],
   historyJumpMessageId: null,
   scratchChats: [],
+  parkedScratchChats: [],
   loadingMessages: false,
   oldestLoadedIndex: 0,
   hasOlderMessages: false,

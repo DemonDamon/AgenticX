@@ -16,6 +16,7 @@ function sample(partial: Partial<ScratchChat> = {}): ScratchChat {
     quotedContent: "选中的原文片段",
     contextFiles: [{ path: "/tmp/report.md" }],
     sessionId: "",
+    hostSessionId: "",
     messages: [],
     floating: false,
     ...partial,

@@ -6,7 +6,7 @@
  */
 
 import { useAppStore } from "../../store";
-import type { ScratchChat } from "../../utils/scratch-chat";
+import { filterScratchChatsForHost, type ScratchChat } from "../../utils/scratch-chat";
 import { ScratchChatFloatOverlay } from "./ScratchChatFloatOverlay";
 import { useScratchChatRuntime } from "./use-scratch-chat-runtime";
 
@@ -19,7 +19,11 @@ type Props = {
 
 export function ScratchChatFloatHost({ paneId, onDock }: Props) {
   const floatingChat = useAppStore((s) => {
-    const chats = s.panes.find((pane) => pane.id === paneId)?.scratchChats ?? EMPTY_SCRATCH_CHATS;
+    const pane = s.panes.find((item) => item.id === paneId);
+    const chats = filterScratchChatsForHost(
+      pane?.scratchChats ?? EMPTY_SCRATCH_CHATS,
+      pane?.sessionId ?? "",
+    );
     return chats.find((chat) => chat.floating) ?? null;
   });
   const setScratchChatFloating = useAppStore((s) => s.setScratchChatFloating);
@@ -36,7 +40,9 @@ export function ScratchChatFloatHost({ paneId, onDock }: Props) {
         onDock(floatingChat.id);
       }}
       onSend={(text) => sendScratch(floatingChat, text)}
-      onRetry={(userMessageId) => sendScratch(floatingChat, "", { retryUserId: userMessageId })}
+      onRetry={(userMessageId, editText) =>
+        sendScratch(floatingChat, "", { retryUserId: userMessageId, editText })
+      }
       sending={sendingIds.includes(floatingChat.id)}
       error={errors[floatingChat.id]}
     />

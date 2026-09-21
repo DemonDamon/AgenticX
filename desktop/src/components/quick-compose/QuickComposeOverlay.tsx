@@ -7,7 +7,8 @@ import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { getRememberedSessionForAvatar } from "../../utils/avatar-last-session";
 import { sanitizeGroupAvatarIds } from "../../utils/group-editor-utils";
-import { isSessionAvatarMatch, pickMostRecentSessionId } from "../../utils/group-pane-open";
+import { pickPreferredSessionId } from "../../utils/group-pane-open";
+import { scratchHistoryBlocklist } from "../../utils/scratch-chat";
 import {
   buildSuggestions,
   composeEnterHint,
@@ -202,16 +203,16 @@ export function QuickComposeOverlay() {
         }> }));
       if (previewGenRef.current !== gen) return;
       const rows = listed.ok && Array.isArray(listed.sessions) ? listed.sessions : [];
-      const rememberedSid = getRememberedSessionForAvatar(avatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        rows.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, avatarId),
-        );
-      const recentSid = pickMostRecentSessionId(rows, avatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const blocked = scratchHistoryBlocklist(
+        useAppStore.getState().panes,
+        useAppStore.getState().hiddenScratchSessionIds,
+      );
+      const preferredSid = pickPreferredSessionId({
+        sessions: rows,
+        avatarId,
+        rememberedSid: getRememberedSessionForAvatar(avatarId),
+        blockedIds: blocked,
+      });
       if (!preferredSid || previewGenRef.current !== gen) return;
       const latest = useAppStore.getState().panes.find((item) => item.id === paneId);
       if (!latest) return;

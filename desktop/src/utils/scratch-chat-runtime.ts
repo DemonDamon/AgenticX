@@ -117,15 +117,30 @@ export function isScratchReplyIncomplete(messages: Message[]): boolean {
   return !scratchVisibleReplyText(assistant.content);
 }
 
+export function precedingScratchUserId(messages: Message[], messageId: string): string | null {
+  const idx = messages.findIndex((item) => item.id === messageId);
+  if (idx < 0) return null;
+  if (messages[idx]?.role === "user") return messages[idx].id;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return messages[i].id;
+  }
+  return null;
+}
+
 export function prepareScratchRetry(
   messages: Message[],
   userId: string,
+  nextText?: string,
 ): { messages: Message[]; userText: string } | null {
   const idx = messages.findIndex((item) => item.id === userId && item.role === "user");
   if (idx < 0) return null;
-  const userText = String(messages[idx]?.content ?? "").trim();
+  const userText = String(nextText ?? messages[idx]?.content ?? "").trim();
   if (!userText) return null;
-  return { messages: messages.slice(0, idx + 1), userText };
+  const kept = messages.slice(0, idx + 1);
+  if (nextText !== undefined) {
+    kept[idx] = { ...kept[idx], content: userText };
+  }
+  return { messages: kept, userText };
 }
 
 function appendScratchAssistant(

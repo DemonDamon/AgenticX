@@ -19,12 +19,17 @@ export function isSessionAvatarMatch(
 
 export function pickMostRecentSessionId(
   sessions: GroupOpenSessionRow[],
-  avatarId?: string | null
+  avatarId?: string | null,
+  blockedIds?: Iterable<string>,
 ): string | undefined {
+  const blocked = new Set(
+    [...(blockedIds ?? [])].map((id) => String(id ?? "").trim()).filter(Boolean)
+  );
   const sorted = [...sessions]
     .filter((item) => {
       const sid = String(item.session_id ?? "").trim();
       if (!sid) return false;
+      if (blocked.has(sid)) return false;
       if (item.archived === true) return false;
       return isSessionAvatarMatch(item, avatarId);
     })
@@ -48,21 +53,40 @@ export function pickOptimisticGroupSessionId(
   return sid || undefined;
 }
 
+export function pickPreferredSessionId(args: {
+  sessions: GroupOpenSessionRow[];
+  avatarId?: string | null;
+  rememberedSid?: string | null;
+  blockedIds?: Iterable<string>;
+}): string | undefined {
+  const blocked = new Set(
+    [...(args.blockedIds ?? [])].map((id) => String(id ?? "").trim()).filter(Boolean)
+  );
+  const remembered = String(args.rememberedSid ?? "").trim();
+  const rememberedValid =
+    !!remembered &&
+    !blocked.has(remembered) &&
+    args.sessions.some(
+      (item) =>
+        String(item.session_id ?? "").trim() === remembered &&
+        isSessionAvatarMatch(item, args.avatarId)
+    );
+  if (rememberedValid) return remembered;
+  return pickMostRecentSessionId(args.sessions, args.avatarId, args.blockedIds);
+}
+
 export function pickConfirmedGroupSessionId(args: {
   rememberedSid?: string | null;
   listed: GroupOpenSessionRow[];
   groupAvatarId: string;
+  blockedIds?: Iterable<string>;
 }): string | undefined {
-  const remembered = String(args.rememberedSid ?? "").trim();
-  const rememberedValid =
-    !!remembered &&
-    args.listed.some(
-      (item) =>
-        String(item.session_id ?? "").trim() === remembered &&
-        isSessionAvatarMatch(item, args.groupAvatarId)
-    );
-  if (rememberedValid) return remembered;
-  return pickMostRecentSessionId(args.listed, args.groupAvatarId);
+  return pickPreferredSessionId({
+    sessions: args.listed,
+    avatarId: args.groupAvatarId,
+    rememberedSid: args.rememberedSid,
+    blockedIds: args.blockedIds,
+  });
 }
 
 export function existingGroupPaneNeedsBind(sessionId?: string | null): boolean {

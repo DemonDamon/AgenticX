@@ -3,6 +3,7 @@ import {
   buildMessageScratchDraft,
   buildPathScratchDraft,
   buildPreviewScratchDraft,
+  buildBlankScratchDraft,
   buildQuotedScratchDraft,
   clipScratchTitleSnippet,
   fileLabelFromPath,
@@ -139,5 +140,16 @@ describe("buildPreviewScratchDraft", () => {
     expect(draft.sourceKey).toBe("file:/tmp/a.ts");
     expect(draft.quotedContent).toBeUndefined();
     expect(draft.contextFiles).toEqual([{ path: "/tmp/a.ts", sourcePath: "/tmp/a.ts" }]);
+  });
+});
+
+describe("buildBlankScratchDraft", () => {
+  it("creates a unique selection scratch without quoted content", () => {
+    const a = buildBlankScratchDraft("临时对话");
+    const b = buildBlankScratchDraft("临时对话");
+    expect(a.sourceKind).toBe("selection");
+    expect(a.sourceKey.startsWith("selection:blank:")).toBe(true);
+    expect(a.sourceKey).not.toBe(b.sourceKey);
+    expect(a.quotedContent).toBeUndefined();
   });
 });

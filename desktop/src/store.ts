@@ -15,8 +15,16 @@ import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
 import {
-  closeScratchChatList,
+  attachUnhostedScratchChats,
+  clearScratchChatsForHost,
+  closeOrParkScratchChat,
+  deleteScratchChatFromLists,
+  dismissParkedScratchChat as dismissParkedScratchChatList,
+  forgetScratchSessionIds,
   patchScratchChatList,
+  rememberScratchSessionIds,
+  restoreParkedScratchChat as restoreParkedScratchChatList,
+  scratchHistoryBlocklist,
   setScratchFloating,
   upsertScratchChatList,
   type ScratchChat,
@@ -235,6 +243,8 @@ export type ChatPane = {
   pendingQuote?: { messageId: string; body: string; label: string } | null;
   /** Workspace-only scratch chats. Not listed in sidebar history. */
   scratchChats?: ScratchChat[];
+  /** Closed scratch chats kept in the workspace until dismissed. */
+  parkedScratchChats?: ScratchChat[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
   /** + menu turn intent: default execute / plan first / isolated copy. */
@@ -662,6 +672,10 @@ type AppState = {
   sessionHistoryHints: Record<string, { activityAt: number; running: boolean }>;
   markSessionHistoryActive: (sessionId: string) => void;
   clearSessionHistoryHint: (sessionId: string) => void;
+  /** Closed/materialized scratch session ids that must never appear in sidebar history. */
+  hiddenScratchSessionIds: string[];
+  rememberHiddenScratchSessionIds: (sessionIds: Iterable<string>) => void;
+  forgetHiddenScratchSessionIds: (sessionIds: Iterable<string>) => void;
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
   forwardAutoReply: {
     paneId: string;
@@ -877,7 +891,12 @@ type AppState = {
     draft: ScratchChatDraft
   ) => { chatId: string; reused: boolean };
   setScratchChatFloating: (paneId: string, chatId: string, floating: boolean) => void;
-  closeScratchChat: (paneId: string, chatId: string) => void;
+  closeScratchChat: (paneId: string, chatId: string) => string[];
+  restoreParkedScratchChat: (paneId: string, chatId: string) => string;
+  dismissParkedScratchChat: (paneId: string, chatId: string) => string;
+  deleteScratchChat: (paneId: string, chatId: string) => string;
+  promoteScratchChat: (paneId: string, chatId: string) => string;
+  clearHostScratchChats: (paneId: string, hostSessionId: string) => string[];
   patchScratchChat: (paneId: string, chatId: string, patch: Partial<ScratchChat>) => void;
   togglePaneHistory: (paneId: string) => void;
   togglePaneMemoryGraph: (paneId: string) => void;
@@ -1013,6 +1032,7 @@ function makeDefaultPane(): ChatPane {
     historySearchTerms: [],
     historyJumpMessageId: null,
     scratchChats: [],
+    parkedScratchChats: [],
     loadingMessages: false,
     oldestLoadedIndex: 0,
     hasOlderMessages: false,
@@ -1297,6 +1317,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionCatalogRevision: 0,
   bumpSessionCatalogRevision: () =>
     set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),
+  hiddenScratchSessionIds: [],
+  rememberHiddenScratchSessionIds: (sessionIds) => {
+    const incoming = [...sessionIds].map((id) => String(id ?? "").trim()).filter(Boolean);
+    if (incoming.length === 0) return;
+    set((state) => ({
+      hiddenScratchSessionIds: rememberScratchSessionIds(state.hiddenScratchSessionIds, incoming),
+    }));
+  },
+  forgetHiddenScratchSessionIds: (sessionIds) => {
+    const incoming = [...sessionIds].map((id) => String(id ?? "").trim()).filter(Boolean);
+    if (incoming.length === 0) return;
+    set((state) => ({
+      hiddenScratchSessionIds: forgetScratchSessionIds(state.hiddenScratchSessionIds, incoming),
+    }));
+  },
   sessionHistoryHints: {},
   markSessionHistoryActive: (sessionId) => {
     const sid = String(sessionId ?? "").trim();
@@ -1902,6 +1937,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           historySearchTerms: [],
           historyJumpMessageId: null,
           scratchChats: [],
+          parkedScratchChats: [],
         },
       ],
       activePaneId: paneId,
@@ -2392,10 +2428,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             : prevTrimmed === nextTrimmed
               ? normalizeSessionTokens(p.sessionTokens)
               : { ...EMPTY_SESSION_TOKENS };
+        const blocked = scratchHistoryBlocklist(
+          state.panes,
+          state.hiddenScratchSessionIds,
+        );
+        const shouldAttachHost = Boolean(nextTrimmed) && !blocked.has(nextTrimmed);
         return {
           ...p,
           sessionId,
           sessionTokens: baseTokens,
+          scratchChats: shouldAttachHost
+            ? attachUnhostedScratchChats(p.scratchChats ?? [], nextTrimmed)
+            : p.scratchChats,
+          parkedScratchChats: shouldAttachHost
+            ? attachUnhostedScratchChats(p.parkedScratchChats ?? [], nextTrimmed)
+            : p.parkedScratchChats,
           taskspacePanelOpen: nextTaskspacePanelOpenOnSessionBind({
             prevSessionId: prevTrimmed,
             nextSessionId: nextTrimmed,
@@ -2568,10 +2615,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
-        const next = upsertScratchChatList(pane.scratchChats ?? [], draft, uid());
+        const next = upsertScratchChatList(
+          pane.scratchChats ?? [],
+          draft,
+          uid(),
+          pane.parkedScratchChats ?? [],
+          String(pane.sessionId ?? "").trim(),
+        );
         chatId = next.chat.id;
         reused = next.reused;
-        return { ...pane, scratchChats: next.chats };
+        return { ...pane, scratchChats: next.chats, parkedScratchChats: next.parked };
       }),
     }));
     return { chatId, reused };
@@ -2584,22 +2637,147 @@ export const useAppStore = create<AppState>((set, get) => ({
           : pane
       ),
     })),
-  closeScratchChat: (paneId, chatId) =>
+  closeScratchChat: (paneId, chatId) => {
+    const evictedIds: string[] = [];
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const closing = pane?.scratchChats?.find((chat) => chat.id === chatId);
+      const result = closeOrParkScratchChat(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      for (const item of result.evicted) {
+        const sid = String(item.sessionId ?? "").trim();
+        if (sid) evictedIds.push(sid);
+      }
+      const sid = String(closing?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: rememberScratchSessionIds(
+          state.hiddenScratchSessionIds,
+          [sid, ...evictedIds],
+        ),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: result.open, parkedScratchChats: result.parked }
+            : item
+        ),
+      };
+    });
+    return evictedIds;
+  },
+  restoreParkedScratchChat: (paneId, chatId) => {
+    let restoredId = "";
     set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? { ...pane, scratchChats: closeScratchChatList(pane.scratchChats ?? [], chatId) }
-          : pane
-      ),
-    })),
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = restoreParkedScratchChatList(pane.scratchChats ?? [], pane.parkedScratchChats ?? [], chatId);
+        restoredId = next.chat?.id ?? "";
+        return { ...pane, scratchChats: next.open, parkedScratchChats: next.parked };
+      }),
+    }));
+    return restoredId;
+  },
+  dismissParkedScratchChat: (paneId, chatId) => {
+    let removedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = dismissParkedScratchChatList(pane?.parkedScratchChats ?? [], chatId);
+      removedSid = String(next.removed?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: removedSid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [removedSid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((item) =>
+          item.id === paneId ? { ...item, parkedScratchChats: next.parked } : item
+        ),
+      };
+    });
+    return removedSid;
+  },
+  deleteScratchChat: (paneId, chatId) => {
+    let removedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = deleteScratchChatFromLists(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      removedSid = String(next.removed?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: removedSid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [removedSid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return removedSid;
+  },
+  promoteScratchChat: (paneId, chatId) => {
+    let promotedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = deleteScratchChatFromLists(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      promotedSid = String(next.removed?.sessionId ?? "").trim();
+      if (!promotedSid) return state;
+      return {
+        hiddenScratchSessionIds: forgetScratchSessionIds(state.hiddenScratchSessionIds, [promotedSid]),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return promotedSid;
+  },
+  clearHostScratchChats: (paneId, hostSessionId) => {
+    const removedIds: string[] = [];
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = clearScratchChatsForHost(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        hostSessionId,
+      );
+      for (const item of next.removed) {
+        const sid = String(item.sessionId ?? "").trim();
+        if (sid) removedIds.push(sid);
+      }
+      return {
+        hiddenScratchSessionIds: rememberScratchSessionIds(state.hiddenScratchSessionIds, removedIds),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return removedIds;
+  },
   patchScratchChat: (paneId, chatId, patch) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? { ...pane, scratchChats: patchScratchChatList(pane.scratchChats ?? [], chatId, patch) }
-          : pane
-      ),
-    })),
+    set((state) => {
+      const sid = String(patch.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: sid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [sid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? { ...pane, scratchChats: patchScratchChatList(pane.scratchChats ?? [], chatId, patch) }
+            : pane
+        ),
+      };
+    }),
   togglePaneHistory: (paneId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>

@@ -4,14 +4,14 @@ import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import {
   existingGroupPaneNeedsBind,
-  isSessionAvatarMatch,
   pickConfirmedGroupSessionId,
-  pickMostRecentSessionId,
   pickOptimisticGroupSessionId,
+  pickPreferredSessionId,
   shouldCreateGroupSession,
   shouldSkipGroupSessionListOnOpen,
   type GroupOpenSessionRow,
 } from "../utils/group-pane-open";
+import { scratchHistoryBlocklist } from "../utils/scratch-chat";
 import { schedulePrefetchSessionTail } from "../utils/session-tail-cache";
 import { resolveGroupTitle } from "../utils/quick-compose";
 
@@ -50,8 +50,12 @@ export function usePaneNavigation() {
           const listed = await window.agenticxDesktop
             .listSessions(avatarId ?? undefined)
             .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+          const blocked = scratchHistoryBlocklist(
+            useAppStore.getState().panes,
+            useAppStore.getState().hiddenScratchSessionIds,
+          );
           const currentSid = String(existing.sessionId ?? "").trim();
-          if (currentSid && listed.ok && Array.isArray(listed.sessions)) {
+          if (currentSid && !blocked.has(currentSid) && listed.ok && Array.isArray(listed.sessions)) {
             const currentRow = listed.sessions.find(
               (item) => String(item.session_id ?? "").trim() === currentSid
             );
@@ -63,34 +67,23 @@ export function usePaneNavigation() {
               return;
             }
           }
-          if (!currentSid) {
-            const rememberedSid = getRememberedSessionForAvatar(avatarId);
-            const rememberedValid =
-              !!rememberedSid &&
-              listed.ok &&
-              Array.isArray(listed.sessions) &&
-              listed.sessions.some(
-                (item) =>
-                  String(item.session_id ?? "").trim() === rememberedSid &&
-                  isSessionAvatarMatch(item, avatarId)
-              );
-            const recentSid =
-              listed.ok && Array.isArray(listed.sessions)
-                ? pickMostRecentSessionId(listed.sessions, avatarId)
-                : undefined;
-            const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
-            const preferredRow =
-              preferredSid && listed.ok && Array.isArray(listed.sessions)
-                ? listed.sessions.find(
-                    (item) => String(item.session_id ?? "").trim() === preferredSid
-                  )
-                : undefined;
+          if (!currentSid || blocked.has(currentSid)) {
+            const rows = listed.ok && Array.isArray(listed.sessions) ? listed.sessions : [];
+            const preferredSid = pickPreferredSessionId({
+              sessions: rows,
+              avatarId,
+              rememberedSid: getRememberedSessionForAvatar(avatarId),
+              blockedIds: blocked,
+            });
+            const preferredRow = preferredSid
+              ? rows.find((item) => String(item.session_id ?? "").trim() === preferredSid)
+              : undefined;
             if (preferredSid) {
               const latestPane = useAppStore
                 .getState()
                 .panes.find((item) => item.id === existing.id);
               const latestSid = String(latestPane?.sessionId ?? "").trim();
-              if (!latestSid) {
+              if (!latestSid || blocked.has(latestSid)) {
                 setPaneSessionId(existing.id, preferredSid, {
                   provider: preferredRow?.provider,
                   model: preferredRow?.model,
@@ -114,27 +107,20 @@ export function usePaneNavigation() {
           const listed = await window.agenticxDesktop
             .listSessions(avatarId ?? undefined)
             .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
-          const rememberedSid = getRememberedSessionForAvatar(avatarId);
-          const rememberedValid =
-            !!rememberedSid &&
-            listed.ok &&
-            Array.isArray(listed.sessions) &&
-            listed.sessions.some(
-              (item) =>
-                String(item.session_id ?? "").trim() === rememberedSid &&
-                isSessionAvatarMatch(item, avatarId)
-            );
-          const recentSid =
-            listed.ok && Array.isArray(listed.sessions)
-              ? pickMostRecentSessionId(listed.sessions, avatarId)
-              : undefined;
-          const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
-          const preferredRow =
-            preferredSid && listed.ok && Array.isArray(listed.sessions)
-              ? listed.sessions.find(
-                  (item) => String(item.session_id ?? "").trim() === preferredSid
-                )
-              : undefined;
+          const blocked = scratchHistoryBlocklist(
+            useAppStore.getState().panes,
+            useAppStore.getState().hiddenScratchSessionIds,
+          );
+          const rows = listed.ok && Array.isArray(listed.sessions) ? listed.sessions : [];
+          const preferredSid = pickPreferredSessionId({
+            sessions: rows,
+            avatarId,
+            rememberedSid: getRememberedSessionForAvatar(avatarId),
+            blockedIds: blocked,
+          });
+          const preferredRow = preferredSid
+            ? rows.find((item) => String(item.session_id ?? "").trim() === preferredSid)
+            : undefined;
           if (preferredSid) {
             setPaneSessionId(paneId, preferredSid, {
               provider: preferredRow?.provider,
@@ -168,8 +154,12 @@ export function usePaneNavigation() {
           String(
             useAppStore.getState().panes.find((item) => item.id === paneId)?.sessionId ?? ""
           ).trim();
+        const blocked = scratchHistoryBlocklist(
+          useAppStore.getState().panes,
+          useAppStore.getState().hiddenScratchSessionIds,
+        );
         const optimisticSid = pickOptimisticGroupSessionId(rememberedSid);
-        if (optimisticSid && !readCurrentSid()) {
+        if (optimisticSid && !blocked.has(optimisticSid) && !readCurrentSid()) {
           setPaneSessionId(paneId, optimisticSid);
           schedulePrefetchSessionTail(optimisticSid);
         }
@@ -191,6 +181,7 @@ export function usePaneNavigation() {
           rememberedSid,
           listed: listedRows,
           groupAvatarId,
+          blockedIds: blocked,
         });
         if (confirmedSid) {
           if (readCurrentSid() !== confirmedSid) {
@@ -221,7 +212,12 @@ export function usePaneNavigation() {
         }
         setActivePaneId(existing.id);
         setActiveAvatarId(null);
-        if (!existingGroupPaneNeedsBind(existing.sessionId)) return;
+        const existingSid = String(existing.sessionId ?? "").trim();
+        const blockedExisting = scratchHistoryBlocklist(
+          useAppStore.getState().panes,
+          useAppStore.getState().hiddenScratchSessionIds,
+        );
+        if (!existingGroupPaneNeedsBind(existing.sessionId) && !blockedExisting.has(existingSid)) return;
         void bindGroupPaneSession(existing.id);
         return;
       }
@@ -230,7 +226,12 @@ export function usePaneNavigation() {
       openingRef.current = true;
 
       const rememberedSid = getRememberedSessionForAvatar(groupAvatarId);
-      const optimisticSid = pickOptimisticGroupSessionId(rememberedSid) ?? "";
+      const blocked = scratchHistoryBlocklist(
+        useAppStore.getState().panes,
+        useAppStore.getState().hiddenScratchSessionIds,
+      );
+      const rawOptimistic = pickOptimisticGroupSessionId(rememberedSid) ?? "";
+      const optimisticSid = rawOptimistic && !blocked.has(rawOptimistic) ? rawOptimistic : "";
       const paneId = addPane(groupAvatarId, `群聊 · ${title}`, optimisticSid);
       setActivePaneId(paneId);
       setActiveAvatarId(null);

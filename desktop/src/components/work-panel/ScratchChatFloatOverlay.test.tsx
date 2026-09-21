@@ -13,6 +13,7 @@ const chat: ScratchChat = {
   sourceKey: "message:m1",
   quotedContent: "引用正文",
   sessionId: "",
+  hostSessionId: "",
   messages: [],
   floating: true,
 };

@@ -9,6 +9,7 @@ export type SummarySectionId =
   | "workitems"
   | "artifacts"
   | "changes"
+  | "scratch"
   | "spawns"
   | "refs"
   | "members";
@@ -18,6 +19,7 @@ export const COLLAPSED_SUMMARY_SECTIONS: Record<SummarySectionId, boolean> = {
   workitems: false,
   artifacts: false,
   changes: false,
+  scratch: false,
   spawns: false,
   refs: false,
   members: false,
@@ -34,6 +36,7 @@ export function contentDrivenOpenSections(flags: {
   workitems: boolean;
   artifacts: boolean;
   changes: boolean;
+  scratch: boolean;
   spawns: boolean;
   refs: boolean;
   members: boolean;
@@ -43,6 +46,7 @@ export function contentDrivenOpenSections(flags: {
     workitems: flags.workitems,
     artifacts: flags.artifacts,
     changes: flags.changes,
+    scratch: flags.scratch,
     spawns: flags.spawns,
     refs: flags.refs,
     members: flags.members,

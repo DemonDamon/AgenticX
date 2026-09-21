@@ -73,7 +73,7 @@ export function useScratchChatRuntime(paneId: string) {
     async (
       chat: ScratchChat,
       text: string,
-      options?: { retryUserId?: string },
+      options?: { retryUserId?: string; editText?: string },
     ): Promise<boolean> => {
       const chatId = chat.id;
       const key = turnKey(paneId, chatId);
@@ -92,7 +92,7 @@ export function useScratchChatRuntime(paneId: string) {
       let reuseUser = false;
       const retryUserId = String(options?.retryUserId ?? "").trim();
       if (retryUserId) {
-        const prepared = prepareScratchRetry(latest.messages ?? [], retryUserId);
+        const prepared = prepareScratchRetry(latest.messages ?? [], retryUserId, options?.editText);
         if (!prepared) {
           const sending = { ...snap.sending };
           delete sending[key];
@@ -106,6 +106,17 @@ export function useScratchChatRuntime(paneId: string) {
         patchScratchChat(paneId, chatId, { messages: prepared.messages });
       }
       const resolved = resolveScratchChatModel(latest, scratchPaneMeta);
+      const transport: typeof defaultScratchChatTransport = {
+        ...defaultScratchChatTransport,
+        createSession: async (payload) => {
+          const created = await defaultScratchChatTransport.createSession(payload);
+          const sid = String(created.session_id ?? "").trim();
+          if (created.ok && sid) {
+            useAppStore.getState().rememberHiddenScratchSessionIds([sid]);
+          }
+          return created;
+        },
+      };
       const result = await runScratchChatTurn({
         chat: latest,
         userText,
@@ -119,7 +130,7 @@ export function useScratchChatRuntime(paneId: string) {
           assistantId: crypto.randomUUID(),
           clientTurnId: crypto.randomUUID(),
         },
-        transport: defaultScratchChatTransport,
+        transport,
         signal: abort.signal,
         reuseUser,
         onMessages: (messages) => patchScratchChat(paneId, chatId, { messages }),

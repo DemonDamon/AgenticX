@@ -14,8 +14,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Boxes,
-  Bot,
-  CheckSquare,
   ChevronDown,
   Cookie,
   FileCode2,
@@ -65,11 +63,14 @@ import { Modal } from "../ds/Modal";
 import { ScratchChatCard } from "./ScratchChatCard";
 import { useScratchChatRuntime } from "./use-scratch-chat-runtime";
 import {
-  shouldConfirmCloseScratch,
+  filterScratchChatsForHost,
+  listSummaryScratchChats,
+  scratchParkedPreview,
   type ScratchChat,
   type ScratchChatDraft,
 } from "../../utils/scratch-chat";
 import {
+  buildBlankScratchDraft,
   buildPathScratchDraft,
   buildPreviewScratchDraft,
   buildQuotedScratchDraft,
@@ -167,6 +168,7 @@ let inAppBrowserOpenIpcWired = false;
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_SCRATCH_CHATS: ScratchChat[] = [];
+const EMPTY_PARKED_SCRATCH_CHATS: ScratchChat[] = [];
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 
 function logWorkspacePerf(payload: Record<string, unknown>): void {
@@ -728,6 +730,7 @@ function Section({
   onToggle,
   children,
   footer,
+  actions,
 }: {
   id: SummarySectionId;
   title: string;
@@ -736,26 +739,38 @@ function Section({
   onToggle: (id: SummarySectionId) => void;
   children: ReactNode;
   footer?: ReactNode;
+  actions?: ReactNode;
 }) {
   // Size to content (no flex-1 fill). Parent summary column scrolls as a whole when
   // sections exceed the panel — avoids large empty gaps under short lists like「待办」.
   return (
     <section className="flex shrink-0 flex-col border-b border-border last:border-b-0">
-      <button
-        type="button"
-        className="group flex w-full shrink-0 items-center gap-2 px-3 py-3.5 text-left text-[13px] text-text-strong hover:bg-surface-hover/40"
-        onClick={() => onToggle(id)}
-        aria-expanded={open}
-      >
-        <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${open ? "" : "-rotate-90"}`}
-          strokeWidth={2}
-        />
-        <span className="font-normal group-hover:font-semibold">{title}</span>
-        {typeof count === "number" ? (
-          <span className="text-[11px] font-normal text-text-faint">{count}</span>
+      <div className="flex w-full shrink-0 items-center">
+        <button
+          type="button"
+          className="group flex min-w-0 flex-1 items-center gap-2 px-3 py-3.5 text-left text-[13px] text-text-strong hover:bg-surface-hover/40"
+          onClick={() => onToggle(id)}
+          aria-expanded={open}
+        >
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${open ? "" : "-rotate-90"}`}
+            strokeWidth={2}
+          />
+          <span className="font-normal group-hover:font-semibold">{title}</span>
+          {typeof count === "number" ? (
+            <span className="text-[11px] font-normal text-text-faint">{count}</span>
+          ) : null}
+        </button>
+        {actions ? (
+          <div
+            className="shrink-0 pr-3"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {actions}
+          </div>
         ) : null}
-      </button>
+      </div>
       {open ? <div className="px-3 pb-3">{children}</div> : null}
       {open && footer ? <div className="shrink-0 px-3 pb-3">{footer}</div> : null}
     </section>
@@ -837,10 +852,26 @@ export function WorkPanel({
   const paneMessages = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.messages ?? EMPTY_MESSAGES,
   );
-  const scratchChats = useAppStore(
+  const scratchChatsRaw = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.scratchChats ?? EMPTY_SCRATCH_CHATS,
   );
+  const parkedScratchChatsRaw = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId)?.parkedScratchChats ?? EMPTY_PARKED_SCRATCH_CHATS,
+  );
+  const hostSessionId = String(sessionId ?? "").trim();
+  const scratchChats = useMemo(
+    () => filterScratchChatsForHost(scratchChatsRaw, hostSessionId),
+    [scratchChatsRaw, hostSessionId],
+  );
+  const parkedScratchChats = useMemo(
+    () => filterScratchChatsForHost(parkedScratchChatsRaw, hostSessionId),
+    [parkedScratchChatsRaw, hostSessionId],
+  );
   const closeScratchChat = useAppStore((s) => s.closeScratchChat);
+  const restoreParkedScratchChat = useAppStore((s) => s.restoreParkedScratchChat);
+  const deleteScratchChat = useAppStore((s) => s.deleteScratchChat);
+  const promoteScratchChat = useAppStore((s) => s.promoteScratchChat);
+  const clearHostScratchChats = useAppStore((s) => s.clearHostScratchChats);
   const setScratchChatFloating = useAppStore((s) => s.setScratchChatFloating);
   const { sendScratch, sendingIds: scratchSendingIds, errors: scratchSendErrors, clearScratchRuntime } =
     useScratchChatRuntime(paneId);
@@ -857,7 +888,8 @@ export function WorkPanel({
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
   const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
-  const [pendingCloseScratch, setPendingCloseScratch] = useState<ScratchChat | null>(null);
+  const [pendingDismissParked, setPendingDismissParked] = useState<ScratchChat | null>(null);
+  const [pendingClearHost, setPendingClearHost] = useState(false);
   const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
     sessionId: string;
     runId: string;
@@ -901,6 +933,7 @@ export function WorkPanel({
     workitems: false,
     artifacts: false,
     changes: false,
+    scratch: false,
     spawns: false,
     refs: false,
     members: false,
@@ -1183,6 +1216,7 @@ export function WorkPanel({
       workitems: isGroupPane && workItems.length > 0,
       artifacts: presentArtifactPaths.length > 0,
       changes: changeRows.length > 0,
+      scratch: scratchChats.length + parkedScratchChats.length > 0,
       spawns: subAgents.length > 0,
       refs: !referenceBundle.isEmpty,
       members: isGroupPane,
@@ -1261,6 +1295,10 @@ export function WorkPanel({
     return null;
   };
 
+  const summaryScratchChats = useMemo(
+    () => listSummaryScratchChats(scratchChats, parkedScratchChats),
+    [scratchChats, parkedScratchChats],
+  );
   const activeScratch = useMemo(
     () => scratchChats.find((chat) => chat.id === activeScratchId) ?? scratchChats[0] ?? null,
     [scratchChats, activeScratchId],
@@ -1269,21 +1307,91 @@ export function WorkPanel({
     setActiveScratchId((current) => resolveActiveScratchId(scratchChats, current));
   }, [scratchChats]);
 
+  const deleteScratchSessionIfUnused = (sid: string) => {
+    const sessionId = String(sid ?? "").trim();
+    if (!sessionId) return;
+    const usedByMainPane = useAppStore
+      .getState()
+      .panes.some((pane) => String(pane.sessionId ?? "").trim() === sessionId);
+    if (usedByMainPane || typeof window.agenticxDesktop?.deleteSession !== "function") return;
+    void window.agenticxDesktop.deleteSession(sessionId).finally(() => {
+      useAppStore.getState().bumpSessionCatalogRevision();
+    });
+  };
+
   const commitCloseScratch = (chatId: string) => {
     clearScratchRuntime(chatId);
-    closeScratchChat(paneId, chatId);
+    const evicted = closeScratchChat(paneId, chatId);
+    for (const sid of evicted) deleteScratchSessionIfUnused(sid);
     if (activeKind === "scratch" && activeScratchId === chatId) {
       setActiveKind(resolveFallbackKind({ excludeScratchId: chatId }));
     }
-    setPendingCloseScratch(null);
   };
 
   const requestCloseScratch = (chat: ScratchChat) => {
-    if (shouldConfirmCloseScratch(chat)) {
-      setPendingCloseScratch(chat);
+    commitCloseScratch(chat.id);
+  };
+
+  const restoreParkedScratch = (chat: ScratchChat) => {
+    const restoredId = restoreParkedScratchChat(paneId, chat.id);
+    if (!restoredId) return;
+    setActiveScratchId(restoredId);
+    setActiveKind("scratch");
+  };
+
+  const commitDismissParked = (chatId: string) => {
+    clearScratchRuntime(chatId);
+    const sid = deleteScratchChat(paneId, chatId);
+    deleteScratchSessionIfUnused(sid);
+    setPendingDismissParked(null);
+    if (activeKind === "scratch" && activeScratchId === chatId) {
+      setActiveKind(resolveFallbackKind({ excludeScratchId: chatId }));
+    }
+  };
+
+  const commitPromoteScratch = (chat: ScratchChat) => {
+    const sid = promoteScratchChat(paneId, chat.id);
+    if (!sid) return;
+    clearScratchRuntime(chat.id);
+    useAppStore.getState().bumpSessionCatalogRevision();
+    if (activeKind === "scratch" && activeScratchId === chat.id) {
+      setActiveKind(resolveFallbackKind({ excludeScratchId: chat.id }));
+    }
+  };
+
+  const commitClearHost = () => {
+    const ids = clearHostScratchChats(paneId, hostSessionId);
+    for (const sid of ids) deleteScratchSessionIfUnused(sid);
+    setPendingClearHost(false);
+    setActiveScratchId(null);
+    if (activeKind === "scratch") {
+      setActiveKind("summary");
+    }
+  };
+
+  const openExistingScratch = (chat: ScratchChat, isParked: boolean) => {
+    if (isParked) {
+      restoreParkedScratch(chat);
       return;
     }
-    commitCloseScratch(chat.id);
+    setActiveScratchId(chat.id);
+    setActiveKind("scratch");
+  };
+
+  const openScratchFromPlus = () => {
+    closePlus();
+    const latestOpen = scratchChats[scratchChats.length - 1];
+    if (latestOpen) {
+      setActiveScratchId(latestOpen.id);
+      setActiveKind("scratch");
+      return;
+    }
+    const latestParked = parkedScratchChats[0];
+    if (latestParked) {
+      restoreParkedScratch(latestParked);
+      return;
+    }
+    onOpenScratchChat?.(buildBlankScratchDraft(t("work.tabScratch")));
   };
 
   const scratchAbout = (snippet: string) =>
@@ -1590,6 +1698,17 @@ export function WorkPanel({
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab, scratchChats, activeScratchId]);
+
+  useEffect(() => {
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(
+        prev,
+        "scratch",
+        scratchChats.length + parkedScratchChats.length > 0,
+        pinnedSummarySectionRef.current,
+      ),
+    );
+  }, [scratchChats.length, parkedScratchChats.length, pinnedSummarySection]);
 
   useEffect(() => {
     setOpenSections((prev) =>
@@ -2006,6 +2125,14 @@ export function WorkPanel({
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+              onClick={openScratchFromPlus}
+            >
+              <MessageSquare className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              {t("work.tabScratch")}
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openChangesTab}
             >
               <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
@@ -2063,6 +2190,13 @@ export function WorkPanel({
       title: t("work.tabSummary"),
       subtitle: t("work.subtitleSummary"),
       onClick: openSummaryTab,
+    },
+    {
+      key: "scratch",
+      icon: <MessageSquare className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: t("work.tabScratch"),
+      subtitle: t("work.subtitleScratch"),
+      onClick: openScratchFromPlus,
     },
     {
       key: "changes",
@@ -2508,20 +2642,14 @@ export function WorkPanel({
 
         {hasAnyTab && activeKind === "summary" && summaryTabOpen ? (
           <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+            {hasSessionTodo && sessionTodo ? (
             <Section
               id="todo"
               title={t("work.todos")}
-              count={sessionTodo?.total ?? 0}
+              count={sessionTodo.total}
               open={openSections.todo}
               onToggle={toggleSection}
             >
-              {!sessionTodo ? (
-                <EmptyBlock
-                  icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
-                  title={t("work.emptyTodos")}
-                  subtitle={t("work.emptyTodosHint")}
-                />
-              ) : (
                 <SessionTodoList
                   todo={sessionTodo}
                   onOpenScratch={
@@ -2538,8 +2666,8 @@ export function WorkPanel({
                       : undefined
                   }
                 />
-              )}
             </Section>
+            ) : null}
 
             {isGroupPane && groupId ? (
               <Section
@@ -2736,6 +2864,81 @@ export function WorkPanel({
               </Section>
             ) : null}
 
+            {summaryScratchChats.length > 0 ? (
+              <Section
+                id="scratch"
+                title={t("work.tabScratch")}
+                count={summaryScratchChats.length}
+                open={openSections.scratch}
+                onToggle={toggleSection}
+                actions={
+                  <button
+                    type="button"
+                    className="rounded px-1.5 py-0.5 text-[11px] text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => setPendingClearHost(true)}
+                  >
+                    {t("work.scratchClearAll")}
+                  </button>
+                }
+              >
+                <div className="space-y-1">
+                  {summaryScratchChats.map((chat) => {
+                    const preview = scratchParkedPreview(chat);
+                    const canPromote = Boolean(String(chat.sessionId ?? "").trim());
+                    return (
+                      <div
+                        key={chat.id}
+                        className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover"
+                      >
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => openExistingScratch(chat, chat.isParked)}
+                        >
+                          <div className="truncate text-[13px] text-text-strong">{chat.title}</div>
+                          {preview ? (
+                            <div className="truncate text-[11px] text-text-faint">{preview}</div>
+                          ) : null}
+                        </button>
+                        {canPromote ? (
+                          <button
+                            type="button"
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              commitPromoteScratch(chat);
+                            }}
+                          >
+                            {t("work.scratchPromote")}
+                          </button>
+                        ) : null}
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDismissParked(chat);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setPendingDismissParked(chat);
+                            }
+                          }}
+                          aria-label={t("work.scratchDismiss")}
+                        >
+                          <X className="h-3.5 w-3.5" strokeWidth={2} />
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            ) : null}
+
+            {subAgents.length > 0 ? (
             <Section
               id="spawns"
               title={t("work.subagents")}
@@ -2743,13 +2946,6 @@ export function WorkPanel({
               open={openSections.spawns}
               onToggle={toggleSection}
             >
-              {subAgents.length === 0 ? (
-                <EmptyBlock
-                  icon={<Bot className="h-9 w-9" strokeWidth={1.3} />}
-                  title={t("work.emptySubagents")}
-                  subtitle={t("work.emptySubagentsHint")}
-                />
-              ) : (
                 <div className="space-y-2">
                   {subAgents.map((subAgent) => (
                     <SubAgentCard
@@ -2765,8 +2961,8 @@ export function WorkPanel({
                     />
                   ))}
                 </div>
-              )}
             </Section>
+            ) : null}
           </div>
         ) : null}
 
@@ -3097,7 +3293,9 @@ export function WorkPanel({
               hideHeader
               onClose={() => requestCloseScratch(activeScratch)}
               onSend={(text) => sendScratch(activeScratch, text)}
-              onRetry={(userMessageId) => sendScratch(activeScratch, "", { retryUserId: userMessageId })}
+              onRetry={(userMessageId, editText) =>
+                sendScratch(activeScratch, "", { retryUserId: userMessageId, editText })
+              }
               sending={scratchSendingIds.includes(activeScratch.id)}
               error={scratchSendErrors[activeScratch.id]}
             />
@@ -3106,27 +3304,46 @@ export function WorkPanel({
       </div>
 
       <Modal
-        open={!!pendingCloseScratch}
-        title={t("work.scratchCloseConfirmTitle")}
-        onClose={() => setPendingCloseScratch(null)}
+        open={!!pendingDismissParked}
+        title={t("work.scratchDismissConfirmTitle")}
+        onClose={() => setPendingDismissParked(null)}
         panelClassName="w-full max-w-[400px] bg-surface-panel"
         footer={
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPendingCloseScratch(null)}>
-              {t("work.scratchCloseConfirmCancel")}
+            <Button variant="ghost" onClick={() => setPendingDismissParked(null)}>
+              {t("work.scratchDismissConfirmCancel")}
             </Button>
             <Button
               variant="danger"
               onClick={() => {
-                if (pendingCloseScratch) commitCloseScratch(pendingCloseScratch.id);
+                if (pendingDismissParked) commitDismissParked(pendingDismissParked.id);
               }}
             >
-              {t("work.scratchCloseConfirmOk")}
+              {t("work.scratchDismissConfirmOk")}
             </Button>
           </div>
         }
       >
-        <p className="text-sm text-text-subtle">{t("work.scratchCloseConfirm")}</p>
+        <p className="text-sm text-text-subtle">{t("work.scratchDismissConfirm")}</p>
+      </Modal>
+
+      <Modal
+        open={pendingClearHost}
+        title={t("work.scratchClearAllConfirmTitle")}
+        onClose={() => setPendingClearHost(false)}
+        panelClassName="w-full max-w-[400px] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPendingClearHost(false)}>
+              {t("work.scratchDismissConfirmCancel")}
+            </Button>
+            <Button variant="danger" onClick={commitClearHost}>
+              {t("work.scratchClearAll")}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-text-subtle">{t("work.scratchClearAllConfirm")}</p>
       </Modal>
     </div>
   );

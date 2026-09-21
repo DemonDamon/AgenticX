@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppStore } from "../store";
+import { scratchHistoryBlocklist } from "../utils/scratch-chat";
 
 export type GlobalSearchCategory =
   | "all"
@@ -136,9 +138,13 @@ async function fetchConversationHits(trimmed: string): Promise<{
   }
   const rawHits = Array.isArray(sres.hits) ? sres.hits : [];
   const mapped: ConversationHit[] = [];
+  const blocked = scratchHistoryBlocklist(
+    useAppStore.getState().panes,
+    useAppStore.getState().hiddenScratchSessionIds,
+  );
   for (const h of rawHits) {
     const sid = String(h.session_id || "").trim();
-    if (!sid) continue;
+    if (!sid || blocked.has(sid)) continue;
     const row = rowsById.get(sid);
     const avatarId = row?.avatar_id ?? null;
     if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;

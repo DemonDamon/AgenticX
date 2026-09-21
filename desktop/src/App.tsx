@@ -25,7 +25,15 @@ import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
 import { i18n } from "./i18n/i18n";
 import { announceDesktopTaskComplete, isDesktopWindowFocusedAndVisible } from "./utils/desktop-task-notify";
-import { normalizePersistedScratchChats, type ScratchChat } from "./utils/scratch-chat";
+import {
+  collectScratchSessionIds,
+  mergeHiddenScratchSessionIdsForPersist,
+  normalizePersistedScratchChats,
+  rememberScratchSessionIds,
+  scratchHistoryBlocklist,
+  normalizePersistedScratchSessionIds,
+  type ScratchChat,
+} from "./utils/scratch-chat";
 import { LOCALE_STORAGE_KEY, isAppLocale } from "./i18n/locales";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
@@ -97,12 +105,14 @@ type PersistedPaneState = {
   turnIntent?: "default" | "plan" | "isolate";
   isolateActive?: boolean;
   scratchChats?: ScratchChat[];
+  parkedScratchChats?: ScratchChat[];
 };
 
 type PersistedWorkspaceState = {
   sessionId: string;
   activePaneId: string;
   panes: PersistedPaneState[];
+  hiddenScratchSessionIds: string[];
 };
 
 function toProviderEntries(
@@ -233,11 +243,20 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         turnIntent: normalizeTurnIntent(row.turnIntent),
         isolateActive: row.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(row.scratchChats),
+        parkedScratchChats: normalizePersistedScratchChats(row.parkedScratchChats),
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
   if (panes.length === 0) return null;
-  return { sessionId, activePaneId, panes };
+  return {
+    sessionId,
+    activePaneId,
+    panes,
+    hiddenScratchSessionIds: rememberScratchSessionIds(
+      normalizePersistedScratchSessionIds(obj.hiddenScratchSessionIds),
+      collectScratchSessionIds(panes),
+    ),
+  };
 }
 
 type SessionListItem = {
@@ -259,12 +278,17 @@ function isSessionItemMatchingAvatar(item: SessionListItem, avatarId?: string | 
 
 function pickMostRecentSessionId(
   sessions: SessionListItem[],
-  avatarId?: string | null
+  avatarId?: string | null,
+  blockedIds?: Iterable<string>,
 ): string | undefined {
+  const blocked = new Set(
+    [...(blockedIds ?? [])].map((id) => String(id ?? "").trim()).filter(Boolean)
+  );
   const sorted = [...sessions]
     .filter((item) => {
       const sid = String(item.session_id ?? "").trim();
       if (!sid) return false;
+      if (blocked.has(sid)) return false;
       if (item.archived === true) return false;
       return isSessionItemMatchingAvatar(item, avatarId);
     })
@@ -307,6 +331,7 @@ export function App() {
   const sessionId = useAppStore((s) => s.sessionId);
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
+  const hiddenScratchSessionIds = useAppStore((s) => s.hiddenScratchSessionIds);
   const confirm = useAppStore((s) => s.confirm);
   const clarification = useAppStore((s) => s.clarification);
   const settings = useAppStore((s) => s.settings);
@@ -423,8 +448,20 @@ export function App() {
     const activePane = panes.find((pane) => pane.id === activePaneId);
     const sid = String(activePane?.sessionId ?? "").trim();
     if (!sid) return;
+    const blocked = scratchHistoryBlocklist(panes, hiddenScratchSessionIds);
+    if (blocked.has(sid)) return;
     rememberSessionForAvatar(activePane?.avatarId ?? null, sid);
-  }, [activePaneId, panes]);
+  }, [activePaneId, panes, hiddenScratchSessionIds]);
+  useEffect(() => {
+    const blocked = scratchHistoryBlocklist(panes, hiddenScratchSessionIds);
+    if (blocked.size === 0) return;
+    for (const pane of panes) {
+      const sid = String(pane.sessionId ?? "").trim();
+      if (sid && blocked.has(sid)) {
+        setPaneSessionId(pane.id, "");
+      }
+    }
+  }, [panes, hiddenScratchSessionIds, setPaneSessionId]);
   useEffect(() => {
     ensureBrowserAgentIpc();
   }, []);
@@ -718,10 +755,14 @@ export function App() {
       }
 
       let recovered = false;
+      let scratchBlocklist = new Set<string>();
       try {
         const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
         const saved = normalizePersistedWorkspaceState(parsed);
+        if (saved) {
+          scratchBlocklist = scratchHistoryBlocklist(saved.panes, saved.hiddenScratchSessionIds);
+        }
         const sessionsCache = new Map<string, SessionListItem[]>();
         const recentSidCache = new Map<string, string>();
         const getSessionsForAvatar = async (avatarId?: string | null): Promise<SessionListItem[]> => {
@@ -776,7 +817,7 @@ export function App() {
             recentSidCache.set(key, "");
             return undefined;
           }
-          const sid = pickMostRecentSessionId(rows, key || undefined);
+          const sid = pickMostRecentSessionId(rows, key || undefined, scratchBlocklist);
           recentSidCache.set(key, sid ?? "");
           return sid;
         };
@@ -790,6 +831,9 @@ export function App() {
               const lazyEligible = !isGroupPane && !isAutomationTaskPane;
 
               let wantedSid = String(pane.sessionId ?? "").trim();
+              if (wantedSid && scratchBlocklist.has(wantedSid)) {
+                wantedSid = "";
+              }
               if (wantedSid && !(await isSessionCompatible(wantedSid, pane.avatarId))) {
                 wantedSid = "";
               }
@@ -881,8 +925,13 @@ export function App() {
                 turnIntent: normalizeTurnIntent(pane.turnIntent),
                 isolateActive: pane.isolateActive === true,
                 scratchChats: normalizePersistedScratchChats(pane.scratchChats),
+                parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
               })),
               activePaneId: nextActivePaneId,
+              hiddenScratchSessionIds: rememberScratchSessionIds(
+                saved.hiddenScratchSessionIds,
+                collectScratchSessionIds(hydratedPanes),
+              ),
             });
             // Re-apply sid bindings so store can restore per-session token cache
             // and seed the model from the newly-returned session.provider/model
@@ -941,7 +990,7 @@ export function App() {
           try {
             const listed = await window.agenticxDesktop.listSessions();
             if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) return undefined;
-            return pickMostRecentSessionId(listed.sessions, null);
+            return pickMostRecentSessionId(listed.sessions, null, scratchBlocklist);
           } catch {
             return undefined;
           }
@@ -1108,14 +1157,29 @@ export function App() {
         turnIntent: normalizeTurnIntent(pane.turnIntent),
         isolateActive: pane.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(pane.scratchChats),
+        parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
       })),
+      hiddenScratchSessionIds: mergeHiddenScratchSessionIdsForPersist(
+        (() => {
+          try {
+            const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (!parsed || typeof parsed !== "object") return [];
+            return (parsed as { hiddenScratchSessionIds?: unknown }).hiddenScratchSessionIds;
+          } catch {
+            return [];
+          }
+        })(),
+        hiddenScratchSessionIds,
+        panes,
+      ),
     };
     try {
       writeScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
       // ignore storage failures
     }
-  }, [sessionId, activePaneId, panes]);
+  }, [sessionId, activePaneId, panes, hiddenScratchSessionIds]);
 
   useEffect(() => {
     subAgentsRef.current = subAgents;

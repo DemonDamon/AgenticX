@@ -12,6 +12,7 @@ function chat(partial: Partial<ScratchChat> & Pick<ScratchChat, "id">): ScratchC
     sourceKind: partial.sourceKind ?? "message",
     sourceKey: partial.sourceKey ?? `message:${partial.id}`,
     sessionId: partial.sessionId ?? "",
+    hostSessionId: partial.hostSessionId ?? "",
     messages: partial.messages ?? [],
     floating: partial.floating ?? false,
     quotedContent: partial.quotedContent,
