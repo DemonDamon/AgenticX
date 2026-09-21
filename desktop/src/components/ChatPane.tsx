@@ -691,6 +691,7 @@ const FALLBACK_PANE: ChatPaneState = {
   sessionTokens: { ...EMPTY_SESSION_TOKENS },
   historySearchTerms: [],
   historyJumpMessageId: null,
+  scratchChats: [],
   loadingMessages: false,
   oldestLoadedIndex: 0,
   hasOlderMessages: false,

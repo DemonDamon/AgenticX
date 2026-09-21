@@ -57,6 +57,7 @@ import {
   type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
+import { collectScratchSessionIds, excludeScratchSessionsFromHistory } from "../../utils/scratch-chat";
 import { HoverTip } from "../ds/HoverTip";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
 import { SidebarSessionFileManage } from "./SidebarSessionFileManage";
@@ -375,8 +376,12 @@ export function SidebarSessionHistory() {
   );
 
   const sessionsWithHints = useMemo(
-    () => applySidebarSessionHistoryHints(sessions, sessionHistoryHints),
-    [sessions, sessionHistoryHints]
+    () =>
+      applySidebarSessionHistoryHints(
+        excludeScratchSessionsFromHistory(sessions, collectScratchSessionIds(panes)),
+        sessionHistoryHints
+      ),
+    [sessions, sessionHistoryHints, panes]
   );
 
   const wechatRow = useMemo(() => {

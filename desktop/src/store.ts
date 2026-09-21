@@ -14,6 +14,14 @@ import {
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
+import {
+  closeScratchChatList,
+  patchScratchChatList,
+  setScratchFloating,
+  upsertScratchChatList,
+  type ScratchChat,
+  type ScratchChatDraft,
+} from "./utils/scratch-chat";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
 import { findLastOwnedMessageIndex } from "./utils/message-ownership";
 import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
@@ -225,6 +233,8 @@ export type ChatPane = {
   historyJumpMessageId?: string | null;
   /** One-shot cross-pane quote payload set by "引用至新对话"; consumed once on mount then cleared. */
   pendingQuote?: { messageId: string; body: string; label: string } | null;
+  /** Workspace-only scratch chats. Not listed in sidebar history. */
+  scratchChats?: ScratchChat[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
   /** + menu turn intent: default execute / plan first / isolated copy. */
@@ -862,6 +872,13 @@ type AppState = {
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   setPaneHistoryJumpMessageId: (paneId: string, messageId: string | null) => void;
   setPanePendingQuote: (paneId: string, payload: ChatPane["pendingQuote"]) => void;
+  upsertScratchChat: (
+    paneId: string,
+    draft: ScratchChatDraft
+  ) => { chatId: string; reused: boolean };
+  setScratchChatFloating: (paneId: string, chatId: string, floating: boolean) => void;
+  closeScratchChat: (paneId: string, chatId: string) => void;
+  patchScratchChat: (paneId: string, chatId: string, patch: Partial<ScratchChat>) => void;
   togglePaneHistory: (paneId: string) => void;
   togglePaneMemoryGraph: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
@@ -995,6 +1012,7 @@ function makeDefaultPane(): ChatPane {
     sessionTokens: { ...EMPTY_SESSION_TOKENS },
     historySearchTerms: [],
     historyJumpMessageId: null,
+    scratchChats: [],
     loadingMessages: false,
     oldestLoadedIndex: 0,
     hasOlderMessages: false,
@@ -1883,6 +1901,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessionTokens: { ...EMPTY_SESSION_TOKENS },
           historySearchTerms: [],
           historyJumpMessageId: null,
+          scratchChats: [],
         },
       ],
       activePaneId: paneId,
@@ -2541,6 +2560,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, pendingQuote: payload ?? null } : pane
+      ),
+    })),
+  upsertScratchChat: (paneId, draft) => {
+    let chatId = "";
+    let reused = false;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = upsertScratchChatList(pane.scratchChats ?? [], draft, uid());
+        chatId = next.chat.id;
+        reused = next.reused;
+        return { ...pane, scratchChats: next.chats };
+      }),
+    }));
+    return { chatId, reused };
+  },
+  setScratchChatFloating: (paneId, chatId, floating) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, scratchChats: setScratchFloating(pane.scratchChats ?? [], chatId, floating) }
+          : pane
+      ),
+    })),
+  closeScratchChat: (paneId, chatId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, scratchChats: closeScratchChatList(pane.scratchChats ?? [], chatId) }
+          : pane
+      ),
+    })),
+  patchScratchChat: (paneId, chatId, patch) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, scratchChats: patchScratchChatList(pane.scratchChats ?? [], chatId, patch) }
+          : pane
       ),
     })),
   togglePaneHistory: (paneId) =>

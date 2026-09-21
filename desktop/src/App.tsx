@@ -25,6 +25,7 @@ import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
 import { i18n } from "./i18n/i18n";
 import { announceDesktopTaskComplete, isDesktopWindowFocusedAndVisible } from "./utils/desktop-task-notify";
+import { normalizePersistedScratchChats, type ScratchChat } from "./utils/scratch-chat";
 import { LOCALE_STORAGE_KEY, isAppLocale } from "./i18n/locales";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
@@ -95,6 +96,7 @@ type PersistedPaneState = {
   };
   turnIntent?: "default" | "plan" | "isolate";
   isolateActive?: boolean;
+  scratchChats?: ScratchChat[];
 };
 
 type PersistedWorkspaceState = {
@@ -230,6 +232,7 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         },
         turnIntent: normalizeTurnIntent(row.turnIntent),
         isolateActive: row.isolateActive === true,
+        scratchChats: normalizePersistedScratchChats(row.scratchChats),
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
@@ -877,6 +880,7 @@ export function App() {
                 activeTerminalTabId: null,
                 turnIntent: normalizeTurnIntent(pane.turnIntent),
                 isolateActive: pane.isolateActive === true,
+                scratchChats: normalizePersistedScratchChats(pane.scratchChats),
               })),
               activePaneId: nextActivePaneId,
             });
@@ -1103,6 +1107,7 @@ export function App() {
         sessionTokens: pane.sessionTokens,
         turnIntent: normalizeTurnIntent(pane.turnIntent),
         isolateActive: pane.isolateActive === true,
+        scratchChats: normalizePersistedScratchChats(pane.scratchChats),
       })),
     };
     try {
