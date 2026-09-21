@@ -25,6 +25,7 @@ import {
   Globe,
   ListTodo,
   Maximize2,
+  MessageSquare,
   Minimize2,
   PanelRight,
   Plus,
@@ -59,6 +60,17 @@ import {
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
 import { HoverTip } from "../ds/HoverTip";
+import { Button } from "../ds/Button";
+import { Modal } from "../ds/Modal";
+import { ScratchChatCard } from "./ScratchChatCard";
+import {
+  shouldConfirmCloseScratch,
+  type ScratchChat,
+} from "../../utils/scratch-chat";
+import {
+  resolveActiveScratchId,
+  resolveScratchFocusId,
+} from "../../utils/scratch-chat-panel";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
@@ -145,6 +157,7 @@ const inAppBrowserOpenHandlers = new Set<InAppBrowserOpenHandler>();
 let inAppBrowserOpenIpcWired = false;
 
 const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_SCRATCH_CHATS: ScratchChat[] = [];
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 
 function logWorkspacePerf(payload: Record<string, unknown>): void {
@@ -462,7 +475,8 @@ export type WorkPanelTabKind =
   | "browser"
   | "preview"
   | "graph"
-  | "timeline";
+  | "timeline"
+  | "scratch";
 
 export type { SummarySectionId } from "./summary-sections";
 
@@ -495,6 +509,7 @@ export type WorkPanelFocus =
       runId?: string;
       eventId?: string;
     }
+  | { kind: "scratch"; chatId: string }
   | null;
 
 type BrowserHistoryEntry = {
@@ -799,6 +814,10 @@ export function WorkPanel({
   const paneMessages = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.messages ?? EMPTY_MESSAGES,
   );
+  const scratchChats = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId)?.scratchChats ?? EMPTY_SCRATCH_CHATS,
+  );
+  const closeScratchChat = useAppStore((s) => s.closeScratchChat);
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
@@ -811,6 +830,8 @@ export function WorkPanel({
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
+  const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
+  const [pendingCloseScratch, setPendingCloseScratch] = useState<ScratchChat | null>(null);
   const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
     sessionId: string;
     runId: string;
@@ -1173,7 +1194,8 @@ export function WorkPanel({
     timelineTabOpen ||
     terminalTabs.length > 0 ||
     browserTabs.length > 0 ||
-    previewTabs.length > 0;
+    previewTabs.length > 0 ||
+    scratchChats.length > 0;
 
   const resolveFallbackKind = (opts?: {
     excludeSummary?: boolean;
@@ -1183,7 +1205,13 @@ export function WorkPanel({
     excludeTerminalId?: string;
     excludeBrowserId?: string;
     excludePreviewId?: string;
+    excludeScratchId?: string;
   }): WorkPanelTabKind | null => {
+    const remainingScratch = scratchChats.find((chat) => chat.id !== opts?.excludeScratchId);
+    if (opts?.excludeScratchId && remainingScratch) {
+      setActiveScratchId(remainingScratch.id);
+      return "scratch";
+    }
     if (!opts?.excludeSummary && summaryTabOpen) return "summary";
     if (!opts?.excludeGraph && graphTabOpen) return "graph";
     if (!opts?.excludeTimeline && timelineTabOpen) return "timeline";
@@ -1200,7 +1228,36 @@ export function WorkPanel({
       setActiveBrowserId(nextBrowser.id);
       return "browser";
     }
+    if (remainingScratch) {
+      setActiveScratchId(remainingScratch.id);
+      return "scratch";
+    }
     return null;
+  };
+
+  const activeScratch = useMemo(
+    () => scratchChats.find((chat) => chat.id === activeScratchId) ?? scratchChats[0] ?? null,
+    [scratchChats, activeScratchId],
+  );
+
+  useEffect(() => {
+    setActiveScratchId((current) => resolveActiveScratchId(scratchChats, current));
+  }, [scratchChats]);
+
+  const commitCloseScratch = (chatId: string) => {
+    closeScratchChat(paneId, chatId);
+    if (activeKind === "scratch" && activeScratchId === chatId) {
+      setActiveKind(resolveFallbackKind({ excludeScratchId: chatId }));
+    }
+    setPendingCloseScratch(null);
+  };
+
+  const requestCloseScratch = (chat: ScratchChat) => {
+    if (shouldConfirmCloseScratch(chat)) {
+      setPendingCloseScratch(chat);
+      return;
+    }
+    commitCloseScratch(chat.id);
   };
 
   const silentReloadPreviewTab = useCallback(async (tabId: string, path: string) => {
@@ -1485,9 +1542,12 @@ export function WorkPanel({
           eventId: focusRequest.eventId,
         });
       }
+    } else if (focusRequest.kind === "scratch") {
+      setActiveScratchId(resolveScratchFocusId(scratchChats, focusRequest.chatId, activeScratchId));
+      setActiveKind("scratch");
     }
     onFocusRequestHandled?.();
-  }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
+  }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab, scratchChats, activeScratchId]);
 
   useEffect(() => {
     setOpenSections((prev) =>
@@ -2270,6 +2330,47 @@ export function WorkPanel({
           </button>
         ))}
 
+        {scratchChats.map((chat) => (
+          <button
+            key={chat.id}
+            type="button"
+            className={`flex h-7 max-w-[168px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "scratch" && activeScratch?.id === chat.id
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => {
+              setActiveScratchId(chat.id);
+              setActiveKind("scratch");
+            }}
+          >
+            <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">{chat.title}</span>
+            {chat.floating ? (
+              <span className="shrink-0 text-[10px] text-text-faint">{t("work.scratchFloated")}</span>
+            ) : null}
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                requestCloseScratch(chat);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  requestCloseScratch(chat);
+                }
+              }}
+              aria-label={t("work.closeScratchTab")}
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ))}
+
         <button
           ref={plusBtnRef}
           type="button"
@@ -2825,7 +2926,40 @@ export function WorkPanel({
             />
           </div>
         ) : null}
+
+        {hasAnyTab && activeKind === "scratch" && activeScratch ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <ScratchChatCard
+              chat={activeScratch}
+              onClose={() => requestCloseScratch(activeScratch)}
+            />
+          </div>
+        ) : null}
       </div>
+
+      <Modal
+        open={!!pendingCloseScratch}
+        title={t("work.scratchCloseConfirmTitle")}
+        onClose={() => setPendingCloseScratch(null)}
+        panelClassName="w-full max-w-[400px] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPendingCloseScratch(null)}>
+              {t("work.scratchCloseConfirmCancel")}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (pendingCloseScratch) commitCloseScratch(pendingCloseScratch.id);
+              }}
+            >
+              {t("work.scratchCloseConfirmOk")}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-text-subtle">{t("work.scratchCloseConfirm")}</p>
+      </Modal>
     </div>
   );
 }
