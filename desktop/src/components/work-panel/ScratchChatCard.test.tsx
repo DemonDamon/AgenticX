@@ -61,4 +61,20 @@ describe("ScratchChatCard", () => {
     expect(html).not.toContain(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" }));
     expect(html).not.toContain(i18n.t("work.scratchEmpty", { ns: "workspace" }));
   });
+
+  it("exposes a float control only when docked and onFloat is provided", () => {
+    const floatLabel = `aria-label="${i18n.t("work.scratchFloat", { ns: "workspace" })}"`;
+    const withFloat = renderToStaticMarkup(
+      <ScratchChatCard chat={sample()} onClose={() => undefined} onFloat={() => undefined} />,
+    );
+    expect(withFloat).toContain(floatLabel);
+    const floated = renderToStaticMarkup(
+      <ScratchChatCard
+        chat={sample({ floating: true })}
+        onClose={() => undefined}
+        onFloat={() => undefined}
+      />,
+    );
+    expect(floated).not.toContain(floatLabel);
+  });
 });

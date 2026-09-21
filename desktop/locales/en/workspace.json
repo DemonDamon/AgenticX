@@ -236,6 +236,8 @@
     "scratchCreateFailed": "Could not create the scratch session",
     "scratchFloated": "Floated",
     "scratchFloatedHint": "Closing the float docks it back here",
+    "scratchFloat": "Float",
+    "scratchDock": "Dock to workspace",
     "scratchCloseConfirmTitle": "Close this scratch chat?",
     "scratchCloseConfirm": "This scratch chat will leave the workspace and will not appear in sidebar history.",
     "scratchCloseConfirmOk": "Close",

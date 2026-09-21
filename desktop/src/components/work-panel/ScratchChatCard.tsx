@@ -1,4 +1,4 @@
-import { MessageSquare, X } from "lucide-react";
+import { Maximize2, MessageSquare, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ds/Button";
@@ -7,6 +7,7 @@ import type { ScratchChat, ScratchChatSourceKind } from "../../utils/scratch-cha
 type Props = {
   chat: ScratchChat;
   onClose: () => void;
+  onFloat?: () => void;
   onSend?: (text: string) => Promise<boolean>;
   sending?: boolean;
   error?: string;
@@ -21,7 +22,7 @@ function sourceKey(kind: ScratchChatSourceKind): `work.scratchSource.${ScratchCh
   return `work.scratchSource.${kind}`;
 }
 
-export function ScratchChatCard({ chat, onClose, onSend, sending = false, error }: Props) {
+export function ScratchChatCard({ chat, onClose, onFloat, onSend, sending = false, error }: Props) {
   const { t } = useTranslation("workspace");
   const [draft, setDraft] = useState("");
   const quote = String(chat.quotedContent ?? "").trim();
@@ -45,6 +46,16 @@ export function ScratchChatCard({ chat, onClose, onSend, sending = false, error 
           <div className="truncate text-[13px] font-medium text-text-strong">{chat.title}</div>
           <div className="mt-0.5 text-[11px] text-text-faint">{t(sourceKey(chat.sourceKind))}</div>
         </div>
+        {!chat.floating && onFloat ? (
+          <button
+            type="button"
+            className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+            onClick={onFloat}
+            aria-label={t("work.scratchFloat")}
+          >
+            <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        ) : null}
         <button
           type="button"
           className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"

@@ -63,6 +63,7 @@ import { HoverTip } from "../ds/HoverTip";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
 import { ScratchChatCard } from "./ScratchChatCard";
+import { ScratchChatFloatOverlay } from "./ScratchChatFloatOverlay";
 import {
   shouldConfirmCloseScratch,
   type ScratchChat,
@@ -823,6 +824,7 @@ export function WorkPanel({
   );
   const closeScratchChat = useAppStore((s) => s.closeScratchChat);
   const patchScratchChat = useAppStore((s) => s.patchScratchChat);
+  const setScratchChatFloating = useAppStore((s) => s.setScratchChatFloating);
   const scratchPaneMeta = useAppStore((s) => {
     const pane = s.panes.find((item) => item.id === paneId);
     return {
@@ -1254,6 +1256,10 @@ export function WorkPanel({
   const activeScratch = useMemo(
     () => scratchChats.find((chat) => chat.id === activeScratchId) ?? scratchChats[0] ?? null,
     [scratchChats, activeScratchId],
+  );
+  const floatingChat = useMemo(
+    () => scratchChats.find((chat) => chat.floating) ?? null,
+    [scratchChats],
   );
 
   useEffect(() => {
@@ -3004,6 +3010,7 @@ export function WorkPanel({
             <ScratchChatCard
               chat={activeScratch}
               onClose={() => requestCloseScratch(activeScratch)}
+              onFloat={() => setScratchChatFloating(paneId, activeScratch.id, true)}
               onSend={(text) => sendScratch(activeScratch, text)}
               sending={scratchSendingIds.includes(activeScratch.id)}
               error={scratchSendErrors[activeScratch.id]}
@@ -3011,6 +3018,16 @@ export function WorkPanel({
           </div>
         ) : null}
       </div>
+
+      {floatingChat ? (
+        <ScratchChatFloatOverlay
+          chat={floatingChat}
+          onDock={() => setScratchChatFloating(paneId, floatingChat.id, false)}
+          onSend={(text) => sendScratch(floatingChat, text)}
+          sending={scratchSendingIds.includes(floatingChat.id)}
+          error={scratchSendErrors[floatingChat.id]}
+        />
+      ) : null}
 
       <Modal
         open={!!pendingCloseScratch}

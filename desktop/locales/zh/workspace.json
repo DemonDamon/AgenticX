@@ -236,6 +236,8 @@
     "scratchCreateFailed": "无法创建临时会话",
     "scratchFloated": "已浮出",
     "scratchFloatedHint": "关闭浮窗后会收回这里",
+    "scratchFloat": "浮出",
+    "scratchDock": "收回工作区",
     "scratchCloseConfirmTitle": "关闭临时对话？",
     "scratchCloseConfirm": "关闭后这张临时对话会从工作区消失，侧栏历史里也找不到。",
     "scratchCloseConfirmOk": "关闭",
