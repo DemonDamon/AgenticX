@@ -5920,16 +5920,24 @@ class AgentRuntime:
             _fr = str(model_finish_reason or "").strip().lower()
             if (
                 not tool_calls
-                and not str(ac_clean or "").strip()
                 and _fr in {"tool_calls", "tool_call", "function_call", "functions"}
                 and not getattr(session, "_empty_tool_calls_retry_used", False)
             ):
+                # A lead-in sentence is not a finished answer. Vendors set
+                # finish_reason=tool_calls when the tool payload was the point
+                # of the turn; dropping that because visible text exists ends
+                # the turn on the preamble.
                 setattr(session, "_empty_tool_calls_retry_used", True)
                 hint = (
                     "[系统通知] 上一轮 finish_reason 表明模型要调用工具，但没有收到完整可用的 tool_call。"
+                    "可见正文里的开场白不能代替工具调用。"
                     "请立即重新发出明确的 tool_call（补全所有 required 参数）；"
                     "若已无需工具，请直接给出用户可见的最终说明。"
                 )
+                visible = str(ac_clean or "").strip()
+                if visible:
+                    messages.append({"role": "assistant", "content": visible})
+                    session.agent_messages.append({"role": "assistant", "content": visible})
                 messages.append({"role": "system", "content": hint})
                 session.agent_messages.append({"role": "system", "content": hint})
                 logger.info(
