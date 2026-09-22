@@ -23,10 +23,17 @@ _THINK_CLOSE = chr(60) + "/think" + chr(62)
 
 
 class _FakeResponse:
-    def __init__(self, content: str, tool_calls, reasoning_content: str = ""):
+    def __init__(
+        self,
+        content: str,
+        tool_calls,
+        reasoning_content: str = "",
+        finish_reason: str = "",
+    ):
         self.content = content
         self.tool_calls = tool_calls
         self.reasoning_content = reasoning_content
+        self.finish_reason = finish_reason
 
 
 class _ApproveGate(ConfirmGate):
@@ -296,6 +303,41 @@ def test_reasoning_only_exhausts_nudge_emits_visible_retry_fallback() -> None:
     assert last["metadata"]["model_finish_reason"] == "unknown"
     assert last["metadata"]["protocol_errors"] == []
     assert _THINK_OPEN not in last["content"]
+
+
+class _LengthCutReasoningOnly:
+    """Every invoke is reasoning-only and stops on the completion cap."""
+
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse(
+            _THINK_OPEN + "设计到一半" + _THINK_CLOSE,
+            [],
+            finish_reason="length",
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield _THINK_OPEN + "设计到一半" + _THINK_CLOSE
+
+
+def test_length_cut_reasoning_only_asks_to_continue() -> None:
+    """A max_tokens cut inside thinking must not look like a blank refusal."""
+    runtime = AgentRuntime(_LengthCutReasoningOnly(), _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "写一个 html"))
+    final = _final_text(events)
+    last = session.chat_history[-1]
+    hints = [
+        str(message.get("content") or "")
+        for message in session.agent_messages
+        if message.get("role") == "system"
+    ]
+
+    assert "输出长度上限截断" in final
+    assert "继续" in final
+    assert last["metadata"]["terminal_reason"] == "output_length_fallback"
+    assert last["metadata"]["model_finish_reason"] == "length"
+    assert any("[runtime-output-cut]" in hint for hint in hints)
+    assert last["reasoning"] == "设计到一半"
 
 
 def test_sync_fallback_empty_turn_persists_provider_reasoning() -> None:

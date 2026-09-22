@@ -54,6 +54,11 @@ _LENGTH_FINISH_REASONS = frozenset(
     }
 )
 
+
+def is_length_finish_reason(finish_reason: str) -> bool:
+    """True when the vendor stopped because the completion cap was hit."""
+    return str(finish_reason or "").strip().lower() in _LENGTH_FINISH_REASONS
+
 SUSPECT_BODY_MAX_CHARS = 80
 
 # Vendors always close a healthy stream with a finish_reason. An empty one means

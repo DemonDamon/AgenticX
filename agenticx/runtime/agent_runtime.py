@@ -78,6 +78,7 @@ from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
+    is_length_finish_reason,
     is_search_deferral_stub,
 )
 from agenticx.runtime.usage_metadata import (
@@ -1096,13 +1097,27 @@ def _chat_temperature_kwargs(
     return {"temperature": float(value)}
 
 
+# DeepSeek V4 thinking spends this same completion budget. 8192 is enough for
+# the reasoning trace alone, so the visible reply and tool call never start.
+# 24576 leaves room for a file write while staying inside the default 180s
+# round hard-timeout at the token rate seen on deepseek-v4-flash (~200 tok/s).
+# The model ceiling is 384K; this is a floor, not that ceiling.
+_DEEPSEEK_V4_THINKING_OUTPUT_FLOOR = 24576
+
+
 def _resolve_round_max_tokens(
     base: int,
     recent_tools: Sequence[str],
     *,
     provider: str = "",
+    model: str = "",
+    thinking: bool = False,
 ) -> int:
-    """Resolve per-round max_tokens, raising budget after recent file writes."""
+    """Resolve per-round max_tokens, raising budget after recent file writes.
+
+    When DeepSeek V4 thinking is on, reasoning and the answer share max_tokens.
+    Raise the floor unless ``base`` is already a vendor downshift below 8192.
+    """
     try:
         resolved_base = int(base)
     except Exception:
@@ -1116,9 +1131,34 @@ def _resolve_round_max_tokens(
     resolved = (
         min(16384, max(resolved_base, 12288)) if write_heavy else resolved_base
     )
+    if (
+        thinking
+        and resolved_base >= 8192
+        and _is_deepseek_v4_model(model)
+    ):
+        resolved = max(resolved, _DEEPSEEK_V4_THINKING_OUTPUT_FLOOR)
     if str(provider or "").strip().lower() == "minimax":
         return min(4096, int(resolved))
     return int(resolved)
+
+
+def _session_round_max_tokens(
+    session: Any,
+    recent_tools: Sequence[str],
+    *,
+    provider: str,
+    model: str,
+) -> int:
+    """Per-round completion cap for this session, including thinking floors."""
+    thinking_on = getattr(session, "_thinking_enabled", None) is not False
+    base = int(getattr(session, "_max_tokens_override", None) or 8192)
+    return _resolve_round_max_tokens(
+        base,
+        recent_tools,
+        provider=provider,
+        model=model,
+        thinking=thinking_on,
+    )
 
 
 def _is_kimi_effort_model(model_name: str) -> bool:
@@ -2395,6 +2435,10 @@ def _recover_public_completion_from_reasoning(
 
 
 _EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
+_LENGTH_CUT_EMPTY_FALLBACK = (
+    "上一轮生成被输出长度上限截断，可见回复还没写出来。"
+    "直接回复「继续」，我会接着把结果写完。"
+)
 _TOOL_TURN_EMPTY_FALLBACK = (
     "工具已执行完成，但模型没有给出总结说明。"
     "请直接回复「继续」让我基于已有结果完成说明，或告诉我下一步。"
@@ -2588,6 +2632,22 @@ _REASONING_ONLY_NUDGE_HINT = (
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
     "或发出明确的 tool_call；不要只输出思考。"
 )
+_LENGTH_CUT_REASONING_NUDGE_HINT = (
+    "[runtime-output-cut] 上一轮输出在思考阶段被 max_tokens 截断，"
+    "没有用户可见回复，也没有 tool_call。"
+    "不要重写设计过程，不要继续展开方案。"
+    "立刻发出 tool_call 落盘，或直接输出完整的最终可见回复。"
+    "思考最多三句话。"
+)
+
+
+def _reasoning_only_retry_hint(finish_reason: str) -> str:
+    """Hint for a bodyless round. Length cuts must not restart the essay."""
+    if is_length_finish_reason(finish_reason):
+        return _LENGTH_CUT_REASONING_NUDGE_HINT
+    return _REASONING_ONLY_NUDGE_HINT
+
+
 _TRUNCATED_FINAL_NUDGE_HINT = (
     "[runtime-truncated-final] 你上一条回复似乎在中途被截断：正文很短、没有结束标记，"
     "而你的思考表明还需要继续执行（例如调用工具核实信息）。"
@@ -4714,13 +4774,11 @@ class AgentRuntime:
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
-                                _max_tokens = _resolve_round_max_tokens(
-                                    int(
-                                        getattr(session, "_max_tokens_override", None)
-                                        or 8192
-                                    ),
+                                _max_tokens = _session_round_max_tokens(
+                                    session,
                                     executed_tool_names,
                                     provider=provider_name,
+                                    model=model_name,
                                 )
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
@@ -5024,13 +5082,11 @@ class AgentRuntime:
                                 messages_for_llm,
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
-                                max_tokens=_resolve_round_max_tokens(
-                                    int(
-                                        getattr(session, "_max_tokens_override", None)
-                                        or 8192
-                                    ),
+                                max_tokens=_session_round_max_tokens(
+                                    session,
                                     executed_tool_names,
                                     provider=provider_name,
+                                    model=model_name,
                                 ),
                                 timeout=request_timeout_seconds,
                                 **_chat_temperature_kwargs(model_name, provider_name),
@@ -6028,8 +6084,9 @@ class AgentRuntime:
                         round_idx,
                     )
                     messages.append(dict(assistant_message))
-                    messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
-                    session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    _reason_hint = _reasoning_only_retry_hint(model_finish_reason)
+                    messages.append({"role": "system", "content": _reason_hint})
+                    session.agent_messages.append({"role": "system", "content": _reason_hint})
                     synced_session_message_count = len(session.agent_messages)
                     continue
 
@@ -6080,11 +6137,17 @@ class AgentRuntime:
                             model_finish_reason or "unknown",
                         )
                         messages.append(dict(assistant_message))
+                        _trunc_hint = _TRUNCATED_FINAL_NUDGE_HINT
+                        if (
+                            truncation_signal == "finish_reason_length"
+                            and not parsed.visible_body.strip()
+                        ):
+                            _trunc_hint = _LENGTH_CUT_REASONING_NUDGE_HINT
                         messages.append(
-                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                            {"role": "system", "content": _trunc_hint}
                         )
                         session.agent_messages.append(
-                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                            {"role": "system", "content": _trunc_hint}
                         )
                         synced_session_message_count = len(session.agent_messages)
                         continue
@@ -6104,13 +6167,11 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    max_tokens=_resolve_round_max_tokens(
-                                        int(
-                                            getattr(session, "_max_tokens_override", None)
-                                            or 8192
-                                        ),
+                                    max_tokens=_session_round_max_tokens(
+                                        session,
                                         executed_tool_names,
                                         provider=provider_name,
+                                        model=model_name,
                                     ),
                                     timeout=request_timeout_seconds,
                                     **_chat_temperature_kwargs(model_name, provider_name),
@@ -6230,6 +6291,9 @@ class AgentRuntime:
                             )
                             tool_silence_kind = "success"
                         terminal_reason = "tool_turn_empty_fallback"
+                    elif is_length_finish_reason(model_finish_reason):
+                        clean_body = _LENGTH_CUT_EMPTY_FALLBACK
+                        terminal_reason = "output_length_fallback"
                     else:
                         clean_body = _EMPTY_RESPONSE_FALLBACK
                         terminal_reason = "empty_response_fallback"
@@ -6348,6 +6412,7 @@ class AgentRuntime:
                             if terminal_reason
                             in {
                                 "empty_response_fallback",
+                                "output_length_fallback",
                                 "tool_turn_empty_fallback",
                                 "tool_result_fallback",
                             }
