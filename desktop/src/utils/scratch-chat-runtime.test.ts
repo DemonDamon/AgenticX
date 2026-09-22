@@ -10,6 +10,8 @@ import {
   precedingScratchUserId,
   prepareScratchRetry,
   runScratchChatTurn,
+  scratchRetryDiskPlan,
+  truncateScratchSessionForRetry,
   type ScratchChatTransport,
 } from "./scratch-chat-runtime";
 import type { Message } from "../store";
@@ -271,20 +273,24 @@ describe("runScratchChatTurn", () => {
       text: "什么是 fan-out",
       sessionId: "sid-5",
     }).slice(0, 1);
+    let sentBody: Record<string, unknown> | undefined;
     const transport: ScratchChatTransport = {
       createSession: async () => ({ ok: true, session_id: "sid-5" }),
-      chat: async () => ({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => ({
-            read: async () => {
-              if (offset >= chunks.length) return { done: true as const };
-              return { done: false as const, value: chunks[offset++] };
-            },
-          }),
-        },
-      }),
+      chat: async ({ body }) => {
+        sentBody = body;
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (offset >= chunks.length) return { done: true as const };
+                return { done: false as const, value: chunks[offset++] };
+              },
+            }),
+          },
+        };
+      },
     };
     const seen: Message[][] = [];
     const result = await runScratchChatTurn({
@@ -296,6 +302,7 @@ describe("runScratchChatTurn", () => {
       ids: { userId: "u-new", assistantId: "a-new", clientTurnId: "t" },
       transport,
       reuseUser: true,
+      skipUserHistory: true,
       onMessages: (rows) => seen.push(rows),
       onSessionId: () => undefined,
     });
@@ -305,6 +312,8 @@ describe("runScratchChatTurn", () => {
       ["u-keep", "user", "什么是 fan-out"],
       ["a-new", "assistant", "扇出"],
     ]);
+    expect(sentBody?.skip_user_history).toBe(true);
+    expect(sentBody?.user_input).toBe("什么是 fan-out");
   });
 });
 
@@ -326,6 +335,58 @@ describe("scratch retry helpers", () => {
     expect(prepareScratchRetry(rows, "u1", "改成 fan-in")).toEqual({
       messages: [{ id: "u1", role: "user", content: "改成 fan-in" }],
       userText: "改成 fan-in",
+    });
+  });
+
+  it("keeps the same question on disk when retrying, and replaces it only when edited", async () => {
+    const rows: Message[] = [
+      { id: "u1", role: "user", content: "浅显易懂的描述一下" },
+      { id: "tool-1", role: "tool", content: "跳过检索" },
+      { id: "a1", role: "assistant", content: "第一版回答" },
+    ];
+    expect(scratchRetryDiskPlan(rows, "u1")).toEqual({
+      mode: "after",
+      userContent: "浅显易懂的描述一下",
+      userOccurrence: 1,
+      expectRemoved: true,
+      skipUserHistory: true,
+    });
+    const duplicated: Message[] = [
+      ...rows,
+      { id: "u2", role: "user", content: "浅显易懂的描述一下" },
+      { id: "a2", role: "assistant", content: "第二版" },
+    ];
+    expect(scratchRetryDiskPlan(duplicated, "u2")?.userOccurrence).toBe(2);
+    expect(scratchRetryDiskPlan(rows, "u1", "换个说法")).toMatchObject({
+      mode: "including",
+      userContent: "浅显易懂的描述一下",
+      skipUserHistory: false,
+    });
+
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const ok = await truncateScratchSessionForRetry({
+      apiBase: "http://127.0.0.1:9",
+      apiToken: "tok",
+      sessionId: "861e5daa-4674-4054-b840-715d66519760",
+      plan: scratchRetryDiskPlan(rows, "u1")!,
+      fetchImpl: (async (url, init) => {
+        calls.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+        });
+        return new Response(
+          JSON.stringify({ ok: true, removed_chat: 2, removed_agent: 2, matched_chat: true }),
+          { status: 200 },
+        );
+      }) as typeof fetch,
+    });
+    expect(ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:9/api/session/messages/truncate");
+    expect(calls[0]?.body).toMatchObject({
+      session_id: "861e5daa-4674-4054-b840-715d66519760",
+      user_content: "浅显易懂的描述一下",
+      mode: "after",
+      user_occurrence: 1,
     });
   });
 });

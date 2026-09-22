@@ -14,6 +14,8 @@ import {
   defaultScratchChatTransport,
   prepareScratchRetry,
   runScratchChatTurn,
+  scratchRetryDiskPlan,
+  truncateScratchSessionForRetry,
 } from "../../utils/scratch-chat-runtime";
 import { useScratchPaneMeta } from "./use-scratch-pane-meta";
 
@@ -90,10 +92,13 @@ export function useScratchChatRuntime(paneId: string) {
         chat;
       let userText = text;
       let reuseUser = false;
+      let skipUserHistory = false;
       const retryUserId = String(options?.retryUserId ?? "").trim();
       if (retryUserId) {
-        const prepared = prepareScratchRetry(latest.messages ?? [], retryUserId, options?.editText);
-        if (!prepared) {
+        const beforeMessages = latest.messages ?? [];
+        const diskPlan = scratchRetryDiskPlan(beforeMessages, retryUserId, options?.editText);
+        const prepared = prepareScratchRetry(beforeMessages, retryUserId, options?.editText);
+        if (!prepared || !diskPlan) {
           const sending = { ...snap.sending };
           delete sending[key];
           abortByKey.delete(key);
@@ -104,6 +109,38 @@ export function useScratchChatRuntime(paneId: string) {
         userText = prepared.userText;
         reuseUser = true;
         patchScratchChat(paneId, chatId, { messages: prepared.messages });
+        const sid = String(latest.sessionId ?? "").trim();
+        skipUserHistory = Boolean(sid) && diskPlan.skipUserHistory;
+        if (sid) {
+          let aborted = false;
+          const truncated = await truncateScratchSessionForRetry({
+            apiBase,
+            apiToken,
+            sessionId: sid,
+            plan: diskPlan,
+            signal: abort.signal,
+          }).catch((err: unknown) => {
+            aborted =
+              !!err &&
+              typeof err === "object" &&
+              String((err as { name?: string }).name ?? "") === "AbortError";
+            return false;
+          });
+          if (!truncated) {
+            patchScratchChat(paneId, chatId, { messages: beforeMessages });
+            const sending = { ...snap.sending };
+            delete sending[key];
+            abortByKey.delete(key);
+            emit({
+              sending,
+              errors: {
+                ...snap.errors,
+                [key]: aborted ? t("work.scratchStopped") : t("work.scratchRetryTruncateFailed"),
+              },
+            });
+            return false;
+          }
+        }
       }
       const resolved = resolveScratchChatModel(latest, scratchPaneMeta);
       const transport: typeof defaultScratchChatTransport = {
@@ -133,6 +170,7 @@ export function useScratchChatRuntime(paneId: string) {
         transport,
         signal: abort.signal,
         reuseUser,
+        skipUserHistory,
         onMessages: (messages) => patchScratchChat(paneId, chatId, { messages }),
         onSessionId: (sessionId) => patchScratchChat(paneId, chatId, { sessionId }),
       });

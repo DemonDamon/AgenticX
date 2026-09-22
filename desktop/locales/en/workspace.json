@@ -263,6 +263,7 @@
     "scratchConfigureModels": "Add a usable model in Settings first",
     "scratchStop": "Stop",
     "scratchRetry": "Retry",
+    "scratchRetryTruncateFailed": "Retry failed: could not trim session history, so it was not sent again",
     "scratchCopyRoleUser": "User",
     "scratchCopyRoleAssistant": "Assistant",
     "scratchSelected": "{{count}} selected",

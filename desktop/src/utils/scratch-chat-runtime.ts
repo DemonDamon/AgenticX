@@ -46,12 +46,14 @@ export function buildScratchChatRequestBody(input: {
   quotedContent?: string;
   contextFiles?: ScratchChatContextFile[];
   clientTurnId: string;
+  skipUserHistory?: boolean;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     session_id: String(input.sessionId ?? "").trim(),
     user_input: String(input.userInput ?? ""),
     client_turn_id: String(input.clientTurnId ?? "").trim(),
   };
+  if (input.skipUserHistory) body.skip_user_history = true;
   const quoted = String(input.quotedContent ?? "").trim();
   if (quoted) body.quoted_content = quoted;
   const provider = String(input.provider ?? "").trim();
@@ -141,6 +143,88 @@ export function prepareScratchRetry(
     kept[idx] = { ...kept[idx], content: userText };
   }
   return { messages: kept, userText };
+}
+
+export type ScratchRetryDiskPlan = {
+  mode: "after" | "including";
+  userContent: string;
+  userOccurrence: number;
+  expectRemoved: boolean;
+  skipUserHistory: boolean;
+};
+
+/** Same-text retry keeps the persisted user row. An edited retry replaces it. */
+export function scratchRetryDiskPlan(
+  messages: Message[],
+  userId: string,
+  nextText?: string,
+): ScratchRetryDiskPlan | null {
+  const idx = messages.findIndex((item) => item.id === userId && item.role === "user");
+  if (idx < 0) return null;
+  const userContent = String(messages[idx]?.content ?? "");
+  if (!userContent.trim()) return null;
+  const edited =
+    nextText !== undefined && String(nextText).trim() !== userContent.trim();
+  let userOccurrence = 0;
+  for (let i = 0; i <= idx; i += 1) {
+    const row = messages[i];
+    if (row?.role === "user" && row.content === userContent) userOccurrence += 1;
+  }
+  return {
+    mode: edited ? "including" : "after",
+    userContent,
+    userOccurrence,
+    expectRemoved: edited || idx < messages.length - 1,
+    skipUserHistory: !edited,
+  };
+}
+
+export async function truncateScratchSessionForRetry(input: {
+  apiBase: string;
+  apiToken: string;
+  sessionId: string;
+  plan: ScratchRetryDiskPlan;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<boolean> {
+  const sessionId = String(input.sessionId ?? "").trim();
+  const apiBase = String(input.apiBase ?? "").replace(/\/$/, "");
+  if (!sessionId || !apiBase) return false;
+  const doFetch = input.fetchImpl ?? fetch;
+  try {
+    const resp = await doFetch(`${apiBase}/api/session/messages/truncate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": input.apiToken,
+      },
+      body: JSON.stringify({
+        session_id: sessionId,
+        user_content: input.plan.userContent,
+        mode: input.plan.mode,
+        user_occurrence: input.plan.userOccurrence,
+      }),
+      signal: input.signal,
+    });
+    const data = (await resp.json()) as {
+      ok?: boolean;
+      removed_chat?: number;
+      removed_agent?: number;
+      matched_chat?: boolean;
+      matched_agent?: boolean;
+    };
+    if (!resp.ok || !data.ok) return false;
+    const removedChat = typeof data.removed_chat === "number" ? data.removed_chat : 0;
+    const removedAgent = typeof data.removed_agent === "number" ? data.removed_agent : 0;
+    const matched = Boolean(data.matched_chat || data.matched_agent);
+    if (input.plan.expectRemoved && removedChat === 0 && removedAgent === 0 && !matched) {
+      return false;
+    }
+    return true;
+  } catch (err) {
+    if (isScratchAbortError(err)) throw err;
+    return false;
+  }
 }
 
 function appendScratchAssistant(
@@ -418,6 +502,8 @@ export async function runScratchChatTurn(opts: {
   transport: ScratchChatTransport;
   signal?: AbortSignal;
   reuseUser?: boolean;
+  /** When true, /api/chat must not append another user row for this turn. */
+  skipUserHistory?: boolean;
   onMessages: (messages: Message[]) => void;
   onSessionId: (sessionId: string) => void;
 }): Promise<ScratchTurnResult> {
@@ -450,6 +536,7 @@ export async function runScratchChatTurn(opts: {
         quotedContent: opts.chat.quotedContent,
         contextFiles: opts.chat.contextFiles,
         clientTurnId: opts.ids.clientTurnId,
+        skipUserHistory: opts.skipUserHistory,
       }),
       signal: opts.signal,
     });

@@ -263,6 +263,7 @@
     "scratchConfigureModels": "先在设置里添加可用模型",
     "scratchStop": "停止",
     "scratchRetry": "重试",
+    "scratchRetryTruncateFailed": "重试失败：无法裁剪会话历史，没有再次发送",
     "scratchCopyRoleUser": "用户",
     "scratchCopyRoleAssistant": "助手",
     "scratchSelected": "已选 {{count}} 条",
