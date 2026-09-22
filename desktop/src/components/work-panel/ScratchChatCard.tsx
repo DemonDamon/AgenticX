@@ -1,5 +1,5 @@
 import { ArrowUp, Maximize2, MessageSquare, Square, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import type { ScratchChat, ScratchChatContextFile, ScratchChatSourceKind } from "../../utils/scratch-chat";
@@ -16,7 +16,7 @@ type Props = {
   onClose: () => void;
   onFloat?: () => void;
   onSend?: (text: string) => Promise<boolean>;
-  onRetry?: (userMessageId: string) => void;
+  onRetry?: (userMessageId: string, editText?: string) => void;
   sending?: boolean;
   error?: string;
   hideHeader?: boolean;
@@ -109,6 +109,7 @@ export function ScratchChatCard({
 }: Props) {
   const { t } = useTranslation("workspace");
   const [draft, setDraft] = useState("");
+  const imeComposingRef = useRef(false);
   const patchScratchChat = useAppStore((s) => s.patchScratchChat);
   const paneMeta = useScratchPaneMeta(paneId ?? "");
   const resolvedModel = resolveScratchChatModel(chat, paneMeta);
@@ -192,10 +193,19 @@ export function ScratchChatCard({
               </div>
             </div>
           ) : (
-            <ScratchChatTranscript messages={messages} sending={sending} onRetry={onRetry} />
+            <ScratchChatTranscript
+              messages={messages}
+              sending={sending}
+              onRetry={onRetry}
+              onQuote={
+                canEditContext
+                  ? (text) => patchScratchChat(paneId!, chat.id, { quotedContent: text })
+                  : undefined
+              }
+            />
           )}
           {error ? (
-            <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1">
+            <div className="flex shrink-0 items-center justify-between gap-2 px-5 pb-1">
               <div className="min-w-0 text-[11px] leading-relaxed text-rose-400">
                 {t("work.scratchSendError", { error })}
               </div>
@@ -211,7 +221,7 @@ export function ScratchChatCard({
               ) : null}
             </div>
           ) : null}
-          <div className="shrink-0 px-3 pb-3 pt-1">
+          <div className="shrink-0 px-5 pb-4 pt-1">
             <div
               data-slot="scratch-composer"
               className="rounded-[22px] border border-border bg-surface-card px-3 py-2 shadow-sm"
@@ -253,15 +263,23 @@ export function ScratchChatCard({
                     event.target.style.height = "auto";
                     event.target.style.height = `${Math.min(event.target.scrollHeight, 112)}px`;
                   }}
+                  onCompositionStart={() => {
+                    imeComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    window.setTimeout(() => {
+                      imeComposingRef.current = false;
+                    }, 0);
+                  }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      if (sending && paneId) {
-                        abortScratchChatTurn(paneId, chat.id);
-                        return;
-                      }
-                      void submit();
+                    if (event.key !== "Enter" || event.shiftKey) return;
+                    if (event.nativeEvent.isComposing || imeComposingRef.current) return;
+                    event.preventDefault();
+                    if (sending && paneId) {
+                      abortScratchChatTurn(paneId, chat.id);
+                      return;
                     }
+                    void submit();
                   }}
                 />
                 {sending ? (

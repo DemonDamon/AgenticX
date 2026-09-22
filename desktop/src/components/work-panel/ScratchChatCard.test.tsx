@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/i18n";
 import { useAppStore } from "../../store";
 import type { ScratchChat } from "../../utils/scratch-chat";
@@ -71,8 +71,10 @@ describe("ScratchChatCard", () => {
             { id: "a1", role: "assistant", content: "助手回答" },
           ],
         })}
+        paneId="pane-1"
         onClose={() => undefined}
         onSend={async () => true}
+        onRetry={() => undefined}
       />,
     );
     expect(html).toContain("用户追问");
@@ -81,9 +83,112 @@ describe("ScratchChatCard", () => {
     expect(html).toContain('data-scroll-anchor="true"');
     expect(html).toContain('role="log"');
     expect(html).not.toContain("data-scratch-scroller-spacer");
+    expect(html).toContain("px-5");
     expect(html).toContain('data-slot="scratch-composer-quote"');
     expect(html).not.toContain('data-message-id="scratch-context"');
     expect(html).not.toContain(i18n.t("work.scratchEmpty", { ns: "workspace" }));
+    expect(html).toContain('data-slot="scratch-actions"');
+    expect(html).toContain('data-slot="scratch-action-copy"');
+    expect(html).toContain('data-slot="scratch-action-quote"');
+    expect(html).toContain('data-slot="scratch-action-edit"');
+    expect(html).toContain('data-slot="scratch-retry"');
+    expect(html).toContain('data-slot="scratch-action-select"');
+  });
+
+  it("drops the composer quote after the message is sent", async () => {
+    const paneId = useAppStore.getState().panes[0]?.id ?? "";
+    const created = useAppStore.getState().upsertScratchChat(paneId, {
+      title: "关于这段回复",
+      sourceKind: "message",
+      sourceKey: "message:clear-quote",
+      quotedContent: "续跑结论",
+    });
+    const chat = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(chat?.quotedContent).toBe("续跑结论");
+    render(
+      <ScratchChatCard
+        chat={chat!}
+        paneId={paneId}
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" })),
+      { target: { value: "解释下" } },
+    );
+    fireEvent.click(screen.getByLabelText(i18n.t("work.scratchSend", { ns: "workspace" })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const after = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(after?.quotedContent).toBeUndefined();
+  });
+
+  it("clears a quote that was already copied onto a sent user message", async () => {
+    const paneId = useAppStore.getState().panes[0]?.id ?? "";
+    const created = useAppStore.getState().upsertScratchChat(paneId, {
+      title: "关于这段回复",
+      sourceKind: "message",
+      sourceKey: "message:stale-quote",
+      quotedContent: "续跑结论",
+    });
+    useAppStore.getState().patchScratchChat(paneId, created.chatId, {
+      messages: [{ id: "u1", role: "user", content: "解释下", quotedContent: "续跑结论" }],
+    });
+    const chat = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    render(
+      <ScratchChatCard
+        chat={chat!}
+        paneId={paneId}
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const after = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(after?.quotedContent).toBeUndefined();
+  });
+
+  it("shows the quoted passage above the sent user bubble", () => {
+    const html = renderToStaticMarkup(
+      <ScratchChatCard
+        chat={sample({
+          quotedContent: "续跑结论：无可由我单方面推进的任务",
+          messages: [
+            {
+              id: "u1",
+              role: "user",
+              content: "这啥意思",
+              quotedContent: "续跑结论：无可由我单方面推进的任务",
+            },
+          ],
+        })}
+        paneId="pane-1"
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    expect(html).toContain('data-slot="scratch-message-quote"');
+    expect(html).toContain("续跑结论：无可由我单方面推进的任务");
+    expect(html).toContain("这啥意思");
   });
 
   it("shows a failed reply and retry when the last assistant is empty", () => {
@@ -205,100 +310,69 @@ describe("ScratchChatCard", () => {
     expect(floated).not.toContain(floatLabel);
   });
 
-  it("drops the composer quote after the message is sent", async () => {
-    const paneId = useAppStore.getState().panes[0]?.id ?? "";
-    const created = useAppStore.getState().upsertScratchChat(paneId, {
-      title: "关于这段回复",
-      sourceKind: "message",
-      sourceKey: "message:clear-quote",
-      quotedContent: "续跑结论",
-    });
-    const chat = useAppStore
-      .getState()
-      .panes.find((pane) => pane.id === paneId)
-      ?.scratchChats?.find((item) => item.id === created.chatId);
-    expect(chat?.quotedContent).toBe("续跑结论");
+  it("does not send when Enter confirms an IME composition", async () => {
+    const onSend = vi.fn(async () => true);
     render(
       <ScratchChatCard
-        chat={chat!}
-        paneId={paneId}
+        chat={sample()}
+        paneId="pane-1"
         hideHeader
         onClose={() => undefined}
-        onSend={async () => true}
+        onSend={onSend}
       />,
     );
-    fireEvent.change(
-      screen.getByPlaceholderText(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" })),
-      { target: { value: "解释下" } },
+    const textarea = screen.getByPlaceholderText(
+      i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" }),
     );
-    fireEvent.click(screen.getByLabelText(i18n.t("work.scratchSend", { ns: "workspace" })));
+    fireEvent.change(textarea, { target: { value: "fan" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false, isComposing: true, keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.compositionStart(textarea);
+    fireEvent.change(textarea, { target: { value: "范" } });
+    fireEvent.compositionEnd(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+    expect(onSend).not.toHaveBeenCalled();
+
     await act(async () => {
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    const after = useAppStore
-      .getState()
-      .panes.find((pane) => pane.id === paneId)
-      ?.scratchChats?.find((item) => item.id === created.chatId);
-    expect(after?.quotedContent).toBeUndefined();
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("范");
   });
 
-  it("clears a quote that was already copied onto a sent user message", async () => {
-    const paneId = useAppStore.getState().panes[0]?.id ?? "";
-    const created = useAppStore.getState().upsertScratchChat(paneId, {
-      title: "关于这段回复",
-      sourceKind: "message",
-      sourceKey: "message:stale-quote",
-      quotedContent: "续跑结论",
+  it("quotes, retries, and multi-selects completed assistant replies", async () => {
+    const onRetry = vi.fn();
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
     });
-    useAppStore.getState().patchScratchChat(paneId, created.chatId, {
-      messages: [{ id: "u1", role: "user", content: "解释下", quotedContent: "续跑结论" }],
-    });
-    const chat = useAppStore
-      .getState()
-      .panes.find((pane) => pane.id === paneId)
-      ?.scratchChats?.find((item) => item.id === created.chatId);
     render(
-      <ScratchChatCard
-        chat={chat!}
-        paneId={paneId}
-        hideHeader
-        onClose={() => undefined}
-        onSend={async () => true}
-      />,
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const after = useAppStore
-      .getState()
-      .panes.find((pane) => pane.id === paneId)
-      ?.scratchChats?.find((item) => item.id === created.chatId);
-    expect(after?.quotedContent).toBeUndefined();
-  });
-
-  it("shows the quoted passage above the sent user bubble", () => {
-    const html = renderToStaticMarkup(
       <ScratchChatCard
         chat={sample({
-          quotedContent: "续跑结论：无可由我单方面推进的任务",
           messages: [
-            {
-              id: "u1",
-              role: "user",
-              content: "这啥意思",
-              quotedContent: "续跑结论：无可由我单方面推进的任务",
-            },
+            { id: "u1", role: "user", content: "fan-in" },
+            { id: "a1", role: "assistant", content: "多个上游汇入一个下游" },
           ],
         })}
         paneId="pane-1"
         hideHeader
         onClose={() => undefined}
         onSend={async () => true}
+        onRetry={onRetry}
       />,
     );
-    expect(html).toContain('data-slot="scratch-message-quote"');
-    expect(html).toContain("续跑结论：无可由我单方面推进的任务");
-    expect(html).toContain("这啥意思");
+    const retries = screen.getAllByLabelText(i18n.t("work.scratchRetry", { ns: "workspace" }));
+    expect(retries.length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(retries[retries.length - 1]!);
+    expect(onRetry).toHaveBeenCalledWith("u1");
+
+    fireEvent.click(screen.getAllByLabelText(i18n.t("actions.select", { ns: "chat" }))[1]!);
+    expect(screen.getByText(i18n.t("work.scratchSelected", { ns: "workspace", count: 1 }))).toBeTruthy();
+    fireEvent.click(screen.getByText(i18n.t("work.scratchCopySelected", { ns: "workspace" })));
+    expect(writeText).toHaveBeenCalled();
   });
 
   it("docks without a second title chrome and keeps float on the tab", () => {

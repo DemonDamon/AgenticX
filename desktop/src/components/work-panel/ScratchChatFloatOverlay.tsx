@@ -16,7 +16,7 @@ type Props = {
   paneId: string;
   onDock: () => void;
   onSend?: (text: string) => Promise<boolean>;
-  onRetry?: (userMessageId: string) => void;
+  onRetry?: (userMessageId: string, editText?: string) => void;
   sending?: boolean;
   error?: string;
 };

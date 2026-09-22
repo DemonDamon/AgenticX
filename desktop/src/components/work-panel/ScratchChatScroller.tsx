@@ -291,7 +291,7 @@ export function ScratchMessageScrollerContent({
       role="log"
       aria-relevant="additions"
       aria-busy={busy || undefined}
-      className={`flex min-h-full flex-col gap-3 px-3 py-3 ${className}`.trim()}
+      className={`flex min-h-full flex-col gap-4 px-5 py-4 ${className}`.trim()}
     >
       {children}
     </div>
