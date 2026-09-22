@@ -74,15 +74,23 @@ export function buildScratchChatRequestBody(input: {
 
 export function appendScratchTurn(
   messages: Message[],
-  input: { userId: string; assistantId: string; text: string; sessionId: string },
+  input: {
+    userId: string;
+    assistantId: string;
+    text: string;
+    sessionId: string;
+    quotedContent?: string;
+  },
 ): Message[] {
   const now = Date.now();
+  const quoted = String(input.quotedContent ?? "").trim();
   return [
     ...messages,
     {
       id: input.userId,
       role: "user",
       content: input.text,
+      quotedContent: quoted || undefined,
       ownerSessionId: input.sessionId,
       timestamp: now,
     },
@@ -558,6 +566,7 @@ export async function runScratchChatTurn(opts: {
         assistantId: opts.ids.assistantId,
         text: userText,
         sessionId,
+        quotedContent: opts.chat.quotedContent,
       });
   opts.onMessages(messages);
 

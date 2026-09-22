@@ -142,6 +142,10 @@ export function useScratchChatRuntime(paneId: string) {
           }
         }
       }
+      const quoteToRestore = retryUserId ? "" : String(latest.quotedContent ?? "").trim();
+      if (quoteToRestore) {
+        patchScratchChat(paneId, chatId, { quotedContent: undefined });
+      }
       const resolved = resolveScratchChatModel(latest, scratchPaneMeta);
       const transport: typeof defaultScratchChatTransport = {
         ...defaultScratchChatTransport,
@@ -178,6 +182,9 @@ export function useScratchChatRuntime(paneId: string) {
       const sending = { ...snap.sending };
       delete sending[key];
       if (!result.ok) {
+        if (quoteToRestore && result.committed !== true) {
+          patchScratchChat(paneId, chatId, { quotedContent: quoteToRestore });
+        }
         const message =
           result.error === "createSession failed"
             ? t("work.scratchCreateFailed")

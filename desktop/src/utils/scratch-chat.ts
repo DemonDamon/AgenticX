@@ -321,7 +321,14 @@ export function patchScratchChatList(
   patch: Partial<ScratchChat>
 ): ScratchChat[] {
   const id = String(chatId ?? "").trim();
-  return chats.map((chat) => (chat.id === id ? { ...chat, ...patch, id: chat.id } : chat));
+  return chats.map((chat) => {
+    if (chat.id !== id) return chat;
+    const next: ScratchChat = { ...chat, ...patch, id: chat.id };
+    if ("quotedContent" in patch && !String(patch.quotedContent ?? "").trim()) {
+      delete next.quotedContent;
+    }
+    return next;
+  });
 }
 
 export function resolveScratchChatModel(

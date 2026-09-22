@@ -21,6 +21,7 @@ import {
   listSummaryScratchChats,
   scratchParkedPreview,
   normalizePersistedScratchChats,
+  patchScratchChatList,
   resolveScratchChatModel,
   scratchSourceKey,
   setScratchFloating,
@@ -199,6 +200,18 @@ describe("scratch-chat helpers", () => {
     expect(cleared.open.map((item) => item.id)).toEqual(["keep"]);
     expect(cleared.parked).toEqual([]);
     expect(forgetScratchSessionIds(["sid-gone", "keep-hidden"], ["sid-gone"])).toEqual(["keep-hidden"]);
+  });
+
+  it("drops a sent quote from the composer without bringing it back on later patches", () => {
+    const open = [chat({ id: "c1", sourceKey: "message:c1", quotedContent: "续跑结论" })];
+    const cleared = patchScratchChatList(open, "c1", { quotedContent: undefined });
+    expect(cleared[0]?.quotedContent).toBeUndefined();
+    expect("quotedContent" in (cleared[0] ?? {})).toBe(false);
+    const next = patchScratchChatList(cleared, "c1", {
+      messages: [{ id: "u1", role: "user", content: "解释下", quotedContent: "续跑结论" }],
+    });
+    expect(next[0]?.quotedContent).toBeUndefined();
+    expect(next[0]?.messages?.[0]?.quotedContent).toBe("续跑结论");
   });
 
   it("stamps hostSessionId on a newly created scratch", () => {

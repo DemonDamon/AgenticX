@@ -1,5 +1,5 @@
 import { ArrowUp, Maximize2, MessageSquare, Square, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import type { ScratchChat, ScratchChatContextFile, ScratchChatSourceKind } from "../../utils/scratch-chat";
@@ -114,6 +114,14 @@ export function ScratchChatCard({
   const resolvedModel = resolveScratchChatModel(chat, paneMeta);
   const quote = String(chat.quotedContent ?? "").trim();
   const files = chat.contextFiles ?? [];
+  useEffect(() => {
+    if (!paneId || !quote) return;
+    const alreadySent = (chat.messages ?? []).some(
+      (item) => item.role === "user" && String(item.quotedContent ?? "").trim() === quote,
+    );
+    if (!alreadySent) return;
+    patchScratchChat(paneId, chat.id, { quotedContent: undefined });
+  }, [chat.id, chat.messages, paneId, patchScratchChat, quote]);
   const messages = chat.messages ?? [];
   const lastUserId = lastScratchUserMessage(messages)?.id ?? "";
   const showEmpty = messages.length === 0 && !sending;
@@ -125,7 +133,13 @@ export function ScratchChatCard({
     if (!text || !onSend || sending) return;
     setDraft("");
     const ok = await onSend(text);
-    if (!ok) setDraft(text);
+    if (!ok) {
+      setDraft(text);
+      return;
+    }
+    if (paneId && quote) {
+      patchScratchChat(paneId, chat.id, { quotedContent: undefined });
+    }
   };
 
   return (

@@ -137,6 +137,14 @@ describe("appendScratchTurn", () => {
       ["user", "问", "s"],
       ["assistant", "", "s"],
     ]);
+    const quoted = appendScratchTurn([], {
+      userId: "u2",
+      assistantId: "a2",
+      text: "这啥意思",
+      sessionId: "s",
+      quotedContent: "续跑结论",
+    });
+    expect(quoted[0]).toMatchObject({ role: "user", content: "这啥意思", quotedContent: "续跑结论" });
   });
 });
 

@@ -75,8 +75,18 @@ function ScratchUserMessage({
   const referenceAttachments = (message.attachments ?? []).filter((item) =>
     isWorkspaceReferenceAttachment(item),
   );
+  const quote = String(message.quotedContent ?? "").trim();
   return (
     <div className="flex flex-col items-end gap-1" data-align="end">
+      {quote ? (
+        <div
+          data-slot="scratch-message-quote"
+          className="max-w-[min(78%,36rem)] rounded-xl border border-border/70 bg-surface-card px-3 py-2"
+        >
+          <div className="text-[10px] leading-4 text-text-faint">{t("work.scratchQuote")}</div>
+          <div className="line-clamp-3 text-[12px] leading-relaxed text-text-subtle">{quote}</div>
+        </div>
+      ) : null}
       <div
         className="agx-im-user-bubble agx-im-body-type min-w-0 max-w-[85%] overflow-hidden border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)]"
         style={{

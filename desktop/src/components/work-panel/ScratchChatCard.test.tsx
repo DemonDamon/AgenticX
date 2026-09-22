@@ -1,11 +1,20 @@
+// @vitest-environment jsdom
+
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { act } from "react";
+import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "../../i18n/i18n";
+import { useAppStore } from "../../store";
 import type { ScratchChat } from "../../utils/scratch-chat";
 import { ScratchChatCard } from "./ScratchChatCard";
+
+afterEach(() => {
+  cleanup();
+});
 
 function sample(partial: Partial<ScratchChat> = {}): ScratchChat {
   return {
@@ -194,6 +203,102 @@ describe("ScratchChatCard", () => {
       />,
     );
     expect(floated).not.toContain(floatLabel);
+  });
+
+  it("drops the composer quote after the message is sent", async () => {
+    const paneId = useAppStore.getState().panes[0]?.id ?? "";
+    const created = useAppStore.getState().upsertScratchChat(paneId, {
+      title: "关于这段回复",
+      sourceKind: "message",
+      sourceKey: "message:clear-quote",
+      quotedContent: "续跑结论",
+    });
+    const chat = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(chat?.quotedContent).toBe("续跑结论");
+    render(
+      <ScratchChatCard
+        chat={chat!}
+        paneId={paneId}
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText(i18n.t("work.scratchComposerPlaceholder", { ns: "workspace" })),
+      { target: { value: "解释下" } },
+    );
+    fireEvent.click(screen.getByLabelText(i18n.t("work.scratchSend", { ns: "workspace" })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const after = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(after?.quotedContent).toBeUndefined();
+  });
+
+  it("clears a quote that was already copied onto a sent user message", async () => {
+    const paneId = useAppStore.getState().panes[0]?.id ?? "";
+    const created = useAppStore.getState().upsertScratchChat(paneId, {
+      title: "关于这段回复",
+      sourceKind: "message",
+      sourceKey: "message:stale-quote",
+      quotedContent: "续跑结论",
+    });
+    useAppStore.getState().patchScratchChat(paneId, created.chatId, {
+      messages: [{ id: "u1", role: "user", content: "解释下", quotedContent: "续跑结论" }],
+    });
+    const chat = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    render(
+      <ScratchChatCard
+        chat={chat!}
+        paneId={paneId}
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const after = useAppStore
+      .getState()
+      .panes.find((pane) => pane.id === paneId)
+      ?.scratchChats?.find((item) => item.id === created.chatId);
+    expect(after?.quotedContent).toBeUndefined();
+  });
+
+  it("shows the quoted passage above the sent user bubble", () => {
+    const html = renderToStaticMarkup(
+      <ScratchChatCard
+        chat={sample({
+          quotedContent: "续跑结论：无可由我单方面推进的任务",
+          messages: [
+            {
+              id: "u1",
+              role: "user",
+              content: "这啥意思",
+              quotedContent: "续跑结论：无可由我单方面推进的任务",
+            },
+          ],
+        })}
+        paneId="pane-1"
+        hideHeader
+        onClose={() => undefined}
+        onSend={async () => true}
+      />,
+    );
+    expect(html).toContain('data-slot="scratch-message-quote"');
+    expect(html).toContain("续跑结论：无可由我单方面推进的任务");
+    expect(html).toContain("这啥意思");
   });
 
   it("docks without a second title chrome and keeps float on the tab", () => {
