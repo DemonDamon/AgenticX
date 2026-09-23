@@ -224,11 +224,22 @@ import {
   AT_MENTION_SEARCH_DEBOUNCE_MS,
   domTextLooksNonEmpty,
   isComposerNonEmpty,
+  matchSlashCommandQuery,
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
+import { SESSION_ID_RE, buildCommandSendText, filterCommands } from "../utils/command-send";
+import {
+  fetchSessionPerf,
+  fetchVisibleCommands,
+  pinCommand,
+  type PerfSummary,
+  type VisibleCommand,
+} from "../services/commandsApi";
 import { Toast } from "./ds/Toast";
 import { AtMentionPicker } from "./AtMentionPicker";
+import { CommandMenu } from "./composer/CommandMenu";
+import { CommandPerfCard } from "./composer/CommandPerfCard";
 import type { AtMentionBrowseState } from "./AtMentionPicker";
 import type { AtMentionCandidate } from "../utils/at-mention-display";
 import { parentBrowsePath } from "../utils/at-mention-display";
@@ -3060,6 +3071,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [isGroupPane, paneAvatarMeta.name, t],
   );
   const [composerHasText, setComposerHasText] = useState(false);
+  const [composerPlain, setComposerPlain] = useState("");
+  const [slashForced, setSlashForced] = useState(false);
+  const [composerCommand, setComposerCommand] = useState<VisibleCommand | null>(null);
+  const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
+  const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceTranscribing, setVoiceTranscribing] = useState(false);
@@ -4801,6 +4817,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const next = isComposerNonEmpty(value);
         return prev === next ? prev : next;
       });
+      setComposerPlain(value);
       updateAtStateFromText(value, caretOffset);
     },
     [updateAtStateFromText]
@@ -9442,6 +9459,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       lockedSessionId?: string;
       turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
+      commandName?: string;
       propagateError?: boolean;
     }
   ) => Promise<void>>(
@@ -9535,6 +9553,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       lockedSessionId?: string;
       turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
+      commandName?: string;
     }
   ) => {
     if (useReplayStore.getState().getPane(paneId).presenting) return;
@@ -9987,7 +10006,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           sendAttachments,
           {
             ownerSessionId: requestSessionId,
-            metadata: { client_turn_id: clientTurnId },
+            command_name: options?.commandName,
+            metadata: {
+              client_turn_id: clientTurnId,
+              ...(options?.commandName ? { command_name: options.commandName } : {}),
+            },
             ...(() => {
               const payload = buildQuotedPayload();
               if (!payload.quotedContent) return {};
@@ -10292,6 +10315,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       // Idempotency key: backend short-circuits a duplicate POST (double-click /
       // chip burst / retry race) so it never appends a second user row.
       body.client_turn_id = clientTurnId;
+      if (options?.commandName) body.command_name = options.commandName;
       if (skipUserHistory) body.skip_user_history = true;
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
@@ -12633,6 +12657,73 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   sendChatRef.current = sendChat;
 
+  const slashQuery = composerCommand ? null : matchSlashCommandQuery(composerPlain);
+  const slashOpen = slashForced || slashQuery !== null;
+  const commandContext = (() => {
+    const aid = String(pane?.avatarId ?? "");
+    if (aid.startsWith("group:")) return { context: "group", subjectId: aid.slice("group:".length) };
+    if (!aid || aid.startsWith("automation:")) return { context: "meta", subjectId: "" };
+    return { context: "avatar", subjectId: aid };
+  })();
+
+  useEffect(() => {
+    if (!slashOpen || !apiBase) return;
+    let cancelled = false;
+    void fetchVisibleCommands(apiBase, apiToken, {
+      context: commandContext.context,
+      subjectId: commandContext.subjectId,
+      sessionId: pane?.sessionId,
+    })
+      .then((items) => {
+        if (!cancelled) setCommandItems(items);
+      })
+      .catch(() => {
+        if (!cancelled) setCommandItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slashOpen, apiBase, apiToken, commandContext.context, commandContext.subjectId, pane?.sessionId]);
+
+  const selectComposerCommand = (item: VisibleCommand) => {
+    setComposerCommand(item);
+    setSlashForced(false);
+    setComposerText("");
+  };
+
+  const submitComposerCommand = async () => {
+    if (!composerCommand) return;
+    const extra = extractComposerSendText().trim();
+    if (composerCommand.kind === "local") {
+      if (extra && !SESSION_ID_RE.test(extra)) {
+        setPerfCard({ summary: null, error: t("composer.commands.invalidSession") });
+        return;
+      }
+      const sid = extra || String(pane?.sessionId ?? "").trim();
+      if (!sid) {
+        setPerfCard({ summary: null, error: t("composer.commands.placeholderPerfRoom") });
+        return;
+      }
+      setComposerCommand(null);
+      setComposerText("");
+      try {
+        const summary = await fetchSessionPerf(apiBase, apiToken, sid);
+        setPerfCard({ summary, error: "" });
+      } catch (err) {
+        setPerfCard({
+          summary: null,
+          error: err instanceof Error ? err.message : t("composer.commands.missing"),
+        });
+      }
+      return;
+    }
+    const text = buildCommandSendText(composerCommand.instructions, extra);
+    const commandName = composerCommand.name;
+    setComposerCommand(null);
+    setComposerText("");
+    void sendChat(text, { commandName });
+  };
+
   useEffect(() => registerPaneTextSender(
     pane.id,
     createPaneTextSender(
@@ -14386,7 +14477,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   }
                   return;
                 }
+                if (e.key === "Escape" && (slashForced || composerCommand)) {
+                  e.preventDefault();
+                  setSlashForced(false);
+                  setComposerCommand(null);
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
+                  if (slashOpen) {
+                    const filtered = filterCommands(commandItems, slashQuery ?? "");
+                    if (filtered[0]) {
+                      e.preventDefault();
+                      selectComposerCommand(filtered[0]);
+                      return;
+                    }
+                  }
+                  if (composerCommand) {
+                    e.preventDefault();
+                    void submitComposerCommand();
+                    return;
+                  }
                   if (atOpen && atCandidates.length > 0) {
                     e.preventDefault();
                     // Same semantics as clicking the row: folders drill in, others insert.
@@ -14467,7 +14577,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             />
             {!composerHasText && quoteTargets.length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[var(--agx-chat-im-body-font-size)] text-text-faint">
-                {pane.turnIntent === "plan"
+                {composerCommand
+                  ? composerCommand.kind === "local"
+                    ? t("composer.commands.placeholderPerf")
+                    : t("composer.commands.placeholderPrompt")
+                  : pane.turnIntent === "plan"
                   ? t("composer.placeholderPlan")
                   : t("composer.placeholder")}
               </div>
@@ -14475,6 +14589,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
+                <button
+                  type="button"
+                  className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+                  onClick={() => setSlashForced((open) => !open)}
+                >
+                  <span className="font-mono text-[13px] leading-none">/</span>
+                  <span>{t("composer.commands.button")}</span>
+                </button>
+                {composerCommand ? (
+                  <button
+                    type="button"
+                    className="inline-flex h-7 items-center rounded-full bg-surface-hover px-2 text-[12px] text-text-primary"
+                    onClick={() => setComposerCommand(null)}
+                  >
+                    /{composerCommand.name}
+                  </button>
+                ) : null}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -14598,6 +14729,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   onSend={() => {
                     if (replayPresenting) return;
                     lastComposerEnterAtRef.current = 0;
+                    if (composerCommand) {
+                      void submitComposerCommand();
+                      return;
+                    }
                     void sendChat(extractComposerSendText());
                   }}
                   onMic={onMicClick}
@@ -14605,6 +14740,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
               </div>
             </div>
+            {perfCard ? (
+              <CommandPerfCard
+                summary={perfCard.summary}
+                error={perfCard.error}
+                onClose={() => setPerfCard(null)}
+              />
+            ) : null}
+            {slashOpen ? (
+              <CommandMenu
+                items={commandItems}
+                query={slashQuery ?? ""}
+                canPin={Boolean(pane.sessionId)}
+                onSelect={selectComposerCommand}
+                onPin={(item) => {
+                  const sid = String(pane.sessionId ?? "").trim();
+                  if (!sid || !apiBase) return;
+                  void pinCommand(apiBase, apiToken, sid, {
+                    scope: item.scope,
+                    subject_id: item.scope === "global" ? "" : commandContext.subjectId,
+                    name: item.name,
+                  }).then(() =>
+                    fetchVisibleCommands(apiBase, apiToken, {
+                      context: commandContext.context,
+                      subjectId: commandContext.subjectId,
+                      sessionId: sid,
+                    }).then(setCommandItems),
+                  );
+                }}
+              />
+            ) : null}
             {atOpen ? (
               <AtMentionPicker
                 query={atQuery}

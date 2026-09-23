@@ -60,6 +60,8 @@ class ChatRequest(BaseModel):
     # Idempotency key from desktop: a duplicate POST with the same id within a
     # short window is short-circuited so no second user row is persisted.
     client_turn_id: Optional[str] = None
+    # Composer command chip. Persisted on the user row metadata for history reload.
+    command_name: Optional[str] = None
     # Kimi K3 / K2.8 / GLM-5.3: "low" | "high" | "max". GLM-5.2: "high" | "max".
     reasoning_effort: Optional[str] = None
     # DeepSeek V4 thinking switch; None leaves session unset (runtime defaults on).

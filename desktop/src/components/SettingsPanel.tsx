@@ -48,7 +48,9 @@ import {
   X,
   TriangleAlert,
   ShieldCheck,
+  Slash,
 } from "lucide-react";
+import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
 import {
   SETTINGS_HINT_CLASS,
@@ -1044,6 +1046,7 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "connectors", icon: Link2 },
   { id: "tools", icon: Wrench },
   { id: "skills", icon: SkillPuzzleIcon },
+  { id: "commands", icon: Slash },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", icon: Library },
   { id: "data_sources", icon: Database },
@@ -8942,6 +8945,8 @@ export function SettingsPanel({
                 <SkillAdvancedPanel />
               </div>
             )}
+
+            {tab === "commands" && <CommandsSettings />}
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
             {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}

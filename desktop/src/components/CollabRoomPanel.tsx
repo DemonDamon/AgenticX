@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "../store";
+import { CommandMenu } from "./composer/CommandMenu";
+import { CommandPerfCard } from "./composer/CommandPerfCard";
+import { fetchSessionPerf, fetchVisibleCommands, type PerfSummary, type VisibleCommand } from "../services/commandsApi";
+import { SESSION_ID_RE, composeRoomCommandSend } from "../utils/command-send";
+import { matchSlashCommandQuery } from "../utils/composer-input-sync";
 import { i18n } from "../i18n/i18n";
 import { Users, X } from "lucide-react";
 import {
@@ -67,6 +73,10 @@ function asMessage(raw: unknown): RoomMessage | null {
 
 export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Props) {
   const { t } = useTranslation("workspace");
+  const { t: tChat } = useTranslation("chat");
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
+  const setActiveCollabRoomId = useAppStore((s) => s.setActiveCollabRoomId);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listBusy, setListBusy] = useState(false);
@@ -78,6 +88,10 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const [status, setStatus] = useState<RoomStreamStatus>("connecting");
   const [roomError, setRoomError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [roomCommand, setRoomCommand] = useState<VisibleCommand | null>(null);
+  const [slashForced, setSlashForced] = useState(false);
+  const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
+  const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -85,6 +99,30 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   activeRoomIdRef.current = activeRoomId;
+
+  useEffect(() => {
+    setActiveCollabRoomId(activeRoomId);
+  }, [activeRoomId, setActiveCollabRoomId]);
+
+  useEffect(() => () => setActiveCollabRoomId(null), [setActiveCollabRoomId]);
+
+  const slashQuery = roomCommand ? null : matchSlashCommandQuery(draft);
+  const slashOpen = Boolean(activeRoomId) && (slashForced || slashQuery !== null);
+
+  useEffect(() => {
+    if (!slashOpen || !apiBase || !activeRoomId) return;
+    let cancelled = false;
+    void fetchVisibleCommands(apiBase, apiToken, { context: "room", subjectId: activeRoomId })
+      .then((items) => {
+        if (!cancelled) setCommandItems(items);
+      })
+      .catch(() => {
+        if (!cancelled) setCommandItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slashOpen, apiBase, apiToken, activeRoomId]);
 
   const stopWatch = useCallback(async (roomId: string | null) => {
     unsubscribeRef.current?.();
@@ -272,7 +310,29 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
 
   const onSend = async () => {
     const roomId = activeRoomId;
-    const text = draft.trim();
+    if (roomCommand?.kind === "local") {
+      const extra = draft.trim();
+      if (!extra || !SESSION_ID_RE.test(extra)) {
+        setPerfCard({
+          summary: null,
+          error: extra ? tChat("composer.commands.invalidSession") : tChat("composer.commands.placeholderPerfRoom"),
+        });
+        return;
+      }
+      setRoomCommand(null);
+      setDraft("");
+      try {
+        const summary = await fetchSessionPerf(apiBase, apiToken, extra);
+        setPerfCard({ summary, error: "" });
+      } catch (err) {
+        setPerfCard({
+          summary: null,
+          error: err instanceof Error ? err.message : tChat("composer.commands.missing"),
+        });
+      }
+      return;
+    }
+    const text = composeRoomCommandSend(roomCommand, draft).trim();
     if (!roomId || !text || sending || status === "revoked") return;
     const tempId = `temp-${Date.now()}`;
     const optimistic: RoomMessage = {
@@ -287,6 +347,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
     setSending(true);
     setSendError(null);
     setDraft("");
+    setRoomCommand(null);
     setMessages((list) => upsertBySeq(list, optimistic));
     try {
       const res = await window.agenticxDesktop.collabRoomSend(roomId, text);
@@ -484,21 +545,77 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                   <div ref={bottomRef} />
                 </div>
                 <form
-                  className="flex items-end gap-2 border-t border-border p-3"
+                  className="relative flex items-end gap-2 border-t border-border p-3"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void onSend();
                   }}
                 >
+                  {perfCard ? (
+                    <div className="absolute bottom-full left-3 right-3">
+                      <CommandPerfCard
+                        summary={perfCard.summary}
+                        error={perfCard.error}
+                        onClose={() => setPerfCard(null)}
+                      />
+                    </div>
+                  ) : null}
+                  {slashOpen ? (
+                    <CommandMenu
+                      items={commandItems}
+                      query={slashQuery ?? ""}
+                      canPin={false}
+                      onSelect={(item) => {
+                        setRoomCommand(item);
+                        setSlashForced(false);
+                        setDraft("");
+                      }}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-border px-2 py-2 text-[12px] text-text-muted"
+                    onClick={() => setSlashForced((open) => !open)}
+                  >
+                    / {tChat("composer.commands.button")}
+                  </button>
+                  {roomCommand ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-full bg-surface-hover px-2 py-1 text-[12px]"
+                      onClick={() => setRoomCommand(null)}
+                    >
+                      /{roomCommand.name}
+                    </button>
+                  ) : null}
                   <input
                     className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none"
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder={sending ? t("collab.sending") : t("collab.inputPlaceholder")}
+                    placeholder={
+                      roomCommand
+                        ? roomCommand.kind === "local"
+                          ? tChat("composer.commands.placeholderPerfRoom")
+                          : tChat("composer.commands.placeholderPrompt")
+                        : sending
+                          ? t("collab.sending")
+                          : t("collab.inputPlaceholder")
+                    }
                     disabled={sending}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault();
+                        if (slashOpen) {
+                          const filtered = commandItems.filter((item) =>
+                            (slashQuery ?? "") === "" ? true : item.name.includes(slashQuery ?? ""),
+                          );
+                          if (filtered[0]) {
+                            setRoomCommand(filtered[0]);
+                            setSlashForced(false);
+                            setDraft("");
+                            return;
+                          }
+                        }
                         void onSend();
                       }
                     }}
@@ -506,7 +623,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                   <button
                     type="submit"
                     className="shrink-0 rounded-md border border-border bg-surface-card-strong px-3 py-2 text-sm text-text-strong disabled:opacity-50"
-                    disabled={sending || !draft.trim()}
+                    disabled={sending || (!draft.trim() && roomCommand?.kind !== "prompt")}
                   >
                     {t("collab.send")}
                   </button>

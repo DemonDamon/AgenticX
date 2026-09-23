@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus, ChevronDown, ChevronUp } from "lucide-react";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
@@ -19,6 +19,7 @@ import { CitationSourcesCard } from "./WebSearchSources";
 import { withBibliographyFallback } from "./source-attribution-parse";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
+import { splitCommandBody } from "../../utils/command-send";
 import { isPeerHumanSpeakerId, resolveUserBubbleName } from "../../utils/peer-human-speaker";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
@@ -370,6 +371,8 @@ export function ImBubble({
     isGroupAssistant
       ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
       : strippedBody;
+  const commandName = isUser ? String(message.command_name ?? "").trim() : "";
+  const commandParts = commandName ? splitCommandBody(String(bodyText ?? "")) : null;
   const groupStreamActive = isGroupAssistant && isStreaming;
   const pacedBodyText = usePacedStreamText(String(bodyText ?? ""), groupStreamActive);
   const canPeelGroupReport =
@@ -940,6 +943,25 @@ export function ImBubble({
                         ) : null}
                       </div>
                     </div>
+                  </div>
+                ) : commandParts ? (
+                  <div>
+                    <div className="mb-1 inline-flex rounded-full bg-surface-hover px-2 py-0.5 font-mono text-[11px]">
+                      /{commandName}
+                    </div>
+                    {commandParts.extra ? (
+                      <div className="whitespace-pre-wrap break-words">{commandParts.extra}</div>
+                    ) : null}
+                    {commandParts.instructions ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[11px] opacity-70">
+                          {t("composer.commands.instructions")}
+                        </summary>
+                        <div className="mt-1 whitespace-pre-wrap break-words text-[12px]">
+                          {commandParts.instructions}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
                   <div className="whitespace-pre-wrap break-words">

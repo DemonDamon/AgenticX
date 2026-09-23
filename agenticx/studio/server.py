@@ -1470,6 +1470,10 @@ def create_studio_app() -> FastAPI:
 
     register_data_sources_routes(app, check_token=_check_token)
 
+    from agenticx.studio.command_routes import register_command_routes
+
+    register_command_routes(app, _check_token)
+
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
             raise HTTPException(status_code=403, detail="desktop token required for MCP admin APIs")
@@ -4026,7 +4030,15 @@ def create_studio_app() -> FastAPI:
                             user_message_content=user_message_content,
                             history_user_attachments=history_user_attachments,
                             history_user_metadata=(
-                                {"client_turn_id": _ctid} if _ctid else None
+                                {
+                                    key: value
+                                    for key, value in {
+                                        "client_turn_id": _ctid,
+                                        "command_name": str(getattr(payload, "command_name", "") or "").strip(),
+                                    }.items()
+                                    if value
+                                }
+                                or None
                             ),
                             history_user_content=(
                                 user_display_content or str(payload.user_input or "")

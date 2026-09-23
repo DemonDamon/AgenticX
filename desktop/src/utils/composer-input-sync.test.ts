@@ -4,6 +4,7 @@ import {
   domTextLooksNonEmpty,
   isComposerNonEmpty,
   matchTrailingAtMention,
+  matchSlashCommandQuery,
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
   shouldCommitComposerHasText,
@@ -32,6 +33,18 @@ describe("shouldCommitComposerHasText", () => {
     expect(shouldCommitComposerHasText(true, "")).toBe(true);
     expect(shouldCommitComposerHasText(true, "   ")).toBe(true);
     expect(shouldCommitComposerHasText(false, "")).toBe(false);
+  });
+});
+
+describe("matchSlashCommandQuery", () => {
+  it("returns the query only for a whole lowercase slash token at the caret end", () => {
+    expect(matchSlashCommandQuery("/perf")).toBe("perf");
+    expect(matchSlashCommandQuery("/")).toBe("");
+    expect(matchSlashCommandQuery("/Users")).toBeNull();
+    expect(matchSlashCommandQuery("/a/b")).toBeNull();
+    expect(matchSlashCommandQuery("/Perf")).toBeNull();
+    expect(matchSlashCommandQuery("/a b")).toBeNull();
+    expect(matchSlashCommandQuery("/perf", 2)).toBeNull();
   });
 });
 

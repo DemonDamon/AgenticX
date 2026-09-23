@@ -9,6 +9,7 @@
     "connectors": "Connectors",
     "tools": "Built-in tools",
     "skills": "Skills",
+    "commands": "Commands",
     "knowledge": "Knowledge base",
     "data_sources": "Data sources",
     "memory": "Memory",
@@ -17,6 +18,33 @@
     "favorites": "Favorites",
     "server": "Remote connection",
     "security": "Security"
+  },
+  "commands": {
+    "title": "Commands",
+    "hint": "Save a prompt, then type / in the composer to run it.",
+    "create": "Create",
+    "createTitle": "Create command",
+    "emptyTitle": "No commands yet",
+    "emptyHint": "Save a prompt, then type / in the composer to run it.",
+    "name": "Name",
+    "description": "Description",
+    "instructions": "Instructions",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "subject": "Subject",
+    "invalidName": "Use lowercase letters, numbers, and hyphens",
+    "reservedName": "This name is reserved",
+    "instructionsRequired": "Instructions are required",
+    "subjectRequired": "Choose a subject",
+    "loadFailed": "Could not load",
+    "roomLogin": "Sign in to an enterprise account to manage room commands",
+    "scope": {
+      "global": "Global",
+      "avatar": "Avatar",
+      "group": "Group",
+      "room": "Room"
+    }
   },
   "display": {
     "title": "Display",

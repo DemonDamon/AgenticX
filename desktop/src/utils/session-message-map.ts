@@ -298,6 +298,7 @@ export type LoadedSessionMessage = {
   attachments?: unknown;
   visual_attachments?: unknown;
   metadata?: Record<string, unknown>;
+  command_name?: string;
   system_notice?: boolean;
   tool_call_id?: string;
   tool_name?: string;
@@ -389,6 +390,7 @@ export function mapLoadedSessionMessage(
         : undefined,
     attachments: normalizeReferenceAttachments(mergedAttachments),
     metadata,
+    command_name: String(metadata?.command_name ?? item.command_name ?? "").trim() || undefined,
     systemNotice: item.system_notice === true,
     subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };

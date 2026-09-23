@@ -9,6 +9,7 @@
     "connectors": "连接器",
     "tools": "内置工具",
     "skills": "技能配置",
+    "commands": "指令",
     "knowledge": "知识库",
     "data_sources": "数据源",
     "memory": "记忆管理",
@@ -17,6 +18,33 @@
     "favorites": "内容收藏",
     "server": "远程连接",
     "security": "安全中心"
+  },
+  "commands": {
+    "title": "指令",
+    "hint": "保存常用说明后，在输入框输入 / 即可调用。",
+    "create": "创建",
+    "createTitle": "创建指令",
+    "emptyTitle": "暂无指令",
+    "emptyHint": "保存常用说明后，在输入框输入 / 即可调用。",
+    "name": "命令名称",
+    "description": "描述",
+    "instructions": "说明",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "subject": "主体",
+    "invalidName": "名称只能使用小写字母、数字和短横线",
+    "reservedName": "该名称已保留",
+    "instructionsRequired": "请填写说明",
+    "subjectRequired": "请选择主体",
+    "loadFailed": "加载失败",
+    "roomLogin": "登录企业账号后可管理房间指令",
+    "scope": {
+      "global": "全局",
+      "avatar": "分身",
+      "group": "群聊",
+      "room": "云房间"
+    }
   },
   "display": {
     "title": "显示",

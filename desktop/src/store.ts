@@ -364,6 +364,8 @@ export type Message = {
   budgetSource?: string;
   budgetCurrent?: number;
   budgetMax?: number;
+  /** Composer command that produced this user turn. */
+  command_name?: string;
   /** messages.json metadata (e.g. view_image_inject). */
   metadata?: Record<string, unknown>;
   /** Sub-Plan E: persisted anchor for a historical sub-agent cluster card. */
@@ -562,6 +564,7 @@ type TokenDashboardState = {
 
 type CollabRoomsState = {
   open: boolean;
+  activeRoomId: string | null;
 };
 
 type DeliveryPanelState = {
@@ -793,6 +796,7 @@ type AppState = {
         | "searchedQueries"
         | "ownerSessionId"
         | "metadata"
+        | "command_name"
         | "blocks"
         | "usage"
         | "modelSelection"
@@ -992,6 +996,7 @@ type AppState = {
   closeTokenDashboard: () => void;
   openCollabRooms: () => void;
   closeCollabRooms: () => void;
+  setActiveCollabRoomId: (id: string | null) => void;
   setTokenDashboardRange: (range: TokenDashboardRange) => void;
   setTokenDashboardCustomRange: (from: string, to: string) => void;
   openDeliveryPanel: (taskId?: string | null) => void;
@@ -1369,7 +1374,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {}, focusSeq: 0 },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
-  collabRooms: { open: false },
+  collabRooms: { open: false, activeRoomId: null },
   deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
@@ -3145,10 +3150,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   closeCollabRooms: () => {
     set((state) => ({
-      collabRooms: { ...state.collabRooms, open: false },
+      collabRooms: { ...state.collabRooms, open: false, activeRoomId: null },
     }));
     get().returnToPreviousChat();
   },
+  setActiveCollabRoomId: (id) =>
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, activeRoomId: id ?? null },
+    })),
   setTokenDashboardRange: (range) =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, range },
