@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { CommandMenu } from "./composer/CommandMenu";
 import { CommandPerfCard } from "./composer/CommandPerfCard";
-import { fetchSessionPerf, fetchVisibleCommands, type PerfSummary, type VisibleCommand } from "../services/commandsApi";
-import { SESSION_ID_RE, composeRoomCommandSend } from "../utils/command-send";
+import { fetchSessionPerf, fetchVisibleCommands, perfCardError, type VisibleCommand } from "../services/commandsApi";
+import { buildPerfDiagnosisText, composeRoomCommandSend, parsePerfCommandInput } from "../utils/command-send";
 import { matchSlashCommandQuery } from "../utils/composer-input-sync";
 import { i18n } from "../i18n/i18n";
 import { Users, X } from "lucide-react";
@@ -90,7 +90,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const [draft, setDraft] = useState("");
   const [roomCommand, setRoomCommand] = useState<VisibleCommand | null>(null);
   const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
-  const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
+  const [perfCard, setPerfCard] = useState<{ error: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -309,29 +309,29 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
 
   const onSend = async () => {
     const roomId = activeRoomId;
+    let text = "";
     if (roomCommand?.kind === "local") {
-      const extra = draft.trim();
-      if (!extra || !SESSION_ID_RE.test(extra)) {
-        setPerfCard({
-          summary: null,
-          error: extra ? tChat("composer.commands.invalidSession") : tChat("composer.commands.placeholderPerfRoom"),
-        });
+      const parsed = parsePerfCommandInput(draft, "");
+      if (!parsed) {
+        setPerfCard(perfCardError(
+          draft.trim() ? tChat("composer.commands.invalidSession") : tChat("composer.commands.placeholderPerfRoom"),
+        ));
         return;
       }
-      setRoomCommand(null);
-      setDraft("");
       try {
-        const summary = await fetchSessionPerf(apiBase, apiToken, extra);
-        setPerfCard({ summary, error: "" });
+        const summary = await fetchSessionPerf(apiBase, apiToken, parsed.sessionId);
+        text = buildPerfDiagnosisText(summary, parsed.note);
       } catch (err) {
-        setPerfCard({
-          summary: null,
-          error: err instanceof Error ? err.message : tChat("composer.commands.missing"),
-        });
+        setPerfCard(perfCardError(err instanceof Error ? err.message : tChat("composer.commands.missing")));
+        return;
       }
-      return;
+      if (!text) {
+        setPerfCard(perfCardError(tChat("composer.commands.noRuns")));
+        return;
+      }
+    } else {
+      text = composeRoomCommandSend(roomCommand, draft).trim();
     }
-    const text = composeRoomCommandSend(roomCommand, draft).trim();
     if (!roomId || !text || sending || status === "revoked") return;
     const tempId = `temp-${Date.now()}`;
     const optimistic: RoomMessage = {
@@ -553,7 +553,6 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                   {perfCard ? (
                     <div className="absolute bottom-full left-3 right-3">
                       <CommandPerfCard
-                        summary={perfCard.summary}
                         error={perfCard.error}
                         onClose={() => setPerfCard(null)}
                       />

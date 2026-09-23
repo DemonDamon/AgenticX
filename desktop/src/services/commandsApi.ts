@@ -29,8 +29,12 @@ export type PerfRunBrief = {
 
 export type PerfLatest = PerfRunBrief & {
   model_waits: PerfWait[];
+  model_wait_total_ms?: number;
   tool_elapsed_ms: number;
   slowest_tool: { name: string; elapsed_ms: number } | null;
+  output_tokens?: number | null;
+  turn_output_tokens?: number | null;
+  output_tokens_per_sec?: number | null;
 };
 
 export type PerfSummary = {
@@ -38,6 +42,10 @@ export type PerfSummary = {
   runs: PerfRunBrief[];
   latest: PerfLatest | null;
 };
+
+export function perfCardError(error: string): { error: string } {
+  return { error };
+}
 
 function headers(token: string): HeadersInit {
   return token ? { "x-agx-desktop-token": token } : {};

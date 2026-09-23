@@ -37,6 +37,9 @@ def summarize_session_perf(sessions_root: Path, session_id: str) -> dict[str, An
             events = _load_events(run_dir / "events.jsonl")
             detailed.append(_summarize_run(run, events, observations))
     detailed.sort(key=lambda row: float(row.get("_created") or 0.0), reverse=True)
+    usages = _load_message_usages(session_dir / "messages.json")
+    if detailed:
+        _attach_output_rate(detailed[0], usages)
     latest = _public_run(detailed[0]) if detailed else None
     briefs = [
         {
@@ -53,7 +56,70 @@ def summarize_session_perf(sessions_root: Path, session_id: str) -> dict[str, An
 
 
 def _public_run(row: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in row.items() if key != "_created"}
+    return {key: value for key, value in row.items() if not str(key).startswith("_")}
+
+
+def _attach_output_rate(row: dict[str, Any], usages: list[tuple[float, dict[str, Any]]]) -> None:
+    """Match the assistant usage written at the end of this run and divide by model wait."""
+    usage = _usage_near(usages, _as_float(row.get("_completed")))
+    output_tokens = _usage_int(usage, "output_tokens")
+    turn_output_tokens = _usage_int(usage, "turn_output_tokens")
+    counted = turn_output_tokens if turn_output_tokens is not None else output_tokens
+    total_ms = row.get("model_wait_total_ms")
+    rate = None
+    if isinstance(counted, int) and isinstance(total_ms, int) and total_ms > 0:
+        rate = round(counted / (total_ms / 1000), 1)
+    row["output_tokens"] = output_tokens
+    row["turn_output_tokens"] = turn_output_tokens
+    row["output_tokens_per_sec"] = rate
+
+
+def _usage_near(
+    usages: list[tuple[float, dict[str, Any]]],
+    completed: float | None,
+) -> dict[str, Any] | None:
+    if completed is None:
+        return None
+    best: dict[str, Any] | None = None
+    best_delta = 5.0
+    for ts, usage in usages:
+        delta = abs(ts - completed)
+        if delta <= best_delta:
+            best = usage
+            best_delta = delta
+    return best
+
+
+def _usage_int(usage: dict[str, Any] | None, key: str) -> int | None:
+    if not isinstance(usage, dict):
+        return None
+    value = usage.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _load_message_usages(path: Path) -> list[tuple[float, dict[str, Any]]]:
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    rows: list[tuple[float, dict[str, Any]]] = []
+    for item in data:
+        if not isinstance(item, dict) or item.get("role") != "assistant":
+            continue
+        usage = item.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        ts = item.get("timestamp")
+        if isinstance(ts, bool) or not isinstance(ts, (int, float)):
+            continue
+        rows.append((float(ts) / 1000.0, usage))
+    return rows
 
 
 def _summarize_run(
@@ -67,7 +133,9 @@ def _summarize_run(
     if created is not None and completed is not None:
         wall_ms = int(round((completed - created) * 1000))
     ttft_ms = _ttft_ms(events)
-    model_waits = _model_waits(events)
+    model_waits_all = _model_waits(events)
+    model_waits = sorted(model_waits_all, key=lambda row: int(row["wait_ms"]), reverse=True)[:3]
+    model_wait_total_ms = sum(int(row["wait_ms"]) for row in model_waits_all)
     window_end = completed
     if window_end is None and events:
         window_end = _as_float(events[-1].get("ts"))
@@ -81,9 +149,11 @@ def _summarize_run(
         "wall_ms": wall_ms,
         "ttft_ms": ttft_ms,
         "model_waits": model_waits,
+        "model_wait_total_ms": model_wait_total_ms,
         "tool_elapsed_ms": tool_elapsed_ms,
         "slowest_tool": slowest,
         "created_at": created_iso,
+        "_completed": completed if completed is not None else 0.0,
     }
 
 
@@ -146,8 +216,7 @@ def _model_waits(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             until = "assistant_output_completed"
         waits.append({"wait_ms": int(round((target_ts - start_ts) * 1000)), "until": until})
-    waits.sort(key=lambda row: int(row["wait_ms"]), reverse=True)
-    return waits[:3]
+    return waits
 
 
 def _tools_in_window(

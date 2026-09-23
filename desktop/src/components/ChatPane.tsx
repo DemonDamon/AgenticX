@@ -228,12 +228,12 @@ import {
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
-import { SESSION_ID_RE, buildCommandSendText, filterCommands } from "../utils/command-send";
+import { buildCommandSendText, buildPerfDiagnosisText, filterCommands, parsePerfCommandInput } from "../utils/command-send";
 import {
   fetchSessionPerf,
   fetchVisibleCommands,
+  perfCardError,
   pinCommand,
-  type PerfSummary,
   type VisibleCommand,
 } from "../services/commandsApi";
 import { Toast } from "./ds/Toast";
@@ -3091,7 +3091,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [composerPlain, setComposerPlain] = useState("");
   const [composerCommand, setComposerCommand] = useState<VisibleCommand | null>(null);
   const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
-  const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
+  const [perfCard, setPerfCard] = useState<{ error: string } | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceTranscribing, setVoiceTranscribing] = useState(false);
@@ -12711,25 +12711,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!composerCommand) return;
     const extra = extractComposerSendText().trim();
     if (composerCommand.kind === "local") {
-      if (extra && !SESSION_ID_RE.test(extra)) {
-        setPerfCard({ summary: null, error: t("composer.commands.invalidSession") });
-        return;
-      }
-      const sid = extra || String(pane?.sessionId ?? "").trim();
-      if (!sid) {
-        setPerfCard({ summary: null, error: t("composer.commands.placeholderPerfRoom") });
+      const parsed = parsePerfCommandInput(extra, String(pane?.sessionId ?? ""));
+      if (!parsed) {
+        setPerfCard(perfCardError(extra ? t("composer.commands.invalidSession") : t("composer.commands.placeholderPerfRoom")));
         return;
       }
       setComposerCommand(null);
       setComposerText("");
       try {
-        const summary = await fetchSessionPerf(apiBase, apiToken, sid);
-        setPerfCard({ summary, error: "" });
+        const summary = await fetchSessionPerf(apiBase, apiToken, parsed.sessionId);
+        const instructions = buildPerfDiagnosisText(summary, parsed.note);
+        if (!instructions) {
+          setPerfCard(perfCardError(t("composer.commands.noRuns")));
+          return;
+        }
+        void sendChat(buildCommandSendText(instructions, extra), { commandName: "perf" });
       } catch (err) {
-        setPerfCard({
-          summary: null,
-          error: err instanceof Error ? err.message : t("composer.commands.missing"),
-        });
+        setPerfCard(perfCardError(err instanceof Error ? err.message : t("composer.commands.missing")));
       }
       return;
     }
@@ -14740,7 +14738,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 </div>
                 <ActionCircleButton
                   hasInput={
-                    (!!composerHasText || readyAttachments.length > 0 || quoteTargets.length > 0)
+                    (!!composerHasText || readyAttachments.length > 0 || quoteTargets.length > 0 || !!composerCommand)
                   }
                   /* `canInterruptCurrentSession` 只覆盖"当前 pane 自己发起 SSE"的场景。
                    * 分身被 Meta 委派时，分身 pane 自己没有 SSE，但任务确实在跑。
@@ -14765,7 +14763,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
             {perfCard ? (
               <CommandPerfCard
-                summary={perfCard.summary}
                 error={perfCard.error}
                 onClose={() => setPerfCard(null)}
               />

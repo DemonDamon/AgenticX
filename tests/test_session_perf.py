@@ -62,3 +62,41 @@ def test_missing_first_token_is_null(tmp_path: Path) -> None:
     body = summarize_session_perf(tmp_path, "sess-2")
     assert body["latest"]["ttft_ms"] is None
     assert body["latest"]["wall_ms"] == 10000
+
+
+def test_output_rate_uses_turn_tokens_over_model_wait(tmp_path: Path) -> None:
+    events = [
+        {"type": "round_started", "round_idx": 1, "ts": 1000.0, "payload": {}},
+        {"type": "assistant_output_completed", "ts": 1010.0, "payload": {}},
+    ]
+    _write_run(
+        tmp_path,
+        "sess-rate",
+        "run-rate",
+        events,
+        {
+            "run_id": "run-rate",
+            "model": "mimo",
+            "status": "completed",
+            "created_at": 1000,
+            "completed_at": 1010,
+        },
+    )
+    messages = [
+        {
+            "role": "assistant",
+            "timestamp": 1010000,
+            "usage": {"output_tokens": 100, "turn_output_tokens": 200},
+        }
+    ]
+    (tmp_path / "sess-rate" / "messages.json").write_text(
+        json.dumps(messages),
+        encoding="utf-8",
+    )
+    body = summarize_session_perf(tmp_path, "sess-rate")
+    latest = body["latest"]
+    assert latest["turn_output_tokens"] == 200
+    assert latest["output_tokens"] == 100
+    assert latest["model_wait_total_ms"] == 10000
+    assert latest["output_tokens_per_sec"] == 20.0
+    assert "_completed" not in latest

@@ -14,7 +14,7 @@ from agenticx.studio.command_store import CommandStore, CommandValidationError
 BUILTIN_COMMANDS = (
     {
         "name": "perf",
-        "description": "查看这次对话的耗时",
+        "description": "诊断这次对话的性能",
         "kind": "local",
         "scope": "builtin",
         "instructions": "",
