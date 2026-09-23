@@ -766,12 +766,14 @@ function NewTopicButton({
 /** 「更多操作」+ 按钮：仅承载当前消息的附件与能力，不混入会话级操作。 */
 function ComposerMoreActionsButton({
   onPickFile,
+  onOpenCommands,
   renderMode,
   renderSkillPicker,
   renderKbRetrieval,
   renderConnectors,
 }: {
   onPickFile: () => void;
+  onOpenCommands: () => void;
   renderMode?: () => ReactNode;
   renderSkillPicker: () => ReactNode;
   renderKbRetrieval: () => ReactNode;
@@ -857,6 +859,21 @@ function ComposerMoreActionsButton({
               <span className="flex-1">{t("composer.addFile")}</span>
             </button>
             {renderMode?.()}
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+              onClick={() => {
+                onOpenCommands();
+                setOpen(false);
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0 text-text-muted" aria-hidden>
+                <path d="M4 17l6-5-6-5" />
+                <path d="M12 19h8" />
+              </svg>
+              <span className="flex-1">{t("composer.commands.button")}</span>
+            </button>
             {renderSkillPicker()}
             {renderKbRetrieval()}
             {renderConnectors()}
@@ -3072,7 +3089,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const [composerHasText, setComposerHasText] = useState(false);
   const [composerPlain, setComposerPlain] = useState("");
-  const [slashForced, setSlashForced] = useState(false);
   const [composerCommand, setComposerCommand] = useState<VisibleCommand | null>(null);
   const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
   const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
@@ -12659,7 +12675,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   sendChatRef.current = sendChat;
 
   const slashQuery = composerCommand ? null : matchSlashCommandQuery(composerPlain);
-  const slashOpen = slashForced || slashQuery !== null;
+  const slashOpen = slashQuery !== null;
   const commandContext = (() => {
     const aid = String(pane?.avatarId ?? "");
     if (aid.startsWith("group:")) return { context: "group", subjectId: aid.slice("group:".length) };
@@ -12688,7 +12704,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const selectComposerCommand = (item: VisibleCommand) => {
     setComposerCommand(item);
-    setSlashForced(false);
     setComposerText("");
   };
 
@@ -14339,6 +14354,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   )}
                 </button>
               </div>
+              <div className={composerCommand ? "flex items-start gap-2 px-4 pt-4" : ""}>
+              {composerCommand ? (
+                <button
+                  type="button"
+                  className="group inline-flex h-7 shrink-0 items-center rounded-full border border-[rgba(var(--theme-color-rgb),0.28)] bg-[rgba(var(--theme-color-rgb),0.16)] px-2.5 text-[13px] font-medium leading-none text-[rgb(var(--theme-color-rgb))] shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] backdrop-blur-md"
+                  onClick={() => setComposerCommand(null)}
+                  aria-label={t("composer.commands.close")}
+                >
+                  <X className="h-3 w-0 overflow-hidden opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-3 group-hover:opacity-100" strokeWidth={2.4} aria-hidden />
+                  <span>/{composerCommand.name}</span>
+                </button>
+              ) : null}
+              <div className="relative min-w-0 flex-1">
               <div
                 ref={composerRef}
               contentEditable={!replayPresenting}
@@ -14478,9 +14506,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   }
                   return;
                 }
-                if (e.key === "Escape" && (slashForced || composerCommand)) {
+                if (e.key === "Escape" && composerCommand) {
                   e.preventDefault();
-                  setSlashForced(false);
                   setComposerCommand(null);
                   return;
                 }
@@ -14567,7 +14594,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void sendChat(composerText);
                 }
               }}
-              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)] text-text-primary outline-none ${
+              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pb-0 text-[14px] leading-[var(--agx-chat-im-body-line-height)] text-text-primary outline-none ${
+                composerCommand ? "px-0 pt-0.5" : "px-4 pt-4"
+              } ${
                 // 收起时右侧留白需覆盖「展开输入」角标（absolute right-3 + w-8），pr-4 会导致首行末字与按钮重叠
                 composerExpanded
                   ? "max-h-[62vh] min-h-[260px] pr-40"
@@ -14577,36 +14606,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }`}
             />
             {!composerHasText && quoteTargets.length === 0 ? (
-              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[var(--agx-chat-im-body-font-size)] text-text-faint">
+              <div className={`agx-pane-composer-placeholder pointer-events-none absolute text-[14px] text-text-faint ${
+                composerCommand ? "left-0 top-0.5" : "left-4 top-4"
+              }`}>
                 {composerCommand
                   ? composerCommand.kind === "local"
                     ? t("composer.commands.placeholderPerf")
                     : t("composer.commands.placeholderPrompt")
                   : pane.turnIntent === "plan"
                   ? t("composer.placeholderPlan")
-                  : t("composer.placeholder")}
+                  : isBrandEmptyState
+                    ? t("composer.placeholderEmpty")
+                    : t("composer.placeholder")}
               </div>
             ) : null}
             </div>
+            </div>
+            </div>
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
-                <button
-                  type="button"
-                  className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
-                  onClick={() => setSlashForced((open) => !open)}
-                >
-                  <span className="font-mono text-[13px] leading-none">/</span>
-                  <span>{t("composer.commands.button")}</span>
-                </button>
-                {composerCommand ? (
-                  <button
-                    type="button"
-                    className="inline-flex h-7 items-center rounded-full bg-surface-hover px-2 text-[12px] text-text-primary"
-                    onClick={() => setComposerCommand(null)}
-                  >
-                    /{composerCommand.name}
-                  </button>
-                ) : null}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -14632,6 +14650,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
                 <ComposerMoreActionsButton
                   onPickFile={() => fileInputRef.current?.click()}
+                  onOpenCommands={() => {
+                    setComposerText("/");
+                    requestAnimationFrame(() => focusComposerEnd());
+                  }}
                   renderMode={
                     isGroupPane || isAutomationTaskPane
                       ? undefined

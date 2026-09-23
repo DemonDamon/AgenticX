@@ -89,7 +89,6 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const [roomError, setRoomError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [roomCommand, setRoomCommand] = useState<VisibleCommand | null>(null);
-  const [slashForced, setSlashForced] = useState(false);
   const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
   const [perfCard, setPerfCard] = useState<{ summary: PerfSummary | null; error: string } | null>(null);
   const [sending, setSending] = useState(false);
@@ -107,7 +106,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   useEffect(() => () => setActiveCollabRoomId(null), [setActiveCollabRoomId]);
 
   const slashQuery = roomCommand ? null : matchSlashCommandQuery(draft);
-  const slashOpen = Boolean(activeRoomId) && (slashForced || slashQuery !== null);
+  const slashOpen = Boolean(activeRoomId) && slashQuery !== null;
 
   useEffect(() => {
     if (!slashOpen || !apiBase || !activeRoomId) return;
@@ -567,18 +566,10 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                       canPin={false}
                       onSelect={(item) => {
                         setRoomCommand(item);
-                        setSlashForced(false);
                         setDraft("");
                       }}
                     />
                   ) : null}
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md border border-border px-2 py-2 text-[12px] text-text-muted"
-                    onClick={() => setSlashForced((open) => !open)}
-                  >
-                    / {tChat("composer.commands.button")}
-                  </button>
                   {roomCommand ? (
                     <button
                       type="button"
@@ -611,7 +602,6 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                           );
                           if (filtered[0]) {
                             setRoomCommand(filtered[0]);
-                            setSlashForced(false);
                             setDraft("");
                             return;
                           }

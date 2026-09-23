@@ -262,19 +262,23 @@ export function RunModePicker() {
         ref={anchorRef}
         type="button"
         className={`inline-flex h-7 max-w-[160px] items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors ${
-          mode === "auto" ? "text-amber-500" : "text-text-subtle"
-        } ${open ? "bg-surface-hover" : "hover:bg-surface-hover hover:text-text-primary"}`}
+          mode === "auto"
+            ? "font-semibold text-red-800 [html[data-theme=dark]_&]:text-red-400 [html[data-theme=dim]_&]:text-red-400"
+            : "text-text-subtle"
+        } ${open ? "bg-surface-hover" : "hover:bg-surface-hover"} ${
+          mode === "auto" ? "" : "hover:text-text-primary"
+        }`}
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={t(currentKeys.hint)}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+        <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={mode === "auto" ? 2.2 : 1.8} />
         <span className="truncate">{t(currentKeys.label)}</span>
         {open && placement === "up" ? (
-          <ChevronUp className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
+          <ChevronUp className={`h-3 w-3 shrink-0 ${mode === "auto" ? "text-current" : "text-text-faint"}`} strokeWidth={2} />
         ) : (
-          <ChevronDown className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
+          <ChevronDown className={`h-3 w-3 shrink-0 ${mode === "auto" ? "text-current" : "text-text-faint"}`} strokeWidth={2} />
         )}
       </button>
       {open

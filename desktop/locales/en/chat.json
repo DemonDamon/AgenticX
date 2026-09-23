@@ -404,6 +404,7 @@
     "allowAllRisks": "Main risks",
     "allowAllFooter": "Workspace isolation still applies. You can switch back anytime.",
     "placeholder": "Message...",
+    "placeholderEmpty": "What should we do today? @ to reference a file, / for skills and commands",
     "commands": {
       "menuTitle": "Commands ({{count}})",
       "empty": "No matching commands",

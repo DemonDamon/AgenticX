@@ -14,7 +14,7 @@ export function CommandMenu({ items, query, canPin, onSelect, onPin }: Props) {
   const { t } = useTranslation("chat");
   const shown = filterCommands(items, query);
   return (
-    <div className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-xl border border-border bg-surface-panel shadow-lg">
+    <div className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-xl border border-border bg-surface-popover shadow-lg">
       <div className="border-b border-border px-3 py-1.5 text-[11px] text-text-faint">
         {t("composer.commands.menuTitle", { count: shown.length })}
       </div>

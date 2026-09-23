@@ -1027,11 +1027,8 @@ input[type="radio"] {
 }
 
 .agx-theme-focus-ring:focus-within {
-  border-color: rgba(var(--theme-color-rgb), 0.4);
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.15);
-}
-:root[data-theme="dark"] .agx-theme-focus-ring:focus-within {
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.2);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 /* Theme-aware focus styles for form inputs in Settings and Panels */
