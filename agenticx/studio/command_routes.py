@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from agenticx.runtime.replay_ledger.contracts import validate_ledger_id
 from agenticx.runtime.session_perf import summarize_session_perf
-from agenticx.studio.command_resolve import resolve_visible
+from agenticx.studio.command_resolve import BUILTIN_COMMANDS, resolve_visible
 from agenticx.studio.command_store import (
     CommandNameExists,
     CommandNameReserved,
@@ -38,6 +38,10 @@ class CommandPinRequest(BaseModel):
     scope: str
     subject_id: str = ""
     name: str = Field(min_length=1)
+
+
+class BuiltinEnabledRequest(BaseModel):
+    enabled: bool
 
 
 def register_command_routes(
@@ -102,7 +106,31 @@ def register_command_routes(
             rows = store.list_commands(scope, "" if scope == "global" else subject_id)
         except CommandStoreError as exc:
             raise _http(exc) from exc
-        return {"commands": rows}
+        payload: dict = {"commands": rows}
+        if scope == "global":
+            disabled = store.disabled_builtin_names()
+            payload["builtins"] = [
+                {
+                    "name": item["name"],
+                    "description": item["description"],
+                    "enabled": item["name"] not in disabled,
+                }
+                for item in BUILTIN_COMMANDS
+            ]
+        return payload
+
+    @app.put("/api/commands/builtins/{name}")
+    async def commands_set_builtin(
+        name: str,
+        body: BuiltinEnabledRequest,
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict:
+        _auth(x_agx_desktop_token)
+        try:
+            store.set_builtin_enabled(name, body.enabled)
+        except CommandStoreError as exc:
+            raise _http(exc) from exc
+        return {"name": name, "enabled": body.enabled}
 
     @app.post("/api/commands", status_code=201)
     async def commands_create(

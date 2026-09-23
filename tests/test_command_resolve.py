@@ -42,3 +42,13 @@ def test_session_pin_shadows_global_and_builtin_stays_if_not_shadowed(tmp_path: 
     assert by_name["summarize-pr"]["instructions"] == "pinned text"
     assert by_name["perf"]["scope"] == "builtin"
     assert by_name["perf"]["kind"] == "local"
+
+
+def test_disabled_builtin_is_hidden(tmp_path: Path) -> None:
+    store = CommandStore(tmp_path / "commands", tmp_path / "sessions")
+    store.set_builtin_enabled("perf", False)
+    visible = resolve_visible(store, context="meta")
+    assert "perf" not in [item["name"] for item in visible]
+    store.set_builtin_enabled("perf", True)
+    visible = resolve_visible(store, context="meta")
+    assert "perf" in [item["name"] for item in visible]

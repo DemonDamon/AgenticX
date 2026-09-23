@@ -5,8 +5,11 @@ import {
   createCommand,
   deleteCommand,
   fetchCommands,
+  setBuiltinEnabled,
+  type BuiltinCommand,
   type StoredCommand,
 } from "../../../services/commandsApi";
+import { SettingsSwitch } from "../SettingsSwitch";
 
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SCOPES = ["global", "avatar", "group", "room"] as const;
@@ -23,6 +26,7 @@ export function CommandsSettings() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [subjectError, setSubjectError] = useState("");
   const [commands, setCommands] = useState<StoredCommand[]>([]);
+  const [builtins, setBuiltins] = useState<BuiltinCommand[]>([]);
   const [loadError, setLoadError] = useState("");
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -99,13 +103,17 @@ export function CommandsSettings() {
     if (!apiBase) return;
     if (scope !== "global" && !subjectId) {
       setCommands([]);
+      setBuiltins([]);
       return;
     }
     setLoadError("");
     try {
-      setCommands(await fetchCommands(apiBase, apiToken, scope, subjectId));
+      const loaded = await fetchCommands(apiBase, apiToken, scope, subjectId);
+      setCommands(loaded.commands);
+      setBuiltins(scope === "global" ? loaded.builtins : []);
     } catch (err) {
       setCommands([]);
+      setBuiltins([]);
       setLoadError(err instanceof Error ? err.message : t("commands.loadFailed"));
     }
   }, [apiBase, apiToken, scope, subjectId, t]);
@@ -156,6 +164,17 @@ export function CommandsSettings() {
     }
   };
 
+  const toggleBuiltin = async (item: BuiltinCommand) => {
+    const next = !item.enabled;
+    setBuiltins((rows) => rows.map((row) => (row.name === item.name ? { ...row, enabled: next } : row)));
+    try {
+      await setBuiltinEnabled(apiBase, apiToken, item.name, next);
+    } catch (err) {
+      setBuiltins((rows) => rows.map((row) => (row.name === item.name ? { ...row, enabled: item.enabled } : row)));
+      setLoadError(err instanceof Error ? err.message : t("commands.loadFailed"));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
@@ -189,6 +208,30 @@ export function CommandsSettings() {
             ))}
           </select>
         )
+      ) : null}
+      {scope === "global" && builtins.length > 0 ? (
+        <div className="rounded-xl border border-border">
+          <div className="border-b border-border px-3 py-2">
+            <div className="text-[13px] font-medium text-text-strong">{t("commands.builtinTitle")}</div>
+            <p className="text-[11px] text-text-faint">{t("commands.builtinHint")}</p>
+          </div>
+          <ul>
+            {builtins.map((item) => (
+              <li key={item.name} className="flex items-center gap-2 border-t border-border px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-[12px] text-text-strong">/{item.name}</div>
+                  {item.description ? <div className="truncate text-[11px] text-text-faint">{item.description}</div> : null}
+                </div>
+                <SettingsSwitch
+                  size="sm"
+                  checked={item.enabled}
+                  aria-label={t(item.enabled ? "commands.available" : "commands.unavailable", { name: item.name })}
+                  onChange={() => void toggleBuiltin(item)}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       <div className="rounded-xl border border-border">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">

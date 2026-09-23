@@ -45,7 +45,10 @@ def resolve_visible(
     if clean_context not in _CONTEXTS:
         raise CommandValidationError("invalid context")
     by_name: dict[str, dict[str, Any]] = {}
+    disabled = store.disabled_builtin_names()
     for item in BUILTIN_COMMANDS:
+        if str(item["name"]) in disabled:
+            continue
         by_name[str(item["name"])] = dict(item)
     for row in store.list_commands("global"):
         _put(by_name, row, "global")

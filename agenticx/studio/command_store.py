@@ -115,6 +115,33 @@ class CommandStore:
             raise CommandNotFound(CommandNotFound.detail)
         self._write_commands(path, kept)
 
+    def disabled_builtin_names(self) -> set[str]:
+        path = self.root / "disabled.json"
+        if not path.is_file():
+            return set()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return set()
+        names = data.get("names") if isinstance(data, dict) else None
+        if not isinstance(names, list):
+            return set()
+        return {str(name) for name in names if str(name) in RESERVED_NAMES}
+
+    def set_builtin_enabled(self, name: str, enabled: bool) -> None:
+        clean = self._validate_name(name)
+        if clean not in RESERVED_NAMES:
+            raise CommandValidationError("not a builtin command")
+        names = self.disabled_builtin_names()
+        if enabled:
+            names.discard(clean)
+        else:
+            names.add(clean)
+        path = self.root / "disabled.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "names": sorted(names)}
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     def list_session_pins(self, session_id: str) -> list[dict[str, Any]]:
         sid = validate_ledger_id(str(session_id or "").strip(), "session_id")
         return self._read_commands(self._session_path(sid))

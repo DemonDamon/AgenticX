@@ -1,11 +1,15 @@
 /** @vitest-environment jsdom */
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../../i18n/i18n";
 import { useAppStore } from "../../../store";
 import { CommandsSettings } from "./CommandsSettings";
 
 describe("CommandsSettings", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(async () => {
     await i18n.changeLanguage("zh");
     useAppStore.setState({ apiBase: "http://studio.test", apiToken: "tok" });
@@ -16,6 +20,23 @@ describe("CommandsSettings", () => {
         json: async () => ({ commands: [] }),
       })),
     );
+  });
+
+  it("shows the builtin command on the global list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          commands: [],
+          builtins: [{ name: "perf", description: "诊断这次对话的性能", enabled: true }],
+        }),
+      })),
+    );
+    render(<CommandsSettings />);
+    expect(await screen.findByText("/perf")).toBeTruthy();
+    expect(screen.getByText("内置指令")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "perf 可用" })).toBeTruthy();
   });
 
   it("shows the empty state and keeps the dialog open for a reserved name", async () => {

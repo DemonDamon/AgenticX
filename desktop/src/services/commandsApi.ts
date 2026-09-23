@@ -74,18 +74,41 @@ export async function fetchVisibleCommands(
   return Array.isArray(body.items) ? body.items : [];
 }
 
+export type BuiltinCommand = {
+  name: string;
+  description: string;
+  enabled: boolean;
+};
+
 export async function fetchCommands(
   apiBase: string,
   token: string,
   scope: string,
   subjectId = "",
-): Promise<StoredCommand[]> {
+): Promise<{ commands: StoredCommand[]; builtins: BuiltinCommand[] }> {
   const params = new URLSearchParams({ scope });
   if (scope !== "global" && subjectId) params.set("subject_id", subjectId);
   const res = await fetch(`${apiBase}/api/commands?${params.toString()}`, { headers: headers(token) });
   if (!res.ok) throw new Error(await readError(res));
-  const body = (await res.json()) as { commands?: StoredCommand[] };
-  return Array.isArray(body.commands) ? body.commands : [];
+  const body = (await res.json()) as { commands?: StoredCommand[]; builtins?: BuiltinCommand[] };
+  return {
+    commands: Array.isArray(body.commands) ? body.commands : [],
+    builtins: Array.isArray(body.builtins) ? body.builtins : [],
+  };
+}
+
+export async function setBuiltinEnabled(
+  apiBase: string,
+  token: string,
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  const res = await fetch(`${apiBase}/api/commands/builtins/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { ...headers(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export async function createCommand(

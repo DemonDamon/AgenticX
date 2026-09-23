@@ -48,7 +48,6 @@ import {
   X,
   TriangleAlert,
   ShieldCheck,
-  Slash,
 } from "lucide-react";
 import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
@@ -87,6 +86,7 @@ import { AutomationTab } from "./automation/AutomationTab";
 import { TypesafeConfigSection } from "./settings/typesafe/TypesafeConfigSection";
 import { useTypesafeSettings } from "../hooks/useTypesafeSettings";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
+import { CommandPromptIcon } from "./icons/CommandPromptIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
 import {
@@ -1049,7 +1049,7 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "connectors", icon: Link2 },
   { id: "tools", icon: Wrench },
   { id: "skills", icon: SkillPuzzleIcon },
-  { id: "commands", icon: Slash },
+  { id: "commands", icon: CommandPromptIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", icon: Library },
   { id: "data_sources", icon: Database },
