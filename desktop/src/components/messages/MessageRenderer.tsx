@@ -122,6 +122,8 @@ type Props = {
   /** When true, the turn-interrupted resume button is hidden (task already complete). */
   isFutileResume?: boolean;
   /** Group chat: avatar + name on each user/assistant bubble. */
+  /** Scheduled-task user queries collapse when the instruction is long. */
+  collapseLongUserQuery?: boolean;
   showSenderIdentity?: boolean;
   clusterContinue?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
@@ -405,6 +407,7 @@ export function MessageRenderer({
   onResumeTask,
   resumeInFlight = false,
   isFutileResume = false,
+  collapseLongUserQuery = false,
   showSenderIdentity = false,
   clusterContinue = false,
   senderAvatarVariant = "circle",
@@ -582,6 +585,7 @@ export function MessageRenderer({
             ? shouldShowBudgetIncompleteHint(message, allMessages, budgetExceededActive)
             : false
         }
+        collapseLongUserQuery={collapseLongUserQuery}
         showSenderIdentity={showSenderIdentity}
         clusterContinue={clusterContinue}
         senderAvatarVariant={showSenderIdentity ? senderAvatarVariant : "circle"}

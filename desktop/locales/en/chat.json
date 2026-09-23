@@ -144,7 +144,9 @@
     "reanswerAt": "@Switch model",
     "pickReanswerModel": "Choose a model to retry",
     "unselectBlock": "Deselect reply block",
-    "selectBlock": "Select reply block"
+    "selectBlock": "Select reply block",
+    "expandQuery": "Show full query",
+    "collapseQuery": "Collapse"
   },
   "reasoning": {
     "thinking": "Thinking · …",

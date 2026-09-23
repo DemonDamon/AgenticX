@@ -144,7 +144,9 @@
     "reanswerAt": "@换模型",
     "pickReanswerModel": "选择模型重新回答",
     "unselectBlock": "取消选择回复块",
-    "selectBlock": "选择回复块"
+    "selectBlock": "选择回复块",
+    "expandQuery": "展开全部",
+    "collapseQuery": "收起"
   },
   "reasoning": {
     "thinking": "思考中 · …",

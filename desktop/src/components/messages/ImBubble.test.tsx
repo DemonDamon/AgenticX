@@ -731,3 +731,46 @@ describe("ImBubble peer human speaker", () => {
     expect(html).not.toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
   });
 });
+
+describe("ImBubble long scheduled-task query", () => {
+  const contract = [
+    "## Execution Contract (Auto Injected)",
+    "- 这是执行任务，不是方案讨论。禁止输出“是否按此方案执行”。",
+    "- 禁止把 MCP 工具名当作 bash 命令执行（例如 firecrawl_scrape）。",
+    "- mcp_call 参数字段优先使用 arguments；调用前核对目标工具 schema。",
+    "- 若某工具参数校验失败，立即按 schema 修正并继续执行；不要向用户追问。",
+    "- Preflight strategy: Use basic-web-crawler batch_browser_extract for site-list pages first.",
+    "- 时间窗口必须严格限定在最近 7 天，无法解析日期的条目直接丢弃。",
+  ].join("\n");
+
+  it("collapses a long automation query until it is expanded", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "task-query", role: "user", content: contract }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain('data-user-query="collapsed"');
+    expect(html).toContain("Execution Contract");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("leaves a short automation query fully open", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "short-query", role: "user", content: "汇总今日收盘价量" }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain("汇总今日收盘价量");
+    expect(html).not.toContain("data-user-query");
+  });
+
+  it("collapses a long user query in a normal chat", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble message={{ id: "chat-query", role: "user", content: contract }} />,
+    );
+    expect(html).toContain("Execution Contract");
+    expect(html).toContain('data-user-query="collapsed"');
+  });
+});

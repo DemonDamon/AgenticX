@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus, ChevronDown, ChevronUp } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus } from "lucide-react";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
@@ -67,6 +67,7 @@ import { MaybeConversationBubble, MaybeConversationContent } from "./Conversatio
 import { GroupTalkReportCard } from "./GroupTalkReportCard";
 import { usePacedStreamText } from "./usePacedStreamText";
 import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
+import { isLongUserQuery } from "../../utils/long-user-query";
 
 type Props = {
   message: Message;
@@ -135,7 +136,65 @@ type Props = {
   onOpenWorkspaceRefs?: () => void;
   /** Session-level web refs so the chip still shows when this row omitted `references`. */
   sessionWebRefs?: SearchReference[];
+  /** Also collapse a long user query when the caller opts in explicitly. */
+  collapseLongUserQuery?: boolean;
 };
+
+function CollapsibleUserQuery({
+  enabled,
+  text,
+  children,
+}: {
+  enabled: boolean;
+  text: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation("chat");
+  const long = enabled && isLongUserQuery(text);
+  const [expanded, setExpanded] = useState(false);
+  if (!long) {
+    return <div className="whitespace-pre-wrap break-words">{children}</div>;
+  }
+  return (
+    <div>
+      <div
+        className={
+          expanded
+            ? "whitespace-pre-wrap break-words"
+            : "agx-user-query-collapsed whitespace-pre-wrap break-words"
+        }
+        data-user-query={expanded ? "expanded" : "collapsed"}
+        role={expanded ? undefined : "button"}
+        tabIndex={expanded ? undefined : 0}
+        aria-expanded={expanded ? undefined : false}
+        onClick={expanded ? undefined : () => setExpanded(true)}
+        onKeyDown={
+          expanded
+            ? undefined
+            : (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setExpanded(true);
+                }
+              }
+        }
+      >
+        {children}
+      </div>
+      {expanded ? (
+        <button
+          type="button"
+          className="mt-1 text-[12px] leading-none text-inherit opacity-75 hover:opacity-100"
+          aria-expanded
+          aria-label={t("actions.collapseQuery")}
+          onClick={() => setExpanded(false)}
+        >
+          {t("actions.collapseQuery")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
   const { t } = useTranslation("chat");
@@ -319,6 +378,7 @@ export function ImBubble({
   afterBody,
   onOpenWorkspaceRefs,
   sessionWebRefs,
+  collapseLongUserQuery = false,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -964,14 +1024,14 @@ export function ImBubble({
                     ) : null}
                   </div>
                 ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
-                  <div className="whitespace-pre-wrap break-words">
+                  <CollapsibleUserQuery enabled={isUser || collapseLongUserQuery} text={String(bodyText ?? "")}>
                     {renderUserBubbleInlineContent(
                       bodyText,
                       displayQuotedItems,
                       referenceAttachments,
                       onOpenFileReference
                     )}
-                  </div>
+                  </CollapsibleUserQuery>
                 ) : null}
               </div>
             </MaybeConversationContent>

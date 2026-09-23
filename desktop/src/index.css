@@ -980,6 +980,15 @@ body.agx-settings-nav-resizing {
   background: var(--surface-hover);
 }
 
+/* Long user query: five readable lines, with a short fade on the last line. */
+.agx-user-query-collapsed {
+  max-height: calc(var(--agx-chat-im-body-font-size) * var(--agx-chat-im-body-line-height) * 5);
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+}
+
 /* 用户气泡：实心填充胶囊；圆角只放这里，避免和 Tailwind 抢 border-radius */
 .agx-im-user-bubble {
   border: none;
