@@ -13,6 +13,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from .arvo import (LengthPenaltyConfig, apply_tool_penalty,
+                   episode_signals, grouped_length_penalty)
 from .core_algos import grpo_outcome_advantage
 from .rollout import RolloutEngine, RolloutSample
 
@@ -89,7 +91,9 @@ class GRPOTrainer:
                  reward_fn: Callable[[torch.Tensor, torch.Tensor], float], *,
                  lr: float = 1e-3, clip_eps: float = 0.2, kl_beta: float = 0.0,
                  ref_lm: nn.Module | None = None,
-                 optimizer: torch.optim.Optimizer | None = None):
+                 optimizer: torch.optim.Optimizer | None = None,
+                 length_penalty: LengthPenaltyConfig | None = None,
+                 tool_penalty_kappa: float | None = None):
         self.lm = lm
         self.rollout = rollout
         self.reward_fn = reward_fn
@@ -97,6 +101,8 @@ class GRPOTrainer:
         self.kl_beta = kl_beta
         self.ref_lm = ref_lm
         self.opt = optimizer or torch.optim.AdamW(lm.parameters(), lr=lr)
+        self.length_penalty = length_penalty          # SP20 ARVO：改 reward（优势前）
+        self.tool_penalty_kappa = tool_penalty_kappa  # SP20 ARVO：改 advantage（优势后）
 
     def train_step(self, prompts: list[list[int]], *, n_samples: int = 4,
                    max_new_tokens: int = 8, temperature: float = 1.0,
@@ -133,16 +139,32 @@ class GRPOTrainer:
                 "reward_mean": float(np.mean(rewards)),
                 "n_samples": len(samples)}
 
-    def train_step_episodes(self, episodes, *, shaping=None) -> dict:
+    def train_step_episodes(self, episodes, *, shaping=None,
+                            tool_error_segments=None, is_infra=None) -> dict:
         """episode 级 GRPO：优势在 episode 粒度（按任务分组），广播到段内全部 token。
 
         episodes: list[harbor_rollout.Episode]（segments 为 RolloutSample，鸭子类型）。
         shaping: Callable[[rewards, task_ids], advantages]，替换默认分组优势
         （M4 回放基线塑形从这里注入）。
+        tool_error_segments: list[bool] per segment（按 samples 拼接顺序），
+        标记该生成段是否含工具调用错误；配置 tool_penalty_kappa 后生效。
+        is_infra: list[bool] per episode，infra 失败的 episode 不施加工具惩罚
+        （与工程约定"infra 重试到消除"对齐，惩罚只学真错）。
+
+        ARVO 管线（SP20）: 长度惩罚 delta 先加到 reward（M4 shaping 之前，
+        二者天然复合）→ 优势计算 → adv_signed 工具惩罚改 token 优势 → loss。
         """
         device = next(self.lm.parameters()).device
         rewards = [float(e.reward) for e in episodes]
         task_ids = [e.task for e in episodes]
+
+        arvo_metrics = {}
+        if self.length_penalty is not None:
+            deltas = grouped_length_penalty(
+                rewards, task_ids, episode_signals(episodes), self.length_penalty)
+            rewards = [r + d for r, d in zip(rewards, deltas)]
+            arvo_metrics["arvo/length_penalty_sum"] = -float(sum(deltas))
+
         if shaping is not None:
             adv = np.asarray(shaping(rewards, task_ids), dtype=np.float64)
         else:
@@ -165,6 +187,22 @@ class GRPOTrainer:
         tok_adv = np.concatenate([
             np.repeat(adv[ep_of_sample[k]], s.response_ids.shape[0])
             for k, s in enumerate(samples)])
+        if self.tool_penalty_kappa is not None and tool_error_segments is not None:
+            # 工具错误段 → 该段全部生成 token 标记 hit；infra episode 的段豁免
+            seg_lens = [s.response_ids.shape[0] for s in samples]
+            hit_tok = np.zeros(sum(seg_lens))
+            off = 0
+            infra_eps = (set() if is_infra is None
+                         else {i for i, f in enumerate(is_infra) if bool(f)})
+            errs = list(map(bool, tool_error_segments))
+            assert len(errs) == len(samples), "tool_error_segments 须逐段给出"
+            for k in range(len(samples)):
+                n = seg_lens[k]
+                if errs[k] and ep_of_sample[k] not in infra_eps:
+                    hit_tok[off: off + n] = 1.0
+                off += n
+            tok_adv, arvo_metrics = apply_tool_penalty(
+                tok_adv, hit_tok, kappa=self.tool_penalty_kappa)
         adv_t = torch.tensor(tok_adv, dtype=logprobs.dtype, device=device)
         mask = torch.ones_like(logprobs)
         loss = torch_grpo_loss(logprobs, old, ref, adv_t, mask,
@@ -178,4 +216,4 @@ class GRPOTrainer:
         return {"loss": float(loss.detach()),
                 "reward_mean": float(np.mean(rewards)),
                 "n_episodes": len(episodes),
-                "n_tokens": int(mask.sum().item())}
+                "n_tokens": int(mask.sum().item()), **arvo_metrics}
