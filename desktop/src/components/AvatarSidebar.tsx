@@ -107,6 +107,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
             workspaceDir: a.workspace_dir ?? "",
             description: a.description ?? "",
             tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
+            portraitStyle: typeof a.portrait_style === "string" ? a.portrait_style : "",
           }))
         );
         return true;

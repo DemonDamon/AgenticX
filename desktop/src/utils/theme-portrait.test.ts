@@ -38,11 +38,10 @@ describe("prepareThemedPortraitMarkup", () => {
     expect(isNearCubePortraitUrl("/assets/export_embedded.png")).toBe(false);
   });
 
-  it("leaves identity studio portraits untouched", () => {
+  it("leaves collection character portraits untouched", () => {
     const svg =
-      '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="identity-studio" viewBox="0 0 128 128"><path fill="#000"/></svg>';
-    const url = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+      '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="dicebear-lorelei" viewBox="0 0 128 128"><path fill="#000"/></svg>';
+    const url = `data:image/svg+xml;base64,${btoa(svg)}`;
     expect(prepareThemedPortraitMarkup(url)).toBeNull();
-    expect(isNearCubePortraitUrl(url)).toBe(false);
   });
 });

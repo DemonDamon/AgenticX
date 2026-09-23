@@ -206,6 +206,7 @@ type AvatarItem = {
   workspace_dir?: string;
   description?: string;
   tags?: string[];
+  portrait_style?: string;
 };
 
 type ToolStatusItem = {
@@ -635,6 +636,7 @@ declare global {
         default_provider?: string;
         default_model?: string;
         workspace_dir?: string;
+        portrait_style?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       updateAvatar: (payload: {
         id: string;
@@ -651,6 +653,7 @@ declare global {
         default_provider?: string;
         default_model?: string;
         color?: string;
+        portrait_style?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;

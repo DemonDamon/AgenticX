@@ -47,6 +47,35 @@ _PALETTE_HEX: dict[str, str] = {
 PORTRAIT_STYLE = "near-cube-v3"
 PORTRAIT_STYLE_LEGACY_GENERATED = "notionists-v1"
 PORTRAIT_STYLE_CUSTOM = "custom"
+COLLECTION_STYLE_IDS = frozenset(
+    {
+        "near-cube-v3",
+        "blobs",
+        "disco",
+        "identicon",
+        "squircles",
+        "waves",
+        "adventurer",
+        "adventurer-neutral",
+        "avataaars",
+        "bottts",
+        "bottts-neutral",
+        "clay",
+        "critters",
+        "croodles-neutral",
+        "cutouts",
+        "fun-emoji",
+        "gaze",
+        "lorelei",
+        "micah",
+        "thumbs",
+        "voxel-art",
+        "voxel-bot",
+        "landscape",
+        "planets",
+    }
+)
+COLLECTION_PORTRAIT_PREFIX = 'data-portrait="dicebear-'
 
 _COLLECTION_BASE = "https://api.dicebear.com/9.x/notionists/svg"
 _COLLECTION_TIMEOUT_SEC = 6.0
@@ -243,6 +272,10 @@ def is_near_cube_svg(avatar_url: str) -> bool:
     return 'data-portrait="near-cube' in _decode_svg_data_url(avatar_url)
 
 
+def is_collection_portrait_svg(avatar_url: str) -> bool:
+    return COLLECTION_PORTRAIT_PREFIX in _decode_svg_data_url(avatar_url)
+
+
 def extract_cube_colorway_id(avatar_url: str) -> str:
     """Read data-colorway from a stored Near cube data URL."""
     match = re.search(r'data-colorway="([^"]+)"', _decode_svg_data_url(avatar_url))
@@ -260,6 +293,8 @@ def needs_portrait_refresh(
     if not url:
         return True
     if style == PORTRAIT_STYLE_CUSTOM:
+        return False
+    if is_collection_portrait_svg(url):
         return False
     if is_local_fallback_svg(url):
         return True

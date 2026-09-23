@@ -157,6 +157,83 @@ def test_list_replaces_geometric_svg_fallback(tmp_path, monkeypatch) -> None:
     assert listed[0].portrait_style == PORTRAIT_STYLE
 
 
+def test_needs_portrait_refresh_skips_collection_svg() -> None:
+    import base64
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="dicebear-lorelei"></svg>'
+    url = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+    assert needs_portrait_refresh(url, portrait_style="lorelei") is False
+    assert needs_portrait_refresh(url, portrait_style="") is False
+
+
+def test_needs_portrait_refresh_still_fills_empty() -> None:
+    assert needs_portrait_refresh("", portrait_style="") is True
+
+
+def _lorelei_svg_url() -> str:
+    import base64
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="dicebear-lorelei"></svg>'
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
+def test_create_avatar_keeps_collection_portrait_style(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    url = _lorelei_svg_url()
+    cfg = registry.create_avatar(name="飞坦", avatar_url=url, portrait_style="lorelei")
+    assert cfg.portrait_style == "lorelei"
+    assert cfg.avatar_url == url
+
+
+def test_update_avatar_keeps_collection_portrait_style(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(name="飞坦", role="算法")
+    url = _lorelei_svg_url()
+    updated = registry.update_avatar(cfg.id, {"avatar_url": url, "portrait_style": "lorelei"})
+    assert updated is not None
+    assert updated.portrait_style == "lorelei"
+    assert updated.avatar_url == url
+
+
+def test_update_avatar_empty_url_returns_cube(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(
+        name="飞坦",
+        avatar_url=_lorelei_svg_url(),
+        portrait_style="lorelei",
+    )
+    updated = registry.update_avatar(cfg.id, {"avatar_url": ""})
+    assert updated is not None
+    assert updated.portrait_style == PORTRAIT_STYLE
+    assert updated.avatar_url.startswith("data:image/svg+xml;base64,")
+    assert "dicebear-lorelei" not in updated.avatar_url
+
+
+def test_update_avatar_raster_without_style_is_custom(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    cfg = registry.create_avatar(name="飞坦")
+    updated = registry.update_avatar(cfg.id, {"avatar_url": _PNG_DATA_URL})
+    assert updated is not None
+    assert updated.portrait_style == PORTRAIT_STYLE_CUSTOM
+    assert updated.avatar_url == _PNG_DATA_URL
+
+
+def test_list_avatars_does_not_replace_collection_svg(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    monkeypatch.setattr("agenticx.avatar.registry.collection_fetch_enabled", lambda: True)
+    registry = AvatarRegistry()
+    url = _lorelei_svg_url()
+    cfg = registry.create_avatar(name="飞坦", avatar_url=url, portrait_style="lorelei")
+    listed = registry.list_avatars()
+    assert listed[0].id == cfg.id
+    assert listed[0].avatar_url == url
+    assert listed[0].portrait_style == "lorelei"
+
+
 def test_male_name_selects_short_hair() -> None:
     from urllib.parse import parse_qs, urlparse
 

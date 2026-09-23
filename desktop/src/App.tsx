@@ -16,7 +16,6 @@ import { AutomationView } from "./components/automation/AutomationView";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
-import { IdentityStudioOverlay } from "./components/identity/IdentityStudioOverlay";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
@@ -354,10 +353,6 @@ export function App() {
   const mcpServers = useAppStore((s) => s.mcpServers);
   const setMcpServers = useAppStore((s) => s.setMcpServers);
   const focusMode = useAppStore((s) => s.focusMode);
-  const identityStudioSeen = useAppStore((s) => s.identityStudioSeen);
-  const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
-  const userNickname = useAppStore((s) => s.userNickname);
-  const setIdentityStudioSeen = useAppStore((s) => s.setIdentityStudioSeen);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const theme = useAppStore((s) => s.theme);
   const themeColor = useAppStore((s) => s.themeColor);
@@ -2517,11 +2512,6 @@ export function App() {
     };
   }, [apiBase, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages, setPaneSessionId]);
 
-  useEffect(() => {
-    if (!configLoaded || identityStudioSeen) return;
-    if (userAvatarUrl.trim() || userNickname.trim()) setIdentityStudioSeen(true);
-  }, [configLoaded, identityStudioSeen, setIdentityStudioSeen, userAvatarUrl, userNickname]);
-
   const sidebarOverlayMode =
     userMode === "pro" &&
     !!apiBase &&
@@ -2605,15 +2595,6 @@ export function App() {
       ) : (
         <div className="flex-1" aria-hidden />
       )}
-
-      {configLoaded &&
-      apiBase &&
-      !focusMode &&
-      !identityStudioSeen &&
-      !userAvatarUrl.trim() &&
-      !userNickname.trim() ? (
-        <IdentityStudioOverlay />
-      ) : null}
 
       <ExternalLinkConfirmDialog />
       <ConfirmDialog

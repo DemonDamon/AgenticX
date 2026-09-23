@@ -38,7 +38,7 @@ function looksLikeGeneratedLineArt(svg: string): boolean {
   if (!text.includes("<svg") || text.includes("<script") || text.includes("<image")) {
     return false;
   }
-  if (looksLikeNearCubePortrait(svg) || svg.includes('data-portrait="identity-studio"')) {
+  if (looksLikeNearCubePortrait(svg) || svg.includes('data-portrait="dicebear-')) {
     return false;
   }
   if (text.includes("viewbox=\"0 0 1744 1744\"") || text.includes("viewbox='0 0 1744 1744'")) {

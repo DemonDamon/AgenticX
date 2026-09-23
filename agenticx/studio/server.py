@@ -5920,6 +5920,7 @@ def create_studio_app() -> FastAPI:
             skills_enabled=skills_enabled,
             brains_enabled=brains_enabled,
             workspace_dir=str(payload.get("workspace_dir", "")).strip(),
+            portrait_style=str(payload.get("portrait_style", "")).strip(),
         )
         return {"ok": True, "avatar": config.to_dict()}
 

@@ -102,6 +102,7 @@ type AvatarApiRow = {
   workspace_dir?: string;
   description?: string;
   tags?: string[];
+  portrait_style?: string;
 };
 
 /** Map `/api/avatars` rows into store `Avatar` shape. */
@@ -135,6 +136,7 @@ export function mapAvatarsFromApi(rows: unknown[]): Avatar[] {
       workspaceDir: a.workspace_dir ?? "",
       description: a.description ?? "",
       tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
+      portraitStyle: typeof a.portrait_style === "string" ? a.portrait_style : "",
     }));
 }
 

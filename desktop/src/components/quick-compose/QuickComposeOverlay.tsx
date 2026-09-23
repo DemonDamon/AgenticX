@@ -9,6 +9,7 @@ import { getRememberedSessionForAvatar } from "../../utils/avatar-last-session";
 import { sanitizeGroupAvatarIds } from "../../utils/group-editor-utils";
 import { pickPreferredSessionId } from "../../utils/group-pane-open";
 import { scratchHistoryBlocklist } from "../../utils/scratch-chat";
+import { collectionPortraitCreateFields } from "../../utils/expert-portrait";
 import {
   buildSuggestions,
   composeEnterHint,
@@ -38,6 +39,7 @@ function mapCreatedAvatar(item: {
   pinned?: boolean;
   created_by?: string;
   color?: string;
+  portrait_style?: string;
 }): Avatar {
   return {
     id: item.id,
@@ -47,6 +49,7 @@ function mapCreatedAvatar(item: {
     pinned: Boolean(item.pinned),
     createdBy: item.created_by ?? "manual",
     color: typeof item.color === "string" ? item.color : "",
+    portraitStyle: typeof item.portrait_style === "string" ? item.portrait_style : "",
   };
 }
 
@@ -304,6 +307,7 @@ export function QuickComposeOverlay() {
       const result = await window.agenticxDesktop.createAvatar({
         name: name.trim(),
         created_by: "manual",
+        ...collectionPortraitCreateFields(name.trim()),
       });
       if (!result.ok || !result.avatar) {
         throw new Error(result.error || t("compose.createExpertFailed"));

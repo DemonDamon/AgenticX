@@ -21,6 +21,7 @@ import yaml
 from agenticx.utils.agx_home import agx_home, lazy_home_path
 
 from agenticx.avatar.portrait import (
+    COLLECTION_STYLE_IDS,
     PORTRAIT_STYLE,
     PORTRAIT_STYLE_CUSTOM,
     collection_fetch_enabled,
@@ -301,6 +302,7 @@ class AvatarRegistry:
         brains_enabled: Optional[Any] = None,
         workspace_dir: str = "",
         color: str = "",
+        portrait_style: str = "",
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace.
 
@@ -318,9 +320,15 @@ class AvatarRegistry:
         se: Optional[Dict[str, bool]] = None
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
+        requested = str(portrait_style or "").strip()
         resolved_avatar_url = str(avatar_url or "").strip()
         if resolved_avatar_url:
-            resolved_style = PORTRAIT_STYLE_CUSTOM
+            if requested in COLLECTION_STYLE_IDS and requested != PORTRAIT_STYLE:
+                resolved_style = requested
+            elif requested == PORTRAIT_STYLE_CUSTOM:
+                resolved_style = PORTRAIT_STYLE_CUSTOM
+            else:
+                resolved_style = PORTRAIT_STYLE_CUSTOM
         else:
             resolved_avatar_url = generate_avatar_portrait_url(
                 name=name,
@@ -391,10 +399,13 @@ class AvatarRegistry:
             if key == "tags":
                 config.tags = normalize_avatar_tags(value)
                 continue
+            if key == "portrait_style":
+                continue
             if hasattr(config, key):
                 setattr(config, key, value)
         if "avatar_url" in patch:
             new_url = str(config.avatar_url or "").strip()
+            requested = str(patch.get("portrait_style") or "").strip()
             if not new_url:
                 config.avatar_url = generate_avatar_portrait_url(
                     name=config.name,
@@ -406,12 +417,21 @@ class AvatarRegistry:
                     taken_colorways=self._occupied_colorways(exclude_id=config.id),
                 )
                 config.portrait_style = PORTRAIT_STYLE
+            elif requested in COLLECTION_STYLE_IDS and requested != PORTRAIT_STYLE:
+                config.portrait_style = requested
+            elif requested == PORTRAIT_STYLE:
+                config.portrait_style = PORTRAIT_STYLE
             elif new_url != original_url:
                 config.portrait_style = PORTRAIT_STYLE_CUSTOM
+        elif "portrait_style" in patch:
+            requested = str(patch.get("portrait_style") or "").strip()
+            if requested in COLLECTION_STYLE_IDS or requested == PORTRAIT_STYLE_CUSTOM:
+                config.portrait_style = requested
         elif (
             "color" in patch
             and config.color != original_color
-            and str(config.portrait_style or "").strip() != PORTRAIT_STYLE_CUSTOM
+            and str(config.portrait_style or "").strip()
+            not in {PORTRAIT_STYLE_CUSTOM, *(COLLECTION_STYLE_IDS - {PORTRAIT_STYLE})}
         ):
             config.avatar_url = generate_avatar_portrait_url(
                 name=config.name,

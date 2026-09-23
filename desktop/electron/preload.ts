@@ -250,6 +250,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     default_provider?: string;
     default_model?: string;
     workspace_dir?: string;
+    portrait_style?: string;
   }) =>
     ipcRenderer.invoke("create-avatar", payload),
   updateAvatar: async (payload: {
@@ -267,6 +268,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     default_provider?: string;
     default_model?: string;
     color?: string;
+    portrait_style?: string;
   }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),

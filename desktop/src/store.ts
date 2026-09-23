@@ -63,11 +63,6 @@ import {
   isPersistedUserAvatarUrl,
   resolveMetaAvatarFromColorway,
 } from "./utils/identity-avatar";
-import {
-  buildStudioSvgDataUri,
-  parseIdentityStudioRecipe,
-  type IdentityStudioRecipe,
-} from "./utils/identity-studio";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -144,6 +139,8 @@ export type Avatar = {
   description?: string;
   /** Skill tags shown as chips on the gallery card. */
   tags?: string[];
+  /** near-cube-v3, a collection style id, or custom for an uploaded photo. */
+  portraitStyle?: string;
 };
 
 export type SessionItem = {
@@ -631,10 +628,6 @@ type AppState = {
   userNickname: string;
   /** Custom avatar for the human user (group chats). Independent of Near's cube costume. */
   userAvatarUrl: string;
-  /** How the current user portrait was made. Null until the studio or an upload records one. */
-  userAvatarStudio: IdentityStudioRecipe | null;
-  /** First-run identity studio has been confirmed or skipped. Independent of onboarding. */
-  identityStudioSeen: boolean;
   /** Near cube colorway. Drives `metaAvatarUrl`. `brand` is the official orange mark. */
   userCubeColorwayId: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
@@ -744,10 +737,6 @@ type AppState = {
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
-  setUserAvatarStudio: (recipe: IdentityStudioRecipe | null) => void;
-  setIdentityStudioSeen: (seen: boolean) => void;
-  /** Write the generated portrait, its recipe, and the seen flag together. */
-  commitStudioAvatar: (recipe: IdentityStudioRecipe, nickname?: string) => void;
   setUserCubeColorwayId: (colorwayId: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
@@ -1086,8 +1075,6 @@ const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
-const USER_AVATAR_STUDIO_KEY = "agx-user-avatar-studio";
-const IDENTITY_STUDIO_SEEN_KEY = "agx-identity-studio-seen";
 const USER_CUBE_COLORWAY_KEY = "agx-user-cube-colorway";
 const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
 const SESSION_TOKEN_CACHE_KEY = "agx-session-token-cache-v1";
@@ -1161,60 +1148,6 @@ function loadUserAvatarUrl(): string {
     // ignore storage errors
   }
   return "";
-}
-
-function loadUserAvatarStudio(): IdentityStudioRecipe | null {
-  try {
-    const saved = window.localStorage.getItem(USER_AVATAR_STUDIO_KEY);
-    if (!saved) return null;
-    return parseIdentityStudioRecipe(JSON.parse(saved));
-  } catch {
-    return null;
-  }
-}
-
-function loadIdentityStudioSeen(): boolean {
-  try {
-    return window.localStorage.getItem(IDENTITY_STUDIO_SEEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeUserAvatarUrl(url: string) {
-  try {
-    if (url.trim()) window.localStorage.setItem(USER_AVATAR_URL_KEY, url);
-    else window.localStorage.removeItem(USER_AVATAR_URL_KEY);
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function writeUserNickname(name: string) {
-  try {
-    if (name.trim()) window.localStorage.setItem(USER_DISPLAY_NAME_KEY, name);
-    else window.localStorage.removeItem(USER_DISPLAY_NAME_KEY);
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function writeUserAvatarStudio(recipe: IdentityStudioRecipe | null) {
-  try {
-    if (recipe) window.localStorage.setItem(USER_AVATAR_STUDIO_KEY, JSON.stringify(recipe));
-    else window.localStorage.removeItem(USER_AVATAR_STUDIO_KEY);
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function writeIdentityStudioSeen(seen: boolean) {
-  try {
-    if (seen) window.localStorage.setItem(IDENTITY_STUDIO_SEEN_KEY, "1");
-    else window.localStorage.removeItem(IDENTITY_STUDIO_SEEN_KEY);
-  } catch {
-    // ignore storage errors
-  }
 }
 
 function loadMetaAvatarUrl(): string {
@@ -1339,8 +1272,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
-  userAvatarStudio: loadUserAvatarStudio(),
-  identityStudioSeen: loadIdentityStudioSeen(),
   userCubeColorwayId: loadUserCubeColorwayId(),
   userPreference: loadUserPreference(),
   attachmentRouting: ATTACHMENT_ROUTING_OFF,
@@ -1656,57 +1587,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { chatStyle };
     }),
   setUserNickname: (name) =>
-    set((state) => {
+    set(() => {
       const next = String(name ?? "").slice(0, 48);
-      writeUserNickname(next);
-      const studio = state.userAvatarStudio;
-      if (!studio || studio.source !== "studio") {
-        return { userNickname: next };
+      try {
+        if (next.trim()) window.localStorage.setItem(USER_DISPLAY_NAME_KEY, next);
+        else window.localStorage.removeItem(USER_DISPLAY_NAME_KEY);
+      } catch {
+        // ignore storage errors
       }
-      const seed = studio.seedFrozen ? studio.seed : next.trim() || "me";
-      if (seed === studio.seed) return { userNickname: next };
-      const nextRecipe: IdentityStudioRecipe = { ...studio, seed };
-      const uri = buildStudioSvgDataUri(nextRecipe);
-      writeUserAvatarUrl(uri);
-      writeUserAvatarStudio(nextRecipe);
-      return { userNickname: next, userAvatarUrl: uri, userAvatarStudio: nextRecipe };
+      return { userNickname: next };
     }),
   setUserAvatarUrl: (url) =>
     set(() => {
       const next = String(url ?? "");
-      writeUserAvatarUrl(next);
+      try {
+        if (next.trim()) window.localStorage.setItem(USER_AVATAR_URL_KEY, next);
+        else window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+      } catch {
+        // ignore storage errors
+      }
       return { userAvatarUrl: next };
-    }),
-  setUserAvatarStudio: (recipe) =>
-    set(() => {
-      writeUserAvatarStudio(recipe);
-      return { userAvatarStudio: recipe };
-    }),
-  setIdentityStudioSeen: (seen) =>
-    set(() => {
-      writeIdentityStudioSeen(seen);
-      return { identityStudioSeen: seen };
-    }),
-  commitStudioAvatar: (recipe, nickname) =>
-    set((state) => {
-      const nextName = nickname === undefined ? state.userNickname : String(nickname ?? "").slice(0, 48);
-      const nextRecipe: IdentityStudioRecipe = {
-        ...recipe,
-        source: "studio",
-        seed: recipe.seed.trim() || nextName.trim() || "me",
-        options: recipe.options ?? {},
-      };
-      const uri = buildStudioSvgDataUri(nextRecipe);
-      writeUserNickname(nextName);
-      writeUserAvatarUrl(uri);
-      writeUserAvatarStudio(nextRecipe);
-      writeIdentityStudioSeen(true);
-      return {
-        userNickname: nextName,
-        userAvatarUrl: uri,
-        userAvatarStudio: nextRecipe,
-        identityStudioSeen: true,
-      };
     }),
   setUserCubeColorwayId: (colorwayId) =>
     set(() => {

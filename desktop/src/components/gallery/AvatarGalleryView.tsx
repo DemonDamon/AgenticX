@@ -12,6 +12,9 @@ import { AvatarCreateDialog } from "../AvatarCreateDialog";
 import { AvatarSettingsPanel } from "../AvatarSettingsPanel";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
+import { collectionPortraitCreateFields } from "../../utils/expert-portrait";
+import { ExpertPortraitStyleControl } from "./ExpertPortraitStyleControl";
+import { mapAvatarsFromApi } from "../../utils/splash-preload-core";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -121,6 +124,7 @@ export function AvatarGalleryView() {
       ...(ws ? { workspace_dir: ws } : {}),
       ...(blurb ? { description: blurb } : {}),
       ...(tags.length > 0 ? { tags } : {}),
+      ...collectionPortraitCreateFields(data.name),
     });
     await refreshAvatars();
   };
@@ -176,14 +180,33 @@ export function AvatarGalleryView() {
               {t("gallery.subtitle")}
             </p>
           </div>
-          <button
-            type="button"
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            {t("gallery.newExpert")}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <ExpertPortraitStyleControl
+              avatars={avatars}
+              onUpdated={(row) => {
+                setAvatars(
+                  useAppStore.getState().avatars.map((avatar) =>
+                    avatar.id === row.id
+                      ? { ...avatar, avatarUrl: row.avatarUrl, portraitStyle: row.portraitStyle }
+                      : avatar,
+                  ),
+                );
+              }}
+              onApplied={async () => {
+                const listed = await window.agenticxDesktop.listAvatars();
+                if (listed.ok) setAvatars(mapAvatarsFromApi(listed.avatars));
+                await refreshAvatars();
+              }}
+            />
+            <button
+              type="button"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              {t("gallery.newExpert")}
+            </button>
+          </div>
         </div>
       </div>
 

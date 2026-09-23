@@ -71,8 +71,6 @@ import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
-import { IdentityStudio } from "./identity/IdentityStudio";
-import { defaultRecipe } from "../utils/identity-studio";
 import {
   RECOMMENDED_SKILLS,
   type RecommendedSkillTier,
@@ -4954,9 +4952,6 @@ export function SettingsPanel({
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
-  const userAvatarStudio = useAppStore((s) => s.userAvatarStudio);
-  const setUserAvatarStudio = useAppStore((s) => s.setUserAvatarStudio);
-  const commitStudioAvatar = useAppStore((s) => s.commitStudioAvatar);
   const userCubeColorwayId = useAppStore((s) => s.userCubeColorwayId);
   const setUserCubeColorwayId = useAppStore((s) => s.setUserCubeColorwayId);
   const userPreference = useAppStore((s) => s.userPreference);
@@ -4988,11 +4983,6 @@ export function SettingsPanel({
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
-  const [avatarStudioOpen, setAvatarStudioOpen] = useState(false);
-  const studioRecipe = useMemo(
-    () => userAvatarStudio ?? defaultRecipe(userNickname),
-    [userAvatarStudio, userNickname],
-  );
   const [metaEditorKind, setMetaEditorKind] = useState<"costume" | "identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
@@ -5463,15 +5453,12 @@ export function SettingsPanel({
           return;
         }
         setUserAvatarUrl(result);
-        const current = useAppStore.getState().userAvatarStudio;
-        const base = current ?? defaultRecipe(useAppStore.getState().userNickname);
-        setUserAvatarStudio({ ...base, source: "upload" });
         setUserProfileMessage(t("profile.avatarUpdated"));
       };
       reader.onerror = () => setUserProfileMessage(t("profile.readImageFailed"));
       reader.readAsDataURL(file);
     },
-    [setUserAvatarStudio, setUserAvatarUrl, t],
+    [setUserAvatarUrl, t],
   );
 
   const metaSoulDirty = metaSoul !== metaSoulSaved;
@@ -7315,14 +7302,6 @@ export function SettingsPanel({
                     <button
                       type="button"
                       className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.98]"
-                      onClick={() => setAvatarStudioOpen((open) => !open)}
-                      aria-expanded={avatarStudioOpen}
-                    >
-                      {t("profile.studioTitle")}
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.98]"
                       onClick={() => setUserProfileEditing((editing) => !editing)}
                     >
                       <SquarePen className="h-3.5 w-3.5" />
@@ -7348,7 +7327,6 @@ export function SettingsPanel({
                         className="shrink-0 text-[11px] text-text-faint transition-colors hover:text-text-muted"
                         onClick={() => {
                           setUserAvatarUrl("");
-                          setUserAvatarStudio(null);
                           setUserProfileMessage(t("profile.resetDefaultDone"));
                         }}
                       >
@@ -7356,32 +7334,6 @@ export function SettingsPanel({
                       </button>
                     ) : null}
                   </div>
-                  {avatarStudioOpen ? (
-                    <div className="mt-3 border-t border-[var(--border-muted)] pt-3">
-                      <IdentityStudio
-                        compact
-                        nickname={userNickname}
-                        onNicknameChange={(name) => {
-                          setUserNickname(name);
-                          setUserNicknameDraft(name);
-                        }}
-                        recipe={studioRecipe}
-                        onRecipeChange={(next) => commitStudioAvatar(next)}
-                        onUploadFile={handlePickUserAvatar}
-                      />
-                      {userAvatarStudio?.source === "upload" ? (
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            type="button"
-                            className="text-[11px] text-text-faint transition-colors hover:text-text-muted"
-                            onClick={() => commitStudioAvatar({ ...userAvatarStudio, source: "studio" })}
-                          >
-                            {t("profile.studioRestore")}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {userProfileMessage && !userProfileEditing ? (
                     <p
                       className={`mt-1.5 text-right text-[11px] ${

@@ -1,4 +1,5 @@
 import type { GroupTemplate } from "./group-templates";
+import { collectionPortraitCreateFields } from "../../utils/expert-portrait";
 
 export type GroupTemplateCreationPhase =
   | "creating-avatar"
@@ -141,13 +142,15 @@ export async function createGroupFromTemplate({
         total: totalSteps,
         message: `正在创建「${member.name}」（${index + 1}/${template.members.length}）…`,
       });
+      const memberName = `${normalizedName} · ${member.name}`;
       const result = await api.createAvatar({
-        name: `${normalizedName} · ${member.name}`,
+        name: memberName,
         role: member.role,
         description: member.description,
         tags: uniqueTags(template.name, member.tags),
         system_prompt: `你当前服务于「${normalizedName}」团队。\n\n${member.systemPrompt}`,
         created_by: `group_template:${template.id}`,
+        ...collectionPortraitCreateFields(memberName),
       });
       if (!result.ok) {
         throw new Error(result.error || `创建分身「${member.name}」失败。`);

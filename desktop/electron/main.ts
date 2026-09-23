@@ -8483,6 +8483,7 @@ function registerIpc(): void {
     default_provider?: string;
     default_model?: string;
     workspace_dir?: string;
+    portrait_style?: string;
   }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -8686,6 +8687,7 @@ function registerIpc(): void {
     default_provider?: string;
     default_model?: string;
     color?: string;
+    portrait_style?: string;
   }) => {
     const { id, ...body } = payload;
     try {
