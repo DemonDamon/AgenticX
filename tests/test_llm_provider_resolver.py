@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.llms.deepseek_provider import DeepSeekProvider
+from agenticx.llms.mimo_provider import MimoProvider
 from agenticx.llms.litellm_provider import LiteLLMProvider
 from agenticx.llms.minimax_provider import MiniMaxProvider
 from agenticx.llms.provider_resolver import ProviderResolver
@@ -267,3 +268,33 @@ def test_deepseek_provider_strips_deepseek_prefix():
 def test_deepseek_provider_idempotent_openai_prefix():
     provider = DeepSeekProvider.from_config({"model": "openai/deepseek-v4-pro", "api_key": "k"})
     assert provider.model == "openai/deepseek-v4-pro"
+
+
+def test_resolver_uses_mimo_default_base_url(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "mimo", scope="global")
+    ConfigManager.set_value("providers.mimo.api_key", "sk-mimo", scope="global")
+    ConfigManager.set_value("providers.mimo.model", "mimo-v2.6-pro", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, MimoProvider)
+    assert provider.base_url == "https://api.xiaomimimo.com/v1"
+    assert provider.model == "openai/mimo-v2.6-pro"
+
+
+def test_mimo_provider_strips_mimo_prefix():
+    provider = MimoProvider.from_config({"model": "mimo/mimo-v2.6-flash", "api_key": "k"})
+    assert provider.model == "openai/mimo-v2.6-flash"
+    assert provider.base_url == "https://api.xiaomimimo.com/v1"
+
+
+def test_mimo_provider_keeps_custom_base_url():
+    provider = MimoProvider.from_config(
+        {
+            "model": "mimo-v2.6-pro",
+            "api_key": "tp-key",
+            "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        }
+    )
+    assert provider.base_url == "https://token-plan-cn.xiaomimimo.com/v1"
+    assert provider.model == "openai/mimo-v2.6-pro"

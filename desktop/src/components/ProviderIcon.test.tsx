@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ProviderIcon } from "./ProviderIcon";
-import { ZhipuIcon } from "../utils/provider-icons";
+import { ProviderIcon, resolveProviderVisualBrand } from "./ProviderIcon";
+import { MimoIcon, ZhipuIcon } from "../utils/provider-icons";
 
 const chatPaneSrc = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "./ChatPane.tsx"),
@@ -34,5 +34,21 @@ describe("Zhipu glyph clip guard", () => {
     );
     expect(chatPaneSrc).toContain("min-w-0 truncate pl-px text-text-strong");
     expect(chatPaneSrc).toContain("min-w-0 flex-1 truncate pl-px font-semibold text-text-strong");
+  });
+});
+
+describe("MiMo wordmark", () => {
+  it("paints the official wordmark with currentColor on light and dark", () => {
+    const picker = renderToStaticMarkup(
+      <ProviderIcon provider="mimo" model="mimo-v2.6-pro" />,
+    );
+    const settings = renderToStaticMarkup(<MimoIcon size={26} />);
+    for (const html of [picker, settings]) {
+      expect(html).toContain('viewBox="0 0 70 36"');
+      expect(html).toContain('fill="currentColor"');
+      expect(html).not.toContain("#1F2329");
+      expect(html).not.toContain("#ff6900");
+    }
+    expect(resolveProviderVisualBrand("mimo", "mimo-v2.6-pro")).toBe("#1F2329");
   });
 });

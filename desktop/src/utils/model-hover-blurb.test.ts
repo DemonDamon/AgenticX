@@ -65,6 +65,9 @@ describe("describeModelForPicker", () => {
     expect(pro.metaValue).toBe("DeepSeek");
 
     const flash = describeModelForPicker("deepseek", "deepseek-v4-flash", "DeepSeek");
+    const mimo = describeModelForPicker("mimo", "mimo-v2.6-pro", "小米 MiMo");
+    expect(mimo.description).toContain("全模态");
+    expect(mimo.metaValue).toBe("小米 MiMo");
     expect(flash.description).toBe("DeepSeek 旗舰模型，支持 1M 上下文窗口");
     expect(flash.supportsDeepSeekThinking).toBe(true);
     expect(supportsDeepSeekV4Thinking("openai/deepseek-v4-pro-0813")).toBe(true);

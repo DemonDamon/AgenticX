@@ -287,6 +287,7 @@
       "minimax": "MiniMax",
       "kimi": "月之暗面",
       "deepseek": "DeepSeek",
+      "mimo": "小米 MiMo",
       "ollama": "Ollama"
     },
     "ollamaHint": "Ollama 直连（如局域网 11434）；API 地址勿带 /v1。侧栏已有内置「Ollama」时可改那边，此处用于第二实例或自定义名称。",

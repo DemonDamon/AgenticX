@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { MimoIcon } from "../utils/provider-icons";
+
 /**
  * Vendor glyph for model pickers / badges.
  * Custom OpenAI-compatible gateways (彩讯 / MOMA / …) often proxy several
@@ -12,6 +14,7 @@ export type ProviderVisualKey =
   | "anthropic"
   | "kimi"
   | "deepseek"
+  | "mimo"
   | "minimax"
   | "zhipu"
   | "ollama"
@@ -29,6 +32,7 @@ export function resolveProviderVisualKey(provider: string, model?: string): Prov
   if (m.includes("kimi") || m.includes("moonshot")) return "kimi";
   if (m.includes("minimax")) return "minimax";
   if (m.includes("deepseek")) return "deepseek";
+  if (m.includes("mimo")) return "mimo";
   if (/\bglm\b/.test(m) || m.includes("zhipu") || m.startsWith("glm") || m.includes("/glm")) {
     return "zhipu";
   }
@@ -41,6 +45,7 @@ export function resolveProviderVisualKey(provider: string, model?: string): Prov
   if (p.includes("anthropic")) return "anthropic";
   if (p.includes("kimi") || p.includes("moonshot")) return "kimi";
   if (p.includes("deepseek")) return "deepseek";
+  if (p.includes("mimo") || p.includes("xiaomi")) return "mimo";
   if (p.includes("minimax")) return "minimax";
   if (p.includes("zhipu") || p.includes("glm")) return "zhipu";
   if (p.includes("ollama") || p.startsWith("custom_ollama_")) return "ollama";
@@ -62,6 +67,8 @@ export function resolveProviderVisualBrand(provider: string, model?: string): st
       return "#1d6af4";
     case "deepseek":
       return "#4d6bfe";
+    case "mimo":
+      return "#1F2329";
     case "minimax":
       return "#1a1a1a";
     case "zhipu":
@@ -225,6 +232,8 @@ export function ProviderIcon({
       return <IconKimi className={className} />;
     case "deepseek":
       return <IconDeepseek className={className} />;
+    case "mimo":
+      return <MimoIcon className={className} />;
     case "minimax":
       return <IconMiniMax className={className} />;
     case "zhipu":

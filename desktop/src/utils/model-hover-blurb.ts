@@ -262,6 +262,18 @@ const CURATED_BLURBS: CuratedRule[] = [
     description: "DeepSeek 旗舰模型，支持 1M 上下文窗口",
   },
   {
+    test: (m) => m.includes("mimo-v2.6-pro"),
+    description: "小米旗舰全模态，1M 上下文，适合复杂推理与长任务",
+  },
+  {
+    test: (m) => m.includes("mimo-v2.6-flash"),
+    description: "小米快速全模态，适合日常对话与低延迟任务",
+  },
+  {
+    test: (m) => m === "mimo-v2.5" || m.endsWith("/mimo-v2.5"),
+    description: "全模态理解，该型号即将下线",
+  },
+  {
     test: (m) => m.includes("deepseek-r1") || m.includes("deepseek-reasoner"),
     description: "强推理模型，擅长数学、逻辑与分步推导",
   },

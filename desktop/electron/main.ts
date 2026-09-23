@@ -1406,6 +1406,7 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   minimax: "https://api.minimax.chat/v1",
   kimi: "https://api.moonshot.cn/v1",
   deepseek: "https://api.deepseek.com/v1",
+  mimo: "https://api.xiaomimimo.com/v1",
 };
 
 /** Treat UI placeholders as empty so we do not send `Bearer sk-...` to intranet gateways. */
@@ -1608,7 +1609,20 @@ const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
     "deepseek-v4-pro",
     "deepseek-v4-flash",
   ],
+  mimo: [
+    "mimo-v2.6-pro",
+    "mimo-v2.6-flash",
+  ],
 };
+
+/** ASR / TTS SKUs are not chat models. Hide them from the MiMo picker. */
+function dropMimoNonChatModels(provider: string, models: string[]): string[] {
+  if (provider !== "mimo") return models;
+  return models.filter((id) => {
+    const slug = id.toLowerCase().split("/").pop() ?? "";
+    return !(slug.includes("-asr") || slug.includes("-tts"));
+  });
+}
 
 function loadAgxConfig(): AgxConfig {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -11264,7 +11278,7 @@ function registerIpc(): void {
         const body = await resp.text().catch(() => "");
         const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
         if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
-          return { ok: true, models: mergeCatalogExtras(fallback) };
+          return { ok: true, models: dropMimoNonChatModels(payload.provider, mergeCatalogExtras(fallback)) };
         }
         if (catalogExtras.length > 0) {
           // Even if the catalog endpoint fails, expose known extras so users can configure them.
@@ -11292,7 +11306,10 @@ function registerIpc(): void {
       const models = (data.data ?? [])
         .map((m) => String(m.id ?? m.model ?? m.name ?? "").trim())
         .filter(Boolean);
-      return { ok: true, models: mergeCatalogExtras(models).sort() };
+      return {
+        ok: true,
+        models: dropMimoNonChatModels(payload.provider, mergeCatalogExtras(models)).sort(),
+      };
     } catch (err) {
       return { ok: false, models: [], error: String(err) };
     }

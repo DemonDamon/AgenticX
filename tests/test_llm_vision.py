@@ -17,6 +17,14 @@ def test_bailian_qwen37_max_is_not_vision_capable() -> None:
     assert is_vision_capable("bailian", "openai/qwen3.7-max") is False
 
 
+def test_mimo_v26_is_vision_capable_and_v25_pro_is_not() -> None:
+    assert is_vision_capable("mimo", "mimo-v2.6-pro") is True
+    assert is_vision_capable("mimo", "openai/mimo-v2.6-flash") is True
+    assert is_vision_capable("mimo", "mimo-v2.5") is True
+    assert is_vision_capable("mimo", "mimo-v2.5-pro") is False
+    assert is_vision_capable("mimo", "mimo-v2.5-asr") is False
+
+
 def test_bailian_qwen_vl_is_vision_capable() -> None:
     assert is_vision_capable("bailian", "qwen-vl-max") is True
     assert is_vision_capable("bailian", "qwen2.5-vl-72b-instruct") is True

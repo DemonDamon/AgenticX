@@ -3108,6 +3108,7 @@ def create_studio_app() -> FastAPI:
                         "kimi",
                         "minimax",
                         "deepseek",
+                        "mimo",
                         "ollama",
                     ]
                 )

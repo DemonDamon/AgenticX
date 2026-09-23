@@ -287,6 +287,7 @@
       "minimax": "MiniMax",
       "kimi": "Moonshot AI",
       "deepseek": "DeepSeek",
+      "mimo": "Xiaomi MiMo",
       "ollama": "Ollama"
     },
     "ollamaHint": "Direct Ollama (e.g. LAN 11434); do not put /v1 on the API URL. Use the built-in Ollama row for the first instance; this is for a second instance or a custom name.",

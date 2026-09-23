@@ -41,6 +41,7 @@ SUPPORTED_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "abab6.5s-chat",
     },
     "deepseek": {"required": ["api_key"], "default_model": "deepseek-v4-pro"},
+    "mimo": {"required": ["api_key"], "default_model": "mimo-v2.6-pro"},
     "ollama": {"required": ["base_url"], "default_model": "llama3"},
 }
 
@@ -54,6 +55,7 @@ ENV_PROVIDER_MAP = {
     "kimi": ("MOONSHOT_API_KEY", "kimi-k2-0711-preview"),
     "minimax": ("MINIMAX_API_KEY", "abab6.5s-chat"),
     "deepseek": ("DEEPSEEK_API_KEY", "deepseek-v4-pro"),
+    "mimo": ("MIMO_API_KEY", "mimo-v2.6-pro"),
 }
 
 

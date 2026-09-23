@@ -27,6 +27,8 @@ def test_resolve_context_window_known_models():
         ("openai/glm-5.3", 1_000_000),
         ("glm-5.2", 1_000_000),
         ("kimi-k2.8-preview", 1_000_000),
+        ("mimo-v2.6-pro", 1_048_576),
+        ("openai/mimo-v2.6-flash", 1_048_576),
         ("MiniMax-M3", 512_000),
         ("openai/minimax-m3", 512_000),
         ("glm-5.1", 200_000),
