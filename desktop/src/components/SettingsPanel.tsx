@@ -14,6 +14,7 @@ import {
   settingsMarkdownComponents,
   settingsRemarkPlugins,
 } from "./messages/markdown-components";
+import { assistVisibleText } from "./messages/reasoning-parser";
 import {
   Settings2,
   Cpu,
@@ -5742,7 +5743,7 @@ export function SettingsPanel({
         },
         preference: {
           system:
-            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 200 字，直接输出内容，不要加任何前缀。",
+            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 200 字，直接输出内容，不要加任何前缀，不要输出思考过程或 think 标签。",
           user: currentContent.trim()
             ? `请润色以下用户偏好描述，让它更自然、更清晰：\n\n${currentContent}`
             : "请生成一段示例用户偏好描述，内容包含：回复风格、格式偏好、沟通习惯等，字数在 100 字以内。",
@@ -5773,7 +5774,7 @@ export function SettingsPanel({
           setMsg(t("profile.aiAssistFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
           return;
         }
-        const result = (res.content ?? "").trim();
+        const result = assistVisibleText(res.content ?? "");
         if (!result) {
           setMsg(t("profile.aiEmpty"));
           return;
@@ -7371,8 +7372,8 @@ export function SettingsPanel({
                       <div>
                         <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.preference")}</div>
                         <textarea
-                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                          rows={3}
+                          className="max-h-64 min-h-[4.75rem] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          rows={Math.min(12, Math.max(4, userPreferenceDraft.split("\n").length + 1))}
                           value={userPreferenceDraft}
                           onChange={(e) => {
                             setUserPreferenceDraft(e.target.value);

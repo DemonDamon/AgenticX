@@ -51,3 +51,11 @@ export function parseReasoningContent(content: string): ReasoningParseResult {
     hasReasoningTag,
   };
 }
+
+/** Drop model thinking wrappers so assist fields only keep the visible answer. */
+export function assistVisibleText(content: string): string {
+  const raw = String(content ?? "")
+    .replace(/<redacted_thinking>[\s\S]*?<\/redacted_thinking>/gi, "")
+    .replace(/<\/?redacted_thinking>/gi, "");
+  return parseReasoningContent(raw).response.trim();
+}
