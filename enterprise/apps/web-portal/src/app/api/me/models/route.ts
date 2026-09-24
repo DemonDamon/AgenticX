@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionFromCookies } from "../../../../lib/session";
-import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
+import { listAvailableModelsForUser, readDeptDefaultModelForUser } from "../../../../lib/admin-providers-reader";
 
 export async function GET() {
   const session = await getSessionFromCookies();
@@ -10,10 +10,14 @@ export async function GET() {
       { status: 401 }
     );
   }
-  const models = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? undefined);
+  const deptId = session.deptId ?? undefined;
+  const [models, deptDefaultModelId] = await Promise.all([
+    listAvailableModelsForUser(session.userId, session.email, deptId),
+    readDeptDefaultModelForUser(session.userId, session.email, deptId),
+  ]);
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { models },
+    data: { models, deptDefaultModelId },
   });
 }

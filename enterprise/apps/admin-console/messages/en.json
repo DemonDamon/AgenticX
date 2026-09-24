@@ -905,7 +905,8 @@
           "save": "Save",
           "cancel": "Cancel",
           "collapse": "Collapse",
-          "clear": "Clear department models"
+          "clear": "Clear department models",
+          "defaultModel": "Default model"
         },
         "settings": {
           "permissionsTitle": "Permissions",

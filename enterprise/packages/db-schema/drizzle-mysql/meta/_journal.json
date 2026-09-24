@@ -169,6 +169,13 @@
       "when": 1786800000001,
       "tag": "0023_enterprise_collab_rooms",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1786900000001,
+      "tag": "0024_enterprise_scope_default_models",
+      "breakpoints": true
     }
   ]
 }

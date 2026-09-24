@@ -4,9 +4,11 @@
  */
 
 import { enterpriseRuntimeModelProviders as pgMpTable } from "@agenticx/db-schema";
+import { enterpriseRuntimeScopeDefaultModels as pgDefaultTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeUserVisibleModels as pgUvmTable } from "@agenticx/db-schema";
 import {
   enterpriseRuntimeModelProviders as mysqlMpTable,
+  enterpriseRuntimeScopeDefaultModels as mysqlDefaultTable,
   enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
 } from "@agenticx/db-schema/mysql";
 import {
@@ -16,7 +18,7 @@ import {
   migrateLegacyUserVisibleModelsIfNeeded,
   resolveDatabaseConfig,
 } from "@agenticx/iam-core";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import {
   collectUserAssignmentKeys,
@@ -24,6 +26,7 @@ import {
   computeEffectiveUserAllowed,
   mergeUserStoredSet,
 } from "./effective-models";
+import { resolveDeptDefaultModel } from "./dept-default-model";
 import { decryptProviderApiKey } from "./provider-api-key-crypto";
 
 export type ProviderRoute = "local" | "private-cloud" | "third-party";
@@ -203,4 +206,39 @@ export async function listAvailableModelsForUser(
     }
   }
   return out;
+}
+
+/** 叶到根第一个仍在该用户可见集合内的部门默认模型。 */
+export async function readDeptDefaultModelForUser(
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<string | null> {
+  const models = await listAvailableModelsForUser(userId, email, deptId);
+  const effectiveModelIds = models.map((m) => m.id);
+  if (!deptId) return resolveDeptDefaultModel({ effectiveModelIds, defaultsLeafToRoot: [] });
+  const tid = requiredTenant();
+  const chain = await listDepartmentAncestorIds(tid, deptId);
+  const keys = chain.map((id) => `dept:${id}`);
+  if (keys.length === 0) return null;
+  const config = resolveDatabaseConfig();
+  let rows: Array<{ assignmentKey: string; modelId: string }>;
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    rows = await db
+      .select({ assignmentKey: mysqlDefaultTable.assignmentKey, modelId: mysqlDefaultTable.modelId })
+      .from(mysqlDefaultTable)
+      .where(and(eq(mysqlDefaultTable.tenantId, tid), inArray(mysqlDefaultTable.assignmentKey, keys)));
+  } else {
+    const db = getIamDb();
+    rows = await db
+      .select({ assignmentKey: pgDefaultTable.assignmentKey, modelId: pgDefaultTable.modelId })
+      .from(pgDefaultTable)
+      .where(and(eq(pgDefaultTable.tenantId, tid), inArray(pgDefaultTable.assignmentKey, keys)));
+  }
+  const byKey = new Map(rows.map((row) => [row.assignmentKey, row.modelId]));
+  return resolveDeptDefaultModel({
+    effectiveModelIds,
+    defaultsLeafToRoot: keys.map((key) => byKey.get(key) ?? null),
+  });
 }

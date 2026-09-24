@@ -905,7 +905,8 @@
           "save": "保存",
           "cancel": "取消",
           "collapse": "收起",
-          "clear": "清空本部门模型"
+          "clear": "清空本部门模型",
+          "defaultModel": "默认模型"
         },
         "settings": {
           "permissionsTitle": "权限配置",

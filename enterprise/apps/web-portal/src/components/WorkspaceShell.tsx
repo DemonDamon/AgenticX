@@ -86,6 +86,27 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const activeModel = useChatStore((s) => s.activeModel);
+  const [sessionModelIds, setSessionModelIds] = React.useState<string[]>([]);
+  const [deptDefaultModelId, setDeptDefaultModelId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/me/models", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { models?: Array<{ id: string }>; deptDefaultModelId?: string | null } } | null) => {
+        if (cancelled || !json?.data) return;
+        setSessionModelIds((json.data.models ?? []).map((m) => m.id));
+        setDeptDefaultModelId(json.data.deptDefaultModelId ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const pickedSessionModel = React.useCallback(() => {
+    if (activeModel && sessionModelIds.includes(activeModel)) return activeModel;
+    if (deptDefaultModelId && sessionModelIds.includes(deptDefaultModelId)) return deptDefaultModelId;
+    return sessionModelIds[0] || activeModel || "deepseek-chat";
+  }, [activeModel, sessionModelIds, deptDefaultModelId]);
   const messages = useChatStore((s) => s.messages);
   const historyLoading = useChatStore((s) => s.historyLoading);
   const createSession = useChatStore((s) => s.createSession);
@@ -190,18 +211,18 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   }, []);
 
   const onNewChat = React.useCallback(() => {
-    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    void createSession({ defaultModel: pickedSessionModel(), title: t("newChat") });
     setDeepResearchMode(false);
     setPanelMode("chat");
     setMobileOpen(false);
-  }, [createSession, activeModel, t]);
+  }, [createSession, pickedSessionModel, t]);
 
   const onDeepResearchNav = React.useCallback(() => {
-    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    void createSession({ defaultModel: pickedSessionModel(), title: t("newChat") });
     setDeepResearchMode(true);
     setPanelMode("chat");
     setMobileOpen(false);
-  }, [createSession, activeModel, t]);
+  }, [createSession, pickedSessionModel, t]);
 
   const onSelectSession = React.useCallback((id: string) => {
     void switchSession(id);

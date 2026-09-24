@@ -21,3 +21,9 @@ export const setDeptModels: typeof postgresql.setDeptModels = (...args: Paramete
 
 export const deleteDeptAssignment: typeof postgresql.deleteDeptAssignment = (...args: Parameters<typeof postgresql.deleteDeptAssignment>) =>
   implementation().deleteDeptAssignment(...args);
+
+export const applyDeptModelSave: typeof postgresql.applyDeptModelSave = (...args: Parameters<typeof postgresql.applyDeptModelSave>) =>
+  implementation().applyDeptModelSave(...args);
+
+export const getDeptDefaultModel: typeof postgresql.getDeptDefaultModel = (...args: Parameters<typeof postgresql.getDeptDefaultModel>) =>
+  implementation().getDeptDefaultModel(...args);
