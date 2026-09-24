@@ -81,6 +81,35 @@ def list_pending() -> list[dict[str, Any]]:
     return rows
 
 
+def _publish_learning_skill_to_registry(skill_dir: Path, name: str) -> dict[str, Any]:
+    """Publish an approved learning skill into the local registry.
+
+    The entry carries a full multi-file manifest (SEP-2640 governance) with
+    ``origin="learning"``, so distilled skills are immediately distributable
+    via the Skills-over-MCP server. Same-version conflicts auto-bump the
+    patch segment (a published version is immutable). Any registry failure is
+    logged and returned — it must never block the filesystem merge.
+    """
+    from agenticx.skills.registry import (
+        RegistryStorage,
+        build_registry_entry,
+        publish_with_auto_bump,
+    )
+
+    try:
+        entry = build_registry_entry(skill_dir, origin="learning")
+        stored = publish_with_auto_bump(RegistryStorage(), entry)
+        logger.info(
+            "Published learning skill '%s' v%s to the local registry",
+            name,
+            stored.version,
+        )
+        return {"ok": True, "version": stored.version}
+    except Exception as exc:
+        logger.warning("Registry publish failed for learning skill '%s': %s", name, exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def approve(proposal_id: str, *, approver: str = "user") -> dict[str, Any]:
     """Merge a pending proposal into the main skills directory."""
     from agenticx.learning.config import get_learning_config
@@ -152,8 +181,15 @@ def approve(proposal_id: str, *, approver: str = "user") -> dict[str, Any]:
             author=approver,
             summary=f"merged proposal {proposal_id} ({action})",
         )
+        try:
+            registry_info = _publish_learning_skill_to_registry(skill_dir, name)
+        except Exception as exc:  # defensive: the merge must never be blocked
+            registry_info = {"ok": False, "error": str(exc)}
         shutil.rmtree(pdir, ignore_errors=True)
-        return {"ok": True, "skill_name": name, "path": str(target)}
+        result = {"ok": True, "skill_name": name, "path": str(target)}
+        if registry_info is not None:
+            result["registry"] = registry_info
+        return result
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
 

@@ -69,12 +69,26 @@ class BundleParseError(ValueError):
 
 @dataclass
 class BundleSkillRef:
-    """Reference to a skill within a bundle."""
+    """Reference to a skill within a bundle.
 
-    path: str
+    Either a local ``path`` (relative to the bundle directory, pointing at a
+    SKILL.md) or a remote ``mcp`` reference (``{"server": ..., "uri": ...}``
+    pointing at a ``skill://`` URI served by an MCP skills server). The two
+    are mutually exclusive; ``mcp`` skills are pulled and verified through the
+    SP1 host chain at install time (origin="mcp").
+    """
+
+    path: str = ""
     description: str = ""
+    mcp: Optional[Dict[str, str]] = None
+
+    @property
+    def is_remote(self) -> bool:
+        return self.mcp is not None
 
     def resolved_path(self, bundle_dir: Path) -> Path:
+        if not self.path:
+            raise BundleParseError("skill reference has no local 'path'")
         return bundle_dir / self.path
 
 
@@ -154,7 +168,14 @@ class BundleManifest:
             "format_version": self.format_version,
             "source_dir": str(self.source_dir),
             "components": {
-                "skills": [{"path": s.path, "description": s.description} for s in self.skills],
+                "skills": [
+                    (
+                        {"path": s.path, "description": s.description, "mcp": s.mcp}
+                        if s.mcp
+                        else {"path": s.path, "description": s.description}
+                    )
+                    for s in self.skills
+                ],
                 "mcp_servers": [
                     {"name": m.name, "config_path": m.config_path, "description": m.description}
                     for m in self.mcp_servers
@@ -216,6 +237,32 @@ def _parse_skills(raw: Any, bundle_dir: Path) -> List[BundleSkillRef]:
             logger.warning("skills[%d] is not a dict; skipping", idx)
             continue
         raw_path = _safe_str(item.get("path"))
+        mcp_raw = item.get("mcp")
+        if mcp_raw is not None:
+            # Remote reference: exactly one of path / mcp.
+            if raw_path:
+                raise BundleParseError(
+                    f"skills[{idx}]: 'path' and 'mcp' are mutually exclusive"
+                )
+            if not isinstance(mcp_raw, dict):
+                raise BundleParseError(f"skills[{idx}]: 'mcp' must be a mapping")
+            server = _safe_str(mcp_raw.get("server"))
+            uri = _safe_str(mcp_raw.get("uri"))
+            if not server or not uri:
+                raise BundleParseError(
+                    f"skills[{idx}].mcp requires both 'server' and 'uri'"
+                )
+            refs.append(
+                BundleSkillRef(
+                    description=_safe_str(item.get("description")),
+                    mcp={"server": server, "uri": uri},
+                )
+            )
+            continue
+        if not raw_path:
+            raise BundleParseError(
+                f"skills[{idx}]: either 'path' or 'mcp' is required"
+            )
         try:
             path = _validate_relative_path(raw_path, bundle_dir, f"skills[{idx}].path")
         except BundleParseError as exc:

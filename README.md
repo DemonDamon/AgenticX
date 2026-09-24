@@ -71,6 +71,7 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 ### Skills & Self-Evolution
 - **Skill System**: Registration and full lifecycle management — dangerous-pattern security scan gate, 5-strategy fuzzy patch, `.changelog` versioning, source tagging, and per-skill enable/disable
 - **Skill Self-Evolution**: Captures tool-call observations at runtime and auto-distills new skills via background LLM session review; quality gate, usage stats, and deprecation form the lifecycle loop
+- **Skills over MCP (SEP-2640)**: Host side consumes skills from any skills-capable MCP server (capability probing, reading-point digest verification, digest-bound approvals, unified local/remote index); server side exposes the local skill registry — including self-evolved artifacts — as a `skills/list` endpoint over stdio or streamable HTTP
 - **Extension Ecosystem (AGX Bundle)**: Bundle definitions (skills / mcp_servers / avatars / memory_templates), local install/uninstall, multi-source registry aggregated search
 
 ### Long-Horizon Autonomous Coding
