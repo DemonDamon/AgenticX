@@ -48,6 +48,8 @@ export type PortalCapability = {
   version?: string;
   bundleUri?: string;
   bundleDigest?: string;
+  description?: string;
+  scanVerdict?: "safe" | "caution" | "dangerous" | null;
   /** MCP 专有：网关反代入口，由 desktop-capability-endpoints 在下发前补上。 */
   endpointUrl?: string;
   /** 这条能力在哪些客户端生效。 */
@@ -85,10 +87,13 @@ type SkillRow = {
   id: string;
   slug: string;
   displayName: string | null;
+  description: string | null;
   version: string;
   bundleUri: string | null;
   bundleDigest: string | null;
   requiredCapabilities: unknown;
+  scanVerdict: "safe" | "caution" | "dangerous" | null;
+  status: string;
 };
 type McpRow = { id: string; name: string; displayName: string | null };
 
@@ -113,6 +118,8 @@ function toSkillCapability(row: SkillRow): PortalCapability {
     version: row.version,
     bundleUri: row.bundleUri ?? "",
     bundleDigest: row.bundleDigest ?? "",
+    description: row.description ?? "",
+    scanVerdict: row.scanVerdict ?? null,
   };
 }
 

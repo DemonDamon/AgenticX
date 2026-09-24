@@ -51,6 +51,12 @@
     "quotaWeek": "This week",
     "quotaMonth": "This month",
     "quotaDept": "Department",
+    "skills": {
+      "caution": "Needs review",
+      "dangerous": "Blocked",
+      "unscanned": "Not scanned",
+      "inactive": "Disabled"
+    },
     "quotaUnlimited": "Unlimited",
     "quotaSharedPool": " (shared pool)",
     "quotaRemaining": "{amount} remaining · {reset}",
