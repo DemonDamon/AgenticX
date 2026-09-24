@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Loader2, Shuffle, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,7 +9,6 @@ import {
 import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
 import {
   BRAND_CUBE_COLORWAY_ID,
-  CUBE_COLORWAYS,
   buildCubePortraitDataUrl,
   buildCubePortraitDataUrlFromWay,
   listCustomCubeColorways,
@@ -17,6 +16,14 @@ import {
 } from "../../utils/cube-colorway";
 import { CUBE_GACHA_SYSTEM_PROMPT, commitGachaCubeColorway } from "../../utils/cube-gacha";
 import { useAppStore } from "../../store";
+import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl";
+import {
+  CUBE_PORTRAIT_STYLE,
+  buildCollectionPortraitDataUri,
+  promptToStyleOptions,
+  type CollectionStyleId,
+} from "../../utils/expert-portrait";
+import { listNearPickedLooks, rememberNearPickedLook } from "../../utils/near-picked-looks";
 
 type Props = {
   selectedId: string;
@@ -44,10 +51,8 @@ function CubeSwatch({
       onClick={onClick}
       aria-label={label}
       aria-pressed={selected}
-      className={`flex h-11 w-11 items-center justify-center rounded-xl border transition-transform active:scale-95 ${
-        selected
-          ? "border-text-primary bg-surface-panel shadow-sm"
-          : "border-transparent hover:bg-surface-hover"
+      className={`flex h-11 w-11 items-center justify-center rounded-xl border border-transparent transition-transform active:scale-95 ${
+        selected ? "" : "hover:bg-surface-hover"
       }`}
     >
       <img
@@ -77,31 +82,62 @@ export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChang
   const [skinsTick, setSkinsTick] = useState(0);
   const currentId = selectedId || BRAND_CUBE_COLORWAY_ID;
   const defaultPrompt = t("profile.costumeGachaPrompt");
-  const swatches = useMemo(
-    () =>
-      CUBE_COLORWAYS.filter((way) => way.kind !== "shade").map((way) => ({
-        id: way.id,
-        src: buildCubePortraitDataUrl(way.id),
-      })),
-    [],
-  );
-  const customSwatches = useMemo(
-    () =>
-      listCustomCubeColorways().map((way) => ({
-        id: way.id,
-        src: buildCubePortraitDataUrlFromWay(way),
-      })),
-    [skinsTick],
-  );
+  const displayedNearUrl = useDisplayedMetaAvatarUrl();
+  const collectionStyle = useAppStore((s) => s.collectionPortraitStyle);
+  const nearSeed = useAppStore((s) => s.nearSeedsByStyle[collectionStyle] ?? "");
+  const setNearStyleSeed = useAppStore((s) => s.setNearStyleSeed);
+  const faceFollowsStyle = collectionStyle !== CUBE_PORTRAIT_STYLE;
+  const currentLookKey = faceFollowsStyle ? nearSeed || "default" : currentId;
 
-  const previewSrc =
-    currentId === BRAND_CUBE_COLORWAY_ID
+  useEffect(() => {
+    const existing = listNearPickedLooks(collectionStyle).find((item) => item.key === currentLookKey);
+    if (!existing) rememberNearPickedLook(collectionStyle, currentLookKey);
+  }, [collectionStyle, currentLookKey]);
+
+  const picked = useMemo(() => {
+    const rows = listNearPickedLooks(collectionStyle);
+    if (rows.some((item) => item.key === currentLookKey)) return rows;
+    return [{ style: collectionStyle, key: currentLookKey }, ...rows];
+  }, [collectionStyle, currentLookKey, skinsTick]);
+
+  const previewLook = picked.find((item) => item.key === currentLookKey) ?? picked[0];
+  const previewLookSrc = previewLook
+    ? faceFollowsStyle
+      ? buildCollectionPortraitDataUri(
+          collectionStyle,
+          previewLook.key === "default" ? "Near:meta" : previewLook.key,
+          previewLook.options ?? {},
+        )
+      : previewLook.key === BRAND_CUBE_COLORWAY_ID
+        ? DEFAULT_META_AVATAR_URL
+        : buildCubePortraitDataUrl(previewLook.key) || DEFAULT_META_AVATAR_URL
+    : displayedNearUrl;
+  const previewSrc = faceFollowsStyle
+    ? previewLookSrc
+    : currentId === BRAND_CUBE_COLORWAY_ID
       ? DEFAULT_META_AVATAR_URL
       : buildCubePortraitDataUrl(currentId) || DEFAULT_META_AVATAR_URL;
-  const previewBrand = currentId === BRAND_CUBE_COLORWAY_ID || !buildCubePortraitDataUrl(currentId);
+  const previewBrand = !faceFollowsStyle && (currentId === BRAND_CUBE_COLORWAY_ID || !buildCubePortraitDataUrl(currentId));
+
+  const drawStyleFace = (hint: string) => {
+    const options = promptToStyleOptions(collectionStyle, hint);
+    if (Object.keys(options).length === 0) {
+      setDrawMessage(t("profile.costumeGachaInvalid"));
+      return;
+    }
+    const seed = `${collectionStyle}-${Date.now().toString(36)}`;
+    rememberNearPickedLook(collectionStyle, seed, options);
+    setNearStyleSeed(collectionStyle, seed);
+    setSkinsTick((value) => value + 1);
+    setDrawMessage(t("profile.costumeGachaDone"));
+  };
 
   const drawSkin = async () => {
     const userPrompt = prompt.trim() || defaultPrompt;
+    if (faceFollowsStyle) {
+      await drawStyleFace(userPrompt);
+      return;
+    }
     const store = useAppStore.getState();
     const settings = store.settings;
     const activeProvider = store.activeProvider || settings.defaultProvider || "";
@@ -127,6 +163,7 @@ export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChang
         return;
       }
       setSkinsTick((value) => value + 1);
+      rememberNearPickedLook(collectionStyle, way.id);
       onSelect(way.id);
       setDrawMessage(t("profile.costumeGachaDone"));
     } catch (err) {
@@ -151,16 +188,18 @@ export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChang
       >
         <div
           className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-hover ${
-            previewBrand ? "overflow-hidden" : "overflow-visible"
+            faceFollowsStyle || previewBrand ? "overflow-hidden" : "overflow-visible"
           }`}
         >
           <img
             src={previewSrc}
             alt=""
             className={`h-8 w-8 ${
-              previewBrand
-                ? `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
-                : NEAR_CUBE_AVATAR_FIT_CLASS
+              faceFollowsStyle
+                ? "rounded-md object-cover"
+                : previewBrand
+                  ? `origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`
+                  : NEAR_CUBE_AVATAR_FIT_CLASS
             }`}
           />
         </div>
@@ -196,7 +235,16 @@ export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChang
             <button
               type="button"
               className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface-panel px-2.5 text-[11px] text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
-              onClick={() => onSelect(pickRandomCubeColorwayId(currentId))}
+              onClick={() => {
+                if (faceFollowsStyle) {
+                  drawStyleFace(prompt.trim() || defaultPrompt);
+                  return;
+                }
+                const nextId = pickRandomCubeColorwayId(currentId);
+                rememberNearPickedLook(collectionStyle, nextId);
+                setSkinsTick((value) => value + 1);
+                onSelect(nextId);
+              }}
             >
               <Shuffle className="h-3 w-3" />
               {t("profile.costumeShuffle")}
@@ -224,31 +272,42 @@ export function UserCubeColorwayPicker({ selectedId, onSelect, open, onOpenChang
             <p className="mb-2 text-right text-[11px] text-text-faint">{drawMessage}</p>
           ) : null}
           <div className="grid grid-cols-6 gap-1.5">
-            <CubeSwatch
-              src={DEFAULT_META_AVATAR_URL}
-              brand
-              selected={currentId === BRAND_CUBE_COLORWAY_ID}
-              label={t("profile.costumeBrand")}
-              onClick={() => onSelect(BRAND_CUBE_COLORWAY_ID)}
-            />
-            {customSwatches.map((item) => (
-              <CubeSwatch
-                key={item.id}
-                src={item.src}
-                selected={currentId === item.id}
-                label={item.id}
-                onClick={() => onSelect(item.id)}
-              />
-            ))}
-            {swatches.map((item) => (
-              <CubeSwatch
-                key={item.id}
-                src={item.src}
-                selected={currentId === item.id}
-                label={item.id}
-                onClick={() => onSelect(item.id)}
-              />
-            ))}
+            {picked.map((item) => {
+              const selected = item.key === currentLookKey;
+              const src = faceFollowsStyle
+                ? buildCollectionPortraitDataUri(
+                    collectionStyle as CollectionStyleId,
+                    item.key === "default" ? "Near:meta" : item.key,
+                    item.options ?? {},
+                  )
+                : item.key === BRAND_CUBE_COLORWAY_ID
+                  ? DEFAULT_META_AVATAR_URL
+                  : buildCubePortraitDataUrl(item.key) ||
+                    buildCubePortraitDataUrlFromWay(
+                      listCustomCubeColorways().find((way) => way.id === item.key) || {
+                        id: item.key,
+                        kind: "dual",
+                        body: "#e7e5e4",
+                        lid: "#44403c",
+                      },
+                    );
+              return (
+                <CubeSwatch
+                  key={`${item.style}:${item.key}`}
+                  src={src}
+                  brand={!faceFollowsStyle && item.key === BRAND_CUBE_COLORWAY_ID}
+                  selected={selected}
+                  label={item.key}
+                  onClick={() => {
+                    if (faceFollowsStyle) {
+                      setNearStyleSeed(collectionStyle, item.key === "default" ? "" : item.key);
+                      return;
+                    }
+                    onSelect(item.key);
+                  }}
+                />
+              );
+            })}
           </div>
         </div>
       ) : null}

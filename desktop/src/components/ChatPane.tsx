@@ -448,6 +448,7 @@ import { EmptyStateCornerLotties } from "./brand/EmptyStateCornerLotties";
 import { NearBoxHero } from "./brand/NearBoxHero";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
 import { findLiveAvatar, preferLiveAvatarUrl } from "../utils/live-avatar-url";
 import { createKbApi } from "./settings/knowledge/api";
@@ -3017,7 +3018,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const subAgents = useAppStore((s) => s.subAgents);
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const metaAvatarUrl = useDisplayedMetaAvatarUrl();
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const userNickname = useAppStore((s) => s.userNickname);

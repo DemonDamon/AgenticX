@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Search, X } from "lucide-react";
 import type { Avatar, GroupChat } from "../store";
-import { useAppStore } from "../store";
+import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { ThemedAvatarImage } from "./ds/ThemedAvatarImage";
@@ -110,7 +110,7 @@ export function ForwardPicker({
 }: ForwardPickerProps) {
   const { t } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const metaAvatarUrl = useDisplayedMetaAvatarUrl();
   const [sessionSearch, setSessionSearch] = useState("");
   const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(null);
   const [sessionRows, setSessionRows] = useState<ForwardRow[]>([]);

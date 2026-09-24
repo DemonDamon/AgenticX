@@ -12,9 +12,12 @@ import { AvatarCreateDialog } from "../AvatarCreateDialog";
 import { AvatarSettingsPanel } from "../AvatarSettingsPanel";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
-import { collectionPortraitCreateFields } from "../../utils/expert-portrait";
+import { collectionPortraitCreateFields, CUBE_PORTRAIT_STYLE } from "../../utils/expert-portrait";
 import { ExpertPortraitStyleControl } from "./ExpertPortraitStyleControl";
 import { mapAvatarsFromApi } from "../../utils/splash-preload-core";
+import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl";
+import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
+import { UserCubeColorwayPicker } from "../settings/UserCubeColorwayPicker";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -51,6 +54,12 @@ export function AvatarGalleryView() {
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
 
   const { openMetaOrAvatarPane, newMetaTask } = usePaneNavigation();
+  const nearAvatarUrl = useDisplayedMetaAvatarUrl();
+  const collectionPortraitStyle = useAppStore((s) => s.collectionPortraitStyle);
+  const userCubeColorwayId = useAppStore((s) => s.userCubeColorwayId);
+  const setUserCubeColorwayId = useAppStore((s) => s.setUserCubeColorwayId);
+  const openSettings = useAppStore((s) => s.openSettings);
+  const [nearSettingsOpen, setNearSettingsOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsAvatarId, setSettingsAvatarId] = useState<string | null>(null);
@@ -215,7 +224,65 @@ export function AvatarGalleryView() {
           <Loader2 className="h-4 w-4 animate-spin" />
           {t("gallery.loading")}
         </div>
-      ) : sortedAvatars.length === 0 ? (
+      ) : (
+        <>
+          <section className="mb-6">
+            <h3 className="text-sm font-medium text-text-strong">{t("gallery.builtinTitle")}</h3>
+            <p className="mt-1 text-xs text-text-muted">{t("gallery.builtinHint")}</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div
+                role="button"
+                tabIndex={0}
+                className={`${GALLERY_CARD_BASE} ${nearSettingsOpen ? GALLERY_CARD_SELECTED : GALLERY_CARD_IDLE}`}
+                onClick={() => setNearSettingsOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setNearSettingsOpen(true);
+                  }
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  <ThemedAvatarImage
+                    src={nearAvatarUrl}
+                    alt={META_AGENT_DISPLAY_NAME}
+                    className="h-14 w-14 shrink-0 rounded-2xl object-cover"
+                  />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <div className="truncate text-[15px] font-semibold text-text-strong">
+                      {META_AGENT_DISPLAY_NAME}
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-text-muted">{t("gallery.nearRole")}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                  <button
+                    type="button"
+                    className="flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 text-xs font-medium text-text-strong transition hover:border-[rgb(var(--theme-color-rgb,59,130,246))] hover:text-[rgb(var(--theme-color-rgb,59,130,246))]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openMetaOrAvatarPane(null, META_AGENT_DISPLAY_NAME);
+                    }}
+                  >
+                    {t("gallery.startChat")}
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-border px-3 py-2 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNearSettingsOpen(true);
+                    }}
+                  >
+                    {t("gallery.nearSettings")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <h3 className="mb-3 text-sm font-medium text-text-strong">{t("gallery.myExperts")}</h3>
+          {sortedAvatars.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-card text-text-faint">
             <Sparkles className="h-5 w-5" />
@@ -335,6 +402,8 @@ export function AvatarGalleryView() {
             <span className="text-[13px] font-medium">{t("gallery.createExpert")}</span>
           </button>
         </div>
+          )}
+        </>
       )}
 
       {cardMenu && (
@@ -383,6 +452,61 @@ export function AvatarGalleryView() {
           </button>
         </div>
       )}
+
+      {nearSettingsOpen ? (
+        <div
+          className="fixed inset-0 z-modal flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setNearSettingsOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-label={META_AGENT_DISPLAY_NAME}
+            className="max-h-[80vh] w-[480px] max-w-[92vw] overflow-y-auto rounded-xl border border-border bg-surface-popover p-4 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center gap-3">
+              <ThemedAvatarImage
+                src={nearAvatarUrl}
+                alt={META_AGENT_DISPLAY_NAME}
+                className="h-12 w-12 rounded-2xl object-cover"
+              />
+              <div>
+                <div className="text-sm font-semibold text-text-strong">{META_AGENT_DISPLAY_NAME}</div>
+                <p className="text-xs text-text-muted">{t("gallery.nearRole")}</p>
+              </div>
+            </div>
+            <p className="mb-3 text-xs text-text-muted">
+              {collectionPortraitStyle === CUBE_PORTRAIT_STYLE
+                ? t("gallery.nearCubeHint")
+                : t("gallery.nearStyleHint")}
+            </p>
+            <UserCubeColorwayPicker
+              selectedId={userCubeColorwayId}
+              onSelect={setUserCubeColorwayId}
+              open
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="h-8 rounded-md px-3 text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary"
+                onClick={() => setNearSettingsOpen(false)}
+              >
+                {tCommon("cancel")}
+              </button>
+              <button
+                type="button"
+                className="h-8 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-xs font-medium text-[var(--ui-btn-primary-text)]"
+                onClick={() => {
+                  setNearSettingsOpen(false);
+                  openSettings("account");
+                }}
+              >
+                {t("gallery.nearIdentity")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AvatarCreateDialog
         open={createOpen}

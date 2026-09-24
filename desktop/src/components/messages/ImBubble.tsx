@@ -7,6 +7,7 @@ import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
+import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl";
 import { isRegistryAvatarId, preferCostumeOverBrandMark, preferLiveAvatarUrl } from "../../utils/live-avatar-url";
 import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 import type { SearchReference } from "../../types/search-references";
@@ -265,7 +266,7 @@ export function ChatImAvatar({
   color?: string;
   size?: "sm" | "md";
 }) {
-  const metaCostumeUrl = useAppStore((s) => s.metaAvatarUrl);
+  const metaCostumeUrl = useDisplayedMetaAvatarUrl();
   const liveExpert = useAppStore((s) => {
     const id = String(avatarId ?? "").trim();
     if (!isRegistryAvatarId(id)) return undefined;

@@ -67,6 +67,7 @@ import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
+import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
 import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -4958,8 +4959,8 @@ export function SettingsPanel({
   const setUserPreference = useAppStore((s) => s.setUserPreference);
   const themeColor = useAppStore((s) => s.themeColor);
   const setThemeColor = useAppStore((s) => s.setThemeColor);
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
-  const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
+  const displayedMetaAvatarUrl = useDisplayedMetaAvatarUrl();
+  const effectiveMetaAvatarUrl = displayedMetaAvatarUrl;
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
   const settingsOpenToFocus = useAppStore((s) => s.settings.openToFocus);
   const settingsFocusSeq = useAppStore((s) => s.settings.focusSeq ?? 0);

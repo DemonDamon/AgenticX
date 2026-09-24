@@ -219,7 +219,7 @@
     "deleteConfirm": "Delete expert “{{name}}”? This cannot be undone.",
     "createDraft": "Help me create a digital expert.\n\nMy requirements:\n{{description}}\n\nDesign this expert from the requirements. If information is missing, only ask the key questions that would clearly change the result; if there is already enough, do not ask again.\n\nBefore creating, organize and show this plan:\n- Name\n- Role\n- Bio\n- Specialty tags\n- Working style and tone\n- Necessary boundaries\n\nThen use a confirmation card. Create only after I confirm; if I ask for changes, update the plan and confirm again.",
     "portraitStyle": "Portrait style",
-    "portraitStyleHint": "Applies to every expert. Photos you uploaded stay.",
+    "portraitStyleHint": "Applies to built-in agents and every expert on this page. Photos you uploaded stay.",
     "portraitApplying": "Updating portraits…",
     "portraitApplyFailed": "Couldn’t update portraits: {{error}}",
     "styleCube": "Cube",
@@ -250,7 +250,15 @@
     "styleVoxelBot": "Voxel bot",
     "styleLandscape": "Landscape",
     "stylePlanets": "Planets",
-    "portraitCredit": "Credit: Adventure Lisa Wischofsky; Doodle vijay verma; Emoji Davis Uche; Sketch Micah Lanier (CC BY 4.0). Cartoon and Mech by Pablo Stanley, free for commercial use."
+    "portraitCredit": "Credit: Adventure Lisa Wischofsky; Doodle vijay verma; Emoji Davis Uche; Sketch Micah Lanier (CC BY 4.0). Cartoon and Mech by Pablo Stanley, free for commercial use.",
+    "builtinTitle": "Built-in",
+    "builtinHint": "Top-level agents. Their portrait follows the style above, together with your experts.",
+    "myExperts": "My experts",
+    "nearRole": "Meta agent",
+    "nearSettings": "Settings",
+    "nearCubeHint": "Cube style is on, so you can change Near's colorway.",
+    "nearStyleHint": "Near is using the same portrait style as the experts on this page. Switch back to cubes to edit the colorway.",
+    "nearIdentity": "Identity and persona"
   },
   "sessionQueries": {
     "title": "Questions in this chat",

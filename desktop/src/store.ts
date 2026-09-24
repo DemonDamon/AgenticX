@@ -63,6 +63,12 @@ import {
   isPersistedUserAvatarUrl,
   resolveMetaAvatarFromColorway,
 } from "./utils/identity-avatar";
+import {
+  CUBE_PORTRAIT_STYLE,
+  loadCollectionPortraitStyle,
+  writeCollectionPortraitStyle,
+  type CollectionStyleId,
+} from "./utils/expert-portrait";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -628,8 +634,12 @@ type AppState = {
   userNickname: string;
   /** Custom avatar for the human user (group chats). Independent of Near's cube costume. */
   userAvatarUrl: string;
-  /** Near cube colorway. Drives `metaAvatarUrl`. `brand` is the official orange mark. */
+  /** Near cube colorway. Drives the cube face when the collection style is cubes. */
   userCubeColorwayId: string;
+  /** Shared portrait style for built-in agents and generated experts. */
+  collectionPortraitStyle: CollectionStyleId;
+  /** Extra Near seeds for non-cube styles. Empty uses the stable default face. */
+  nearSeedsByStyle: Record<string, string>;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
   /** 附件路由策略。无企业下发时保持关闭；真正 containment 在 Studio 侧。 */
@@ -738,6 +748,8 @@ type AppState = {
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
   setUserCubeColorwayId: (colorwayId: string) => void;
+  setCollectionPortraitStyle: (style: CollectionStyleId) => void;
+  setNearStyleSeed: (style: CollectionStyleId, seed: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
   setRunMode: (v: RunMode) => void;
@@ -1075,7 +1087,22 @@ const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
+const NEAR_STYLE_SEEDS_KEY = "agx-near-style-seeds";
 const USER_CUBE_COLORWAY_KEY = "agx-user-cube-colorway";
+
+function loadNearSeedsByStyle(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(NEAR_STYLE_SEEDS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
 const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
 const SESSION_TOKEN_CACHE_KEY = "agx-session-token-cache-v1";
 
@@ -1273,6 +1300,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userCubeColorwayId: loadUserCubeColorwayId(),
+  collectionPortraitStyle: loadCollectionPortraitStyle(),
+  nearSeedsByStyle: loadNearSeedsByStyle(),
   userPreference: loadUserPreference(),
   attachmentRouting: ATTACHMENT_ROUTING_OFF,
   attachmentRoutingLock: null,
@@ -1624,6 +1653,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { userCubeColorwayId: next, metaAvatarUrl: avatarUrl };
+    }),
+  setCollectionPortraitStyle: (style) =>
+    set(() => {
+      const next = style || CUBE_PORTRAIT_STYLE;
+      writeCollectionPortraitStyle(next);
+      return { collectionPortraitStyle: next };
+    }),
+  setNearStyleSeed: (style, seed) =>
+    set((state) => {
+      const next = { ...state.nearSeedsByStyle, [style]: seed };
+      try {
+        window.localStorage.setItem(NEAR_STYLE_SEEDS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return { nearSeedsByStyle: next };
     }),
   setUserPreference: (pref) =>
     set(() => {

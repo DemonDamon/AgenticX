@@ -3,12 +3,12 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { buildCubePortraitDataUrl } from "../../utils/cube-colorway";
+import { useAppStore } from "../../store";
 import { applyCollectionStyleToExperts } from "../../utils/apply-expert-collection-style";
 import {
   CUBE_PORTRAIT_STYLE,
   PORTRAIT_GROUPS,
   buildCollectionPortraitDataUri,
-  loadCollectionPortraitStyle,
   type CollectionStyleId,
 } from "../../utils/expert-portrait";
 
@@ -63,7 +63,8 @@ export function ExpertPortraitStyleControl({
   const { t } = useTranslation("sidebar");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<CollectionStyleId>(() => loadCollectionPortraitStyle());
+  const style = useAppStore((s) => s.collectionPortraitStyle);
+  const setCollectionPortraitStyle = useAppStore((s) => s.setCollectionPortraitStyle);
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
@@ -115,7 +116,7 @@ export function ExpertPortraitStyleControl({
         updateAvatar: (payload) => window.agenticxDesktop.updateAvatar(payload),
         onUpdated,
       });
-      if (result.updated > 0 || !result.error) setStyle(next);
+      if (result.updated > 0 || !result.error) setCollectionPortraitStyle(next);
       await onApplied();
       if (result.error) {
         setError(result.error);
@@ -196,7 +197,7 @@ export function ExpertPortraitStyleControl({
               ref={panelRef}
               role="dialog"
               aria-label={t("gallery.portraitStyle")}
-              className="fixed z-modal w-[456px] max-w-[calc(100vw-24px)] rounded-xl border border-border bg-surface-panel p-3 shadow-2xl"
+              className="fixed z-modal w-[456px] max-w-[calc(100vw-24px)] rounded-xl border border-border bg-surface-popover p-3 shadow-2xl"
               style={{ top: box.top, left: box.left }}
             >
               <p className="mb-3 text-[12px] leading-snug text-text-muted">

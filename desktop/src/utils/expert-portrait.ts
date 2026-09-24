@@ -3,7 +3,7 @@
  * Cube stays the default and is generated on the backend.
  * Author: Damon Li
  */
-import { Avatar, Style, type StyleDefinition } from "@dicebear/core";
+import { Avatar, OptionsDescriptor, Style, type StyleDefinition } from "@dicebear/core";
 import adventurerJson from "@dicebear/styles/adventurer.json";
 import adventurerNeutralJson from "@dicebear/styles/adventurer-neutral.json";
 import avataaarsJson from "@dicebear/styles/avataaars.json";
@@ -169,14 +169,128 @@ export function isCustomExpertPortrait(opts: {
   return /^(data:image\/(png|jpeg|jpg|webp|gif)|https?:)/i.test(url);
 }
 
-export function buildCollectionPortraitDataUri(style: CollectionStyleId, seed: string): string {
+export function describeStyleOptions(style: CollectionStyleId): string {
+  if (style === CUBE_PORTRAIT_STYLE) return "";
+  const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
+  const ranked = Object.entries(descriptor).sort(([a], [b]) => {
+    const score = (name: string) =>
+      /hair|glass|outfit|jacket|shirt|pant|suit|top|beard/i.test(name) ? 0 : 1;
+    return score(a) - score(b);
+  });
+  const lines: string[] = [];
+  for (const [name, field] of ranked) {
+    if (name === "seed" || name === "size" || name === "scale" || name === "rotate" || name === "flip") continue;
+    if (field.type === "enum") lines.push(`${name}: ${field.values.slice(0, 16).join("|")}`);
+    else if (field.type === "color") lines.push(`${name}: #RRGGBB`);
+    else if (field.type === "boolean") lines.push(`${name}: true|false`);
+    else if (field.type === "number") lines.push(`${name}: 0-100`);
+    if (lines.length >= 36) break;
+  }
+  return lines.join("\n");
+}
+
+export function promptToStyleOptions(
+  style: CollectionStyleId,
+  prompt: string,
+): Record<string, string | string[] | boolean | number> {
+  if (style === CUBE_PORTRAIT_STYLE) return {};
+  const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
+  const text = prompt.trim();
+  const next: Record<string, string | string[] | boolean | number> = {};
+  const setColor = (name: string, hex: string) => {
+    if (descriptor[name]?.type !== "color") return;
+    next[name] = [hex];
+    const order = `${name}Order`;
+    if (descriptor[order]?.type === "enum") next[order] = "fixed";
+  };
+  const setEnum = (name: string, value: string) => {
+    const field = descriptor[name];
+    if (field?.type === "enum" && field.values.includes(value)) next[name] = value;
+  };
+  const setProb = (name: string, value: number) => {
+    if (descriptor[name]?.type === "number") next[name] = value;
+  };
+  if (/金发|金色发|金色头发|头发是金色|头发金色|黄发|黄色头发/.test(text)) setColor("hairColor", "#E6B325");
+  else if (/粉红发|粉色发|粉红色头发|粉色头发|头发是粉/.test(text)) setColor("hairColor", "#F9A8D4");
+  else if (/黑发|黑色头发|头发是黑|头发黑/.test(text)) setColor("hairColor", "#1C1917");
+  else if (/白发|白色头发|银发|头发是白|头发是银/.test(text)) setColor("hairColor", "#E7E5E4");
+  else if (/红发|红色头发|头发是红|头发红/.test(text)) setColor("hairColor", "#E11D48");
+  else if (/棕发|棕色头发|头发是棕|头发棕/.test(text)) setColor("hairColor", "#9A3412");
+  if (/不戴眼镜|不带眼镜|没戴眼镜|不要眼镜|无眼镜/.test(text)) setProb("glassesProbability", 0);
+  else if (/戴眼镜|带眼镜|装眼镜/.test(text)) {
+    setProb("glassesProbability", 100);
+    setEnum("glassesVariant", "square");
+  }
+  if (/领带/.test(text)) setEnum("outfitVariant", "tie");
+  else if (/西装|西服/.test(text)) setEnum("outfitVariant", "suit");
+  if (/西装|西服|领带/.test(text)) setProb("outfitProbability", 100);
+  if (/黑西装|黑色西装|黑西服|黑色西服/.test(text)) {
+    setColor("jacketColor", "#1C1917");
+    setColor("shirtColor", "#1C1917");
+    setColor("pantsColor", "#1C1917");
+  } else if (/白西装|白色西装|白西服/.test(text)) {
+    setColor("jacketColor", "#F5F5F4");
+    setColor("shirtColor", "#F5F5F4");
+    setColor("pantsColor", "#F5F5F4");
+  }
+  if (/女生|女孩|女性|女的/.test(text)) {
+    setProb("beardProbability", 0);
+    setEnum("topVariant", "longStraight");
+    setProb("topProbability", 100);
+  } else if (/男生|男孩|男性|男的/.test(text)) {
+    setEnum("topVariant", "bowl");
+    setProb("topProbability", 100);
+  }
+  return next;
+}
+
+export function sanitizeStyleOptions(
+  style: CollectionStyleId,
+  raw: Record<string, unknown>,
+): Record<string, string | string[] | boolean | number> {
+  if (style === CUBE_PORTRAIT_STYLE) return {};
+  const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
+  const next: Record<string, string | string[] | boolean | number> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const field = descriptor[name];
+    if (!field) continue;
+    if (field.type === "boolean" && typeof value === "boolean") next[name] = value;
+    if (field.type === "number" && typeof value === "number") next[name] = value;
+    if (field.type === "enum" && typeof value === "string" && field.values.includes(value)) next[name] = value;
+    if (field.type === "color" && typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+      next[name] = [value];
+      const order = `${name}Order`;
+      if (descriptor[order]?.type === "enum") next[order] = "fixed";
+    }
+  }
+  return next;
+}
+
+export function buildCollectionPortraitDataUri(
+  style: CollectionStyleId,
+  seed: string,
+  options: Record<string, string | string[] | boolean | number> = {},
+): string {
   if (style === CUBE_PORTRAIT_STYLE) return "";
   const svg = new Avatar(STYLE_LIBRARY[style], {
     seed: seed.trim() || "avatar",
     size: 128,
+    ...options,
   }).toString();
   const marked = svg.replace(/<svg\b/, `<svg data-portrait="dicebear-${style}"`);
   return `data:image/svg+xml;utf8,${encodeURIComponent(marked)}`;
+}
+
+export function displayedMetaAvatarUrl(
+  style: CollectionStyleId,
+  cubeUrl: string,
+  nearSeed = "",
+  options: Record<string, string | string[] | boolean | number> = {},
+): string {
+  const cube = cubeUrl.trim();
+  if (style === CUBE_PORTRAIT_STYLE) return cube;
+  const seed = nearSeed.trim() || portraitSeed("Near", "meta");
+  return buildCollectionPortraitDataUri(style, seed, options);
 }
 
 export function collectionPortraitCreateFields(name: string): {

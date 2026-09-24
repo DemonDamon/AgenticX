@@ -219,7 +219,7 @@
     "deleteConfirm": "确定删除分身「{{name}}」吗？此操作不可恢复。",
     "createDraft": "帮我创建一个数字分身。\n\n我的需求：\n{{description}}\n\n请根据需求设计这个分身。信息不足时，只追问会明显影响分身效果的关键问题；信息已经足够时，不要重复询问。\n\n创建前，请整理并展示以下方案：\n- 名称\n- 角色定位\n- 简介\n- 专长标签\n- 工作方式与回答风格\n- 必要的行为边界\n\n然后通过确认卡让我确认。只有确认后才能正式创建；如果我要求修改，请更新方案并再次确认。",
     "portraitStyle": "头像风格",
-    "portraitStyleHint": "为全部专家换一套头像。你上传的照片不会动。",
+    "portraitStyleHint": "为这一页的内置智能体和全部专家换一套头像。你上传的照片不会动。",
     "portraitApplying": "正在换风格…",
     "portraitApplyFailed": "换风格失败：{{error}}",
     "styleCube": "方块",
@@ -250,7 +250,15 @@
     "styleVoxelBot": "体素机",
     "styleLandscape": "风景",
     "stylePlanets": "星球",
-    "portraitCredit": "署名：冒险与冒险淡彩 Lisa Wischofsky；涂鸦 vijay verma；表情 Davis Uche；素描 Micah Lanier（CC BY 4.0）。卡通与机甲 Pablo Stanley，可商用。"
+    "portraitCredit": "署名：冒险与冒险淡彩 Lisa Wischofsky；涂鸦 vijay verma；表情 Davis Uche；素描 Micah Lanier（CC BY 4.0）。卡通与机甲 Pablo Stanley，可商用。",
+    "builtinTitle": "内置",
+    "builtinHint": "顶层智能体。头像风格和下面的专家一起换。",
+    "myExperts": "我的专家",
+    "nearRole": "元智能体",
+    "nearSettings": "设置",
+    "nearCubeHint": "当前是方块风格，可以改 Near 的配色。",
+    "nearStyleHint": "Near 正跟这一页的专家用同一套头像。换回方块后可以改配色。",
+    "nearIdentity": "身份与人格"
   },
   "sessionQueries": {
     "title": "本会话提问",
