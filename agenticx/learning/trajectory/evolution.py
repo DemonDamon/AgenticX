@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,11 @@ def compile_policy(source: str) -> SimplePolicy:
 
 
 class PolicyRegistry:
-    """策略版本注册表：candidate → promoted, 与 ModelRegistry 同语义。"""
+    """策略版本注册表：candidate → promoted, 与 ModelRegistry 同语义。
+
+    SP21 已否定清单（RRSI 归因机制）: 被回放否决的变体留指纹（normalize 后
+    sha256）, evolve_loop 提前跳过——已否定假设不再消耗评估预算。
+    """
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -54,6 +59,7 @@ class PolicyRegistry:
         data = self._load()
         self._versions: list[dict[str, Any]] = data.get("versions", [])
         self._promoted: int | None = data.get("promoted")
+        self._denied: list[dict[str, Any]] = data.get("denied", [])
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -62,8 +68,29 @@ class PolicyRegistry:
             return {}
 
     def _save(self) -> None:
-        json.dump({"versions": self._versions, "promoted": self._promoted},
+        json.dump({"versions": self._versions, "promoted": self._promoted,
+                   "denied": self._denied},
                   open(self.path, "w"), ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def fingerprint(source: str) -> str:
+        """空白归一化后哈希——只对语义指纹, 不对排版。"""
+        return hashlib.sha256(" ".join(source.split()).encode()).hexdigest()
+
+    def deny(self, source: str, score: float, reason: str) -> None:
+        fp = self.fingerprint(source)
+        if any(d["fingerprint"] == fp for d in self._denied):
+            return
+        self._denied.append({"fingerprint": fp, "score": score,
+                             "reason": reason})
+        self._save()
+
+    def is_denied(self, source: str) -> bool:
+        fp = self.fingerprint(source)
+        return any(d["fingerprint"] == fp for d in self._denied)
+
+    def denied(self) -> list[dict[str, Any]]:
+        return list(self._denied)
 
     def register(self, source: str, score: float, lineage: str) -> int:
         version = (self._versions[-1]["version"] + 1) if self._versions else 1
@@ -103,12 +130,15 @@ def evolve_loop(registry: PolicyRegistry,
                 evaluate_fn: Callable[[Any], float],
                 propose_fn: Callable[[str, str], str],
                 n_iters: int = 5,
-                min_improve: float = 0.0) -> EvolutionReport:
+                min_improve: float = 0.0,
+                track_denied: bool = True) -> EvolutionReport:
     """离线演化主循环（论文 Dreaming-based Policy Improvement）。
 
     evaluate_fn 只允许绑定 train 区任务树（SP7 隔离纪律）。
     择优规则：new_score > best + min_improve 才 register+promote。
     坏代码（语法错/缺 NAME/缺 act）与劣质变体一律丢弃, 不影响当前策略。
+    SP21（RRSI）: track_denied 时被否决的变体进已否定清单, 同指纹提议
+    后续迭代直接跳过（不再消耗 evaluate 预算, 归因可查）。
     """
     current = registry.current()
     if current is None:
@@ -117,9 +147,14 @@ def evolve_loop(registry: PolicyRegistry,
     accepted = rejected = 0
     for _ in range(n_iters):
         proposal = propose_fn(current["source"], f"current_score={best_score}")
+        if track_denied and registry.is_denied(proposal):
+            rejected += 1                      # 已否定假设: 零成本跳过
+            continue
         try:
             policy = compile_policy(proposal)
         except Exception:
+            if track_denied:
+                registry.deny(proposal, 0.0, "compile_error")
             rejected += 1
             continue
         score = evaluate_fn(policy)
@@ -130,6 +165,8 @@ def evolve_loop(registry: PolicyRegistry,
             current = registry.current()
             accepted += 1
         else:
+            if track_denied:
+                registry.deny(proposal, score, "no_improvement")
             rejected += 1
     return EvolutionReport(n_iters, accepted, rejected, best_score, best_version)
 
