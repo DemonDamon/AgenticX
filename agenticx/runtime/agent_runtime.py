@@ -1870,6 +1870,15 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             if _message_content_is_empty(msg.get("content")):
+                # A reasoning-only retry stores the draft in reasoning_content
+                # and a single space in content. Dropping that row makes the
+                # follow-up call forget the draft and think again with no body.
+                if not str(msg.get("reasoning_content") or "").strip():
+                    idx += 1
+                    continue
+                kept = dict(msg)
+                kept["content"] = " "
+                sanitized.append(kept)
                 idx += 1
                 continue
             sanitized.append(msg)
@@ -2625,12 +2634,10 @@ def _classify_tool_turn_outcome(
 # Forces one retry so the model emits a real final reply or an explicit tool_call,
 # instead of the runtime misjudging the turn as complete and surfacing a "继续" button.
 _REASONING_ONLY_NUDGE_HINT = (
-    "[runtime-reasoning-only] 上一轮只输出了思考内容（"
-    + _THINK_OPEN_TAG
-    + "），"
+    "[runtime-reasoning-only] 上一轮只输出了思考内容，"
     "没有给出用户可见的回复，也没有发出 tool_call。"
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
-    "或发出明确的 tool_call；不要只输出思考。"
+    "或发出明确的 tool_call；不要只输出思考，不要输出思考标签。"
 )
 _LENGTH_CUT_REASONING_NUDGE_HINT = (
     "[runtime-output-cut] 上一轮输出在思考阶段被 max_tokens 截断，"
@@ -6264,7 +6271,13 @@ class AgentRuntime:
                 if reasoning_field_final_recovered:
                     reasoning_text = ""
                 elif parsed.malformed:
-                    reasoning_text = ""
+                    # Tag noise on the retry must not erase the earlier draft.
+                    # A malformed turn that still has a visible body stays hidden.
+                    reasoning_text = (
+                        reasoning_before_nudge
+                        if not parsed.visible_body.strip()
+                        else ""
+                    )
                 else:
                     reasoning_text = (
                         parsed.reasoning
@@ -6392,7 +6405,11 @@ class AgentRuntime:
                 yield await self._finish_terminal_reply(
                     session,
                     clean_body=clean_body,
-                    reasoning_text=reasoning_text if not parsed.malformed else "",
+                    reasoning_text=(
+                        ""
+                        if parsed.malformed and parsed.visible_body.strip()
+                        else reasoning_text
+                    ),
                     suggestions=sug_list,
                     reasoning_seconds=_rs,
                     references=_ref_list,
