@@ -87,6 +87,7 @@ class JobRegistry:
         )
         self._lock = threading.RLock()
         self._jobs: Dict[str, IngestJob] = {}
+        self._generations: Dict[str, int] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._futures: Dict[str, Future] = {}
 
@@ -105,6 +106,15 @@ class JobRegistry:
             job = self._jobs.get(job_id)
             if job is None:
                 return
+            incoming_generation = updates.pop("generation", None)
+            if incoming_generation is not None and int(incoming_generation) < int(job.generation):
+                return
+            new_status = updates.get("status")
+            if new_status == IngestJobStatus.DONE and job.status in {
+                IngestJobStatus.CANCELLED,
+                IngestJobStatus.FAILED,
+            }:
+                return
             for key, value in updates.items():
                 setattr(job, key, value)
 
@@ -119,11 +129,15 @@ class JobRegistry:
     ) -> IngestJob:
         """Queue a document for background ingestion. Returns the new job."""
 
+        with self._lock:
+            generation = self._generations.get(document_id, 0) + 1
+            self._generations[document_id] = generation
         job = IngestJob(
             id=f"job_{uuid.uuid4().hex[:12]}",
             document_id=document_id,
             status=IngestJobStatus.QUEUED,
             started_at=datetime.now(timezone.utc).isoformat(),
+            generation=generation,
         )
         event = threading.Event()
         with self._lock:
@@ -194,6 +208,7 @@ class JobRegistry:
                 status=mapped,
                 progress=_weighted_progress(mapped, stage_progress),
                 message=message,
+                generation=job.generation,
             )
 
         try:
@@ -226,6 +241,7 @@ class JobRegistry:
                 report=report,
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 message=message,
+                generation=job.generation,
             )
         except Exception as exc:
             logger.exception("ingest job %s crashed", job.id)

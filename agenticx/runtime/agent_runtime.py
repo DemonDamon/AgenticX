@@ -68,7 +68,7 @@ from agenticx.runtime.events import (
     iter_content_block_start_events,
 )
 from agenticx.runtime.hooks import HookRegistry
-from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.loop_detector import LoopDetector, TurnSteerQueue
 from agenticx.runtime.plan_mode import (
     plan_mode_retry_limit_reached,
     turn_intent_denial_message,
@@ -2026,6 +2026,40 @@ def _response_finish_reason(response: Any) -> str:
     return ""
 
 
+def _persist_steer_text(session: Any, text: str) -> bool:
+    """Write a follow-up before it is shown to the model. Failure keeps it queued."""
+
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        history = getattr(session, "agent_messages", None)
+    if not isinstance(history, list):
+        return False
+    history.append({"role": "user", "content": text, "metadata": {"source": "steer"}})
+    return True
+
+
+def _tool_args_complete(tool_calls: Any) -> bool:
+    """False when a tool call has empty or unparsable arguments."""
+
+    if not tool_calls:
+        return True
+    for call in tool_calls:
+        if isinstance(call, dict):
+            fn = call.get("function") if isinstance(call.get("function"), dict) else call
+            raw = fn.get("arguments", call.get("arguments"))
+        else:
+            fn = getattr(call, "function", None)
+            raw = getattr(fn, "arguments", None) if fn is not None else getattr(call, "arguments", None)
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return False
+        if isinstance(raw, str):
+            try:
+                json.loads(raw)
+            except json.JSONDecodeError:
+                return False
+    return True
+
+
 _MAX_TOKENS_CAP_RE = re.compile(
     r"max_tokens.*?[\[（(]\s*1\s*[,，]\s*(\d+)\s*[\]）)]",
     re.IGNORECASE,
@@ -3368,6 +3402,7 @@ class AgentRuntime:
             warning_threshold=loop_warning_threshold,
             critical_threshold=loop_critical_threshold,
         )
+        self.turn_steer = TurnSteerQueue()
         self._pending_loop_nudge: Optional[str] = None
         self._injected_loop_nudge: Optional[str] = None
         self._recent_exploratory_fps: deque[str] = deque(maxlen=10)
@@ -3906,6 +3941,7 @@ class AgentRuntime:
 
         self.token_budget.reset_turn()
         self.loop_detector.reset()
+        self.turn_steer.discard()
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._overflow_retries_this_turn = 0
@@ -4421,8 +4457,11 @@ class AgentRuntime:
 
         for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
+                self.turn_steer.discard()
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                 return
+            for steered in self.turn_steer.drain(lambda text: _persist_steer_text(session, text)):
+                messages.append({"role": "user", "content": steered})
             # Previous round (if any) fully completed at this point.
             self._write_run_checkpoint(session, round_idx=round_idx - 1)
             # Re-project each round so tool_search loads take effect next round.
@@ -5639,7 +5678,7 @@ class AgentRuntime:
 
                     if (
                         overflow_retry_enabled()
-                        and self._overflow_retries_this_turn < max_overflow_retries()
+                        and self._overflow_retries_this_turn < min(1, max_overflow_retries())
                     ):
                         hist_before = _sanitize_context_messages(session.agent_messages)
                         new_hist, did, summary, count, _pending_q = await self.compactor.maybe_compact(
@@ -5924,6 +5963,28 @@ class AgentRuntime:
                 )
                 continue
             model_finish_reason = _response_finish_reason(response)
+            plain_issue = self.loop_detector.note_assistant_round(
+                str(ac_clean or ""),
+                had_tool_calls=bool(tool_calls),
+                length_truncated=is_length_finish_reason(model_finish_reason),
+                tool_args_complete=_tool_args_complete(tool_calls),
+            )
+            if plain_issue is not None and plain_issue.detector == "plain_repeat" and not tool_calls:
+                messages.append(
+                    {"role": "system", "content": plain_issue.nudge or "请给出完整正文。"}
+                )
+                continue
+            if plain_issue is not None and plain_issue.detector == "length_truncated_tools":
+                yield RuntimeEvent(
+                    type=EventType.ERROR.value,
+                    data={
+                        "text": plain_issue.message,
+                        "severity": "warning",
+                        "detector": "length_truncated_tools",
+                    },
+                    agent_id=agent_id,
+                )
+                return
             _fr = str(model_finish_reason or "").strip().lower()
             if (
                 not tool_calls

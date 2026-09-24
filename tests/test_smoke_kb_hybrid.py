@@ -24,7 +24,9 @@ from agenticx.studio.kb import (  # noqa: E402
     RetrievalSpec,
     VectorStoreSpec,
 )
+from agenticx.studio.kb.contracts import RetrievalHit, RetrievalHitSource  # noqa: E402
 from agenticx.studio.kb.rrf import reciprocal_rank_fusion  # noqa: E402
+from agenticx.studio.kb.runtime import _rescale_unbounded_scores  # noqa: E402
 
 
 class _DeterministicEmbedding:
@@ -87,6 +89,42 @@ def test_retrieval_spec_defaults_backward_compatible():
     assert cfg.retrieval.top_k == 7
     assert cfg.retrieval.retrieval_mode == "vector"
     assert cfg.retrieval.rrf_k == 60
+
+
+def test_rescale_unbounded_bm25_scores():
+    assert _rescale_unbounded_scores([12.0, 6.0]) == [1.0, 0.5]
+    assert _rescale_unbounded_scores([0.4, 0.8]) == [0.4, 0.8]
+    assert _rescale_unbounded_scores([float("nan"), float("-inf"), float("inf"), 4.0]) == [
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+    ]
+
+
+def test_hybrid_fused_score_is_rrf_not_raw_bm25(tmp_path: Path):
+    runtime, _ = _build_runtime(tmp_path, retrieval_mode="hybrid")
+
+    def _hit(cid: str, score: float, *, vector: float, bm25: float) -> RetrievalHit:
+        return RetrievalHit(
+            id=cid,
+            score=score,
+            text=cid,
+            source=RetrievalHitSource(uri="mem"),
+            metadata={"vector_score": vector, "bm25_score": bm25},
+        )
+
+    runtime._search_vector = lambda _query, _k: [  # type: ignore[method-assign]
+        _hit("b", 0.2, vector=0.2, bm25=0.0),
+        _hit("a", 0.9, vector=0.9, bm25=0.0),
+    ]
+    runtime._search_bm25 = lambda _query, _k: [  # type: ignore[method-assign]
+        _hit("a", 12.0, vector=0.0, bm25=12.0),
+    ]
+    hits = runtime._search_hybrid("query", 5)
+    assert hits[0].id == "a"
+    assert hits[0].score == pytest.approx(2.0 / 61.0)
+    assert hits[0].score != 12.0
 
 
 def test_rrf_fusion_prefers_both_channels():

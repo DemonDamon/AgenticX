@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import platform
 import threading
@@ -784,6 +785,9 @@ class KBRuntime:
             self._ingest_cache_store().remove(doc_id)
         except Exception as exc:
             logger.warning("Failed to purge ingest cache for %s: %s", doc_id, exc)
+        parent_path = self._parent_store_path(doc_id)
+        if parent_path.is_file():
+            parent_path.unlink()
         return True
 
     def mark_document_cancelled(self, doc_id: str, message: str = "已取消") -> None:
@@ -892,7 +896,13 @@ class KBRuntime:
             if not chunks:
                 raise KBError("No chunks produced")
 
-            chunk_texts = [c["text"] for c in chunks]
+            parents = [c for c in chunks if c.get("chunk_role") == "parent"]
+            index_chunks = [c for c in chunks if c.get("chunk_role") != "parent"]
+            if not index_chunks:
+                raise KBError("No chunks produced")
+            self._write_parent_store(doc.id, parents)
+
+            chunk_texts = [str(c.get("embed_text") or c["text"]) for c in index_chunks]
             _raise_if_cancelled(cancel_event)
             _report(
                 KBDocumentStatus.EMBEDDING,
@@ -918,7 +928,7 @@ class KBRuntime:
             _raise_if_cancelled(cancel_event)
             _report(KBDocumentStatus.WRITING, "writing to vector store")
             self._store().delete_by_document(doc.id)  # rebuild-safe replace
-            ids = [f"{doc.id}::{c['chunk_index']:06d}" for c in chunks]
+            ids = [f"{doc.id}::{c['chunk_index']:06d}" for c in index_chunks]
             # Chroma rejects `None` metadata values with
             # "Expected metadata value to be a str, int, float or bool, got None".
             # PDF / DOCX / PPTX chunks frequently lack `start_index` / `end_index`
@@ -934,14 +944,16 @@ class KBRuntime:
                         "chunk_index": c["chunk_index"],
                         "start_index": c.get("start_index"),
                         "end_index": c.get("end_index"),
+                        "parent_id": c.get("parent_id"),
+                        "chunk_role": c.get("chunk_role"),
                     }.items()
                     if value is not None
                 }
-                for c in chunks
+                for c in index_chunks
             ]
             self._store().upsert(
                 ids=ids,
-                texts=[c["text"] for c in chunks],
+                texts=chunk_texts,
                 embeddings=embeddings,
                 metadatas=metadatas,
             )
@@ -951,16 +963,16 @@ class KBRuntime:
                     "source_path": doc.source_path,
                     "source_name": doc.source_name,
                     "chunk_index": c["chunk_index"],
-                    "text": c["text"],
+                    "text": chunk_texts[i],
                 }
-                for i, c in enumerate(chunks)
+                for i, c in enumerate(index_chunks)
             ]
             self._fts().upsert_chunks(document_id=doc.id, rows=fts_rows)
 
             updated = replace(
                 doc,
                 status=KBDocumentStatus.DONE,
-                chunks=len(chunks),
+                chunks=len(index_chunks),
                 error=None,
                 embedding_fingerprint=self._config.embedding_fingerprint(),
             )
@@ -972,7 +984,7 @@ class KBRuntime:
                     source_hash=source_hash,
                     chunking_fp=chunking_fingerprint(self._config.chunking),
                     embedding_fp=self._config.embedding_fingerprint(),
-                    chunks=len(chunks),
+                    chunks=len(index_chunks),
                 )
             except Exception as exc:
                 logger.warning("ingest cache write failed for %s: %s", doc.id, exc)
@@ -980,7 +992,7 @@ class KBRuntime:
                 self._indexed_fingerprint = self._config.embedding_fingerprint()
                 self._save_state()
             report.success = 1
-            _report(KBDocumentStatus.DONE, f"indexed {len(chunks)} chunks")
+            _report(KBDocumentStatus.DONE, f"indexed {len(index_chunks)} chunks")
             return report
 
         except KBCancelled as exc:
@@ -1039,15 +1051,16 @@ class KBRuntime:
         k = max(1, min(20, int(top_k or self._config.retrieval.top_k)))
         mode = (retrieval_mode or self._config.retrieval.retrieval_mode or "vector").strip().lower()
         if mode == "vector":
-            return self._search_vector(q, k)
-        if mode == "bm25":
-            return self._search_bm25(q, k)
-        if mode in {"hybrid", "hybrid_graph"}:
+            hits = self._search_vector(q, k)
+        elif mode == "bm25":
+            hits = self._search_bm25(q, k)
+        elif mode in {"hybrid", "hybrid_graph"}:
             hits = self._search_hybrid(q, k)
             if mode == "hybrid_graph":
                 hits = self._apply_graph_expansion(q, hits, k)
-            return hits
-        return self._search_vector(q, k)
+        else:
+            hits = self._search_vector(q, k)
+        return self._expand_parent_hits(hits)
 
     def _search_vector(self, query: str, k: int) -> List[RetrievalHit]:
         query_vec = _embed_texts(self._embedding(), [query])[0]
@@ -1066,9 +1079,12 @@ class KBRuntime:
 
     def _search_bm25(self, query: str, k: int) -> List[RetrievalHit]:
         raw = self._fts().search(query, top_k=k)
+        rows = [(cid, float(score), text, dict(meta)) for cid, score, text, meta in raw]
+        scaled = _rescale_unbounded_scores([score for _cid, score, _text, _meta in rows])
+        floor = float(self._config.retrieval.score_floor or 0.0)
         hits: List[RetrievalHit] = []
-        for cid, score, text, meta in raw:
-            if score < float(self._config.retrieval.score_floor or 0.0):
+        for (cid, _raw_score, text, meta), score in zip(rows, scaled):
+            if score < floor:
                 continue
             meta_out = dict(meta)
             meta_out["vector_score"] = 0.0
@@ -1080,8 +1096,8 @@ class KBRuntime:
 
     def _search_hybrid(self, query: str, k: int) -> List[RetrievalHit]:
         fetch_k = min(20, max(k * 2, k))
-        vector_raw = self._search_vector(query, fetch_k)
-        bm25_raw = self._search_bm25(query, fetch_k)
+        vector_raw = _sort_hits_by_score(self._search_vector(query, fetch_k))
+        bm25_raw = _sort_hits_by_score(self._search_bm25(query, fetch_k))
         vector_list = [
             (h.id, float(h.metadata.get("vector_score") or h.score), h.text, dict(h.metadata))
             for h in vector_raw
@@ -1181,6 +1197,71 @@ class KBRuntime:
             source=src,
             metadata=meta,
         )
+
+    def _parent_store_path(self, document_id: str) -> Path:
+        return self._registry_dir / "parents" / f"{document_id}.json"
+
+    def _write_parent_store(self, document_id: str, parents: List[Dict[str, Any]]) -> None:
+        path = self._parent_store_path(document_id)
+        if not parents:
+            if path.is_file():
+                path.unlink()
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            str(parent.get("parent_id")): {
+                "text": str(parent.get("text") or ""),
+                "child_texts": list(parent.get("child_texts") or []),
+            }
+            for parent in parents
+            if parent.get("parent_id")
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _load_parent_store(self, document_id: str) -> Dict[str, Any]:
+        path = self._parent_store_path(document_id)
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _expand_parent_hits(self, hits: List[RetrievalHit]) -> List[RetrievalHit]:
+        if not hits:
+            return hits
+        window = int(self._config.chunking.child_chunk_size or 384)
+        expanded: List[RetrievalHit] = []
+        for hit in hits:
+            parent_id = str(hit.metadata.get("parent_id") or "")
+            document_id = str(hit.metadata.get("document_id") or "")
+            if not parent_id or not document_id:
+                expanded.append(hit)
+                continue
+            record = self._load_parent_store(document_id).get(parent_id) or {}
+            parent_text = str(record.get("text") or "")
+            if not parent_text:
+                expanded.append(hit)
+                continue
+            text = parent_text
+            if len(parent_text) < window:
+                children = [str(item) for item in record.get("child_texts") or []]
+                neighbors = [child for child in children if child and child not in parent_text]
+                if neighbors:
+                    text = parent_text + "\n\n" + "\n\n".join(neighbors)
+            meta = dict(hit.metadata)
+            meta["parent_expanded"] = True
+            expanded.append(
+                RetrievalHit(
+                    id=hit.id,
+                    score=hit.score,
+                    text=text,
+                    source=hit.source,
+                    metadata=meta,
+                )
+            )
+        return expanded
 
     # ------------------------- chunking preview ------------------------- #
 
@@ -1347,6 +1428,10 @@ def _chunk_text(
     """
 
     strategy = (spec.strategy or "recursive").strip().lower()
+    if strategy in {"auto", "heading"} or spec.parent_child:
+        from .chunk_strategy import split_document
+
+        return split_document(text, spec, document_id=document_id)
     chunker_strategy = "recursive" if strategy == "contextual" else (spec.strategy or "recursive")
     context_prefix = _document_context_prefix(source_path, text) if strategy == "contextual" else ""
 
@@ -1393,6 +1478,36 @@ def _chunk_text(
             }
         )
     return out
+
+
+def _rescale_unbounded_scores(scores: List[float]) -> List[float]:
+    """Map a keyword-only score list onto ``[0, 1]`` when the max exceeds 1.
+
+    Scores already inside ``[0, 1]`` stay unchanged so a floor comparison keeps
+    its meaning. Non-finite values are only rewritten on the rescale path.
+    """
+
+    max_score = 0.0
+    for score in scores:
+        if math.isfinite(score) and score > max_score:
+            max_score = score
+    if max_score <= 1:
+        return list(scores)
+    scaled: List[float] = []
+    for score in scores:
+        if math.isnan(score) or math.isinf(score) and score < 0 or score <= 0:
+            scaled.append(0.0)
+        elif math.isinf(score):
+            scaled.append(1.0)
+        else:
+            scaled.append(score / max_score)
+    return scaled
+
+
+def _sort_hits_by_score(hits: List[RetrievalHit]) -> List[RetrievalHit]:
+    """Return hits in descending score order before rank fusion."""
+
+    return sorted(hits, key=lambda hit: float(hit.score), reverse=True)
 
 
 def _naive_split(text: str, spec: ChunkingSpec) -> List[Dict[str, Any]]:

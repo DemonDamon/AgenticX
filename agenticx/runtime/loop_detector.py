@@ -23,6 +23,42 @@ class LoopCheckResult:
     nudge: Optional[str] = None
 
 
+class TurnSteerQueue:
+    """User follow-ups injected only at a round boundary.
+
+    Persistence happens before the text is returned for the model. A stop
+    discards anything not yet injected.
+    """
+
+    def __init__(self) -> None:
+        self._pending: List[str] = []
+
+    def enqueue(self, text: str) -> None:
+        cleaned = str(text or "").strip()
+        if cleaned:
+            self._pending.append(cleaned)
+
+    def discard(self) -> None:
+        self._pending.clear()
+
+    def drain(self, persist) -> List[str]:
+        """Persist each pending line. Failed writes stay queued."""
+
+        injected: List[str] = []
+        remaining: List[str] = []
+        for text in self._pending:
+            try:
+                ok = bool(persist(text))
+            except Exception:
+                ok = False
+            if ok:
+                injected.append(text)
+            else:
+                remaining.append(text)
+        self._pending = remaining
+        return injected
+
+
 class LoopDetector:
     """Detect repeating tool call patterns with warning/critical levels."""
 
@@ -43,6 +79,9 @@ class LoopDetector:
         self._last_result_digests: Dict[Tuple[str, str], str] = {}
         self._file_edit_failures: Dict[str, int] = {}
         self._latest_file_edit_failure: Optional[Tuple[str, str, int]] = None
+        self._plain_repeat_content: Optional[str] = None
+        self._plain_repeat_count = 0
+        self._length_truncation_count = 0
 
     def reset(self) -> None:
         """Clear per-turn detector state without changing configured thresholds."""
@@ -53,6 +92,57 @@ class LoopDetector:
         self._last_result_digests.clear()
         self._file_edit_failures.clear()
         self._latest_file_edit_failure = None
+        self._plain_repeat_content = None
+        self._plain_repeat_count = 0
+        self._length_truncation_count = 0
+
+    def note_assistant_round(
+        self,
+        content: str,
+        *,
+        had_tool_calls: bool,
+        length_truncated: bool = False,
+        tool_args_complete: bool = True,
+    ) -> Optional[LoopCheckResult]:
+        """Count identical plain answers, including empty ones, and length cuts.
+
+        A round that issued tool calls clears the plain-text streak. Incomplete
+        tool arguments cut off by the completion cap stop the turn instead of
+        treating the preamble as the answer.
+        """
+
+        if had_tool_calls:
+            self._plain_repeat_content = None
+            self._plain_repeat_count = 0
+        else:
+            text = content if isinstance(content, str) else str(content or "")
+            if self._plain_repeat_content == text:
+                self._plain_repeat_count += 1
+            else:
+                self._plain_repeat_content = text
+                self._plain_repeat_count = 1
+            if self._plain_repeat_count >= self.critical_threshold:
+                return LoopCheckResult(
+                    stuck=True,
+                    level="critical",
+                    detector="plain_repeat",
+                    message="连续相同正文，包含空回复。",
+                    nudge="请给出完整正文。",
+                )
+
+        if length_truncated and not tool_args_complete:
+            self._length_truncation_count += 1
+        else:
+            self._length_truncation_count = 0
+        if self._length_truncation_count >= self.critical_threshold:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="length_truncated_tools",
+                message="连续在工具参数处被长度截断。",
+                nudge=None,
+            )
+        return None
 
     @staticmethod
     def args_signature(arguments: Dict[str, Any]) -> str:

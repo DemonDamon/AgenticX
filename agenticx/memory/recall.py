@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agenticx.memory.item_status import apply_memory_status
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 
 
@@ -250,13 +251,16 @@ async def search_memory_for_chat(
         except Exception as exc:
             graph_skipped_reason = f"graph search failed: {exc}"
 
-    merged = _merge_recall_results(
-        workspace_rows,
-        graph_rows,
-        limit=max(1, limit),
-        graph_limit=cfg.search_in_chat_graph_limit,
-        turns_rows=turns_rows,
-        turns_limit=turns_cap if use_turns else 0,
+    merged = apply_memory_status(
+        _merge_recall_results(
+            workspace_rows,
+            graph_rows,
+            limit=max(1, limit),
+            graph_limit=cfg.search_in_chat_graph_limit,
+            turns_rows=turns_rows,
+            turns_limit=turns_cap if use_turns else 0,
+        ),
+        query=q,
     )
     turn_ids = [str(item["id"]) for item in merged if item.get("source") == "turn" and item.get("id")]
     if turn_ids:

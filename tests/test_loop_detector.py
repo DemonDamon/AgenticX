@@ -7,7 +7,9 @@ Author: Damon Li
 from __future__ import annotations
 
 from agenticx.runtime.agent_runtime import _confirmation_spam_score_for_path
-from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.agent_runtime import _persist_steer_text, _tool_args_complete
+from agenticx.runtime.harden_flags import max_overflow_retries
+from agenticx.runtime.loop_detector import LoopDetector, TurnSteerQueue
 
 
 def test_loop_detector_generic_repeat_warning() -> None:
@@ -160,3 +162,54 @@ def test_loop_detector_reset_clears_file_edit_failures() -> None:
     detector.reset()
 
     assert detector.check() is None
+
+
+def test_empty_plain_repeat_requests_full_answer() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    issue = None
+    for _ in range(4):
+        issue = detector.note_assistant_round("", had_tool_calls=False)
+    assert issue is not None
+    assert issue.detector == "plain_repeat"
+    assert issue.nudge == "请给出完整正文。"
+
+
+def test_tool_round_clears_plain_repeat() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    detector.note_assistant_round("", had_tool_calls=False)
+    detector.note_assistant_round("let me look", had_tool_calls=True)
+    issue = detector.note_assistant_round("", had_tool_calls=False)
+    assert issue is None
+
+
+def test_length_truncated_tools_are_not_a_final_answer() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    issue = None
+    for _ in range(4):
+        issue = detector.note_assistant_round(
+            "let me look that up",
+            had_tool_calls=True,
+            length_truncated=True,
+            tool_args_complete=False,
+        )
+    assert issue is not None
+    assert issue.detector == "length_truncated_tools"
+    assert _tool_args_complete([{"function": {"arguments": ""}}]) is False
+
+
+def test_steer_persist_failure_and_stop_drop() -> None:
+    queue = TurnSteerQueue()
+    queue.enqueue("follow up")
+    assert queue.drain(lambda _text: False) == []
+    session = type("S", (), {"chat_history": []})()
+    injected = queue.drain(lambda text: _persist_steer_text(session, text))
+    assert injected == ["follow up"]
+    assert session.chat_history[0]["content"] == "follow up"
+    queue.enqueue("late")
+    queue.discard()
+    assert queue.drain(lambda text: _persist_steer_text(session, text)) == []
+    assert len(session.chat_history) == 1
+
+
+def test_overflow_retry_is_once_per_turn() -> None:
+    assert min(1, max_overflow_retries()) <= 1
