@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+import httpx
 from fastapi import Request, Response
 
 from agenticx.gateway.models import GatewayMessage, GatewayReply
@@ -79,5 +80,15 @@ class DingTalkAdapter:
         )
 
     async def send_reply(self, reply: GatewayReply) -> bool:
-        logger.info("DingTalk send_reply stub: would deliver to %s", reply.reply_to_sender_id)
-        return True
+        url = (reply.session_webhook or "").strip()
+        if not url:
+            logger.warning("DingTalk reply skipped: no session webhook")
+            return False
+        payload = {"msgtype": "text", "text": {"content": reply.content}}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(url, json=payload)
+        except Exception:
+            logger.warning("DingTalk reply request failed")
+            return False
+        return 200 <= response.status_code < 300

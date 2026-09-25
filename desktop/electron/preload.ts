@@ -159,6 +159,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     appId: string;
     appSecret: string;
   }) => ipcRenderer.invoke("save-feishu-config", payload),
+  loadGatewayAdapters: async () =>
+    ipcRenderer.invoke("load-gateway-adapters") as Promise<import("./gateway-adapter-config").GatewayAdapterForm>,
+  saveGatewayAdapters: async (payload: import("./gateway-adapter-config").GatewayAdapterForm) =>
+    ipcRenderer.invoke("save-gateway-adapters", payload),
   loadFeishuBinding: async () =>
     ipcRenderer.invoke("load-feishu-binding") as Promise<{ ok: boolean; bindings: Record<string, unknown> }>,
   saveFeishuDesktopBinding: async (payload: {
