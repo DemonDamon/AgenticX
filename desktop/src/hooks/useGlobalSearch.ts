@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import { scratchHistoryBlocklist } from "../utils/scratch-chat";
+import { findPaneForSidebarSession } from "../utils/sidebar-session-history";
 
 export type GlobalSearchCategory =
   | "all"
@@ -31,6 +32,23 @@ export type ConversationHit = {
   provider?: string;
   model?: string;
 };
+
+type GlobalSearchPaneRef = {
+  id: string;
+  sessionId?: string;
+  avatarId?: string | null;
+};
+
+/** Keep search navigation on the hit's session and identity. */
+export function findPaneForGlobalSearchHit(
+  panes: ReadonlyArray<GlobalSearchPaneRef>,
+  hit: Pick<ConversationHit, "sessionId" | "avatarId">,
+): GlobalSearchPaneRef | undefined {
+  return findPaneForSidebarSession(panes, {
+    session_id: hit.sessionId,
+    avatar_id: hit.avatarId,
+  });
+}
 
 export type GlobalSearchPreview = {
   ok: boolean;
@@ -121,7 +139,7 @@ type SessionListRow = {
 };
 
 /** Search chat history via FTS and resolve titles/avatars from the session list. */
-async function fetchConversationHits(trimmed: string): Promise<{
+export async function fetchConversationHits(trimmed: string): Promise<{
   hits: ConversationHit[];
   error?: string;
 }> {
@@ -149,11 +167,14 @@ async function fetchConversationHits(trimmed: string): Promise<{
     const avatarId = row?.avatar_id ?? null;
     if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;
     const rawName = String(row?.session_name || "").trim();
+    const avatarName =
+      String(row?.avatar_name || "").trim() ||
+      (typeof avatarId === "string" && avatarId.startsWith("automation:") ? "定时任务" : "");
     const title = rawName || `·${sid.replace(/-/g, "").slice(0, 8)}`;
     mapped.push({
       sessionId: sid,
       avatarId,
-      avatarName: String(row?.avatar_name || "").trim(),
+      avatarName,
       title,
       snippet: String(h.snippet || "").trim(),
       updatedAt: Number(row?.updated_at || 0),

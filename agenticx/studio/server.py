@@ -2271,7 +2271,11 @@ def create_studio_app() -> FastAPI:
         if session_id:
             managed = manager.get(session_id, touch=False)
             if managed is not None:
-                taskspaces = getattr(managed.studio_session, "taskspaces", None) or []
+                # Restored workspace metadata may live on ManagedSession before chat
+                # populates the StudioSession compatibility attribute.
+                taskspaces = getattr(managed, "taskspaces", None) or getattr(
+                    managed.studio_session, "taskspaces", None
+                ) or []
                 for ts in taskspaces:
                     if isinstance(ts, dict):
                         path = str(ts.get("path", "") or "").strip()

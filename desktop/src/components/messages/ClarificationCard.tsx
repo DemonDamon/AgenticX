@@ -504,7 +504,7 @@ export function ClarificationCard({
                   setCustomText(e.target.value);
                   setError(null);
                 }}
-placeholder={openEnded ? t("clarify.openAnswerPlaceholder") : t("clarify.customPlaceholderShort")}
+                placeholder={openEnded ? t("clarify.openAnswerPlaceholder") : t("clarify.customPlaceholderShort")}
                 rows={3}
                 className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40"
               />
@@ -536,8 +536,6 @@ placeholder={openEnded ? t("clarify.openAnswerPlaceholder") : t("clarify.customP
       <div className="flex items-center justify-between px-3 pb-2.5 pt-1 text-xs">
         <div className="text-[11px] text-text-faint">
           {groupedMode
-            ? hasMultipleDecision
-{groupedMode
             ? hasMultipleDecision
               ? t("clarify.submitHintGroupedMulti")
               : t("clarify.submitHintGrouped")

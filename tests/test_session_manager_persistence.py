@@ -365,6 +365,46 @@ def test_taskspace_apis_can_lazy_restore_session(tmp_path: Path) -> None:
     assert rows[0]["id"] == "default"
 
 
+def test_automation_taskspaces_survive_cold_restore(tmp_path: Path) -> None:
+    """Automation workspace paths remain on ManagedSession after restart."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sid = "automation-cold-restore-session"
+    managed = manager.create(session_id=sid)
+    managed.avatar_id = "automation:scheduled-task"
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "run scheduled task"},
+        {"role": "assistant", "content": "done"},
+    ]
+    workspace = tmp_path / "automation-workspace"
+    workspace.mkdir()
+    attached = manager.add_taskspace(sid, path=str(workspace), label="scheduled task")
+    assert attached["path"] == str(workspace.resolve())
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    fresh._taskspaces_root = str(taskspaces_root)
+    restored = fresh.get(sid, touch=False)
+
+    assert restored is not None
+    assert restored.avatar_id == "automation:scheduled-task"
+    assert any(
+        row.get("path") == str(workspace.resolve()) for row in restored.taskspaces
+    )
+    # The route must read the managed field; this compatibility attribute is
+    # intentionally absent after a cold restore until a chat/loop request.
+    assert not hasattr(restored.studio_session, "taskspaces")
+
+
 def test_taskspaces_are_isolated_per_session(tmp_path: Path) -> None:
     """Attached folders belong to one session; siblings must not see or lose them."""
     store = SessionStore(tmp_path / "sessions.sqlite")
