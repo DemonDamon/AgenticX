@@ -58,6 +58,7 @@ import {
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
 import { ensureBrowserAgentIpc } from "./components/work-panel/browser-agent-registry";
 import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
+import { notifySidebarSessionCatalogChangedForAutomationProgress } from "./utils/sidebar-session-history";
 import {
   coerceSelectableModel,
   isModelSelectable,
@@ -2362,6 +2363,10 @@ export function App() {
         setActiveAvatarId(aid.startsWith("automation:") ? null : (openedPane?.avatarId ?? null));
       }
       if (!sid) return;
+      notifySidebarSessionCatalogChangedForAutomationProgress(
+        payload,
+        () => useAppStore.getState().bumpSessionCatalogRevision(),
+      );
       const taskKey = String(payload.taskId ?? "").trim() || `ts:${Date.now()}`;
       if (payload.phase === "queued" || payload.phase === "running") {
         const runningSet = automationRunningRef.current.get(sid) ?? new Set<string>();

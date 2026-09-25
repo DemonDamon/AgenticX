@@ -71,7 +71,10 @@
     "submitHintFlat": "将提交你勾选的选项",
     "skipDefault": "跳过（按默认推进）",
     "submitting": "提交中…",
-    "submitDecision": "提交决定"
+    "submitDecision": "提交决定",
+    "openAnswer": "你的回复",
+    "openAnswerPlaceholder": "请输入你的回复…",
+    "submitHintOpenEnded": "输入回复后提交 · 智能体将在同一回合继续"
   },
   "share": {
     "rasterNotReady": "栅格化失败：卡片未就绪",
@@ -893,7 +896,9 @@
     "doubleEnterHint": "Enter 再按一次立即发送",
     "attachments": "{{count}} 个附件",
     "next": "下一个",
-    "sendNowInterrupt": "立即发送（中断当前生成）"
+    "sendNowInterrupt": "立即发送（中断当前生成）",
+    "otherSession": "另有 {{count}} 条待发送消息保存在其他对话。切回原对话后可继续发送；这些消息不会发到当前对话。",
+    "persistenceFailed": "此设备未能保存待发送队列。退出应用前请先发送或复制消息。"
   },
   "skillPatch": {
     "strategy": "策略",

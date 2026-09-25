@@ -32,6 +32,24 @@ export type SidebarSessionHistoryHint = {
   running: boolean;
 };
 
+export type SidebarAutomationProgress = {
+  sessionId?: string | null;
+};
+
+/**
+ * Refresh the sidebar catalog after an automation run has a durable session.
+ * A queued notification has no durable session yet and is intentionally
+ * ignored. The mounted sidebar's existing polling reconciles the metadata.
+ */
+export function notifySidebarSessionCatalogChangedForAutomationProgress(
+  payload: SidebarAutomationProgress,
+  bump: () => void,
+): boolean {
+  if (!String(payload.sessionId ?? "").trim()) return false;
+  bump();
+  return true;
+}
+
 const PLACEHOLDER_SESSION_TITLES = new Set(
   [
     "微信会话",
@@ -110,7 +128,6 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
     const sessionId = String(row.session_id ?? "").trim();
     if (!sessionId) continue;
     const avatarId = row.avatar_id == null ? null : String(row.avatar_id);
-    if (isAutomationPaneAvatarId(avatarId)) continue;
     if (Boolean(row.archived)) continue;
     const updatedAtRaw = Number(row.updated_at ?? 0);
     const createdAtRaw = Number(row.created_at ?? updatedAtRaw);
@@ -186,6 +203,10 @@ export function resolveSidebarAvatarChipName(
 ): string {
   const aid = String(row.avatar_id ?? "").trim();
   if (!aid) return META_AGENT_DISPLAY_NAME;
+  if (isAutomationPaneAvatarId(aid)) {
+    const fromRow = String(row.avatar_name ?? "").trim();
+    return fromRow || "定时任务";
+  }
   if (aid.startsWith("group:")) {
     // Prefer live group registry name so every session of the same group
     // shares one chip (new sessions often omit avatar_name → used to show「群聊」).
@@ -230,11 +251,24 @@ export function findPaneForSidebarSession(
     return panes.find((p) => p.id === forcePaneId);
   }
   const sid = String(row.session_id ?? "").trim();
+  const target = String(row.avatar_id ?? "").trim();
+  // Automation sessions are durable runs of a specific task. A session id can
+  // briefly be present in a regular pane while the run event is being handled;
+  // selecting by session first in that window would silently turn an old run
+  // into a Meta/Near conversation. Preserve the task identity when opening it.
+  if (isAutomationPaneAvatarId(target)) {
+    const bySessionAndAvatar = panes.find(
+      (p) =>
+        String(p.sessionId ?? "").trim() === sid &&
+        String(p.avatarId ?? "").trim() === target,
+    );
+    if (bySessionAndAvatar) return bySessionAndAvatar;
+    return panes.find((p) => String(p.avatarId ?? "").trim() === target);
+  }
   if (sid) {
     const bySession = panes.find((p) => String(p.sessionId ?? "").trim() === sid);
     if (bySession) return bySession;
   }
-  const target = String(row.avatar_id ?? "").trim();
   return panes.find((p) => String(p.avatarId ?? "").trim() === target);
 }
 

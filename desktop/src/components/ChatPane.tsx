@@ -483,6 +483,16 @@ import {
   resolveReferenceSourcePath,
 } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath, canonicalizeArtifactPreviewPath } from "../utils/workspace-file-path";
+import { formatTaskspaceAddError } from "../utils/taskspace-errors";
+import {
+  countQueuedMessagesForOtherSessions,
+  queuedMessagesForSession,
+} from "../utils/pending-message-queue";
+import {
+  bootstrapMarkerForSessionBinding,
+  ensureWorkspaceSessionBeforeFirstMessage,
+  shouldKeepNewTopicWorkspaceControls,
+} from "../utils/workspace-session-visibility";
 import {
   composerAcceptsDragTypes,
   decodeNearWorkspaceDragEntry,
@@ -2928,9 +2938,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const toolRoundBudget = 60;
   const paneQueuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const otherSessionQueuedCount = useMemo(
+    () => countQueuedMessagesForOtherSessions(paneQueuedMessages, pane.sessionId),
+    [pane.sessionId, paneQueuedMessages],
+  );
   const queuedMessages = useMemo(
     () => queuedMessagesForSession(paneQueuedMessages, pane.sessionId),
     [pane.sessionId, paneQueuedMessages],
+  );
+  const pendingMessagesPersistenceFailed = useAppStore(
+    (s) => s.pendingMessagesPersistenceFailed,
   );
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
   const takePendingMessage = useAppStore((s) => s.takePendingMessage);
@@ -3196,6 +3213,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const programmaticScrollRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
+  const freshlyCreatedSessionRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
   const sessionBootstrapAttemptRef = useRef(0);
   const [sessionBootstrapRetryNonce, setSessionBootstrapRetryNonce] = useState(0);
@@ -6610,7 +6628,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   useEffect(() => {
     loadingOlderMessagesRef.current = false;
-    sessionBootstrapRef.current = "";
+    const boundSessionId = String(pane.sessionId ?? "").trim();
+    sessionBootstrapRef.current = bootstrapMarkerForSessionBinding(
+      boundSessionId,
+      freshlyCreatedSessionRef.current,
+    );
+    if (sessionBootstrapRef.current) {
+      freshlyCreatedSessionRef.current = "";
+    }
     sessionBootstrapInflightRef.current = "";
     sessionBootstrapAttemptRef.current = 0;
     // 切换会话时收起落盘 drawer：其 runId 属于上一会话，跨会话残留会导致
@@ -9512,6 +9537,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (created.inherited) {
         setPaneContextInherited(pane.id, true);
       }
+      freshlyCreatedSessionRef.current = newSessionId;
       setPaneSessionId(pane.id, newSessionId, {
         provider: chatProvider || undefined,
         model: chatModel || undefined,
@@ -9885,6 +9911,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           useAppStore.getState().setPaneMessages(pane.id, []);
           lastPollCountRef.current = 0;
           pollSessionSidRef.current = requestSessionId;
+          freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
@@ -10522,6 +10549,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (created.ok && created.session_id) {
           const oldSessionId = requestSessionId;
           requestSessionId = created.session_id;
+          freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
 
           try {
@@ -12802,6 +12830,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
       });
       if (result.ok && result.session_id) {
+        migrateActiveComposerDraftToSession(result.session_id);
+        freshlyCreatedSessionRef.current = result.session_id;
         setPaneSessionId(pane.id, result.session_id, {
           provider: chatProvider || undefined,
           model: chatModel || undefined,
@@ -14172,6 +14202,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           <MessageQueuePanel
             messages={queuedMessages}
+            otherSessionCount={otherSessionQueuedCount}
+            persistenceFailed={pendingMessagesPersistenceFailed}
             onEdit={(id, newText) => editPendingMessage(paneId, id, newText)}
             onRemove={(id) => removePendingMessage(paneId, id)}
             onSendNow={sendQueuedMessageNow}
@@ -14563,7 +14595,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   });
                   const queue = queuedMessagesForSession(
                     useAppStore.getState().pendingMessages[paneId] ?? [],
-                    sid,
+                    queueSid,
                   );
 
                   if (streamActive) {

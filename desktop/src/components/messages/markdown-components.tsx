@@ -496,8 +496,8 @@ function ChatInlineCode({
         type="button"
         className={
           label != null
-            ? "cursor-pointer font-medium text-text-strong underline-offset-2 transition-colors duration-150 hover:underline"
-            : "cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 hover:underline"
+            ? "inline-block max-w-full cursor-pointer whitespace-normal break-all text-left align-baseline font-medium leading-relaxed text-text-strong underline-offset-2 transition-colors duration-150 [overflow-wrap:anywhere] hover:underline"
+            : "inline-block max-w-full cursor-pointer whitespace-normal break-all rounded bg-surface-card px-1.5 py-0.5 text-left align-baseline font-mono text-[0.85em] leading-relaxed text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 [overflow-wrap:anywhere] hover:underline"
         }
         title={text}
         onClick={(event) => {

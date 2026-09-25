@@ -270,3 +270,4 @@ def _looks_text_file(path: Path) -> bool:
         ".sh",
         ".sql",
     }
+
