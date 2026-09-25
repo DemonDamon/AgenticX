@@ -46,15 +46,20 @@ async def _wait_until(predicate, timeout: float = 8.0) -> None:
 
 
 @pytest.fixture()
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
     app = create_studio_app()
     return TestClient(app)
 
 
-def _seed_runs(tmp_path: Path) -> tuple[str, list[str]]:
+def _seed_runs(tmp_path: Path, client: TestClient) -> tuple[str, list[str]]:
     async def _run() -> tuple[str, list[str]]:
         owner_sid = "review-session-1"
+        # HC review routes require an actual persisted owner session.
+        owner = client.app.state.session_manager.create(session_id=owner_sid)
+        owner.studio_session.chat_history = [{"role": "user", "content": "Run review tasks"}]
+        assert client.app.state.session_manager.persist(owner_sid) is True
         manager = AgentTeamManager(
             llm_factory=lambda: _QuickTextLLM(),
             base_session=StudioSession(),
@@ -101,7 +106,7 @@ def _seed_runs(tmp_path: Path) -> tuple[str, list[str]]:
 
 def test_smoke_subagent_clusters_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    owner_sid, run_ids = _seed_runs(tmp_path)
+    owner_sid, run_ids = _seed_runs(tmp_path, client)
 
     resp = client.get(
         "/api/session/subagent-clusters",
@@ -128,7 +133,7 @@ def test_smoke_subagent_run_and_activity_pagination(
     client: TestClient,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    owner_sid, run_ids = _seed_runs(tmp_path)
+    owner_sid, run_ids = _seed_runs(tmp_path, client)
     run_id = run_ids[0]
 
     detail = client.get(
@@ -178,7 +183,7 @@ def test_smoke_subagent_artifact_preview_security(
     client: TestClient,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    owner_sid, run_ids = _seed_runs(tmp_path)
+    owner_sid, run_ids = _seed_runs(tmp_path, client)
     run_id = run_ids[0]
     store = SubAgentRunStore(owner_sid)
     record = store.get_run(run_id)
@@ -216,7 +221,7 @@ def test_smoke_subagent_review_cold_restart(
     client: TestClient,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    owner_sid, run_ids = _seed_runs(tmp_path)
+    owner_sid, run_ids = _seed_runs(tmp_path, client)
 
     # Simulate cold restart: new app instance, no in-memory team manager required.
     app = create_studio_app()
@@ -270,14 +275,20 @@ def test_smoke_subagent_terminal_record_rejects_stale_running_memory(
 
 
 def test_smoke_subagent_empty_session_clusters(client: TestClient) -> None:
+    empty_session = client.app.state.session_manager.create()
     resp = client.get(
         "/api/session/subagent-clusters",
-        params={"session_id": "no-such-session"},
+        params={"session_id": empty_session.session_id},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("ok") is True
     assert body.get("clusters") == []
+
+    missing = client.get(
+        "/api/session/subagent-clusters", params={"session_id": "no-such-session"}
+    )
+    assert missing.status_code == 404
 
 
 def _create_api_session(client: TestClient) -> str:

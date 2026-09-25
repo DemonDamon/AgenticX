@@ -1,15 +1,33 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../store";
-import { queuedMessagesForSession } from "./pending-message-queue";
+import {
+  countQueuedMessagesForOtherSessions,
+  parsePendingMessageQueues,
+  PENDING_MESSAGE_QUEUE_STORAGE_KEY,
+  queuedMessagesForSession,
+} from "./pending-message-queue";
+import { scopedKey } from "./backend-scope";
+
+class MemoryStorage {
+  private values = new Map<string, string>();
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  setItem(key: string, value: string) { this.values.set(key, String(value)); }
+  removeItem(key: string) { this.values.delete(key); }
+}
 
 describe("pending message queue session isolation", () => {
   const paneId = "pane-test";
 
   beforeEach(() => {
+    const localStorage = new MemoryStorage();
+    vi.stubGlobal("window", {
+      localStorage,
+      agenticxDesktop: { getBackendScopeSync: () => "local" },
+    } as unknown as Window);
     useAppStore.setState((state) => ({
       ...state,
+      pendingMessagesPersistenceFailed: false,
       pendingMessages: {
-        ...state.pendingMessages,
         [paneId]: [
           {
             id: "m1",
@@ -45,6 +63,20 @@ describe("pending message queue session isolation", () => {
     expect(removed?.id).toBe("m2");
     const remainingIds = (useAppStore.getState().pendingMessages[paneId] ?? []).map((m) => m.id);
     expect(remainingIds).toEqual(["m1", "m3"]);
+  });
+
+  it("shows only queued messages owned by the active session", () => {
+    const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+    expect(queuedMessagesForSession(queue, "sess-a").map((message) => message.id)).toEqual([
+      "m1",
+      "m3",
+    ]);
+    expect(queuedMessagesForSession(queue, "sess-b").map((message) => message.id)).toEqual([
+      "m2",
+    ]);
+    expect(queuedMessagesForSession(queue, "")).toEqual([]);
+    expect(countQueuedMessagesForOtherSessions(queue, "sess-a")).toBe(1);
+    expect(countQueuedMessagesForOtherSessions(queue, "")).toBe(3);
   });
 
   it("keeps queue unchanged when session id is empty", () => {
@@ -108,5 +140,46 @@ describe("pending message queue session isolation", () => {
 
     const rest = useAppStore.getState().pendingMessages[paneId] ?? [];
     expect(rest).toHaveLength(0);
+  });
+
+  it("persists queued user text so a restart can restore it to the same pane", () => {
+    useAppStore.getState().clearPendingMessages(paneId);
+    const message = {
+      id: "persisted-1",
+      text: "生成pdf",
+      sessionId: "sess-a",
+      attachments: [],
+      contextFiles: [],
+      timestamp: Date.now(),
+    };
+    useAppStore.getState().enqueuePaneMessage(paneId, message);
+
+    const raw = window.localStorage.getItem(scopedKey(PENDING_MESSAGE_QUEUE_STORAGE_KEY));
+    expect(raw).toBeTruthy();
+    expect(parsePendingMessageQueues(raw ?? "")[paneId]).toEqual([message]);
+    expect(useAppStore.getState().pendingMessagesPersistenceFailed).toBe(false);
+  });
+
+  it("updates persisted queues when a message is edited or removed", () => {
+    useAppStore.getState().clearPendingMessages(paneId);
+    const message = {
+      id: "persisted-2",
+      text: "old text",
+      sessionId: "sess-a",
+      attachments: [],
+      contextFiles: [],
+      timestamp: Date.now(),
+    };
+    useAppStore.getState().enqueuePaneMessage(paneId, message);
+    useAppStore.getState().editPendingMessage(paneId, message.id, "new text");
+
+    const key = scopedKey(PENDING_MESSAGE_QUEUE_STORAGE_KEY);
+    let restored = parsePendingMessageQueues(window.localStorage.getItem(key))[paneId];
+    expect(restored).toHaveLength(1);
+    expect(restored?.[0]?.text).toBe("new text");
+
+    useAppStore.getState().removePendingMessage(paneId, message.id);
+    restored = parsePendingMessageQueues(window.localStorage.getItem(key))[paneId];
+    expect(restored).toBeUndefined();
   });
 });

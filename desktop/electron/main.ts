@@ -2786,6 +2786,27 @@ function userManagedVenvPython(): string {
   return path.join(userManagedVenvBinDir(), exe);
 }
 
+function pythonForVenvDir(venvDir: string): string {
+  const sub = process.platform === "win32" ? "Scripts" : "bin";
+  const exe = process.platform === "win32" ? "python.exe" : "python";
+  return path.join(venvDir, sub, exe);
+}
+
+/**
+ * Development checkouts own their Python environment. Never repair one source
+ * tree by overwriting the shared end-user venv, otherwise another checkout's
+ * editable install can become the Desktop backend.
+ */
+function backendRepairVenvDir(): string {
+  if (!app.isPackaged) {
+    const repoBinDir = repoAdjacentVenvBinDirs()[0];
+    if (repoBinDir) return path.dirname(repoBinDir);
+    const sourceRoot = findAgenticxSourceRoot();
+    if (sourceRoot) return path.join(sourceRoot, ".venv");
+  }
+  return path.join(os.homedir(), ".agenticx", ".venv");
+}
+
 /** Find an executable by candidate names across the augmented PATH dirs. */
 function findExecOnPath(augmentedPath: string, names: string[]): string | null {
   const dirs = augmentedPath.split(pathListSeparator());
@@ -2805,12 +2826,10 @@ function findExecOnPath(augmentedPath: string, names: string[]): string | null {
 
 /**
  * Resolve the Python interpreter the backend currently uses, for dependency
- * diagnosis. Prefers the managed venv, then python next to resolved agx,
- * then python on PATH.
+ * diagnosis. Follow the resolved agx executable first so a development
+ * checkout cannot diagnose a different checkout's shared managed venv.
  */
 function resolveBackendPython(augmentedPath: string): string | null {
-  const venvPy = userManagedVenvPython();
-  if (fs.existsSync(venvPy)) return venvPy;
   const agx = findAgxBinaryOnPath(augmentedPath);
   if (agx) {
     const dir = path.dirname(agx);
@@ -2820,16 +2839,18 @@ function resolveBackendPython(augmentedPath: string): string | null {
       if (fs.existsSync(candidate)) return candidate;
     }
   }
+  const venvPy = userManagedVenvPython();
+  if (fs.existsSync(venvPy)) return venvPy;
   return findExecOnPath(augmentedPath, process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"]);
 }
 
 /**
- * Find a base Python (>=3.10) to bootstrap the managed venv. Skips the managed
- * venv itself to avoid a chicken-and-egg dependency.
+ * Find a base Python (>=3.10) to bootstrap a runtime venv. Skips the target
+ * and other internal venvs to avoid a chicken-and-egg dependency.
  */
-function findBasePython(augmentedPath: string): string | null {
-  const venvDir = userManagedVenvBinDir();
-  const dirs = augmentedPath.split(pathListSeparator()).filter((d) => path.normalize(d) !== path.normalize(venvDir));
+function findBasePython(augmentedPath: string, excludedVenvBinDirs: string[] = [userManagedVenvBinDir()]): string | null {
+  const excluded = new Set(excludedVenvBinDirs.map((dir) => path.normalize(dir)));
+  const dirs = augmentedPath.split(pathListSeparator()).filter((d) => !excluded.has(path.normalize(d)));
   const names = process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"];
   for (const dir of dirs) {
     for (const name of names) {
@@ -2881,11 +2902,14 @@ function buildAugmentedPath(): string {
   const basePath =
     process.env.PATH ?? (process.platform === "win32" ? "" : "/usr/bin:/bin");
 
-  // User-managed venv (~/.agenticx/.venv) from「一键修复」must win over repo-adjacent
-  // .venv in dev trees; otherwise repair installs PDF/KB deps but agx serve still runs
-  // from an incomplete project venv.
+  // Source checkouts must run their own repo-local backend. The shared managed
+  // venv is an end-user fallback and may contain an editable install belonging
+  // to another checkout (for example a parallel experimental repository).
   const userVenvDirs = existingUserManagedVenvBinDirs();
   const repoVenvDirs = repoAdjacentVenvBinDirs();
+  const preferredVenvDirs = app.isPackaged
+    ? [...userVenvDirs, ...repoVenvDirs]
+    : [...repoVenvDirs, ...userVenvDirs];
   let extraPaths: string[];
   let trailingPaths: string[] = [];
   if (process.platform === "win32") {
@@ -2899,8 +2923,7 @@ function buildAugmentedPath(): string {
       ? pyWinFolders.map((folder) => path.join(appDataRoaming, "Python", folder, "Scripts"))
       : [];
     extraPaths = [
-      ...userVenvDirs,
-      ...repoVenvDirs,
+      ...preferredVenvDirs,
       ...programsPythonScripts,
       ...userSiteScripts,
       path.join(home, "miniconda3", "Scripts"),
@@ -2918,8 +2941,7 @@ function buildAugmentedPath(): string {
       (v) => `${home}/Library/Python/${v}/bin`
     );
     extraPaths = [
-      ...userVenvDirs,
-      ...repoVenvDirs,
+      ...preferredVenvDirs,
       ...pyUserBins,
       ...nvmNodeBinDirs(home),
       "/opt/miniconda3/bin",
@@ -8603,8 +8625,9 @@ function registerIpc(): void {
 
   ipcMain.handle("repair-backend-deps", async (event) => {
     const augmentedPath = buildAugmentedPath();
-    const venvDir = path.join(os.homedir(), ".agenticx", ".venv");
-    const venvPy = userManagedVenvPython();
+    const venvDir = backendRepairVenvDir();
+    const venvPy = pythonForVenvDir(venvDir);
+    const venvBinDir = path.dirname(venvPy);
     const send = (phase: string, line?: string, pct?: number) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send("backend-deps-progress", { phase, line, pct });
@@ -8622,7 +8645,7 @@ function registerIpc(): void {
 
     try {
       if (!fs.existsSync(venvPy)) {
-        const basePy = findBasePython(augmentedPath);
+        const basePy = findBasePython(augmentedPath, [userManagedVenvBinDir(), venvBinDir]);
         if (!basePy) {
           send("error", "未找到 Python 3.10+，无法创建虚拟环境。请先安装 Python。");
           return { ok: false, error: "no base python found" };

@@ -70,7 +70,13 @@ export function ClarificationCard({
   }, [prompt.decisions, prompt.context, opts]);
   const groupedMode = decisions.length > 0;
   const hasMultipleDecision = decisions.some((d) => d.selectionMode === "multiple");
-  const canFree = prompt.allowFreeText !== false;
+  // `request_clarification` intentionally permits prompt-only, open-ended
+  // questions. In that shape the text box is the primary answer surface, not
+  // an optional alternative hidden behind a checkbox. Also keep malformed
+  // persisted payloads answerable when they provide neither choices nor a
+  // free-text flag.
+  const openEnded = !groupedMode && opts.length === 0;
+  const canFree = prompt.allowFreeText !== false || openEnded;
 
   const [selectedFlat, setSelectedFlat] = useState<Set<string>>(() => new Set());
   const [selectedByDecision, setSelectedByDecision] = useState<Record<string, string[]>>({});
@@ -102,7 +108,7 @@ export function ClarificationCard({
     if (groupedMode) {
       return decisions.every((d) => decisionAnswered(d));
     }
-    const hasCustom = canFree && customOpen && customText.trim().length > 0;
+    const hasCustom = canFree && (openEnded || customOpen) && customText.trim().length > 0;
     return selectedFlat.size > 0 || hasCustom;
   }, [
     answered,
@@ -112,6 +118,7 @@ export function ClarificationCard({
     customByDecision,
     decisions,
     groupedMode,
+    openEnded,
     selectedByDecision,
     selectedFlat.size,
   ]);
@@ -163,8 +170,8 @@ export function ClarificationCard({
       return { answerText: "", selectedOptions };
     }
     return {
-      answerText: customOpen ? customText.trim() : "",
-      selectedOptions: Array.from(selectedFlat),
+      answerText: openEnded || customOpen ? customText.trim() : "",
+      selectedOptions: openEnded ? [] : Array.from(selectedFlat),
     };
   };
 
@@ -465,29 +472,39 @@ export function ClarificationCard({
         {/* Flat mode: one global custom reply */}
         {canFree && !groupedMode && (
           <div className="mt-2">
-            <label className="flex cursor-pointer items-center gap-2 text-[10px] text-text-faint select-none">
-              <input
-                type="checkbox"
-                checked={customOpen}
-                onChange={(e) => {
-                  const v = e.target.checked;
-                  setCustomOpen(v);
-                  if (!v) setCustomText("");
-                  if (v) setSelectedFlat(new Set());
-                  setError(null);
-                }}
-                className="h-3.5 w-3.5 accent-[var(--ui-btn-primary-bg)]"
-              />
-              {t("clarify.customReply")}
-            </label>
-            {customOpen && (
+{openEnded ? (
+              <label
+                htmlFor={`clarify-open-answer-${prompt.requestId}`}
+                className="block text-[10px] text-text-faint"
+              >
+                {t("clarify.openAnswer")}
+              </label>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-2 text-[10px] text-text-faint select-none">
+                <input
+                  type="checkbox"
+                  checked={customOpen}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setCustomOpen(v);
+                    if (!v) setCustomText("");
+                    if (v) setSelectedFlat(new Set());
+                    setError(null);
+                  }}
+                  className="h-3.5 w-3.5 accent-[var(--ui-btn-primary-bg)]"
+                />
+                {t("clarify.customReply")}
+              </label>
+            )}
+            {(openEnded || customOpen) && (
               <textarea
+                id={openEnded ? `clarify-open-answer-${prompt.requestId}` : undefined}
                 value={customText}
                 onChange={(e) => {
                   setCustomText(e.target.value);
                   setError(null);
                 }}
-                placeholder={t("clarify.customPlaceholderShort")}
+                placeholder={openEnded ? t("clarify.openAnswerPlaceholder") : t("clarify.customPlaceholderShort")}
                 rows={3}
                 className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40"
               />
@@ -522,7 +539,9 @@ export function ClarificationCard({
             ? hasMultipleDecision
               ? t("clarify.submitHintGroupedMulti")
               : t("clarify.submitHintGrouped")
-            : t("clarify.submitHintFlat")}
+            : openEnded
+              ? t("clarify.submitHintOpenEnded")
+              : t("clarify.submitHintFlat")}
         </div>
         <div className="flex items-center gap-2">
           <button

@@ -4277,6 +4277,11 @@ async def _request_clarification(
     """
     options = list(options or [])
     decisions = list(decisions or [])
+    # A clarification without any selectable choice is necessarily open-ended.
+    # Never emit an impossible prompt that offers neither choices nor a text
+    # answer surface; desktop also mirrors this invariant for persisted rows.
+    if not options and not decisions:
+        allow_free_text = True
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
