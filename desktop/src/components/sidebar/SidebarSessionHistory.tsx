@@ -483,22 +483,23 @@ export function SidebarSessionHistory() {
 
   const visibleLoopReviewIds = useMemo(() => {
     const rows: SidebarSessionRow[] = [];
-    if (!collapse.groups) rows.push(...visibleGroupRows);
-    if (!collapse.projects) rows.push(...visibleProjectRows);
-    if (!collapse.tasks) {
-      if (!collapse.pinned) rows.push(...taskBuckets.pinned);
-      rows.push(...visibleTaskChrono);
-    }
+    if (!collapse.wechat && wechatRow) rows.push(wechatRow);
+    if (!collapse.feishu && feishuRow) rows.push(feishuRow);
+    if (!collapse.pinned) rows.push(...flattenSidebarHistoryNodes(buckets.pinned));
+    if (!collapse.today) rows.push(...flattenSidebarHistoryNodes(todayVisible));
+    if (!collapse.earlier) rows.push(...flattenSidebarHistoryNodes(earlierVisible));
     return rows.map((row) => row.session_id);
   }, [
-    collapse.groups,
-    collapse.projects,
-    collapse.tasks,
+    collapse.wechat,
+    collapse.feishu,
     collapse.pinned,
-    taskBuckets.pinned,
-    visibleGroupRows,
-    visibleProjectRows,
-    visibleTaskChrono,
+    collapse.today,
+    collapse.earlier,
+    wechatRow,
+    feishuRow,
+    buckets.pinned,
+    todayVisible,
+    earlierVisible,
   ]);
 
   useEffect(() => {

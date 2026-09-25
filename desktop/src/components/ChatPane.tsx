@@ -264,7 +264,6 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
-import { queuedMessagesForSession } from "../utils/pending-message-queue";
 import {
   chatListFollowRows,
   shouldApplyScrollPinFromEvent,
