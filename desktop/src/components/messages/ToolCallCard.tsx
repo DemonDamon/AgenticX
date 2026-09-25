@@ -189,7 +189,7 @@ function pickToolIcon(name: string) {
 
 function iconTone(st: Message["toolStatus"]): string {
   if (st === "done") return "text-emerald-400";
-  if (st === "error") return "text-rose-400";
+  if (st === "error") return "text-text-muted";
   if (st === "cancelled") return "text-text-faint";
   if (st === "running" || st === "pending") return "text-cyan-400";
   return "text-text-subtle";
@@ -462,7 +462,7 @@ export function ToolCallCard({
   // show_widget with truncated/broken content → amber warning inline
   if (toolName === "show_widget" && /\[micro-compact tool=show_widget/i.test(message.content)) {
     return (
-      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {t("tool.chartTruncated")}
       </div>
     );
@@ -470,7 +470,7 @@ export function ToolCallCard({
 
   if (toolName === "show_widget" && isBrokenStockChartAttempt(message.content) && !widgetPayload) {
     return (
-      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {stockChartDegradedMessage()}
       </div>
     );
