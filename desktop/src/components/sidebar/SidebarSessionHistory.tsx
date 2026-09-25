@@ -181,6 +181,8 @@ export function SidebarSessionHistory() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const fetchedLoopReviewRef = useRef<Set<string>>(new Set());
+  const pendingLoopReviewRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; top: number } | null>(null);
 
   const avatarNameById = useMemo(() => {
@@ -478,6 +480,62 @@ export function SidebarSessionHistory() {
       cancelled = true;
     };
   }, [visibleLoopReviewKey]);
+
+  const visibleLoopReviewIds = useMemo(() => {
+    const rows: SidebarSessionRow[] = [];
+    if (!collapse.groups) rows.push(...visibleGroupRows);
+    if (!collapse.projects) rows.push(...visibleProjectRows);
+    if (!collapse.tasks) {
+      if (!collapse.pinned) rows.push(...taskBuckets.pinned);
+      rows.push(...visibleTaskChrono);
+    }
+    return rows.map((row) => row.session_id);
+  }, [
+    collapse.groups,
+    collapse.projects,
+    collapse.tasks,
+    collapse.pinned,
+    taskBuckets.pinned,
+    visibleGroupRows,
+    visibleProjectRows,
+    visibleTaskChrono,
+  ]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const targets = sidebarLoopReviewFetchIds(
+      visibleLoopReviewIds,
+      new Set([...fetchedLoopReviewRef.current, ...pendingLoopReviewRef.current]),
+    );
+    if (targets.length === 0) return;
+    for (const id of targets) pendingLoopReviewRef.current.add(id);
+    void Promise.allSettled(
+      targets.map(async (id) => {
+        const r = await window.agenticxDesktop.getSessionLoopReview(id);
+        if (!r.ok) throw new Error("Loop review request failed");
+        return r.review && r.review.observations_available !== false
+          ? { id, score: r.review.overall }
+          : null;
+      }),
+    ).then((results) => {
+      const next: Record<string, number> = {};
+      for (const [index, res] of results.entries()) {
+        const id = targets[index];
+        pendingLoopReviewRef.current.delete(id);
+        if (res.status === "fulfilled") fetchedLoopReviewRef.current.add(id);
+        if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
+      }
+      if (!mountedRef.current) return;
+      if (Object.keys(next).length === 0) return;
+      setLoopReviewScores((prev) => ({ ...prev, ...next }));
+    });
+  }, [visibleLoopReviewIds]);
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();

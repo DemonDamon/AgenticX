@@ -200,12 +200,15 @@ describe("sidebar-session-history utils", () => {
   });
 
   it("only fetches loop-review for visible ids not already fetched", () => {
-    const already = new Set(["a", "c"]);
+    // The component passes fetched + pending ids together, so a slow request
+    // is not duplicated when the visible page changes before it settles.
+    const already = new Set(["a", "c", "pending"]);
     expect(sidebarLoopReviewFetchIds(["a", "b", "b", "", "c", "d"], already)).toEqual([
       "b",
       "d",
     ]);
     expect(sidebarLoopReviewFetchIds(["a", "c"], already)).toEqual([]);
+    expect(sidebarLoopReviewFetchIds(["a", "pending", "c"], already)).toEqual([]);
   });
 
   it("nests continue-from children under the parent session", () => {
