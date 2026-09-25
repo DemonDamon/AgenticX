@@ -165,7 +165,6 @@ export async function fetchConversationHits(trimmed: string): Promise<{
     if (!sid || blocked.has(sid)) continue;
     const row = rowsById.get(sid);
     const avatarId = row?.avatar_id ?? null;
-    if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;
     const rawName = String(row?.session_name || "").trim();
     const avatarName =
       String(row?.avatar_name || "").trim() ||
