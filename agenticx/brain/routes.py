@@ -16,10 +16,12 @@ from agenticx.brain.runtime_docs import DocsBrainRuntime
 from agenticx.brain.search import search_code_brains, search_docs_brains
 from agenticx.brain.types import BrainScope, BrainType
 from agenticx.brain.wiki_compiler import WikiCompiler
+from agenticx.brain.wiki_graph import wiki_graph_payload
 from agenticx.brain.wiki_ops import (
     brain_storage_root,
     list_wiki_pages,
     maybe_compile_wiki_after_ingest,
+    seed_sample_wiki,
     purge_wiki_source,
     read_wiki_page,
     run_brain_maintenance,
@@ -421,6 +423,18 @@ def register_brain_routes(app: FastAPI) -> None:
         rt = _require_docs_brain(brain_id)
         pages = await asyncio.to_thread(list_wiki_pages, brain_storage_root(rt.brain))
         return {"ok": True, "pages": pages}
+
+    @app.get("/api/brains/{brain_id}/wiki/graph")
+    async def brain_wiki_graph(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        payload = await asyncio.to_thread(wiki_graph_payload, brain_storage_root(rt.brain))
+        return {"ok": True, **payload}
+
+    @app.post("/api/brains/{brain_id}/wiki/sample")
+    async def brain_wiki_sample(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        written = await asyncio.to_thread(seed_sample_wiki, brain_storage_root(rt.brain))
+        return {"ok": True, "written": written}
 
     @app.get("/api/brains/{brain_id}/wiki/page")
     async def brain_wiki_page(brain_id: str, path: str) -> Dict[str, Any]:

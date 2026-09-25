@@ -145,6 +145,90 @@ def maybe_compile_wiki_after_ingest(docs_rt, job) -> None:
         pass
 
 
+_SAMPLE_PAGES = {
+    "wiki/index.md": """---
+title: 员工手册
+type: summary
+sources:
+  - handbook.md
+---
+
+# 员工手册
+
+这份示例 Wiki 用来验收浏览、搜索、关联和关系图。
+
+- 年假规则见 [[concepts/annual-leave]]
+- 报销规则见 [[concepts/expense]]
+- 公司主体见 [[entities/company]]
+""",
+    "wiki/concepts/annual-leave.md": """---
+title: 年假
+type: concept
+sources:
+  - handbook.md
+---
+
+# 年假
+
+按司龄发放的带薪休假。申请流程见 [[concepts/leave-requests]]。所属组织是 [[entities/company]]。
+
+| 司龄 | 年假 |
+| --- | --- |
+| 未满 1 年 | 5 天 |
+| 1–10 年 | 10 天 |
+| 10 年以上 | 15 天 |
+""",
+    "wiki/concepts/leave-requests.md": """---
+title: 请假申请
+type: synthesis
+sources:
+  - handbook.md
+---
+
+# 请假申请
+
+3 天以内由直属经理审批，3–7 天由部门负责人审批，超过 7 天通知人力资源。规则来自 [[concepts/annual-leave]]。
+""",
+    "wiki/concepts/expense.md": """---
+title: 费用报销
+type: concept
+sources:
+  - handbook.md
+---
+
+# 费用报销
+
+差旅、培训和办公费用在发生后 30 天内提交。逾期需要经理和财务负责人补签。付款主体是 [[entities/company]]。
+""",
+    "wiki/entities/company.md": """---
+title: 公司
+type: entity
+sources:
+  - handbook.md
+---
+
+# 公司
+
+示例里的雇主主体。年假见 [[concepts/annual-leave]]，报销见 [[concepts/expense]]。
+""",
+}
+
+
+def seed_sample_wiki(brain_storage: Path) -> List[str]:
+    """Write a small linked wiki so browse, search, and graph can be checked."""
+    written: List[str] = []
+    for rel, body in _SAMPLE_PAGES.items():
+        target = (brain_storage / rel).resolve()
+        target.relative_to(brain_storage.resolve())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body.strip() + "\n", encoding="utf-8")
+        written.append(rel)
+    purpose = brain_storage / "purpose.md"
+    if not purpose.is_file() or not purpose.read_text(encoding="utf-8").strip():
+        purpose.write_text("# 知识库目标\n\n把员工手册编译成可浏览的概念、实体和来源页。\n", encoding="utf-8")
+    return written
+
+
 def run_brain_maintenance(docs_rt) -> Dict[str, Any]:
     """Lightweight maintenance: orphan wiki report + broken wikilink lint."""
     storage = brain_storage_root(docs_rt.brain)

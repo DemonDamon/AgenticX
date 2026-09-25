@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
-import { AlarmClock, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
+import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
@@ -30,32 +30,43 @@ const NAV_ITEM_IDLE = "text-text-muted hover:bg-surface-hover hover:text-text-st
 const NAV_ITEM_ACTIVE =
   "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]";
 
+type SidebarView = Exclude<MainView, "chat">;
+
 type NavEntry =
   | { kind: "action"; id: "new-task"; label: string; icon: LucideIcon }
-  | { kind: "view"; id: MainView; label: string; icon: LucideIcon };
+  | { kind: "view"; id: SidebarView; label: string; icon: LucideIcon };
 
-const NAV_ENTRY_DEFS: Array<Omit<NavEntry, "label">> = [
-  { kind: "action", id: "new-task", icon: MessageSquarePlus },
-  { kind: "view", id: "avatars", icon: Bot },
-  { kind: "view", id: "groups", icon: Waypoints },
-  { kind: "view", id: "collab", icon: Users },
-  { kind: "view", id: "automation", icon: AlarmClock },
+const NAV_ENTRY_DEFS = [
+  { kind: "action" as const, id: "new-task" as const, icon: MessageSquarePlus },
+  { kind: "view" as const, id: "avatars" as const, icon: Bot },
+  { kind: "view" as const, id: "groups" as const, icon: Waypoints },
+  { kind: "view" as const, id: "collab" as const, icon: Users },
+  { kind: "view" as const, id: "automation" as const, icon: AlarmClock },
+  { kind: "view" as const, id: "wiki" as const, icon: BookOpen },
 ];
 
-const NAV_LABEL_KEY: Record<NavEntry["id"], string> = {
+const NAV_LABEL_KEY: Record<(typeof NAV_ENTRY_DEFS)[number]["id"], string> = {
   "new-task": "nav.newTask",
   avatars: "nav.avatars",
   groups: "nav.groups",
   collab: "nav.collab",
   automation: "nav.automation",
+  wiki: "nav.wiki",
 };
 
 export function AvatarSidebar({ onToggleSidebar }: Props) {
   const { t } = useTranslation("sidebar");
   const { t: tCommon } = useTranslation("common");
   const navEntries = useMemo<NavEntry[]>(
-    () => NAV_ENTRY_DEFS.map((entry) => ({ ...entry, label: t(NAV_LABEL_KEY[entry.id]) })),
-    [t]
+    () =>
+      NAV_ENTRY_DEFS.map((entry): NavEntry => {
+        const label = t(NAV_LABEL_KEY[entry.id]);
+        if (entry.kind === "action") {
+          return { kind: "action", id: entry.id, icon: entry.icon, label };
+        }
+        return { kind: "view", id: entry.id, icon: entry.icon, label };
+      }),
+    [t],
   );
   const setAvatars = useAppStore((s) => s.setAvatars);
   const setGroups = useAppStore((s) => s.setGroups);

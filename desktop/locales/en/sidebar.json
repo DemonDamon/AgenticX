@@ -5,7 +5,33 @@
     "avatars": "Experts",
     "groups": "Expert groups",
     "collab": "Collaboration",
-    "automation": "Scheduled tasks"
+    "automation": "Scheduled tasks",
+    "wiki": "Wiki"
+  },
+  "wiki": {
+    "search": "Search pages",
+    "pages": "Pages",
+    "graph": "Graph",
+    "purpose": "Knowledge intent",
+    "savePurpose": "Save intent",
+    "loading": "Loading",
+    "emptyBrains": "No document library yet. Create one and ingest materials first.",
+    "emptyPages": "No pages yet. Create a sample, or turn on Wiki compile in Knowledge settings so pages appear after ingest.",
+    "howTo": "Build: create a sample wiki to get leave, expense, and company pages now, or turn on Wiki compile in Knowledge settings so ingest writes pages from the intent. Manage: use the tree and search, switch to the graph, and edit the knowledge intent from the top bar. Follow links between pages.",
+    "createSample": "Create sample wiki",
+    "openKnowledge": "Open knowledge settings",
+    "linked": "Linked pages",
+    "sources": "Source documents",
+    "openPage": "Open page",
+    "noLinks": "This page does not link to other pages yet.",
+    "type": {
+      "summary": "Summary",
+      "entity": "Entity",
+      "concept": "Concept",
+      "synthesis": "Synthesis",
+      "comparison": "Comparison",
+      "page": "Page"
+    }
   },
   "collapseSidebar": "Collapse sidebar",
   "expandSidebar": "Expand sidebar",

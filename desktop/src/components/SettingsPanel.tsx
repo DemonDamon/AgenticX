@@ -43,7 +43,6 @@ import {
   ExternalLink,
   FolderOpen,
   Library,
-  BookOpen,
   Mic,
   Network,
   Database,
@@ -116,7 +115,6 @@ import {
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
-import { WikiNavPanel } from "./settings/knowledge/WikiNavPanel";
 import { GatewayAdaptersPanel } from "./settings/server/GatewayAdaptersPanel";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
@@ -1057,7 +1055,6 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "commands", icon: CommandPromptIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", icon: Library },
-  { id: "wiki", icon: BookOpen },
   { id: "data_sources", icon: Database },
   { id: "memory", icon: Network },
   { id: "automation", icon: AutomationTaskIcon },
@@ -8959,7 +8956,6 @@ export function SettingsPanel({
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
             {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
-            {tab === "wiki" && <WikiNavPanel />}
 
             {tab === "data_sources" && <DataSourcesSettings />}
 

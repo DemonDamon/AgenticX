@@ -182,7 +182,7 @@ export type GroupChat = {
 };
 
 /** Main-area view router state for button-style sidebar navigation. */
-export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation";
+export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation" | "wiki";
 
 /** Sidebar「+」快捷创建：收件人栏意图。不落盘。 */
 export type QuickComposeIntent = "expert" | "group";
@@ -671,7 +671,7 @@ type AppState = {
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
-  /** Which content the right main area shows (chat / gallery / projects / automation). */
+  /** Which content the right main area shows (chat / gallery / projects / automation / wiki). */
   mainView: MainView;
   setMainView: (view: MainView) => void;
   /**

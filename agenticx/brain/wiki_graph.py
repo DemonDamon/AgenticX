@@ -118,6 +118,27 @@ def build_wiki_graph(brain_kb_dir: Path) -> WikiGraph:
     return graph
 
 
+def wiki_graph_payload(brain_kb_dir: Path) -> Dict[str, Any]:
+    """Serialize compiled wiki pages and wikilink edges for the browse UI."""
+    graph = build_wiki_graph(brain_kb_dir)
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, str]] = []
+    for node_id in sorted(graph.nodes):
+        node = graph.nodes[node_id]
+        nodes.append(
+            {
+                "id": node.node_id,
+                "title": node.title,
+                "type": node.page_type,
+                "path": node.path,
+                "sources": list(node.sources),
+            }
+        )
+        for target in sorted(node.out_links):
+            edges.append({"source": node.node_id, "target": target})
+    return {"nodes": nodes, "edges": edges}
+
+
 def _type_affinity(a: str, b: str) -> float:
     if a == b:
         return 0.8

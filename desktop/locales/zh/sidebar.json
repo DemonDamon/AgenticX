@@ -5,7 +5,33 @@
     "avatars": "数字专家",
     "groups": "专家群聊",
     "collab": "多人协作",
-    "automation": "定时任务"
+    "automation": "定时任务",
+    "wiki": "Wiki"
+  },
+  "wiki": {
+    "search": "搜索页面",
+    "pages": "页面",
+    "graph": "关系图",
+    "purpose": "知识库意图",
+    "savePurpose": "保存意图",
+    "loading": "加载中",
+    "emptyBrains": "还没有文档知识库。先创建文档库并完成资料入库。",
+    "emptyPages": "还没有页面。可以先创建一份示例，或打开知识库设置，启用「Wiki 编译」后随资料入库自动生成。",
+    "howTo": "构建：点「创建示例 Wiki」立即得到可浏览的年假、报销和公司页面；或在知识库设置打开「Wiki 编译」，资料入库后按意图自动生成。管理：左侧目录和搜索浏览页面，顶栏切换关系图，右上角编辑知识库意图。页面之间用链接跳转。",
+    "createSample": "创建示例 Wiki",
+    "openKnowledge": "打开知识库设置",
+    "linked": "关联页面",
+    "sources": "来源资料",
+    "openPage": "打开页面",
+    "noLinks": "这一页还没有链到其他页面。",
+    "type": {
+      "summary": "摘要",
+      "entity": "实体",
+      "concept": "概念",
+      "synthesis": "综合",
+      "comparison": "对照",
+      "page": "页面"
+    }
   },
   "collapseSidebar": "收起侧栏",
   "expandSidebar": "展开侧栏",
