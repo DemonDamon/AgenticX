@@ -4,6 +4,7 @@ import { isSettingsFocus, isSettingsTab } from "./settings-tab";
 import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
+import { loadPendingMessageQueues, savePendingMessageQueues } from "./utils/pending-message-queue";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { COMPOSE_PREVIEW_PANE_ID, isComposePreviewPane } from "./utils/compose-preview";
 import {
@@ -710,6 +711,8 @@ type AppState = {
   ) => void;
   /** Per-pane queued user messages (sent automatically after current stream ends). */
   pendingMessages: Record<string, QueuedMessage[]>;
+  /** True when queued follow-ups could not be saved for recovery after restart. */
+  pendingMessagesPersistenceFailed: boolean;
   enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;
   dequeuePaneMessage: (paneId: string) => QueuedMessage | undefined;
   dequeuePaneMessageForSession: (paneId: string, sessionId: string) => QueuedMessage | undefined;
@@ -1869,24 +1872,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
-  pendingMessages: {},
+  pendingMessages: loadPendingMessageQueues(),
+  pendingMessagesPersistenceFailed: false,
   enqueuePaneMessage: (paneId, msg) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: [...(state.pendingMessages[paneId] ?? []), msg],
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   dequeuePaneMessage: (paneId) => {
     const queue = get().pendingMessages[paneId];
     if (!queue?.length) return undefined;
     const first = queue[0];
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).slice(1),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return first;
   },
   dequeuePaneMessageForSession: (paneId, sessionId) => {
@@ -1896,49 +1910,74 @@ export const useAppStore = create<AppState>((set, get) => ({
     const idx = queue.findIndex((m) => String(m.sessionId ?? "").trim() === sid);
     if (idx < 0) return undefined;
     const item = queue[idx];
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((_, i) => i !== idx),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return item;
   },
   takePendingMessage: (paneId, msgId) => {
     const queue = get().pendingMessages[paneId] ?? [];
     const item = queue.find((m) => m.id === msgId);
     if (!item) return undefined;
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return item;
   },
   removePendingMessage: (paneId, msgId) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   editPendingMessage: (paneId, msgId, newText) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).map((m) =>
           m.id === msgId ? { ...m, text: newText } : m
         ),
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   clearPendingMessages: (paneId) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: [],
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
     set((state) => {

@@ -751,6 +751,11 @@ class ContextCompactor:
         )
         memory = self._extract_session_memory(to_compact)
 
+        # The compacted prefix is not the whole active tail. A newer user turn
+        # can still be in ``retained``; using only ``to_compact`` would keep an
+        # older pending marker or miss the latest unanswered question entirely.
+        memory["pending_user_question"] = self._extract_pending_user_question(working)
+
         # FR-6: Extract pending user question (hard-coded at top of content)
         pending_question = memory.get("pending_user_question", "")
 

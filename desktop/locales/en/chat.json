@@ -896,7 +896,9 @@
     "doubleEnterHint": "Press Enter again to send now",
     "attachments": "{{count}} attachments",
     "next": "Next",
-    "sendNowInterrupt": "Send now (stop current generation)"
+    "sendNowInterrupt": "Send now (stop current generation)",
+    "otherSession": "{{count}} queued message(s) are saved in other conversations. Switch back to the original conversation to send them; they will not be sent to the current one.",
+    "persistenceFailed": "This device failed to save the queued messages. Send or copy them before exiting the app."
   },
   "skillPatch": {
     "strategy": "Strategy",

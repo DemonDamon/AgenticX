@@ -160,6 +160,63 @@ class TestCompactedMessageContent:
         assert "[user-pending-question] Unanswered follow-up" in content
         assert pending_q == "Unanswered follow-up"
 
+    @pytest.mark.asyncio
+    async def test_pending_question_scans_retained_tail_to_clear_answered_marker(self, monkeypatch):
+        """A user question answered in the retained tail must clear an older pending marker."""
+        c = ContextCompactor(_MockLLM(), threshold_messages=8, retain_recent_messages=4)
+        messages = [
+            {"role": "user", "content": "Old question"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "search"}}]},
+            {"role": "tool", "name": "search", "content": "Old result"},
+            {"role": "assistant", "content": "Old answer"},
+            {"role": "user", "content": "Latest question"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "search"}}]},
+            {"role": "tool", "name": "search", "content": "Latest result"},
+            {"role": "assistant", "content": "Latest answer"},
+        ]
+        monkeypatch.setattr(
+            c,
+            "_split_for_compaction",
+            lambda items, **_kwargs: (list(items[:3]), list(items[3:])),
+        )
+
+        compacted, did_compact, _summary, _count, pending_q = await c.maybe_compact(
+            messages, force=True
+        )
+
+        assert did_compact is True
+        assert pending_q == ""
+        assert "[user-pending-question]" not in compacted[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_pending_question_uses_newest_unanswered_user_in_retained_tail(self, monkeypatch):
+        """A newer unanswered question in retained history supersedes an older one."""
+        c = ContextCompactor(_MockLLM(), threshold_messages=8, retain_recent_messages=4)
+        messages = [
+            {"role": "user", "content": "Old question"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "search"}}]},
+            {"role": "tool", "name": "search", "content": "Old result"},
+            {"role": "assistant", "content": "Old answer"},
+            {"role": "user", "content": "Newest unanswered question"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "search"}}]},
+            {"role": "tool", "name": "search", "content": "Still working"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "read_file"}}]},
+        ]
+        monkeypatch.setattr(
+            c,
+            "_split_for_compaction",
+            lambda items, **_kwargs: (list(items[:3]), list(items[3:])),
+        )
+
+        compacted, did_compact, _summary, _count, pending_q = await c.maybe_compact(
+            messages, force=True
+        )
+
+        assert did_compact is True
+        assert pending_q == "Newest unanswered question"
+        assert "[user-pending-question] Newest unanswered question" in compacted[0]["content"]
+        assert "[user-pending-question] Old question" not in compacted[0]["content"]
+
 
 class TestCompactionPromptPrioritization:
     """Test suite for compaction prompt changes (FR-6)."""

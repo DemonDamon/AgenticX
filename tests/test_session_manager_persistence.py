@@ -411,6 +411,7 @@ def test_taskspaces_are_isolated_per_session(tmp_path: Path) -> None:
     assert any(row["id"] == created2["id"] for row in rows_b_fresh)
 
 
+
 def test_taskspaces_are_isolated_even_for_same_avatar(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"

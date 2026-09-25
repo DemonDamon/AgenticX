@@ -484,7 +484,10 @@ import {
 } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath, canonicalizeArtifactPreviewPath } from "../utils/workspace-file-path";
 import { formatTaskspaceAddError } from "../utils/taskspace-errors";
-import { queuedMessagesForSession } from "../utils/pending-message-queue";
+import {
+  countQueuedMessagesForOtherSessions,
+  queuedMessagesForSession,
+} from "../utils/pending-message-queue";
 import {
   bootstrapMarkerForSessionBinding,
   ensureWorkspaceSessionBeforeFirstMessage,
@@ -2935,9 +2938,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const toolRoundBudget = 60;
   const paneQueuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const otherSessionQueuedCount = useMemo(
+    () => countQueuedMessagesForOtherSessions(paneQueuedMessages, pane.sessionId),
+    [pane.sessionId, paneQueuedMessages],
+  );
   const queuedMessages = useMemo(
     () => queuedMessagesForSession(paneQueuedMessages, pane.sessionId),
     [pane.sessionId, paneQueuedMessages],
+  );
+  const pendingMessagesPersistenceFailed = useAppStore(
+    (s) => s.pendingMessagesPersistenceFailed,
   );
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
   const takePendingMessage = useAppStore((s) => s.takePendingMessage);
@@ -14192,6 +14202,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           <MessageQueuePanel
             messages={queuedMessages}
+            otherSessionCount={otherSessionQueuedCount}
+            persistenceFailed={pendingMessagesPersistenceFailed}
             onEdit={(id, newText) => editPendingMessage(paneId, id, newText)}
             onRemove={(id) => removePendingMessage(paneId, id)}
             onSendNow={sendQueuedMessageNow}
