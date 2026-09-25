@@ -18,6 +18,11 @@ import {
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  mergeGatewayAdapters,
+  readGatewayAdapterForm,
+  type GatewayAdapterForm,
+} from "./gateway-adapter-config";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -335,6 +340,7 @@ type AgxConfig = {
     device_id?: string;
     token?: string;
     studio_base_url?: string;
+    adapters?: Record<string, Record<string, unknown>>;
   };
   feishu_longconn?: {
     enabled?: boolean;
@@ -7955,6 +7961,16 @@ function registerIpc(): void {
     // Restart feishu process with new config
     stopFeishuProcess();
     if (payload.enabled) startFeishuProcess();
+    return { ok: true };
+  });
+
+  ipcMain.handle("load-gateway-adapters", async () => {
+    return readGatewayAdapterForm(loadAgxConfig());
+  });
+
+  ipcMain.handle("save-gateway-adapters", async (_event, form: GatewayAdapterForm) => {
+    const merged = mergeGatewayAdapters(loadAgxConfig(), form);
+    saveAgxConfig(merged);
     return { ok: true };
   });
 

@@ -13,12 +13,15 @@ import secrets
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from agenticx.gateway.adapters.dingtalk import DingTalkAdapter
 from agenticx.gateway.adapters.feishu import FeishuAdapter
+from agenticx.gateway.adapters.qqbot import QQBotAdapter
+from agenticx.gateway.adapters.slack import SlackAdapter
+from agenticx.gateway.adapters.telegram import TelegramAdapter
 from agenticx.gateway.adapters.wechat_ilink import WeChatILinkAdapter
 from agenticx.gateway.adapters.wecom import WeComAdapter, query_dict_from_request
 from agenticx.gateway.config import (
@@ -89,6 +92,27 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     if cfg.adapters.dingtalk.enabled:
         dingtalk = DingTalkAdapter(app_secret=cfg.adapters.dingtalk.app_secret)
 
+    slack: Optional[SlackAdapter] = None
+    if cfg.adapters.slack.enabled:
+        slack = SlackAdapter(
+            bot_token=cfg.adapters.slack.bot_token,
+            signing_secret=cfg.adapters.slack.signing_secret,
+        )
+
+    telegram: Optional[TelegramAdapter] = None
+    if cfg.adapters.telegram.enabled:
+        telegram = TelegramAdapter(
+            bot_token=cfg.adapters.telegram.bot_token,
+            webhook_secret=cfg.adapters.telegram.webhook_secret,
+        )
+
+    qqbot: Optional[QQBotAdapter] = None
+    if cfg.adapters.qqbot.enabled:
+        qqbot = QQBotAdapter(
+            app_id=cfg.adapters.qqbot.app_id,
+            app_secret=cfg.adapters.qqbot.app_secret,
+        )
+
     wechat_ilink: Optional[WeChatILinkAdapter] = None
     if cfg.adapters.wechat_ilink.enabled:
         sidecar_url = (cfg.adapters.wechat_ilink.sidecar_url or "").strip()
@@ -105,6 +129,9 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     app.state.feishu = feishu
     app.state.wecom = wecom
     app.state.dingtalk = dingtalk
+    app.state.slack = slack
+    app.state.telegram = telegram
+    app.state.qqbot = qqbot
     app.state.wechat_ilink = wechat_ilink
     app.state.connect_sessions = connect_sessions
 
@@ -200,6 +227,63 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
 
         task.add_done_callback(_log_err)
         return JSONResponse({"success": True})
+
+    @app.post("/webhook/slack")
+    async def webhook_slack(request: Request) -> Response:
+        if slack is None:
+            raise HTTPException(status_code=404, detail="slack adapter disabled")
+        early = await slack.early_response(request)
+        if early is not None:
+            return early
+        msg = await slack.parse_message(request)
+        if msg is None:
+            return JSONResponse({"ok": True})
+        task = asyncio.create_task(router.route(msg, slack))
+
+        def _log_err(t: asyncio.Task) -> None:
+            try:
+                t.result()
+            except Exception as exc:
+                logger.exception("slack route failed: %s", exc)
+
+        task.add_done_callback(_log_err)
+        return JSONResponse({"ok": True})
+
+    @app.post("/webhook/telegram")
+    async def webhook_telegram(request: Request) -> JSONResponse:
+        if telegram is None:
+            raise HTTPException(status_code=404, detail="telegram adapter disabled")
+        msg = await telegram.parse_message(request)
+        if msg is None:
+            return JSONResponse({"ok": True})
+        task = asyncio.create_task(router.route(msg, telegram))
+
+        def _log_err(t: asyncio.Task) -> None:
+            try:
+                t.result()
+            except Exception as exc:
+                logger.exception("telegram route failed: %s", exc)
+
+        task.add_done_callback(_log_err)
+        return JSONResponse({"ok": True})
+
+    @app.post("/webhook/qqbot")
+    async def webhook_qqbot(request: Request) -> JSONResponse:
+        if qqbot is None:
+            raise HTTPException(status_code=404, detail="qqbot adapter disabled")
+        msg = await qqbot.parse_message(request)
+        if msg is None:
+            return JSONResponse({"ok": True})
+        task = asyncio.create_task(router.route(msg, qqbot))
+
+        def _log_err(t: asyncio.Task) -> None:
+            try:
+                t.result()
+            except Exception as exc:
+                logger.exception("qqbot route failed: %s", exc)
+
+        task.add_done_callback(_log_err)
+        return JSONResponse({"ok": True})
 
     @app.post("/api/command")
     async def api_command(

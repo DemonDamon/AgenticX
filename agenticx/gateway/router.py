@@ -48,6 +48,21 @@ class MessageRouter:
         self._reply_timeout = reply_timeout_seconds
         self._connect_sessions = connect_sessions
 
+    def _decorate(self, message: GatewayMessage, reply: GatewayReply) -> GatewayReply:
+        raw = message.raw if isinstance(message.raw, dict) else {}
+        webhook = str(raw.get("sessionWebhook") or "")
+        data = reply.model_dump()
+        if not data.get("session_webhook"):
+            data["session_webhook"] = webhook
+        if not data.get("channel_id"):
+            data["channel_id"] = message.chat_id
+        if not data.get("chat_id"):
+            data["chat_id"] = message.chat_id
+        return GatewayReply.model_validate(data)
+
+    async def _send(self, adapter: SupportsSendReply, message: GatewayMessage, reply: GatewayReply) -> bool:
+        return await adapter.send_reply(self._decorate(message, reply))
+
     async def route(
         self,
         message: GatewayMessage,
@@ -63,8 +78,7 @@ class MessageRouter:
                 bind_code
             )
             if not device_id:
-                await adapter.send_reply(
-                    GatewayReply(
+                await self._send(adapter, message, GatewayReply(
                         message_id=message.message_id,
                         source=platform,
                         reply_to_sender_id=sender,
@@ -77,7 +91,7 @@ class MessageRouter:
             if self._connect_sessions is not None:
                 name = (message.sender_name or "").strip() or sender
                 self._connect_sessions.try_complete_bind(bind_code, device_id, platform, name)
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -97,7 +111,7 @@ class MessageRouter:
                 f"在线: {'是' if online else '否'}\n"
                 f"离线队列: {pending} 条"
             )
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -109,7 +123,7 @@ class MessageRouter:
             return
 
         if UserDeviceMap.is_cancel_command(text):
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -122,7 +136,7 @@ class MessageRouter:
 
         device_id = (message.device_id or "").strip() or self._user_map.get_device(platform, sender) or ""
         if not device_id:
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -145,7 +159,7 @@ class MessageRouter:
 
         if not self._dm.is_online(device_id):
             self._dm.enqueue_pending(device_id, message)
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -159,7 +173,7 @@ class MessageRouter:
         sent = await self._dm.send_to_device(device_id, payload)
         if not sent:
             self._dm.enqueue_pending(device_id, message)
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -172,7 +186,7 @@ class MessageRouter:
 
         reply = await self._dm.wait_for_reply(correlation_id, timeout=self._reply_timeout)
         if reply is None:
-            await adapter.send_reply(
+            await self._send(adapter, message,
                 GatewayReply(
                     message_id=message.message_id,
                     source=platform,
@@ -196,4 +210,4 @@ class MessageRouter:
             content_type=reply.content_type,
             attachments=reply.attachments,
         )
-        await adapter.send_reply(reply)
+        await self._send(adapter, message, reply)

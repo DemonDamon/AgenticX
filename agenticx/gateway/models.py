@@ -46,6 +46,8 @@ class GatewayReply(BaseModel):
     content: str = ""
     content_type: str = "text"
     attachments: List[GatewayAttachment] = Field(default_factory=list)
+    session_webhook: str = ""
+    channel_id: str = ""
 
 
 class PendingMessage(BaseModel):

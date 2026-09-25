@@ -40,6 +40,24 @@ class DingTalkAdapterConfig(BaseModel):
     app_secret: str = ""
 
 
+class SlackAdapterConfig(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    signing_secret: str = ""
+
+
+class TelegramAdapterConfig(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    webhook_secret: str = ""
+
+
+class QQBotAdapterConfig(BaseModel):
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+
+
 class WeChatILinkAdapterConfig(BaseModel):
     enabled: bool = False
     sidecar_url: str = ""
@@ -60,6 +78,9 @@ class AdaptersConfig(BaseModel):
     feishu: FeishuAdapterConfig = Field(default_factory=FeishuAdapterConfig)
     wecom: WeComAdapterConfig = Field(default_factory=WeComAdapterConfig)
     dingtalk: DingTalkAdapterConfig = Field(default_factory=DingTalkAdapterConfig)
+    slack: SlackAdapterConfig = Field(default_factory=SlackAdapterConfig)
+    telegram: TelegramAdapterConfig = Field(default_factory=TelegramAdapterConfig)
+    qqbot: QQBotAdapterConfig = Field(default_factory=QQBotAdapterConfig)
     wechat_ilink: WeChatILinkAdapterConfig = Field(default_factory=WeChatILinkAdapterConfig)
 
 

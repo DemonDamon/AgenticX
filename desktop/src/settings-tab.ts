@@ -24,6 +24,7 @@ export const SETTINGS_TAB_IDS = [
   "skills",
   "commands",
   "knowledge",
+  "wiki",
   "data_sources",
   "memory",
   "hooks",
