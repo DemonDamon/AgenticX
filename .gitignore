@@ -119,6 +119,9 @@ enterprise/.runtime/
 .dataset/
 deploy/observability/pours/
 
+# RSI 数据飞轮产出物（数据集/轨迹库不入库，card 例外由脚本显式 add）
+datasets/
+
 # harness comparison lab: 只忽略密钥与运行时产物，脚本/文档/图表入库
 harness-lab/.env
 harness-lab/.cache/
