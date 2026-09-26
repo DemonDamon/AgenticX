@@ -68,6 +68,115 @@ def _env_autocompact_pct() -> Optional[float]:
     return None
 
 
+_SLIDE_CHROME_LINE = re.compile(r"^(?:---\s*Page\s+\d+\s*---|火龙果讲堂|uml\.lorg\.cn)\s*$")
+
+
+def _tighten_hit_text(text: str) -> str:
+    """Drop slide chrome so the character cap keeps the procedure, not the header."""
+    kept: List[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or _SLIDE_CHROME_LINE.match(line):
+            continue
+        stamp = re.sub(r"老刘说NLP|刘焕勇|焕勇|LP|\s+", "", line)
+        if "老刘说NLP" in line and len(stamp) < 12:
+            continue
+        kept.append(line)
+    merged: List[str] = []
+    for line in kept:
+        prev = merged[-1] if merged else ""
+        if (
+            prev
+            and len(prev) <= 24
+            and prev[-1] not in "。！？；：.!?;|"
+            and not prev.startswith(("#", "-", "|", "---"))
+            and ": " not in prev
+            and not prev.endswith(":")
+        ):
+            merged[-1] = merged[-1] + line
+            continue
+        merged.append(line)
+    return "\n".join(merged)
+
+
+def _project_knowledge_search_hits(result: str, budget: int) -> Optional[str]:
+    """Project knowledge_search JSON so every hit keeps its own text.
+
+    The raw payload repeats the same hits under ``by_brain`` and duplicates
+    score fields. A head/tail cut then drops the middle hits. References are
+    parsed from the raw string elsewhere, so this projection only shortens
+    what the model sees and keeps hit order.
+    """
+    text = str(result or "")
+    if len(text) <= budget:
+        return text
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    hits = parsed.get("hits")
+    if not isinstance(hits, list):
+        return None
+
+    def render(text_cap: int, title_cap: int) -> str:
+        slim_hits: List[Dict[str, Any]] = []
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            source = hit.get("source") if isinstance(hit.get("source"), dict) else {}
+            meta = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+            item: Dict[str, Any] = {
+                "id": hit.get("id"),
+                "score": hit.get("score"),
+                "title": str(source.get("title") or "")[:title_cap],
+                "text": _tighten_hit_text(str(hit.get("text") or ""))[:text_cap],
+            }
+            wiki_page = meta.get("wiki_page")
+            if wiki_page:
+                item["wiki_page"] = wiki_page
+            slim_hits.append(item)
+        body: Dict[str, Any] = {
+            "ok": parsed.get("ok", True),
+            "hits": slim_hits,
+            "used_top_k": parsed.get("used_top_k", len(slim_hits)),
+        }
+        return json.dumps(body, ensure_ascii=False)
+
+    def fit(title_cap: int) -> Optional[str]:
+        if len(render(0, title_cap)) > budget:
+            return None
+        best = render(0, title_cap)
+        lo, hi = 0, 700
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            candidate = render(mid, title_cap)
+            if len(candidate) <= budget:
+                best = candidate
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+
+    projected = fit(180)
+    if projected is not None:
+        return projected
+    lo, hi = 0, 180
+    best = render(0, 0)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = fit(mid)
+        if candidate is not None:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    if len(best) <= budget:
+        return best
+    return None
+
+
 def _compact_query_data_source_result(result: str, budget: int) -> str:
     """Trim time-series ``data`` arrays while preserving attribution and warnings."""
     text = str(result or "")
@@ -400,6 +509,10 @@ class ContextCompactor:
         if budget is None:
             budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)
         text = str(result or "")
+        if name == "knowledge_search":
+            projected = _project_knowledge_search_hits(text, budget)
+            if projected is not None:
+                return projected
         if len(text) <= budget:
             return text
         head_len = max(200, budget // 3)
