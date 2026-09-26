@@ -12,10 +12,18 @@ function st(key: string, opts?: Record<string, unknown>): string {
 }
 
 
+type WikiCompile = {
+  document_id: string;
+  source_name: string;
+  status: string;
+  message: string;
+};
+
 type Props = {
   api: KBApi;
   enabled: boolean;
   extensions: string[];
+  wikiCompileEnabled?: boolean;
 };
 
 type ActiveJob = {
@@ -28,7 +36,7 @@ type ActiveJob = {
 
 const POLL_INTERVAL_MS = 800;
 
-export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
+export function KnowledgeMaterialsPanel({ api, enabled, extensions, wikiCompileEnabled }: Props) {
   const { t } = useTranslation("settings");
   const [documents, setDocuments] = useState<KBDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +44,9 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
   const [uploading, setUploading] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [activeJobs, setActiveJobs] = useState<Record<string, ActiveJob>>({});
+  const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
+  const [wikiByDoc, setWikiByDoc] = useState<Record<string, WikiCompile>>({});
+  const [backfilling, setBackfilling] = useState(false);
   /** null = checking; true = chromadb/PDF/SOCKS deps importable in backend Python */
   const [backendDepsReady, setBackendDepsReady] = useState<boolean | null>(null);
   const [depsMissing, setDepsMissing] = useState<string[]>([]);
@@ -127,6 +138,9 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         const cur = activeJobs[key];
         try {
           const job = await api.getJob(cur.jobId);
+          if (job.message.includes("skipped unchanged")) {
+            setSkipNotes((prev) => ({ ...prev, [key]: st("knowledge.skippedReindex") }));
+          }
           if (
             job.status !== cur.status ||
             Math.abs(job.progress - cur.progress) > 0.01 ||
@@ -152,6 +166,39 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
   }, [activeJobs, api, reload, refreshBackendDeps]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const rows = await api.listWikiCompiles();
+        if (cancelled) return;
+        const next: Record<string, WikiCompile> = {};
+        for (const row of rows) next[row.document_id] = row;
+        setWikiByDoc(next);
+      } catch {
+        // 旧后端没有这个接口时，资料行只显示索引进度。
+      }
+    };
+    void pull();
+    const iv = setInterval(() => void pull(), POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [api]);
+
+  async function backfillWiki() {
+    setBackfilling(true);
+    setError(null);
+    try {
+      await api.backfillWiki();
+    } catch (exc) {
+      setError(String((exc as Error).message ?? exc));
+    } finally {
+      setBackfilling(false);
+    }
+  }
 
   async function uploadFile(file: File) {
     setUploading(true);
@@ -339,7 +386,21 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         </div>
       </Panel>
 
-      <Panel title={st("knowledge.docsTitle", { count: documents.length })}>
+      <Panel
+        title={st("knowledge.docsTitle", { count: documents.length })}
+        actions={
+          wikiCompileEnabled ? (
+            <button
+              type="button"
+              className="rounded border border-border px-2 py-1 text-xs disabled:opacity-50"
+              disabled={backfilling || documents.length === 0}
+              onClick={() => void backfillWiki()}
+            >
+              {backfilling ? st("knowledge.wikiBackfillBusy") : st("knowledge.wikiBackfill")}
+            </button>
+          ) : null
+        }
+      >
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-text-subtle">
             <Loader2 className="h-4 w-4 animate-spin" /> {st("knowledge.loading")}
@@ -364,8 +425,15 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                       {doc.source_name}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-subtle">
-                      <span className={statusTagClass(status)}>{statusLabel(status)}</span>
+                      <span className={statusTagClass(status)}>
+                        {skipNotes[doc.id] && status === "done" ? skipNotes[doc.id] : statusLabel(status)}
+                      </span>
                       {isRunning ? <span>{progressPercent}%</span> : null}
+                      {wikiByDoc[doc.id] ? (
+                        <span className="text-text-muted" title={wikiByDoc[doc.id].message}>
+                          {wikiStatusLabel(wikiByDoc[doc.id])}
+                        </span>
+                      ) : null}
                       <span>{formatSize(doc.size_bytes)}</span>
                       <span>{st("knowledge.chunks", { count: doc.chunks })}</span>
                     </div>
@@ -456,6 +524,19 @@ function isDesktopRuntimeIngestError(text: string): boolean {
     t.includes("httpx[socks]") ||
     t.includes("socks proxy")
   );
+}
+
+function wikiStatusLabel(row: WikiCompile): string {
+  const text = row.message ? `${row.message}` : "";
+  const map: Record<string, string> = {
+    queued: st("knowledge.wikiQueued"),
+    running: st("knowledge.wikiRunning"),
+    done: st("knowledge.wikiDone"),
+    failed: st("knowledge.wikiFailed"),
+    skipped: st("knowledge.wikiSkipped"),
+  };
+  const label = map[row.status] ?? row.status;
+  return text && row.status === "failed" ? `${label}：${text}` : label;
 }
 
 function statusLabel(status: KBDocumentStatus): string {

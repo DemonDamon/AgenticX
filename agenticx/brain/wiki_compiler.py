@@ -102,7 +102,7 @@ def build_generation_prompt(
 def _invoke_llm(messages: List[Dict[str, str]], *, provider_name: Optional[str], model_name: Optional[str]) -> str:
     from agenticx.llms.provider_resolver import ProviderResolver
 
-    llm = ProviderResolver.resolve(provider_name=provider_name, model_name=model_name)
+    llm = ProviderResolver.resolve(provider_name=provider_name, model=model_name)
     if hasattr(llm, "invoke"):
         resp = llm.invoke(messages)
         if hasattr(resp, "content"):

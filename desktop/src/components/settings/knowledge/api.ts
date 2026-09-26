@@ -70,6 +70,11 @@ export type KBApi = {
   getPurpose: () => Promise<string>;
   savePurpose: (content: string) => Promise<void>;
   createSampleWiki: () => Promise<string[]>;
+  clearSampleWiki: () => Promise<string[]>;
+  listWikiCompiles: () => Promise<
+    { document_id: string; source_name: string; status: string; message: string }[]
+  >;
+  backfillWiki: () => Promise<string[]>;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -221,6 +226,20 @@ export function createKbApi(
     async createSampleWiki() {
       const body = await doJson<{ written?: string[] }>(p("/wiki/sample"), { method: "POST" });
       return body.written ?? [];
+    },
+    async clearSampleWiki() {
+      const body = await doJson<{ removed?: string[] }>(p("/wiki/sample"), { method: "DELETE" });
+      return body.removed ?? [];
+    },
+    async listWikiCompiles() {
+      const body = await doJson<{
+        compiles?: { document_id: string; source_name: string; status: string; message: string }[];
+      }>(p("/wiki/compiles"));
+      return body.compiles ?? [];
+    },
+    async backfillWiki() {
+      const body = await doJson<{ queued?: string[] }>(p("/wiki/backfill"), { method: "POST" });
+      return body.queued ?? [];
     },
   };
 }

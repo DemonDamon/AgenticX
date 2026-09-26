@@ -262,7 +262,7 @@ class JobRegistry:
                     try:
                         on_done(final)
                     except Exception as exc:  # pragma: no cover - defensive
-                        logger.debug("on_done callback failed: %s", exc)
+                        logger.warning("on_done callback failed: %s", exc)
 
     def shutdown(self, *, wait: bool = False) -> None:  # pragma: no cover - used at app shutdown
         self._executor.shutdown(wait=wait, cancel_futures=not wait)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -15,6 +15,14 @@ import { useAppStore } from "../../store";
 import { createBrainsApi, type BrainRecord } from "../settings/brains/api";
 import { displayBrainName } from "../settings/brains/brain-display";
 import { createKbApi, type KBApi } from "../settings/knowledge/api";
+
+const SAMPLE_PATHS = new Set([
+  "wiki/index.md",
+  "wiki/concepts/annual-leave.md",
+  "wiki/concepts/leave-requests.md",
+  "wiki/concepts/expense.md",
+  "wiki/entities/company.md",
+]);
 
 type WikiPage = { path: string; title: string; type: string };
 type WikiNode = { id: string; title: string; type: string; path: string; sources: string[] };
@@ -54,10 +62,11 @@ function parsePage(raw: string): { body: string; sources: string[] } {
   return { body: raw.slice(match[0].length), sources };
 }
 
-function wikiMarkdown(body: string): string {
+function wikiMarkdown(body: string, pages: WikiPage[]): string {
   return body.replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_full, target: string, label?: string) => {
     const token = target.trim();
-    const text = (label || token).trim();
+    const page = resolvePage(pages, token);
+    const text = (label || page?.title || token).trim();
     return `[${text}](#wiki/${encodeURIComponent(token)})`;
   });
 }
@@ -74,7 +83,7 @@ function buildTree(pages: WikiPage[]): TreeItem[] {
         const key = parts.slice(0, i + 1).join("/");
         let folder = level.find((item): item is TreeFolder => item.kind === "folder" && item.key === key);
         if (!folder) {
-          folder = { kind: "folder", key, name: part.replace(/[-_]/g, " "), children: [] };
+          folder = { kind: "folder", key, name: part, children: [] };
           level.push(folder);
         }
         level = folder.children;
@@ -128,6 +137,7 @@ export function WikiBrowseView() {
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
   const openSettings = useAppStore((s) => s.openSettings);
+  const returnToPreviousChat = useAppStore((s) => s.returnToPreviousChat);
   const resolveApiBase = useCallback(async () => {
     const configured = (apiBase ?? "").trim();
     if (configured) return configured.replace(/\/+$/, "");
@@ -156,6 +166,10 @@ export function WikiBrowseView() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [reloadKey, setReloadKey] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [compiles, setCompiles] = useState<
+    { document_id: string; source_name: string; status: string; message: string }[]
+  >([]);
+  const compileSignature = useRef("");
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +250,33 @@ export function WikiBrowseView() {
   }, [kbApi, reloadKey]);
 
   useEffect(() => {
+    if (!kbApi) return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const rows = await kbApi.listWikiCompiles();
+        if (cancelled) return;
+        setCompiles(rows);
+        const signature = rows.map((row) => `${row.document_id}:${row.status}`).join("|");
+        if (signature !== compileSignature.current && rows.some((row) => row.status === "done")) {
+          compileSignature.current = signature;
+          setReloadKey((value) => value + 1);
+        } else {
+          compileSignature.current = signature;
+        }
+      } catch {
+        if (!cancelled) setCompiles([]);
+      }
+    };
+    void pull();
+    const timer = window.setInterval(() => void pull(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [kbApi]);
+
+  useEffect(() => {
     if (!kbApi || !selectedPath) {
       setPreview("");
       setSources([]);
@@ -248,7 +289,7 @@ export function WikiBrowseView() {
         const content = await kbApi.getWikiPage(selectedPath);
         if (cancelled) return;
         const parsed = parsePage(content);
-        setPreview(wikiMarkdown(parsed.body));
+        setPreview(parsed.body);
         setSources(parsed.sources);
       } catch (exc) {
         if (!cancelled) setPreview(String((exc as Error).message ?? exc));
@@ -269,6 +310,7 @@ export function WikiBrowseView() {
     );
   }, [pages, query]);
   const tree = useMemo(() => buildTree(filteredPages), [filteredPages]);
+  const showingSample = pages.length > 0 && pages.every((page) => SAMPLE_PATHS.has(page.path));
   const selectedPage = pages.find((page) => page.path === selectedPath) ?? null;
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
@@ -328,6 +370,31 @@ export function WikiBrowseView() {
     setSelectedPath(page.path);
   }
 
+  function openKnowledge(kind: "compile" | "materials") {
+    openSettings("knowledge");
+    const name = kind === "compile" ? "agenticx:focus-wiki-compile" : "agenticx:focus-wiki-materials";
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 400);
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 900);
+  }
+
+  async function exitSample() {
+    if (!kbApi) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await kbApi.clearSampleWiki();
+    } catch {
+      // 旧后端还没有这个接口时，刷新后的页面列表仍以磁盘为准。
+    }
+    setPages([]);
+    setNodes([]);
+    setEdges([]);
+    setSelectedPath(null);
+    setSelectedNodeId(null);
+    setReloadKey((value) => value + 1);
+    setCreating(false);
+  }
+
   async function createSample() {
     if (!kbApi) return;
     setCreating(true);
@@ -354,6 +421,12 @@ export function WikiBrowseView() {
     return label === key ? type : label;
   }
 
+  function folderLabel(name: string): string {
+    const key = `wiki.folder.${name}`;
+    const label = t(key);
+    return label === key ? name.replace(/[-_]/g, " ") : label;
+  }
+
   function renderTree(items: TreeItem[], depth: number) {
     return items.map((item) => {
       if (item.kind === "folder") {
@@ -367,7 +440,7 @@ export function WikiBrowseView() {
               onClick={() => setCollapsed((state) => ({ ...state, [item.key]: !state[item.key] }))}
             >
               {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              <span className="truncate">{item.name}</span>
+              <span className="truncate">{folderLabel(item.name)}</span>
             </button>
             {open ? renderTree(item.children, depth + 1) : null}
           </div>
@@ -476,14 +549,38 @@ export function WikiBrowseView() {
         />
       ) : pages.length === 0 ? (
         <EmptyState
-          text={t("wiki.howTo")}
-          action={t("wiki.createSample")}
-          onAction={() => void createSample()}
-          secondary={t("wiki.openKnowledge")}
-          onSecondary={() => openSettings("knowledge")}
+          text={emptyWikiText(compiles, t)}
+          action={t("wiki.goAddDoc")}
+          onAction={() => openKnowledge("materials")}
+          secondary={t("wiki.makeMine")}
+          onSecondary={() => openKnowledge("compile")}
           busy={creating}
         />
-      ) : mode === "pages" ? (
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-strong hover:bg-surface-hover"
+              onClick={returnToPreviousChat}
+            >
+              {t("wiki.backToChat")}
+            </button>
+            <p className="min-w-0 flex-1 text-xs leading-relaxed text-text-muted">
+              {showingSample ? t("wiki.sampleHint") : t("wiki.value")}
+            </p>
+            {showingSample ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1.5 text-xs font-medium text-[var(--ui-btn-primary-text)] disabled:opacity-50"
+                disabled={creating}
+                onClick={() => void exitSample()}
+              >
+                {t("wiki.exitSample")}
+              </button>
+            ) : null}
+          </div>
+          {mode === "pages" ? (
         <div className="flex min-h-0 flex-1">
           <aside className="w-72 shrink-0 overflow-y-auto border-r border-border p-2">
             {renderTree(tree, 0)}
@@ -506,11 +603,26 @@ export function WikiBrowseView() {
                     <span className="text-xs text-text-faint">{brain ? displayBrainName(brain) : ""}</span>
                   </div>
                 ) : null}
-                <div className="prose prose-sm max-w-none text-text-primary dark:prose-invert">
+                <div className="max-w-none text-sm leading-relaxed text-text-primary">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     urlTransform={(url) => url}
                     components={{
+                      h1: ({ children }) => <h1 className="mb-3 text-xl font-semibold text-text-strong">{children}</h1>,
+                      p: ({ children }) => <p className="mb-3">{children}</p>,
+                      table: ({ children }) => (
+                        <table className="my-3 w-full border-collapse overflow-hidden rounded-md border border-border text-sm">
+                          {children}
+                        </table>
+                      ),
+                      th: ({ children }) => (
+                        <th className="border border-border bg-surface-card px-3 py-1.5 text-left text-xs font-medium text-text-muted">
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="border border-border px-3 py-1.5 text-text-primary">{children}</td>
+                      ),
                       a: ({ href, children }) => {
                         if (href?.startsWith("#wiki/")) {
                           return (
@@ -531,7 +643,7 @@ export function WikiBrowseView() {
                       },
                     }}
                   >
-                    {preview}
+                    {wikiMarkdown(preview, pages)}
                   </ReactMarkdown>
                 </div>
                 <section className="mt-8 border-t border-border pt-4">
@@ -640,9 +752,22 @@ export function WikiBrowseView() {
             </aside>
           ) : null}
         </div>
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+function emptyWikiText(
+  compiles: { source_name: string; status: string; message: string }[],
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const active = compiles.find((row) => row.status === "queued" || row.status === "running");
+  if (active) return t("wiki.compileRunning", { name: active.source_name || "" });
+  const failed = compiles.find((row) => row.status === "failed");
+  if (failed) return t("wiki.compileFailed", { name: failed.source_name || "", message: failed.message });
+  return t("wiki.buildSteps");
 }
 
 function EmptyState({

@@ -1,7 +1,7 @@
 """Wiki graph payload for the browse UI."""
 
 from agenticx.brain.wiki_graph import wiki_graph_payload
-from agenticx.brain.wiki_ops import list_wiki_pages, read_wiki_page, seed_sample_wiki
+from agenticx.brain.wiki_ops import clear_sample_wiki, list_wiki_pages, read_wiki_page, seed_sample_wiki
 
 
 def test_wiki_graph_payload_serializes_nodes_and_wikilinks(tmp_path):
@@ -38,3 +38,11 @@ def test_sample_wiki_lists_pages_links_and_purpose(tmp_path):
     assert ("index", "concepts/expense") in edges
     purpose = (tmp_path / "purpose.md").read_text(encoding="utf-8")
     assert "知识库目标" in purpose
+    kept = tmp_path / "wiki" / "concepts" / "mine.md"
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text("---\ntitle: Mine\ntype: concept\n---\n# Mine\n", encoding="utf-8")
+    removed = clear_sample_wiki(tmp_path)
+    assert "wiki/concepts/annual-leave.md" in removed
+    assert kept.is_file()
+    titles = {page["title"] for page in list_wiki_pages(tmp_path)}
+    assert titles == {"Mine"}

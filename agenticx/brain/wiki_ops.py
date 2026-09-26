@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agenticx.brain.wiki_compiler import WikiCompiler
-from agenticx.studio.kb.contracts import IngestJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -107,26 +106,21 @@ def purge_wiki_source(brain_storage: Path, source_name: str) -> List[str]:
     return removed
 
 
-def maybe_compile_wiki_after_ingest(docs_rt, job) -> None:
-    """Background callback after ingest job completes."""
-    if getattr(job, "status", None) != IngestJobStatus.DONE:
-        return
-    doc_id = getattr(job, "document_id", None)
-    if not doc_id:
-        return
+def compile_document_wiki(docs_rt, doc_id: str) -> Dict[str, Any]:
+    """Write wiki pages for one already indexed document. Caller runs off the ingest pool."""
     cfg = docs_rt.read_config()
     if not getattr(getattr(cfg, "wiki_compiler", None), "enabled", False):
-        return
+        return {"ok": False, "skipped": True, "message": "Wiki 编译未打开", "written": []}
     doc = docs_rt.runtime.get_document(doc_id)
     if doc is None:
-        return
+        return {"ok": False, "error": "document not found", "written": []}
     try:
         from agenticx.studio.kb.runtime import _read_document_text
 
         text = _read_document_text(doc.source_path)
     except Exception as exc:
         logger.warning("wiki compile skipped, cannot read source: %s", exc)
-        return
+        return {"ok": False, "error": str(exc), "written": []}
     storage = brain_storage_root(docs_rt.brain)
     compiler = WikiCompiler(storage)
     result = compiler.compile_source(
@@ -137,12 +131,20 @@ def maybe_compile_wiki_after_ingest(docs_rt, job) -> None:
     )
     if not result.ok:
         logger.warning("wiki compile failed for %s: %s", doc_id, result.error)
-    else:
-        logger.info("wiki compile wrote %d pages for %s", len(result.written), doc_id)
+        return {"ok": False, "error": result.error or "编译失败", "written": []}
+    logger.info("wiki compile wrote %d pages for %s", len(result.written), doc_id)
     try:
         docs_rt.refresh_brain_stats()
     except Exception:
         pass
+    return {"ok": True, "written": list(result.written)}
+
+
+def maybe_compile_wiki_after_ingest(docs_rt, job) -> None:
+    """Ingest callback. Only queues wiki writing; it must return before the next ingest."""
+    from agenticx.brain.wiki_compile_queue import schedule_wiki_after_ingest
+
+    schedule_wiki_after_ingest(docs_rt, job)
 
 
 _SAMPLE_PAGES = {
@@ -227,6 +229,25 @@ def seed_sample_wiki(brain_storage: Path) -> List[str]:
     if not purpose.is_file() or not purpose.read_text(encoding="utf-8").strip():
         purpose.write_text("# 知识库目标\n\n把员工手册编译成可浏览的概念、实体和来源页。\n", encoding="utf-8")
     return written
+
+
+def clear_sample_wiki(brain_storage: Path) -> List[str]:
+    """Remove only the bundled sample pages. Other wiki files stay."""
+    removed: List[str] = []
+    for rel in _SAMPLE_PAGES:
+        target = (brain_storage / rel).resolve()
+        try:
+            target.relative_to(brain_storage.resolve())
+        except ValueError:
+            continue
+        if not target.is_file():
+            continue
+        target.unlink()
+        removed.append(rel)
+        parent = target.parent
+        if parent != brain_storage and parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    return removed
 
 
 def run_brain_maintenance(docs_rt) -> Dict[str, Any]:

@@ -66,6 +66,16 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("config");
+  useEffect(() => {
+    const focusWikiCompile = () => setDetailTab("config");
+    const focusMaterials = () => setDetailTab("materials");
+    window.addEventListener("agenticx:focus-wiki-compile", focusWikiCompile);
+    window.addEventListener("agenticx:focus-wiki-materials", focusMaterials);
+    return () => {
+      window.removeEventListener("agenticx:focus-wiki-compile", focusWikiCompile);
+      window.removeEventListener("agenticx:focus-wiki-materials", focusMaterials);
+    };
+  }, []);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<"docs" | "code">("docs");
@@ -437,6 +447,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                       <KnowledgeMaterialsPanel
                         api={kbApi}
                         enabled={kbDraft.enabled}
+                        wikiCompileEnabled={kbDraft.wiki_compiler?.enabled ?? false}
                         extensions={kbDraft.file_filters.extensions}
                       />
                     ) : null}

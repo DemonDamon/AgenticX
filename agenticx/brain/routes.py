@@ -15,12 +15,14 @@ from agenticx.brain.registry import BrainError, BrainRegistry
 from agenticx.brain.runtime_docs import DocsBrainRuntime
 from agenticx.brain.search import search_code_brains, search_docs_brains
 from agenticx.brain.types import BrainScope, BrainType
+from agenticx.brain.wiki_compile_queue import enqueue_wiki_backfill
 from agenticx.brain.wiki_compiler import WikiCompiler
 from agenticx.brain.wiki_graph import wiki_graph_payload
 from agenticx.brain.wiki_ops import (
     brain_storage_root,
     list_wiki_pages,
     maybe_compile_wiki_after_ingest,
+    clear_sample_wiki,
     seed_sample_wiki,
     purge_wiki_source,
     read_wiki_page,
@@ -435,6 +437,23 @@ def register_brain_routes(app: FastAPI) -> None:
         rt = _require_docs_brain(brain_id)
         written = await asyncio.to_thread(seed_sample_wiki, brain_storage_root(rt.brain))
         return {"ok": True, "written": written}
+
+    @app.delete("/api/brains/{brain_id}/wiki/sample")
+    async def brain_wiki_sample_clear(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        removed = await asyncio.to_thread(clear_sample_wiki, brain_storage_root(rt.brain))
+        return {"ok": True, "removed": removed}
+
+    @app.get("/api/brains/{brain_id}/wiki/compiles")
+    async def brain_wiki_compiles(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        return {"ok": True, "compiles": rt.wiki_compiles.list_status()}
+
+    @app.post("/api/brains/{brain_id}/wiki/backfill")
+    async def brain_wiki_backfill(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        queued = enqueue_wiki_backfill(rt, None)
+        return {"ok": True, "queued": queued}
 
     @app.get("/api/brains/{brain_id}/wiki/page")
     async def brain_wiki_page(brain_id: str, path: str) -> Dict[str, Any]:

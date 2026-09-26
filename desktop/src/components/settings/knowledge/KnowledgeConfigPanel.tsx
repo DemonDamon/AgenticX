@@ -84,6 +84,17 @@ export function KnowledgeConfigPanel({
   const [testStatus, setTestStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
   const [testMessage, setTestMessage] = useState<string>("");
   const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
+  const [wikiCompilePulse, setWikiCompilePulse] = useState(false);
+
+  useEffect(() => {
+    const focus = () => {
+      setWikiCompilePulse(true);
+      document.getElementById("agx-wiki-compile")?.scrollIntoView({ block: "center" });
+      window.setTimeout(() => setWikiCompilePulse(false), 4000);
+    };
+    window.addEventListener("agenticx:focus-wiki-compile", focus);
+    return () => window.removeEventListener("agenticx:focus-wiki-compile", focus);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -599,6 +610,7 @@ export function KnowledgeConfigPanel({
 
       <Panel title={st("knowledge.enhanced")}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div id="agx-wiki-compile" className={wikiCompilePulse ? "rounded-lg ring-2 ring-[var(--ui-btn-primary-bg)]" : ""}>
           <KbCapabilityTile
             phase={st("knowledge.phaseIngest")}
             icon={BookOpen}
@@ -612,6 +624,7 @@ export function KnowledgeConfigPanel({
               })
             }
           />
+          </div>
           <KbCapabilityTile
             phase={st("knowledge.phaseAnswer")}
             icon={Sparkles}
