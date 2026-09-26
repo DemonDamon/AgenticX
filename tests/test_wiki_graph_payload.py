@@ -1,7 +1,54 @@
-"""Wiki graph payload for the browse UI."""
+"""Wiki graph payload for the browse UI and retrieval expansion."""
 
-from agenticx.brain.wiki_graph import wiki_graph_payload
+from agenticx.brain.wiki_graph import expand_hits_with_wiki_graph, wiki_graph_payload
 from agenticx.brain.wiki_ops import clear_sample_wiki, list_wiki_pages, read_wiki_page, seed_sample_wiki
+from agenticx.studio.kb.contracts import RetrievalHit, RetrievalHitSource
+
+
+def test_ontology_query_follows_matching_page_not_filename_cluster(tmp_path):
+    wiki = tmp_path / "wiki"
+    (wiki / "sources").mkdir(parents=True)
+    (wiki / "sources" / "lecture.md").write_text(
+        "---\ntitle: 老刘说NLP第四十六讲 Palantir本体论\ntype: source-summary\n---\n"
+        "见 [[ontology-compare]] 与 [[graphrag-routes]]\n",
+        encoding="utf-8",
+    )
+    (wiki / "ontology-compare.md").write_text(
+        "---\ntitle: 三大Ontology对比\ntype: concept\n---\n"
+        "本体建模里，Palantir 以业务为中心，OWL 是另一套形式化做法。\n",
+        encoding="utf-8",
+    )
+    (wiki / "graphrag-routes.md").write_text(
+        "---\ntitle: GraphRAG两条技术路线\ntype: concept\n---\n见 [[lightrag]]\n",
+        encoding="utf-8",
+    )
+    (wiki / "lightrag.md").write_text(
+        "---\ntitle: LightRAG\ntype: entity\n---\nGraphRAG 的一种实现。\n",
+        encoding="utf-8",
+    )
+    chunk = RetrievalHit(
+        id="chunk-1",
+        score=0.55,
+        text="01 定义对象 02 添加属性",
+        source=RetrievalHitSource(
+            uri="/docs/知识图谱、GraphRAG、palantir本体论.pdf",
+            title="知识图谱、GraphRAG、palantir本体论.pdf",
+        ),
+    )
+    expanded = expand_hits_with_wiki_graph(
+        tmp_path,
+        query="老刘说了关于本体的东西，本体建模的过程是咋样的",
+        hits=[chunk],
+        top_k=5,
+    )
+    ids = [hit.id for hit in expanded]
+    assert ids[0] == "chunk-1"
+    assert "wiki::ontology-compare" in ids
+    assert "wiki::lightrag" not in ids
+    assert "wiki::graphrag-routes" not in ids
+    wiki_scores = [hit.score for hit in expanded if str(hit.id).startswith("wiki::")]
+    assert wiki_scores
+    assert max(wiki_scores) < 1.0
 
 
 def test_wiki_graph_payload_serializes_nodes_and_wikilinks(tmp_path):

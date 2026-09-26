@@ -65,8 +65,17 @@ def search_docs_brains(
         by_brain.append({"brain_id": bid, "brain_name": brain.name, "hits": hit_dicts})
         flat.extend(hit_dicts)
 
-    flat.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
-    flat = flat[:top_k]
+    def _is_wiki_hit(item: Dict[str, Any]) -> bool:
+        if str(item.get("id") or "").startswith("wiki::"):
+            return True
+        meta = item.get("metadata") or {}
+        return bool(isinstance(meta, dict) and meta.get("wiki_page"))
+
+    wiki_hits = [item for item in flat if _is_wiki_hit(item)]
+    chunk_hits = [item for item in flat if not _is_wiki_hit(item)]
+    chunk_hits.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
+    wiki_hits.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
+    flat = chunk_hits[:top_k] + wiki_hits[:3]
 
     return {
         "ok": True,

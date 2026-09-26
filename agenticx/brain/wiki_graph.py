@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from agenticx.studio.kb.contracts import RetrievalHit
+from agenticx.studio.kb.contracts import RetrievalHit, RetrievalHitSource
 
 _WIKILINK = re.compile(r"\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]")
 _FM_BLOCK = re.compile(r"^---\n([\s\S]*?)\n---", re.MULTILINE)
@@ -165,6 +165,62 @@ def calculate_relevance(source: WikiNode, target: WikiNode, graph: WikiGraph) ->
     return score
 
 
+_QUERY_STOP = {
+    "什么", "怎么", "如何", "为啥", "这个", "那个", "一下", "东西", "过程",
+    "关于", "我们", "你们", "他们", "是否", "可以", "咋样", "没有", "不是",
+    "说了", "关于",
+}
+# Glue inside a question. Grams that contain these are splits like 「了关于本」, not page titles.
+_QUERY_GLUE = set("的了是在被把对从这那说呢吗吧啊呀过程关於于东西怎样什咋")
+
+
+def _query_terms(query: str) -> List[str]:
+    """Terms that can identify a wiki page. Longer phrases stay ahead of bigrams."""
+    terms: List[str] = []
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9_+.-]{2,}", query or ""):
+        terms.append(word.lower())
+    cjk = "".join(re.findall(r"[\u4e00-\u9fff]", query or ""))
+    for size in (4, 3, 2):
+        for index in range(0, max(0, len(cjk) - size + 1)):
+            gram = cjk[index : index + size]
+            if gram in _QUERY_STOP or any(ch in _QUERY_GLUE for ch in gram):
+                continue
+            terms.append(gram)
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    for term in terms:
+        if term in seen:
+            continue
+        seen.add(term)
+        ordered.append(term)
+    return ordered[:48]
+
+
+def _overlap_score(text: str, terms: List[str]) -> float:
+    lowered = (text or "").lower()
+    if not lowered:
+        return 0.0
+    score = 0.0
+    matched: Set[str] = set()
+    for term in terms:
+        key = term.lower()
+        if key in matched or key not in lowered:
+            continue
+        matched.add(key)
+        score += float(len(term))
+    return score
+
+
+def _page_text(brain_kb_dir: Path, node: WikiNode) -> str:
+    wiki_path = brain_kb_dir / node.path
+    if not wiki_path.is_file():
+        return ""
+    try:
+        return wiki_path.read_text(encoding="utf-8", errors="replace")[:1500]
+    except OSError:
+        return ""
+
+
 def expand_hits_with_wiki_graph(
     brain_kb_dir: Path,
     *,
@@ -172,71 +228,97 @@ def expand_hits_with_wiki_graph(
     hits: List[RetrievalHit],
     top_k: int,
 ) -> List[RetrievalHit]:
-    """Boost / append related wiki pages using graph signals."""
-    _ = query
+    """Append wiki pages whose titles match the query, plus one hop of their links.
+
+    Pages are chosen from the question, not from the source filename. A neighbor
+    is kept only when its title or body also overlaps the question, so a lecture
+    that mentions several topics does not drag in the best-connected cluster.
+    """
     graph = build_wiki_graph(brain_kb_dir)
     if not graph.nodes or not hits:
         return hits
+    terms = _query_terms(query)
+    if not terms:
+        return hits
 
-    seed_ids: Set[str] = set()
-    for hit in hits:
-        uri = str(hit.source.uri or "")
-        name = Path(uri).stem if uri else ""
-        for nid, node in graph.nodes.items():
-            if name and (name in node.title or name in nid or name in Path(node.path).stem):
-                seed_ids.add(nid)
-                break
+    seed_ids = [
+        nid
+        for nid, node in graph.nodes.items()
+        if _overlap_score(f"{node.title}\n{nid}", terms) > 0
+    ]
+    if not seed_ids:
+        return hits
 
-    if not seed_ids and hits:
-        seed_ids.add(next(iter(graph.nodes)))
-
-    scored: Dict[str, float] = {}
-    hit_by_id = {h.id: h for h in hits}
+    candidate_ids: Set[str] = set(seed_ids)
     for sid in seed_ids:
-        source = graph.nodes.get(sid)
-        if source is None:
-            continue
-        for nid, node in graph.nodes.items():
-            rel = calculate_relevance(source, node, graph)
-            if rel > 0:
-                scored[nid] = max(scored.get(nid, 0.0), rel)
+        candidate_ids.update(graph.nodes[sid].out_links)
 
-    boosted = list(hits)
-    for hit in hits:
-        meta = dict(hit.metadata)
-        meta["graph_boost"] = meta.get("graph_boost", 0.0)
-        hit.metadata = meta
-
-    for nid, boost in sorted(scored.items(), key=lambda x: x[1], reverse=True):
-        if any(nid in (h.source.title or "") or nid in h.source.uri for h in boosted):
+    pages: List[Tuple[WikiNode, str]] = []
+    for nid in candidate_ids:
+        node = graph.nodes.get(nid)
+        if node is None or str(node.page_type or "").startswith("source"):
             continue
+        text = _page_text(brain_kb_dir, node)
+        if not text:
+            continue
+        pages.append((node, text))
+    if not pages:
+        return hits
+
+    # A word printed on every related page (讲者名、讲座名) does not say which page answers the question.
+    useful_terms = []
+    for term in terms:
+        present = 0
+        titled = 0
+        for node, text in pages:
+            blob = f"{node.title}\n{node.node_id}\n{text}".lower()
+            if term.lower() in blob:
+                present += 1
+            if term.lower() in f"{node.title}\n{node.node_id}".lower():
+                titled += 1
+        if present == 0:
+            continue
+        if present == len(pages) and titled == 0:
+            continue
+        useful_terms.append(term)
+    if not useful_terms:
+        return hits
+
+    ranked: List[Tuple[float, str, str]] = []
+    for node, text in pages:
+        title_score = _overlap_score(f"{node.title}\n{node.node_id}", useful_terms)
+        body_score = _overlap_score(text, useful_terms)
+        if title_score <= 0 and body_score <= 0:
+            continue
+        ranked.append((title_score * 3.0 + body_score, node.node_id, text))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    best_chunk = max((float(hit.score) for hit in hits), default=0.5)
+    extras: List[RetrievalHit] = []
+    for match_score, nid, text in ranked:
+        if len(extras) >= 3:
+            break
         node = graph.nodes[nid]
-        wiki_path = brain_kb_dir / node.path
-        if not wiki_path.is_file():
+        if any(nid in (hit.source.title or "") or nid in hit.source.uri for hit in hits):
             continue
-        try:
-            text = wiki_path.read_text(encoding="utf-8", errors="replace")[:1200]
-        except OSError:
-            continue
-        from agenticx.studio.kb.contracts import RetrievalHitSource
-
-        boosted.append(
+        # Stay near the chunk scores. A graph weight of 7 used to outrank the slides.
+        score = max(0.01, best_chunk * 0.85) + min(match_score, 8.0) * 0.01
+        extras.append(
             RetrievalHit(
                 id=f"wiki::{nid}",
-                score=float(boost),
-                text=text,
+                score=score,
+                text=text[:1200],
                 source=RetrievalHitSource(
                     kind="local",
-                    uri=str(wiki_path),
+                    uri=str(brain_kb_dir / node.path),
                     title=node.title,
                 ),
                 metadata={
-                    "retrieval_mode": "hybrid_graph",
-                    "graph_boost": float(boost),
+                    "retrieval_mode": "wiki_graph",
+                    "graph_boost": float(match_score),
                     "wiki_page": node.path,
                 },
             )
         )
-
-    boosted.sort(key=lambda h: float(h.score), reverse=True)
-    return boosted[:top_k]
+    _ = top_k
+    return list(hits) + extras

@@ -1056,10 +1056,9 @@ class KBRuntime:
             hits = self._search_bm25(q, k)
         elif mode in {"hybrid", "hybrid_graph"}:
             hits = self._search_hybrid(q, k)
-            if mode == "hybrid_graph":
-                hits = self._apply_graph_expansion(q, hits, k)
         else:
             hits = self._search_vector(q, k)
+        hits = self._apply_graph_expansion(q, hits, k)
         return self._expand_parent_hits(hits)
 
     def _search_vector(self, query: str, k: int) -> List[RetrievalHit]:
