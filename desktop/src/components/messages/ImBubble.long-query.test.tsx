@@ -27,7 +27,7 @@ describe("ImBubble long query expand", () => {
         collapseLongUserQuery
       />,
     );
-    expect(document.querySelector("[data-user-query='collapsed']")?.textContent).toContain("Execution Contract");
+    expect(document.querySelector("[data-user-query='collapsed']")?.textContent).toContain("这是执行任务");
     fireEvent.click(document.querySelector("[data-user-query='collapsed']")!);
     expect(document.querySelector("[data-user-query='expanded']")?.textContent).toContain("最近 7 天");
     fireEvent.click(screen.getByRole("button", { name: i18n.t("actions.collapseQuery", { ns: "chat" }) }));

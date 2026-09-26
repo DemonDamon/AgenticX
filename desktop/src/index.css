@@ -902,6 +902,52 @@ body.agx-settings-nav-resizing {
 }
 
 /*
+ * Page markdown paints headings/strong with --text-strong and inline code with the
+ * dark-theme chip. On a white (mono) fill those tokens are light-on-light.
+ * Stay on the bubble's own text color instead.
+ */
+.agx-im-user-bubble .msg-content :is(h1, h2, h3, strong) {
+  color: inherit;
+}
+.agx-im-user-bubble .msg-content :is(h1, h2, h3) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: inherit;
+  letter-spacing: 0;
+}
+.agx-im-user-bubble .msg-content :not(pre) > code {
+  color: inherit !important;
+  background: color-mix(in srgb, var(--chat-im-user-text) 14%, transparent) !important;
+}
+.agx-im-user-bubble .msg-content ul,
+.agx-im-user-bubble .msg-content ol {
+  list-style-position: inside;
+  margin-left: 0;
+  padding-left: 0.2em;
+}
+
+/* Scheduled-task contract: one-line note, not a markdown document inside the bubble. */
+.agx-execution-contract {
+  margin-top: 0.55rem;
+  font-size: 0.86em;
+  line-height: 1.45;
+}
+.agx-execution-contract summary {
+  cursor: pointer;
+  font-weight: 600;
+  opacity: 0.82;
+  list-style: none;
+}
+.agx-execution-contract summary::-webkit-details-marker {
+  display: none;
+}
+.agx-execution-contract ul {
+  margin: 0.35rem 0 0;
+  padding-left: 0.2em;
+  list-style-position: inside;
+}
+
+/*
  * 用户气泡 + 操作栏（locked — 详见 desktop/DESIGN.md「User message action bar」）：
  * gutter 在 stack 上；操作栏 width:0;min-width:100% 与气泡同宽右对齐；
  * 时间戳在图标簇内、紧挨「复制」左侧；末枚按钮四边对称 padding。

@@ -76,4 +76,14 @@ describe("IM bubble tokens", () => {
     expect(block).toContain("color: var(--chat-im-user-text)");
     expect(block).not.toContain("theme-color-rgb");
   });
+
+  it("keeps user-bubble markdown on the bubble text color", () => {
+    const heading = ruleBlock(indexCss, ".agx-im-user-bubble .msg-content :is(h1, h2, h3, strong) {");
+    expect(heading).toContain("color: inherit");
+    const code = ruleBlock(indexCss, ".agx-im-user-bubble .msg-content :not(pre) > code {");
+    expect(code).toContain("color: inherit !important");
+    expect(code).toContain("var(--chat-im-user-text)");
+    const lists = ruleBlock(indexCss, ".agx-im-user-bubble .msg-content ul,");
+    expect(lists).toContain("list-style-position: inside");
+  });
 });

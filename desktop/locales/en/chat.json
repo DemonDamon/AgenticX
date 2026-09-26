@@ -149,7 +149,8 @@
     "unselectBlock": "Deselect reply block",
     "selectBlock": "Select reply block",
     "expandQuery": "Show full query",
-    "collapseQuery": "Collapse"
+    "collapseQuery": "Collapse",
+    "executionContract": "Execution notes"
   },
   "reasoning": {
     "thinking": "Thinking · …",

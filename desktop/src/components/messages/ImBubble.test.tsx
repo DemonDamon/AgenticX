@@ -751,7 +751,9 @@ describe("ImBubble long scheduled-task query", () => {
       />,
     );
     expect(html).toContain('data-user-query="collapsed"');
-    expect(html).toContain("Execution Contract");
+    expect(html).toContain("这是执行任务");
+    expect(html).not.toContain("Execution Contract");
+    expect(html).not.toContain("<h2");
     expect(html).toContain('aria-expanded="false"');
   });
 
@@ -770,7 +772,26 @@ describe("ImBubble long scheduled-task query", () => {
     const html = renderToStaticMarkup(
       <ImBubble message={{ id: "chat-query", role: "user", content: contract }} />,
     );
-    expect(html).toContain("Execution Contract");
+    expect(html).toContain("这是执行任务");
+    expect(html).not.toContain("<h2");
     expect(html).toContain('data-user-query="collapsed"');
+  });
+
+  it("leads a scheduled task with the instruction and tucks the contract into a note", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "task-with-instruction",
+          role: "user",
+          content: `${contract}\n\n抓取最近 7 天的公告并汇总。`,
+        }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain("抓取最近 7 天的公告并汇总。");
+    expect(html).toContain("执行约束");
+    expect(html).toContain("<details");
+    expect(html).not.toContain("<h2");
+    expect(html).not.toContain("Execution Contract");
   });
 });

@@ -149,7 +149,8 @@
     "unselectBlock": "取消选择回复块",
     "selectBlock": "选择回复块",
     "expandQuery": "展开全部",
-    "collapseQuery": "收起"
+    "collapseQuery": "收起",
+    "executionContract": "执行约束"
   },
   "reasoning": {
     "thinking": "思考中 · …",

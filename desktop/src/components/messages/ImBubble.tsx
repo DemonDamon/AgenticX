@@ -69,6 +69,7 @@ import { GroupTalkReportCard } from "./GroupTalkReportCard";
 import { usePacedStreamText } from "./usePacedStreamText";
 import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
 import { isLongUserQuery } from "../../utils/long-user-query";
+import { splitAutomationExecutionContract } from "../../utils/automation-contract-display";
 
 type Props = {
   message: Message;
@@ -141,6 +142,21 @@ type Props = {
   collapseLongUserQuery?: boolean;
 };
 
+function ExecutionContractNote({ lines }: { lines: string[] }) {
+  const { t } = useTranslation("chat");
+  if (lines.length === 0) return null;
+  return (
+    <details className="agx-execution-contract">
+      <summary>{t("actions.executionContract")}</summary>
+      <ul>
+        {lines.map((line, index) => (
+          <li key={`${index}-${line}`}>{line}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function CollapsibleUserQuery({
   enabled,
   text,
@@ -194,6 +210,40 @@ function CollapsibleUserQuery({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function UserQueryBody({
+  text,
+  quotedItems,
+  referenceAttachments,
+  onOpenFileReference,
+}: {
+  text: string;
+  quotedItems: string[];
+  referenceAttachments: MessageAttachment[];
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
+}) {
+  const { instruction, contractLines } = splitAutomationExecutionContract(text);
+  const hasTask = instruction.trim().length > 0;
+  const plainContract = contractLines.length > 0 && !hasTask;
+  const visibleText = plainContract ? contractLines.join("\n") : hasTask ? instruction : text;
+  return (
+    <>
+      <CollapsibleUserQuery enabled text={visibleText}>
+        {plainContract ? (
+          contractLines.map((line, index) => <div key={`${index}-${line}`}>{line}</div>)
+        ) : (
+          renderUserBubbleInlineContent(
+            visibleText,
+            quotedItems,
+            referenceAttachments,
+            onOpenFileReference,
+          )
+        )}
+      </CollapsibleUserQuery>
+      {hasTask && contractLines.length > 0 ? <ExecutionContractNote lines={contractLines} /> : null}
+    </>
   );
 }
 
@@ -384,6 +434,7 @@ export function ImBubble({
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
   void userAvatarUrl;
+  void collapseLongUserQuery;
   const isUser = message.role === "user";
   const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
   const fallbackMe = userName || t("actions.me");
@@ -1025,14 +1076,12 @@ export function ImBubble({
                     ) : null}
                   </div>
                 ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
-                  <CollapsibleUserQuery enabled={isUser || collapseLongUserQuery} text={String(bodyText ?? "")}>
-                    {renderUserBubbleInlineContent(
-                      bodyText,
-                      displayQuotedItems,
-                      referenceAttachments,
-                      onOpenFileReference
-                    )}
-                  </CollapsibleUserQuery>
+                  <UserQueryBody
+                    text={String(bodyText ?? "")}
+                    quotedItems={displayQuotedItems}
+                    referenceAttachments={referenceAttachments}
+                    onOpenFileReference={onOpenFileReference}
+                  />
                 ) : null}
               </div>
             </MaybeConversationContent>
