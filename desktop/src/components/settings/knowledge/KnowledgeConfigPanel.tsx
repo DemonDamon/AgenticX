@@ -1,5 +1,5 @@
 // Plan-Id: machi-kb-stage1-local-mvp
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, BookOpen, Check, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -23,6 +23,13 @@ import { i18n } from "../../../i18n/i18n";
 
 function st(key: string, opts?: Record<string, unknown>): string {
   return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
+function wikiModelOptions(entry: { model?: string; models?: string[] } | undefined, current?: string): string[] {
+  const models = [...(entry?.models ?? [])];
+  if (entry?.model && !models.includes(entry.model)) models.unshift(entry.model);
+  if (current && !models.includes(current)) models.unshift(current);
+  return models;
 }
 
 function embedProviderLabel(id: string): string {
@@ -609,7 +616,7 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title={st("knowledge.enhanced")}>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
           <div id="agx-wiki-compile" className={wikiCompilePulse ? "rounded-lg ring-2 ring-[var(--ui-btn-primary-bg)]" : ""}>
           <KbCapabilityTile
             phase={st("knowledge.phaseIngest")}
@@ -620,10 +627,61 @@ export function KnowledgeConfigPanel({
             onChange={(enabled) =>
               setConfig({
                 ...config,
-                wiki_compiler: { enabled },
+                wiki_compiler: { ...config.wiki_compiler, enabled },
               })
             }
-          />
+          >
+            {config.wiki_compiler?.enabled ? (
+              <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
+                <label className="block text-xs text-text-muted">
+                  {st("knowledge.wikiModelProvider")}
+                  <select
+                    className={`mt-1 block w-full ${KB_FIELD_BASE}`}
+                    value={config.wiki_compiler.provider ?? ""}
+                    onChange={(event) => {
+                      const provider = event.target.value;
+                      const entry = providerCatalog[provider];
+                      const models = entry?.models ?? [];
+                      const current = config.wiki_compiler?.model ?? "";
+                      const model = models.includes(current) ? current : (models[0] ?? entry?.model ?? "");
+                      setConfig({
+                        ...config,
+                        wiki_compiler: { ...config.wiki_compiler, enabled: true, provider, model },
+                      });
+                    }}
+                  >
+                    <option value="">{st("knowledge.wikiModelPick")}</option>
+                    {Object.keys(providerCatalog).map((id) => (
+                      <option key={id} value={id}>
+                        {providerCatalog[id]?.displayName || id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs text-text-muted">
+                  {st("knowledge.wikiModelName")}
+                  <select
+                    className={`mt-1 block w-full ${KB_FIELD_BASE}`}
+                    value={config.wiki_compiler.model ?? ""}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        wiki_compiler: { ...config.wiki_compiler, enabled: true, model: event.target.value },
+                      })
+                    }
+                  >
+                    <option value="">{st("knowledge.wikiModelPick")}</option>
+                    {wikiModelOptions(providerCatalog[config.wiki_compiler.provider ?? ""], config.wiki_compiler.model).map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="text-[11px] leading-snug text-text-faint">{st("knowledge.wikiModelHint")}</p>
+              </div>
+            ) : null}
+          </KbCapabilityTile>
           </div>
           <KbCapabilityTile
             phase={st("knowledge.phaseAnswer")}
@@ -664,6 +722,7 @@ function KbCapabilityTile({
   description,
   enabled,
   onChange,
+  children,
 }: {
   phase: string;
   icon: LucideIcon;
@@ -671,6 +730,7 @@ function KbCapabilityTile({
   description: string;
   enabled: boolean;
   onChange: (enabled: boolean) => void;
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -703,6 +763,7 @@ function KbCapabilityTile({
         </div>
         <SettingsSwitch checked={enabled} onChange={onChange} size="sm" aria-label={title} />
       </div>
+      {children}
     </div>
   );
 }

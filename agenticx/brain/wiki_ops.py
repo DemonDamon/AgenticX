@@ -106,11 +106,26 @@ def purge_wiki_source(brain_storage: Path, source_name: str) -> List[str]:
     return removed
 
 
-def compile_document_wiki(docs_rt, doc_id: str) -> Dict[str, Any]:
+def compile_document_wiki(
+    docs_rt,
+    doc_id: str,
+    *,
+    progress_cb=None,
+    cancel_event=None,
+) -> Dict[str, Any]:
     """Write wiki pages for one already indexed document. Caller runs off the ingest pool."""
     cfg = docs_rt.read_config()
-    if not getattr(getattr(cfg, "wiki_compiler", None), "enabled", False):
+    wiki_cfg = getattr(cfg, "wiki_compiler", None)
+    if not getattr(wiki_cfg, "enabled", False):
         return {"ok": False, "skipped": True, "message": "Wiki 编译未打开", "written": []}
+    provider = str(getattr(wiki_cfg, "provider", "") or "").strip()
+    model = str(getattr(wiki_cfg, "model", "") or "").strip()
+    if not provider or not model:
+        return {
+            "ok": False,
+            "error": "请先在知识库配置里选择写 Wiki 的供应商和模型，并保存",
+            "written": [],
+        }
     doc = docs_rt.runtime.get_document(doc_id)
     if doc is None:
         return {"ok": False, "error": "document not found", "written": []}
@@ -126,9 +141,13 @@ def compile_document_wiki(docs_rt, doc_id: str) -> Dict[str, Any]:
     result = compiler.compile_source(
         source_path=doc.source_path,
         source_text=text,
-        provider_name=cfg.embedding.provider,
-        model_name=None,
+        provider_name=provider,
+        model_name=model,
+        progress_cb=progress_cb,
+        cancel_event=cancel_event,
     )
+    if result.error == "已取消":
+        return {"ok": False, "cancelled": True, "error": "已取消", "written": []}
     if not result.ok:
         logger.warning("wiki compile failed for %s: %s", doc_id, result.error)
         return {"ok": False, "error": result.error or "编译失败", "written": []}

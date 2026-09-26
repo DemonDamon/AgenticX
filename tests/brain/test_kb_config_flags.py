@@ -37,6 +37,8 @@ def test_registry_update_persists_wiki_and_synthesis_flags(isolated_brains):
 
     cfg = KBConfig.from_dict(brain.config)
     cfg.wiki_compiler.enabled = True
+    cfg.wiki_compiler.provider = "bailian"
+    cfg.wiki_compiler.model = "qwen-plus"
     cfg.synthesis.enabled = True
     reg.update(brain.id, {"config": cfg.to_dict()})
 
@@ -44,6 +46,8 @@ def test_registry_update_persists_wiki_and_synthesis_flags(isolated_brains):
     assert reloaded is not None
     out = KBConfig.from_dict(reloaded.config)
     assert out.wiki_compiler.enabled is True
+    assert out.wiki_compiler.provider == "bailian"
+    assert out.wiki_compiler.model == "qwen-plus"
     assert out.synthesis.enabled is True
 
     yaml_path = brain_registry_mod.BRAINS_ROOT / brain.id / "brain.yaml"
@@ -52,6 +56,7 @@ def test_registry_update_persists_wiki_and_synthesis_flags(isolated_brains):
     assert disk is not None
     disk_cfg = KBConfig.from_dict(disk.config)
     assert disk_cfg.wiki_compiler.enabled is True
+    assert disk_cfg.wiki_compiler.model == "qwen-plus"
     assert disk_cfg.synthesis.enabled is True
 
 

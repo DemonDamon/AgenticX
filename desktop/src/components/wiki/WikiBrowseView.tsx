@@ -167,7 +167,7 @@ export function WikiBrowseView() {
   const [reloadKey, setReloadKey] = useState(0);
   const [creating, setCreating] = useState(false);
   const [compiles, setCompiles] = useState<
-    { document_id: string; source_name: string; status: string; message: string }[]
+    { document_id: string; source_name: string; status: string; message: string; progress?: number; model?: string }[]
   >([]);
   const compileSignature = useRef("");
   const [loading, setLoading] = useState(true);
@@ -550,10 +550,19 @@ export function WikiBrowseView() {
       ) : pages.length === 0 ? (
         <EmptyState
           text={emptyWikiText(compiles, t)}
-          action={t("wiki.goAddDoc")}
-          onAction={() => openKnowledge("materials")}
-          secondary={t("wiki.makeMine")}
-          onSecondary={() => openKnowledge("compile")}
+          progress={activeCompile(compiles)?.progress}
+          detail={activeCompile(compiles)?.model}
+          action={activeCompile(compiles) ? t("wiki.cancelCompile") : t("wiki.goAddDoc")}
+          onAction={() => {
+            const current = activeCompile(compiles);
+            if (current && kbApi) {
+              void kbApi.cancelWikiCompile(current.document_id);
+              return;
+            }
+            openKnowledge("materials");
+          }}
+          secondary={activeCompile(compiles) ? undefined : t("wiki.makeMine")}
+          onSecondary={activeCompile(compiles) ? undefined : () => openKnowledge("compile")}
           busy={creating}
         />
       ) : (
@@ -759,12 +768,21 @@ export function WikiBrowseView() {
   );
 }
 
+function activeCompile(
+  compiles: { document_id: string; source_name: string; status: string; message: string; progress?: number; model?: string }[],
+) {
+  return compiles.find((row) => row.status === "queued" || row.status === "running");
+}
+
 function emptyWikiText(
   compiles: { source_name: string; status: string; message: string }[],
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
   const active = compiles.find((row) => row.status === "queued" || row.status === "running");
-  if (active) return t("wiki.compileRunning", { name: active.source_name || "" });
+  if (active) {
+    const action = active.message || t("wiki.compileRunning", { name: active.source_name || "" });
+    return `${active.source_name} · ${action}`;
+  }
   const failed = compiles.find((row) => row.status === "failed");
   if (failed) return t("wiki.compileFailed", { name: failed.source_name || "", message: failed.message });
   return t("wiki.buildSteps");
@@ -777,6 +795,8 @@ function EmptyState({
   secondary,
   onSecondary,
   busy,
+  progress,
+  detail,
 }: {
   text: string;
   action: string;
@@ -784,10 +804,21 @@ function EmptyState({
   secondary?: string;
   onSecondary?: () => void;
   busy?: boolean;
+  progress?: number;
+  detail?: string;
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
       <p className="max-w-lg text-sm leading-relaxed text-text-muted">{text}</p>
+      {detail ? <p className="text-xs text-text-faint">{detail}</p> : null}
+      {typeof progress === "number" ? (
+        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-border/40">
+          <div
+            className="h-full bg-[rgb(var(--theme-color-rgb,59,130,246))] transition-all"
+            style={{ width: `${Math.round(progress * 100)}%` }}
+          />
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <button
           type="button"

@@ -26,6 +26,7 @@
     "buildSteps": "还没有页面。先确认「Wiki 编译」已打开并保存，再在资料里点「为已入库资料补写 Wiki」，或新增一份文档。写页面时，这里会显示正在写哪一份、失败原因是什么。",
     "compileRunning": "正在为「{{name}}」写 Wiki 页。这一步不占索引进度，写完后页面会出现在这里。",
     "compileFailed": "「{{name}}」没有写成 Wiki 页：{{message}}",
+    "cancelCompile": "停止写页面",
     "goAddDoc": "去新增或重新索引",
     "backToChat": "返回对话",
     "makeMine": "去打开 Wiki 编译",

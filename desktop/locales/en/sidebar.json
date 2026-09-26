@@ -26,6 +26,7 @@
     "buildSteps": "No pages yet. Turn on Wiki compile and save, then use Write wiki for indexed files, or add a document. This page shows which file is being written and why a write failed.",
     "compileRunning": "Writing wiki pages for \"{{name}}\". This does not use the index progress. Pages show up here when it finishes.",
     "compileFailed": "Wiki pages were not written for \"{{name}}\": {{message}}",
+    "cancelCompile": "Stop writing",
     "goAddDoc": "Add or reindex a file",
     "backToChat": "Back to chat",
     "makeMine": "Open Wiki compile",

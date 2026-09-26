@@ -55,6 +55,8 @@ export type RetrievalSpec = {
 
 export type WikiCompilerSpec = {
   enabled: boolean;
+  provider?: string;
+  model?: string;
 };
 
 export type SynthesisSpec = {
@@ -146,6 +148,8 @@ export function normalizeKbConfig(config: KBConfig): KBConfig {
     retrieval: { ...base.retrieval, ...config.retrieval },
     wiki_compiler: {
       enabled: config.wiki_compiler?.enabled ?? base.wiki_compiler!.enabled,
+      provider: config.wiki_compiler?.provider ?? base.wiki_compiler?.provider ?? "",
+      model: config.wiki_compiler?.model ?? base.wiki_compiler?.model ?? "",
     },
     synthesis: {
       enabled: config.synthesis?.enabled ?? base.synthesis!.enabled,
@@ -211,7 +215,7 @@ export function defaultKBConfig(): KBConfig {
       vector_weight: 1,
       rerank_enabled: false,
     },
-    wiki_compiler: { enabled: false },
+    wiki_compiler: { enabled: false, provider: "", model: "" },
     synthesis: { enabled: false },
   };
 }

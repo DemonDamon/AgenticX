@@ -117,6 +117,8 @@ class FileFilterSpec:
 @dataclass
 class WikiCompilerSpec:
     enabled: bool = False
+    provider: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -252,7 +254,11 @@ class KBConfig:
             )
         if isinstance(data.get("wiki_compiler"), dict):
             wc = data["wiki_compiler"]
-            merged.wiki_compiler = WikiCompilerSpec(enabled=bool(wc.get("enabled", False)))
+            merged.wiki_compiler = WikiCompilerSpec(
+                enabled=bool(wc.get("enabled", False)),
+                provider=str(wc.get("provider") or "").strip(),
+                model=str(wc.get("model") or "").strip(),
+            )
         if isinstance(data.get("synthesis"), dict):
             syn = data["synthesis"]
             merged.synthesis = SynthesisSpec(enabled=bool(syn.get("enabled", False)))

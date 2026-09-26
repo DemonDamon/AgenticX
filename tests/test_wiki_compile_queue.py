@@ -42,14 +42,8 @@ def test_disabled_compile_is_visible_and_does_not_queue_work():
     brain = _Brain()
     schedule_wiki_after_ingest(brain, _Job(IngestJobStatus.DONE, "doc-1"))
     rows = brain.wiki_compiles.list_status()
-    assert rows == [
-        {
-            "document_id": "doc-1",
-            "source_name": "talk.pdf",
-            "status": "skipped",
-            "message": "Wiki 编译未打开",
-        }
-    ]
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["message"] == "Wiki 编译未打开"
 
 
 def test_failed_compile_is_recorded_on_the_wiki_queue():
@@ -72,3 +66,11 @@ def test_failed_compile_is_recorded_on_the_wiki_queue():
         time.sleep(0.05)
     assert status == "failed"
     assert "model unavailable" in queue.list_status()[0]["message"]
+
+
+def test_cancel_queued_compile_does_not_stay_running():
+    queue = WikiCompileQueue()
+    queue.note("doc-3", "talk.pdf", "queued", "等待写页面", stage="queued")
+    cancelled = queue.cancel("doc-3")
+    assert cancelled == ["doc-3"]
+    assert queue.list_status()[0]["status"] == "cancelled"

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FilePlus, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { Panel } from "../../ds/Panel";
-import type { KBApi } from "./api";
+import type { KBApi, WikiCompileStatus } from "./api";
 import type { IngestJob, KBDocument, KBDocumentStatus } from "./types";
 import { i18n } from "../../../i18n/i18n";
 
@@ -12,12 +12,7 @@ function st(key: string, opts?: Record<string, unknown>): string {
 }
 
 
-type WikiCompile = {
-  document_id: string;
-  source_name: string;
-  status: string;
-  message: string;
-};
+type WikiCompile = WikiCompileStatus;
 
 type Props = {
   api: KBApi;
@@ -457,6 +452,25 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions, wikiCompileE
                         ) : null}
                       </div>
                     ) : null}
+                    {wikiByDoc[doc.id] && (wikiByDoc[doc.id].status === "queued" || wikiByDoc[doc.id].status === "running") ? (
+                      <div className="mt-1">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/40">
+                          <div
+                            className="h-full bg-[var(--settings-accent-progress)] transition-all"
+                            style={{ width: `${Math.round((wikiByDoc[doc.id].progress ?? 0) * 100)}%` }}
+                          />
+                        </div>
+                        <div className="mt-1 truncate text-[11px] text-text-muted" title={wikiByDoc[doc.id].model}>
+                          {wikiByDoc[doc.id].model ? `${wikiByDoc[doc.id].model} · ` : ""}
+                          {wikiByDoc[doc.id].message || wikiStatusLabel(wikiByDoc[doc.id])}
+                        </div>
+                      </div>
+                    ) : null}
+                    {wikiByDoc[doc.id]?.status === "failed" ? (
+                      <div className="mt-1 break-words text-xs text-rose-600 dark:text-rose-400">
+                        {wikiByDoc[doc.id].message}
+                      </div>
+                    ) : null}
                     {isRunning ? (
                       <>
                         <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border/40">
@@ -474,6 +488,16 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions, wikiCompileE
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-1">
+                    {wikiByDoc[doc.id] && (wikiByDoc[doc.id].status === "queued" || wikiByDoc[doc.id].status === "running") ? (
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2 py-1 text-xs"
+                        onClick={() => void api.cancelWikiCompile(doc.id)}
+                        title={st("knowledge.wikiCancel")}
+                      >
+                        {st("knowledge.wikiCancel")}
+                      </button>
+                    ) : null}
                     {isRunning ? (
                       <button
                         type="button"

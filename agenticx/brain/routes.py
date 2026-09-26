@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 
 from agenticx.brain.manager import BrainManager
 from agenticx.brain.registry import BrainError, BrainRegistry
@@ -454,6 +454,16 @@ def register_brain_routes(app: FastAPI) -> None:
         rt = _require_docs_brain(brain_id)
         queued = enqueue_wiki_backfill(rt, None)
         return {"ok": True, "queued": queued}
+
+    @app.post("/api/brains/{brain_id}/wiki/compiles/cancel")
+    async def brain_wiki_compiles_cancel(
+        brain_id: str,
+        payload: Optional[Dict[str, Any]] = Body(default=None),
+    ) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        doc_id = str(payload.get("document_id") or "").strip() if isinstance(payload, dict) else ""
+        cancelled = rt.wiki_compiles.cancel(doc_id or None)
+        return {"ok": True, "cancelled": cancelled}
 
     @app.get("/api/brains/{brain_id}/wiki/page")
     async def brain_wiki_page(brain_id: str, path: str) -> Dict[str, Any]:

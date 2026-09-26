@@ -71,10 +71,19 @@ export type KBApi = {
   savePurpose: (content: string) => Promise<void>;
   createSampleWiki: () => Promise<string[]>;
   clearSampleWiki: () => Promise<string[]>;
-  listWikiCompiles: () => Promise<
-    { document_id: string; source_name: string; status: string; message: string }[]
-  >;
+  listWikiCompiles: () => Promise<WikiCompileStatus[]>;
   backfillWiki: () => Promise<string[]>;
+  cancelWikiCompile: (documentId?: string) => Promise<string[]>;
+};
+
+export type WikiCompileStatus = {
+  document_id: string;
+  source_name: string;
+  status: string;
+  message: string;
+  stage?: string;
+  progress?: number;
+  model?: string;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -232,14 +241,19 @@ export function createKbApi(
       return body.removed ?? [];
     },
     async listWikiCompiles() {
-      const body = await doJson<{
-        compiles?: { document_id: string; source_name: string; status: string; message: string }[];
-      }>(p("/wiki/compiles"));
+      const body = await doJson<{ compiles?: WikiCompileStatus[] }>(p("/wiki/compiles"));
       return body.compiles ?? [];
     },
     async backfillWiki() {
       const body = await doJson<{ queued?: string[] }>(p("/wiki/backfill"), { method: "POST" });
       return body.queued ?? [];
+    },
+    async cancelWikiCompile(documentId?: string) {
+      const body = await doJson<{ cancelled?: string[] }>(p("/wiki/compiles/cancel"), {
+        method: "POST",
+        body: JSON.stringify(documentId ? { document_id: documentId } : {}),
+      });
+      return body.cancelled ?? [];
     },
   };
 }

@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,15 @@ def build_generation_prompt(
     )
 
 
+class WikiCompileCancelled(Exception):
+    """Raised when the user stops page writing. The in-flight model call is abandoned."""
+
+
+def _raise_if_cancelled(cancel_event: Optional[threading.Event]) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise WikiCompileCancelled()
+
+
 def _invoke_llm(messages: List[Dict[str, str]], *, provider_name: Optional[str], model_name: Optional[str]) -> str:
     from agenticx.llms.provider_resolver import ProviderResolver
 
@@ -109,6 +119,34 @@ def _invoke_llm(messages: List[Dict[str, str]], *, provider_name: Optional[str],
             return str(resp.content or "")
         return str(resp)
     raise RuntimeError("LLM provider unavailable for wiki compile")
+
+
+def _invoke_llm_cancellable(
+    messages: List[Dict[str, str]],
+    *,
+    provider_name: Optional[str],
+    model_name: Optional[str],
+    cancel_event: Optional[threading.Event],
+) -> str:
+    _raise_if_cancelled(cancel_event)
+    box: Dict[str, str] = {}
+    err: Dict[str, BaseException] = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = _invoke_llm(messages, provider_name=provider_name, model_name=model_name)
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the waiter
+            err["error"] = exc
+
+    worker = threading.Thread(target=_run, name="agx-wiki-llm", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        if cancel_event is not None and cancel_event.is_set():
+            raise WikiCompileCancelled()
+        worker.join(0.25)
+    if "error" in err:
+        raise err["error"]
+    return box.get("value", "")
 
 
 class WikiCompiler:
@@ -130,6 +168,8 @@ class WikiCompiler:
         source_text: str,
         provider_name: Optional[str] = None,
         model_name: Optional[str] = None,
+        progress_cb: Optional[Callable[[str, str], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> WikiCompileResult:
         purpose = _read_optional(self._storage / "purpose.md")
         schema = _read_optional(self._storage / "schema.md")
@@ -137,8 +177,15 @@ class WikiCompiler:
         overview = _read_optional(self._storage / "wiki" / "overview.md")
         source_name = Path(source_path).name
 
+        def _step(stage: str, message: str) -> None:
+            _raise_if_cancelled(cancel_event)
+            if progress_cb is not None:
+                progress_cb(stage, message)
+
         try:
-            analysis = _invoke_llm(
+            _step("reading", "正在读取正文")
+            _step("analyzing", "正在抽出实体和概念")
+            analysis = _invoke_llm_cancellable(
                 [
                     {"role": "system", "content": build_analysis_prompt(
                         purpose=purpose, index=index, source_content=source_text
@@ -147,8 +194,10 @@ class WikiCompiler:
                 ],
                 provider_name=provider_name,
                 model_name=model_name,
+                cancel_event=cancel_event,
             )
-            generation = _invoke_llm(
+            _step("generating", "正在生成页面")
+            generation = _invoke_llm_cancellable(
                 [
                     {"role": "system", "content": build_generation_prompt(
                         schema=schema,
@@ -162,7 +211,11 @@ class WikiCompiler:
                 ],
                 provider_name=provider_name,
                 model_name=model_name,
+                cancel_event=cancel_event,
             )
+            _step("writing", "正在保存页面")
+        except WikiCompileCancelled:
+            return WikiCompileResult(ok=False, error="已取消")
         except Exception as exc:
             logger.exception("wiki compile LLM failed")
             return WikiCompileResult(ok=False, error=str(exc))
