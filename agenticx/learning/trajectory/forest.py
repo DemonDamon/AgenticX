@@ -6,12 +6,50 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
 from .schema import RSITrajectory
 
 _ERROR_MARK = "error"
+
+# SP22 错误三分类（Dream-RSI 附录规则）:
+#   infra     = 可修复失误（网络/超时/容器/限流/显存/维度/编译/环境路径）,
+#               单次或多次出现都不允许据此关停分支;
+#   algorithm = 判真失败（断言/测试/验证器/期望不符）, 才是算法方向失败信号。
+_INFRA_ERROR_RE = re.compile(
+    r"networkerror|connectionerror|connection (reset|refused)|"
+    r"timeout|timed out|docker|rate.?limit|pull access|"
+    r"out of memory|cuda oom|"
+    r"filenotfounderror|modulenotfounderror|importerror|permissionerror|"
+    r"shape mismatch|size mismatch|dimension|"
+    r"compilation|compile error", re.I)
+_ALGO_ERROR_RE = re.compile(
+    r"assertionerror|assert failed|tests? (failed|failure)|verifier|"
+    r"expected.{0,60}got|wrong (answer|output|result)", re.I)
+
+
+def classify_error(messages: list) -> str:
+    """按消息里的报错内容做三分类: infra / algorithm / none。
+
+    优先级 algorithm > infra > none（混合时以判真信号为准——验证器说
+    错就是方向失败, 即便同时有网络抖动）。非 tool 消息不参与分类。
+    """
+    infra = algo = False
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "tool":
+            continue
+        content = str(m.get("content") or "")
+        if _ALGO_ERROR_RE.search(content):
+            algo = True
+        elif _INFRA_ERROR_RE.search(content):
+            infra = True
+    if algo:
+        return "algorithm"
+    if infra:
+        return "infra"
+    return "none"
 
 @dataclass
 class StepFeatures:
@@ -74,6 +112,7 @@ class AttemptNode:
     total_est_tokens: int
     steps: list[StepFeatures] = field(default_factory=list)
     source: str = ""
+    error_class: str = "none"      # SP22: classify_error 三分类
 
     @property
     def passed(self) -> bool:
@@ -88,6 +127,7 @@ class AttemptNode:
             n_steps=len(steps),
             total_est_tokens=steps[-1].est_tokens if steps else 0,
             steps=steps, source=traj.source,
+            error_class=classify_error(traj.messages),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +138,7 @@ class AttemptNode:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "AttemptNode":
         d = {k: v for k, v in d.items() if k != "passed"}
+        d.setdefault("error_class", "none")   # 旧记录兼容
         d["steps"] = [StepFeatures(**s) for s in d.get("steps", [])]
         return cls(**d)
 

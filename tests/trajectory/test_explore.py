@@ -123,3 +123,40 @@ def test_min_votes_filters_hints(tmp_path):
                      trials_root=tmp_path / "trials", dry=True, min_votes=2,
                      skip_split_guard=True)
     assert "FileNotFoundError" in rep2["results"][0]["hints"]  # 快照 2 票 ≥ 2 → 注入
+
+
+# --- SP22: hints 分期（Dream-RSI 5.1: 探索期关注入） ---
+
+
+def test_hints_mode_explore_skips_injection(tmp_path):
+    """explore 模式: 上轮冻结经验存在也不进 prompt; 经验提取入库不受影响。"""
+    tasks = ["/tmp/fakeA", "/tmp/fakeB"]
+    store = TrajectoryStore(tmp_path / "store")
+    m1 = ExperienceMemory(tmp_path / "experience" / "round_1.json")
+    run_round(1, tasks, m1, store, trials_root=tmp_path / "trials", dry=True,
+              skip_split_guard=True)
+
+    m2 = ExperienceMemory(tmp_path / "experience" / "round_2.json")
+    rep = run_round(2, tasks, m2, store, trials_root=tmp_path / "trials",
+                    dry=True, skip_split_guard=True, hints_mode="explore")
+    assert rep["results"][0]["hints"] == ""        # 不注入
+    assert rep["results"][0]["hints_mode"] == "explore"
+    assert len(m2.all_lessons()) >= 2              # 经验仍照常提取入库
+
+    # 对照臂: 默认(exploit)仍注入
+    m2b = ExperienceMemory(tmp_path / "experience" / "round_2b.json")
+    rep2 = run_round(2, tasks, m2b, store, trials_root=tmp_path / "trials",
+                     dry=True, skip_split_guard=True)
+    assert "FileNotFoundError" in rep2["results"][0]["hints"]
+
+
+def test_run_round_evolve_scheduler_smoke(tmp_path):
+    """--evolve-scheduler: 轮末在 train 区回放上演化调度器, 报告字段就位。"""
+    memory = ExperienceMemory(tmp_path / "exp.json")
+    store = TrajectoryStore(tmp_path / "store")
+    report = run_round(1, _tasks(tmp_path), memory, store,
+                       trials_root=tmp_path / "trials", dry=True,
+                       evolve_scheduler=True, skip_split_guard=True)
+    assert report["scheduler_evolution"] is not None
+    assert "accepted" in report["scheduler_evolution"]
+    assert (tmp_path / "schedulers.json").exists()
