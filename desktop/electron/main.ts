@@ -6951,7 +6951,11 @@ function createWindow(): void {
       mainWindow?.hide();
     }
   });
-  startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+  if (typeof startNearBrowserBridge === "function") {
+    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+  } else {
+    console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
+  }
 }
 
 function trayLabels(locale?: AppLocale): { toggleWindow: string; settings: string; quit: string } {
