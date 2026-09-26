@@ -27,8 +27,7 @@ const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
 const NAV_ITEM_BASE =
   "flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-none transition-colors";
 const NAV_ITEM_IDLE = "text-text-muted hover:bg-surface-hover hover:text-text-strong";
-const NAV_ITEM_ACTIVE =
-  "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]";
+const NAV_ITEM_ACTIVE = "bg-surface-card-strong font-medium text-text-strong";
 
 type SidebarView = Exclude<MainView, "chat">;
 
@@ -235,7 +234,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
 
   return (
     <>
-      <aside className="flex h-full w-full flex-col bg-surface-sidebar">
+      <aside className="flex h-full w-full flex-col bg-transparent">
         {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
           <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">

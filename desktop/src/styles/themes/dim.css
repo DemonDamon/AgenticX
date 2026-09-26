@@ -11,6 +11,8 @@
   --surface-panel: rgba(24, 24, 24, 0.75);
   --surface-popover: #181818;
   --surface-sidebar: rgba(30, 30, 30, 0.68);
+  --shell-canvas: #242428;
+  --shell-panel: #141416;
   --surface-topbar: rgba(30, 30, 30, 0.68);
   --surface-messages: transparent;
   --surface-composer: rgba(26, 26, 26, 0.62);

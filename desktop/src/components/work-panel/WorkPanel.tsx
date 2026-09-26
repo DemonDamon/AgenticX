@@ -163,8 +163,17 @@ import {
  * (active browser tab) wins; else fall back to system browser.
  */
 type InAppBrowserOpenHandler = (url: string) => boolean;
-const inAppBrowserOpenHandlers = new Set<InAppBrowserOpenHandler>();
-let inAppBrowserOpenIpcWired = false;
+type InAppBrowserOpenBridge = {
+  handlers: Set<InAppBrowserOpenHandler>;
+  wired: boolean;
+};
+function inAppBrowserOpenBridge(): InAppBrowserOpenBridge {
+  const host = window as Window & { __nearInAppBrowserOpen?: InAppBrowserOpenBridge };
+  if (!host.__nearInAppBrowserOpen) {
+    host.__nearInAppBrowserOpen = { handlers: new Set(), wired: false };
+  }
+  return host.__nearInAppBrowserOpen;
+}
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_SCRATCH_CHATS: ScratchChat[] = [];
@@ -180,15 +189,15 @@ function logWorkspacePerf(payload: Record<string, unknown>): void {
 }
 
 function ensureInAppBrowserOpenIpc(): void {
-  if (inAppBrowserOpenIpcWired) return;
+  const bridge = inAppBrowserOpenBridge();
+  if (bridge.wired) return;
   const api = window.agenticxDesktop;
   if (!api?.onInAppBrowserOpen) return;
-  inAppBrowserOpenIpcWired = true;
+  bridge.wired = true;
   api.onInAppBrowserOpen((url) => {
-    for (const handler of inAppBrowserOpenHandlers) {
+    for (const handler of bridge.handlers) {
       if (handler(url)) return;
     }
-    void api.openExternal?.(url);
   });
 }
 
@@ -235,6 +244,8 @@ function RemoteBrowserPane({
   url,
   reloadKey = 0,
   onNavigate,
+  onReplaceNavigate,
+  onGuestHistory,
   onQuoteSelection,
   onSearchSelection,
   onOpenScratchSelection,
@@ -245,6 +256,9 @@ function RemoteBrowserPane({
   reloadKey?: number;
   /** Guest navigated (link / redirect / intercepted window.open) → sync address bar. */
   onNavigate?: (nextUrl: string) => void;
+  /** Same visit as the current history entry (server redirect). Do not add a back step. */
+  onReplaceNavigate?: (nextUrl: string) => void;
+  onGuestHistory?: (state: { canBack: boolean; canForward: boolean }) => void;
   onQuoteSelection?: (payload: BrowserQuotePayload) => void;
   onSearchSelection?: (text: string) => void;
   onOpenScratchSelection?: (payload: BrowserQuotePayload) => void;
@@ -264,6 +278,14 @@ function RemoteBrowserPane({
   const committedUrlRef = useRef(url);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const onReplaceNavigateRef = useRef(onReplaceNavigate);
+  onReplaceNavigateRef.current = onReplaceNavigate;
+  const onGuestHistoryRef = useRef(onGuestHistory);
+  onGuestHistoryRef.current = onGuestHistory;
+  /** Server redirects belong to the current visit, not a new back step. */
+  const redirectingRef = useRef(false);
+  /** loadURL from the address bar / in-app open already created the history entry. */
+  const programmaticNavRef = useRef(false);
   const onWebviewReadyRef = useRef(onWebviewReady);
   onWebviewReadyRef.current = onWebviewReady;
   useEffect(() => {
@@ -295,6 +317,7 @@ function RemoteBrowserPane({
     if (!wv) return;
     if (url === committedUrlRef.current) return;
     committedUrlRef.current = url;
+    programmaticNavRef.current = true;
     setSelectionUi(null);
     loadWebviewUrl(wv, url);
   }, [url]);
@@ -318,32 +341,54 @@ function RemoteBrowserPane({
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
-    const syncFromGuest = (nextUrl: string) => {
+    const reportGuestHistory = () => {
+      onGuestHistoryRef.current?.({
+        canBack: Boolean(wv.canGoBack?.()),
+        canForward: Boolean(wv.canGoForward?.()),
+      });
+    };
+    const syncFromGuest = (nextUrl: string, mode: "push" | "replace") => {
       const href = String(nextUrl || "").trim();
+      reportGuestHistory();
       if (!href || !/^https?:\/\//i.test(href)) return;
-      if (href === committedUrlRef.current) return;
+      if (href === committedUrlRef.current && mode === "push") return;
       committedUrlRef.current = href;
       setSelectionUi(null);
-      onNavigateRef.current?.(href);
+      if (mode === "replace") onReplaceNavigateRef.current?.(href);
+      else onNavigateRef.current?.(href);
     };
     const onDidNavigate = (event: Event) => {
       const e = event as Event & { url?: string };
-      syncFromGuest(e.url || wv.getURL?.() || "");
+      const replaced = redirectingRef.current || programmaticNavRef.current;
+      redirectingRef.current = false;
+      programmaticNavRef.current = false;
+      syncFromGuest(e.url || wv.getURL?.() || "", replaced ? "replace" : "push");
       // Do not inject here — guest may not be dom-ready yet after navigate.
+    };
+    const onRedirect = (event: Event) => {
+      const e = event as Event & { url?: string };
+      const href = e.url || "";
+      if (!redirectingRef.current && !programmaticNavRef.current) {
+        redirectingRef.current = true;
+        syncFromGuest(href, "push");
+        return;
+      }
+      redirectingRef.current = true;
+      syncFromGuest(href, "replace");
     };
     const onDomReady = () => injectSelectionHook();
     wv.addEventListener("dom-ready", onDomReady);
     wv.addEventListener("did-finish-load", onDomReady);
     wv.addEventListener("did-navigate", onDidNavigate);
     wv.addEventListener("did-navigate-in-page", onDidNavigate);
-    wv.addEventListener("did-redirect-navigation", onDidNavigate);
+    wv.addEventListener("did-redirect-navigation", onRedirect);
     // Wait for dom-ready / did-finish-load — eager inject on mount races attach.
     return () => {
       wv.removeEventListener("dom-ready", onDomReady);
       wv.removeEventListener("did-finish-load", onDomReady);
       wv.removeEventListener("did-navigate", onDidNavigate);
       wv.removeEventListener("did-navigate-in-page", onDidNavigate);
-      wv.removeEventListener("did-redirect-navigation", onDidNavigate);
+      wv.removeEventListener("did-redirect-navigation", onRedirect);
     };
   }, []);
 
@@ -610,6 +655,22 @@ function pushBrowserHistory(tab: BrowserTab, entry: BrowserHistoryEntry): Browse
   };
 }
 
+function replaceBrowserHistory(tab: BrowserTab, entry: BrowserHistoryEntry): BrowserTab {
+  if (tab.history.length === 0) return pushBrowserHistory(tab, entry);
+  const idx = Math.max(0, Math.min(tab.historyIndex, tab.history.length - 1));
+  const history = tab.history.slice();
+  history[idx] = entry;
+  return {
+    ...tab,
+    url: entry.url,
+    draftUrl: entry.url === "about:blank" ? "" : entry.url,
+    title: entry.title,
+    srcDoc: entry.srcDoc,
+    history,
+    historyIndex: idx,
+  };
+}
+
 function goBrowserHistory(tab: BrowserTab, delta: -1 | 1): BrowserTab | null {
   const next = tab.historyIndex + delta;
   if (next < 0 || next >= tab.history.length) return null;
@@ -622,7 +683,6 @@ function goBrowserHistory(tab: BrowserTab, delta: -1 | 1): BrowserTab | null {
     draftUrl: entry.url === "about:blank" ? "" : entry.url,
     title: entry.title,
     srcDoc: entry.srcDoc,
-    reloadNonce: (tab.reloadNonce ?? 0) + 1,
   };
 }
 
@@ -918,6 +978,7 @@ export function WorkPanel({
   const activeKindRef = useRef(activeKind);
   const activeBrowserIdRef = useRef(activeBrowserId);
   const agentWebviewRef = useRef<NearElectronWebview | null>(null);
+  const [guestHistory, setGuestHistory] = useState({ canBack: false, canForward: false });
   const openWebReferenceInBrowserRef = useRef<(url: string, title: string) => void>(() => undefined);
   const previewDirtyRef = useRef(false);
   const previewRequestLeaveRef = useRef<((proceed: () => void) => void) | null>(null);
@@ -1592,9 +1653,9 @@ export function WorkPanel({
       );
       return true;
     };
-    inAppBrowserOpenHandlers.add(handler);
+    inAppBrowserOpenBridge().handlers.add(handler);
     return () => {
-      inAppBrowserOpenHandlers.delete(handler);
+      inAppBrowserOpenBridge().handlers.delete(handler);
     };
   }, []);
 
@@ -1670,6 +1731,26 @@ export function WorkPanel({
         });
       } else if (focusRequest.tabId) {
         setActiveBrowserId(focusRequest.tabId);
+      } else {
+        setBrowserTabs((prev) => {
+          if (prev.length > 0) {
+            const current =
+              prev.find((t) => t.id === activeBrowserIdRef.current) ?? prev[prev.length - 1];
+            queueMicrotask(() => setActiveBrowserId(current.id));
+            return prev;
+          }
+          const id = uid();
+          queueMicrotask(() => setActiveBrowserId(id));
+          return [
+            ...prev,
+            createBrowserTab({
+              id,
+              title: i18n.t("work.newTab", { ns: "workspace" }),
+              url: "about:blank",
+              draftUrl: "",
+            }),
+          ];
+        });
       }
       setActiveKind("browser");
     } else if (focusRequest.kind === "preview") {
@@ -2243,7 +2324,7 @@ export function WorkPanel({
         : t("work.tabSummary");
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-panel">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
         {summaryTabOpen ? (
           <button
@@ -3134,9 +3215,26 @@ export function WorkPanel({
               }}
             >
               {(() => {
-                const canBack = activeBrowser.historyIndex > 0;
+                const canBack = guestHistory.canBack || activeBrowser.historyIndex > 0;
                 const canForward =
+                  guestHistory.canForward ||
                   activeBrowser.historyIndex < activeBrowser.history.length - 1;
+                const goBack = () => {
+                  const wv = agentWebviewRef.current;
+                  if (wv?.canGoBack?.()) {
+                    wv.goBack?.();
+                    return;
+                  }
+                  goBrowserBack(activeBrowser.id);
+                };
+                const goForward = () => {
+                  const wv = agentWebviewRef.current;
+                  if (wv?.canGoForward?.()) {
+                    wv.goForward?.();
+                    return;
+                  }
+                  goBrowserForward(activeBrowser.id);
+                };
                 const navBtn = (opts: {
                   label: string;
                   disabled: boolean;
@@ -3165,13 +3263,13 @@ export function WorkPanel({
                     {navBtn({
                       label: t("work.back"),
                       disabled: !canBack,
-                      onClick: () => goBrowserBack(activeBrowser.id),
+                      onClick: goBack,
                       children: <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
                       label: t("work.forward"),
                       disabled: !canForward,
-                      onClick: () => goBrowserForward(activeBrowser.id),
+                      onClick: goForward,
                       children: <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
@@ -3264,6 +3362,18 @@ export function WorkPanel({
                       ),
                     );
                   }}
+                  onReplaceNavigate={(nextUrl) => {
+                    const tabId = activeBrowser.id;
+                    const title = browserTitleFromUrl(nextUrl);
+                    setBrowserTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tabId
+                          ? replaceBrowserHistory(t, browserEntry(nextUrl, title, null))
+                          : t,
+                      ),
+                    );
+                  }}
+                  onGuestHistory={setGuestHistory}
                 />
                 <BrowserAgentOverlay sessionId={sessionId} />
               </div>

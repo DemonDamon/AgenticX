@@ -34,6 +34,7 @@ import {
 } from "../../utils/session-tail-cache";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../../utils/session-message-map";
 import { LoopReviewCard } from "../session/LoopReviewCard";
+import { SidebarCreateButton } from "../quick-compose/SidebarCreateButton";
 import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
   SIDEBAR_HISTORY_FILTER_KEY,
@@ -1112,8 +1113,10 @@ export function SidebarSessionHistory() {
     return (
       <div
         key={row.session_id}
-        className={`group/row flex w-full items-center gap-1 rounded-md py-1.5 pr-2 transition-colors ${
-          active || checked || menuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
+        className={`agx-session-history-row group/row flex h-8 w-full items-center gap-1 rounded-md pr-2 text-[13px] transition-colors ${
+          active || checked || menuOpen
+            ? "agx-session-history-row--active text-text-strong"
+            : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
         }`}
         style={{ paddingLeft: 8 + depth * 14 }}
       >
@@ -1165,7 +1168,7 @@ export function SidebarSessionHistory() {
         ) : (
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-[12px] text-text-primary"
+            className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-[13px]"
             onClick={() => {
               if (selectMode) {
                 toggleSelectSession(row.session_id);
@@ -1365,20 +1368,18 @@ export function SidebarSessionHistory() {
   const showFileManage = !!fileManageTarget;
 
   return (
-    <div
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-      style={{ borderTop: "1px solid var(--border-muted)" }}
-    >
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         className={`absolute inset-0 flex min-h-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
           showFileManage ? "-translate-x-full pointer-events-none" : "translate-x-0"
         }`}
         aria-hidden={showFileManage}
       >
-      <div className="flex items-center gap-1 px-2 pb-1 pt-2">
-        <div className="min-w-0 flex-1 truncate px-1 text-[11px] font-medium text-text-faint">
+      <div className="flex items-center gap-1 px-3 pb-1 pt-3">
+        <div className="min-w-0 flex-1 truncate text-[11px] font-light text-text-muted">
           {t("history.title")}
         </div>
+        <SidebarCreateButton className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-faint hover:bg-surface-hover hover:text-text-strong [&_svg]:h-3.5 [&_svg]:w-3.5" />
         {!selectMode ? (
           <>
             <button

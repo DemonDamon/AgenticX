@@ -11,6 +11,9 @@
   --surface-panel: #ffffff;
   --surface-popover: #ffffff;
   --surface-sidebar: #f4f4f5;
+  /* 窗口底比对话/工作区面板浅一档，面板才能嵌进去 */
+  --shell-canvas: #f4f4f5;
+  --shell-panel: #ffffff;
   --surface-topbar: #ffffff;
   --surface-messages: #ffffff;
   --surface-composer: #ffffff;

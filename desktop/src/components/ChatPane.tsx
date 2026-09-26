@@ -385,7 +385,13 @@ import {
 import { resolveSendSessionId } from "../utils/send-lock";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
-import { buildMessageScratchDraft, clipScratchTitleSnippet } from "../utils/scratch-chat-open";
+import { buildBlankScratchDraft, buildMessageScratchDraft, clipScratchTitleSnippet } from "../utils/scratch-chat-open";
+import {
+  DestinationChooser,
+  DestinationRail,
+  EmptyTaskSuggestions,
+  type DestinationKind,
+} from "./shell/destination-rail";
 import type { ScratchChatDraft } from "../utils/scratch-chat";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -443,8 +449,6 @@ import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
-import { EmptyStateCornerLotties } from "./brand/EmptyStateCornerLotties";
-import { NearBoxHero } from "./brand/NearBoxHero";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
@@ -3497,6 +3501,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [sessionFindOpen, setSessionFindOpen] = useState(false);
   /** One-shot focus for WorkPanel tabs (summary / workspace / terminal / browser). */
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
+  const [destinationChooserOpen, setDestinationChooserOpen] = useState(false);
+  const [railKind, setRailKind] = useState<DestinationKind | null>(null);
+  const destinationChooserBootRef = useRef(false);
   /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
   const [workPanelExpanded, setWorkPanelExpanded] = useState(false);
   const prevWorkPanelSessionIdRef = useRef(pane.sessionId);
@@ -13480,9 +13487,39 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const closeWorkspacePanelOnly = () => {
     setWorkPanelExpanded(false);
+    setRailKind(null);
+    setDestinationChooserOpen(false);
     useAppStore.setState((s) => ({
       panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, taskspacePanelOpen: false })),
     }));
+  };
+
+  const openDestination = (kind: DestinationKind) => {
+    if ((workspacePanelOpen && railKind === kind) || (destinationChooserOpen && !workspacePanelOpen && railKind === kind)) {
+      closeWorkspacePanelOnly();
+      return;
+    }
+    setDestinationChooserOpen(false);
+    setRailKind(kind);
+    if (kind === "scratch") {
+      openScratchFromDraft(buildBlankScratchDraft(i18n.t("work.tabScratch", { ns: "workspace" })));
+      return;
+    }
+    if (!pane.taskspacePanelOpen) {
+      openWorkspaceSidebarForPane(
+        pane.id,
+        paneRef.current?.clientWidth ?? paneWidth,
+        openSidePanel,
+      );
+    }
+    if (kind === "changes") {
+      setWorkPanelFocus({ kind: "summary", section: "changes" });
+      return;
+    }
+    if (kind === "terminal" && pane.terminalTabs.length === 0) {
+      addPaneTerminalTab(pane.id, "~", "zsh");
+    }
+    setWorkPanelFocus({ kind });
   };
 
   const toggleWorkPanelExpand = () => {
@@ -13603,13 +13640,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     (!!pane.sessionId && visibleMessages.length === 0);
   const liftComposer = isBrandEmptyState && !workExpandedLayout;
 
+  useEffect(() => {
+    if (destinationChooserBootRef.current) return;
+    if (pane.sessionId || isGroupPane || isAutomationTaskPane) return;
+    destinationChooserBootRef.current = true;
+    if (!workspacePanelOpen) setDestinationChooserOpen(true);
+  }, [isAutomationTaskPane, isGroupPane, pane.sessionId, workspacePanelOpen]);
+
   return (
     <div
       ref={paneRef}
       className={`relative agx-chatpane flex h-full min-w-0 flex-1 ${
         workExpandedLayout ? "agx-chatpane--work-expanded" : ""
       }`}
-      style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
       {routingNotice ? (
@@ -13647,7 +13690,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         className={
           workExpandedLayout
             ? "pointer-events-none absolute inset-x-0 bottom-0 z-[60] flex justify-center px-3 pb-3 sm:px-6"
-            : "agx-chatpane-main-column relative flex h-full min-w-0 flex-1 flex-col"
+            : "agx-chatpane-main-column relative flex min-h-0 min-w-0 flex-1 flex-col"
         }
         style={workExpandedLayout ? undefined : { minWidth: CHAT_COLUMN_MIN_WIDTH }}
       >
@@ -13990,10 +14033,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               : "shrink-0 px-4 pt-2.5 pb-4"
         }>
           {liftComposer ? (
-            <div className="relative z-10 mb-11 w-full max-w-5xl text-center text-xs">
-              <EmptyStateCornerLotties stageSize={200}>
-                <NearBoxHero size={200} className="w-full" />
-              </EmptyStateCornerLotties>
+            <div className="relative z-10 mb-6 w-full max-w-[640px] text-center">
+              <h2 className="text-lg font-medium tracking-tight text-text-strong">{t("empty.needDone")}</h2>
+              <p className="mt-1 text-sm text-text-muted">{t("empty.needDoneHint")}</p>
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>
@@ -14841,6 +14883,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           ) : null}
           {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
+          {liftComposer ? (
+            <EmptyTaskSuggestions
+              onPick={(prompt) => {
+                setComposerText(prompt);
+                composerRef.current?.focus();
+              }}
+            />
+          ) : null}
           {(pane.messages ?? []).some(
             (m) => m.role === "user" || m.role === "assistant"
           ) ? (
@@ -14881,20 +14931,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         <div
           className={
             workExpandedLayout
-              ? "relative h-full min-w-0 flex-1 overflow-hidden"
-              : "relative h-full shrink-0 overflow-hidden"
+              ? "agx-chatpane-side-card relative min-h-0 min-w-0 flex-1 overflow-hidden"
+              : "relative min-h-0 shrink-0 self-stretch"
           }
           style={workExpandedLayout ? undefined : { width: taskspaceWidth }}
         >
           {!workExpandedLayout ? (
             <div
-              className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+              className="absolute -left-2 top-0 z-20 h-full w-2 cursor-col-resize"
               onMouseDown={startResizeTaskspace}
               title={t("layout.resizeWorkbench")}
-            >
-              <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-            </div>
+            />
           ) : null}
+          <div className={workExpandedLayout ? "contents" : "agx-chatpane-side-card h-full overflow-hidden"}>
           <WorkPanel
             paneId={pane.id}
             sessionId={pane.sessionId}
@@ -14978,6 +15027,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onCrewSwitchModel={handleCrewSwitchModel}
             onCrewInterrupt={handleCrewInterrupt}
           />
+          </div>
         </div>
       ) : null}
       {!compactSidePanels && pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
@@ -15014,7 +15064,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <div
             aria-hidden
             role="presentation"
-            className="pointer-events-auto absolute inset-x-0 bottom-0 top-10 z-[45] bg-black/35 backdrop-blur-[1px]"
+            className="pointer-events-auto absolute bottom-0 left-0 right-10 top-10 z-[45] bg-black/35 backdrop-blur-[1px]"
             style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
             onClick={dismissAuxiliaryOverlays}
           />
@@ -15022,8 +15072,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <div
               className={
                 workExpandedLayout
-                  ? "pointer-events-auto absolute inset-0 z-50 overflow-hidden bg-surface-base"
-                  : "pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+                  ? "pointer-events-auto absolute bottom-0 left-0 right-10 top-0 z-50 overflow-hidden bg-surface-base"
+                  : "pointer-events-auto absolute bottom-0 right-10 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
               }
               style={
                 workExpandedLayout
@@ -15217,6 +15267,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           setWorkPanelFocus({ kind: "scratch", chatId });
         }}
       />
+      {destinationChooserOpen && !workspacePanelOpen ? (
+        <div
+          className={
+            compactSidePanels
+              ? "pointer-events-auto absolute bottom-0 right-10 top-10 z-50 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              : "agx-chatpane-side-card relative min-h-0 shrink-0 overflow-hidden"
+          }
+        >
+          <DestinationChooser onClose={closeWorkspacePanelOnly} onSelect={openDestination} />
+        </div>
+      ) : null}
+      <DestinationRail activeKind={workspacePanelOpen ? railKind : null} onSelect={openDestination} />
       {avatarSettingsOpen && paneSettingsAvatar ? (
         <AvatarSettingsPanel
           mode="avatar"

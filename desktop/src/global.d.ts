@@ -8,6 +8,10 @@ type NearElectronWebview = HTMLElement & {
   loadURL: (url: string) => Promise<void> | void;
   reload: () => Promise<void> | void;
   getURL: () => string;
+  canGoBack?: () => boolean;
+  canGoForward?: () => boolean;
+  goBack?: () => void;
+  goForward?: () => void;
   /** Open Chromium DevTools for this guest (Trae-style HTML/browser preview). */
   openDevTools: () => void;
   /** Run script in the guest page (used for WorkPanel browser text selection). */

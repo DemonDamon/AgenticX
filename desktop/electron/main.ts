@@ -6695,9 +6695,28 @@ function shouldRouteToInAppBrowser(targetUrl: string, appUrl: string): boolean {
  * WorkPanel remote browser uses <webview> (not iframe) so sites with
  * X-Frame-Options / CSP frame-ancestors still load. Guest window.open /
  * target=_blank stays inside the same webview instead of system Chrome.
+ *
+ * Electron also asks the `openExternal` permission for those navigations and,
+ * if granted, opens the OS browser (often twice). Deny it for this partition.
  */
+function denyWebviewOpenExternal(partition: string): void {
+  const browserSession = session.fromPartition(partition);
+  browserSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === "openExternal") return false;
+    return true;
+  });
+  browserSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === "openExternal") {
+      callback(false);
+      return;
+    }
+    callback(true);
+  });
+}
+
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
+  denyWebviewOpenExternal("persist:near-workpanel-browser");
   contents.setWindowOpenHandler(({ url }) => {
     if (!parseHttpUrl(url)) return { action: "deny" };
     // Single navigation path: tell renderer to update the WorkPanel tab + loadURL
