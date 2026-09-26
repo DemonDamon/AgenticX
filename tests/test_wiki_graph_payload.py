@@ -43,6 +43,8 @@ def test_sample_wiki_lists_pages_links_and_purpose(tmp_path):
     kept.write_text("---\ntitle: Mine\ntype: concept\n---\n# Mine\n", encoding="utf-8")
     removed = clear_sample_wiki(tmp_path)
     assert "wiki/concepts/annual-leave.md" in removed
+    assert "purpose.md" in removed
+    assert (tmp_path / "purpose.md").read_text(encoding="utf-8") == ""
     assert kept.is_file()
     titles = {page["title"] for page in list_wiki_pages(tmp_path)}
     assert titles == {"Mine"}

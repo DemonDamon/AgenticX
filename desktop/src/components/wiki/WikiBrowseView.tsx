@@ -370,6 +370,21 @@ export function WikiBrowseView() {
     setSelectedPath(page.path);
   }
 
+  const runningCompile = activeCompile(compiles);
+
+  async function rebuildWiki() {
+    if (!kbApi) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await kbApi.backfillWiki();
+    } catch (exc) {
+      setError(String((exc as Error).message ?? exc));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   function openKnowledge(kind: "compile" | "materials") {
     openSettings("knowledge");
     const name = kind === "compile" ? "agenticx:focus-wiki-compile" : "agenticx:focus-wiki-materials";
@@ -511,6 +526,24 @@ export function WikiBrowseView() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
+        {runningCompile ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-strong"
+            onClick={() => void kbApi?.cancelWikiCompile(runningCompile.document_id)}
+          >
+            {t("wiki.cancelCompile")}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-strong disabled:opacity-50"
+            disabled={!kbApi || creating}
+            onClick={() => void rebuildWiki()}
+          >
+            {t("wiki.rebuild")}
+          </button>
+        )}
         <button
           type="button"
           className="text-xs text-text-muted hover:text-text-strong"
@@ -519,11 +552,30 @@ export function WikiBrowseView() {
           {t("wiki.purpose")}
         </button>
       </header>
+      {runningCompile ? (
+        <div className="border-b border-border px-4 py-2">
+          <div className="mb-1 flex items-center justify-between gap-3 text-xs text-text-muted">
+            <span className="min-w-0 truncate">
+              {runningCompile.model ? `${runningCompile.model} · ` : ""}
+              {runningCompile.source_name} · {runningCompile.message || t("wiki.compileRunning", { name: runningCompile.source_name })}
+            </span>
+            <span className="shrink-0 tabular-nums">{Math.round((runningCompile.progress ?? 0) * 100)}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/40">
+            <div
+              className="h-full bg-[rgb(var(--theme-color-rgb,59,130,246))] transition-all"
+              style={{ width: `${Math.round((runningCompile.progress ?? 0) * 100)}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
       {purposeOpen ? (
         <div className="border-b border-border px-4 py-3">
+          <p className="mb-2 max-w-3xl text-xs leading-relaxed text-text-muted">{t("wiki.purposeHelp")}</p>
           <textarea
             className="min-h-[72px] w-full resize-y rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs text-text-strong"
             value={purposeDraft}
+            placeholder={t("wiki.purposePh")}
             onChange={(event) => setPurposeDraft(event.target.value)}
           />
           <button

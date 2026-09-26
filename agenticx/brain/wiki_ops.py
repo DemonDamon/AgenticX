@@ -234,6 +234,12 @@ sources:
 """,
 }
 
+_SAMPLE_PURPOSE = "# 知识库目标\n\n把员工手册编译成可浏览的概念、实体和来源页。\n"
+
+
+def _is_sample_purpose(text: str) -> bool:
+    return text.replace("\r\n", "\n").strip() == _SAMPLE_PURPOSE.strip()
+
 
 def seed_sample_wiki(brain_storage: Path) -> List[str]:
     """Write a small linked wiki so browse, search, and graph can be checked."""
@@ -246,7 +252,7 @@ def seed_sample_wiki(brain_storage: Path) -> List[str]:
         written.append(rel)
     purpose = brain_storage / "purpose.md"
     if not purpose.is_file() or not purpose.read_text(encoding="utf-8").strip():
-        purpose.write_text("# 知识库目标\n\n把员工手册编译成可浏览的概念、实体和来源页。\n", encoding="utf-8")
+        purpose.write_text(_SAMPLE_PURPOSE, encoding="utf-8")
     return written
 
 
@@ -266,6 +272,10 @@ def clear_sample_wiki(brain_storage: Path) -> List[str]:
         parent = target.parent
         if parent != brain_storage and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
+    purpose = brain_storage / "purpose.md"
+    if purpose.is_file() and _is_sample_purpose(purpose.read_text(encoding="utf-8")):
+        purpose.write_text("", encoding="utf-8")
+        removed.append("purpose.md")
     return removed
 
 
