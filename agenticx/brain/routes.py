@@ -20,6 +20,7 @@ from agenticx.brain.wiki_compiler import WikiCompiler
 from agenticx.brain.wiki_graph import wiki_graph_payload
 from agenticx.brain.wiki_ops import (
     brain_storage_root,
+    draft_writing_brief,
     list_wiki_pages,
     maybe_compile_wiki_after_ingest,
     clear_sample_wiki,
@@ -492,6 +493,19 @@ def register_brain_routes(app: FastAPI) -> None:
         purpose_path.parent.mkdir(parents=True, exist_ok=True)
         purpose_path.write_text(content, encoding="utf-8")
         return {"ok": True}
+
+    @app.post("/api/brains/{brain_id}/wiki/purpose/draft")
+    async def brain_wiki_purpose_draft(brain_id: str, payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        content = str(payload.get("content") or "") if isinstance(payload, dict) else ""
+        try:
+            result = await asyncio.to_thread(draft_writing_brief, rt, content)
+        except Exception as exc:
+            logger.exception("wiki purpose draft failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=str(result.get("error") or "生成失败"))
+        return {"ok": True, "content": result.get("content") or ""}
 
     @app.post("/api/brains/{brain_id}/wiki/compile/{doc_id}")
     async def brain_wiki_compile(brain_id: str, doc_id: str) -> Dict[str, Any]:

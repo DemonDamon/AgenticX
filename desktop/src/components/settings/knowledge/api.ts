@@ -69,6 +69,7 @@ export type KBApi = {
   getWikiPage: (path: string) => Promise<string>;
   getPurpose: () => Promise<string>;
   savePurpose: (content: string) => Promise<void>;
+  draftPurpose: (content: string) => Promise<string>;
   createSampleWiki: () => Promise<string[]>;
   clearSampleWiki: () => Promise<string[]>;
   listWikiCompiles: () => Promise<WikiCompileStatus[]>;
@@ -231,6 +232,13 @@ export function createKbApi(
         method: "PUT",
         body: JSON.stringify({ content }),
       });
+    },
+    async draftPurpose(content: string) {
+      const body = await doJson<{ content?: string }>(p("/wiki/purpose/draft"), {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      return body.content ?? "";
     },
     async createSampleWiki() {
       const body = await doJson<{ written?: string[] }>(p("/wiki/sample"), { method: "POST" });

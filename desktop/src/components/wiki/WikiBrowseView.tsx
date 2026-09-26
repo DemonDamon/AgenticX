@@ -62,6 +62,43 @@ function parsePage(raw: string): { body: string; sources: string[] } {
   return { body: raw.slice(match[0].length), sources };
 }
 
+function sourceLink(source: string): { token: string; label?: string } | null {
+  const match = source.match(/^\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]$/);
+  if (!match) return null;
+  return { token: match[1].trim(), label: match[2]?.trim() };
+}
+
+function SourceList({
+  sources,
+  pages,
+  onOpen,
+}: {
+  sources: string[];
+  pages: WikiPage[];
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <ul className="mt-2 space-y-1 text-xs text-text-muted">
+      {sources.map((source) => {
+        const link = sourceLink(source);
+        const page = link ? resolvePage(pages, link.token) : undefined;
+        const label = link?.label || page?.title || link?.token.split("/").pop() || source;
+        return (
+          <li key={source}>
+            {page ? (
+              <button type="button" className="text-left hover:underline" onClick={() => onOpen(page.path)}>
+                {label}
+              </button>
+            ) : (
+              label
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function wikiMarkdown(body: string, pages: WikiPage[]): string {
   return body.replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_full, target: string, label?: string) => {
     const token = target.trim();
@@ -166,6 +203,7 @@ export function WikiBrowseView() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [reloadKey, setReloadKey] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [compiles, setCompiles] = useState<
     { document_id: string; source_name: string; status: string; message: string; progress?: number; model?: string }[]
   >([]);
@@ -424,6 +462,20 @@ export function WikiBrowseView() {
     }
   }
 
+  async function fillPurpose(polish: boolean) {
+    if (!kbApi) return;
+    setDrafting(true);
+    setError(null);
+    try {
+      const text = await kbApi.draftPurpose(polish ? purposeDraft : "");
+      if (text.trim()) setPurposeDraft(text.trim());
+    } catch (exc) {
+      setError(String((exc as Error).message ?? exc));
+    } finally {
+      setDrafting(false);
+    }
+  }
+
   async function savePurpose() {
     if (!kbApi) return;
     await kbApi.savePurpose(purposeDraft);
@@ -578,14 +630,32 @@ export function WikiBrowseView() {
             placeholder={t("wiki.purposePh")}
             onChange={(event) => setPurposeDraft(event.target.value)}
           />
-          <button
-            type="button"
-            className="mt-2 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1 text-xs font-medium text-[var(--ui-btn-primary-text)] disabled:opacity-50"
-            disabled={!kbApi || purposeDraft === purpose}
-            onClick={() => void savePurpose()}
-          >
-            {t("wiki.savePurpose")}
-          </button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1 text-xs text-text-strong disabled:opacity-50"
+              disabled={!kbApi || drafting}
+              onClick={() => void fillPurpose(false)}
+            >
+              {drafting ? t("wiki.purposeBusy") : t("wiki.purposeFromDocs")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1 text-xs text-text-strong disabled:opacity-50"
+              disabled={!kbApi || drafting || !purposeDraft.trim()}
+              onClick={() => void fillPurpose(true)}
+            >
+              {t("wiki.purposePolish")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1 text-xs font-medium text-[var(--ui-btn-primary-text)] disabled:opacity-50"
+              disabled={!kbApi || drafting || purposeDraft === purpose}
+              onClick={() => void savePurpose()}
+            >
+              {t("wiki.savePurpose")}
+            </button>
+          </div>
         </div>
       ) : null}
       {error ? <p className="px-4 py-3 text-xs text-rose-400">{error}</p> : null}
@@ -728,11 +798,11 @@ export function WikiBrowseView() {
                   {sources.length > 0 ? (
                     <>
                       <h3 className="mt-4 text-xs font-medium text-text-muted">{t("wiki.sources")}</h3>
-                      <ul className="mt-2 space-y-1 text-xs text-text-muted">
-                        {sources.map((source) => (
-                          <li key={source}>{source}</li>
-                        ))}
-                      </ul>
+                      <SourceList
+                        sources={sources}
+                        pages={pages}
+                        onOpen={(path) => setSelectedPath(path)}
+                      />
                     </>
                   ) : null}
                 </section>
@@ -803,11 +873,11 @@ export function WikiBrowseView() {
               {selectedNode.sources.length > 0 ? (
                 <>
                   <h3 className="mt-6 text-xs font-medium text-text-muted">{t("wiki.sources")}</h3>
-                  <ul className="mt-2 space-y-1 text-xs text-text-muted">
-                    {selectedNode.sources.map((source) => (
-                      <li key={source}>{source}</li>
-                    ))}
-                  </ul>
+                  <SourceList
+                    sources={selectedNode.sources}
+                    pages={pages}
+                    onOpen={(path) => openToken(pageId(path))}
+                  />
                 </>
               ) : null}
             </aside>

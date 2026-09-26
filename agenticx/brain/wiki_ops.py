@@ -106,6 +106,53 @@ def purge_wiki_source(brain_storage: Path, source_name: str) -> List[str]:
     return removed
 
 
+def draft_writing_brief(docs_rt, content: str = "") -> Dict[str, Any]:
+    """Cold-start or polish the wiki writing brief from indexed file names."""
+    cfg = docs_rt.read_config()
+    wiki_cfg = getattr(cfg, "wiki_compiler", None)
+    provider = str(getattr(wiki_cfg, "provider", "") or "").strip()
+    model = str(getattr(wiki_cfg, "model", "") or "").strip()
+    if not provider or not model:
+        return {"ok": False, "error": "请先在知识库配置里选择写 Wiki 的供应商和模型，并保存"}
+    names = []
+    for doc in docs_rt.runtime.list_documents():
+        name = str(getattr(doc, "source_name", "") or "").strip()
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= 40:
+            break
+    if not names and not content.strip():
+        return {"ok": False, "error": "还没有已入库的资料，无法生成写作说明"}
+    catalog = "\n".join(f"- {name}" for name in names) or "(无)"
+    draft = content.strip()
+    if draft:
+        instruction = (
+            "把下面的写作说明改写成更具体的 2 到 4 句中文，保留原意。"
+            "说明 Wiki 应整理哪些主题、保留什么。不要标题，不要 Markdown。\n\n"
+            f"## 已有资料\n{catalog}\n\n## 原说明\n{draft[:2000]}"
+        )
+    else:
+        instruction = (
+            "根据已入库文件名，写 2 到 4 句中文写作说明，告诉后续 Wiki 应整理哪些主题、保留什么。"
+            "不要标题，不要 Markdown。\n\n"
+            f"## 已有资料\n{catalog}"
+        )
+    from agenticx.brain.wiki_compiler import _invoke_llm
+
+    text = _invoke_llm(
+        [{"role": "user", "content": instruction}],
+        provider_name=provider,
+        model_name=model,
+    ).strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("markdown"):
+            text = text[8:].strip()
+    if not text:
+        return {"ok": False, "error": "模型没有写出说明"}
+    return {"ok": True, "content": text}
+
+
 def compile_document_wiki(
     docs_rt,
     doc_id: str,
