@@ -4,6 +4,12 @@
 闭环: 每轮 冻结记忆→hints 注入模型服务系统提示 → harbor trial（真实容器）
       → 轨迹入库(TrialForest 底座) + 经验提取入库 → 轮末 freeze → 下一轮复用。
       --evolve 时每轮末在 train 区跑策略演化（SP8 纪律: heldout 不参与选择）。
+      --evolve-scheduler 时轮末在回放上演化探索调度器（SP22 四维动作空间）。
+
+SP22 hints 分期（Dream-RSI 5.1 消融）: prompt 注入历史经验做方向引导会
+压制长程探索多样性——探索期（--hints-mode explore, 默认）关注入, 经验
+仍照常提取入库（供回放/蒸馏/治理）只是不进 prompt; 执行期
+（--hints-mode exploit）保留注入。汇报经验层收益必须带 on/off 对照臂。
 
 用法:
   CPU 冒烟（零 Docker/零模型, 全流程逻辑验证）:
@@ -93,16 +99,20 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
               evolve: bool = False, lm=None, tokenizer=None,
               model_name: str = "dry-model", min_votes: int = 1,
               timeout: float = 1800.0,
-              skip_split_guard: bool = False) -> dict:
+              skip_split_guard: bool = False,
+              hints_mode: str = "exploit",
+              evolve_scheduler: bool = False) -> dict:
     """跑一轮自探索。返回 {"results": [...], "evolution": ...} 形报告。
 
     记忆语义（对齐 RSIAgent frozen memory）: 本轮注入的是【上一轮冻结】的
     经验; 本轮新经验提取后写入独立轮次文件, 轮末 freeze 供下一轮读。
+    hints_mode: "exploit"=注入上轮经验（执行期语义, 直接调用默认）;
+    "explore"=不注入（探索期语义, 驱动器 CLI 默认）——经验提取入库不受影响。
     """
     trials_root = Path(trials_root)
     prev = trials_root.parent / "experience" / f"round_{round_no - 1}.json"
     hints = ""
-    if round_no > 1 and prev.exists():
+    if hints_mode == "exploit" and round_no > 1 and prev.exists():
         hints = format_hints(
             ExperienceMemory(prev).voted_lessons(min_votes=min_votes, k=8))
 
@@ -158,16 +168,31 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
         if not memory.is_frozen:
             memory.add(lessons, round_no)
         results.append({"task": task_name, "reward": float(reward),
-                        "hints": hints})
+                        "hints": hints, "hints_mode": hints_mode})
     if srv is not None:
         srv.shutdown()
 
     memory.freeze()
-    report = {"round": round_no, "results": results, "evolution": None}
+    report = {"round": round_no, "results": results, "evolution": None,
+              "scheduler_evolution": None}
     if evolve:
         from dataclasses import asdict
         evo = _evolve(store, trials_root.parent / "policies")
         report["evolution"] = asdict(evo) if evo is not None else None
+    if evolve_scheduler:
+        # SP22: train 区回放上演化探索调度器（与 --evolve 同款隔离纪律）
+        from dataclasses import asdict
+        from agenticx.learning.trajectory.scheduler import scheduler_evolve
+        forest = TrialForest.from_trajectories(store.iter_trajectories())
+        if forest.trees:
+            split = heldout_split(sorted(forest.trees), seed="v1")
+            train_forest = TrialForest.from_trajectories(
+                t for t in store.iter_trajectories()
+                if t.task_id in split.train)
+            if train_forest.trees:
+                reg = PolicyRegistry(trials_root.parent / "schedulers.json")
+                evo_s = scheduler_evolve(reg, train_forest)
+                report["scheduler_evolution"] = asdict(evo_s)
     return report
 
 
@@ -182,6 +207,12 @@ def main() -> int:
     ap.add_argument("--out", default="datasets/explore")
     ap.add_argument("--min-votes", type=int, default=1,
                     help="hints 注入的跨任务票数门槛（SP17）")
+    ap.add_argument("--hints-mode", choices=["explore", "exploit"],
+                    default="explore",
+                    help="explore=探索期关注入（默认, Dream-RSI 5.1）; "
+                         "exploit=执行期保留注入")
+    ap.add_argument("--evolve-scheduler", action="store_true",
+                    help="轮末在回放上演化探索调度器（SP22）")
     ap.add_argument("--skip-split-guard", action="store_true",
                     help="绕过任务集拆分守卫（仅供 dry 冒烟; 真跑禁止）")
     args = ap.parse_args()
@@ -205,7 +236,9 @@ def main() -> int:
                         dry=args.dry, evolve=args.evolve, lm=lm,
                         tokenizer=tokenizer, model_name=args.model,
                         min_votes=args.min_votes,
-                        skip_split_guard=args.skip_split_guard)
+                        skip_split_guard=args.skip_split_guard,
+                        hints_mode=args.hints_mode,
+                        evolve_scheduler=args.evolve_scheduler)
         rep["seconds"] = round(time.time() - t0, 1)
         summary.append(rep)
         print(json.dumps(rep, ensure_ascii=False))
