@@ -169,7 +169,7 @@ def test_merge_disabled_enabled(monkeypatch):
     for name in tools.ROBOT_TOOL_NAMES:
         assert _names(merged).count(name) == 1
         assert _names(twice).count(name) == 1
-    assert len(tools.ROBOT_TOOL_NAMES) == 6
+    assert len(tools.ROBOT_TOOL_NAMES) == 7
 
 
 def test_tool_schemas_are_closed():
@@ -367,6 +367,92 @@ async def test_rollout_start_bridge_error_after_create_keeps_session_id(robot_en
             "robot_rollout_start", {"profile": "desk", "task": "pick"}, _Gate(True)
         )
     )
+    assert result["error_code"] == "invalid_state" and result["session_id"] == SID
+
+
+# ---------------------------------------------------------------------- resume
+
+
+async def test_resume_happy_path(robot_env):
+    bridge, _ = robot_env
+    bridge.on("GET", f"/session/{SID}", _status("idle"), _status("running"))
+    bridge.on("POST", f"/session/{SID}/start", {"ok": True, "accepted": True})
+    gate = _Gate(approve=True)
+
+    result = json.loads(await _call("robot_resume", {"session_id": SID}, gate))
+
+    assert result["ok"] is True and result["session_id"] == SID
+    assert result["state"] == "running"
+    assert len(gate.calls) == 1
+    ctx = gate.calls[0]
+    assert {k: ctx[k] for k in ("tool", "risk", "session_id", "task")} == {
+        "tool": "robot_resume",
+        "risk": "robot",
+        "session_id": SID,
+        "task": "pick",
+    }
+    assert ctx["protected_reason"] == "这条操作会让真实机器人运动"
+
+
+@pytest.mark.parametrize(
+    "state", ["running", "loading", "resetting", "failed", "stopped"]
+)
+async def test_resume_rejects_non_idle(robot_env, state):
+    bridge, _ = robot_env
+    bridge.on("GET", f"/session/{SID}", _status(state))
+
+    result = json.loads(
+        await _call("robot_resume", {"session_id": SID}, _ForbiddenGate())
+    )
+
+    assert result["ok"] is False and result["error_code"] == "robot_not_idle"
+    assert result["session_id"] == SID
+    assert ("POST", f"/session/{SID}/start") not in bridge.paths()
+
+
+async def test_resume_denied(robot_env):
+    bridge, _ = robot_env
+    bridge.on("GET", f"/session/{SID}", _status("idle"))
+
+    result = await _call("robot_resume", {"session_id": SID}, _Gate(approve=False))
+
+    assert result.startswith("CANCELLED:")
+    assert ("POST", f"/session/{SID}/start") not in bridge.paths()
+
+
+async def test_resume_confirms_without_confirm_each_task(robot_env):
+    bridge, configure = robot_env
+    configure(confirm_each_task=False)
+    bridge.on("GET", f"/session/{SID}", _status("idle"), _status("running"))
+    bridge.on("POST", f"/session/{SID}/start", {"ok": True, "accepted": True})
+    gate = _Gate(approve=True)
+
+    result = json.loads(await _call("robot_resume", {"session_id": SID}, gate))
+
+    assert result["ok"] is True and len(gate.calls) == 1
+
+
+async def test_resume_bridge_error_keeps_session_id(robot_env):
+    bridge, _ = robot_env
+    bridge.on("GET", f"/session/{SID}", _status("idle"))
+    bridge.on(
+        "POST",
+        f"/session/{SID}/start",
+        (
+            409,
+            {
+                "ok": False,
+                "error_code": "invalid_state",
+                "error": "cannot start",
+                "hint": "",
+            },
+        ),
+    )
+
+    result = json.loads(
+        await _call("robot_resume", {"session_id": SID}, _Gate(approve=True))
+    )
+
     assert result["error_code"] == "invalid_state" and result["session_id"] == SID
 
 
