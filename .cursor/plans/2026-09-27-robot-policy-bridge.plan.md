@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: rb5-prompt-docs
     content: "RB-5 Meta 能力块 + context_usage + 用户文档"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -1123,9 +1123,9 @@ def _build_robot_capabilities_block() -> str:
 **RB-5a 补充（RB-4 端到端验证后追加，实施时以此为准）**：robot 工具不在 `tool_search.py` 的 `CORE_ALWAYS_LOAD_TOOLS` 中，工具池较大时默认**不会**出现在模型的工具列表里（证据见 RB-4 实施结果"端到端注入冒烟"）。已决定不改 `tool_search.py`，因此能力块必须：
 
 1. 工具列表写全 7 个：`robot_rollout_start` / `robot_resume` / `robot_set_task` / `robot_reset` / `robot_stop` / `robot_status` / `robot_snapshot`。
-2. 在工具列表那一行之后追加两条（原文照写）：
+2. 在工具列表那一行之后追加两条（原文照写；第一条的搜索参数已按 RB-5 实施结果修正，须带 `max_results` 7）：
    ```python
-   "- 这些工具默认不在工具列表里：开始机器人任务前先调用 `tool_search`（query 用 `robot`）加载它们；"
+   "- 这些工具默认不在工具列表里：开始机器人任务前先调用 `tool_search`（`query` 用 `robot`，`max_results` 用 7）一次加载全部；"
    "若调用返回 schema 未加载 / 已自动加载的提示，下一轮直接重试同一调用，`robot_stop` 尤其如此。\n"
    "- 复位或一段跑完后会话回到 idle，需继续时调用 `robot_resume`（会弹确认），不要为此 stop 再重新启动。\n"
    ```
@@ -1145,6 +1145,19 @@ def _build_robot_capabilities_block() -> str:
 ### RB-5 验收
 
 - **FR-30**：`tests/test_robot_bridge_prompt.py`：monkeypatch `ConfigManager.load` 返回 `robot.enabled=False` → `_build_robot_capabilities_block() == ""`；`enabled=True, profiles={"so101_desk": {...}}` → 含 `robot_rollout_start`、`so101_desk`、`robot_stop`；`build_meta_agent_system_prompt` 在群聊（`group_allowed` 非 None）时不含 `## 机器人策略会话`。（若 `build_meta_agent_system_prompt` 参数过多难以直接调用，允许只测 `_build_robot_capabilities_block` 并在 PR 描述中说明。）
+
+**实施结果（2026-09-27）**：`meta_agent.py` +42/-0，`context_usage.py` +2/-0，都是纯新增；`server.py` 与 `pyproject.toml` 零改动（AC-NFR-3）。`tests/test_robot_bridge_prompt.py` 7 passed，`build_meta_agent_system_prompt` 可以直接调用，群聊断言按原计划实现。回归：AC-NFR-2 的确认门四个文件、RB-3/RB-4 的机器人测试，加上所有调用 `build_meta_agent_system_prompt` 的测试文件、上下文统计、按需加载，共 195 passed / 3 failed；3 条失败把两个改动文件换回 HEAD 版本后同样失败，属既有问题（`test_smoke_bash_bg.py` 两条：一条断言英文取消文案、实际为中文，一条断言提示词含 `auth_urls`；`test_context_usage_api_uses_model_query_for_window` 缺 numpy）。`test_studio_server.py` 在有 numpy 的环境（`PYTHONPATH=<本仓库>`，`-o addopts=""`）52 passed / 1 failed，失败的 `test_server_chat_rebinds_team_callbacks_each_turn` 在机器人改动开始前的提交 `636ca05a` 上连续两次同样失败，属既有问题。ruff：`meta_agent.py` +1 BLE001，来自 plan 指定的 `except Exception: return ""`，与相邻的 `_build_computer_use_capabilities_block` 同款；`context_usage.py` 不变。
+
+实施时的调整与补充：
+
+- **搜索参数修正（有证据）**：`tool_search` 默认 `max_results=5`（`tool_search.py` `rank_tools`）。7 个机器人工具名都含 `robot`、得分相同，按 `stable_id`（`builtin:<name>`）字母序取前 5 个：`robot_reset / resume / rollout_start / set_task / snapshot`，**恰好漏掉 `robot_status` 与 `robot_stop`**。`max_results=7` 时 7 个全部加载（加载上限 8–24，放得下）。因此能力块写明 `max_results` 用 7，并新增 `test_prompted_tool_search_loads_every_robot_tool`：从能力块原文解析 query 与 `max_results`，在真实工具池上执行 `apply_search`，断言结果正好等于 `ROBOT_TOOL_NAMES`；以后新增机器人工具而没改数字时，这条会失败。
+- 按需加载清单（`session_context.py` `build_deferred_tools_manifest`，上限 120 个名字）本来就会列出这 7 个名字，能力块与它的说法一致："可直接调用、自动加载后下一轮重试，或先 `tool_search`"。
+- 确认那一条写成"启动、继续、改任务、复位会弹确认"：补上 RB-4 新增的 `robot_resume`。
+- 额外测试：没有 profile 时提示去配置 `robot.profiles`；`ConfigManager.load` 抛异常时返回空串；`test_context_usage_counts_the_block`：同一空会话在启用前后的 `system_prompt` 估算差值，正好等于能力块本身的 token 数（RB-5b）。
+- `packaging/robot-bridge/README.md` 在 RB-1/RB-2 已覆盖安装、测试、集成测试环境变量与 HTTP 接口表，RB-5 没有改动。`docs/guides/robot-bridge.md` 中的命令、字段、默认值、错误码逐一对照了代码（`config_manager.py` `RobotSettings`、`client.py`、`tools.py`、bridge `cli.py` / `lerobot_backend.py` / `fake_backend.py`）；没有加进 `mkdocs.yml` 导航（plan 未要求，现有指南也只收录了一部分）。
+- **已知限制（不修）**：`/api/loop`（`server.py` 约 L4736）与 `agx loop`（`cli/main.py` 约 L792）也调用 `build_meta_agent_system_prompt`，会带上能力块，但这两条路径不注入机器人工具。模型若在 loop 里调用，会得到"不在当前允许列表中，已拒绝执行"，不会执行；Desktop 也没有调用 `/api/loop`。要修得改 `server.py`，超出 RB-4d 的 3 行约束。
+
+**端到端提示词冒烟**（`research/codedeepresearch/lerobot/poc/rb5_prompt_smoke.py`，本地不入库）：假模型服务记录每次请求的系统消息，`agx serve` 用隔离 HOME 与本仓库代码。结果：Meta 主会话的系统消息含 `## 机器人策略会话`、含 `max_results` 用 7 的说明，按需加载清单列出 `robot_stop`，机器人工具 schema 没有直接下发（符合预期）；分身会话与 `robot.enabled: false` 时都没有能力块、也没有机器人工具；服务日志无报错。
 
 ---
 

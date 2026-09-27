@@ -242,6 +242,46 @@ def _build_computer_use_capabilities_block() -> str:
     )
 
 
+def _build_robot_capabilities_block() -> str:
+    """When ``robot.enabled``, describe the robot bridge tools and safety rules."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        settings = ConfigManager.load().robot
+        if not settings.enabled:
+            return ""
+        profiles = "、".join(sorted(settings.profiles)) or (
+            "（未配置，需在 ~/.agenticx/config.yaml 的 robot.profiles 下添加）"
+        )
+    except Exception:
+        return ""
+    return (
+        "## 机器人策略会话\n"
+        f"已启用 `robot.enabled`，可用机器人别名：{profiles}。"
+        "工具：`robot_rollout_start` / `robot_resume` / `robot_set_task` / "
+        "`robot_reset` / `robot_stop` / `robot_status` / `robot_snapshot`。\n"
+        "- 这些工具默认不在工具列表里：开始机器人任务前先调用 `tool_search`"
+        "（`query` 用 `robot`，`max_results` 用 7）一次加载全部；"
+        "若调用返回 schema 未加载 / 已自动加载的提示，下一轮直接重试同一调用，"
+        "`robot_stop` 尤其如此。\n"
+        "- 复位或一段跑完后会话回到 idle，需继续时调用 `robot_resume`（会弹确认），"
+        "不要为此 stop 再重新启动。\n"
+        "- 你是任务导演：只决定子任务、验收与复位，**绝不**尝试控制关节或速度；"
+        "实时控制由策略完成。\n"
+        "- 每个子任务后：先 `robot_status` 看事件，再 `robot_snapshot`"
+        "（图片自动附到下一轮）验收；"
+        "连续 2 次验收失败就 `robot_reset` 并向用户汇报，不要无限重试。\n"
+        "- 启动、继续、改任务、复位会弹确认，这是物理安全要求，不要劝用户关闭。"
+        "`robot_stop` 免确认，结束或出现异常时立即调用；"
+        "它不是物理急停，必要时提醒用户按急停。\n"
+        "- `pose_check.verified` 为 false 时，必须提示用户人工检查机器人姿态。\n"
+        "- 返回 `calibration_required` 时，把 hint 里的标定命令原样给用户，"
+        "标定必须由用户在终端完成。\n"
+        "- 策略启动后首段推理可能有数秒预热，判断是否在动以事件和快照为准。"
+        "若策略不读取语言指令（如 ACT），改任务不会改变动作，应如实告知。\n\n"
+    )
+
+
 def _build_near_browser_capabilities_block() -> str:
     """When ``browser_control.enabled`` (default true), describe WorkPanel browser tools."""
     try:
@@ -935,6 +975,7 @@ def build_meta_agent_system_prompt(
     )
     computer_use_block = _build_computer_use_capabilities_block()
     near_browser_block = _build_near_browser_capabilities_block()
+    robot_block = _build_robot_capabilities_block() if group_allowed is None else ""
     provider_fault_block = _build_provider_hard_failure_block(session)
     effective_kb_mode = (
         str(kb_retrieval_mode_override or "").strip().lower()
@@ -976,6 +1017,7 @@ def build_meta_agent_system_prompt(
         f"{mode_line}"
         f"{computer_use_block}"
         f"{near_browser_block}"
+        f"{robot_block}"
         "## 身份应答策略\n"
         "- 当用户询问“你是谁/你的定位”时，优先基于对话末尾 `<session-context>` 里的“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"
