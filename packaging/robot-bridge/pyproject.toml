@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agx-robot-bridge"
+version = "0.1.0"
+description = "Local HTTP bridge that lets AgenticX drive a robot policy rollout session"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5", "numpy>=1.26", "pillow>=10"]
+
+[project.optional-dependencies]
+lerobot = ["lerobot[dataset]==0.6.2"]
+test = ["pytest>=8", "httpx>=0.25"]
+
+[project.scripts]
+agx-robot-bridge = "agx_robot_bridge.cli:main"
+
+[tool.setuptools]
+packages = ["agx_robot_bridge"]
+
+# Own pytest config so the repository-root one (asyncio_mode, testpaths) is never picked up here.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
