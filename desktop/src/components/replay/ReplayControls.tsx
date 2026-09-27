@@ -67,7 +67,7 @@ export function ReplayControls({
     "inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong disabled:cursor-default disabled:opacity-40";
 
   return (
-    <div className="shrink-0 space-y-1.5 border-b border-border bg-surface-panel px-3 py-2">
+    <div className="shrink-0 space-y-1.5 border-b border-border bg-[var(--shell-panel)] px-3 py-2">
       <div className="flex flex-wrap items-center gap-1">
         <button
           type="button"

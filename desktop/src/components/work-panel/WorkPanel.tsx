@@ -1098,6 +1098,7 @@ export function WorkPanel({
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
   const activeKindRef = useRef(activeKind);
   const activeBrowserIdRef = useRef(activeBrowserId);
   const agentWebviewRef = useRef<NearElectronWebview | null>(null);
@@ -2448,7 +2449,19 @@ export function WorkPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-transparent">
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
+      <div className="flex h-10 shrink-0 items-center border-b border-border">
+        <div
+          ref={tabStripRef}
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0"
+          onWheel={(event) => {
+            const el = tabStripRef.current;
+            if (!el || el.scrollWidth <= el.clientWidth) return;
+            const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+            if (!delta) return;
+            event.preventDefault();
+            el.scrollLeft += delta;
+          }}
+        >
         {summaryTabOpen ? (
           <button
             type="button"
@@ -2782,8 +2795,7 @@ export function WorkPanel({
         >
           <Plus className="h-[16px] w-[16px]" strokeWidth={1.8} />
         </button>
-
-        <div className="flex-1" />
+        </div>
 
         {onToggleExpand ? (
           <HoverTip label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}>

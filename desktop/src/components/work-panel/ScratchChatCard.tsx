@@ -144,7 +144,7 @@ export function ScratchChatCard({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-panel">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--shell-panel)]">
       {!hideHeader ? (
         <div data-slot="scratch-header" className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
           <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.7} />
