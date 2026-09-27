@@ -332,6 +332,8 @@
     "previewFailed": "预览失败",
     "emptyTerminal": "暂无终端",
     "emptyTerminalHint": "点击 + 打开终端",
+    "openLinkInNewTab": "在新标签页中打开链接",
+    "copyLinkAddress": "复制链接地址",
     "back": "后退",
     "forward": "前进",
     "reload": "刷新",

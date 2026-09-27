@@ -7,6 +7,8 @@ export type BrowserGuestSelection = {
   text: string;
   /** Guest viewport rect (CSS px before host offset / zoom). */
   rect: { top: number; left: number; width: number; height: number };
+  /** Set when the selection sits inside a link. */
+  href?: string;
 };
 
 export type BrowserQuotePayload = {
@@ -20,8 +22,20 @@ export type BrowserQuotePayload = {
  * on mouseup / keyup for the host to poll via executeJavaScript.
  */
 export const BROWSER_SELECTION_HOOK_JS = `(() => {
-  if (window.__nearBrowserSelHook) return true;
-  window.__nearBrowserSelHook = true;
+  if (!window.__nearBrowserLinkHook) {
+    window.__nearBrowserLinkHook = true;
+    document.addEventListener("contextmenu", (event) => {
+      try {
+        const node = event && event.target;
+        const anchor = node && node.closest ? node.closest("a[href]") : null;
+        const href = anchor && anchor.href ? String(anchor.href) : "";
+        if (!href || !window.__nearBrowserSel) return;
+        window.__nearBrowserSel.href = href;
+      } catch (_) {}
+    }, true);
+  }
+  if (window.__nearBrowserSelHook === 2) return true;
+  window.__nearBrowserSelHook = 2;
   window.__nearBrowserSel = null;
   const capture = () => {
     try {
@@ -41,8 +55,13 @@ export const BROWSER_SELECTION_HOOK_JS = `(() => {
         window.__nearBrowserSel = null;
         return;
       }
+      const node = range.startContainer;
+      const el = node && node.nodeType === 1 ? node : (node && node.parentElement);
+      const anchor = el && el.closest ? el.closest("a[href]") : null;
+      const href = anchor && anchor.href ? String(anchor.href) : "";
       window.__nearBrowserSel = {
         text,
+        href,
         rect: {
           top: rect.top,
           left: rect.left,
@@ -75,8 +94,10 @@ export const BROWSER_SELECTION_READ_JS = `(() => {
     if (!snap || !snap.text || !snap.rect) return null;
     const text = String(snap.text || "").trim();
     if (!text) return null;
+    const href = String(snap.href || "").trim();
     return {
       text,
+      ...(href ? { href } : {}),
       rect: {
         top: Number(snap.rect.top) || 0,
         left: Number(snap.rect.left) || 0,
@@ -93,6 +114,7 @@ export function parseBrowserGuestSelection(raw: unknown): BrowserGuestSelection 
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
   const text = String(obj.text || "").trim();
+  const href = String(obj.href || "").trim();
   if (!text) return null;
   const rectRaw = obj.rect;
   if (!rectRaw || typeof rectRaw !== "object") return null;
@@ -103,7 +125,7 @@ export function parseBrowserGuestSelection(raw: unknown): BrowserGuestSelection 
     width: Number(r.width) || 0,
     height: Number(r.height) || 0,
   };
-  return { text, rect };
+  return href ? { text, href, rect } : { text, rect };
 }
 
 /** Map guest selection rect into host viewport anchor for the floating toolbar. */

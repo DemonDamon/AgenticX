@@ -332,6 +332,8 @@
     "previewFailed": "Preview failed",
     "emptyTerminal": "No terminal yet",
     "emptyTerminalHint": "Click + to open a terminal",
+    "openLinkInNewTab": "Open link in new tab",
+    "copyLinkAddress": "Copy link address",
     "back": "Back",
     "forward": "Forward",
     "reload": "Reload",

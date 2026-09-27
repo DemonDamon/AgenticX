@@ -246,6 +246,7 @@ function RemoteBrowserPane({
   onNavigate,
   onReplaceNavigate,
   onGuestHistory,
+  onOpenLinkInNewTab,
   onQuoteSelection,
   onSearchSelection,
   onOpenScratchSelection,
@@ -259,6 +260,7 @@ function RemoteBrowserPane({
   /** Same visit as the current history entry (server redirect). Do not add a back step. */
   onReplaceNavigate?: (nextUrl: string) => void;
   onGuestHistory?: (state: { canBack: boolean; canForward: boolean }) => void;
+  onOpenLinkInNewTab?: (url: string, title: string) => void;
   onQuoteSelection?: (payload: BrowserQuotePayload) => void;
   onSearchSelection?: (text: string) => void;
   onOpenScratchSelection?: (payload: BrowserQuotePayload) => void;
@@ -271,6 +273,7 @@ function RemoteBrowserPane({
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const [selectionUi, setSelectionUi] = useState<{
     text: string;
+    href?: string;
     anchor: SelectionPopupAnchor;
   } | null>(null);
   /** Initial src only — subsequent navigations use loadURL. */
@@ -282,6 +285,14 @@ function RemoteBrowserPane({
   onReplaceNavigateRef.current = onReplaceNavigate;
   const onGuestHistoryRef = useRef(onGuestHistory);
   onGuestHistoryRef.current = onGuestHistory;
+  const onOpenLinkInNewTabRef = useRef(onOpenLinkInNewTab);
+  onOpenLinkInNewTabRef.current = onOpenLinkInNewTab;
+  const { t } = useTranslation("workspace");
+  const [linkMenu, setLinkMenu] = useState<{
+    url: string;
+    x: number;
+    y: number;
+  } | null>(null);
   /** Server redirects belong to the current visit, not a new back step. */
   const redirectingRef = useRef(false);
   /** loadURL from the address bar / in-app open already created the history entry. */
@@ -382,6 +393,60 @@ function RemoteBrowserPane({
     wv.addEventListener("did-navigate", onDidNavigate);
     wv.addEventListener("did-navigate-in-page", onDidNavigate);
     wv.addEventListener("did-redirect-navigation", onRedirect);
+    const showLinkMenu = (linkURL: string, guestX: number, guestY: number) => {
+      if (!/^https?:\/\//i.test(linkURL)) {
+        setLinkMenu(null);
+        return;
+      }
+      setSelectionUi(null);
+      const host = webviewHostRef.current?.getBoundingClientRect();
+      const zoomFactor = fixed ? zoom : 1;
+      const rawX = (host?.left ?? 0) + guestX * zoomFactor;
+      const rawY = (host?.top ?? 0) + guestY * zoomFactor;
+      const x = Math.max(8, Math.min(rawX, window.innerWidth - 220));
+      const y = Math.max(8, Math.min(rawY, window.innerHeight - 72));
+      setLinkMenu({ url: linkURL, x, y });
+    };
+    const onContextMenu = (event: Event) => {
+      const params = (event as Event & { params?: { x?: number; y?: number; linkURL?: string } }).params;
+      const linkURL = String(params?.linkURL || "").trim();
+      const guestX = Number(params?.x) || 0;
+      const guestY = Number(params?.y) || 0;
+      if (/^https?:\/\//i.test(linkURL)) {
+        event.preventDefault();
+        showLinkMenu(linkURL, guestX, guestY);
+        return;
+      }
+      void wv.executeJavaScript?.(
+        `(() => { try { return String(window.__nearLinkHref || ""); } catch (_) { return ""; } })()`,
+      ).then((found) => {
+        const href = String(found || "").trim();
+        if (!/^https?:\/\//i.test(href)) return;
+        event.preventDefault();
+        showLinkMenu(href, guestX, guestY);
+      }).catch(() => undefined);
+    };
+    const onConsoleMessage = (event: Event) => {
+      const message = String((event as Event & { message?: string }).message || "");
+      if (!message.startsWith("__NEAR_LINK_MENU__")) return;
+      try {
+        const payload = JSON.parse(message.slice("__NEAR_LINK_MENU__".length)) as {
+          href?: string;
+          x?: number;
+          y?: number;
+        };
+        showLinkMenu(String(payload.href || ""), Number(payload.x) || 0, Number(payload.y) || 0);
+      } catch {
+        /* ignore malformed guest payload */
+      }
+    };
+    wv.addEventListener("context-menu", onContextMenu);
+    wv.addEventListener("console-message", onConsoleMessage);
+    try {
+      void wv.executeJavaScript?.(BROWSER_SELECTION_HOOK_JS).catch(() => undefined);
+    } catch {
+      /* guest not ready yet; dom-ready will inject */
+    }
     // Wait for dom-ready / did-finish-load — eager inject on mount races attach.
     return () => {
       wv.removeEventListener("dom-ready", onDomReady);
@@ -389,8 +454,24 @@ function RemoteBrowserPane({
       wv.removeEventListener("did-navigate", onDidNavigate);
       wv.removeEventListener("did-navigate-in-page", onDidNavigate);
       wv.removeEventListener("did-redirect-navigation", onRedirect);
+      wv.removeEventListener("context-menu", onContextMenu);
+      wv.removeEventListener("console-message", onConsoleMessage);
     };
-  }, []);
+  }, [fixed, zoom]);
+
+  useEffect(() => {
+    if (!linkMenu) return;
+    const close = () => setLinkMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [linkMenu]);
 
   // Poll guest selection → host toolbar (webview has no shared Selection API with host).
   useEffect(() => {
@@ -415,12 +496,13 @@ function RemoteBrowserPane({
           if (
             prev &&
             prev.text === snap.text &&
+            prev.href === snap.href &&
             prev.anchor.top === anchor.top &&
             prev.anchor.left === anchor.left
           ) {
             return prev;
           }
-          return { text: snap.text, anchor };
+          return { text: snap.text, href: snap.href, anchor };
         });
       } catch {
         /* ignore transient guest errors */
@@ -504,6 +586,15 @@ function RemoteBrowserPane({
       {selectionUi ? (
         <BrowserSelectionToolbar
           anchor={selectionUi.anchor}
+          onOpenInNewTab={
+            selectionUi.href && /^https?:\/\//i.test(selectionUi.href)
+              ? () => {
+                  const href = selectionUi.href || "";
+                  setSelectionUi(null);
+                  onOpenLinkInNewTabRef.current?.(href, browserTitleFromUrl(href));
+                }
+              : undefined
+          }
           onSearch={() => {
             const text = selectionUi.text.trim();
             if (!text) return;
@@ -532,6 +623,38 @@ function RemoteBrowserPane({
           }
         />
       ) : null}
+      {linkMenu
+        ? createPortal(
+            <div
+              className="fixed z-[200] min-w-[196px] overflow-hidden rounded-lg border border-border bg-surface-popover py-1 shadow-lg"
+              style={{ left: linkMenu.x, top: linkMenu.y }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={() => {
+                  const nextUrl = linkMenu.url;
+                  setLinkMenu(null);
+                  onOpenLinkInNewTabRef.current?.(nextUrl, browserTitleFromUrl(nextUrl));
+                }}
+              >
+                {t("work.openLinkInNewTab")}
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={() => {
+                  void navigator.clipboard.writeText(linkMenu.url);
+                  setLinkMenu(null);
+                }}
+              >
+                {t("work.copyLinkAddress")}
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -3374,6 +3497,7 @@ export function WorkPanel({
                     );
                   }}
                   onGuestHistory={setGuestHistory}
+                  onOpenLinkInNewTab={(url, title) => openWebReferenceInBrowser(url, title)}
                 />
                 <BrowserAgentOverlay sessionId={sessionId} />
               </div>
