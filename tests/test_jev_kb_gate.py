@@ -165,6 +165,37 @@ def test_eager_search_runs_when_jev_says_yes(monkeypatch) -> None:
     assert dispatched["n"] == 1
 
 
+def test_kb_auto_off_drops_previous_gate(monkeypatch) -> None:
+    called = {"n": 0}
+
+    async def _boom(**_kwargs):
+        called["n"] += 1
+        raise AssertionError("system_one should not run when kb_auto is off")
+
+    monkeypatch.setattr(
+        "agenticx.llms.typesafe_config.load_typesafe_settings",
+        lambda: TypesafeSettings(enabled=True, kb_auto=False, has_key=True),
+    )
+    monkeypatch.setattr(
+        "agenticx.llms.typesafe_config.resolve_typesafe_api_key",
+        lambda: "test-key",
+    )
+    monkeypatch.setattr("agenticx.llms.typesafe_client.system_one", _boom)
+    session = _session(mode="auto")
+    session._jev_kb_gate = {
+        "kind": "jev_kb_gate",
+        "purpose": "kb_auto",
+        "action": "skip",
+        "model": "jev-1.13.0",
+        "content": "Jev (jev-1.13.0) → 跳过检索",
+    }
+    result = asyncio.run(_kb_retrieval_jev_should_search(session, "今天南沙天气怎么样"))
+    assert result is None
+    assert called["n"] == 0
+    assert not hasattr(session, "_jev_kb_gate")
+    assert session.chat_history == []
+
+
 def test_auto_disabled_without_key_does_not_call_jev(monkeypatch) -> None:
     called = {"n": 0}
 

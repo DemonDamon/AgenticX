@@ -3090,11 +3090,22 @@ async def _jev_kb_gate_events(
     )
 
 
+def _clear_session_jev_kb_gate(session: Any) -> None:
+    """Drop a previous turn's KB gate so a later turn cannot replay it."""
+    try:
+        if hasattr(session, "_jev_kb_gate"):
+            delattr(session, "_jev_kb_gate")
+    except Exception:
+        return
+
+
 async def _kb_retrieval_jev_should_search(session: Any, user_input: str) -> bool | None:
     """Jev Noul gate for KB auto. None = do not intervene (always / off / no key)."""
     if _kb_retrieval_always_mode(session):
+        _clear_session_jev_kb_gate(session)
         return None
     if _kb_retrieval_effective_mode(session) != "auto":
+        _clear_session_jev_kb_gate(session)
         return None
     from agenticx.llms.typesafe_client import TypesafeHttpError, TypesafeTimeout, system_one
     from agenticx.llms.typesafe_config import load_typesafe_settings, resolve_typesafe_api_key
@@ -3103,6 +3114,7 @@ async def _kb_retrieval_jev_should_search(session: Any, user_input: str) -> bool
     settings = load_typesafe_settings()
     api_key = resolve_typesafe_api_key()
     if not settings.enabled or not settings.kb_auto or not api_key:
+        _clear_session_jev_kb_gate(session)
         return None
 
     started = time.perf_counter()
