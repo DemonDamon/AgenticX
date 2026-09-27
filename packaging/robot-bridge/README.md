@@ -16,6 +16,18 @@ uv pip install -e 'packaging/robot-bridge[lerobot,test]'    # 真实机器人
 
 bridge 不依赖 AgenticX 主包，AgenticX 主环境也不需要安装 lerobot / torch。
 
+`lerobot` extra 固定到上游一个 git 修订（见 `pyproject.toml`）：`RolloutController` 尚未进入任何已发布版本。`serve --backend lerobot` 启动时会检查该接口，缺失则打印原因并以退出码 2 退出。
+
+### 模拟机器人（无硬件联调）
+
+`sim/lerobot_robot_agx_sim` 是一个模拟 SO-101 从臂插件（机器人类型 `agx_sim_so101`），关节与相机特征（6 个 `<joint>.pos`，`front` / `handeye` 480×640）与 SO-101 的 ACT 策略一致，可直接跑真实策略：
+
+```bash
+uv pip install -e packaging/robot-bridge/sim/lerobot_robot_agx_sim   # 装进已含 lerobot extra 的同一环境
+```
+
+插件本身不声明 lerobot 依赖，避免覆盖上面固定的修订。`robot.extra` 可传 `{"calibrated": false}` 模拟未标定机器人、`{"camera_names": [...]}` 改相机集合。
+
 ## 运行
 
 ```bash
@@ -44,7 +56,7 @@ agx-robot-bridge serve --backend lerobot --port 8766
 | Method | Path | 说明 |
 |---|---|---|
 | GET | `/health` | 版本、后端名、Python 与 lerobot 版本 |
-| POST | `/session` | 创建会话并后台加载，返回 202 与 `session_id`；`robot.max_relative_target` 必填 |
+| POST | `/session` | 创建会话并后台加载，返回 202 与 `session_id`；`robot.max_relative_target` 必填，见下文 |
 | GET | `/session/{sid}?since=<seq>` | 状态、事件（`seq > since`）、`pose_check`、错误信息 |
 | POST | `/session/{sid}/start` | 开始一段运行（仅 `idle`） |
 | POST | `/session/{sid}/task` | `{"task": "..."}`，改任务，下一次推理生效 |
@@ -54,11 +66,36 @@ agx-robot-bridge serve --backend lerobot --port 8766
 
 会话状态：`loading` → `idle` ⇄ `running` / `resetting`，失败为 `failed`，停止过程为 `stopping` → `stopped`。
 
+### 创建会话（`POST /session`）
+
+```json
+{
+  "robot": {"type": "so101_follower", "port": "/dev/tty.usbmodem1", "id": "arm1",
+            "max_relative_target": 10.0, "cameras": {}, "extra": {}},
+  "policy_path": "/path/to/pretrained_model",
+  "task": "pick up the cube",
+  "fps": 30, "duration_s": 0, "device": "cpu", "home_tolerance": 5.0, "offline_backbone": true
+}
+```
+
+- `robot.extra` 透传其余机器人配置项（如 `{"use_degrees": true}`），值为对象 / 数组时按 JSON 传入；不能用它覆盖 `type` / `port` / `id` / `cameras` / `max_relative_target`。
+- `offline_backbone`（默认 `true`）：跳过视觉骨干的 ImageNet 初始化权重下载，训练好的权重仍从 checkpoint 加载，离线环境可用。
+- 加载前会先以不标定方式连一次机器人：未标定直接失败为 `calibration_required`，`hint` 给出对应的 `lerobot-calibrate` 命令；加载过程中任何一步失败都会断开已连接的机器人。
+- `stop` 与 `reset` 之后的回位都会读回关节位姿并与初始位姿比较（`pose_check`），误差超过 `home_tolerance`（单位与关节读数一致）即 `verified: false`。
+- CPU 推理时控制环常低于目标 fps，日志里的 "Control loop is running slower" 告警属预期。
+
 ## 测试
 
 ```bash
 cd packaging/robot-bridge
-python -m pytest tests -q -k "not lerobot_backend_sim"
+python -m pytest tests -q
 ```
 
-包内自带 pytest 配置，不会读取仓库根目录的配置；测试不需要 torch、lerobot 或硬件。
+包内自带 pytest 配置，不会读取仓库根目录的配置。未安装 lerobot 时真实后端用例自动跳过，其余测试不需要 torch 或硬件。
+
+真实后端集成用例（真实策略 + 模拟机器人，需要 `lerobot` extra 与模拟插件）：
+
+```bash
+AGX_ROBOT_BRIDGE_POLICY_PATH=/path/to/act_so101_checkpoint AGX_ROBOT_BRIDGE_DEVICE=cpu \
+  python -m pytest tests/test_lerobot_backend_sim.py -v
+```

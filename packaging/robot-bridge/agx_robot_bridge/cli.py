@@ -35,25 +35,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _backend_factory(name: str) -> Callable[[], RolloutBackend]:
+def _backend_factory(name: str) -> tuple[Callable[[], RolloutBackend], str]:
+    """Return ``(factory, label)``; exits with code 2 when the lerobot runtime is unusable."""
     if name == "fake":
         from .fake_backend import FakeBackend
 
-        return FakeBackend
+        return FakeBackend, "fake"
     try:
-        from .lerobot_backend import LeRobotBackend
+        from .lerobot_backend import LeRobotBackend, check_runtime
+
+        version = check_runtime()
     except ImportError as exc:
         print(f"未安装 lerobot extra：pip install 'agx-robot-bridge[lerobot]'（{exc}）", file=sys.stderr)
         sys.exit(2)
-    return LeRobotBackend
+    return LeRobotBackend, f"lerobot {version}"
 
 
 def _configure_logging(log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # force=True: importing the lerobot runtime already installs a WARNING-level root handler,
+    # which would otherwise turn this call into a no-op and leave bridge.log empty.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[logging.FileHandler(log_path, encoding="utf-8"), logging.StreamHandler(sys.stderr)],
+        force=True,
     )
 
 
@@ -66,7 +72,7 @@ def main(argv: list[str] | None = None) -> None:
     install_input_guard()
     token_file = Path(args.token_file).expanduser()
     token = load_or_create_token(token_file)
-    factory = _backend_factory(args.backend)
+    factory, backend_label = _backend_factory(args.backend)
     _configure_logging(_LOG_FILE.expanduser())
 
     app = create_app(
@@ -78,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
     display_host = f"[{args.host}]" if ":" in args.host else args.host
     print(
         f"robot bridge listening on http://{display_host}:{args.port} "
-        f"(backend={args.backend}, token_file={token_file})",
+        f"(backend={backend_label}, token_file={token_file})",
         file=sys.stderr,
     )
     # log_config=None keeps uvicorn's startup errors and access lines in bridge.log as well.

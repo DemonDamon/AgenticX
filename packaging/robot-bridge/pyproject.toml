@@ -11,7 +11,10 @@ license = { text = "Apache-2.0" }
 dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5", "numpy>=1.26", "pillow>=10"]
 
 [project.optional-dependencies]
-lerobot = ["lerobot[dataset]==0.6.2"]
+# Pinned to a revision: the rollout controller API is not in any published release yet
+# (the latest one lacks lerobot.rollout.RolloutController). `agx-robot-bridge --backend lerobot`
+# checks the API at startup and exits with code 2 if it is missing.
+lerobot = ["lerobot[dataset] @ git+https://github.com/huggingface/lerobot@e595b7902714ba51f91e47523f66f89c5181b649"]
 test = ["pytest>=8", "httpx>=0.25"]
 
 [project.scripts]

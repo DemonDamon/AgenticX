@@ -106,9 +106,12 @@ class BridgeSession:
         except InteractiveInputBlocked as exc:
             self._fail_load(STDIN_INPUT_BLOCKED, str(exc), _STDIN_BLOCKED_HINT, None)
             return
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
+            # SystemExit too: argument parsers exit on bad input, which would otherwise end this
+            # thread silently and leave the session in LOADING forever.
             logger.exception("session %s failed to load", self.session_id)
-            self._fail_load(POLICY_LOAD_FAILED, str(exc), "", traceback.format_exc()[-_TRACEBACK_LIMIT:])
+            message = str(exc) if isinstance(exc, Exception) else f"{type(exc).__name__}({exc})"
+            self._fail_load(POLICY_LOAD_FAILED, message, "", traceback.format_exc()[-_TRACEBACK_LIMIT:])
             return
 
         cameras = list(self._backend.camera_names)
