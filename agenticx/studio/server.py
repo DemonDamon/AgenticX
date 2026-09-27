@@ -77,6 +77,7 @@ from agenticx.cli.agent_tools import (
     _code_search_tool_defs,
     merge_computer_use_tools_into,
 )
+from agenticx.robot_bridge.tools import merge_robot_tools_into
 from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_meta_agent_tools
 from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
 from agenticx.runtime.prompts.current_time import build_current_time_block
@@ -3789,6 +3790,8 @@ def create_studio_app() -> FastAPI:
         else:
             effective_tools_source = list(visible_meta_agent_tools())
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
+        if not str(active_avatar_id or "").strip():
+            effective_tools_source = merge_robot_tools_into(effective_tools_source)
         from agenticx.cli.agent_tools import merge_near_browser_tools_into
 
         effective_tools_source = merge_near_browser_tools_into(effective_tools_source)

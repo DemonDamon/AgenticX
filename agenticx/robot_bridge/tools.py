@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Studio tools that drive a robot policy session through the local robot bridge.
 
-The agent only sends task-level commands (start / change task / reset / stop /
-status / snapshot); the real-time control loop stays inside the bridge process.
+The agent only sends task-level commands (start / resume / change task / reset /
+stop / status / snapshot); the real-time control loop stays inside the bridge process.
 
 Author: Hongyi Zhao
 """
@@ -115,6 +115,12 @@ ROBOT_TOOLS: list[dict[str, Any]] = [
                 "description": "可选，相机名，缺省用第一个相机",
             },
         },
+        ["session_id"],
+    ),
+    _tool(
+        "robot_resume",
+        "让已复位或一段运行结束（state=idle）的机器人会话重新开始运行，沿用已加载的策略与当前任务。开始前会请用户确认。",
+        {"session_id": _SESSION_ID},
         ["session_id"],
     ),
 ]
@@ -376,7 +382,10 @@ async def _load_and_start(
         return _session_failure(st, sid)
     if st.get("state") == "stopped":
         return _fail("robot_session_stopped", "会话在加载期间已被停止", session_id=sid)
+    return await _start_and_wait(client, sid)
 
+
+async def _start_and_wait(client: RobotBridgeClient, sid: str) -> str:
     started = await client.start(sid)
     if not started.get("accepted"):
         return _fail(
@@ -398,6 +407,40 @@ async def _load_and_start(
         supports_text_queries=st.get("supports_text_queries"),
         next="用 robot_status 查看进度，用 robot_snapshot 看现场（图片自动附到下一轮）；结束务必 robot_stop",
     )
+
+
+async def _resume(args: dict[str, Any], call: _Call) -> str:
+    sid = _text(args, "session_id")
+    if not sid:
+        return _fail("robot_invalid_args", "session_id 不能为空")
+    client = resolve_client(call.settings)
+    st = await client.get_session(sid)
+    state = st.get("state")
+    if state != "idle":
+        return _fail(
+            "robot_not_idle",
+            f"会话当前状态为 {state}，只有 idle 才能继续运行",
+            "running 无需继续；failed / stopped 需 robot_stop 后重新 robot_rollout_start",
+            session_id=sid,
+        )
+    task = st.get("task")
+    # Always confirmed, regardless of confirm_each_task: a resting robot starts moving.
+    question = (
+        f"将让机器人会话 {sid} 继续运行，任务：「{task}」。"
+        "机器人会开始运动。请确认急停可及、工作区内无人，是否继续？"
+    )
+    context = {
+        "tool": "robot_resume",
+        "risk": "robot",
+        "session_id": sid,
+        "task": task,
+    }
+    if not await _ask(call, question, context):
+        return _cancelled_text("机器人未继续运行", call)
+    try:
+        return await _start_and_wait(client, sid)
+    except RobotBridgeError as exc:
+        return _fail(exc.code, exc.message, exc.hint, session_id=sid)
 
 
 async def _set_task(args: dict[str, Any], call: _Call) -> str:
@@ -553,6 +596,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any], _Call], Awaitable[str]]] = {
     "robot_stop": _stop,
     "robot_status": _status,
     "robot_snapshot": _snapshot,
+    "robot_resume": _resume,
 }
 
 

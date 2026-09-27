@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: rb4-confirm-wiring
     content: "RB-4 risk=robot 不可豁免 + dispatch 分支 + server.py 注入 + 冷启动冒烟 + 新增 robot_resume"
-    status: pending
+    status: completed
   - id: rb5-prompt-docs
     content: "RB-5 Meta 能力块 + context_usage + 用户文档"
     status: pending
@@ -1059,6 +1059,22 @@ from agenticx.robot_bridge.tools import merge_robot_tools_into
   done
   ```
   三个接口都返回 200，进程无 `NameError` / `ImportError`；验证完 kill 该进程。
+  **注意先确认 `agx` 加载的是本仓库**：`agx` 是 console script，`sys.path[0]` 是 `bin/` 而不是当前目录，环境里若是另一份克隆的可编辑安装，冒烟测的就是那份代码。用 `cd /tmp && python -c "import agenticx; print(agenticx.__file__)"` 核对；不一致时给命令加 `PYTHONPATH=<本仓库根目录>`。
+
+**实施结果（2026-09-27）**：验收命令 85 passed（加上 `tests/test_robot_bridge_config.py` 为 91 passed）；扩大到引用确认门 / 工具分发 / 按需加载工具（tool search）/ 配置的 19 个测试文件共 289 passed（清掉 shell 中 `*_API_KEY` 后）。`server.py` diff 为 3 行新增、0 行删除；`confirm.py` 与 `agent_tools.py` 只有上述改动，ruff 告警数与 HEAD 相比：`server.py` / `agent_tools.py` 不变，`confirm.py` +2（UP006/UP045，来自沿用该文件 `Optional[Dict[...]]` 写法的新函数签名）。
+
+实施时的调整与补充：
+
+- RB-4c 的函数内 import 写成一行为 89 字符，超过仓库行宽 88，改为括号换行（语义不变）。
+- FR-31 `test_resume_happy_path`：`_confirm` 会往确认上下文里补 `request_id` 与 `protected_reason`，因此改为比对 `tool / risk / session_id / task` 四个键，并额外断言 `protected_reason == "这条操作会让真实机器人运动"`（顺带验证 RB-4a）。`test_resume_rejects_non_idle` 参数化覆盖 running / loading / resetting / failed / stopped 五种状态；新增 `test_resume_bridge_error_keeps_session_id`。
+- `tests/test_robot_bridge_confirm.py` 在 FR-25..29 之外新增：`test_path_allow_rule_cannot_waive_robot`（path 白名单放行同样不能豁免 robot）；`test_dispatch_routes_robot_tools` 追加断言：`robot_` 开头但不在 `ROBOT_TOOL_NAMES` 中的名字落到 `unknown tool`，不转发。测试用 autouse fixture 隔离 `ConfigManager` 的全局 / 项目配置路径，不读用户真实配置。
+- 契约冒烟 17/17（新增"reset 后 `robot_resume` → running 且弹确认 1 次"、"running 时 resume → `robot_not_idle`"）。
+
+确认门逐一核对（证据链，未改代码）：`AsyncConfirmGate` 超时对受保护风险一律拒绝（`confirm.py` `request_confirm` 的 TimeoutError 分支）；`RiskAwareAutoConfirmGate`（"全部自动执行"与无人值守都用它）只自动批准 `risk=low`，robot 交互时弹确认、无人值守直接拒绝；`AutoApproveConfirmGate` 只在 `agenticx/runtime/__init__.py` 导出，生产路径未使用；plan mode 的 `TURN_INTENT_ALLOWED_TOOLS` 是白名单，robot 工具在规划模式下被拒绝；群聊分支在 `server.py` 约 L3539 就 `return StreamingResponse`，走不到 L3791 的注入；`_filter_tools_by_policy` 对未登记的工具名默认放行，注入的工具不会被设置页策略误删。
+
+冷启动冒烟：本机 `nanwang` 环境的 `agenticx` 是另一份克隆的可编辑安装，`agenticx` 环境缺 numpy；最终用 `nanwang` 解释器 + `PYTHONPATH=<本仓库>` + 临时 `HOME`（不覆盖真实 `~/.agenticx/serve.port` / `serve.token`）执行，5s 就绪，`/api/session`、`/api/avatars`、`/api/sessions` 均 200，日志无 `NameError` / `ImportError` / Traceback。
+
+**端到端注入冒烟**（`research/codedeepresearch/lerobot/poc/rb4_injection_smoke.py`，本地不入库）：起一个记录请求 `tools` 的假 OpenAI 兼容模型服务，经 `agx serve` 各发一轮对话。结果：元智能体会话注入后工具池 97 → 104（7 个 robot 工具全部加入）；分身会话不调用注入；`robot.enabled: false` 时不追加。**但模型本轮实际只收到 30 个工具**：工具池超过按需加载阈值（`agenticx/runtime/tool_search.py`，默认 6000 tokens）时，`project_tools_for_round` 只下发 `CORE_ALWAYS_LOAD_TOOLS ∩ 工具池` 加 `tool_search`，robot 工具不在核心名单，属于延迟加载：模型要先 `tool_search`，或直接按名字调用（运行时 `auto_load_deferred_tool` 标记为已加载，返回"下一轮重试"，本轮不执行）；已加载工具数有上限（8–24），可能被挤出。7 个 robot 工具 schema 约 706 tokens，`robot_stop` + `robot_status` 约 184 tokens。**决定**：保持延迟加载、不改 `tool_search.py`，由 RB-5a 的能力块列出全部工具名并说明加载方式（见 RB-5a 补充）。
 
 ---
 
@@ -1103,6 +1119,17 @@ def _build_robot_capabilities_block() -> str:
 ```
 
 在 f-string 里 `f"{near_browser_block}"`（约 L978）之后加一行 `f"{robot_block}"`。
+
+**RB-5a 补充（RB-4 端到端验证后追加，实施时以此为准）**：robot 工具不在 `tool_search.py` 的 `CORE_ALWAYS_LOAD_TOOLS` 中，工具池较大时默认**不会**出现在模型的工具列表里（证据见 RB-4 实施结果"端到端注入冒烟"）。已决定不改 `tool_search.py`，因此能力块必须：
+
+1. 工具列表写全 7 个：`robot_rollout_start` / `robot_resume` / `robot_set_task` / `robot_reset` / `robot_stop` / `robot_status` / `robot_snapshot`。
+2. 在工具列表那一行之后追加两条（原文照写）：
+   ```python
+   "- 这些工具默认不在工具列表里：开始机器人任务前先调用 `tool_search`（query 用 `robot`）加载它们；"
+   "若调用返回 schema 未加载 / 已自动加载的提示，下一轮直接重试同一调用，`robot_stop` 尤其如此。\n"
+   "- 复位或一段跑完后会话回到 idle，需继续时调用 `robot_resume`（会弹确认），不要为此 stop 再重新启动。\n"
+   ```
+3. FR-30 追加断言：`enabled=True` 时能力块含 `robot_resume` 与 `tool_search`。
 
 ### RB-5b `agenticx/studio/context_usage.py`
 
