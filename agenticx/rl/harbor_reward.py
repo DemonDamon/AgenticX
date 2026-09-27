@@ -15,11 +15,32 @@ from typing import Any, Callable
 
 
 def make_agent_env(base_url: str, api_key: str = "dummy") -> dict[str, str]:
-    """agenticx agent 连本地模型服务的环境变量（继承当前环境）。"""
+    """agenticx agent 连模型服务的环境变量（继承当前环境）。
+
+    harbor 的 agenticx_agent.py 读 AGENTICX_* 三元组（model/api_key/base_url,
+    见其 L133-138）; OPENAI_* 是本地 model_server 路径的旧约定, 一并保留。
+    """
     env = dict(os.environ)
     env["OPENAI_BASE_URL"] = base_url
     env["OPENAI_API_KEY"] = api_key
+    env["AGENTICX_BASE_URL"] = base_url
+    env["AGENTICX_API_KEY"] = api_key
     return env
+
+
+# agent setup 持久化缓存（bind mount 宿主目录 → 容器）: qemu 模拟层下
+# 每次新容器重装 uv+Python+agenticx 需 30min+, 装一次进缓存后续秒级复用。
+# 注意: mounts 走 trial config 的 environment 段——task.toml 的
+# [environment] 是 TaskEnvironmentConfig, 不含 mounts 字段（实测被忽略）。
+SETUP_CACHE_ROOT = "/tmp/agenticx-setup-cache"
+AGENT_SETUP_CACHE_MOUNTS = [
+    {"type": "bind", "source": f"{SETUP_CACHE_ROOT}/local",
+     "target": "/root/.local"},
+    {"type": "bind", "source": f"{SETUP_CACHE_ROOT}/uv-cache",
+     "target": "/root/.cache/uv"},
+    {"type": "bind", "source": f"{SETUP_CACHE_ROOT}/venv",
+     "target": "/root/.agenticx-venv"},
+]
 
 
 def make_trial_config(task_path: str, model_name: str) -> dict[str, Any]:
@@ -28,9 +49,15 @@ def make_trial_config(task_path: str, model_name: str) -> dict[str, Any]:
     task 为 TaskConfig 对象 {"path": ...}——harbor 0.22 TrialConfig 校验拒绝
     字符串形式（真机冒烟实测）。model_name 须带 provider 前缀（如
     "openai/agenticx-rl"，agenticx adapter 按前缀路由 API 风格）。
+    override_setup_timeout: 模拟层容器内装 agenticx 依赖较慢, 默认 360s
+    实测不够（Apple Silicon qemu 下 uv+pip 首装约 30-40 分钟, 详见
+    AGENT_SETUP_CACHE_MOUNTS 的缓存复用方案）。
     """
     return {"task": {"path": task_path},
-            "agent": {"name": "agenticx", "model_name": model_name}}
+            "agent": {"name": "agenticx", "model_name": model_name,
+                      "override_setup_timeout_sec": 3600},
+            "environment": {"type": "docker",
+                            "mounts": AGENT_SETUP_CACHE_MOUNTS}}
 
 
 def extract_reward(trial_dir: Path) -> float:
@@ -44,11 +71,13 @@ def extract_reward(trial_dir: Path) -> float:
 
 def run_harbor_trial(task_path: str, model_name: str, base_url: str, *,
                      trials_dir: Path, runner: Callable | None = None,
-                     timeout: float = 1800.0) -> tuple[float, Path]:
+                     timeout: float = 1800.0,
+                     api_key: str | None = None) -> tuple[float, Path]:
     """起一个 harbor trial 并返回 (reward, trial_dir)。
 
     runner 注入点供测试 mock；真实路径 = subprocess `harbor trial start`。
     trials_dir 下取 mtime 最新的含 result.json 的子目录为本次 trial。
+    api_key: 远端 API（如 aibox 网关）须显式传; 本地 model_server 走默认。
     """
     trials_dir = Path(trials_dir)
     trials_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +89,8 @@ def run_harbor_trial(task_path: str, model_name: str, base_url: str, *,
     if runner is None:
         def runner(cmd, env, timeout):              # noqa: F811
             subprocess.run(cmd, env=env, timeout=timeout, check=True)
-    runner(cmd, make_agent_env(base_url), timeout)
+    runner(cmd, make_agent_env(base_url, api_key or os.environ.get(
+        "OPENAI_API_KEY", "dummy")), timeout)
 
     candidates = [d for d in trials_dir.iterdir()
                   if d.is_dir() and (d / "result.json").exists()]

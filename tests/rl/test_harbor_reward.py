@@ -20,7 +20,15 @@ def test_make_trial_config_matches_harbor_schema():
     # harbor 0.22 TrialConfig：task 为 TaskConfig 对象（真机冒烟实测）
     assert cfg["task"] == {"path": "/tasks/foo"}
     assert cfg["agent"] == {"name": "agenticx",
-                            "model_name": "openai/test-rl-model"}
+                            "model_name": "openai/test-rl-model",
+                            "override_setup_timeout_sec": 3600}
+    # setup 缓存 bind mounts（task.toml 的 [environment] 不支持 mounts）
+    assert cfg["environment"]["type"] == "docker"
+    targets = {m["target"] for m in cfg["environment"]["mounts"]}
+    assert targets == {"/root/.local", "/root/.cache/uv",
+                       "/root/.agenticx-venv"}
+    for m in cfg["environment"]["mounts"]:
+        assert m["type"] == "bind" and m["source"].startswith("/tmp/")
 
 
 def test_extract_reward_from_result_json(tmp_path):
