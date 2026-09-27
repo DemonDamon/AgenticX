@@ -155,6 +155,19 @@ def test_late_reset_check_does_not_replace_stop_result(make_client, session_body
     assert not [e for e in status["events"] if e["type"] == "pose_check"]
 
 
+class _ExitingBackend(FakeBackend):
+    def load(self, spec, on_event):
+        raise SystemExit(1)
+
+
+def test_system_exit_during_load_marks_failed(make_client, session_body, wait_state):
+    client = make_client(_ExitingBackend)
+    sid = _create(client, session_body())
+    failed = wait_state(client, sid, "failed")
+    assert failed["error_code"] == "policy_load_failed"
+    assert client.post("/session", json=session_body()).status_code == 202
+
+
 def test_commands_rejected_while_loading(make_client, session_body):
     client = make_client(lambda: FakeBackend(load_delay_s=0.5))
     sid = _create(client, session_body())

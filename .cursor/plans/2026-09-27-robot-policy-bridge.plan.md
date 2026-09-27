@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: rb2-lerobot-backend
     content: "RB-2 LeRobotBackend（argv 解析、F-4 离线、F-1 标定预检、F-3 回位校验）+ 模拟机器人插件 + 集成测试"
-    status: pending
+    status: completed
   - id: rb3-agx-client-tools
     content: "RB-3 AgenticX：RobotSettings 配置 + agenticx/robot_bridge/ client 与 6 个工具 + 单测"
     status: pending
@@ -203,7 +203,9 @@ license = { text = "Apache-2.0" }
 dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5", "numpy>=1.26", "pillow>=10"]
 
 [project.optional-dependencies]
-lerobot = ["lerobot[dataset]==0.6.2"]
+# PyPI 上没有 0.6.2；最新发布版 0.6.1 缺 lerobot/rollout/controller.py，只能钉 git 修订
+# （与研究用 upstream 检出同一 SHA）。
+lerobot = ["lerobot[dataset] @ git+https://github.com/huggingface/lerobot@e595b7902714ba51f91e47523f66f89c5181b649"]
 test = ["pytest>=8", "httpx>=0.25"]
 
 [project.scripts]
@@ -452,8 +454,8 @@ agx-robot-bridge serve [--host 127.0.0.1] [--port 8766] [--backend lerobot|fake]
 ```
 
 - `--host` 只允许 `127.0.0.1` / `localhost` / `::1`，否则打印错误并 `sys.exit(2)`。
-- `main()` 顺序：解析参数 → **host 校验**（必须在安装输入守卫之前，否则测试进程的 `input` 会被替换）→ `install_input_guard()` → `token = load_or_create_token(path)` → 选择 backend factory（`lerobot`：延迟 `from .lerobot_backend import LeRobotBackend`，ImportError 时打印"未安装 lerobot extra：pip install 'agx-robot-bridge[lerobot]'"并退出 2；`fake`：`FakeBackend`）→ 日志写 `~/.agenticx/logs/robot_bridge/bridge.log`（`logging.FileHandler` + stderr）→ `uvicorn.run(app, host, port, log_level="info", log_config=None, timeout_graceful_shutdown=20)`（`log_config=None` 让 uvicorn 的启动错误与访问日志也进 `bridge.log`，便于追溯谁在何时下了什么命令）。uvicorn 优雅关闭后会重新抛出 SIGTERM，所以父进程看到的退出码是 -15 / 143，属正常。
-- 启动时 stderr 打印一行 `robot bridge listening on http://<host>:<port> (backend=<name>, token_file=<path>)`，**不打印 token**。
+- `main()` 顺序：解析参数 → **host 校验**（必须在安装输入守卫之前，否则测试进程的 `input` 会被替换）→ `install_input_guard()` → `token = load_or_create_token(path)` → 选择 backend factory，返回 `(factory, label)`（`lerobot`：延迟 `from .lerobot_backend import LeRobotBackend, check_runtime` 并调用 `check_runtime()`，任何 ImportError（未装 / 装成缺 controller 的发布版）打印"未安装 lerobot extra：pip install 'agx-robot-bridge[lerobot]'（<原因>）"并退出 2，label 为 `lerobot <版本>`；`fake`：`FakeBackend`，label `fake`）→ 日志写 `~/.agenticx/logs/robot_bridge/bridge.log`（`logging.FileHandler` + stderr，`basicConfig(..., force=True)`：import lerobot 时 root logger 已被装上 WARNING 级 stderr handler，不加 `force` 则 basicConfig 静默失效、`bridge.log` 为空且 bridge 自身 INFO 日志全丢——RB-2 进程冒烟实测发现）→ `uvicorn.run(app, host, port, log_level="info", log_config=None, timeout_graceful_shutdown=20)`（`log_config=None` 让 uvicorn 的启动错误与访问日志也进 `bridge.log`，便于追溯谁在何时下了什么命令）。uvicorn 优雅关闭后会重新抛出 SIGTERM，所以父进程看到的退出码是 -15 / 143，属正常。
+- 启动时 stderr 打印一行 `robot bridge listening on http://<host>:<port> (backend=<label>, token_file=<path>)`（如 `backend=lerobot 0.6.2`），**不打印 token**。
 
 ### RB-1 验收（FR / AC）
 
@@ -485,25 +487,43 @@ agx-robot-bridge serve [--host 127.0.0.1] [--port 8766] [--backend lerobot|fake]
 模块顶层**只**导入标准库、numpy 和本包模块；lerobot 相关 import 全部放在函数或 `__init__` 内（保证 fake 测试环境可 import 本模块）。
 
 ```python
-_ARGV_LOCK = threading.Lock()
+_ARGV_LOCK = threading.Lock()      # 保护 sys.argv 交换
+_BUILD_LOCK = threading.Lock()     # 保护对 context 模块 make_robot_from_config 的临时替换
+_PLUGINS_LOCK = threading.Lock()
 _PLUGINS_REGISTERED = False
+
+def check_runtime() -> str:
+    # import lerobot + from lerobot.rollout import RolloutController；任一失败都抛 ImportError
+    # （消息含版本与"no usable lerobot.rollout.RolloutController"），成功返回 lerobot.__version__。
+    # cli 启动时调用：装成缺 controller 的发布版时启动即退出 2，而不是到建会话才失败。
 
 def _parse_rollout_config(argv: list[str]):
     from lerobot.configs import parser
     from lerobot.rollout import RolloutConfig
 
-    @parser.wrap()
-    def _inner(cfg: RolloutConfig):
+    def _inner(cfg):
         return cfg
 
+    # parser.wrap() 读 argspec.annotations 的原始对象当类用：本模块不能 `from __future__ import annotations`，
+    # 这里显式写入类对象，避免被字符串注解坑。
+    _inner.__annotations__ = {"cfg": RolloutConfig}
+    wrapped = parser.wrap()(_inner)
+
+    captured = io.StringIO()
     with _ARGV_LOCK:
         saved = sys.argv
         sys.argv = ["agx-robot-bridge", *argv]
         try:
-            return _inner()
+            with contextlib.redirect_stderr(captured):
+                return wrapped()
+        except SystemExit as exc:          # 解析失败时 parser 打印到 stderr 后 sys.exit(1)
+            detail = captured.getvalue().strip() or f"exit code {exc.code}"
+            raise ValueError(f"argument parsing failed: {detail}") from None
         finally:
             sys.argv = saved
 ```
+
+`session.py::_load` 的兜底同步改为 `except (Exception, SystemExit)`：任何库在加载线程里 `sys.exit` 都会让线程静默结束、会话永远卡在 `loading`，必须转成 `policy_load_failed`（`test_system_exit_during_load_marks_failed`）。
 
 `build_argv(spec) -> list[str]`（纯函数，单测覆盖）：
 
@@ -530,20 +550,28 @@ for key, value in spec.robot.extra.items():
     argv.append(f"--robot.{key}={rendered}")
 ```
 
+`build_argv` 的安全约束（实施补充，`test_build_argv_rejects_unsafe_extra` / `test_build_argv_requires_motion_limit`）：
+
+- `robot.max_relative_target is None` → `ValueError`（HTTP 层已拦截，这里是第二道防线，防止直接调用绕过）。
+- `extra` 的 key 必须匹配 `^[A-Za-z_][A-Za-z0-9_.]*$`，否则 `ValueError`（防止 `"x=1 --robot.max_relative_target"` 这类 key 注入额外参数）。
+- `extra` key 的首段（`key.split(".", 1)[0]`）不得属于 `{"type", "port", "id", "cameras", "max_relative_target"}`：这些由专用字段给出，draccus 对同名参数后者覆盖前者，允许的话 `extra={"max_relative_target": 1000}` 就能悄悄放开限幅。
+
+`prepare_config(spec)`（可单测，FR-15 直接调它）：`_ensure_plugins()`（`_PLUGINS_LOCK` 下只执行一次 `register_third_party_plugins()`）→ `cfg = _parse_rollout_config(build_argv(spec))`，任何异常 → `BridgeError("policy_load_failed", f"invalid rollout config: {exc}")` → **F-4**：`if spec.offline_backbone and hasattr(cfg.policy, "pretrained_backbone_weights"): cfg.policy.pretrained_backbone_weights = None` → 返回 cfg。
+
 `load(spec, on_event)` 严格按以下顺序：
 
-1. 若 `_PLUGINS_REGISTERED` 为假：`from lerobot.utils.import_utils import register_third_party_plugins; register_third_party_plugins()`，置真。
-2. `cfg = _parse_rollout_config(build_argv(spec))`；异常 → `BridgeError("policy_load_failed", f"invalid rollout config: {exc}")`。
-3. **F-4**：`if spec.offline_backbone and hasattr(cfg.policy, "pretrained_backbone_weights"): cfg.policy.pretrained_backbone_weights = None`。
-4. **F-1 标定预检**：
+1. `cfg = prepare_config(spec)`。
+2. **F-1 标定预检**（连接失败时也要 best-effort `disconnect()`，SO follower 的 `connect` 可能在串口已打开后才抛错）：
    ```python
-   from lerobot.robots.utils import make_robot_from_config
+   from lerobot.robots import make_robot_from_config
    probe = make_robot_from_config(cfg.robot)
    try:
        probe.connect(calibrate=False)
    except InteractiveInputBlocked:
+       _safe_disconnect(probe, "probe")
        raise
    except Exception as exc:
+       _safe_disconnect(probe, "probe")
        raise BridgeError("robot_connect_failed", f"cannot connect robot: {exc}",
                          hint="检查 USB 线缆、串口 port 与供电") from exc
    try:
@@ -555,22 +583,39 @@ for key, value in spec.robot.extra.items():
        raise BridgeError("calibration_required", "robot is not calibrated",
                          hint=f"lerobot-calibrate --robot.type={spec.robot.type} --robot.port={spec.robot.port or '<port>'} --robot.id={spec.robot.id or '<id>'}")
    ```
-5. 构建：
+3. 构建：
    ```python
-   from lerobot.rollout import LinkedEvent, RolloutController, RolloutEvent, build_rollout_context, create_strategy
-   self._shutdown = LinkedEvent(threading.Event())
-   self._ctx = build_rollout_context(cfg, self._shutdown)
+   import lerobot.rollout.context as context_module
+   from lerobot.rollout import LinkedEvent, RolloutController, build_rollout_context, create_strategy
+   # build_rollout_context（context.py:311）在 L393 创建并 connect 机器人之后，还要做特征对齐、
+   # 视觉特征不匹配 ValueError（L488）、processor 与引擎构建；这些步骤失败时 ctx 尚未返回，
+   # 已连接的机器人没人断开。临时替换该模块的 make_robot_from_config，记录创建出的机器人：
+   created = []
+   original = context_module.make_robot_from_config
+   def _recording(config):
+       robot = original(config); created.append(robot); return robot
+   with _BUILD_LOCK:
+       context_module.make_robot_from_config = _recording
+       try:
+           self._ctx = build_rollout_context(cfg, LinkedEvent(threading.Event()))
+       except BaseException:
+           for robot in created:
+               if getattr(robot, "is_connected", False): _safe_disconnect(robot, "robot")
+           raise
+       finally:
+           context_module.make_robot_from_config = original
    self._strategy = create_strategy(cfg.strategy)
    self._strategy.setup(self._ctx)
    self._controller = RolloutController(self._strategy, self._ctx, on_event=self._forward_event)
-   self._thread = threading.Thread(target=self._controller.serve, name="rollout-serve", daemon=True)
+   self._thread = threading.Thread(target=self._serve, name="rollout-serve", daemon=True)
    self._thread.start()
    ```
-   步骤 5 中任何异常：若 `self._ctx` 已建立则 `try: self._strategy.teardown(self._ctx)`（strategy 未建则用 `create_strategy(cfg.strategy).teardown(self._ctx)`），然后 `InteractiveInputBlocked` 原样抛出、`BridgeError` 原样抛出、其他包成 `BridgeError("policy_load_failed", str(exc))`。
-6. `self._forward_event(event, payload)`：`on_event(event.value, {})`；`QUERY_ANSWERED` 事件的 detail 可为 `{}`（MVP 不暴露问答）。
+   `ctx` 建好之后的步骤（strategy / controller / 线程）异常：`(self._strategy or create_strategy(cfg.strategy)).teardown(self._ctx)`（teardown 自身异常只记日志），`self._controller = None`，再抛出。整个步骤 3 的异常：`InteractiveInputBlocked` 与 `BridgeError` 原样抛出、其他包成 `BridgeError("policy_load_failed", str(exc))`（`test_sim_failure_after_connect_releases_robot`）。
+   `_serve()` 包一层：`self._controller.serve()` 抛异常时记 traceback 到 `self._serve_crash` 并 `on_event("engine_failed", {})`（session 据此转 `failed`）；`failure_traceback` 优先取 controller 的，没有再取 `_serve_crash`。
+4. `self._forward_event(event, payload)`：`on_event(event.value, {})`；`QUERY_ANSWERED` 事件的 detail 可为 `{}`（MVP 不暴露问答）。
 - `start` / `set_task` / `reset` 直接转发 `self._controller`；`task` / `initial_task` / `failure_traceback` 转发同名属性；`supports_text_queries` 取 `self._ctx.policy.inference.supports_text_queries`。
-- `camera_names`：`list((getattr(self._ctx.hardware.robot_wrapper.inner, "cameras", None) or {}).keys())`。
-- `read_frame(camera)`：`cams = getattr(robot.inner, "cameras", None) or {}`；为空或 camera 不存在 → `BridgeError("no_camera", ..., status=404)`；`frame = cams[name].read_latest(max_age_ms=1000)`；`np.asarray(frame, dtype=np.uint8)`。
+- `camera_names`：`list(self._ctx.hardware.robot_wrapper.cameras or {})`（`ThreadSafeRobot.cameras` 即 `getattr(inner, "cameras", {})`）。
+- `read_frame(camera)`：`cams = dict(robot_wrapper.cameras or {})`；`camera` 为空取第一个；为空或 camera 不存在 → `BridgeError("no_camera", ..., hint="available cameras: ...", status=404)`；`frame = cams[name].read_latest(max_age_ms=1000)`；`np.asarray(frame, dtype=np.uint8)`。
 - `verify_pose(context, tol)`：
   ```python
   hw = self._ctx.hardware
@@ -582,21 +627,23 @@ for key, value in spec.robot.extra.items():
       return PoseCheck(context, None, None, tol, f"pose read failed: {exc}")
   return PoseCheck(context, err <= tol, round(err, 4), tol)
   ```
-- `stop_and_teardown(tol)`（幂等，缓存结果）：
+- `verify_pose` 实施补充：`initial_position` 与观测没有交集的键时返回 `error="no joint positions in observation"`（避免 `max()` 空序列异常被误报成读数失败）。
+- `stop_and_teardown(tol)`（`_teardown_lock` 下执行，幂等，缓存结果；`load` 前调用返回 `error="backend not loaded"`，`test_stop_before_load_is_safe`）：
   ```python
-  self._controller.stop()
+  try: self._controller.stop()
+  except Exception: logger.exception(...)          # stop 抛错也必须继续回位 + 断开
   self._thread.join(timeout=10)
-  from lerobot.rollout import RolloutStrategy
-  hw = self._ctx.hardware
-  pose = PoseCheck("stop", None, None, tol, "robot not connected")
-  if hw.robot_wrapper.inner.is_connected and hw.initial_position:
-      try:
-          RolloutStrategy.return_to_initial_position(hw)
-          time.sleep(0.5)
-          pose = self.verify_pose("stop", tol)
-      except Exception as exc:
-          pose = PoseCheck("stop", None, None, tol, f"return failed: {exc}")
-  self._strategy.teardown(self._ctx)   # cfg.return_to_initial_position=False → 只停引擎 + 断开
+  if self._thread.is_alive():                       # 控制环还可能在发动作：禁止插值回位
+      pose = PoseCheck("stop", None, None, tol, "control loop did not stop within 10s; return move skipped")
+  elif not hw.initial_position: pose = PoseCheck(..., "no initial position captured")
+  elif not hw.robot_wrapper.is_connected: pose = PoseCheck(..., "robot not connected")
+  else:
+      # 上游 RolloutStrategy.return_to_initial_position(hw, duration_s=3.0, fps=50) -> bool：
+      # 内部吞异常并返回 False，所以必须看返回值，不能只靠 except。
+      moved = self._strategy.return_to_initial_position(hw)   # 异常 → error="return failed: ..."
+      pose = PoseCheck(..., "return move failed partway") if not moved else (sleep(0.5), self.verify_pose("stop", tol))
+  try: self._strategy.teardown(self._ctx)   # cfg.return_to_initial_position=False → 只停引擎 + 断开
+  except Exception as exc: pose.error = f"{pose.error}; teardown failed: {exc}" if pose.error else f"teardown failed: {exc}"
   return pose
   ```
 - `/health` 的 `lerobot_version`：`app.py` 里 `try: import lerobot; lerobot.__version__ except ImportError: None`。
@@ -607,8 +654,9 @@ for key, value in spec.robot.extra.items():
 
 ```
 sim/lerobot_robot_agx_sim/
-  pyproject.toml          # name = "lerobot_robot_agx_sim"，packages = ["lerobot_robot_agx_sim"]，requires-python >=3.12
-  lerobot_robot_agx_sim/__init__.py      # 导出 AgxSimSO101, AgxSimSO101Config
+  pyproject.toml          # name = "lerobot_robot_agx_sim"，packages = ["lerobot_robot_agx_sim"]，requires-python >=3.12；
+                          # 不声明 lerobot 依赖（否则 pip 会从 PyPI 拉发布版覆盖钉住的 git 修订）
+  lerobot_robot_agx_sim/__init__.py      # 导出 AgxSimSO101, AgxSimSO101Config, live_connections
   lerobot_robot_agx_sim/agx_sim_so101.py
 ```
 
@@ -622,7 +670,8 @@ sim/lerobot_robot_agx_sim/
 - 相机：实例属性 **`self.cameras: dict[str, _SimCamera]`**（bridge 通过 `robot.cameras[name].read_latest()` 取快照）。`_SimCamera` 结构同 `OpenCVCamera`：后台线程按 `camera_fps` 渲染帧（`cv2` 画关节读数与简易臂示意），`frame_lock` 保护 `latest_frame` / `latest_timestamp`，`read_latest(max_age_ms=500)` 语义与 `camera_opencv.py:585-615` 一致。
 - `connect(calibrate=True)`：`if not self.is_calibrated and calibrate: self.calibrate()`；启动伺服线程与相机线程。`calibrate()`：调用 `input("Press ENTER to use provided calibration file, or type 'c' and press ENTER to run calibration: ")`（复刻真实 SO follower 行为），之后置已标定。`is_calibrated` 返回内部标志（初值取配置 `calibrated`）。
 - `send_action`：按限位裁剪，再按 `max_relative_target` 对 `|goal - present|` 单步限幅；更新 `goal`；返回实际下发值（`.pos` 键）。
-- `disconnect()`：停相机线程，`time.sleep(0.2)` 让伺服收敛，停伺服线程。
+- `disconnect()`：停相机线程，`time.sleep(0.2)` 让伺服收敛，停伺服线程；可重复调用。
+- 泄漏探针：模块级 `weakref.WeakSet` 记录所有实例，`live_connections() -> int` 返回当前 `is_connected` 的实例数。集成测试 fixture 在每个用例结束后断言为 0，用来证明失败路径也断开了机器人。
 
 可参照 PoC 原型 `research/codedeepresearch/lerobot/poc/plugins/lerobot_robot_agx_sim/`（本机存在时），但以本节规格为准：PoC 版本的快照线程与 `status.json` 写盘**不要**带进来，相机属性名要从 `_cameras` 改为 `cameras`。
 
@@ -634,6 +683,15 @@ sim/lerobot_robot_agx_sim/
   - **FR-14 标定 fail-closed（F-1）**：`extra={"calibrated": False}` → `failed`，`error_code == "calibration_required"`；进程未阻塞（整个用例 ≤30s 内结束）。
   - **FR-15 离线（F-4）**：直接调 `build_argv` + `_parse_rollout_config` + F-4 步骤后断言 `cfg.policy.pretrained_backbone_weights is None`。
 - 参考权重（仅本机手测）：Hugging Face `kai-yamada/act_so101_pick_cube`（ACT，Apache-2.0，约 207MB，输入 6 维状态 + `front`/`handeye` 480×640 两路图像，输出 6 维动作）。
+
+**实施结果（2026-09-27）**：fake 环境 `45 passed, 5 skipped`（真实后端用例按 `importorskip` 跳过）；集成环境（本地 upstream 同 SHA editable + bridge + 模拟插件，ACT 权重，`device=cpu`）`50 passed`；ruff（E/F/W/B/UP/I，行宽 120）通过；`uv pip compile --extra lerobot` 能解析出钉住的 git 修订与 torch 2.11.0。实施时对上面各 FR 的加强与新增：
+
+- FR-13 加严：running 5s 后断言关节偏离初始位姿 > 5°（否则回位校验没有证明力）；reset 的 `max_abs_err ≤ 5.0`；reset 后**再起一段运行、中途 stop**，覆盖"运行中停止 → 回位 → 校验"；另断言 `cameras == ["front", "handeye"]`、两路快照可取、`live_connections()` 建好为 1 / stop 后为 0、stop 耗时 < 10s。
+- FR-14 加：`hint` 以 `lerobot-calibrate --robot.type=agx_sim_so101` 开头。
+- FR-15 加：`return_to_initial_position is False`、`interactive is True`；`offline_backbone=False` 时权重字段保持非空。
+- 新增：`test_sim_failure_after_connect_releases_robot`（`extra={"camera_names": ["cam0"]}` 触发 connect 之后的视觉特征不匹配 → `policy_load_failed`，错误含 `Visual feature mismatch`，且无残留连接）、`test_parse_errors_become_value_errors`、`test_build_argv_omits_empty_optional_robot_fields`、`test_build_argv_rejects_unsafe_extra`（6 组）、`test_build_argv_requires_motion_limit`、`test_stop_before_load_is_safe`、`tests/test_session_fake.py::test_system_exit_during_load_marks_failed`、`tests/test_security.py::test_cli_lerobot_backend_requires_runtime`（runtime 缺失 → 退出码 2、不启动 uvicorn）、`test_logging_replaces_preinstalled_root_handler`。
+- **进程级冒烟（手测）**：`agx-robot-bridge serve --backend lerobot` + 真实 ACT + 模拟机器人：进程 ~4s 就绪 → 建会话 1.4s 到 `idle` → start → 快照 640×480 → reset（`pose_check.verified=True`，误差 0.0001）→ 再 start → 运行中 SIGTERM，4.0s 退出（-15）。`bridge.log` 按序可见：预检连接 / 断开 → 正式连接 → `shutting down: stopping session` → 断开 → `stopped: pose_check={verified: True, max_abs_err: 0.0001}`；stdout 与日志均不含 token。
+- 已知现象：CPU 推理时控制环 5–18Hz，低于 30Hz 目标，上游会打 "Control loop is running slower" 告警，属预期（README 已注明）。
 
 ---
 

@@ -7,6 +7,8 @@ Author: Hongyi Zhao
 from __future__ import annotations
 
 import builtins
+import io
+import logging
 import os
 import stat
 import sys
@@ -61,6 +63,42 @@ def test_cli_rejects_public_host(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main(["serve", "--host", "0.0.0.0", "--backend", "fake"])
     assert exc.value.code == 2
+
+
+def test_cli_lerobot_backend_requires_runtime(monkeypatch, tmp_path, capsys):
+    from agx_robot_bridge import lerobot_backend
+
+    def _missing() -> str:
+        raise ImportError("rollout controller API not found")
+
+    monkeypatch.setattr(cli, "install_input_guard", lambda: None)
+    monkeypatch.setattr(lerobot_backend, "check_runtime", _missing)
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: pytest.fail("must not start without a runtime"))
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["serve", "--backend", "lerobot", "--token-file", str(tmp_path / "t.token")])
+    assert exc.value.code == 2
+    assert "rollout controller API not found" in capsys.readouterr().err
+
+
+def test_logging_replaces_preinstalled_root_handler(tmp_path):
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    preinstalled = logging.StreamHandler(io.StringIO())
+    root.handlers[:] = [preinstalled]
+    root.setLevel(logging.WARNING)
+    log_file = tmp_path / "logs" / "bridge.log"
+    try:
+        cli._configure_logging(log_file)
+        logging.getLogger("agx_robot_bridge.session").info("session loaded")
+        for handler in root.handlers:
+            handler.flush()
+        assert preinstalled not in root.handlers
+        assert "session loaded" in log_file.read_text(encoding="utf-8")
+    finally:
+        for handler in root.handlers:
+            handler.close()
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
 
 
 def test_cli_serve_wiring(monkeypatch, tmp_path):
