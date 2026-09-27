@@ -10,9 +10,9 @@ todos:
     status: completed
   - id: rb3-agx-client-tools
     content: "RB-3 AgenticX：RobotSettings 配置 + agenticx/robot_bridge/ client 与 6 个工具 + 单测"
-    status: pending
+    status: completed
   - id: rb4-confirm-wiring
-    content: "RB-4 risk=robot 不可豁免 + dispatch 分支 + server.py 注入 + 冷启动冒烟"
+    content: "RB-4 risk=robot 不可豁免 + dispatch 分支 + server.py 注入 + 冷启动冒烟 + 新增 robot_resume"
     status: pending
   - id: rb5-prompt-docs
     content: "RB-5 Meta 能力块 + context_usage + 用户文档"
@@ -882,6 +882,34 @@ class RobotBridgeClient:
 - **FR-23 快照附件**：`test_snapshot_attaches_image`：session 用 `StudioSession(provider_name="openai", model_name="gpt-4o")`；MockTransport 返回 1×1 PNG 的 base64 → pending 附件数 +1，`data_url` 以 `data:image/png;base64,` 开头，返回 JSON 不含 `png_base64`；非视觉模型（`model_name="glm-5"`）→ `robot_vision_unavailable`、MockTransport 零请求。
 - **FR-24 bridge 不可达**：`test_bridge_unreachable`：MockTransport 抛 `httpx.ConnectError` → `error_code == "bridge_unreachable"`，hint 含 `agx-robot-bridge serve`。
 
+**实施结果（2026-09-27）**：`tests/test_robot_bridge_config.py` 6 条 + `tests/test_robot_bridge_tools.py` 25 条全部通过；ruff（仓库配置，行宽 88）新文件仅剩与仓库惯例一致的 EXE001（shebang 未加可执行位），`config_manager.py` 新增的 6 条 UP006/UP045 来自沿用该文件既有的 `Dict` / `Optional` 写法，保持不改。`config_manager.py` 的 diff 只有新增行，未改动任何既有行。
+
+测试环境说明：AgenticX 主环境（conda `agenticx`，Python 3.11）没有 pytest，也没有 numpy。实测用 `uv venv --system-site-packages` 在 `research/codedeepresearch/lerobot/.venv-agx-test` 建了测试 venv（只装 pytest / pytest-asyncio / pytest-cov，不动主环境），命令加 `--no-cov`：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 research/codedeepresearch/lerobot/.venv-agx-test/bin/python -m pytest \
+  tests/test_robot_bridge_config.py tests/test_robot_bridge_tools.py -q -p no:cacheprovider --no-cov
+```
+
+相关回归（引用 `ConfigManager` / 确认门 / 视觉附件 helper 的 15 个测试文件）在清掉 shell 中 `*_API_KEY` 环境变量后 245 passed；剩余失败均为既有问题，把 `config_manager.py` 换回 HEAD 版本后同样失败：`test_cli_config_manager.py::test_load_scope_does_not_merge_global_into_project`（仅在 shell 里有 provider API key 环境变量时失败）、`test_smoke_wb_bridge.py` 3 条与 `test_cc_bridge_settings.py` 收集错误（主环境缺 numpy）、`test_sandbox_path_deny.py::test_no_deny_rules_means_no_deny_lines`（沙箱 profile 断言，与本改动无关）。
+
+对上面规格的修正与加强（均有对应单测）：
+
+- **`masked_config` 遮罩 `robot.token`**（规格未覆盖）：`ConfigManager.masked_config()` 在 `return merged` 前对非空 `robot.token` 调 `cls._mask`，否则设置面板 / 配置导出会带出明文 token。测试 `test_masked_config_masks_robot_token`。
+- **reset 改为等"新的" `pose_check` 事件**：规格写的是轮询 `get_session` 的 `pose_check` 字段直到 `context == "reset"`，但该字段保存的是**上一次**校验结果——连续两次 reset 时，第二次会立刻读到第一次的旧结果并误报"已校验"。实现改为 reset 前先读 `last_seq`，之后用 `since=last_seq` 只看新产生的 `pose_check` 事件（`detail.context == "reset"`）。`verified is False` 时附 `warning: "机器人可能未回到初始位姿，请人工检查"`（与 stop 一致）。测试 `test_reset_reports_only_the_new_pose_check`。
+- **token 在确认之前解析**：`resolve_client` 放在 `_confirm` 之前，token 缺失直接返回 `token_missing`，不会让用户先确认"机器人将运动"再报配置错。
+- **参数校验补全**：`max_relative_target` 必须是数字且 > 0，`duration_s` 必须是数字且 ≥ 0，否则 `robot_invalid_args`，均不打 bridge、不弹确认（`test_rollout_start_rejects` 共 6 组，含 `token_missing`）。
+- **建会话之后的失败都带 `session_id`**：`POST /session` 成功后再出现 `RobotBridgeError`（如 bridge 中途不可达）时，返回的失败 JSON 带 `session_id`，便于智能体随后 `robot_stop`。加载阶段被取消或抛错时先 best-effort `client.stop(sid)` 再重新抛出（`_best_effort_stop` 失败只记 warning 日志，不掩盖原始结果）；加载超时同样先 stop 再返回 `robot_load_timeout`。测试 `test_rollout_start_load_timeout_stops_session`、`test_rollout_start_bridge_error_after_create_keeps_session_id`。
+- **启动流的其它分支**：加载期 `stopped` → `robot_session_stopped`；start 之后 15s 内进入 `failed` → 与加载失败相同的失败 JSON（带 `failure_traceback_tail`）；`POST /session` 返回体缺 `session_id` 或 bridge 返回非 JSON 对象 → `bridge_bad_response`；其它 `httpx.HTTPError` → `bridge_error`；`httpx.TimeoutException` → `bridge_timeout`。
+- **stop 仍在 stopping 时给出 warning**：轮询超过 `stop_timeout_s` 仍未 `stopped` 时附 `warning: "停止尚未完成，请稍后用 robot_status 确认"`。测试 `test_stop_waits_while_stopping`。
+- **快照解码加严**：`base64.b64decode(..., validate=True)`，解码失败 → `bridge_bad_response`。
+- **路径安全**：客户端拼 `/session/{sid}` 时用 `urllib.parse.quote(sid, safe="")`，`session_id` 中的 `/`、`..` 不会改写请求路径；`httpx.AsyncClient(trust_env=False)`，本机请求不走 shell 里的代理变量。测试 `test_client_ignores_proxy_env_and_quotes_session_id`。
+- **文案**：`robot_set_task` 的 `note` 去掉规格中的"（如 ACT）"，改为"若当前策略不读取语言指令，改任务不会改变动作"（工具文案保持中性，不写具体策略名）。
+
+**契约冒烟（真实 bridge 进程）**：`research/codedeepresearch/lerobot/poc/rb3_contract_smoke.py`（本地，不入库）起一个真实的 `agx-robot-bridge serve --backend fake`，用 RB-3 的 `dispatch_robot_tool` 走完整链路，15/15 通过：未知会话 → `not_found`；start → `running`（0.2s，确认上下文 `risk=robot`、限幅 10.0）；status 带事件且只有 `failure_traceback_tail`；set_task → `changed`；snapshot 640×480 附到 pending；reset → 新的 `pose_check(context=reset, verified=True)` 且任务恢复为初始任务；stop 免确认 → `stopped` + `pose_check(context=stop)`，重复 stop 幂等；stop 后可再建会话；错 token → 401 `unauthorized`；bridge 退出后 → `bridge_unreachable`；bridge 日志不含 token。这验证了 MockTransport 里手写的响应形状与 RB-1 实际协议一致。
+
+**已知限制（待定）**：reset 之后，以及 `duration_s > 0` 的一段跑完之后，会话回到 `idle`。bridge 的 `POST /session/{sid}/start` 允许 `idle` 重新开始，但 6 个工具都没有暴露这一步（只在 `robot_rollout_start` 内部调用过一次），智能体要继续只能 `robot_stop` 后重新 `robot_rollout_start`（会重新加载策略）。**已决定**：在 RB-4 中补一个始终需要确认的 `robot_resume` 工具，见 RB-4e / FR-31。
+
 ---
 
 ## RB-4 不可豁免的 `risk=robot` + 接线
@@ -973,15 +1001,55 @@ from agenticx.robot_bridge.tools import merge_robot_tools_into
 
 改完必须执行 AC-NFR-1 冷启动冒烟。编辑时只动上述行，提交前 `git diff agenticx/studio/server.py` 逐行确认只有 3 行新增、0 行删除。
 
+### RB-4e 新增 `robot_resume`（`agenticx/robot_bridge/tools.py`）
+
+**根因**（RB-3 契约冒烟发现）：bridge 的 `reset()` 结束后、以及 `duration_s > 0` 的一段跑完后，会话回到 `idle`；bridge 的 `POST /session/{sid}/start` 允许 `idle` 重新开始（RB-1 `start()`：`state != IDLE` → 409），但 RB-3 的 6 个工具只在 `robot_rollout_start` 内部调用过一次 start。智能体想继续只能 `robot_stop` + `robot_rollout_start`，会重新加载策略（大模型策略可能要几分钟）。
+
+1. `ROBOT_TOOLS` 末尾追加（`_tool(...)` 同构，`additionalProperties: False` 由 `_tool` 保证）：
+   ```python
+   _tool(
+       "robot_resume",
+       "让已复位或一段运行结束（state=idle）的机器人会话重新开始运行，沿用已加载的策略与当前任务。开始前会请用户确认。",
+       {"session_id": _SESSION_ID},
+       ["session_id"],
+   ),
+   ```
+2. 把 `_load_and_start` 中从 `started = await client.start(sid)` 到最后 `return _ok(...)` 的尾段抽成 `async def _start_and_wait(client, sid) -> str`（行为、错误码、返回字段完全不变），`_load_and_start` 改为 `return await _start_and_wait(client, sid)`。
+3. 新增 handler：
+   ```python
+   async def _resume(args, call):
+       sid = _text(args, "session_id") → 空 → robot_invalid_args「session_id 不能为空」
+       client = resolve_client(call.settings)
+       st = await client.get_session(sid)
+       st["state"] != "idle" → _fail("robot_not_idle", f"会话当前状态为 {state}，只有 idle 才能继续运行",
+                                     "running 无需继续；failed / stopped 需 robot_stop 后重新 robot_rollout_start",
+                                     session_id=sid)
+       # 始终确认，不受 confirm_each_task 控制：它和 robot_rollout_start 一样会让静止的机器人开始运动
+       question = (f"将让机器人会话 {sid} 继续运行，任务：「{st.get('task')}」。"
+                   "机器人会开始运动。请确认急停可及、工作区内无人，是否继续？")
+       context = {"tool": "robot_resume", "risk": "robot", "session_id": sid, "task": st.get("task")}
+       not approved → return _cancelled_text("机器人未继续运行", call)
+       try: return await _start_and_wait(client, sid)
+       except RobotBridgeError as exc: return _fail(exc.code, exc.message, exc.hint, session_id=sid)
+   ```
+   在 `_HANDLERS` 中加 `"robot_resume": _resume`。`ROBOT_TOOL_NAMES` 自动包含它，RB-4c 的转发分支无需额外改动。
+4. 同步：`tests/test_robot_bridge_tools.py::test_merge_disabled_enabled` 中"六个名字"改为七个；RB-5a 能力块的工具列表加 `robot_resume`，并加一句"复位或一段跑完后会话回到 idle，需继续时调用 `robot_resume`（会弹确认），不要为此 stop 再重新启动"；RB-5b / 用户文档中列出工具名的地方同步加上。
+
 ### RB-4 验收（FR / AC）
 
-`pytest tests/test_robot_bridge_confirm.py tests/test_confirm_risk_policy.py tests/test_confirm_risk_recall.py tests/test_command_safety.py -q`
+`pytest tests/test_robot_bridge_confirm.py tests/test_robot_bridge_tools.py tests/test_confirm_risk_policy.py tests/test_confirm_risk_recall.py tests/test_command_safety.py -q`
 
 - **FR-25 受保护**：`tests/test_robot_bridge_confirm.py::test_robot_is_protected`：`is_protected_confirm({"risk": "robot"}) is True`；`protected_confirm_reason({"risk": "robot"}) == "这条操作会让真实机器人运动"`；`is_non_waivable_confirm({"risk": " ROBOT "}) is True`；`is_non_waivable_confirm({"risk": "non_whitelisted"}) is False`。
 - **FR-26 allow 规则不能豁免**：`test_allowed_tools_cannot_waive_robot`：monkeypatch `agenticx.cli.agent_tools.tool_allowed_without_confirm` 恒返回 True；用记录调用次数的拒绝门调用 `_confirm("q", confirm_gate=gate, context={"risk": "robot", "tool": "robot_rollout_start"})` → 返回 False 且门被调用 1 次；同样设置下 `context={"risk": "non_whitelisted", "tool": "bash_exec"}` → 返回 True 且门零调用（证明只对 robot 生效）。
 - **FR-27 无人值守拒绝**：`test_unattended_rejects_robot`：`RiskAwareAutoConfirmGate(unattended=True)` + robot 上下文 → `_confirm` 返回 False。
 - **FR-28 自动模式仍弹确认**：`test_auto_mode_still_prompts_robot`：仿照 `tests/test_confirm_risk_policy.py::test_confirm_events_follow_gate_capability_and_risk`（L98-138），`RiskAwareAutoConfirmGate(delegate=AsyncConfirmGate(timeout_seconds=1))` + robot 上下文 → 事件序列为 `["confirm_required", "confirm_response"]`，且 `confirm_required` 的 `context["protected_reason"] == "这条操作会让真实机器人运动"`。
 - **FR-29 注入范围**：`test_dispatch_routes_robot_tools`：monkeypatch `agenticx.robot_bridge.tools.dispatch_robot_tool` 为返回 `"routed"` 的 async 函数 → `dispatch_tool_async("robot_status", {"session_id": "x"}, StudioSession())` 返回 `"routed"`。
+- **FR-31 `robot_resume`**（`tests/test_robot_bridge_tools.py`，沿用 `robot_env` / `FakeBridge` / `_Gate`）：
+  - `test_resume_happy_path`：`GET /session/{SID}` 依次返回 idle → running，`POST /session/{SID}/start` → `{"ok": true, "accepted": true}` → 结果 `ok true`、`state == "running"`；门调用 1 次且 `context == {"tool": "robot_resume", "risk": "robot", "session_id": SID, "task": ...}`。
+  - `test_resume_rejects_non_idle`：GET 返回 running → `error_code == "robot_not_idle"`、带 `session_id`；门零调用；请求中没有 `POST .../start`。
+  - `test_resume_denied`：拒绝门 → 以 `CANCELLED:` 开头；请求中没有 `POST .../start`。
+  - `test_resume_confirms_without_confirm_each_task`：`confirm_each_task: false` 时门仍被调用 1 次。
+  - 契约冒烟 `research/codedeepresearch/lerobot/poc/rb3_contract_smoke.py` 在 reset 之后加一步 `robot_resume` → `state == "running"`，再 stop。
 - **AC-NFR-1 server 冷启动**（改了 `server.py` 必做）：
   ```bash
   AGX_DESKTOP_TOKEN= agx serve --host 127.0.0.1 --port 18766 &   # 清空 token：server.py:1449-1452 在 token 为空时跳过 x-agx-desktop-token 校验
