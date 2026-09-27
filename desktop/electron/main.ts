@@ -7335,6 +7335,66 @@ function registerEarlyIpc(): void {
     return { ok: true };
   });
 
+  // macOS + transparent windows do not zoom when the title-bar drag region is
+  // double-clicked. The renderer asks us to fill or restore the whole window.
+  let windowDragStop: (() => void) | null = null;
+  const stopWindowDrag = () => {
+    const stop = windowDragStop;
+    windowDragStop = null;
+    stop?.();
+  };
+  ipcMain.handle("window-toggle-zoom", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    if (win.isMaximized()) {
+      win.unmaximize();
+      return { ok: true, maximized: false };
+    }
+    win.maximize();
+    return { ok: true, maximized: true };
+  });
+  ipcMain.handle("window-drag-start", (event) => {
+    stopWindowDrag();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    const cursorNow = screen.getCursorScreenPoint();
+    if (win.isMaximized()) {
+      const maxBounds = win.getBounds();
+      const normal = win.getNormalBounds();
+      const ratio = (cursorNow.x - maxBounds.x) / Math.max(1, maxBounds.width);
+      win.unmaximize();
+      win.setBounds({
+        x: Math.round(cursorNow.x - normal.width * Math.min(1, Math.max(0, ratio))),
+        y: Math.round(cursorNow.y - 18),
+        width: normal.width,
+        height: normal.height,
+      });
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const [winX, winY] = win.getPosition();
+    const offsetX = cursor.x - winX;
+    const offsetY = cursor.y - winY;
+    const timer = setInterval(() => {
+      if (win.isDestroyed()) {
+        stopWindowDrag();
+        return;
+      }
+      const point = screen.getCursorScreenPoint();
+      win.setPosition(Math.round(point.x - offsetX), Math.round(point.y - offsetY));
+    }, 16);
+    const onBlur = () => stopWindowDrag();
+    win.on("blur", onBlur);
+    windowDragStop = () => {
+      clearInterval(timer);
+      if (!win.isDestroyed()) win.removeListener("blur", onBlur);
+    };
+    return { ok: true };
+  });
+  ipcMain.handle("window-drag-end", () => {
+    stopWindowDrag();
+    return { ok: true };
+  });
+
   /**
    * 「灵巧模式」胶囊窗口：右上角圆形语音 HUD（VoiceFocus）。Enter 会快照 bounds、无边框置顶透明背景；
    * Exit 恢复最小尺寸 / 缩放 / vibrancy / 红黄绿按钮。

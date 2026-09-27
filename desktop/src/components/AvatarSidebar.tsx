@@ -237,6 +237,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
       <aside className="flex h-full w-full flex-col bg-transparent">
         {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
+          <div className="no-drag min-w-0 flex-1 self-stretch" data-window-zoom="" aria-hidden />
           <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">
             <SidebarCreateButton />
             <TopbarLeftControls

@@ -127,6 +127,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("focus-mode-enter"),
   focusModeExit: async (): Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-exit"),
+  toggleWindowZoom: async (): Promise<{ ok: boolean; maximized?: boolean }> =>
+    ipcRenderer.invoke("window-toggle-zoom"),
+  windowDragStart: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("window-drag-start"),
+  windowDragEnd: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("window-drag-end"),
   loadRemoteServer: async () =>
     ipcRenderer.invoke("load-remote-server") as Promise<{ enabled: boolean; url: string; token: string }>,
   saveRemoteServer: async (payload: { enabled: boolean; url: string; token: string }) =>

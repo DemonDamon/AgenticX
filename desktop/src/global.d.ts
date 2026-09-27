@@ -563,6 +563,9 @@ declare global {
       appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
+      toggleWindowZoom: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowDragStart: () => Promise<{ ok: boolean }>;
+      windowDragEnd: () => Promise<{ ok: boolean }>;
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
       saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{
         ok: boolean;

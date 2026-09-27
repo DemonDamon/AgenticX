@@ -13703,10 +13703,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         >
         {!workExpandedLayout ? (
         <div className="agx-pane-toolbar drag-region flex h-10 shrink-0 items-center justify-between px-4">
-          <div className="no-drag flex min-w-0 items-center gap-1.5 overflow-hidden">
+          <div
+            className="no-drag flex min-w-0 items-center gap-1.5 self-stretch overflow-hidden"
+            data-window-zoom=""
+          >
             {paneSortableListeners ? (
               <span
                 className="inline-flex cursor-grab touch-none items-center active:cursor-grabbing"
+                data-no-window-zoom=""
                 {...paneSortableListeners}
                 title={t("toolbar.reorderPane")}
               >
@@ -13723,6 +13727,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {(pane.sessionId || "").trim() ? (
                   <span
                     className="select-all font-mono text-[9px] font-normal leading-snug text-text-faint"
+                    data-no-window-zoom=""
                     title={t("toolbar.sessionIdHint")}
                   >
                     {(pane.sessionId || "").trim()}
@@ -13748,7 +13753,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ) : null}
             </div>
           </div>
-          <div className="no-drag flex shrink-0 items-center gap-1">
+          <div className="no-drag min-w-6 flex-1 self-stretch" data-window-zoom="" aria-hidden />
+          <div className="no-drag flex shrink-0 items-center gap-1 self-stretch">
             <NewTopicButton onNewTopic={createNewTopic} triggerLabel={newTopicLabel} />
             {sessionFindOpen ? (
               <div
