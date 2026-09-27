@@ -2797,6 +2797,7 @@ export function WorkPanel({
         </button>
         </div>
 
+        <div className="flex shrink-0 items-center pr-3">
         {onToggleExpand ? (
           <HoverTip label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}>
             <button
@@ -2827,6 +2828,7 @@ export function WorkPanel({
             <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
         </HoverTip>
+        </div>
       </div>
 
       {plusMenu}

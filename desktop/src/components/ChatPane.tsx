@@ -13864,7 +13864,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <HoverTip label={t("toolbar.workbenchShortcut")}>
               <button
                 type="button"
-                className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
+                className={`mr-1 inline-flex h-7 w-7 items-center justify-center rounded-[10px] transition-colors ${
+                  workspacePanelOpen
+                    ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.18)] text-[rgb(var(--theme-color-rgb,59,130,246))] hover:bg-[rgba(var(--theme-color-rgb,59,130,246),0.26)]"
+                    : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                }`}
                 onClick={toggleWorkspaceSidePanel}
                 title={t("toolbar.workbench")}
                 aria-label={t("toolbar.workbench")}
