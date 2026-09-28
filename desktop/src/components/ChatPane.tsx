@@ -3504,7 +3504,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
   const [destinationChooserOpen, setDestinationChooserOpen] = useState(false);
   const [railKind, setRailKind] = useState<DestinationKind | null>(null);
-  const destinationChooserBootRef = useRef(false);
   /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
   const [workPanelExpanded, setWorkPanelExpanded] = useState(false);
   const prevWorkPanelSessionIdRef = useRef(pane.sessionId);
@@ -12881,8 +12880,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     markPaneAwaitingFreshSession(pane.id);
     setPaneSessionId(pane.id, "");
     setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
-    // 新任务空白态不要沿用上一会话的工作区展开。
+    // 新任务空白态不要沿用上一会话的工作区展开，也不自动弹出「选择一个去处」。
     setWorkPanelExpanded(false);
+    setDestinationChooserOpen(false);
+    setRailKind(null);
     useAppStore.setState((s) => ({
       panes: s.panes.map((row) =>
         row.id !== pane.id
@@ -13643,13 +13644,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
     (!!pane.sessionId && visibleMessages.length === 0);
   const liftComposer = isBrandEmptyState && !workExpandedLayout;
-
-  useEffect(() => {
-    if (destinationChooserBootRef.current) return;
-    if (pane.sessionId || isGroupPane || isAutomationTaskPane) return;
-    destinationChooserBootRef.current = true;
-    if (!workspacePanelOpen) setDestinationChooserOpen(true);
-  }, [isAutomationTaskPane, isGroupPane, pane.sessionId, workspacePanelOpen]);
 
   return (
     <div
