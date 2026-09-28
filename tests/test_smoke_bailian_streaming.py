@@ -86,6 +86,70 @@ def test_bailian_stream_with_tools_passes_runtime_kwargs() -> None:
     assert isinstance(call_kwargs["tools"], list)
 
 
+def test_bailian_stream_with_tools_emits_reasoning_as_think_tags() -> None:
+    """Hybrid Qwen models should surface reasoning_content as think-tag content chunks."""
+    from agenticx.llms import BailianProvider
+
+    provider = BailianProvider(model="qwen3.7-max", api_key="test-key")
+
+    delta_reason = MagicMock()
+    delta_reason.content = None
+    delta_reason.reasoning_content = "plan step one"
+    delta_reason.tool_calls = None
+    choice_reason = MagicMock()
+    choice_reason.delta = delta_reason
+    choice_reason.finish_reason = None
+    chunk_reason = MagicMock()
+    chunk_reason.choices = [choice_reason]
+
+    delta_tool = MagicMock()
+    delta_tool.content = None
+    delta_tool.reasoning_content = None
+    tc = MagicMock()
+    tc.index = 0
+    tc.id = "call_1"
+    tc.function = MagicMock()
+    tc.function.name = "bash_exec"
+    tc.function.arguments = ""
+    delta_tool.tool_calls = [tc]
+    choice_tool = MagicMock()
+    choice_tool.delta = delta_tool
+    choice_tool.finish_reason = "tool_calls"
+    chunk_tool = MagicMock()
+    chunk_tool.choices = [choice_tool]
+
+    provider.client = MagicMock()
+    provider.client.chat.completions.create.return_value = [chunk_reason, chunk_tool]
+
+    chunks = list(
+        provider.stream_with_tools(
+            [{"role": "user", "content": "test"}],
+            tools=[{"type": "function", "function": {"name": "bash_exec"}}],
+            extra_body={"enable_thinking": True},
+        )
+    )
+
+    assert chunks[0] == {"type": "content", "text": "<think>"}
+    assert chunks[1] == {"type": "content", "text": "plan step one"}
+    assert chunks[2] == {"type": "content", "text": "</think>"}
+    assert chunks[3]["type"] == "tool_call_delta"
+
+
+def test_bailian_prepare_params_nests_enable_thinking_in_extra_body() -> None:
+    from agenticx.llms import BailianProvider
+
+    provider = BailianProvider(model="qwen3.7-max", api_key="test-key")
+    prepared = provider._prepare_bailian_params(
+        {
+            "model": "qwen3.7-max",
+            "messages": [{"role": "user", "content": "hi"}],
+            "extra_body": {"enable_thinking": False},
+        }
+    )
+    assert prepared["extra_body"]["enable_thinking"] is False
+    assert "enable_thinking" not in prepared
+
+
 def test_bailian_stream_with_tools_native_qwen_plus() -> None:
     """Verify qwen-plus native stream path emits normalized chunks."""
     from agenticx.llms import BailianProvider

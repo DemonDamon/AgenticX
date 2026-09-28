@@ -1186,6 +1186,25 @@ def _is_deepseek_v4_model(model_name: str) -> bool:
     return bare.startswith("deepseek-v4")
 
 
+def _bailian_qwen_thinking_kwargs(
+    session: Any,
+    model_name: str,
+    provider_name: str,
+) -> Dict[str, Any]:
+    """Pass DashScope ``enable_thinking`` for hybrid Qwen3.* chat models."""
+    from agenticx.memory.graph.json_compat import model_supports_enable_thinking_param
+
+    provider = str(provider_name or "").strip().lower()
+    if provider not in {"bailian", "dashscope", "aliyun"}:
+        return {}
+    if not model_supports_enable_thinking_param(model_name):
+        return {}
+    enabled = getattr(session, "_thinking_enabled", None)
+    if enabled is False:
+        return {"extra_body": {"enable_thinking": False}}
+    return {"extra_body": {"enable_thinking": True}}
+
+
 def _deepseek_v4_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
     """OpenAI-compat DeepSeek V4 thinking switch via extra_body only.
 
@@ -4658,6 +4677,10 @@ class AgentRuntime:
                     _merge_llm_call_kwargs(
                         llm_call_kwargs,
                         _kimi_k3_reasoning_effort_kwargs(session, model_name),
+                    )
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _bailian_qwen_thinking_kwargs(session, model_name, provider_name),
                     )
                     _merge_llm_call_kwargs(
                         llm_call_kwargs,

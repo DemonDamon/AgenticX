@@ -197,6 +197,17 @@ export function supportsDeepSeekV4Thinking(model: string): boolean {
   return normalizeBareModelId(model).toLowerCase().startsWith("deepseek-v4");
 }
 
+/** Bailian/DashScope hybrid Qwen3.* models accept enable_thinking. */
+export function supportsQwenHybridThinking(model: string): boolean {
+  const bare = normalizeBareModelId(model).toLowerCase();
+  if (bare.includes("qvq")) return true;
+  return /^qwen3[\-.]/.test(bare);
+}
+
+export function supportsThinkingModeToggle(model: string): boolean {
+  return supportsDeepSeekV4Thinking(model) || supportsQwenHybridThinking(model);
+}
+
 export function normalizeDeepSeekReasoningEffort(raw: unknown): DeepSeekReasoningEffort {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "high" || v === "max") return v;
@@ -359,7 +370,7 @@ export function describeModelForPicker(
     metaLabel: "服务渠道",
     metaValue: (providerLabel || "").trim() || provider,
     supportsReasoningEffort: reasoningEffortOptions.length > 0,
-    supportsDeepSeekThinking: supportsDeepSeekV4Thinking(model),
+    supportsDeepSeekThinking: supportsThinkingModeToggle(model),
     supportsContextWindow: contextWindowOptions.length > 0,
     reasoningEffortOptions,
     contextWindowOptions,

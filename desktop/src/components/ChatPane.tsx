@@ -411,7 +411,7 @@ import {
   normalizeContextWindow,
   normalizeReasoningEffortForModel,
   reasoningEffortOptionsForModel,
-  supportsDeepSeekV4Thinking,
+  supportsThinkingModeToggle,
   type KimiReasoningEffort,
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
@@ -10390,7 +10390,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           chatModel,
           pane.reasoningEffort,
         );
-      } else if (chatModel && supportsDeepSeekV4Thinking(chatModel)) {
+      } else if (chatModel && supportsThinkingModeToggle(chatModel)) {
         body.thinking_enabled = pane.thinkingEnabled !== false;
       }
       if (chatModel && contextWindowOptionsForModel(chatModel).length > 0) {

@@ -7,7 +7,90 @@ from pydantic import Field  # type: ignore
 from loguru import logger  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
+from agenticx.memory.graph.json_compat import model_supports_enable_thinking_param
 from agenticx.runtime.usage_metadata import normalize_stream_usage
+
+_THINK_OPEN_TAG = "<think>"
+_THINK_CLOSE_TAG = "</think>"
+
+
+def _iter_reasoning_delta_texts(delta: Any) -> List[str]:
+    """Extract reasoning/thinking delta text from a streaming chunk delta."""
+    if isinstance(delta, dict):
+        rc = delta.get("reasoning_content")
+        reasoning = delta.get("reasoning")
+    else:
+        rc = getattr(delta, "reasoning_content", None)
+        reasoning = getattr(delta, "reasoning", None)
+    out: List[str] = []
+    if isinstance(rc, str) and rc:
+        out.append(rc)
+    if isinstance(reasoning, str) and reasoning and reasoning != rc:
+        out.append(reasoning)
+    return out
+
+
+def _resolve_enable_thinking(model: str, params: Dict[str, Any]) -> Optional[bool]:
+    """Return enable_thinking for hybrid Qwen models, or None when unsupported."""
+    if not model_supports_enable_thinking_param(model):
+        return None
+    extra = params.get("extra_body")
+    if isinstance(extra, dict) and "enable_thinking" in extra:
+        return bool(extra["enable_thinking"])
+    if "enable_thinking" in params:
+        return bool(params["enable_thinking"])
+    return True
+
+
+def _apply_enable_thinking_to_openai_params(params: Dict[str, Any], model: str) -> Dict[str, Any]:
+    """Nest enable_thinking in extra_body for OpenAI-compatible Bailian calls."""
+    enabled = _resolve_enable_thinking(model, params)
+    if enabled is None:
+        return params
+    merged = dict(params)
+    merged.pop("enable_thinking", None)
+    extra = dict(merged.get("extra_body") or {})
+    extra["enable_thinking"] = enabled
+    merged["extra_body"] = extra
+    return merged
+
+
+def _apply_enable_thinking_to_native_params(params: Dict[str, Any], model: str) -> None:
+    """Set top-level enable_thinking on native DashScope HTTP payloads."""
+    enabled = _resolve_enable_thinking(model, params)
+    if enabled is None:
+        params.pop("enable_thinking", None)
+        return
+    params["enable_thinking"] = enabled
+
+
+def _close_reasoning_if_needed(reasoning_state: Dict[str, bool]) -> Optional[StreamChunk]:
+    if reasoning_state.get("started") and not reasoning_state.get("closed"):
+        reasoning_state["closed"] = True
+        return {"type": "content", "text": _THINK_CLOSE_TAG}
+    return None
+
+
+def _yield_reasoning_and_content_chunks(
+    delta: Any,
+    reasoning_state: Dict[str, bool],
+) -> Generator[StreamChunk, None, None]:
+    """Forward reasoning deltas as think tags, then visible content."""
+    for reasoning_delta in _iter_reasoning_delta_texts(delta):
+        if not reasoning_state.get("started"):
+            reasoning_state["started"] = True
+            yield {"type": "content", "text": _THINK_OPEN_TAG}
+        yield {"type": "content", "text": reasoning_delta}
+
+    if isinstance(delta, dict):
+        content = delta.get("content")
+    else:
+        content = getattr(delta, "content", None)
+    if isinstance(content, str) and content:
+        if reasoning_state.get("started") and not reasoning_state.get("closed"):
+            reasoning_state["closed"] = True
+            yield {"type": "content", "text": f"{_THINK_CLOSE_TAG}\n"}
+        yield {"type": "content", "text": content}
 
 class BailianProvider(BaseLLMProvider):
     """
@@ -45,11 +128,11 @@ class BailianProvider(BaseLLMProvider):
             "Content-Type": "application/json"
         }
         
-        # 添加百炼特有参数
-        if self._needs_native_request(request_params.get("model", "")):
-            request_params["enable_thinking"] = False
-            logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false")
-        
+        _apply_enable_thinking_to_native_params(
+            request_params,
+            str(request_params.get("model", "") or self.model),
+        )
+
         url = f"{self.base_url}/chat/completions"
 
         # Disable env proxies (HTTP(S)_PROXY, ALL_PROXY). Passing proxies={http: None,
@@ -139,10 +222,11 @@ class BailianProvider(BaseLLMProvider):
             "Content-Type": "application/json"
         }
         
-        # 为需要特殊参数的模型添加enable_thinking=false
-        request_params["enable_thinking"] = False
-        logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false (异步原生请求)")
-        
+        _apply_enable_thinking_to_native_params(
+            request_params,
+            str(request_params.get("model", "") or self.model),
+        )
+
         async with aiohttp.ClientSession(trust_env=False) as session:
             async with session.post(
                 f"{self.base_url}/chat/completions",
@@ -180,6 +264,9 @@ class BailianProvider(BaseLLMProvider):
                      message.content = message_data.get('content', '')
                      message.role = message_data.get('role', 'assistant')
                      message.tool_calls = message_data.get('tool_calls')
+                     message.reasoning_content = message_data.get("reasoning_content") or message_data.get(
+                         "reasoning"
+                     )
                      choice.message = message
                      
                      self.choices.append(choice)
@@ -196,16 +283,12 @@ class BailianProvider(BaseLLMProvider):
          return MockResponse(response_data)
      
     def _prepare_bailian_params(self, request_params: Dict[str, Any]) -> Dict[str, Any]:
-         """处理百炼特定的参数，确保与OpenAI客户端兼容"""
-         # 创建参数副本
+         """Handle Bailian-specific params and keep OpenAI client compatibility."""
          params = request_params.copy()
-         
-         # 为需要特殊参数的模型添加enable_thinking=false
-         if self._needs_native_request(params.get("model", "")):
-             params["enable_thinking"] = False
-             logger.debug(f"为模型 {params.get('model')} 设置 enable_thinking=false (OpenAI客户端)")
-         
-         return params
+         return _apply_enable_thinking_to_openai_params(
+             params,
+             str(params.get("model", "") or self.model),
+         )
     
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
@@ -404,6 +487,7 @@ class BailianProvider(BaseLLMProvider):
 
             response_stream = self.client.chat.completions.create(**final_params)
             last_finish_reason = ""
+            reasoning_state = {"started": False, "closed": False}
             for chunk in response_stream:
                 usage_chunk = normalize_stream_usage(getattr(chunk, "usage", None))
                 if getattr(chunk, "choices", None):
@@ -413,12 +497,13 @@ class BailianProvider(BaseLLMProvider):
                         last_finish_reason = finish_reason
                     delta = getattr(choice, "delta", None)
                     if delta is not None:
-                        content = getattr(delta, "content", None)
-                        if isinstance(content, str) and content:
-                            yield {"type": "content", "text": content}
+                        yield from _yield_reasoning_and_content_chunks(delta, reasoning_state)
 
                         tool_calls = getattr(delta, "tool_calls", None)
                         if tool_calls:
+                            close_chunk = _close_reasoning_if_needed(reasoning_state)
+                            if close_chunk is not None:
+                                yield close_chunk
                             for tc in tool_calls:
                                 idx = getattr(tc, "index", 0)
                                 tc_id = getattr(tc, "id", "") or ""
@@ -444,6 +529,9 @@ class BailianProvider(BaseLLMProvider):
                                 }
                 if usage_chunk:
                     yield {"type": "usage", "usage": usage_chunk}
+            close_chunk = _close_reasoning_if_needed(reasoning_state)
+            if close_chunk is not None:
+                yield close_chunk
             yield {"type": "done", "finish_reason": last_finish_reason}
         except Exception as e:
             raise Exception(
@@ -475,11 +563,12 @@ class BailianProvider(BaseLLMProvider):
         request_params["stream_options"] = stream_options
         if tools:
             request_params["tools"] = tools
-        request_params["enable_thinking"] = False
+        _apply_enable_thinking_to_native_params(request_params, self.model)
 
         url = f"{self.base_url}/chat/completions"
         timeout = kwargs.get("timeout", self.timeout)
         last_finish_reason = ""
+        reasoning_state = {"started": False, "closed": False}
 
         with requests.post(
             url,
@@ -516,11 +605,12 @@ class BailianProvider(BaseLLMProvider):
                         last_finish_reason = finish_reason
                     delta = choice.get("delta")
                     if isinstance(delta, dict):
-                        content = delta.get("content")
-                        if isinstance(content, str) and content:
-                            yield {"type": "content", "text": content}
+                        yield from _yield_reasoning_and_content_chunks(delta, reasoning_state)
                         tool_calls = delta.get("tool_calls")
                         if isinstance(tool_calls, list):
+                            close_chunk = _close_reasoning_if_needed(reasoning_state)
+                            if close_chunk is not None:
+                                yield close_chunk
                             for tc in tool_calls:
                                 if not isinstance(tc, dict):
                                     continue
@@ -541,6 +631,9 @@ class BailianProvider(BaseLLMProvider):
                                 }
                 if usage_chunk:
                     yield {"type": "usage", "usage": usage_chunk}
+        close_chunk = _close_reasoning_if_needed(reasoning_state)
+        if close_chunk is not None:
+            yield close_chunk
         yield {"type": "done", "finish_reason": last_finish_reason}
     
     async def astream(self, prompt: Union[str, List[Dict]], **kwargs):  # type: ignore
@@ -600,11 +693,15 @@ class BailianProvider(BaseLLMProvider):
         ]
         
         main_content = choices[0].content if choices else ""
+        reasoning_content: Optional[str] = None
 
         raw_tool_calls = None
         if getattr(response, "choices", None):
             msg = getattr(response.choices[0], "message", None)
             if msg is not None:
+                rc_any = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)
+                if isinstance(rc_any, str) and rc_any.strip():
+                    reasoning_content = rc_any.strip()
                 tc_list = getattr(msg, "tool_calls", None)
                 if tc_list:
                     raw_tool_calls = []
@@ -638,6 +735,7 @@ class BailianProvider(BaseLLMProvider):
             token_usage=token_usage,
             cost=None,
             tool_calls=raw_tool_calls,
+            reasoning_content=reasoning_content,
             metadata={
                 "provider": "bailian",
                 "api_version": "v1"

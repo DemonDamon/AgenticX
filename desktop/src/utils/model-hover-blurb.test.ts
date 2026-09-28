@@ -21,6 +21,7 @@ import {
   supportsGlm53ReasoningEffort,
   supportsKimiK28ReasoningEffort,
   supportsKimiK3ReasoningEffort,
+  supportsQwenHybridThinking,
 } from "./model-hover-blurb";
 
 describe("describeModelForPicker", () => {
@@ -50,6 +51,13 @@ describe("describeModelForPicker", () => {
     expect(blurb.title).toBe("kimi-k2.7-code");
     expect(blurb.description).toContain("编程");
     expect(blurb.supportsReasoningEffort).toBe(false);
+  });
+
+  it("exposes thinking toggle for qwen3.7-max", () => {
+    const blurb = describeModelForPicker("bailian", "qwen3.7-max", "阿里云百炼");
+    expect(blurb.supportsDeepSeekThinking).toBe(true);
+    expect(supportsQwenHybridThinking("qwen3.7-max")).toBe(true);
+    expect(supportsQwenHybridThinking("qwen-plus")).toBe(false);
   });
 
   it("uses a distinctive blurb for DeepSeek V4", () => {
