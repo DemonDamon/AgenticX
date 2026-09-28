@@ -7,12 +7,13 @@ Author: Damon Li
 from __future__ import annotations
 
 import logging
-import os
 from typing import Callable, List, Optional
 
 from fastapi import Depends, HTTPException, Request  # type: ignore
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer  # type: ignore
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from agenticx.server.jwt_secret import resolve_jwt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,8 @@ API_KEY_SCHEME = APIKeyHeader(name=API_KEY_HEADER, auto_error=False)
 
 
 def _get_jwt_secret() -> str:
-    """Get JWT secret from env or default for dev."""
-    return os.environ.get("AGENTICX_JWT_SECRET", "agenticx-dev-secret-change-in-production")
+    """Resolve JWT secret; fails closed when unset (see jwt_secret.resolve_jwt_secret)."""
+    return resolve_jwt_secret()
 
 
 class AuthState:

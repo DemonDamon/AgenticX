@@ -71,8 +71,9 @@ def check_imports():
             require_role,
             require_permission,
         )
-        from agenticx.server.user_manager import get_user_manager
-        um = get_user_manager()
+        from agenticx.server.user_manager import UserManager
+        # Explicit test secret — production must set AGENTICX_JWT_SECRET (no hardcoded fallback).
+        um = UserManager(db_path=":memory:", jwt_secret="verify-script-test-secret-not-for-prod")
         jwt_token = um.generate_jwt(1, "test@test.com", "test", ["user"])
         print(f"  [P4] auth.py + user_manager JWT OK (JWT: {'yes' if jwt_token else 'no'})")
     except Exception as e:
