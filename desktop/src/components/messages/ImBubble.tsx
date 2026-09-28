@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquare, MessageSquarePlus } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { ScratchChatIcon } from "../work-panel/ScratchChatIcon";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
@@ -774,7 +775,7 @@ export function ImBubble({
               onClick={runOpenScratchChat}
               aria-label={t("actions.openScratch")}
             >
-              <MessageSquare size={14} strokeWidth={2} />
+              <ScratchChatIcon className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
           </HoverTip>
         ) : null}
@@ -1114,7 +1115,7 @@ export function ImBubble({
                         onClick={runOpenScratchChat}
                         aria-label={t("actions.openScratch")}
                       >
-                        <MessageSquare size={14} strokeWidth={2} />
+                        <ScratchChatIcon className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
@@ -1431,7 +1432,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); runOpenScratchChat(); }}
             >
-              <MessageSquare size={12} className="shrink-0 text-text-faint" />{t("actions.openScratch")}
+              <ScratchChatIcon className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />{t("actions.openScratch")}
             </button>
           ) : null}
           <button
