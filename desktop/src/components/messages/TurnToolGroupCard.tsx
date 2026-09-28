@@ -6,7 +6,11 @@ import { buildToolCardTitle, ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
-import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
+import {
+  ASSISTANT_ICON_RAIL_CLASS,
+  REACT_RAIL_ICON_TILE_STYLE,
+  REACT_RAIL_TITLE_CLASS,
+} from "./im-layout";
 import { isToolGroupCancelled, isToolGroupInProgress } from "./group-tool-messages";
 import {
   formatToolElapsedSeconds,
@@ -145,21 +149,27 @@ export function TurnToolGroupCard({
         }`}
         onClick={() => setExpanded((v) => !v)}
       >
-        <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
+        {/* Icon disk sized to match ThinkingGlyph (~18px stroke mass), not a heavier 16px fill+ring. */}
+        <span className={ASSISTANT_ICON_RAIL_CLASS} aria-hidden>
           {inProgress ? (
             <span
-              className="flex h-4 w-4 items-center justify-center rounded-full"
+              className="flex h-3.5 w-3.5 items-center justify-center rounded-full"
               style={REACT_RAIL_ICON_TILE_STYLE}
             >
-              <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
+              <Wrench className="h-2 w-2" strokeWidth={2.45} />
             </span>
           ) : endedCancelled ? (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-surface-hover text-text-faint">
-              <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-surface-hover text-text-faint">
+              <Wrench className="h-2 w-2" strokeWidth={2.45} />
             </span>
           ) : (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
-              <Check className="h-2.5 w-2.5 text-[var(--theme-color-text)]" strokeWidth={2.45} />
+            <span
+              className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))]"
+              style={{
+                boxShadow: "inset 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.35)",
+              }}
+            >
+              <Check className="h-2 w-2 text-[var(--theme-color-text)]" strokeWidth={2.45} />
             </span>
           )}
         </span>
