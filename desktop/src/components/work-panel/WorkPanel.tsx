@@ -82,6 +82,7 @@ import {
   resolveScratchFocusId,
 } from "../../utils/scratch-chat-panel";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
+import { isFreshTask, workspaceToolLocked } from "../../utils/fresh-task-workspace";
 import {
   artifactBaseName,
   collectSessionArtifactPaths,
@@ -2311,6 +2312,36 @@ export function WorkPanel({
     return () => window.removeEventListener("mousedown", onDoc);
   }, [plusOpen]);
 
+  const freshTask = isFreshTask(paneMessages);
+  const plusItem = (key: string, icon: ReactNode, label: string, onClick: () => void) => {
+    const locked = workspaceToolLocked(key, freshTask);
+    const button = (
+      <button
+        type="button"
+        className={
+          locked
+            ? "flex w-full cursor-default items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-faint"
+            : "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+        }
+        aria-disabled={locked || undefined}
+        onClick={() => {
+          if (locked) return;
+          onClick();
+        }}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+    return locked ? (
+      <HoverTip key={key} label={t("work.startLockedHint")} className="w-full">
+        {button}
+      </HoverTip>
+    ) : (
+      <span key={key}>{button}</span>
+    );
+  };
+
   const plusMenu =
     plusOpen && plusPos
       ? createPortal(
@@ -2319,70 +2350,14 @@ export function WorkPanel({
             style={{ left: plusPos.left, top: plusPos.top }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openSummaryTab}
-            >
-              <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabSummary")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openScratchFromPlus}
-            >
-              <ScratchChatIcon className="h-4 w-4 text-text-subtle" />
-              {t("work.tabScratch")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openChangesTab}
-            >
-              <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabChanges")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openBrowserTab}
-            >
-              <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabBrowser")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openGraphTab}
-            >
-              <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabGraph")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openTimelineTab}
-            >
-              <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabTimeline")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openTerminalTab}
-            >
-              <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabTerminal")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openWorkspaceTab}
-            >
-              <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabWorkspace")}
-            </button>
+            {plusItem("summary", <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabSummary"), openSummaryTab)}
+            {plusItem("scratch", <ScratchChatIcon className="h-4 w-4 text-text-subtle" />, t("work.tabScratch"), openScratchFromPlus)}
+            {plusItem("changes", <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabChanges"), openChangesTab)}
+            {plusItem("browser", <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabBrowser"), openBrowserTab)}
+            {plusItem("graph", <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabGraph"), openGraphTab)}
+            {plusItem("timeline", <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTimeline"), openTimelineTab)}
+            {plusItem("terminal", <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTerminal"), openTerminalTab)}
+            {plusItem("workspace", <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabWorkspace"), openWorkspaceTab)}
           </div>,
           document.body
         )
@@ -2838,22 +2813,39 @@ export function WorkPanel({
           <div className="flex h-full flex-col px-8 pt-16">
             <div className="text-[15px] text-text-faint">{t("work.startHere")}</div>
             <div className="mt-6 flex max-w-[360px] flex-col gap-5">
-              {startEntries.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  className="flex items-start gap-3 rounded-lg px-1 py-1 text-left transition hover:bg-surface-hover/50"
-                  onClick={entry.onClick}
-                >
-                  <div className="mt-0.5">{entry.icon}</div>
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-medium text-text-strong">{entry.title}</div>
-                    <div className="mt-0.5 text-[12px] leading-relaxed text-text-faint">
-                      {entry.subtitle}
+              {startEntries.map((entry) => {
+                const locked = workspaceToolLocked(entry.key, freshTask);
+                const button = (
+                  <button
+                    type="button"
+                    className={`flex w-full items-start gap-3 rounded-lg px-1 py-1 text-left ${
+                      locked ? "cursor-default" : "transition hover:bg-surface-hover/50"
+                    }`}
+                    aria-disabled={locked || undefined}
+                    onClick={() => {
+                      if (locked) return;
+                      entry.onClick();
+                    }}
+                  >
+                    <div className={`mt-0.5 ${locked ? "opacity-45" : ""}`}>{entry.icon}</div>
+                    <div className="min-w-0">
+                      <div className={`text-[14px] font-medium ${locked ? "text-text-faint" : "text-text-strong"}`}>
+                        {entry.title}
+                      </div>
+                      <div className="mt-0.5 text-[12px] leading-relaxed text-text-faint">
+                        {entry.subtitle}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+                return locked ? (
+                  <HoverTip key={entry.key} label={t("work.startLockedHint")} className="w-full">
+                    {button}
+                  </HoverTip>
+                ) : (
+                  <span key={entry.key}>{button}</span>
+                );
+              })}
             </div>
           </div>
         ) : null}

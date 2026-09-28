@@ -327,6 +327,7 @@
     "expandPanel": "Expand panel",
     "hideTools": "Hide tools panel",
     "startHere": "Start here",
+    "startLockedHint": "Send a task before opening this",
     "todos": "To-dos",
     "emptyTodos": "No to-dos yet",
     "emptyTodosHint": "Steps listed by the lead appear here; delegation progress stays on chat tool cards",

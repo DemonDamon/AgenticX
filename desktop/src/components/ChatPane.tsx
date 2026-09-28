@@ -383,6 +383,7 @@ import {
   type SendDedupeEntry,
 } from "../utils/send-dedupe";
 import { resolveSendSessionId } from "../utils/send-lock";
+import { isFreshTask, workspaceToolLocked } from "../utils/fresh-task-workspace";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { buildBlankScratchDraft, buildMessageScratchDraft, clipScratchTitleSnippet } from "../utils/scratch-chat-open";
@@ -13494,7 +13495,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }));
   };
 
+  const freshTask = isFreshTask(pane.messages ?? []);
+
   const openDestination = (kind: DestinationKind) => {
+    if (workspaceToolLocked(kind, freshTask)) return;
     if ((workspacePanelOpen && railKind === kind) || (destinationChooserOpen && !workspacePanelOpen && railKind === kind)) {
       closeWorkspacePanelOnly();
       return;
@@ -15275,10 +15279,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               : "agx-chatpane-side-card relative min-h-0 shrink-0 overflow-hidden"
           }
         >
-          <DestinationChooser onClose={closeWorkspacePanelOnly} onSelect={openDestination} />
+          <DestinationChooser freshTask={freshTask} onClose={closeWorkspacePanelOnly} onSelect={openDestination} />
         </div>
       ) : null}
-      <DestinationRail activeKind={workspacePanelOpen ? railKind : null} onSelect={openDestination} />
+      <DestinationRail freshTask={freshTask} activeKind={workspacePanelOpen ? railKind : null} onSelect={openDestination} />
       {avatarSettingsOpen && paneSettingsAvatar ? (
         <AvatarSettingsPanel
           mode="avatar"

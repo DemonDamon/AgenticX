@@ -327,6 +327,7 @@
     "expandPanel": "展开面板",
     "hideTools": "隐藏工具面板",
     "startHere": "从这里开始",
+    "startLockedHint": "先发送任务，再打开这项",
     "todos": "待办",
     "emptyTodos": "暂无待办",
     "emptyTodosHint": "团长列出的步骤会显示在这里；委派进度在对话工具卡",
