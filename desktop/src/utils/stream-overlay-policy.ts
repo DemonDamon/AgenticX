@@ -6,6 +6,21 @@ export function isThinkingPlaceholderText(text: string): boolean {
   return /^[\s⏳….·.]+$/.test(trimmed);
 }
 
+/**
+ * True when an assistant row is only a spinner/empty placeholder and should not
+ * render. Reasoning-only mid-turn rows (empty body + ``reasoning``) must stay
+ * visible so the process card can interleave think rounds with tool calls.
+ */
+export function shouldHideEmptyAssistantPlaceholder(message: {
+  role?: string;
+  content?: string;
+  reasoning?: string;
+}): boolean {
+  if (message.role !== "assistant") return false;
+  if (!isThinkingPlaceholderText(message.content || "")) return false;
+  return !String(message.reasoning ?? "").trim();
+}
+
 /** Strip model-emitted thinking wrappers before persisting subagent reasoning. */
 export function stripThinkingTags(text: string): string {
   return text

@@ -68,12 +68,16 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
     startedAtRef.current = Date.now();
   }
 
+  // Auto-expand only when streaming *starts*. Do not depend on ``content`` —
+  // every token used to re-run setOpen(true) and undo a user collapse mid-stream.
   React.useEffect(() => {
-    if (streaming) {
-      finishedAtRef.current = null;
-      setOpen(true);
-      return;
-    }
+    if (!streaming) return;
+    finishedAtRef.current = null;
+    setOpen(true);
+  }, [streaming]);
+
+  React.useEffect(() => {
+    if (streaming) return;
     if (startedAtRef.current !== null && finishedAtRef.current === null) {
       finishedAtRef.current = Date.now();
       persistReasoningDuration(content, startedAtRef.current, finishedAtRef.current);

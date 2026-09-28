@@ -37,6 +37,10 @@ const clientTurnId = (message: Message) =>
 const assistantBodyKey = (content: unknown) =>
   assistantVisibleBodyForUi(String(content ?? "")).trim();
 
+/** Fingerprint for reasoning-only mid-turn rows (empty body + reasoning text). */
+const assistantReasoningKey = (message: Pick<Message, "reasoning">) =>
+  norm(message.reasoning).slice(0, 2048);
+
 const toolCallIdOf = (message: Message) => String(message.toolCallId ?? "").trim();
 
 /**
@@ -148,6 +152,25 @@ export function mergeSessionMessagesTail(
     }
     const diskBody =
       diskRow.role === "assistant" ? assistantBodyKey(diskRow.content) : "";
+    const diskReasoning =
+      diskRow.role === "assistant" ? assistantReasoningKey(diskRow) : "";
+    // Live preserveStreamReasoning rows are content "" + reasoning. Disk mid-turn
+    // rows look the same after our persist fix — body equality never hits, so
+    // without a reasoning match they were appended after the final answer as a
+    // duplicate "思考了 N 秒" stack.
+    if (diskRow.role === "assistant" && !diskBody && diskReasoning) {
+      const byReasoning = existing.find(
+        (memory) =>
+          !consumedMemory.has(memory) &&
+          memory.role === "assistant" &&
+          !assistantBodyKey(memory.content) &&
+          assistantReasoningKey(memory) === diskReasoning,
+      );
+      if (byReasoning) {
+        consumedMemory.add(byReasoning);
+        return byReasoning;
+      }
+    }
     for (const memory of existing) {
       if (consumedMemory.has(memory)) continue;
       if (memory.role !== diskRow.role) continue;
@@ -179,6 +202,7 @@ export function mergeSessionMessagesTail(
   const out: Message[] = [];
   const outputRowByMemory = new Map<Message, Message>();
   const placedAssistantBodies = new Set<string>();
+  const placedReasoningKeys = new Set<string>();
   const placedToolCallIds = new Set<string>();
   for (const diskRow of mapped) {
     const memory = findMemoryMatch(diskRow);
@@ -188,6 +212,8 @@ export function mergeSessionMessagesTail(
     if (row.role === "assistant") {
       const body = assistantBodyKey(row.content);
       if (body) placedAssistantBodies.add(body);
+      const reasoningKey = assistantReasoningKey(row);
+      if (reasoningKey) placedReasoningKeys.add(reasoningKey);
     }
     if (row.role === "tool") {
       const callId = toolCallIdOf(row);
@@ -200,6 +226,7 @@ export function mergeSessionMessagesTail(
   // Append in-memory rows that disk hasn't persisted yet (缺失自愈), but never
   // re-append an assistant row whose body already appears above — those are the
   // accumulated duplicate "思考了 N 秒" copies left by earlier failed merges.
+  // Same for reasoning-only mid-turn rows (empty body + reasoning fingerprint).
   // Also never re-append a live tool card whose toolCallId already landed from
   // disk (stale running args-only rows used to appear after the final answer).
   //
@@ -213,7 +240,10 @@ export function mergeSessionMessagesTail(
     if (memory.role === "assistant") {
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;
+      const reasoningKey = assistantReasoningKey(memory);
+      if (reasoningKey && placedReasoningKeys.has(reasoningKey)) continue;
       if (body) placedAssistantBodies.add(body);
+      if (reasoningKey) placedReasoningKeys.add(reasoningKey);
     }
     if (memory.role === "tool") {
       const callId = toolCallIdOf(memory);

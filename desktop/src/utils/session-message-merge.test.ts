@@ -321,6 +321,80 @@ describe("mergeSessionMessagesTail", () => {
     expect(out.filter((m) => m.role === "assistant")).toHaveLength(1);
   });
 
+  it("does not append live reasoning-only rows after the final answer when disk already has them", () => {
+    // Live preserveStreamReasoningAtToolBoundary creates empty-body + reasoning
+    // rows; disk mid-turn persist writes the same shape. Body-key matching used
+    // to miss them, so they were appended after the terminal reply as a stack of
+    // "思考了 N 秒" under the answer.
+    const existing: Message[] = [
+      uidMsg("user", "做动画", "uid-u"),
+      {
+        id: "uid-r1",
+        role: "assistant",
+        content: "",
+        agentId: "meta",
+        reasoning: "Need bash_exec first",
+        reasoningSeconds: 1,
+      } as Message,
+      {
+        id: "uid-t1",
+        role: "tool",
+        content: "{}",
+        agentId: "meta",
+        toolCallId: "call-1",
+        toolName: "bash_exec",
+        toolStatus: "done",
+      } as Message,
+      {
+        id: "uid-r2",
+        role: "assistant",
+        content: "",
+        agentId: "meta",
+        reasoning: "Write the skeleton now",
+        reasoningSeconds: 52,
+      } as Message,
+      {
+        id: "uid-t2",
+        role: "tool",
+        content: "OK",
+        agentId: "meta",
+        toolCallId: "call-2",
+        toolName: "file_write",
+        toolStatus: "done",
+      } as Message,
+      {
+        id: "uid-final",
+        role: "assistant",
+        content: "完成，团长。",
+        agentId: "meta",
+        reasoning: "Report the result",
+        reasoningSeconds: 2,
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      { role: "user", content: "做动画" },
+      { role: "assistant", content: "", reasoning: "Need bash_exec first", reasoning_seconds: 1, metadata: { turn_terminal: false } },
+      { role: "tool", content: "{}", tool_call_id: "call-1", tool_name: "bash_exec", tool_status: "done" },
+      { role: "assistant", content: "", reasoning: "Write the skeleton now", reasoning_seconds: 52, metadata: { turn_terminal: false } },
+      { role: "tool", content: "OK", tool_call_id: "call-2", tool_name: "file_write", tool_status: "done" },
+      { role: "assistant", content: "完成，团长。", reasoning: "Report the result", reasoning_seconds: 2, metadata: { turn_terminal: true } },
+    ];
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    expect(out.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
+    expect(out[1].reasoning).toBe("Need bash_exec first");
+    expect(out[3].reasoning).toBe("Write the skeleton now");
+    expect(out[5].content).toBe("完成，团长。");
+    // No duplicate reasoning-only tail after the final answer.
+    expect(out.filter((m) => m.role === "assistant" && !String(m.content ?? "").trim())).toHaveLength(2);
+  });
+
   it("keeps disk chronological order when memory only holds the latest tail (no append-old-to-end bug)", () => {
     const existing = [
       uidMsg("user", "latest q", "uid-u2"),

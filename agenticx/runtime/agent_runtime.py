@@ -6542,15 +6542,46 @@ class AgentRuntime:
                 "tool_calls": tool_calls,
             }
             messages.append(assistant_tool_message)
-            if not _is_system_trigger and str(ac_clean or "").strip():
-                _chat_history_append_deduped(
-                    session.chat_history,
-                    {
+            # Mid-turn UI row: visible preface and/or per-round thinking.
+            # Reasoning used to stay only on agent_messages.reasoning_content
+            # (LLM context) while chat_history dropped it — Desktop then showed
+            # "已思考并调用 N 次工具" with tools only, never interleaved think
+            # rounds (WeKnora-style). Persist reasoning here so reload + process
+            # cards can render ReasoningBlock between tool groups.
+            if not _is_system_trigger:
+                _mid_body = str(ac_clean or "").strip()
+                _mid_reasoning = ""
+                if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call.strip():
+                    _mid_reasoning = _dedupe_reasoning_against_body(
+                        reasoning_for_tool_call, ac_clean
+                    ).strip()
+                if _mid_body or _mid_reasoning:
+                    _mid_row: Dict[str, Any] = {
                         "role": "assistant",
-                        "content": ac_clean,
+                        "content": ac_clean if _mid_body else "",
                         "metadata": {"turn_terminal": False},
-                    },
-                )
+                    }
+                    if _mid_reasoning:
+                        _mid_row["reasoning"] = _mid_reasoning[:16384]
+                        _mid_rs: int | None = None
+                        if (
+                            _stream_reasoning_start_ts is not None
+                            and _stream_body_start_ts is not None
+                        ):
+                            _candidate = int(
+                                _stream_body_start_ts - _stream_reasoning_start_ts
+                            )
+                            if _candidate >= 1:
+                                _mid_rs = _candidate
+                        elif _stream_reasoning_start_ts is not None:
+                            _candidate = int(
+                                time.monotonic() - _stream_reasoning_start_ts
+                            )
+                            if _candidate >= 1:
+                                _mid_rs = _candidate
+                        if _mid_rs is not None:
+                            _mid_row["reasoning_seconds"] = _mid_rs
+                    _chat_history_append_deduped(session.chat_history, _mid_row)
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:

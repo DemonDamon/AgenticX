@@ -144,7 +144,12 @@ import {
   expandMessagesToTopLevelRows,
   expandSelectionToCompleteTurns,
 } from "./messages/react-blocks";
-import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import {
+  isSubAgentLiveStatus,
+  shouldHideEmptyAssistantPlaceholder,
+  shouldHideStreamOverlay,
+  shouldShowMidTurnStreamActivity,
+} from "../utils/stream-overlay-policy";
 import {
   announceDesktopTaskComplete,
   isDesktopWindowFocusedAndVisible,
@@ -3605,7 +3610,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           const confirmId = String(item.inlineConfirm?.requestId ?? "").trim();
           return !(confirmId && ownedIds.has(confirmId));
         }
-        if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
+        if (shouldHideEmptyAssistantPlaceholder(item)) return false;
         if (isInterruptedAssistantPlaceholder(item)) return false;
         if (!paneHasUserMessage && isTurnInterruptionNoticeMessage(item)) return false;
         return !item.agentId || item.agentId === "meta";
@@ -14185,7 +14190,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </button>
               <button
                 type="button"
-                className="rounded-xl px-2 py-1 text-rose-300 transition-colors hover:bg-surface-hover"
+                className="rounded-xl px-2 py-1 font-semibold text-red-600 transition-colors hover:bg-surface-hover [html[data-theme=dark]_&]:text-red-500 [html[data-theme=dim]_&]:text-red-500"
                 onClick={() => void deleteSelectedMessages()}
               >
                 {t("delete.confirm")}

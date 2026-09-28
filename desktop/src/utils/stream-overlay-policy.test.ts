@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../store";
-import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "./stream-overlay-policy";
+import {
+  shouldHideEmptyAssistantPlaceholder,
+  shouldHideStreamOverlay,
+  shouldShowMidTurnStreamActivity,
+} from "./stream-overlay-policy";
 
 const assistant = (content: string): Message => ({
   id: "a1",
@@ -12,6 +16,28 @@ const user = (content: string): Message => ({
   id: "u1",
   role: "user",
   content,
+});
+
+describe("shouldHideEmptyAssistantPlaceholder", () => {
+  it("hides empty assistant with no reasoning", () => {
+    expect(shouldHideEmptyAssistantPlaceholder(assistant(""))).toBe(true);
+    expect(shouldHideEmptyAssistantPlaceholder(assistant("⏳"))).toBe(true);
+  });
+
+  it("keeps reasoning-only mid-turn rows", () => {
+    expect(
+      shouldHideEmptyAssistantPlaceholder({
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "Need get_trace first",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps assistants with visible body", () => {
+    expect(shouldHideEmptyAssistantPlaceholder(assistant("四个工具已就绪"))).toBe(false);
+  });
 });
 
 describe("shouldHideStreamOverlay", () => {
