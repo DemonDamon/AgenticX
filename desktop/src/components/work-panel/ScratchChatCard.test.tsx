@@ -266,7 +266,8 @@ describe("ScratchChatCard", () => {
     expect(html).toContain("先干为敬");
     expect(html).toContain("agx-im-user-bubble");
     expect(html).toContain('data-slot="scratch-tool"');
-    expect(html).toContain("web_fetch");
+    expect(html).toContain('data-tool-name="web_fetch"');
+    expect(html).toContain(i18n.t("work.scratchFetching", { ns: "workspace" }));
   });
 
   it("shows the floated placeholder instead of the composer", () => {

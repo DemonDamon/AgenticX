@@ -4,10 +4,10 @@
  * Author: Damon Li
  */
 
-import { ArrowUp, Check, Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { ArrowUp, ChevronDown, ChevronRight, Globe, Search, Terminal, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Message } from "../../store";
+import type { Message, PendingConfirm } from "../../store";
 import { messagePlainTextForClipboard } from "../../utils/markdown-copy-format";
 import {
   isScratchReplyIncomplete,
@@ -19,10 +19,10 @@ import {
   reasoningDuplicatesVisibleBody,
 } from "../../utils/assistant-output";
 import { CitationMarkdownBody } from "../messages/CitationMarkdownBody";
-import { ReasoningBlock } from "../messages/ReasoningBlock";
 import { parseReasoningContent } from "../messages/reasoning-parser";
 import { renderUserMessageInlineBody } from "../messages/user-message-inline";
 import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
+import { ScratchMatrixOrb, ScratchWaveText } from "./ScratchMatrixOrb";
 import { ScratchMessageActions } from "./ScratchMessageActions";
 import {
   ScratchMessageScroller,
@@ -32,6 +32,9 @@ import {
   ScratchMessageScrollerProvider,
   ScratchMessageScrollerViewport,
 } from "./ScratchChatScroller";
+
+const SCRATCH_RAIL_CLASS =
+  "flex h-3.5 w-3.5 min-w-3.5 max-w-3.5 shrink-0 items-center justify-center";
 
 function lastAssistantId(messages: Message[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -55,35 +58,182 @@ async function writeClipboard(text: string): Promise<void> {
   }
 }
 
-function ScratchToolMessage({ message }: { message: Message }) {
+type ScratchTurn = { tools: Message[]; assistant: Message | null };
+
+function groupScratchTurns(messages: Message[]): Array<{ kind: "user"; message: Message } | { kind: "turn"; turn: ScratchTurn }> {
+  const blocks: Array<{ kind: "user"; message: Message } | { kind: "turn"; turn: ScratchTurn }> = [];
+  let index = 0;
+  while (index < messages.length) {
+    const message = messages[index];
+    if (message.role === "user") {
+      blocks.push({ kind: "user", message });
+      index += 1;
+      continue;
+    }
+    const tools: Message[] = [];
+    while (index < messages.length && messages[index]?.role === "tool") {
+      tools.push(messages[index]);
+      index += 1;
+    }
+    let assistant: Message | null = null;
+    if (index < messages.length && messages[index]?.role === "assistant") {
+      assistant = messages[index];
+      index += 1;
+    }
+    if (tools.length > 0 || assistant) blocks.push({ kind: "turn", turn: { tools, assistant } });
+    else index += 1;
+  }
+  return blocks;
+}
+
+function scratchToolKind(name: string): "search" | "fetch" | "command" | "call" {
+  const normalized = name.toLowerCase();
+  if (normalized.includes("search")) return "search";
+  if (normalized.includes("fetch") || normalized.includes("http") || normalized === "liteparse") return "fetch";
+  if (
+    normalized.includes("bash") ||
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized === "python"
+  ) {
+    return "command";
+  }
+  return "call";
+}
+
+function scratchHostLabel(message: Message): string {
+  const args = message.toolArgs ?? {};
+  const raw = String(args.url ?? args.uri ?? args.href ?? args.link ?? "").trim();
+  if (raw) {
+    try {
+      return new URL(raw).host;
+    } catch {
+      return raw.replace(/^https?:\/\//, "").slice(0, 28);
+    }
+  }
+  const found = String(message.content ?? message.toolResultPreview ?? "").match(/https?:\/\/([^/\s]+)/);
+  return found?.[1] ?? "";
+}
+
+function scratchCallLabel(message: Message): string {
+  const args = message.toolArgs ?? {};
+  return String(args.tool ?? args.name ?? args.server ?? message.toolName ?? "").trim();
+}
+
+function scratchSearchHasNoResults(message: Message): boolean {
+  const text = `${message.toolResultPreview ?? ""} ${message.content ?? ""}`.toLowerCase();
+  return /no results|无结果|未找到|0 results|^\s*\[\s*\]\s*$/.test(text);
+}
+
+function ScratchToolLine({
+  message,
+  onResolveConfirm,
+}: {
+  message: Message;
+  onResolveConfirm?: (confirm: PendingConfirm, approved: boolean) => void;
+}) {
+  const { t } = useTranslation("workspace");
   const running = message.toolStatus === "running" || message.toolStatus === "pending";
   const name = String(message.toolName ?? "tool").trim() || "tool";
-  const preview = String(message.toolResultPreview ?? "").trim();
+  const kind = scratchToolKind(name);
+  const host = kind === "fetch" ? scratchHostLabel(message) : "";
+  const call = kind === "call" ? scratchCallLabel(message) : "";
+  let verb = running ? t("work.scratchCalling") : t("work.scratchCalled");
+  if (kind === "search") {
+    verb = running
+      ? t("work.scratchSearching")
+      : scratchSearchHasNoResults(message)
+        ? t("work.scratchSearchedNone")
+        : t("work.scratchSearched");
+  } else if (kind === "fetch") {
+    verb = running ? t("work.scratchFetching") : t("work.scratchFetched");
+  } else if (kind === "command") {
+    verb = running ? t("work.scratchRunningCommand") : t("work.scratchRanCommand");
+  }
+  const pill = host || (kind === "call" ? call : "");
+  const waiting = Boolean(message.inlineConfirm);
+  const Icon = kind === "search" ? Search : kind === "fetch" ? Globe : kind === "command" ? Terminal : Search;
+  const label = waiting ? t("work.scratchAwaitingConfirm") : verb;
   return (
     <div
       data-slot="scratch-tool"
-      data-tool-status={message.toolStatus ?? (running ? "running" : "done")}
-      className="flex min-w-0 items-center gap-2 text-[12px] leading-5 text-text-faint"
+      data-tool-name={name}
+      data-tool-status={waiting ? "awaiting_confirm" : (message.toolStatus ?? (running ? "running" : "done"))}
+      className="py-0.5 text-[13px] leading-6 text-text-muted"
     >
-      {running ? (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" strokeWidth={2} />
-      ) : (
-        <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-      )}
-      <span className="shrink-0 font-medium text-text-subtle">{name}</span>
-      {preview ? <span className="min-w-0 truncate">{preview}</span> : null}
+      <div className="flex min-w-0 items-center gap-2">
+        <span className={SCRATCH_RAIL_CLASS}>
+          <Icon className="h-3.5 w-3.5 text-text-faint" strokeWidth={1.8} />
+        </span>
+        {running || waiting ? <ScratchWaveText text={label} /> : <span className="shrink-0">{label}</span>}
+        {!waiting && pill ? (
+          <span className="min-w-0 truncate rounded-full bg-surface-card-strong px-2 py-0.5 text-[11px] leading-4 text-text-subtle">
+            {pill}
+          </span>
+        ) : null}
+      </div>
+      {waiting && message.inlineConfirm ? (
+        <div data-slot="scratch-confirm" className="mt-1 flex flex-col gap-1.5 pl-[22px]">
+          <div className="text-[12px] leading-5 text-text-subtle">{message.inlineConfirm.question}</div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-full border border-border bg-surface-card-strong px-3 py-1 text-[12px] text-text-strong"
+              onClick={() => onResolveConfirm?.(message.inlineConfirm!, true)}
+            >
+              {t("work.scratchAllow")}
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-border px-3 py-1 text-[12px] text-text-strong"
+              onClick={() => onResolveConfirm?.(message.inlineConfirm!, false)}
+            >
+              {t("work.scratchDeny")}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ScratchStreamingDots() {
+function ScratchThoughtLine({ text, streaming }: { text: string; streaming: boolean }) {
+  const { t } = useTranslation("workspace");
+  const [open, setOpen] = useState(streaming);
+  useEffect(() => {
+    if (streaming) setOpen(true);
+  }, [streaming]);
+  const body = text.trim();
+  if (!body && !streaming) return null;
   return (
-    <div className="flex items-center gap-1 py-1" aria-hidden>
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-faint" />
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-faint [animation-delay:120ms]" />
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-faint [animation-delay:240ms]" />
+    <div data-slot="scratch-thought">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 py-0.5 text-[13px] leading-6 text-text-muted"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{streaming ? t("work.scratchThinking") : t("work.scratchThought")}</span>
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.8} />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+        )}
+      </button>
+      {open && body ? (
+        <div className="pb-1 pl-4 text-[13px] leading-6 text-text-faint">{body}</div>
+      ) : null}
     </div>
   );
+}
+
+function useNow(live: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [live]);
+  return now;
 }
 
 function ScratchUserEdit({
@@ -219,8 +369,16 @@ function ScratchUserMessage({
   );
 }
 
-function ScratchAssistantMessage({
-  message,
+function scratchWorkedSeconds(turn: ScratchTurn, live: boolean, now: number): number {
+  const stamped = Number(turn.assistant?.metadata?.scratchWorkedSeconds);
+  if (!live && Number.isFinite(stamped) && stamped >= 1) return Math.round(stamped);
+  const started = turn.assistant?.timestamp ?? turn.tools[0]?.timestamp ?? 0;
+  if (!live || !started) return 0;
+  return Math.max(1, Math.round((now - started) / 1000));
+}
+
+function ScratchTurnMessage({
+  turn,
   streaming,
   failed,
   selected,
@@ -229,8 +387,9 @@ function ScratchAssistantMessage({
   onQuote,
   onRetry,
   onSelect,
+  onResolveConfirm,
 }: {
-  message: Message;
+  turn: ScratchTurn;
   streaming: boolean;
   failed?: boolean;
   selected: boolean;
@@ -239,42 +398,78 @@ function ScratchAssistantMessage({
   onQuote: () => void;
   onRetry?: () => void;
   onSelect: () => void;
+  onResolveConfirm?: (confirm: PendingConfirm, approved: boolean) => void;
 }) {
   const { t } = useTranslation("workspace");
-  const parsed = parseReasoningContent(message.content);
-  const bodyText = assistantVisibleBodyForUi(message.content);
-  const hasThinkTag = parsed.hasReasoningTag;
-  const reasoningClosed = hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
+  const now = useNow(streaming);
+  const message = turn.assistant;
+  const parsed = message ? parseReasoningContent(message.content) : null;
+  const bodyText = message ? assistantVisibleBodyForUi(message.content) : "";
+  const hasThinkTag = Boolean(parsed?.hasReasoningTag);
+  const reasoningClosed = hasThinkTag && /<\/think>/i.test(String(message?.content ?? ""));
   const hasBody = Boolean(bodyText.trim());
-  const showReasoning =
-    Boolean(parsed.reasoning) && !reasoningDuplicatesVisibleBody(parsed.reasoning, bodyText);
-  const showDots = streaming && !hasBody && (!hasThinkTag || reasoningClosed);
-  const showActions = !streaming;
+  const reasoningText = parsed?.reasoning ?? "";
+  const showThought =
+    Boolean(reasoningText.trim()) && !reasoningDuplicatesVisibleBody(reasoningText, bodyText);
+  const thoughtStreaming = streaming && hasThinkTag && !reasoningClosed;
+  const seconds = scratchWorkedSeconds(turn, streaming, now);
+  const [traceOpen, setTraceOpen] = useState(true);
+  const showTrace = turn.tools.length > 0 || showThought || thoughtStreaming;
+  const showActions = Boolean(message) && !streaming;
 
   return (
     <div className="flex justify-start" data-align="start" data-selected={selected ? "true" : undefined}>
       <div className="agx-im-body-type min-w-0 w-full max-w-full break-words text-[var(--agx-chat-im-body-font-size)] leading-[var(--agx-chat-im-body-line-height)] text-text-strong">
-        {showReasoning ? (
-          <ReasoningBlock
-            text={parsed.reasoning}
-            streaming={streaming && hasThinkTag && !reasoningClosed}
-          />
+        {streaming && seconds > 0 ? (
+          <div
+            data-slot="scratch-working"
+            className="flex items-center gap-2 py-0.5 text-[13px] leading-6 text-text-muted"
+          >
+            <span className={SCRATCH_RAIL_CLASS}>
+              <ScratchMatrixOrb size={14} dots={5} />
+            </span>
+            <ScratchWaveText text={t("work.scratchWorking", { seconds })} />
+          </div>
+        ) : null}
+        {!streaming && seconds > 0 ? (
+          <button
+            type="button"
+            data-slot="scratch-worked"
+            className="inline-flex items-center gap-1 py-0.5 text-[13px] leading-6 text-text-muted"
+            onClick={() => setTraceOpen((value) => !value)}
+          >
+            <span>{t("work.scratchWorked", { seconds })}</span>
+            {traceOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.8} />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+            )}
+          </button>
+        ) : null}
+        {showTrace && (streaming || traceOpen) ? (
+          <div className="flex flex-col">
+            {showThought || thoughtStreaming ? (
+              <ScratchThoughtLine text={reasoningText} streaming={thoughtStreaming} />
+            ) : null}
+            {turn.tools.map((tool) => (
+              <ScratchToolLine key={tool.id} message={tool} onResolveConfirm={onResolveConfirm} />
+            ))}
+          </div>
         ) : null}
         {hasBody ? (
           <div
             data-slot="scratch-assistant-body"
-            className={`scratch-md msg-content min-w-0 overflow-x-auto ${showReasoning ? "mt-2" : ""}`}
+            className={`scratch-md msg-content min-w-0 overflow-x-auto ${showTrace ? "mt-2" : ""}`}
           >
             <CitationMarkdownBody content={bodyText} isStreaming={streaming} />
           </div>
         ) : null}
-        {showDots ? <ScratchStreamingDots /> : null}
         {failed && !streaming && !hasBody ? (
           <div data-slot="scratch-failed" className="text-[12px] text-text-faint">
             {t("work.scratchEmptyReply")}
           </div>
         ) : null}
-        {showActions ? (
+        {showActions && message ? (
           <ScratchMessageActions
             align="start"
             selected={selected}
@@ -295,16 +490,19 @@ export function ScratchChatTranscript({
   sending = false,
   onRetry,
   onQuote,
+  onResolveConfirm,
 }: {
   messages: Message[];
   sending?: boolean;
   onRetry?: (userMessageId: string, editText?: string) => void;
   onQuote?: (text: string) => void;
+  onResolveConfirm?: (confirm: PendingConfirm, approved: boolean) => void;
 }) {
   const { t } = useTranslation("workspace");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const streamingId = sending ? lastAssistantId(messages) : null;
+  const blocks = groupScratchTurns(messages);
   const incomplete = !sending && isScratchReplyIncomplete(messages);
   const failedAssistantId = incomplete ? lastAssistantId(messages) : null;
   const selectedSet = new Set(selectedIds);
@@ -365,46 +563,58 @@ export function ScratchChatTranscript({
         <ScratchMessageScroller>
           <ScratchMessageScrollerViewport>
             <ScratchMessageScrollerContent busy={sending}>
-              {messages.map((message) => (
-                <ScratchMessageScrollerItem
-                  key={message.id}
-                  messageId={message.id}
-                  scrollAnchor={message.role === "user"}
-                >
-                  {message.role === "user" ? (
-                    <ScratchUserMessage
-                      message={message}
-                      selected={selectedSet.has(message.id)}
-                      canAct={!sending && Boolean(onRetry)}
-                      editing={editingId === message.id}
-                      onCopy={() => copyMessage(message)}
-                      onQuote={() => quoteMessage(message)}
-                      onEdit={() => setEditingId(message.id)}
-                      onRetry={!sending && onRetry ? () => onRetry(message.id) : undefined}
-                      onSelect={() => toggleSelect(message.id)}
-                      onCancelEdit={() => setEditingId(null)}
-                      onSubmitEdit={(text) => {
-                        setEditingId(null);
-                        onRetry?.(message.id, text);
-                      }}
+              {blocks.map((block) => {
+                if (block.kind === "user") {
+                  const message = block.message;
+                  return (
+                    <ScratchMessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor
+                    >
+                      <ScratchUserMessage
+                        message={message}
+                        selected={selectedSet.has(message.id)}
+                        canAct={!sending && Boolean(onRetry)}
+                        editing={editingId === message.id}
+                        onCopy={() => copyMessage(message)}
+                        onQuote={() => quoteMessage(message)}
+                        onEdit={() => setEditingId(message.id)}
+                        onRetry={!sending && onRetry ? () => onRetry(message.id) : undefined}
+                        onSelect={() => toggleSelect(message.id)}
+                        onCancelEdit={() => setEditingId(null)}
+                        onSubmitEdit={(text) => {
+                          setEditingId(null);
+                          onRetry?.(message.id, text);
+                        }}
+                      />
+                    </ScratchMessageScrollerItem>
+                  );
+                }
+                const message = block.turn.assistant;
+                const anchorId = message?.id ?? block.turn.tools[0]?.id ?? "scratch-turn";
+                return (
+                  <ScratchMessageScrollerItem key={anchorId} messageId={anchorId}>
+                    <ScratchTurnMessage
+                      turn={block.turn}
+                      streaming={Boolean(message) && streamingId === message?.id}
+                      failed={Boolean(message) && failedAssistantId === message?.id}
+                      selected={Boolean(message) && selectedSet.has(message.id)}
+                      canRetry={
+                        Boolean(message) &&
+                        !sending &&
+                        Boolean(onRetry) &&
+                        Boolean(precedingScratchUserId(messages, message.id))
+                      }
+                      onCopy={() => message && copyMessage(message)}
+                      onQuote={() => message && quoteMessage(message)}
+                      onRetry={!sending && message && onRetry ? () => retryFrom(message) : undefined}
+                      onSelect={() => message && toggleSelect(message.id)}
+                      onResolveConfirm={onResolveConfirm}
                     />
-                  ) : message.role === "tool" ? (
-                    <ScratchToolMessage message={message} />
-                  ) : (
-                    <ScratchAssistantMessage
-                      message={message}
-                      streaming={streamingId === message.id}
-                      failed={failedAssistantId === message.id}
-                      selected={selectedSet.has(message.id)}
-                      canRetry={!sending && Boolean(onRetry) && Boolean(precedingScratchUserId(messages, message.id))}
-                      onCopy={() => copyMessage(message)}
-                      onQuote={() => quoteMessage(message)}
-                      onRetry={!sending && onRetry ? () => retryFrom(message) : undefined}
-                      onSelect={() => toggleSelect(message.id)}
-                    />
-                  )}
-                </ScratchMessageScrollerItem>
-              ))}
+                  </ScratchMessageScrollerItem>
+                );
+              })}
             </ScratchMessageScrollerContent>
           </ScratchMessageScrollerViewport>
           <ScratchMessageScrollerButton />
