@@ -23,7 +23,6 @@ import {
   Globe,
   ListTodo,
   Maximize2,
-  MessageSquare,
   Minimize2,
   PanelRight,
   Plus,
@@ -35,6 +34,7 @@ import {
 } from "lucide-react";
 import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
 import { i18n } from "../../i18n/i18n";
+import { ScratchChatIcon } from "./ScratchChatIcon";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
 import { replayFocusTargetForSession } from "../replay/branch-lineage-navigation";
@@ -2332,7 +2332,7 @@ export function WorkPanel({
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openScratchFromPlus}
             >
-              <MessageSquare className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              <ScratchChatIcon className="h-4 w-4 text-text-subtle" />
               {t("work.tabScratch")}
             </button>
             <button
@@ -2398,7 +2398,7 @@ export function WorkPanel({
     },
     {
       key: "scratch",
-      icon: <MessageSquare className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      icon: <ScratchChatIcon className="h-5 w-5 shrink-0 text-text-subtle" />,
       title: t("work.tabScratch"),
       subtitle: t("work.subtitleScratch"),
       onClick: openScratchFromPlus,
@@ -2737,7 +2737,7 @@ export function WorkPanel({
               setActiveKind("scratch");
             }}
           >
-            <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <ScratchChatIcon className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{chat.title}</span>
             {chat.floating ? (
               <span className="shrink-0 text-[10px] text-text-faint">{t("work.scratchFloated")}</span>

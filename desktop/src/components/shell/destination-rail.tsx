@@ -5,11 +5,11 @@ import {
   FolderOpen,
   Globe,
   ListTodo,
-  MessageSquare,
   Share2,
   Terminal,
   X,
 } from "lucide-react";
+import { ScratchChatIcon } from "../work-panel/ScratchChatIcon";
 import { useTranslation } from "react-i18next";
 
 /** Right-edge tools. Same set as the work-panel plus menu. */
@@ -25,14 +25,14 @@ export type DestinationKind =
 
 type DestinationDef = {
   kind: DestinationKind;
-  icon: LucideIcon;
+  icon: LucideIcon | typeof ScratchChatIcon;
   labelKey: string;
   subtitleKey: string;
 };
 
 export const DESTINATION_ITEMS: DestinationDef[] = [
   { kind: "summary", icon: ListTodo, labelKey: "work.tabSummary", subtitleKey: "work.subtitleSummary" },
-  { kind: "scratch", icon: MessageSquare, labelKey: "work.tabScratch", subtitleKey: "work.subtitleScratch" },
+  { kind: "scratch", icon: ScratchChatIcon, labelKey: "work.tabScratch", subtitleKey: "work.subtitleScratch" },
   { kind: "changes", icon: FileDiff, labelKey: "work.tabChanges", subtitleKey: "work.subtitleChanges" },
   { kind: "browser", icon: Globe, labelKey: "work.tabBrowser", subtitleKey: "work.subtitleBrowser" },
   { kind: "graph", icon: Share2, labelKey: "work.tabGraph", subtitleKey: "work.subtitleGraph" },
