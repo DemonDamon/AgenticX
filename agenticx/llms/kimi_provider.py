@@ -52,17 +52,27 @@ class KimiProvider(BaseLLMProvider):
         return (self.model or "").lower().split("/")[-1]
 
     def _is_k2_series_model(self) -> bool:
-        """Return True if current model is Kimi K2.5/K2.6 series."""
+        """Return True if current model is Kimi K2.5/K2.6/K2.7 series."""
         model_name = self._normalized_model_name()
-        return model_name.startswith("kimi-k2.6") or model_name.startswith("kimi-k2.5")
+        return (
+            model_name.startswith("kimi-k2.7")
+            or model_name.startswith("kimi-k2.6")
+            or model_name.startswith("kimi-k2.5")
+        )
 
     def _is_k3_series_model(self) -> bool:
-        """Return True if current model is Kimi K3 series.
-
-        Moonshot rejects any temperature other than 1.0 for these models
-        (``invalid temperature: only 1 is allowed for this model``).
-        """
+        """Return True if current model is Kimi K3 series."""
         return self._normalized_model_name().startswith("kimi-k3")
+
+    def _requires_fixed_temperature_one(self) -> bool:
+        """True when Moonshot rejects any temperature other than 1.0.
+
+        Covers K3 and K2.7 (incl. ``kimi-k2.7-code``):
+        ``invalid temperature: only 1 is allowed for this model``.
+        """
+        return self._is_k3_series_model() or self._normalized_model_name().startswith(
+            "kimi-k2.7"
+        )
 
     @staticmethod
     def _extract_thinking_type(kwargs: Dict[str, Any]) -> Optional[str]:
@@ -85,8 +95,8 @@ class KimiProvider(BaseLLMProvider):
     def _resolve_temperature(self, kwargs: Dict[str, Any]) -> Optional[float]:
         """Resolve temperature with K2.x / K3 model constraints."""
         user_temperature = kwargs.get("temperature", self.temperature)
-        # K3 API hard-requires temperature=1 regardless of thinking mode.
-        if self._is_k3_series_model():
+        # K3 / K2.7 hard-require temperature=1 regardless of thinking mode.
+        if self._requires_fixed_temperature_one():
             return 1.0
         if not self._is_k2_series_model():
             return user_temperature
