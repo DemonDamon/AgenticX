@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { TriangleAlert, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ds/Button";
@@ -13,6 +14,7 @@ type Props = {
 export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
   const { t } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
+  const [acked, setAcked] = useState(false);
   const risks = [t("composer.allowAllRiskDelete"), t("composer.allowAllRiskLeak")];
   return (
     <Modal
@@ -24,7 +26,12 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
           <Button variant="ghost" className="min-w-[68px]" onClick={onCancel}>
             {tCommon("cancel")}
           </Button>
-          <Button variant="primary" className="min-w-[68px] font-medium" onClick={onConfirm}>
+          <Button
+            variant="danger"
+            className="min-w-[68px] bg-red-600 font-medium hover:bg-red-500 disabled:bg-red-600/35 disabled:opacity-100"
+            disabled={!acked}
+            onClick={onConfirm}
+          >
             {t("composer.enable")}
           </Button>
         </div>
@@ -70,6 +77,19 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
       <p className="mt-3 text-[12px] leading-[1.6] text-text-faint">
         {t("composer.allowAllFooter")}
       </p>
+
+      <label className="mt-3.5 flex cursor-pointer items-start gap-2.5 select-none">
+        <input
+          type="checkbox"
+          checked={acked}
+          onChange={(e) => setAcked(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-red-600"
+          aria-label={t("composer.allowAllAck")}
+        />
+        <span className="text-[13px] leading-[1.5] text-text-primary">
+          {t("composer.allowAllAck")}
+        </span>
+      </label>
     </Modal>
   );
 }

@@ -263,7 +263,7 @@ export function RunModePicker() {
         type="button"
         className={`inline-flex h-7 max-w-[160px] items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors ${
           mode === "auto"
-            ? "font-semibold text-red-800 [html[data-theme=dark]_&]:text-red-400 [html[data-theme=dim]_&]:text-red-400"
+            ? "font-semibold text-red-600 [html[data-theme=dark]_&]:text-red-500 [html[data-theme=dim]_&]:text-red-500"
             : "text-text-subtle"
         } ${open ? "bg-surface-hover" : "hover:bg-surface-hover"} ${
           mode === "auto" ? "" : "hover:text-text-primary"

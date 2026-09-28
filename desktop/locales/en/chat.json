@@ -407,6 +407,7 @@
     "allowAllBody": "The agent will no longer ask for each step and may run commands, edit files, and access the network.",
     "allowAllRisks": "Main risks",
     "allowAllFooter": "Workspace isolation still applies. You can switch back anytime.",
+    "allowAllAck": "I understand the risks and am responsible for my own data security",
     "placeholder": "Message...",
     "placeholderEmpty": "Describe your task…",
     "commands": {

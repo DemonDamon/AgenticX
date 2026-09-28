@@ -407,6 +407,7 @@
     "allowAllBody": "智能体将不再逐条询问，可自行执行命令、改文件和访问网络。",
     "allowAllRisks": "主要风险",
     "allowAllFooter": "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
+    "allowAllAck": "我已了解风险，并对自己的数据安全负责",
     "placeholder": "发消息...",
     "placeholderEmpty": "描述你的任务…",
     "commands": {
