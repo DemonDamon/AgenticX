@@ -98,4 +98,14 @@ describe("expert portraits", () => {
     writeCollectionPortraitStyle(CUBE_PORTRAIT_STYLE);
     expect(loadCollectionPortraitStyle()).toBe(CUBE_PORTRAIT_STYLE);
   });
+
+  it("builds a stable local mascot portrait for ip-mascot", () => {
+    const first = buildCollectionPortraitDataUri("ip-mascot", "飞坦:abc");
+    const second = buildCollectionPortraitDataUri("ip-mascot", "飞坦:abc");
+    expect(first).toBe(second);
+    expect(decodeURIComponent(first)).toContain('data-portrait="ip-mascot"');
+    writeCollectionPortraitStyle("ip-mascot");
+    expect(loadCollectionPortraitStyle()).toBe("ip-mascot");
+    expect(isCustomExpertPortrait({ portraitStyle: "custom", avatarUrl: first })).toBe(false);
+  });
 });

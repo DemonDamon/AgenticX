@@ -166,6 +166,15 @@ def test_needs_portrait_refresh_skips_collection_svg() -> None:
     assert needs_portrait_refresh(url, portrait_style="") is False
 
 
+def test_needs_portrait_refresh_skips_ip_mascot_svg() -> None:
+    import base64
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="ip-mascot"></svg>'
+    url = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+    assert needs_portrait_refresh(url, portrait_style="ip-mascot") is False
+    assert needs_portrait_refresh(url, portrait_style="") is False
+
+
 def test_needs_portrait_refresh_still_fills_empty() -> None:
     assert needs_portrait_refresh("", portrait_style="") is True
 
@@ -177,12 +186,28 @@ def _lorelei_svg_url() -> str:
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
 
+def _ip_mascot_svg_url() -> str:
+    import base64
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="ip-mascot"></svg>'
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
 def test_create_avatar_keeps_collection_portrait_style(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
     registry = AvatarRegistry()
     url = _lorelei_svg_url()
     cfg = registry.create_avatar(name="飞坦", avatar_url=url, portrait_style="lorelei")
     assert cfg.portrait_style == "lorelei"
+    assert cfg.avatar_url == url
+
+
+def test_create_avatar_keeps_ip_mascot_portrait_style(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("agenticx.avatar.registry.AVATARS_ROOT", tmp_path)
+    registry = AvatarRegistry()
+    url = _ip_mascot_svg_url()
+    cfg = registry.create_avatar(name="飞坦", avatar_url=url, portrait_style="ip-mascot")
+    assert cfg.portrait_style == "ip-mascot"
     assert cfg.avatar_url == url
 
 

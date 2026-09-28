@@ -27,9 +27,14 @@ import thumbsJson from "@dicebear/styles/thumbs.json";
 import voxelArtJson from "@dicebear/styles/voxel-art.json";
 import voxelBotJson from "@dicebear/styles/voxel-bot.json";
 import wavesJson from "@dicebear/styles/waves.json";
+import {
+  IP_MASCOT_PORTRAIT_STYLE,
+  buildIpMascotPortraitDataUri,
+} from "./ip-mascot-portrait";
 
 export const CUBE_PORTRAIT_STYLE = "near-cube-v3";
 export const COLLECTION_PORTRAIT_STORAGE_KEY = "agx-expert-collection-portrait";
+export { IP_MASCOT_PORTRAIT_STYLE };
 
 const MINIMAL_STYLES = ["blobs", "disco", "identicon", "squircles", "waves"] as const;
 const CHARACTER_STYLES = [
@@ -50,25 +55,40 @@ const CHARACTER_STYLES = [
   "voxel-art",
   "voxel-bot",
 ] as const;
+const MASCOT_STYLES = [IP_MASCOT_PORTRAIT_STYLE] as const;
 const SCENE_STYLES = ["landscape", "planets"] as const;
 
 export const COLLECTION_STYLE_IDS = [
   CUBE_PORTRAIT_STYLE,
   ...MINIMAL_STYLES,
   ...CHARACTER_STYLES,
+  ...MASCOT_STYLES,
   ...SCENE_STYLES,
 ] as const;
 
 export type CollectionStyleId = (typeof COLLECTION_STYLE_IDS)[number];
+export type DicebearStyleId =
+  | (typeof MINIMAL_STYLES)[number]
+  | (typeof CHARACTER_STYLES)[number]
+  | (typeof SCENE_STYLES)[number];
 export type CharacterStyleId = Exclude<CollectionStyleId, typeof CUBE_PORTRAIT_STYLE>;
 
+function isDicebearStyle(style: CollectionStyleId): style is DicebearStyleId {
+  return style !== CUBE_PORTRAIT_STYLE && style !== IP_MASCOT_PORTRAIT_STYLE;
+}
+
 export const PORTRAIT_GROUPS: ReadonlyArray<{
-  id: "minimalist" | "characters" | "scenes";
-  labelKey: "gallery.styleGroupMinimal" | "gallery.styleGroupCharacters" | "gallery.styleGroupScenes";
+  id: "minimalist" | "characters" | "mascots" | "scenes";
+  labelKey:
+    | "gallery.styleGroupMinimal"
+    | "gallery.styleGroupCharacters"
+    | "gallery.styleGroupMascots"
+    | "gallery.styleGroupScenes";
   styles: readonly CharacterStyleId[];
 }> = [
   { id: "minimalist", labelKey: "gallery.styleGroupMinimal", styles: MINIMAL_STYLES },
   { id: "characters", labelKey: "gallery.styleGroupCharacters", styles: CHARACTER_STYLES },
+  { id: "mascots", labelKey: "gallery.styleGroupMascots", styles: MASCOT_STYLES },
   { id: "scenes", labelKey: "gallery.styleGroupScenes", styles: SCENE_STYLES },
 ];
 
@@ -76,7 +96,7 @@ function asStyle(definition: object): Style<StyleDefinition> {
   return new Style(definition as StyleDefinition);
 }
 
-const STYLE_LIBRARY: Record<CharacterStyleId, Style<StyleDefinition>> = {
+const STYLE_LIBRARY: Record<DicebearStyleId, Style<StyleDefinition>> = {
   blobs: asStyle(blobsJson),
   disco: asStyle(discoJson),
   identicon: asStyle(identiconJson),
@@ -154,7 +174,11 @@ function decodeSvgDataUrl(url: string): string {
 export function isGeneratedExpertPortraitUrl(url: string): boolean {
   const svg = decodeSvgDataUrl(url);
   if (!svg) return false;
-  return svg.includes('data-portrait="dicebear-') || svg.includes('data-portrait="near-cube');
+  return (
+    svg.includes('data-portrait="dicebear-') ||
+    svg.includes('data-portrait="near-cube') ||
+    svg.includes('data-portrait="ip-mascot"')
+  );
 }
 
 export function isCustomExpertPortrait(opts: {
@@ -170,7 +194,7 @@ export function isCustomExpertPortrait(opts: {
 }
 
 export function describeStyleOptions(style: CollectionStyleId): string {
-  if (style === CUBE_PORTRAIT_STYLE) return "";
+  if (!isDicebearStyle(style)) return "";
   const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
   const ranked = Object.entries(descriptor).sort(([a], [b]) => {
     const score = (name: string) =>
@@ -193,7 +217,7 @@ export function promptToStyleOptions(
   style: CollectionStyleId,
   prompt: string,
 ): Record<string, string | string[] | boolean | number> {
-  if (style === CUBE_PORTRAIT_STYLE) return {};
+  if (!isDicebearStyle(style)) return {};
   const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
   const text = prompt.trim();
   const next: Record<string, string | string[] | boolean | number> = {};
@@ -248,7 +272,7 @@ export function sanitizeStyleOptions(
   style: CollectionStyleId,
   raw: Record<string, unknown>,
 ): Record<string, string | string[] | boolean | number> {
-  if (style === CUBE_PORTRAIT_STYLE) return {};
+  if (!isDicebearStyle(style)) return {};
   const descriptor = new OptionsDescriptor(STYLE_LIBRARY[style]).toJSON();
   const next: Record<string, string | string[] | boolean | number> = {};
   for (const [name, value] of Object.entries(raw)) {
@@ -272,6 +296,10 @@ export function buildCollectionPortraitDataUri(
   options: Record<string, string | string[] | boolean | number> = {},
 ): string {
   if (style === CUBE_PORTRAIT_STYLE) return "";
+  if (style === IP_MASCOT_PORTRAIT_STYLE) {
+    return buildIpMascotPortraitDataUri(seed.trim() || "avatar");
+  }
+  if (!isDicebearStyle(style)) return "";
   const svg = new Avatar(STYLE_LIBRARY[style], {
     seed: seed.trim() || "avatar",
     size: 128,

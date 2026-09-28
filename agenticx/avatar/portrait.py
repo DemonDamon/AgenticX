@@ -71,11 +71,13 @@ COLLECTION_STYLE_IDS = frozenset(
         "thumbs",
         "voxel-art",
         "voxel-bot",
+        "ip-mascot",
         "landscape",
         "planets",
     }
 )
 COLLECTION_PORTRAIT_PREFIX = 'data-portrait="dicebear-'
+IP_MASCOT_PORTRAIT_PREFIX = 'data-portrait="ip-mascot"'
 
 _COLLECTION_BASE = "https://api.dicebear.com/9.x/notionists/svg"
 _COLLECTION_TIMEOUT_SEC = 6.0
@@ -273,7 +275,11 @@ def is_near_cube_svg(avatar_url: str) -> bool:
 
 
 def is_collection_portrait_svg(avatar_url: str) -> bool:
-    return COLLECTION_PORTRAIT_PREFIX in _decode_svg_data_url(avatar_url)
+    decoded = _decode_svg_data_url(avatar_url)
+    return (
+        COLLECTION_PORTRAIT_PREFIX in decoded
+        or IP_MASCOT_PORTRAIT_PREFIX in decoded
+    )
 
 
 def extract_cube_colorway_id(avatar_url: str) -> str:

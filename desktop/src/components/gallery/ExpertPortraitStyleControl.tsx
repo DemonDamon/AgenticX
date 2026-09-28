@@ -35,6 +35,7 @@ const LABEL_KEY: Record<CollectionStyleId, string> = {
   thumbs: "gallery.styleThumbs",
   "voxel-art": "gallery.styleVoxelArt",
   "voxel-bot": "gallery.styleVoxelBot",
+  "ip-mascot": "gallery.styleIpMascot",
   landscape: "gallery.styleLandscape",
   planets: "gallery.stylePlanets",
 };

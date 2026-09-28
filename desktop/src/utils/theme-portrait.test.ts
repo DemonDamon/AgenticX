@@ -44,4 +44,11 @@ describe("prepareThemedPortraitMarkup", () => {
     const url = `data:image/svg+xml;base64,${btoa(svg)}`;
     expect(prepareThemedPortraitMarkup(url)).toBeNull();
   });
+
+  it("leaves local mascot portraits untouched", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" data-portrait="ip-mascot" viewBox="0 0 160 160"><rect fill="#2A3A4A"/></svg>';
+    const url = `data:image/svg+xml;base64,${btoa(svg)}`;
+    expect(prepareThemedPortraitMarkup(url)).toBeNull();
+  });
 });

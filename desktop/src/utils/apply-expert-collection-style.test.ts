@@ -75,4 +75,22 @@ describe("applyCollectionStyleToExperts", () => {
     expect(result.updated).toBe(1);
     expect(updateAvatar).toHaveBeenCalledTimes(2);
   });
+
+  it("writes a marked local mascot portrait for ip-mascot", async () => {
+    const calls: Array<{ id: string; avatar_url: string; portrait_style: string }> = [];
+    const result = await applyCollectionStyleToExperts({
+      style: "ip-mascot",
+      avatars: [{ id: "cube", name: "飞坦", portraitStyle: "near-cube-v3" }],
+      updateAvatar: async (payload) => {
+        calls.push(payload);
+        return { ok: true };
+      },
+    });
+    expect(result.updated).toBe(1);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0];
+    if (!payload) throw new Error("missing payload");
+    expect(payload.portrait_style).toBe("ip-mascot");
+    expect(decodeURIComponent(payload.avatar_url)).toContain('data-portrait="ip-mascot"');
+  });
 });
