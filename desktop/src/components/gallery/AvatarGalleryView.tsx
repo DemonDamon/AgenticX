@@ -18,6 +18,7 @@ import { mapAvatarsFromApi } from "../../utils/splash-preload-core";
 import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { UserCubeColorwayPicker } from "../settings/UserCubeColorwayPicker";
+import { EmptyStateHeaderFigures } from "../brand/EmptyStateCornerLotties";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -181,40 +182,43 @@ export function AvatarGalleryView() {
   return (
     <MainViewShell>
       {/* Sticky title row only; 关注分身仍靠排序置顶，不钉死 */}
-      <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 border-b border-border bg-surface-base px-6 pb-4 pt-6">
+      <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 bg-surface-base px-6 pb-4 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-text-strong">{t("gallery.title")}</h2>
             <p className="mt-1 text-sm text-text-muted">
               {t("gallery.subtitle")}
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <ExpertPortraitStyleControl
+                avatars={avatars}
+                onUpdated={(row) => {
+                  setAvatars(
+                    useAppStore.getState().avatars.map((avatar) =>
+                      avatar.id === row.id
+                        ? { ...avatar, avatarUrl: row.avatarUrl, portraitStyle: row.portraitStyle }
+                        : avatar,
+                    ),
+                  );
+                }}
+                onApplied={async () => {
+                  const listed = await window.agenticxDesktop.listAvatars();
+                  if (listed.ok) setAvatars(mapAvatarsFromApi(listed.avatars));
+                  await refreshAvatars();
+                }}
+              />
+              <button
+                type="button"
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                {t("gallery.newExpert")}
+              </button>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <ExpertPortraitStyleControl
-              avatars={avatars}
-              onUpdated={(row) => {
-                setAvatars(
-                  useAppStore.getState().avatars.map((avatar) =>
-                    avatar.id === row.id
-                      ? { ...avatar, avatarUrl: row.avatarUrl, portraitStyle: row.portraitStyle }
-                      : avatar,
-                  ),
-                );
-              }}
-              onApplied={async () => {
-                const listed = await window.agenticxDesktop.listAvatars();
-                if (listed.ok) setAvatars(mapAvatarsFromApi(listed.avatars));
-                await refreshAvatars();
-              }}
-            />
-            <button
-              type="button"
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus className="h-4 w-4" />
-              {t("gallery.newExpert")}
-            </button>
+          <div className="hidden shrink-0 md:block [@media(max-height:560px)]:hidden">
+            <EmptyStateHeaderFigures />
           </div>
         </div>
       </div>

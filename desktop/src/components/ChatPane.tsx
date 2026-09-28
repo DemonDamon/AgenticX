@@ -389,9 +389,9 @@ import { buildBlankScratchDraft, buildMessageScratchDraft, clipScratchTitleSnipp
 import {
   DestinationChooser,
   DestinationRail,
-  EmptyTaskSuggestions,
   type DestinationKind,
 } from "./shell/destination-rail";
+import { NearBoxHero } from "./brand/NearBoxHero";
 import type { ScratchChatDraft } from "../utils/scratch-chat";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -14043,9 +14043,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               : "shrink-0 px-4 pt-2.5 pb-4"
         }>
           {liftComposer ? (
-            <div className="relative z-10 mb-6 w-full max-w-[640px] text-center">
-              <h2 className="text-lg font-medium tracking-tight text-text-strong">{t("empty.needDone")}</h2>
-              <p className="mt-1 text-sm text-text-muted">{t("empty.needDoneHint")}</p>
+            <div className="relative z-10 mb-6 flex w-full max-w-4xl flex-col items-center gap-3 text-center text-xs">
+              <NearBoxHero size={160} />
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>
@@ -14891,15 +14890,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <RunLocationPicker />
               <WorkspaceFolderPicker api={composerWorkspace} />
             </div>
-          ) : null}
-          {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
-          {liftComposer ? (
-            <EmptyTaskSuggestions
-              onPick={(prompt) => {
-                setComposerText(prompt);
-                composerRef.current?.focus();
-              }}
-            />
           ) : null}
           {(pane.messages ?? []).some(
             (m) => m.role === "user" || m.role === "assistant"

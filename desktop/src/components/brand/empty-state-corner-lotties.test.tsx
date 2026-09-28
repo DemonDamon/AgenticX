@@ -3,7 +3,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../../store";
-import { EmptyStateCornerLotties } from "./EmptyStateCornerLotties";
+import { EmptyStateCornerLotties, EmptyStateHeaderFigures } from "./EmptyStateCornerLotties";
 
 vi.mock("lottie-react", () => ({
   LottieSvg: ({
@@ -80,5 +80,14 @@ describe("EmptyStateCornerLotties", () => {
     );
     expect(getByTestId("empty-lottie-row").getAttribute("data-accent")).toBe("blue");
     useAppStore.setState({ themeColor: previous });
+  });
+
+  it("places the man on the left and the woman on the right", () => {
+    const { getByTestId, getAllByTestId } = render(<EmptyStateHeaderFigures />);
+    const row = getByTestId("empty-header-figures");
+    expect(row.className).toContain("items-end");
+    expect(row.getAttribute("aria-hidden")).toBe("true");
+    const figures = getAllByTestId("empty-header-figure");
+    expect(figures.map((node) => node.getAttribute("data-kind"))).toEqual(["man", "woman"]);
   });
 });
