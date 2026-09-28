@@ -109,6 +109,21 @@
   animation: agx-working-shimmer 4.2s linear infinite;
 }
 
+.scratch-wave-text > span {
+  display: inline-block;
+  animation: scratch-wave-glyph 1.6s ease-in-out infinite;
+}
+
+@keyframes scratch-wave-glyph {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Status meta (运行中 / 思考中): muted base + sharp peak, slow linear sweep. */
 .agx-working-shimmer.agx-status-shimmer {
   color: var(--text-faint);
@@ -196,6 +211,11 @@
   .agx-working-shimmer.agx-status-shimmer {
     color: var(--text-faint);
     -webkit-text-fill-color: var(--text-faint);
+  }
+
+  .scratch-wave-text > span {
+    animation: none !important;
+    opacity: 1 !important;
   }
 
   .agx-working-ellipsis > span {

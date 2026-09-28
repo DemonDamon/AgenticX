@@ -6695,9 +6695,28 @@ function shouldRouteToInAppBrowser(targetUrl: string, appUrl: string): boolean {
  * WorkPanel remote browser uses <webview> (not iframe) so sites with
  * X-Frame-Options / CSP frame-ancestors still load. Guest window.open /
  * target=_blank stays inside the same webview instead of system Chrome.
+ *
+ * Electron also asks the `openExternal` permission for those navigations and,
+ * if granted, opens the OS browser (often twice). Deny it for this partition.
  */
+function denyWebviewOpenExternal(partition: string): void {
+  const browserSession = session.fromPartition(partition);
+  browserSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === "openExternal") return false;
+    return true;
+  });
+  browserSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === "openExternal") {
+      callback(false);
+      return;
+    }
+    callback(true);
+  });
+}
+
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
+  denyWebviewOpenExternal("persist:near-workpanel-browser");
   contents.setWindowOpenHandler(({ url }) => {
     if (!parseHttpUrl(url)) return { action: "deny" };
     // Single navigation path: tell renderer to update the WorkPanel tab + loadURL
@@ -7313,6 +7332,66 @@ function registerEarlyIpc(): void {
     const mode: WinTitleBarTheme =
       theme === "light" || theme === "dim" || theme === "dark" ? theme : "dark";
     applyWinTitleBarOverlay(mode);
+    return { ok: true };
+  });
+
+  // macOS + transparent windows do not zoom when the title-bar drag region is
+  // double-clicked. The renderer asks us to fill or restore the whole window.
+  let windowDragStop: (() => void) | null = null;
+  const stopWindowDrag = () => {
+    const stop = windowDragStop;
+    windowDragStop = null;
+    stop?.();
+  };
+  ipcMain.handle("window-toggle-zoom", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    if (win.isMaximized()) {
+      win.unmaximize();
+      return { ok: true, maximized: false };
+    }
+    win.maximize();
+    return { ok: true, maximized: true };
+  });
+  ipcMain.handle("window-drag-start", (event) => {
+    stopWindowDrag();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    const cursorNow = screen.getCursorScreenPoint();
+    if (win.isMaximized()) {
+      const maxBounds = win.getBounds();
+      const normal = win.getNormalBounds();
+      const ratio = (cursorNow.x - maxBounds.x) / Math.max(1, maxBounds.width);
+      win.unmaximize();
+      win.setBounds({
+        x: Math.round(cursorNow.x - normal.width * Math.min(1, Math.max(0, ratio))),
+        y: Math.round(cursorNow.y - 18),
+        width: normal.width,
+        height: normal.height,
+      });
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const [winX, winY] = win.getPosition();
+    const offsetX = cursor.x - winX;
+    const offsetY = cursor.y - winY;
+    const timer = setInterval(() => {
+      if (win.isDestroyed()) {
+        stopWindowDrag();
+        return;
+      }
+      const point = screen.getCursorScreenPoint();
+      win.setPosition(Math.round(point.x - offsetX), Math.round(point.y - offsetY));
+    }, 16);
+    const onBlur = () => stopWindowDrag();
+    win.on("blur", onBlur);
+    windowDragStop = () => {
+      clearInterval(timer);
+      if (!win.isDestroyed()) win.removeListener("blur", onBlur);
+    };
+    return { ok: true };
+  });
+  ipcMain.handle("window-drag-end", () => {
+    stopWindowDrag();
     return { ok: true };
   });
 

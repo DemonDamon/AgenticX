@@ -200,6 +200,49 @@ body {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Scratch answers read as prose: open paragraphs, a quiet table, and a short fade on the line that just settled. */
+.scratch-md p {
+  margin: 0 0 1.15em;
+  line-height: 1.7;
+}
+.scratch-md p:last-child {
+  margin-bottom: 0;
+}
+.scratch-md[data-streaming="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 2.6rem);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 2.6rem);
+}
+.scratch-md .scratch-quiet-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.scratch-md .scratch-quiet-table th,
+.scratch-md .scratch-quiet-table td {
+  border: none;
+  border-bottom: 1px solid var(--border-muted);
+  padding: 0.55rem 0.2rem;
+}
+.scratch-md .scratch-quiet-table tr th:first-child,
+.scratch-md .scratch-quiet-table tr td:first-child,
+.scratch-md .scratch-quiet-table tr th:last-child,
+.scratch-md .scratch-quiet-table tr td:last-child {
+  border-left: none;
+  border-right: none;
+}
+.scratch-md .scratch-quiet-table thead th {
+  border-top: none;
+  font-weight: 560;
+}
+.scratch-md .scratch-quiet-table tbody tr:last-child td {
+  border-bottom: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scratch-md[data-streaming="true"] {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 .msg-content thead th {
   font-weight: 600;
   color: var(--text-strong);
@@ -447,14 +490,19 @@ body {
 }
 
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
-.agx-session-history-row.agx-session-history-row--active {
-  background-color: rgba(0, 0, 0, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+.agx-session-history-row.agx-session-history-row--active,
+.agx-sidebar-nav-row.agx-sidebar-nav-row--active {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--text-strong);
+  font-weight: 500;
 }
 :root[data-theme="dark"] .agx-session-history-row.agx-session-history-row--active,
-:root[data-theme="dim"] .agx-session-history-row.agx-session-history-row--active {
-  background-color: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+:root[data-theme="dim"] .agx-session-history-row.agx-session-history-row--active,
+:root[data-theme="dark"] .agx-sidebar-nav-row.agx-sidebar-nav-row--active,
+:root[data-theme="dim"] .agx-sidebar-nav-row.agx-sidebar-nav-row--active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-strong);
+  font-weight: 500;
 }
 
 /* 历史列表滚动区：预留 scrollbar gutter，避免会话行选中底左右留白受滚动条挤压而不对称 */

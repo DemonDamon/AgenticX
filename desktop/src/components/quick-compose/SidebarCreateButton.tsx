@@ -7,7 +7,7 @@ import { HoverTip } from "../ds/HoverTip";
 
 const MENU_WIDTH = 168;
 
-export function SidebarCreateButton() {
+export function SidebarCreateButton({ className }: { className?: string } = {}) {
   const { t } = useTranslation("sidebar");
   const openQuickCompose = useAppStore((s) => s.openQuickCompose);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -88,14 +88,14 @@ export function SidebarCreateButton() {
         <button
           ref={btnRef}
           type="button"
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
+          className={className ?? "agx-topbar-btn agx-topbar-btn--icon-only"}
           aria-label={t("compose.new")}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           data-quick-compose-trigger=""
           onClick={openMenu}
         >
-          <Plus className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
         </button>
       </HoverTip>
       {menu}

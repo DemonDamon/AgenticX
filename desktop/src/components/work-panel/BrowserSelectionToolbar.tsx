@@ -9,6 +9,7 @@ type Props = {
   onCopy: () => void;
   onSearch: () => void;
   onOpenScratch?: () => void;
+  onOpenInNewTab?: () => void;
 };
 
 /**
@@ -21,6 +22,7 @@ export function BrowserSelectionToolbar({
   onCopy,
   onSearch,
   onOpenScratch,
+  onOpenInNewTab,
 }: Props) {
   const { t } = useTranslation("workspace");
   return createPortal(
@@ -29,6 +31,15 @@ export function BrowserSelectionToolbar({
       style={{ top: anchor.top, left: anchor.left }}
       onMouseDown={(event) => event.preventDefault()}
     >
+      {onOpenInNewTab ? (
+        <button
+          type="button"
+          className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[11px] leading-none text-text-strong transition hover:bg-surface-hover"
+          onClick={onOpenInNewTab}
+        >
+          {t("work.openLinkInNewTab")}
+        </button>
+      ) : null}
       <button
         type="button"
         className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[11px] leading-none text-text-strong transition hover:bg-surface-hover"

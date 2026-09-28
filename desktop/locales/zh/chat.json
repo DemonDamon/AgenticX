@@ -408,7 +408,7 @@
     "allowAllRisks": "主要风险",
     "allowAllFooter": "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
     "placeholder": "发消息...",
-    "placeholderEmpty": "今天想做点什么？ @ 引用文件，/ 调用技能和指令",
+    "placeholderEmpty": "描述你的任务…",
     "commands": {
       "menuTitle": "指令 ({{count}})",
       "empty": "没有匹配的指令",
@@ -477,7 +477,31 @@
     "loadOlderAria": "加载更早消息",
     "liteHint": "问我任何问题，或使用下方推荐操作",
     "proHint": "输入你的需求开始对话",
-    "automationFailed": "上次定时执行失败"
+    "automationFailed": "上次定时执行失败",
+    "needDone": "你想完成什么？",
+    "needDoneHint": "用平常的话说出来",
+    "suggestions": [
+      {
+        "title": "总结这周",
+        "description": "从邮件和日历里抽出重点。",
+        "prompt": "总结我这一周：从已连接的邮件和日历里抽出重点，给我一份短摘要，说明发生了什么、哪些需要我处理。"
+      },
+      {
+        "title": "整理一份表格",
+        "description": "丢进 CSV，说你想要的结果。",
+        "prompt": "我稍后会给你一份表格。先告诉我你需要哪些列，然后按我说的结果整理数据并给出摘要。"
+      },
+      {
+        "title": "起草一份文档",
+        "description": "用几条要点写成报告、邮件或简报。",
+        "prompt": "起草一份一页纸的项目简报。先问我需要的要点，再写成清楚、有结构的文档。"
+      },
+      {
+        "title": "自动完成网页任务",
+        "description": "用内置浏览器做重复步骤。",
+        "prompt": "用内置浏览器打开一个网页，按我接下来的步骤点击和摘录，最后把结果列出来。"
+      }
+    ]
   },
   "toolbar": {
     "reorderPane": "拖拽以调整窗格顺序",

@@ -123,6 +123,30 @@ describe("applyScratchSsePayload", () => {
       toolResultPreview: "Fetched the page.",
     });
   });
+
+  it("pins a confirmation onto the running tool and clears it after a response", () => {
+    const running = applyScratchSsePayload(seed, "a1", {
+      type: "tool_call",
+      data: { name: "bash_exec", tool_call_id: "b1", arguments: { command: "curl https://example.com" } },
+    });
+    const asked = applyScratchSsePayload(running.messages, "a1", {
+      type: "confirm_required",
+      data: {
+        id: "req-1",
+        question: "检测到高风险命令，仍要执行吗？",
+        context: { tool: "bash_exec" },
+      },
+    });
+    expect(asked.messages[1]?.inlineConfirm).toMatchObject({
+      requestId: "req-1",
+      question: "检测到高风险命令，仍要执行吗？",
+    });
+    const cleared = applyScratchSsePayload(asked.messages, "a1", {
+      type: "confirm_response",
+      data: { id: "req-1", approved: false },
+    });
+    expect(cleared.messages[1]?.inlineConfirm).toBeUndefined();
+  });
 });
 
 describe("appendScratchTurn", () => {

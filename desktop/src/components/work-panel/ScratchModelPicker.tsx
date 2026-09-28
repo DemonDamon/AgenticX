@@ -13,11 +13,53 @@ import { formatModelOptionLabel } from "../../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../../utils/model-options";
 import { ProviderIcon } from "../ProviderIcon";
 
+const PICKER_MARGIN = 8;
+const PICKER_GAP = 6;
+const PICKER_MAX_HEIGHT = 360;
+
+/** Bottom of the page that is not covered by the Dock when the window fills the screen. */
+function visibleContentBottom(): number {
+  const vh = window.innerHeight;
+  const availHeight = window.screen?.availHeight;
+  if (!availHeight || !Number.isFinite(window.screenY)) return vh - PICKER_MARGIN;
+  const workBottom = (window.screen.availTop || 0) + availHeight;
+  const chrome = Math.max(0, window.outerHeight - vh);
+  const contentBottom = window.screenY + chrome + vh;
+  const overlap = Math.max(0, contentBottom - workBottom);
+  return vh - overlap - PICKER_MARGIN;
+}
+
 function pickerPanelStyle(anchor: DOMRect): CSSProperties {
+  const vw = window.innerWidth;
   const width = Math.min(280, Math.max(220, anchor.width + 48));
-  const left = Math.min(Math.max(8, anchor.left), window.innerWidth - width - 8);
-  const top = Math.min(anchor.bottom + 6, window.innerHeight - 220);
-  return { position: "fixed", top, left, width, zIndex: 200 };
+  let left = anchor.left;
+  if (left + width > vw - PICKER_MARGIN) left = vw - PICKER_MARGIN - width;
+  if (left < PICKER_MARGIN) left = PICKER_MARGIN;
+
+  const viewBottom = visibleContentBottom();
+  const spaceAbove = anchor.top - PICKER_MARGIN - PICKER_GAP;
+  const spaceBelow = viewBottom - anchor.bottom - PICKER_GAP;
+  const openAbove = spaceAbove > spaceBelow;
+
+  if (openAbove) {
+    return {
+      position: "fixed",
+      left,
+      width,
+      maxHeight: Math.max(120, Math.min(PICKER_MAX_HEIGHT, Math.floor(spaceAbove))),
+      bottom: window.innerHeight - anchor.top + PICKER_GAP,
+      top: "auto",
+      zIndex: 200,
+    };
+  }
+  return {
+    position: "fixed",
+    top: anchor.bottom + PICKER_GAP,
+    left,
+    width,
+    maxHeight: Math.max(120, Math.min(PICKER_MAX_HEIGHT, Math.floor(spaceBelow))),
+    zIndex: 200,
+  };
 }
 
 export function ScratchModelPicker({
@@ -85,7 +127,7 @@ export function ScratchModelPicker({
           <>
             <div className="fixed inset-0 z-[199]" onClick={() => setOpen(false)} />
             <div
-              className="fixed z-[200] max-h-56 overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl"
+              className="fixed z-[200] overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl"
               style={panelStyle}
             >
               {options.length === 0 ? (

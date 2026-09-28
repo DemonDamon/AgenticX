@@ -374,6 +374,7 @@ export function applyScratchSsePayload(
           toolStatus: status,
           toolResultPreview: preview,
           toolStreamLines: [],
+          inlineConfirm: undefined,
         }),
       };
     }
@@ -404,8 +405,65 @@ export function applyScratchSsePayload(
               toolStatus: status,
               toolResultPreview: preview,
               toolStreamLines: [],
+              inlineConfirm: undefined,
             }
           : item,
+      ),
+    };
+  }
+  if (type === "confirm_required") {
+    const requestId = String(data.id ?? "").trim();
+    const question = String(data.question ?? "是否确认执行？").trim() || "是否确认执行？";
+    const context =
+      data.context && typeof data.context === "object"
+        ? (data.context as Record<string, unknown>)
+        : {};
+    const toolName = String(context.tool ?? "").trim();
+    const inlineConfirm = {
+      requestId,
+      question,
+      agentId: String(context.agent_id ?? "meta"),
+      sessionId: String(context.session_id ?? ""),
+      context,
+    };
+    let target = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const item = messages[i];
+      if (item?.role !== "tool") continue;
+      if (item.toolStatus !== "running" && item.toolStatus !== "pending") continue;
+      if (toolName && item.toolName && item.toolName !== toolName) continue;
+      target = i;
+      break;
+    }
+    if (target < 0) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const item = messages[i];
+        if (item?.role === "tool" && (item.toolStatus === "running" || item.toolStatus === "pending")) {
+          target = i;
+          break;
+        }
+      }
+    }
+    if (target < 0) {
+      return {
+        messages: upsertScratchToolMessage(messages, assistantId, {
+          toolName: toolName || "bash_exec",
+          toolStatus: "running",
+          inlineConfirm,
+        }),
+      };
+    }
+    return {
+      messages: messages.map((item, index) =>
+        index === target ? { ...item, inlineConfirm } : item,
+      ),
+    };
+  }
+  if (type === "confirm_response") {
+    const requestId = String(data.id ?? "").trim();
+    return {
+      messages: messages.map((item) =>
+        item.inlineConfirm?.requestId === requestId ? { ...item, inlineConfirm: undefined } : item,
       ),
     };
   }
@@ -556,6 +614,7 @@ export async function runScratchChatTurn(opts: {
     return { ok: false, error: `HTTP ${resp.status}`, committed: opts.reuseUser };
   }
 
+  const startedAt = Date.now();
   let messages = opts.reuseUser
     ? appendScratchAssistant(opts.chat.messages ?? [], {
         assistantId: opts.ids.assistantId,
@@ -568,22 +627,39 @@ export async function runScratchChatTurn(opts: {
         sessionId,
         quotedContent: opts.chat.quotedContent,
       });
-  opts.onMessages(messages);
+  const publish = (rows: Message[], seal = false) => {
+    messages = seal ? sealScratchWorkedSeconds(rows, opts.ids.assistantId, startedAt) : rows;
+    opts.onMessages(messages);
+  };
+  publish(messages);
 
   try {
     await consumeScratchSse(resp.body.getReader(), (payload) => {
       const next = applyScratchSsePayload(messages, opts.ids.assistantId, payload);
-      messages = next.messages;
-      opts.onMessages(messages);
+      publish(next.messages);
       if (next.error) throw new Error(next.error);
     });
   } catch (err) {
+    publish(messages, true);
     if (isScratchAbortError(err)) return { ok: false, error: "aborted", committed: true };
     return { ok: false, error: err instanceof Error ? err.message : String(err), committed: true };
   }
+  publish(messages, true);
   const assistant = messages.find((item) => item.id === opts.ids.assistantId);
   if (!scratchVisibleReplyText(assistant?.content ?? "")) {
     return { ok: false, error: "empty_reply", committed: true };
   }
   return { ok: true };
+}
+
+function sealScratchWorkedSeconds(messages: Message[], assistantId: string, startedAt: number): Message[] {
+  const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+  return messages.map((item) =>
+    item.id === assistantId
+      ? {
+          ...item,
+          metadata: { ...(item.metadata ?? {}), scratchWorkedSeconds: seconds },
+        }
+      : item,
+  );
 }

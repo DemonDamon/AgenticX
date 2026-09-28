@@ -1479,7 +1479,7 @@ export function WorkspacePanel({
         useSidebarSurface
           ? "bg-surface-sidebar"
           : useWorkPanelSurface
-            ? "bg-surface-panel"
+            ? "bg-transparent"
             : "bg-surface-card"
       }`}
       style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}

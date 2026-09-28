@@ -23,7 +23,6 @@ import {
   Globe,
   ListTodo,
   Maximize2,
-  MessageSquare,
   Minimize2,
   PanelRight,
   Plus,
@@ -35,6 +34,7 @@ import {
 } from "lucide-react";
 import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
 import { i18n } from "../../i18n/i18n";
+import { ScratchChatIcon } from "./ScratchChatIcon";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
 import { replayFocusTargetForSession } from "../replay/branch-lineage-navigation";
@@ -82,6 +82,7 @@ import {
   resolveScratchFocusId,
 } from "../../utils/scratch-chat-panel";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
+import { isFreshTask, workspaceToolLocked } from "../../utils/fresh-task-workspace";
 import {
   artifactBaseName,
   collectSessionArtifactPaths,
@@ -163,8 +164,17 @@ import {
  * (active browser tab) wins; else fall back to system browser.
  */
 type InAppBrowserOpenHandler = (url: string) => boolean;
-const inAppBrowserOpenHandlers = new Set<InAppBrowserOpenHandler>();
-let inAppBrowserOpenIpcWired = false;
+type InAppBrowserOpenBridge = {
+  handlers: Set<InAppBrowserOpenHandler>;
+  wired: boolean;
+};
+function inAppBrowserOpenBridge(): InAppBrowserOpenBridge {
+  const host = window as Window & { __nearInAppBrowserOpen?: InAppBrowserOpenBridge };
+  if (!host.__nearInAppBrowserOpen) {
+    host.__nearInAppBrowserOpen = { handlers: new Set(), wired: false };
+  }
+  return host.__nearInAppBrowserOpen;
+}
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_SCRATCH_CHATS: ScratchChat[] = [];
@@ -180,15 +190,15 @@ function logWorkspacePerf(payload: Record<string, unknown>): void {
 }
 
 function ensureInAppBrowserOpenIpc(): void {
-  if (inAppBrowserOpenIpcWired) return;
+  const bridge = inAppBrowserOpenBridge();
+  if (bridge.wired) return;
   const api = window.agenticxDesktop;
   if (!api?.onInAppBrowserOpen) return;
-  inAppBrowserOpenIpcWired = true;
+  bridge.wired = true;
   api.onInAppBrowserOpen((url) => {
-    for (const handler of inAppBrowserOpenHandlers) {
+    for (const handler of bridge.handlers) {
       if (handler(url)) return;
     }
-    void api.openExternal?.(url);
   });
 }
 
@@ -235,6 +245,9 @@ function RemoteBrowserPane({
   url,
   reloadKey = 0,
   onNavigate,
+  onReplaceNavigate,
+  onGuestHistory,
+  onOpenLinkInNewTab,
   onQuoteSelection,
   onSearchSelection,
   onOpenScratchSelection,
@@ -245,6 +258,10 @@ function RemoteBrowserPane({
   reloadKey?: number;
   /** Guest navigated (link / redirect / intercepted window.open) → sync address bar. */
   onNavigate?: (nextUrl: string) => void;
+  /** Same visit as the current history entry (server redirect). Do not add a back step. */
+  onReplaceNavigate?: (nextUrl: string) => void;
+  onGuestHistory?: (state: { canBack: boolean; canForward: boolean }) => void;
+  onOpenLinkInNewTab?: (url: string, title: string) => void;
   onQuoteSelection?: (payload: BrowserQuotePayload) => void;
   onSearchSelection?: (text: string) => void;
   onOpenScratchSelection?: (payload: BrowserQuotePayload) => void;
@@ -257,6 +274,7 @@ function RemoteBrowserPane({
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const [selectionUi, setSelectionUi] = useState<{
     text: string;
+    href?: string;
     anchor: SelectionPopupAnchor;
   } | null>(null);
   /** Initial src only — subsequent navigations use loadURL. */
@@ -264,6 +282,22 @@ function RemoteBrowserPane({
   const committedUrlRef = useRef(url);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const onReplaceNavigateRef = useRef(onReplaceNavigate);
+  onReplaceNavigateRef.current = onReplaceNavigate;
+  const onGuestHistoryRef = useRef(onGuestHistory);
+  onGuestHistoryRef.current = onGuestHistory;
+  const onOpenLinkInNewTabRef = useRef(onOpenLinkInNewTab);
+  onOpenLinkInNewTabRef.current = onOpenLinkInNewTab;
+  const { t } = useTranslation("workspace");
+  const [linkMenu, setLinkMenu] = useState<{
+    url: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  /** Server redirects belong to the current visit, not a new back step. */
+  const redirectingRef = useRef(false);
+  /** loadURL from the address bar / in-app open already created the history entry. */
+  const programmaticNavRef = useRef(false);
   const onWebviewReadyRef = useRef(onWebviewReady);
   onWebviewReadyRef.current = onWebviewReady;
   useEffect(() => {
@@ -295,6 +329,7 @@ function RemoteBrowserPane({
     if (!wv) return;
     if (url === committedUrlRef.current) return;
     committedUrlRef.current = url;
+    programmaticNavRef.current = true;
     setSelectionUi(null);
     loadWebviewUrl(wv, url);
   }, [url]);
@@ -318,34 +353,126 @@ function RemoteBrowserPane({
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
-    const syncFromGuest = (nextUrl: string) => {
+    const reportGuestHistory = () => {
+      onGuestHistoryRef.current?.({
+        canBack: Boolean(wv.canGoBack?.()),
+        canForward: Boolean(wv.canGoForward?.()),
+      });
+    };
+    const syncFromGuest = (nextUrl: string, mode: "push" | "replace") => {
       const href = String(nextUrl || "").trim();
+      reportGuestHistory();
       if (!href || !/^https?:\/\//i.test(href)) return;
-      if (href === committedUrlRef.current) return;
+      if (href === committedUrlRef.current && mode === "push") return;
       committedUrlRef.current = href;
       setSelectionUi(null);
-      onNavigateRef.current?.(href);
+      if (mode === "replace") onReplaceNavigateRef.current?.(href);
+      else onNavigateRef.current?.(href);
     };
     const onDidNavigate = (event: Event) => {
       const e = event as Event & { url?: string };
-      syncFromGuest(e.url || wv.getURL?.() || "");
+      const replaced = redirectingRef.current || programmaticNavRef.current;
+      redirectingRef.current = false;
+      programmaticNavRef.current = false;
+      syncFromGuest(e.url || wv.getURL?.() || "", replaced ? "replace" : "push");
       // Do not inject here — guest may not be dom-ready yet after navigate.
+    };
+    const onRedirect = (event: Event) => {
+      const e = event as Event & { url?: string };
+      const href = e.url || "";
+      if (!redirectingRef.current && !programmaticNavRef.current) {
+        redirectingRef.current = true;
+        syncFromGuest(href, "push");
+        return;
+      }
+      redirectingRef.current = true;
+      syncFromGuest(href, "replace");
     };
     const onDomReady = () => injectSelectionHook();
     wv.addEventListener("dom-ready", onDomReady);
     wv.addEventListener("did-finish-load", onDomReady);
     wv.addEventListener("did-navigate", onDidNavigate);
     wv.addEventListener("did-navigate-in-page", onDidNavigate);
-    wv.addEventListener("did-redirect-navigation", onDidNavigate);
+    wv.addEventListener("did-redirect-navigation", onRedirect);
+    const showLinkMenu = (linkURL: string, guestX: number, guestY: number) => {
+      if (!/^https?:\/\//i.test(linkURL)) {
+        setLinkMenu(null);
+        return;
+      }
+      setSelectionUi(null);
+      const host = webviewHostRef.current?.getBoundingClientRect();
+      const zoomFactor = fixed ? zoom : 1;
+      const rawX = (host?.left ?? 0) + guestX * zoomFactor;
+      const rawY = (host?.top ?? 0) + guestY * zoomFactor;
+      const x = Math.max(8, Math.min(rawX, window.innerWidth - 220));
+      const y = Math.max(8, Math.min(rawY, window.innerHeight - 72));
+      setLinkMenu({ url: linkURL, x, y });
+    };
+    const onContextMenu = (event: Event) => {
+      const params = (event as Event & { params?: { x?: number; y?: number; linkURL?: string } }).params;
+      const linkURL = String(params?.linkURL || "").trim();
+      const guestX = Number(params?.x) || 0;
+      const guestY = Number(params?.y) || 0;
+      if (/^https?:\/\//i.test(linkURL)) {
+        event.preventDefault();
+        showLinkMenu(linkURL, guestX, guestY);
+        return;
+      }
+      void wv.executeJavaScript?.(
+        `(() => { try { return String(window.__nearLinkHref || ""); } catch (_) { return ""; } })()`,
+      ).then((found) => {
+        const href = String(found || "").trim();
+        if (!/^https?:\/\//i.test(href)) return;
+        event.preventDefault();
+        showLinkMenu(href, guestX, guestY);
+      }).catch(() => undefined);
+    };
+    const onConsoleMessage = (event: Event) => {
+      const message = String((event as Event & { message?: string }).message || "");
+      if (!message.startsWith("__NEAR_LINK_MENU__")) return;
+      try {
+        const payload = JSON.parse(message.slice("__NEAR_LINK_MENU__".length)) as {
+          href?: string;
+          x?: number;
+          y?: number;
+        };
+        showLinkMenu(String(payload.href || ""), Number(payload.x) || 0, Number(payload.y) || 0);
+      } catch {
+        /* ignore malformed guest payload */
+      }
+    };
+    wv.addEventListener("context-menu", onContextMenu);
+    wv.addEventListener("console-message", onConsoleMessage);
+    try {
+      void wv.executeJavaScript?.(BROWSER_SELECTION_HOOK_JS).catch(() => undefined);
+    } catch {
+      /* guest not ready yet; dom-ready will inject */
+    }
     // Wait for dom-ready / did-finish-load — eager inject on mount races attach.
     return () => {
       wv.removeEventListener("dom-ready", onDomReady);
       wv.removeEventListener("did-finish-load", onDomReady);
       wv.removeEventListener("did-navigate", onDidNavigate);
       wv.removeEventListener("did-navigate-in-page", onDidNavigate);
-      wv.removeEventListener("did-redirect-navigation", onDidNavigate);
+      wv.removeEventListener("did-redirect-navigation", onRedirect);
+      wv.removeEventListener("context-menu", onContextMenu);
+      wv.removeEventListener("console-message", onConsoleMessage);
     };
-  }, []);
+  }, [fixed, zoom]);
+
+  useEffect(() => {
+    if (!linkMenu) return;
+    const close = () => setLinkMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [linkMenu]);
 
   // Poll guest selection → host toolbar (webview has no shared Selection API with host).
   useEffect(() => {
@@ -370,12 +497,13 @@ function RemoteBrowserPane({
           if (
             prev &&
             prev.text === snap.text &&
+            prev.href === snap.href &&
             prev.anchor.top === anchor.top &&
             prev.anchor.left === anchor.left
           ) {
             return prev;
           }
-          return { text: snap.text, anchor };
+          return { text: snap.text, href: snap.href, anchor };
         });
       } catch {
         /* ignore transient guest errors */
@@ -459,6 +587,15 @@ function RemoteBrowserPane({
       {selectionUi ? (
         <BrowserSelectionToolbar
           anchor={selectionUi.anchor}
+          onOpenInNewTab={
+            selectionUi.href && /^https?:\/\//i.test(selectionUi.href)
+              ? () => {
+                  const href = selectionUi.href || "";
+                  setSelectionUi(null);
+                  onOpenLinkInNewTabRef.current?.(href, browserTitleFromUrl(href));
+                }
+              : undefined
+          }
           onSearch={() => {
             const text = selectionUi.text.trim();
             if (!text) return;
@@ -487,6 +624,38 @@ function RemoteBrowserPane({
           }
         />
       ) : null}
+      {linkMenu
+        ? createPortal(
+            <div
+              className="fixed z-[200] min-w-[196px] overflow-hidden rounded-lg border border-border bg-surface-popover py-1 shadow-lg"
+              style={{ left: linkMenu.x, top: linkMenu.y }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={() => {
+                  const nextUrl = linkMenu.url;
+                  setLinkMenu(null);
+                  onOpenLinkInNewTabRef.current?.(nextUrl, browserTitleFromUrl(nextUrl));
+                }}
+              >
+                {t("work.openLinkInNewTab")}
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={() => {
+                  void navigator.clipboard.writeText(linkMenu.url);
+                  setLinkMenu(null);
+                }}
+              >
+                {t("work.copyLinkAddress")}
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -610,6 +779,22 @@ function pushBrowserHistory(tab: BrowserTab, entry: BrowserHistoryEntry): Browse
   };
 }
 
+function replaceBrowserHistory(tab: BrowserTab, entry: BrowserHistoryEntry): BrowserTab {
+  if (tab.history.length === 0) return pushBrowserHistory(tab, entry);
+  const idx = Math.max(0, Math.min(tab.historyIndex, tab.history.length - 1));
+  const history = tab.history.slice();
+  history[idx] = entry;
+  return {
+    ...tab,
+    url: entry.url,
+    draftUrl: entry.url === "about:blank" ? "" : entry.url,
+    title: entry.title,
+    srcDoc: entry.srcDoc,
+    history,
+    historyIndex: idx,
+  };
+}
+
 function goBrowserHistory(tab: BrowserTab, delta: -1 | 1): BrowserTab | null {
   const next = tab.historyIndex + delta;
   if (next < 0 || next >= tab.history.length) return null;
@@ -622,7 +807,6 @@ function goBrowserHistory(tab: BrowserTab, delta: -1 | 1): BrowserTab | null {
     draftUrl: entry.url === "about:blank" ? "" : entry.url,
     title: entry.title,
     srcDoc: entry.srcDoc,
-    reloadNonce: (tab.reloadNonce ?? 0) + 1,
   };
 }
 
@@ -915,9 +1099,11 @@ export function WorkPanel({
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
   const activeKindRef = useRef(activeKind);
   const activeBrowserIdRef = useRef(activeBrowserId);
   const agentWebviewRef = useRef<NearElectronWebview | null>(null);
+  const [guestHistory, setGuestHistory] = useState({ canBack: false, canForward: false });
   const openWebReferenceInBrowserRef = useRef<(url: string, title: string) => void>(() => undefined);
   const previewDirtyRef = useRef(false);
   const previewRequestLeaveRef = useRef<((proceed: () => void) => void) | null>(null);
@@ -1592,9 +1778,9 @@ export function WorkPanel({
       );
       return true;
     };
-    inAppBrowserOpenHandlers.add(handler);
+    inAppBrowserOpenBridge().handlers.add(handler);
     return () => {
-      inAppBrowserOpenHandlers.delete(handler);
+      inAppBrowserOpenBridge().handlers.delete(handler);
     };
   }, []);
 
@@ -1670,6 +1856,26 @@ export function WorkPanel({
         });
       } else if (focusRequest.tabId) {
         setActiveBrowserId(focusRequest.tabId);
+      } else {
+        setBrowserTabs((prev) => {
+          if (prev.length > 0) {
+            const current =
+              prev.find((t) => t.id === activeBrowserIdRef.current) ?? prev[prev.length - 1];
+            queueMicrotask(() => setActiveBrowserId(current.id));
+            return prev;
+          }
+          const id = uid();
+          queueMicrotask(() => setActiveBrowserId(id));
+          return [
+            ...prev,
+            createBrowserTab({
+              id,
+              title: i18n.t("work.newTab", { ns: "workspace" }),
+              url: "about:blank",
+              draftUrl: "",
+            }),
+          ];
+        });
       }
       setActiveKind("browser");
     } else if (focusRequest.kind === "preview") {
@@ -2106,6 +2312,36 @@ export function WorkPanel({
     return () => window.removeEventListener("mousedown", onDoc);
   }, [plusOpen]);
 
+  const freshTask = isFreshTask(paneMessages);
+  const plusItem = (key: string, icon: ReactNode, label: string, onClick: () => void) => {
+    const locked = workspaceToolLocked(key, freshTask);
+    const button = (
+      <button
+        type="button"
+        className={
+          locked
+            ? "flex w-full cursor-default items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-faint"
+            : "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+        }
+        aria-disabled={locked || undefined}
+        onClick={() => {
+          if (locked) return;
+          onClick();
+        }}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+    return locked ? (
+      <HoverTip key={key} label={t("work.startLockedHint")} className="w-full">
+        {button}
+      </HoverTip>
+    ) : (
+      <span key={key}>{button}</span>
+    );
+  };
+
   const plusMenu =
     plusOpen && plusPos
       ? createPortal(
@@ -2114,70 +2350,14 @@ export function WorkPanel({
             style={{ left: plusPos.left, top: plusPos.top }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openSummaryTab}
-            >
-              <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabSummary")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openScratchFromPlus}
-            >
-              <MessageSquare className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabScratch")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openChangesTab}
-            >
-              <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabChanges")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openBrowserTab}
-            >
-              <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabBrowser")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openGraphTab}
-            >
-              <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabGraph")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openTimelineTab}
-            >
-              <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabTimeline")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openTerminalTab}
-            >
-              <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabTerminal")}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openWorkspaceTab}
-            >
-              <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              {t("work.tabWorkspace")}
-            </button>
+            {plusItem("summary", <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabSummary"), openSummaryTab)}
+            {plusItem("scratch", <ScratchChatIcon className="h-4 w-4 text-text-subtle" />, t("work.tabScratch"), openScratchFromPlus)}
+            {plusItem("changes", <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabChanges"), openChangesTab)}
+            {plusItem("browser", <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabBrowser"), openBrowserTab)}
+            {plusItem("graph", <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabGraph"), openGraphTab)}
+            {plusItem("timeline", <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTimeline"), openTimelineTab)}
+            {plusItem("terminal", <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTerminal"), openTerminalTab)}
+            {plusItem("workspace", <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabWorkspace"), openWorkspaceTab)}
           </div>,
           document.body
         )
@@ -2193,7 +2373,7 @@ export function WorkPanel({
     },
     {
       key: "scratch",
-      icon: <MessageSquare className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      icon: <ScratchChatIcon className="h-5 w-5 shrink-0 text-text-subtle" />,
       title: t("work.tabScratch"),
       subtitle: t("work.subtitleScratch"),
       onClick: openScratchFromPlus,
@@ -2243,8 +2423,20 @@ export function WorkPanel({
         : t("work.tabSummary");
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-panel">
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
+      <div className="flex h-10 shrink-0 items-center border-b border-border">
+        <div
+          ref={tabStripRef}
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0"
+          onWheel={(event) => {
+            const el = tabStripRef.current;
+            if (!el || el.scrollWidth <= el.clientWidth) return;
+            const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+            if (!delta) return;
+            event.preventDefault();
+            el.scrollLeft += delta;
+          }}
+        >
         {summaryTabOpen ? (
           <button
             type="button"
@@ -2520,7 +2712,7 @@ export function WorkPanel({
               setActiveKind("scratch");
             }}
           >
-            <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <ScratchChatIcon className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{chat.title}</span>
             {chat.floating ? (
               <span className="shrink-0 text-[10px] text-text-faint">{t("work.scratchFloated")}</span>
@@ -2578,9 +2770,9 @@ export function WorkPanel({
         >
           <Plus className="h-[16px] w-[16px]" strokeWidth={1.8} />
         </button>
+        </div>
 
-        <div className="flex-1" />
-
+        <div className="flex shrink-0 items-center pr-3">
         {onToggleExpand ? (
           <HoverTip label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}>
             <button
@@ -2611,6 +2803,7 @@ export function WorkPanel({
             <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
         </HoverTip>
+        </div>
       </div>
 
       {plusMenu}
@@ -2620,22 +2813,39 @@ export function WorkPanel({
           <div className="flex h-full flex-col px-8 pt-16">
             <div className="text-[15px] text-text-faint">{t("work.startHere")}</div>
             <div className="mt-6 flex max-w-[360px] flex-col gap-5">
-              {startEntries.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  className="flex items-start gap-3 rounded-lg px-1 py-1 text-left transition hover:bg-surface-hover/50"
-                  onClick={entry.onClick}
-                >
-                  <div className="mt-0.5">{entry.icon}</div>
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-medium text-text-strong">{entry.title}</div>
-                    <div className="mt-0.5 text-[12px] leading-relaxed text-text-faint">
-                      {entry.subtitle}
+              {startEntries.map((entry) => {
+                const locked = workspaceToolLocked(entry.key, freshTask);
+                const button = (
+                  <button
+                    type="button"
+                    className={`flex w-full items-start gap-3 rounded-lg px-1 py-1 text-left ${
+                      locked ? "cursor-default" : "transition hover:bg-surface-hover/50"
+                    }`}
+                    aria-disabled={locked || undefined}
+                    onClick={() => {
+                      if (locked) return;
+                      entry.onClick();
+                    }}
+                  >
+                    <div className={`mt-0.5 ${locked ? "opacity-45" : ""}`}>{entry.icon}</div>
+                    <div className="min-w-0">
+                      <div className={`text-[14px] font-medium ${locked ? "text-text-faint" : "text-text-strong"}`}>
+                        {entry.title}
+                      </div>
+                      <div className="mt-0.5 text-[12px] leading-relaxed text-text-faint">
+                        {entry.subtitle}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+                return locked ? (
+                  <HoverTip key={entry.key} label={t("work.startLockedHint")} className="w-full">
+                    {button}
+                  </HoverTip>
+                ) : (
+                  <span key={entry.key}>{button}</span>
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -3134,9 +3344,26 @@ export function WorkPanel({
               }}
             >
               {(() => {
-                const canBack = activeBrowser.historyIndex > 0;
+                const canBack = guestHistory.canBack || activeBrowser.historyIndex > 0;
                 const canForward =
+                  guestHistory.canForward ||
                   activeBrowser.historyIndex < activeBrowser.history.length - 1;
+                const goBack = () => {
+                  const wv = agentWebviewRef.current;
+                  if (wv?.canGoBack?.()) {
+                    wv.goBack?.();
+                    return;
+                  }
+                  goBrowserBack(activeBrowser.id);
+                };
+                const goForward = () => {
+                  const wv = agentWebviewRef.current;
+                  if (wv?.canGoForward?.()) {
+                    wv.goForward?.();
+                    return;
+                  }
+                  goBrowserForward(activeBrowser.id);
+                };
                 const navBtn = (opts: {
                   label: string;
                   disabled: boolean;
@@ -3165,13 +3392,13 @@ export function WorkPanel({
                     {navBtn({
                       label: t("work.back"),
                       disabled: !canBack,
-                      onClick: () => goBrowserBack(activeBrowser.id),
+                      onClick: goBack,
                       children: <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
                       label: t("work.forward"),
                       disabled: !canForward,
-                      onClick: () => goBrowserForward(activeBrowser.id),
+                      onClick: goForward,
                       children: <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
@@ -3264,6 +3491,19 @@ export function WorkPanel({
                       ),
                     );
                   }}
+                  onReplaceNavigate={(nextUrl) => {
+                    const tabId = activeBrowser.id;
+                    const title = browserTitleFromUrl(nextUrl);
+                    setBrowserTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tabId
+                          ? replaceBrowserHistory(t, browserEntry(nextUrl, title, null))
+                          : t,
+                      ),
+                    );
+                  }}
+                  onGuestHistory={setGuestHistory}
+                  onOpenLinkInNewTab={(url, title) => openWebReferenceInBrowser(url, title)}
                 />
                 <BrowserAgentOverlay sessionId={sessionId} />
               </div>

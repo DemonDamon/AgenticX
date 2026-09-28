@@ -18,13 +18,7 @@ function usePrefersReducedMotion(): boolean {
   return reduce;
 }
 
-export function EmptyStateCornerLotties({
-  children,
-  stageSize = 200,
-}: {
-  children?: ReactNode;
-  stageSize?: number;
-}) {
+function useEmptyFigureSources() {
   const reduce = usePrefersReducedMotion();
   const themeColor = useAppStore((s) => s.themeColor);
   const theme = useAppStore((s) => s.theme);
@@ -38,6 +32,51 @@ export function EmptyStateCornerLotties({
     () => recolorEmptyLottieClothes(thinkingQuestions, "think", primary, bottom),
     [primary, bottom],
   );
+  return { reduce, themeColor, thinkingSrc, workingSrc };
+}
+
+/** Header pair: man (question marks) on the left, woman (laptop) on the right. */
+export function EmptyStateHeaderFigures({ className = "" }: { className?: string }) {
+  const { reduce, themeColor, thinkingSrc, workingSrc } = useEmptyFigureSources();
+  const manWidth = 96;
+  const womanWidth = 56;
+  return (
+    <div
+      data-testid="empty-header-figures"
+      data-accent={themeColor}
+      aria-hidden
+      className={`pointer-events-none flex shrink-0 items-end gap-1.5 ${className}`}
+    >
+      <span data-testid="empty-header-figure" data-kind="man">
+        <LottieSvg
+          src={thinkingSrc}
+          autoplay={!reduce}
+          loop={!reduce}
+          className="block"
+          style={{ width: manWidth, height: manWidth * (876 / 824) }}
+        />
+      </span>
+      <span data-testid="empty-header-figure" data-kind="woman">
+        <LottieSvg
+          src={workingSrc}
+          autoplay={!reduce}
+          loop={!reduce}
+          className="block"
+          style={{ width: womanWidth, height: womanWidth * (918 / 496) }}
+        />
+      </span>
+    </div>
+  );
+}
+
+export function EmptyStateCornerLotties({
+  children,
+  stageSize = 200,
+}: {
+  children?: ReactNode;
+  stageSize?: number;
+}) {
+  const { reduce, themeColor, thinkingSrc, workingSrc } = useEmptyFigureSources();
   return (
     <div
       data-testid="empty-lottie-row"

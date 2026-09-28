@@ -1,7 +1,7 @@
 import { ArrowUp, Maximize2, MessageSquare, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../store";
+import { useAppStore, type PendingConfirm } from "../../store";
 import type { ScratchChat, ScratchChatContextFile, ScratchChatSourceKind } from "../../utils/scratch-chat";
 import { resolveScratchChatModel, withoutScratchContextFile } from "../../utils/scratch-chat";
 import { lastScratchUserMessage } from "../../utils/scratch-chat-runtime";
@@ -96,6 +96,43 @@ function ScratchComposerContext({
   );
 }
 
+async function resolveScratchConfirm(
+  paneId: string,
+  chatId: string,
+  sessionId: string | undefined,
+  confirm: PendingConfirm,
+  approved: boolean,
+): Promise<void> {
+  const state = useAppStore.getState();
+  const apiBase = String(state.apiBase ?? "").replace(/\/$/, "");
+  const apiToken = String(state.apiToken ?? "");
+  const sid = String(confirm.sessionId || sessionId || "").trim();
+  if (!apiBase || !sid || !confirm.requestId) return;
+  const resp = await fetch(`${apiBase}/api/confirm`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-agx-desktop-token": apiToken,
+    },
+    body: JSON.stringify({
+      session_id: sid,
+      request_id: confirm.requestId,
+      approved,
+      agent_id: confirm.agentId || "meta",
+    }),
+  }).catch(() => null);
+  if (!resp?.ok) return;
+  const chat = state.panes
+    .find((item) => item.id === paneId)
+    ?.scratchChats?.find((item) => item.id === chatId);
+  if (!chat) return;
+  state.patchScratchChat(paneId, chatId, {
+    messages: (chat.messages ?? []).map((item) =>
+      item.inlineConfirm?.requestId === confirm.requestId ? { ...item, inlineConfirm: undefined } : item,
+    ),
+  });
+}
+
 export function ScratchChatCard({
   chat,
   paneId,
@@ -144,7 +181,7 @@ export function ScratchChatCard({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-panel">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--shell-panel)]">
       {!hideHeader ? (
         <div data-slot="scratch-header" className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
           <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.7} />
@@ -200,6 +237,13 @@ export function ScratchChatCard({
               onQuote={
                 canEditContext
                   ? (text) => patchScratchChat(paneId!, chat.id, { quotedContent: text })
+                  : undefined
+              }
+              onResolveConfirm={
+                paneId
+                  ? (confirm, approved) => {
+                      void resolveScratchConfirm(paneId, chat.id, chat.sessionId, confirm, approved);
+                    }
                   : undefined
               }
             />

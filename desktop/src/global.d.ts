@@ -8,6 +8,10 @@ type NearElectronWebview = HTMLElement & {
   loadURL: (url: string) => Promise<void> | void;
   reload: () => Promise<void> | void;
   getURL: () => string;
+  canGoBack?: () => boolean;
+  canGoForward?: () => boolean;
+  goBack?: () => void;
+  goForward?: () => void;
   /** Open Chromium DevTools for this guest (Trae-style HTML/browser preview). */
   openDevTools: () => void;
   /** Run script in the guest page (used for WorkPanel browser text selection). */
@@ -559,6 +563,9 @@ declare global {
       appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
+      toggleWindowZoom: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowDragStart: () => Promise<{ ok: boolean }>;
+      windowDragEnd: () => Promise<{ ok: boolean }>;
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
       saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{
         ok: boolean;

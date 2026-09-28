@@ -4,6 +4,10 @@ import type { LucideIcon } from "lucide-react";
 import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  DEFAULT_META_AVATAR_URL,
+} from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
@@ -27,8 +31,7 @@ const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
 const NAV_ITEM_BASE =
   "flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-none transition-colors";
 const NAV_ITEM_IDLE = "text-text-muted hover:bg-surface-hover hover:text-text-strong";
-const NAV_ITEM_ACTIVE =
-  "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]";
+const NAV_ITEM_ACTIVE = "bg-surface-card-strong font-medium text-text-strong";
 
 type SidebarView = Exclude<MainView, "chat">;
 
@@ -235,9 +238,10 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
 
   return (
     <>
-      <aside className="flex h-full w-full flex-col bg-surface-sidebar">
+      <aside className="flex h-full w-full flex-col bg-transparent">
         {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
+          <div className="no-drag min-w-0 flex-1 self-stretch" data-window-zoom="" aria-hidden />
           <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">
             <SidebarCreateButton />
             <TopbarLeftControls
@@ -248,7 +252,6 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           </div>
         </div>
 
-        {/* Meta-Agent brand row — text-only product name + version (no character logo) */}
         <button
           className={`group flex w-full items-center px-4 py-2.5 text-left transition-colors ${
             metaPaneActive ? "" : "hover:bg-surface-hover"
@@ -261,14 +264,21 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
             setMachiContextMenu({ x: e.clientX, y: e.clientY });
           }}
         >
-          <div className="flex min-w-0 items-baseline gap-1.5">
+          <span className="mr-2 inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center overflow-hidden">
+            <img
+              src={DEFAULT_META_AVATAR_URL}
+              alt=""
+              className={`h-full w-full origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`}
+            />
+          </span>
+          <span className="flex min-w-0 items-baseline gap-1.5">
             <span className="truncate text-[16px] font-semibold leading-none tracking-[-0.015em] text-text-strong">
               {APP_DISPLAY_NAME}
             </span>
             <span className="shrink-0 text-[11px] font-normal leading-none tabular-nums text-text-faint">
               {APP_VERSION}
             </span>
-          </div>
+          </span>
         </button>
 
         {/* Compact button navigation */}

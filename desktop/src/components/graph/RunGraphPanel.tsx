@@ -248,8 +248,8 @@ export function RunGraphPanel({
 
   return (
     <div
-      className="relative flex h-full min-h-0 w-full flex-col bg-surface-base"
-      style={tintColor ? { backgroundColor: tintColor } : undefined}
+      className="relative flex h-full min-h-0 w-full flex-col bg-[var(--shell-panel)]"
+      style={!embedded && tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2.5 py-2">
         {!embedded ? (

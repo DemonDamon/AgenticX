@@ -467,6 +467,69 @@ export function App() {
   useEffect(() => {
     ensureBrowserAgentIpc();
   }, []);
+  useEffect(() => {
+    const desktop = window.agenticxDesktop;
+    if (!desktop?.toggleWindowZoom) return;
+    const interactive = "button, a, input, textarea, select, label, [role='button'], [data-no-window-zoom]";
+    const chrome = ".agx-pane-toolbar, .agx-sidebar-topbar, .agx-topbar, .drag-region";
+    const isChrome = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      if (document.documentElement.dataset.platform === "win32") return false;
+      if (target.closest(".agx-voice-focus-root")) return false;
+      if (target.closest(interactive)) return false;
+      return Boolean(target.closest(chrome));
+    };
+    const onDblClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (document.documentElement.dataset.platform === "win32") return;
+      if (target instanceof Element && target.classList.contains("agx-chatpane")) {
+        const top = event.clientY - target.getBoundingClientRect().top;
+        if (top > 12) return;
+        event.preventDefault();
+        void desktop.toggleWindowZoom();
+        return;
+      }
+      if (!isChrome(target)) return;
+      event.preventDefault();
+      void desktop.toggleWindowZoom();
+    };
+    let dragging = false;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("[data-window-zoom]")) return;
+      if (target.closest(interactive)) return;
+      const startX = event.screenX;
+      const startY = event.screenY;
+      dragging = false;
+      const onMove = (ev: PointerEvent) => {
+        if (dragging) return;
+        if (Math.hypot(ev.screenX - startX, ev.screenY - startY) < 4) return;
+        dragging = true;
+        void desktop.windowDragStart?.();
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", onUp, true);
+        window.removeEventListener("pointercancel", onUp, true);
+        if (dragging) {
+          dragging = false;
+          void desktop.windowDragEnd?.();
+        }
+      };
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", onUp, true);
+      window.addEventListener("pointercancel", onUp, true);
+    };
+    window.addEventListener("dblclick", onDblClick, true);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("dblclick", onDblClick, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      if (dragging) void desktop.windowDragEnd?.();
+    };
+  }, []);
   const resolvePaneForSession = useCallback((sid: string, fallbackAgentId?: string) => {
     const store = useAppStore.getState();
     let pane = store.panes.find((p) => p.sessionId === sid);
