@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 482 170" width="482" height="170">
-<text x="4" y="94" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="112" font-weight="700" letter-spacing="-2" fill="#FFFFFF">AgenticX</text>
-<text x="8" y="160" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="34" font-weight="400" fill="#D6C4B0">Unified Multi-Agent Platform</text>
+<text x="241" y="94" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="112" font-weight="700" letter-spacing="-2" fill="#FFFFFF">AgenticX</text>
+<text x="241" y="160" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="34" font-weight="400" fill="#D6C4B0">Unified Multi-Agent Platform</text>
 </svg>
