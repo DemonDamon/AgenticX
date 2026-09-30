@@ -85,7 +85,7 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
-  version: "0.5.0",
+  version: "0.6.0",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
