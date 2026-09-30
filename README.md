@@ -630,6 +630,6 @@ Thank you for building in the open. Your work has been a constant source of insi
 
 **If AgenticX helps you, please give us a Star!**
 
-[GitHub](https://github.com/DemonDamon/AgenticX) • [Documentation](coming-soon) • [Examples](examples/) • [Discussions](https://github.com/DemonDamon/AgenticX/discussions)
+[GitHub](https://github.com/DemonDamon/AgenticX) • [Documentation](https://www.agxbuilder.com/docs) • [Examples](examples/) • [Discussions](https://github.com/DemonDamon/AgenticX/discussions)
 
 </div>

@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Documentation](https://img.shields.io/badge/docs-coming_soon-green.svg)](#)
+[![文档](https://img.shields.io/badge/docs-agxbuilder.com-green.svg)](https://www.agxbuilder.com/docs)
 
 **从 Python Agent Runtime 到 Near Desktop 与 Enterprise 的统一智能体技术栈**
 
@@ -626,6 +626,6 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 
 **如果 AgenticX 对你有帮助，请给我们一个 Star！**
 
-[GitHub](https://github.com/DemonDamon/AgenticX) • [文档](coming-soon) • [示例](examples/) • [讨论](https://github.com/DemonDamon/AgenticX/discussions)
+[GitHub](https://github.com/DemonDamon/AgenticX) • [文档](https://www.agxbuilder.com/docs) • [示例](examples/) • [讨论](https://github.com/DemonDamon/AgenticX/discussions)
 
 </div>
