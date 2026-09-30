@@ -1,4 +1,6 @@
 <div align="center">
+<img src="assets/near-app-icon.png" alt="Near" width="168" />
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/agenticx-logo-orange-dark.svg" />
   <img src="assets/agenticx-logo-orange-light.svg" alt="AgenticX — Unified Multi-Agent Platform" width="480" />
