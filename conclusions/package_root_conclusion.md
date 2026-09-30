@@ -30,6 +30,7 @@
 - 版本与作者：`pyproject.toml` `[project]`（name `agenticx`、version、authors、classifiers、keywords）。
 - 依赖分层：`[project.dependencies]` 核心轻量栈；`[project.optional-dependencies]` 含 `desktop-runtime`、`dev`、`memory`、`graph` 等 extras（详见 pyproject，不在此枚举）。
 - `requirements.txt`：核心依赖镜像 + 安装说明（`pip install -e .` / extras / 可选 lock）。
+- 包内资源：`[tool.setuptools.package-data]` 对 `agenticx` 打包 `*.yaml/*.yml/*.json/*.toml/*.txt/*.md/*.png`（含子目录 `**/`），PNG 资源（如 `agenticx/avatar/near_cube_luma.png`）随 wheel 分发。
 - 品牌常量硬编码于 `branding.py`，运行时可通过各调用方 env（如 `AGX_WECHAT_REPLY_NAME`）覆盖展示名，但非本模块职责。
 
 ## Dependencies

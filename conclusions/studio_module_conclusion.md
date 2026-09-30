@@ -1,6 +1,6 @@
 # AgenticX Studio 模块总结
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 
@@ -33,9 +33,13 @@ agenticx/studio/
 ├── conversation_continue.py  # (NEW) 从某条消息切开继续（对话分支，非状态恢复）
 ├── changeplane_routes.py  # (NEW) ChangePlane webhook 入站
 ├── usage_alive.py         # (NEW) retry/edit 截断后的用量时间窗
+├── command_store.py       # (NEW) 输入框 Composer 命令的本地 JSON 存储（scope 文件 + 会话 pin 快照）
+├── command_resolve.py     # (NEW) 按上下文解析可见命令（builtin < global < subject < session pin）
+├── command_routes.py      # (NEW) /api/commands* CRUD、会话 pin 与 /api/sessions/<sid>/perf
+├── typesafe_routes.py     # (NEW) TypeSafe（Jev）设置读写与连通性探测（非聊天 provider）
 ├── code_index/            # (NEW) 代码索引 HTTP 路由（config/status，serve 期模型预载）
 ├── web_search/            # (NEW) 内置 Web 搜索子包（contracts/providers/service/routes）
-└── kb/                    # 本地知识库（manager/runtime/routes；job 可 cancel）
+└── kb/                    # 本地知识库（manager/runtime/routes；job 可 cancel；chunk_strategy 标题感知/父子分块）
 ```
 
 ---
@@ -143,7 +147,7 @@ agenticx/studio/
 2. 锁定生效时 `document_pages.stage_pdf_pages()` 把本轮 PDF 渲染成页图挂到 `PENDING_VISUAL_ATTACHMENTS_KEY`，替代抽文本通路。
 3. `reasoning_effort`（Kimi K3 / DeepSeek V4）与 `thinking_enabled`（DeepSeek V4）按轮写入 session 私有属性，缺省时清除，避免上一轮的值串到其他模型。
 
-**确认门与无人值守（NEW）**：`_resolve_confirm_gate(managed, agent_id, unattended=...)` —— `unattended_run=True`（supervisor/auto-nudge 续跑、`automation:*` 会话）时使用 `RiskAwareAutoConfirmGate(unattended=True)`（低风险放行、受保护操作 fail-closed）；全局自动确认改由 `is_global_auto_confirm_mode(run_mode, confirm_strategy, permissions_mode)` 判定（显式 `run_mode`/`confirm_strategy` 优先，legacy `permissions.mode` 兜底），开启时包装为 `RiskAwareAutoConfirmGate(delegate=managed_gate)`。LLM 解析前经 `effective_session_llm_names()` 回填空的 session provider/model；fallback 候选加入 `deepseek`，并跳过设置里已禁用的 provider（`provider_raw_enabled_for_fallback`）。
+**确认门与无人值守（NEW）**：`_resolve_confirm_gate(managed, agent_id, unattended=...)` —— `unattended_run=True`（supervisor/auto-nudge 续跑、`automation:*` 会话）时使用 `RiskAwareAutoConfirmGate(unattended=True)`（低风险放行、受保护操作 fail-closed）；全局自动确认改由 `is_global_auto_confirm_mode(run_mode, confirm_strategy, permissions_mode)` 判定（显式 `run_mode`/`confirm_strategy` 优先，legacy `permissions.mode` 兜底），开启时包装为 `RiskAwareAutoConfirmGate(delegate=managed_gate)`。LLM 解析前经 `effective_session_llm_names()` 回填空的 session provider/model；fallback 候选加入 `deepseek`、`mimo`（位于 `ollama` 之前），并跳过设置里已禁用的 provider（`provider_raw_enabled_for_fallback`）。
 
 **会话管理**：
 
@@ -180,6 +184,9 @@ agenticx/studio/
 | `/api/avatars/<id>` | GET/PATCH/DELETE | 读取/更新/删除 Avatar |
 | `/api/groups` | GET/POST | 列出/创建 GroupChat |
 | `/api/groups/<id>` | GET/PATCH/DELETE | 读取/更新/删除 GroupChat |
+| `/api/groups/<id>/human-members` | POST | 向群加入人类成员（`group_registry.add_human_member`）；`ValueError` → 400，群不存在 → 404 |
+
+创建 Avatar（`POST /api/avatars`）额外接受 `portrait_style` 字段并落入 `AvatarConfig`。
 
 **配置与 MCP**：
 
@@ -215,6 +222,8 @@ agenticx/studio/
 | `/api/graph/runs`、`/api/graph/runs/<rid>`、`/api/graph/runs/<rid>/intervene` | GET/POST | **(NEW)** WorkGraph 运行列表 / GraphRun 快照 + agent projection（God-View UI）/ I1–I6 图干预（乐观版本锁，指令写回所属 session 的 scratchpad） |
 | `/api/sessions/<sid>/loop-review` | GET | **(NEW)** 单会话工作流健康巡检：优先读 `sessions/<sid>/loop_review.json` 缓存，`refresh=1` 时经 `learning.loop_review.review_session` 重算 |
 | `/api/vision/fallback` | GET | **(NEW)** 查询视觉兜底模型配置（`llms.vision_fallback.resolve_vision_fallback`） |
+| `/api/commands*`、`/api/sessions/<sid>/commands*`、`/api/sessions/<sid>/perf` | GET/POST/PUT/DELETE | **(NEW)** Composer 命令与会话性能诊断（`command_routes.py:register_command_routes`，见下文） |
+| `/api/typesafe/settings`、`/api/typesafe/test` | GET/PUT/POST | **(NEW)** TypeSafe（Jev）设置与连通性探测（`typesafe_routes.py:register_typesafe_routes`，见下文） |
 
 #### SSE 流式协议
 
@@ -229,6 +238,8 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 所有 `RuntimeEvent.type` 均直接透传，Desktop 前端按 `agent_id` 路由到对应分身窗格。
 
 群聊分支（`group_id` 非空）在 `live_reattach_enabled()` 开启时同样改走 `SessionEventHub`：runtime 在后台 task 生产事件、SSE 生成器订阅 hub 消费，客户端断开后 runtime 继续跑、重连可回放；群聊澄清经 `_persist_clarification_prompt(..., agent_id, avatar_name)` 按分身归属持久化，`group_reply`/`group_skipped`/`group_clarification` 事件触发 `incremental_persist`；`should_stop` 改接 `manager.should_interrupt()`，并支持 `image_inputs`/`history_image_attachments` 透传给 `router.run_group_turn()`。
+
+群聊回合在路由/LLM 之前先经 `GroupChatContext(session).append_user(...)` 写入用户行（`sender_id` 取 `speaker_user_id`，缺省 `"user"`；`sender_name` 缺省「我」；带引用与图片附件）并 `incremental_persist`，让轮询 `messages.json` 的 Desktop 能立刻看到 IM 发起的群聊轮次；`speaker_user_id` 同时透传给 `run_group_turn()`。`group_jev_decision` 事件经 `_persist_jev_decision()` 追加一条 UI 用 `role=tool`、`tool_name=jev`、`agent_id/sender_id=__jev__` 的决策卡行（`metadata.kind=jev_decision`，与末行同 purpose/action/target_ids 时去重；pending 事件不落盘），并同样触发增量持久化。`keep_runtime_after_disconnect`（请求字段；hub 开启时强制为真）为真时客户端断开不再中断 SSE 循环，也不取消后台 runtime task。
 
 **Server 端 MCP 辅助函数**（`server.py` 顶部）：
 
@@ -249,7 +260,7 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 
 ### protocols.py
 
-定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。
+定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。`speaker_user_id`：群聊房间发言人（空则视为桌面主人 `"user"`）。`command_name`：Composer 命令 chip，与 `client_turn_id` 一起写入该轮用户行的 `history_user_metadata`（空值不写），供历史重载回显。
 
 ---
 
@@ -297,6 +308,36 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 ### 中断失败提示 — turn_interruption.py
 
 `_last_failure_summary()` 保留 `模型调用失败 (provider/model):` 前缀（卡片可见是哪个模型失败），新增剥离 `litellm.UnsupportedParamsError:`，摘要上限从 120 放宽到 160 字符。
+
+### Composer 命令 — command_store.py + command_resolve.py + command_routes.py（NEW）
+
+输入框「/命令」的本地存储、可见性解析与 HTTP 接口，全部端点经 `_check_token`（`X-Agx-Desktop-Token`）校验；`create_studio_app()` 调用 `register_command_routes(app, _check_token)`（`app.state._command_routes_registered` 防重复注册）。
+
+- **存储（`CommandStore`）**：根目录默认 `~/.agenticx/commands/`——`global.json`、`avatars|groups|rooms/<subject_id>.json`（scope ∈ `global`/`avatar`/`group`/`room`），会话 pin 在 `~/.agenticx/sessions/<sid>/commands.json`，内置命令禁用表 `disabled.json`；文件格式 `{"version": 1, "commands": [...]}`，读失败按空列表处理。校验：名称 `^[a-z0-9]+(?:-[a-z0-9]+)*$` 且 ≤64，description ≤200，instructions 必填且 ≤8000；`subject_id` 禁止 `/`、`\`、`..`；`session_id` 走 `validate_ledger_id`。保留名 `perf` 不可新建/pin。pin 为源命令的**快照**（同名覆盖），源命令后续修改不影响已 pin 版本。错误类型：`CommandValidationError`/`CommandNameReserved` → 400、`CommandNameExists` → 409、`CommandNotFound` → 404。
+- **解析（`resolve_visible`）**：优先级 builtin < global < 当前 subject（avatar/group/room）< session pin，同名高优先级覆盖；`context` ∈ `meta`/`avatar`/`group`/`room`，非 meta 必须带 `subject_id`；group 上下文不加载 avatar 文件、room 不加载 avatar/group 文件。内置命令 `BUILTIN_COMMANDS` 目前只有 `perf`（`kind=local`，「诊断这次对话的性能」），结果中 local 命令在前、prompt 命令按名称排序。
+- **路由**：
+
+| 路由 | 方法 | 说明 |
+|------|------|------|
+| `/api/commands/visible` | GET | `context`/`subject_id`/`session_id` → `{items}` |
+| `/api/commands` | GET | 按 `scope`/`subject_id` 列出 `{commands}`；`scope=global` 时附 `builtins`（含 `enabled`） |
+| `/api/commands` | POST | 新建（201） |
+| `/api/commands/<command_id>` | DELETE | 按 scope 删除（204） |
+| `/api/commands/builtins/<name>` | PUT | `{enabled}` 启停内置命令 |
+| `/api/sessions/<sid>/commands/pin` | POST | 把某 scope 下的命令快照 pin 到会话（201） |
+| `/api/sessions/<sid>/commands/<name>` | DELETE | 取消 pin（204） |
+| `/api/sessions/<sid>/perf` | GET | `runtime.session_perf.summarize_session_perf(sessions_root, sid)`；`ValueError` → 400 |
+
+### TypeSafe（Jev）设置 — typesafe_routes.py（NEW）
+
+`register_typesafe_routes(app)`（在 web_search 路由之后注册）：`GET /api/typesafe/settings` 返回 `typesafe_settings_public_dict()`；`PUT` 仅写入全局配置 `typesafe.api_key` 与白名单字段 `enabled`/`model`/`timeout_sec`/`soft_timeout_sec`/`group_routing`/`kb_auto`/`show_decision_card`/`act_above`/`review_above`；`POST /api/typesafe/test` 以 `llms.typesafe_client.system_one` 发一次 ping 探测，返回 `{ok, model, latency_ms, error}`——未配置密钥 400、超时 408、上游 HTTP 错误透传状态码（非 4xx/5xx 归为 400）、其他异常 400。注意这几个端点未做 desktop token 校验。
+
+### KB 分块策略与检索（kb/chunk_strategy.py + kb/runtime.py）
+
+- **`ChunkingSpec` 新增** `parent_child`（默认 `False`）、`parent_chunk_size`（4096）、`child_chunk_size`（384），从 `knowledge_base.chunking` 读取，`POST /api/kb/debug/preview` 的 `chunking` payload 同样接受；`chunking_fingerprint()` 纳入这三项，改动后 ingest 缓存失效。`WikiCompilerSpec` 新增 `provider`/`model`（字符串，默认空）。
+- **`chunk_strategy.split_document()`**：`strategy` 为 `auto`/`heading` 或开启 `parent_child` 时 `_chunk_text()` 改走此函数。`auto` 依次尝试 heading → recursive → naive，`heading` 为 heading → naive，其他为 recursive → naive；每层用 `_chunks_ok()`（非空、块长 ≤2×size、不过碎等）判定是否采用。heading 层要求 ≥3 个 Markdown 标题，按主导层级切段并生成面包屑 `context_header`，索引文本 `embed_text` = header + 正文。父子模式下父块（`chunk_role=parent`，id `<doc>::pNNNN`）不入向量库/FTS，只写 `<registry_dir>/parents/<document_id>.json`（`text` + `child_texts`），子块（overlap = child_size/5）带 `parent_id`/`chunk_role` 元数据入库；文档计数只统计子块；删除文档时同步删除 parent store。
+- **检索**：所有模式结果都会经 `_apply_graph_expansion()`（此前仅 `hybrid_graph`）再经 `_expand_parent_hits()`——命中带 `parent_id` 时把文本替换为父块全文（父块短于 `child_chunk_size` 时拼上未包含的子块），并标 `metadata.parent_expanded=True`。BM25 分数最大值 >1 时经 `_rescale_unbounded_scores()` 归一到 `[0,1]` 后再比较 `score_floor`；hybrid 融合前两路先按分数降序排序。
+- **Job 世代**：`JobRegistry` 按 `document_id` 递增 `IngestJob.generation`（`to_dict` 输出）；`_update` 丢弃旧世代的更新，且已 `CANCELLED`/`FAILED` 的 job 不会被覆盖回 `DONE`；`on_done` 回调失败改记 warning。
 
 ---
 

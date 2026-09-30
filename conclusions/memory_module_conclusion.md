@@ -1,6 +1,6 @@
 # agenticx.memory 目录完整结构分析
 
-> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 `d:/myWorks/AgenticX/agenticx/memory`
@@ -18,6 +18,7 @@
 - hierarchical.py  *(本轮更新：新增 `ensure_aware`)*  
 - hybrid_search.py  *(本轮更新：时间衰减读取侧兜底)*  
 - intelligence/  
+- item_status.py  *(新增：记忆条目 pending/active 状态)*  
 - knowledge_base.py  
 - mcp_memory.py  
 - mem0_memory.py  
@@ -137,6 +138,14 @@
 **历史变更（commit `1b873108`，2026-03-23）**：新增标题感知切分（章节在 60 行以内保持单 chunk）；打通「收藏 → 长期记忆」管线——`POST /api/memory/save` 向 `MEMORY.md` 追加 `[用户收藏]` 备注并 `index_workspace_sync` 重建索引（best-effort，失败不阻断）；空文件内容产出 0 chunk，不写空占位。  
 **依赖关系**：由 Studio `/api/memory/*` 与 Meta-Agent 记忆召回调用；路径解析依赖 `agenticx/utils/agx_home.py`。
 
+### item_status.py（新增：记忆条目 pending/active 状态）
+**文件功能**：区分「推断出的待确认记忆」与「已确认/显式记忆」，在对话召回时过滤未确认条目。  
+**关键组件**：
+- `status_for_write(*, inferred, origin)`：`inferred=True` 且 `origin`（小写去空格）不在 `{"user","manual","explicit"}` 时返回 `"pending"`，否则 `"active"`。
+- `MemoryItemStore(path)`：JSON 列表文件存储，`default()` 指向 `agx_home()/memory/items.json`；`add(content, *, inferred, origin)` 生成 `uuid4().hex` id 并按 `status_for_write` 定状态；`confirm(item_id)` 置为 `active`（未找到返回 `None`）；`pending_ids()`；`active_matches(query)` 对 active 条目做大小写不敏感子串匹配，返回 `source="memory_item"`、`status="active"` 的行（空 query 返回空）。文件缺失/损坏/非 list 时视为空列表。
+- `apply_memory_status(rows, *, query, store=None)`：丢弃 `status=="pending"` 或 id 在 `pending_ids()` 中的行（缺省 status 视为 active），再按 id 去重追加 `active_matches(query)`；未传 `store` 且默认 `items.json` 不存在时原样返回（零开销旁路）。  
+**依赖关系**：被 `recall.py` 的 `search_memory_for_chat` 调用；当前仓库内仅测试 `tests/test_memory_status_and_ingest_generation.py` 调用 `MemoryItemStore.add/confirm`，尚无生产写入方。
+
 ### graph/ 子目录（本轮更新：writer.py 事件循环安全）
 记忆图谱（Graphiti）子系统目录，含 `store.py`/`config.py`/`status.py`/`group_id.py`/`routes.py` 等；本轮仅 `writer.py` 有变更。
 
@@ -232,4 +241,4 @@
 |------|------|------|
 | 配置 | `agenticx/memory/turn_archive_config.py` | `memory.turn_archive.enabled` 默认 `false`；`AGX_TURN_ARCHIVE_ENABLED` 可覆盖 |
 | 存储 | `WorkspaceMemoryStore.archive_turn_sync/search_turns_sync/reinforce_turns_sync` | `turns` + `turns_fts` 表；SHA-256 去重；复合重排 `recency×frequency×base` |
-| 召回 | `agenticx/memory/recall.py` | `search_memory_for_chat` 并入 `source=turn` 结果，命中后 `reinforce_turns_sync` |
+| 召回 | `agenticx/memory/recall.py` | `search_memory_for_chat` 并入 `source=turn` 结果，命中后 `reinforce_turns_sync`；`_merge_recall_results` 的合并结果再经 `item_status.apply_memory_status(..., query=q)` 过滤 pending 条目并追加匹配的 active `memory_item`（在 turn/chunk 强化之前执行） |

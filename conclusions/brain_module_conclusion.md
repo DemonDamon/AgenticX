@@ -1,6 +1,6 @@
 # AgenticX Brain 模块总结
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更；首次创建于 2026-05-29）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 模块概述
 
@@ -20,6 +20,10 @@ agenticx/brain/
 ├── runtime_code.py    # CodeBrainRuntime：封装 CodeIndexManager（1 脑 ↔ 1 代码库）
 ├── mount.py           # 挂载解析：可见性判定 + resolve_mounted_brain_ids
 ├── search.py          # 多脑检索聚合：search_docs_brains / search_code_brains
+├── wiki_compiler.py   # WikiCompiler：两步 LLM（分析 → 生成）把源文档编译为 wiki 页，支持进度回调与取消
+├── wiki_compile_queue.py # WikiCompileQueue：单 worker 后台写页队列，脱离入库线程池
+├── wiki_ops.py        # wiki 运维：单文档编译、写作说明草稿、示例 wiki、清理/维护
+├── wiki_graph.py      # wikilink 图：构建、序列化 payload、按 query 追加相关 wiki 命中
 └── routes.py          # FastAPI 路由：/api/brains 等 REST 接口
 ```
 
@@ -51,7 +55,7 @@ agenticx/brain/
 
 ### DocsBrainRuntime / CodeBrainRuntime（runtime_docs.py / runtime_code.py）
 
-- **DocsBrainRuntime**：包装 `agenticx.studio.kb` 的 `KBRuntime`（每脑独立 registry_dir 与 `JobRegistry`），提供 `search`、`read_config`/`write_config`、`stats`，并能把统计回写到 `BrainRegistry`。
+- **DocsBrainRuntime**：包装 `agenticx.studio.kb` 的 `KBRuntime`（每脑独立 registry_dir 与 `JobRegistry`），提供 `search`、`read_config`/`write_config`、`stats`，并能把统计回写到 `BrainRegistry`；每个实例另持有一个 `wiki_compiles: WikiCompileQueue`（见下文 Wiki 编译）。
 - **CodeBrainRuntime**：包装 `agenticx.code_index` 的 `CodeIndexManager`，校验 `codebase_path` 必须为绝对路径，提供 `search`、`create_index`、`status`、`clear_index`、`cancel_index`、`update_config`。
 
 ### 挂载解析（mount.py）
@@ -63,13 +67,39 @@ agenticx/brain/
 
 ### 多脑检索聚合（search.py）
 
-`search_docs_brains` / `search_code_brains` 对解析出的多个脑逐一检索，返回统一结构：`hits`（按 score 降序、截断 top_k 的扁平命中列表）、`by_brain`（按脑分块、含 per-brain error）、`brains`（参与脑 id）。未挂载任何脑时返回带中文 `hint` 的空结果，引导用户去「设置 → 知识库」创建并挂载。
+`search_docs_brains` / `search_code_brains` 对解析出的多个脑逐一检索，返回统一结构：`hits`（扁平命中列表）、`by_brain`（按脑分块、含 per-brain error）、`brains`（参与脑 id）。未挂载任何脑时返回带中文 `hint` 的空结果，引导用户去「设置 → 知识库」创建并挂载。
+
+`search_docs_brains` 的 `hits` 把普通 chunk 命中与 wiki 页命中分开排序：wiki 命中判定为 `id` 以 `wiki::` 开头或 `metadata.wiki_page` 非空；chunk 命中按 score 降序截断 `top_k`，wiki 命中按 score 降序最多取 3 条追加在后（因此 `used_top_k` 可能超过 `top_k`）。`search_code_brains` 仍按 score 降序截断。
+
+### Wiki 编译（wiki_compiler.py / wiki_compile_queue.py / wiki_ops.py / wiki_graph.py）
+
+文档脑可把已入库文档编译为 `<storage_root>/wiki/` 下带 frontmatter 与 `[[wikilink]]` 的 Markdown 页，受 `KBConfig.wiki_compiler`（`enabled` / `provider` / `model`）控制。
+
+- **WikiCompiler.compile_source()**：两步 LLM（抽实体/概念 JSON → 生成 `===FILE: ... ===` 文件块），新增可选 `progress_cb(stage, message)` 与 `cancel_event: threading.Event`。阶段依次为 `reading` / `analyzing` / `generating` / `writing`；LLM 调用经 `_invoke_llm_cancellable` 在 daemon 线程中执行、每 0.25s 轮询取消事件，取消时抛 `WikiCompileCancelled` 并返回 `WikiCompileResult(ok=False, error="已取消")`（在途模型调用被放弃而非中断）。`_invoke_llm` 调用 `ProviderResolver.resolve(provider_name=..., model=...)`。
+- **WikiCompileQueue**：`ThreadPoolExecutor(max_workers=1)` 单 worker，使入库线程不被模型调用阻塞。按 `doc_id` 维护状态项（`document_id` / `source_name` / `status` / `message` / `stage` / `progress` / `model`），`progress` 由阶段映射（queued 0 → reading 0.15 → analyzing 0.4 → generating 0.7 → writing 0.9 → 终态 1.0）。`enqueue` 对同一文档递增 generation 并置位旧取消事件（新任务替换旧任务）；`cancel(doc_id=None)` 只取消 `queued`/`running` 项，缺省取消全部；终态为 `done`（「写入 N 页」）/ `failed` / `cancelled` / `skipped`。
+- **schedule_wiki_after_ingest(docs_rt, job)**：仅对 `IngestJobStatus.DONE` 的 job 入队并立即返回；`wiki_compiler.enabled` 为假时记为 `skipped`（「Wiki 编译未打开」）。`wiki_ops.maybe_compile_wiki_after_ingest` 现只是转调它，不再同步编译。
+- **enqueue_wiki_backfill(docs_rt, document_ids=None)**：对已 `KBDocumentStatus.DONE` 的文档补排写页任务，不重新向量化，返回已入队的 doc id 列表。
+- **wiki_ops.compile_document_wiki(docs_rt, doc_id, *, progress_cb, cancel_event)**：单文档编译，使用 `wiki_compiler.provider/model`（不再借用 embedding provider）；未开启返回 `skipped`，未配置供应商/模型返回中文错误，取消返回 `cancelled: True`，成功后刷新脑统计并返回 `written`。
+- **wiki_ops.draft_writing_brief(docs_rt, content="")**：基于最多 40 个已入库文件名（可带原说明做润色）让模型写 2–4 句中文写作说明（`purpose`），要求已配置 wiki 供应商/模型。
+- **wiki_ops.seed_sample_wiki / clear_sample_wiki**：写入/移除内置的 5 页「员工手册」示例 wiki（含 `purpose.md` 默认文本），清理仅删除示例页与空目录，`purpose.md` 仅在内容等于示例文本时清空。
+- **wiki_graph.wiki_graph_payload(dir)**：把 wiki 页序列化为 `{nodes: [{id,title,type,path,sources}], edges: [{source,target}]}` 供浏览 UI。
+- **wiki_graph.expand_hits_with_wiki_graph()**（由 `agenticx/studio/kb/runtime.py` 调用）：改为按 query 选页——从问题抽英文词与 4/3/2 字中文 n-gram（过滤停用词与虚词），以标题命中为种子并扩一跳出链，排除 `source*` 类型页，剔除在所有候选页都出现但不在标题中的词，按「标题分×3 + 正文分」排序，最多追加 3 条 `wiki::<id>` 命中；分数锚定为最佳 chunk 分 ×0.85 加小幅加成，`metadata.retrieval_mode = "wiki_graph"`。原有命中保持不变、不再重排或截断 `top_k`；无种子/无有效词时原样返回。
 
 ### REST 路由（routes.py）
 
 `register_brain_routes()` 注册 `/api/brains` 等接口（幂等注册保护），对外暴露脑列表（文档脑会附带实时 stats）与脑管理能力；`_require_docs_brain()` 做类型校验后返回对应 runtime。
 
 **(NEW，2026-09)** `POST /api/brains/{brain_id}/jobs/{job_id}/cancel`：对文档脑入库 job 调用 `rt.jobs.request_cancel(job_id, rt.runtime)`。job 不存在 → 404；已终态 → 409 `job already finished`；成功返回更新后的 `job.to_dict()`。与 Studio KB `jobs.request_cancel` / LiteParse `cancel_event` 同一取消语义。
+
+Wiki 相关接口（均先经 `_require_docs_brain`）：
+
+- `GET /api/brains/{brain_id}/wiki/graph` → `{ok, nodes, edges}`。
+- `POST` / `DELETE /api/brains/{brain_id}/wiki/sample` → 写入（`written`）/ 移除（`removed`）示例 wiki。
+- `GET /api/brains/{brain_id}/wiki/compiles` → `{ok, compiles}`（队列状态列表）。
+- `POST /api/brains/{brain_id}/wiki/backfill` → `{ok, queued}`，对全部已入库文档补排写页。
+- `POST /api/brains/{brain_id}/wiki/compiles/cancel`，可选 body `{document_id}`，缺省取消全部 → `{ok, cancelled}`。
+- `POST /api/brains/{brain_id}/wiki/purpose/draft`，可选 body `{content}` → `{ok, content}`；业务失败 400、异常 500。
+- 既有 `POST /api/brains/{brain_id}/wiki/compile/{doc_id}` 仍为同步编译，且仍以 `cfg.embedding.provider`、`model_name=None` 调用 `WikiCompiler`（未走队列与 `wiki_compiler` 模型配置）。
 
 ## 设计模式
 

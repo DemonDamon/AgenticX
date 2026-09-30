@@ -1,6 +1,6 @@
 # AgenticX Runtime 模块总结
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 
@@ -67,9 +67,12 @@ agenticx/runtime/
 ├── global_mcp_state.py     # 最近连接 MCP 服务名持久化（mcp_state.json）
 ├── tool_result_budget.py   # 工具结果上下文预算：归档 / 分类 / 衰减（含批量归档阈值）
 ├── token_budget.py         # token 预算治理与超限事件
-├── usage_store.py          # LLM 用量落 ~/.agenticx/usage.sqlite（含 cache_stats 命中率聚合）
+├── usage_store.py          # LLM 用量落 ~/.agenticx/usage.sqlite（含 cache_stats 命中率聚合 + usage_faults 故障表）
+├── plugin_usage.py         # 只读用量查询（模型/Provider 调用与故障、Jev 判定卡片），供 plugin_usage 工具
+├── session_perf.py         # 单会话 replay run 性能摘要（wall / TTFT / 模型等待 / 工具耗时）
+├── jev_intent.py           # TypeSafe System One（Jev）答案 ↔ 群聊意图的纯映射 + 卡片文案
 ├── model_pricing.py        # 按 1M tokens 估算成本（config.yaml 可覆盖）
-├── model_context_window.py # 模型上下文窗口表 + 1M 级强上下文判定（is_strong_context_model）
+├── model_context_window.py # 模型上下文窗口表（含 mimo-v2 按 1M 记）+ 1M 级强上下文判定（is_strong_context_model）
 ├── prompt_cache_policy.py  # 缓存断点策略 + 隐式前缀提供商旁路 + 前缀指纹落盘
 ├── provider_fallback.py    # 超时兜底切换 + 禁止兜底判定（附件路由锁 / 企业托管）
 ├── truncated_final.py      # 截断终答检测（finish_reason=length、未闭合 Markdown、路径截断）
@@ -105,11 +108,25 @@ agenticx/runtime/
 4. 工具调用过滤：流式累积和非流式响应均过滤 tool_name 为空字符串或字面量 `"none"` 的无效条目（部分 provider 会产生此类帧），过滤时记录 warning 日志
 5. 内联工具解析：从文本中提取 `<tool_code>` 格式的工具调用
 6. 工具分发：meta-only 工具走 `meta_tools.dispatch_meta_tool_async()`，其余走 `dispatch_tool_async()`
-7. 循环检测：`LoopDetector` 记录每轮工具调用，warning/critical 两级处理
+7. 循环检测：`LoopDetector` 记录每轮工具调用，warning/critical 两级处理；每轮 LLM 响应后另调 `note_assistant_round()` 统计无工具的重复正文与工具参数处的长度截断（见 LoopDetector）
 8. 状态查询节流：`query_subagent_status` 每轮至多 1 次，跨轮需冷却 8s
+9. 轮边界插话：`self.turn_steer`（`TurnSteerQueue`）在每轮开始前 `drain()`，经 `_persist_steer_text()` 先把追问写进 `chat_history`（`metadata.source="steer"`）再追加为 user 消息；停止或新回合开始时 `discard()` 丢弃未注入内容（运行时内暂无 `enqueue` 调用方）
+
+**本轮回复收口细节**：
+- **空 todo_write 丢弃**：`_should_drop_noop_progress_tools()`——已有可见正文且本轮工具只有参数为空的 `todo_write` 时，直接清空 tool_calls 当终答，避免同一答案被当作中途行再生成一遍
+- **内联工具解析收紧**：`_extract_inline_tool_call()` 的括号兜底只扫描可见正文（不扫推理），括号内不是 JSON 对象（如英文/中文说明）时返回 None，不再造出空参数的假工具调用
+- **finish_reason=tool_calls 但无可用 tool_call**：即使有可见开场白也触发一次重试（`_empty_tool_calls_retry_used`），开场白先作为 assistant 行保留
+- **长度截断处理**：`truncated_final.is_length_finish_reason()` 判定厂商截断；只有推理没正文时改用 `_LENGTH_CUT_REASONING_NUDGE_HINT`（要求立即落盘或直接给终答，不重写思考）；最终仍无正文时终答为 `_LENGTH_CUT_EMPTY_FALLBACK`（提示回复「继续」），`terminal_reason="output_length_fallback"`
+- **仅推理行保留**：`_sanitize_context_messages()` 对无 tool_calls、content 为空但带 `reasoning_content` 的 assistant 行保留（content 置为单空格），避免重试时丢失草稿；`kind` 为 `jev_decision` / `jev_kb_gate` 的行与其他 UI 卡片一样不进入 LLM 上下文；malformed 重试且无可见正文时沿用重试前的推理文本
+- **chat_history 去重合并**：`_chat_history_append_deduped()` 对同一用户轮内可见正文相同的 assistant 行不再追加，而是经 `_merge_assistant_history_row()` 合并 metadata / reasoning / usage / references 等字段到前一条
+- **中途行带推理**：带工具调用的中途 assistant 行（`metadata.turn_terminal=False`）在只有推理、没有正文时也会落 `chat_history`，携带 `reasoning`（截断至 16384 字符）与 `reasoning_seconds`，供 Desktop 在工具组之间渲染思考块
+
+**模型故障落账**：`_log_model_fault()` 包装 `usage_store.log_model_fault()`，在流式失败（`phase=stream`）、`LLMRetryPolicy(on_retry=...)` 重试（`phase=retry`）、单轮超时（`phase=timeout`）与 invoke 异常（`phase=invoke`）时写 `usage_faults`；失败只记 debug 日志，不影响主流程。
+
+**Jev 知识库检索门（kb_auto）**：第 1 轮、`knowledge_search` 在可用工具中、非系统触发且非「始终检索」时，`_kb_retrieval_jev_should_search()` 在检索模式为 `auto`（会话 `kb_retrieval_mode` 优先，否则读 `KBManager` 配置）且 `typesafe.enabled` + `typesafe.kb_auto` + 有密钥时，调 `llms.typesafe_client.system_one` 问一个 `need_search` noul 问题：≥0.7 则按「始终检索」路径强制首轮 `knowledge_search`，否则跳过；超时/HTTP 错误返回 None 不干预。判定结果以 `kind=jev_kb_gate` 的 tool 行（`agent_id="__jev__"`）写入 `chat_history`（同 action/source 不重复写），并发射 `name="jev"` 的 `TOOL_CALL` / `TOOL_RESULT` 事件对；不适用时 `_clear_session_jev_kb_gate()` 清掉上一轮残留。
 
 **长运行硬化（harden_flags.py 门控）**：
-- **上下文溢出重试**：LLM 报 `context_window` 类错误时，强制压缩历史后重试本轮（`AGX_OVERFLOW_RETRY` 默认开，`AGX_MAX_OVERFLOW_RETRIES` 默认 2、上限 5），并发射 `detector=context_overflow_compact_retry` 的 warning 事件
+- **上下文溢出重试**：LLM 报 `context_window` 类错误时，强制压缩历史后重试本轮（`AGX_OVERFLOW_RETRY` 默认开；实际每轮至多 1 次——判定为 `min(1, max_overflow_retries())`，`AGX_MAX_OVERFLOW_RETRIES` 设为 0 可关闭），并发射 `detector=context_overflow_compact_retry` 的 warning 事件
 - **持久化失败收口**：`_persist_or_abort()` 在 LLM 请求与每个工具副作用前 flush 回合前缀；`AGX_PERSIST_FAIL_CLOSED=1` 时持久化失败直接中止本轮而不是带病继续
 - **取消前缀落盘**：用户中途打断时，`_finalize_cancelled_prefix()` 把已流出的可见正文作为 assistant 消息提交进历史（`AGX_CANCELLED_PREFIX_FINALIZE` 默认开），避免「用户看到了、模型却没说过」
 - **中断收尾**：崩溃恢复路径由 `interrupted_closers.close_interrupted_tool_calls()` 为悬空 tool_calls 合成「未开始 / 结果未知」tool 行（见下文「中断恢复」）
@@ -118,6 +135,8 @@ agenticx/runtime/
 **模型适配**：
 - `_chat_temperature_kwargs()` 经 `sampling_params.resolve_chat_temperature` 按厂商解析温度参数
 - Kimi K3 注入 `reasoning_effort`；DeepSeek V4（1M 窗口）注入 thinking 参数并保证带 tool_calls 的 assistant 行携带 `reasoning_content`
+- 每轮 `max_tokens` 统一经 `_session_round_max_tokens()`（基值 `_max_tokens_override` 或 8192）→ `_resolve_round_max_tokens(..., model=, thinking=)`：DeepSeek V4 且 thinking 未关闭、基值 ≥8192 时抬到 `_DEEPSEEK_V4_THINKING_OUTPUT_FLOOR=24576`（推理与正文共用完成预算）；MiniMax 仍封顶 4096
+- 百炼/DashScope（provider `bailian` / `dashscope` / `aliyun`）上支持 `enable_thinking` 的混合 Qwen3.* 模型，`_bailian_qwen_thinking_kwargs()` 按 `session._thinking_enabled` 经 `extra_body.enable_thinking` 显式开关
 - 1M 级端点（`model_context_window.is_strong_context_model`）抑制每轮 goal anchor 注入
 
 **超时体系**：
@@ -225,6 +244,7 @@ COMPACTION, CONTEXT_STATS, ROUND_END, STALL
 - 内联出图纪律（`_build_inline_photo_display_block`：web_search → web_fetch → show_images 直链出图，与 view_image 视觉能力解耦）
 - 纯文本模型的图片兜底：`view_image` 不可用时改用 `analyze_image(target=..., question=...)`
 - 分身身份更新规则（`AVATAR_IDENTITY_UPDATE_RULES`：必须调用 `update_self_identity` 落盘）
+- 用量问答纪律：用户问模型/Provider/Jev 的调用次数、日期范围用量、超时、连续失败或某 session 为何重试时，必须调用 `plugin_usage`（可带 model / from_date / to_date / session_id），不得凭记忆编造
 
 **易变状态外移**：`build_meta_agent_system_prompt(..., include_volatile=False)` 时，易变区块（`build_meta_agent_volatile_sections`）经 `stash_volatile_sections()` 挂到 session，由 runtime 以 `<session-context>` 尾部消息注入，不再占 system prompt 前缀（见「会话上下文与前缀缓存」）。
 
@@ -278,6 +298,8 @@ Meta-Agent 通过 `delegate_to_avatar(avatar_id, task)` 将任务注入目标分
 ### ContextCompactor（compactor.py）
 
 - `maybe_compact(history, *, force, model, session)`：历史消息超阈值时调用 LLM 生成摘要，返回压缩后的 messages + did_compact + summary + compacted_count
+- 待答问题：`pending_user_question` 从完整 working 历史（含保留尾部）提取，而非仅被压缩的前缀，避免保留旧标记或漏掉最新未答问题
+- 微压缩 `knowledge_search` 结果：`_project_knowledge_search_hits()` 把超预算（`AGX_MICRO_COMPACT_BUDGET`，默认 4000）的检索 JSON 投影为 `{ok, hits:[{id, score, title, text, wiki_page?}], used_top_k}`，丢掉 `by_brain` 重复命中，并二分搜索每条命中的 text/title 截断长度，使每条命中都保留自己的正文且顺序不变（`_tighten_hit_text()` 去掉幻灯片页眉等噪声行）；无法解析或压不进预算时回落 head/tail 截断
 - 压缩全程经 `compaction_journal` 记账：先追加 `compaction/start` 并建 `compaction.lock`，完成后追加 `compaction/end`（outcome: summarized / nothing-to-compact / failed），**最后**才删锁——中途崩溃留下可检测的孤儿锁，`detect_orphan` 下次启动时接管并记 warning，不阻塞后续压缩
 
 ---
@@ -285,8 +307,11 @@ Meta-Agent 通过 `delegate_to_avatar(avatar_id, task)` 将任务注入目标分
 ### LoopDetector（loop_detector.py）
 
 - 记录工具调用序列，检测无进展重复模式
-- `warning_threshold=4`：emitting 警告提示
-- `critical_threshold=8`：终止当前 Agent 执行
+- 构造默认 `warning_threshold=8`（下限 3）：发出警告提示
+- 构造默认 `critical_threshold=15`（至少比 warning 大 1）：终止当前 Agent 执行
+- `AgentRuntime` 默认传入 `loop_warning_threshold=6` / `loop_critical_threshold=12`
+- `note_assistant_round(content, had_tool_calls=, length_truncated=, tool_args_complete=)`：无工具调用的相同正文（含空回复）连续达 critical 阈值返回 `detector="plain_repeat"`（runtime 追加「请给出完整正文。」系统提示并继续）；因长度截断导致工具参数不完整（`_tool_args_complete()` 判为空/非法 JSON）连续达阈值返回 `detector="length_truncated_tools"`（runtime 发 warning 级 `ERROR` 事件并结束本轮）；有工具调用的轮次清零纯文本计数，`reset()` 一并清零
+- `TurnSteerQueue`：轮边界插话队列，`enqueue` / `discard` / `drain(persist)`——persist 失败的条目留在队列
 
 ---
 
@@ -350,6 +375,9 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 - **open_floor 闲聊动作**：`_analyze_intent` 新增 `open_floor` 动作——把话丢进群里、最多 `group_open_floor_max_speakers()`（默认 2、上限 3）名成员有机会开口也可跳过；`AGX_GROUP_OPEN_FLOOR=0` 可整体回滚到单发言人旧行为。意图识别与 Meta 回复的 token 预算分别由 `AGX_GROUP_INTENT_MAX_TOKENS`（默认 1500）/ `AGX_GROUP_META_REPLY_MAX_TOKENS`（默认 2000）控制。
 - **执行证据门**：`_apply_execution_evidence_gate()` 结合 `group_facts.build_group_execution_facts()` 聚合的只读事实（成员回复数、工具调用数、图节点状态、taskspace 产物文件）校验「完成/已搜索」类声称；无执行痕迹时 `_append_zero_exec_fallback()` 追加兜底说明，避免「口头承诺当产出」。
 - **进度/工具事件收敛**：`_should_enqueue_runtime_event()` / `_should_forward_progress()` 过滤噪音进度；工具步骤与详情经 `_runtime_event_to_tool_step()` / `_runtime_event_to_tool_detail()` 渲染为聚合卡片素材。
+- **Jev 意图判定（TypeSafe System One）**：`_analyze_intent()` 在无显式 @、`config.yaml` 的 `typesafe.enabled` 与 `typesafe.group_routing` 均开启时，先并发调 `_try_jev_intent()`（`jev_intent.build_group_routing_state/questions` 组 state 与 action/target/requires_execution 三问，`map_jev_to_intent()` 映射；`decide_gate()` 按 `act_above` 默认 0.8 / `review_above` 默认 0.5 分 auto/review/abstain，仅 auto/review 被采用）。等待 `soft_timeout_sec`（默认 2s，经 `clamp_soft_timeout_sec` 夹到硬超时 `timeout_sec` 默认 8s 内）未返回则并行启动主模型意图识别，Jev 先完成且可采用则取消主模型任务，主模型先完成则取消 Jev（记 `jev_soft_timeout`）。未采用时 `IntentDecision` 标记 `source="fallback"` 与 `fallback_reason`（`jev_no_key` / `jev_timeout` / `jev_http` / `jev_fallback_llm` / `jev_soft_timeout`，主模型也失败时为 `jev_fallback_meta`）。`IntentDecision` 新增 source / model / confidence / probabilities / gate / fallback_reason / noul_execution / requested_model / latency_ms 字段，显式 @ 覆盖为 route_to 时一并保留。开启时群聊流先 yield `group_jev_pending`（有密钥时），判定后 yield `group_jev_decision`（`agent_id="__jev__"`、`skipped=True`、`confirm_context` 载 `kind=jev_decision` 载荷，正文由 `format_jev_content_line()` 生成）。
+- **意图兜底改回 Meta**：主模型意图识别返回 `route_to` 却无目标时改为 `meta_direct`（原为派给第一个成员）；意图识别抛错时有活跃话题则 `continue_thread`，否则 `meta_direct`（`_intent_unavailable_decision()`，不再回落第一个成员）。
+- **发言人身份**：`run_group_turn(..., speaker_user_id=)` 透传到 `GroupChatContext.append_user(sender_id=)`，用户行 `sender_id` / `agent_id` 不再固定为 `"user"`；`append_user` 对与末行完全相同（内容、发言人、引用、附件）的用户行去重不追加。
 - **其他**：`GroupChatContext.append_user/append_agent` 支持 `attachments` 落历史；群成员本地会话经 `_bind_group_local_session()` / `_copy_group_member_runtime_flags()` 继承运行时开关；`resolve_studio_session_id()` 统一解析 base session id（图 run 绑定缺失时拒绝把 session_id 绑成 group_id）。
 
 ---
@@ -381,6 +409,9 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 ### 用量计量与追问
 
 - **usage_store.py** + **model_pricing.py**：每轮 LLM 用量写入 `~/.agenticx/usage.sqlite`（`usage_events` 表），`compute_cost_usd()` 按 1M tokens 估算成本，供 Studio `/api/usage/*` 聚合。
+- **usage_store.py 故障表**：新增 `usage_faults` 表（ts_ms / session_id / avatar_id / provider / model / kind / phase / attempt / retryable / recovered / message≤400 字符，含 ts、session、model 索引）与同步接口 `record_fault_sync` / `query_faults_sync` / `summarize_faults_sync`，以及对 `usage_events` 的 `query_calls_sync` / `summarize_calls_sync`（均支持时间窗 + session / provider 精确 / model 子串过滤）和 `consecutive_fault_streaks_sync(min_streak=2)`（按 session+model 时间线统计连续失败）。模块级 `log_model_fault(session, ...)` 从 session 补齐 session_id / provider / model 后 best-effort 写入，永不抛出。
+- **plugin_usage.py**：`query_plugin_usage(plugin=, scope=, purpose=, session_id=, model=, provider=, from_date=, to_date=, range_key=, limit=, ...)` 只读查询，由 `cli/agent_tools.py` 的 `plugin_usage` 工具调用。`plugin="jev"` 时扫描会话目录（`AGX_SESSIONS_ROOT` 或 `~/.agenticx/sessions`，至多 400 个目录、单个 `messages.json` ≤8MB，可合并 live messages）里 `jev_decision` / `jev_kb_gate` 卡片并按 outcome（adopted / timeout / soft_timeout / http_error / no_key / low_confidence / fell_back_to_meta）汇总；其余（`all` 及 model/provider 别名，`_split_plugin_filters` 会把形似模型名的 plugin 当 model 过滤）走 `usage_store` 调用 + 故障聚合、连续失败与指定 session 的 `diagnosis`（最近结果、连续失败数、最新故障类型与 `provider_fault.human_hint_for_fault` 提示）。时间窗：显式 `from_date` / `to_date`（YYYY-MM-DD / today / yesterday）优先，否则 `range_key` day / week / month，缺省时 session 范围为全量、全局为近 30 天；`scope="current"` 缺 session_id 时返回 `missing_session_id`；limit 默认 8、上限 30。结果不注入模型上下文。
+- **session_perf.py**：`summarize_session_perf(sessions_root, session_id)` 读 `<session>/runs/*/run.json` + `events.jsonl` 与 `tool_call_observations.json`，输出最近 20 个 run 的 wall / TTFT（第 1 轮 `round_started` → `assistant_output_started`）简表，以及最新 run 的模型等待（每轮到首个 tool_call 或输出完成，取前 3）、窗口内工具总耗时与最慢工具、按 `messages.json` 末条 usage 计算的 `output_tokens_per_sec`；缺失计时保持 None；session_id 经 `validate_ledger_id` 校验。由 `studio/command_routes.py` 调用。
 - **followup_stream.py**：从流式与最终文本剥离 `<followups>` 块，受 `runtime.suggested_questions.enabled` 控制，驱动 Desktop 追问 chips（要求第一人称视角，commit `dedfbcca`）。
 
 ### 凭据安全与品牌
@@ -407,7 +438,7 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 | `AGX_STATUS_QUERY_BUDGET_PER_TURN` | 2 | 每轮 query_subagent_status 上限 |
 | `AGX_STATUS_QUERY_COOLDOWN_SECONDS` | 8 | 状态查询冷却时间 |
 | `AGX_OVERFLOW_RETRY` | 1 | 上下文窗口溢出时压缩历史并重试本轮 |
-| `AGX_MAX_OVERFLOW_RETRIES` | 2 | 单轮溢出重试上限（clamp 0..5） |
+| `AGX_MAX_OVERFLOW_RETRIES` | 2 | 溢出重试配置（clamp 0..5）；runtime 每轮实际至多 1 次，0 为关闭 |
 | `AGX_INTERRUPTED_CLOSERS` | 1 | 崩溃恢复时合成中断工具收尾行 |
 | `AGX_PERSIST_FAIL_CLOSED` | 0 | 持久化失败时中止本轮（默认带病继续） |
 | `AGX_CANCELLED_PREFIX_FINALIZE` | 1 | 打断时已流出前缀落盘进历史 |
@@ -419,6 +450,10 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 | `AGX_GROUP_META_DIRECT_TOOLS` | 0 | 群聊 Meta 直答携带工具（opt-in） |
 | `AGX_GRAPH_RUNS_ROOT` | `~/.agenticx/graph_runs` | GraphRun 快照根目录 |
 | `AGX_WINDOWS_SANDBOX_EXECUTABLE` | （空） | Windows mxc 沙箱运行器路径 |
+| `AGX_SESSIONS_ROOT` | `~/.agenticx/sessions` | `plugin_usage` 扫描 Jev 卡片的会话根目录 |
+| `TYPESAFE_API_KEY` | （空） | Jev 密钥（优先级次于 `typesafe.api_key`，高于 `~/.config/typesafe/key`） |
+
+Jev（TypeSafe）其余参数在 `config.yaml` 的 `typesafe:` 节（由 `agenticx/llms/typesafe_config.py` 解析）：`enabled`（默认关）、`group_routing`（默认开）、`kb_auto`（默认关）、`model`（默认 `jev-latest`）、`base_url`（默认 `https://api.typesafe.ai`）、`timeout_sec`（默认 8）、`soft_timeout_sec`（默认 2）、`act_above`（0.8）、`review_above`（0.5）。
 
 以上 harden/group 类开关均按 `harden_flags.py` 的「env > `config.yaml` > 默认值」顺序解析，解析失败回落默认、绝不抛异常。
 
@@ -547,7 +582,7 @@ GroupChatRouter.run_group_turn(routing="team")
 ### 输出治理（2026-09 修订）
 
 - **widget_flow_guard.py**：检测正文里的 ASCII/文本流程图（箭头行、竖向箭头、box-drawing 字符、`+---+` 框），命中后由 `build_widget_flow_retry_hint()` 生成重写提示让模型改用 `show_widget` 重画；每会话至多重试 1 次（`WIDGET_FLOW_MAX_RETRIES_PER_SESSION=1`），重写期间向 SSE 发一次性的 `WIDGET_FLOW_DISCARD_NOTICE`（Desktop 不落盘该句）。检测器用围栏状态机拆分 prose 与代码块，避免把代码里的箭头误判成流程图。
-- **truncated_final.py**：截断终答检测增强——厂商显式 `finish_reason`（`length` / `max_tokens` / `max_output_tokens` / `max_completion_tokens`）必续一次；新增未闭合 Markdown（奇数个 ``` 或 `**`）与路径中间截断（如 `补 T4/T`）启发式。
+- **truncated_final.py**：截断终答检测增强——厂商显式 `finish_reason`（`length` / `max_tokens` / `max_output_tokens` / `max_completion_tokens`）必续一次（公开判定函数 `is_length_finish_reason()`，被 runtime 与 LoopDetector 调用链复用）；新增未闭合 Markdown（奇数个 ``` 或 `**`）与路径中间截断（如 `补 T4/T`）启发式。
 - **assistant_output.py**：`<followups>` 保留标签兼容 MiniMax 等模型的别名拼写（`followflows` / `follow-ups` / `follow_ups` / `followup`），统一归一为 `followups` 且不再把已知别名误判为非规范标签。
 - **tool_search.py**：默认模式从 `off` 改为 `auto`；`CORE_ALWAYS_LOAD_TOOLS` 新增 `web_search` 与 `update_self_identity`（`show_widget` 移出延迟白名单）；模型直接调用未加载工具时自动 load 并提示下轮重试（`TOOL_AUTO_LOADED_TEMPLATE`，无需先调 `tool_search`）。
 

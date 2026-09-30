@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "reliability",
-  "generation": "901d4adc95724bdf888c75553962e954",
+  "generation": "cccabf2e04a540c9bb499c02180e2e66",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
   "source_fingerprint": "sha256:4b3133405cdc7b2ef1c58c4d6fda271a0e965ae9c5b5f7b42e915f00eee22fd3",
   "summary_path": "conclusions/reliability_module_conclusion.md",
   "summary_sha256": "sha256:cbca087e79f4db8573796c4b317aef0048819d2e970250313094af1b453bb66f",
-  "updated_at": "2026-09-17T23:48:10.864056+00:00"
+  "updated_at": "2026-09-30T00:54:10.191568+00:00"
 }

@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 
@@ -110,6 +110,7 @@ agenticx/cli/
 | Todo 管理 | `todo_write` |
 | Scratchpad | `scratchpad_write`, `scratchpad_read` |
 | 记忆 | **(NEW)** `memory_search`, `memory_append`, `session_search`（跨会话 FTS5 检索） |
+| 用量诊断 | **(NEW)** `plugin_usage`（只读：按 `plugin`（`all` 默认读本地 usage 台账 / `jev` 读结构化决策卡 / provider id / 模型名）、`model`、`provider`、`from_date`/`to_date`（`YYYY-MM-DD` 或 `today`/`yesterday`）、`range`（day/week/month/total）、`scope`（all/current）、`purpose`（all/failed/timeout/retry/adopted·ok/routing/kb）、`session_id`、`limit`（1–30，默认 8）查询调用次数、超时、重试、连续失败与会话失败原因；`_tool_plugin_usage` 委托 `agenticx.runtime.plugin_usage.query_plugin_usage`，并传入当前会话 `chat_history` 与 session id 作为 live 数据，结果 JSON 返回、不注入常规对话上下文；列入 `_CONCURRENCY_SAFE_STUDIO_TOOLS`） |
 | 知识/代码索引 | **(NEW)** `knowledge_search`, `code_search`, `code_outline`, `code_index_create` / `code_index_status` / `code_index_cancel` / `code_index_clear` |
 | 子智能体 | `spawn_subagent`, `query_subagent_status`, `cancel_subagent`, `send_message_to_subagent`（委派/接力均通过 meta_tools 暴露） |
 | MCP | `mcp_call`, **(NEW)** `mcp_connect`, `mcp_import` |
@@ -145,6 +146,7 @@ agenticx/cli/
 - `file_read` / `file_write` / `file_edit` 完成后调用 `session.file_state_tracker.refresh_from_disk` 刷新文件快照；`file_write` / `file_edit` / `memory_append` / `skill_manage` 等确认文案中文化并带 `risk` 分级（`low` / `policy`）
 - `skill_use` 返回文案明确「正文已注入本轮上下文，不要再用 file_read/bash_exec 读技能目录（工作区外不可读）」
 - `META_TOOL_NAMES` 新增 `fresh_round_loop`
+- `_request_clarification`：当 `options` 与 `decisions` 均为空时强制 `allow_free_text=True`，避免下发既无选项又无文本输入的澄清请求（Desktop 对持久化行做同样兜底）
 
 ---
 
@@ -232,7 +234,7 @@ agenticx/cli/
 - `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析 `Path.home()`——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
 - `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 写入后主动 `_invalidate_yaml_cache`，不依赖时间戳精度。实测消除 `get_value` 读路径上约 96% 的重复 YAML 解析耗时
 
-**Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）。
+**Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）与 **(NEW)** `mimo`（必填 `api_key`，环境变量 `MIMO_API_KEY`，默认模型 `mimo-v2.6-pro`）。
 
 **配置项说明**：
 - `workspace_dir`：Meta-Agent workspace 目录

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "brain",
-  "generation": "a0636157f1e74c2881b881ea312d668f",
+  "generation": "cfaee4e2a27c42d59751fd2af749f874",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
-  "source_fingerprint": "sha256:bc02c2242afb102e16fda899ffc7e1ea128a6e8c84ad841943a7fb847d1eee30",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "source_fingerprint": "sha256:127ed30f94e090ef1715c8d9ff1dc4e81f8822ef73220ed7d08ad8462aca4492",
   "summary_path": "conclusions/brain_module_conclusion.md",
-  "summary_sha256": "sha256:70c49318d717ff64917aa329812caef8cad511bf0f963d3585e29eec44fc44b8",
-  "updated_at": "2026-09-17T23:48:08.496035+00:00"
+  "summary_sha256": "sha256:448cae5726b829ef51d0bdad9b58a4b65775d59117630e1ed6604e092263347f",
+  "updated_at": "2026-09-30T00:54:43.107537+00:00"
 }

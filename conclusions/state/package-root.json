@@ -1,16 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "package-root",
-  "generation": "65238fe2cae64024a20fc0793d8a7bc9",
+  "generation": "d07f789dd9454ddbb747bd181b428a80",
   "mapping_revision": 2,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
-  "source_fingerprint": "sha256:b5319e3ce9c876931fe206125d247cf7c60978e1cdb123199bedff19b431a3ca",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "source_fingerprint": "sha256:e3a4ecff01f2a2291c5ff8303b5d087cb09c8b82c68d030064273dccd28a55c9",
   "summary_path": "conclusions/package_root_conclusion.md",
-  "summary_sha256": "sha256:0aa82b12bac290bb16d3a333b31dcec6964ee4f0b785737907e42d015b47fcf6",
-  "updated_at": "2026-09-17T23:48:11.478486+00:00",
-  "mapping_refresh": {
-    "previous_mapping_revision": 1,
-    "reason": "split ops/reliability/wb_bridge out of package-root; exclude harness-lab"
-  }
+  "summary_sha256": "sha256:bccbab964410939e15eacb373d2f9c2b5fc0925c3f0002a65daf9c32bed2001b",
+  "updated_at": "2026-09-30T00:54:15.843117+00:00"
 }
