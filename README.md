@@ -1,5 +1,8 @@
 <div align="center">
-<img src="assets/agenticx-logo.svg" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/agenticx-logo-orange-dark.svg" />
+  <img src="assets/agenticx-logo-orange-light.svg" alt="AgenticX — Unified Multi-Agent Platform" width="480" />
+</picture>
 
 <!-- [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/) -->
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -448,135 +451,6 @@ See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
 | **Spec Coding** | Specification-driven code generation | [examples/agenticx-for-spec-coding/](examples/agenticx-for-spec-coding/) |
 | **Vibe Coding** | AI-assisted creative/vibe coding | [examples/agenticx-for-vibecoding/](examples/agenticx-for-vibecoding/) |
 
-## Technical Architecture
-
-### Product and Runtime Paths
-
-```mermaid
-flowchart TB
-    subgraph Entry["Product and Developer Entry Points"]
-        Near["Near Desktop<br/>Local-first Workspace"]
-        Dev["Python SDK · agx CLI<br/>REST API + SSE"]
-        Enterprise["AgenticX Enterprise<br/>Portal · Admin · Go Gateway"]
-    end
-
-    subgraph PythonRuntime["AgenticX Python Runtime"]
-        Studio["Studio Server<br/>Sessions · Avatars · Group Chat"]
-        Runtime["Agent Runtime<br/>Orchestration · Delegation · Events"]
-        Capabilities["Tools · MCP · Memory · KB<br/>LLM · Skills · Hooks"]
-        Studio <--> Runtime
-        Runtime <--> Capabilities
-    end
-
-    subgraph EnterprisePath["Current Enterprise Online Path"]
-        Portal["Web Portal"] --> BFF["Portal BFF"]
-        BFF --> Gateway["Go AI Gateway<br/>Compliance · Routing · Audit"]
-        Gateway --> Models["Compatible Model Services"]
-    end
-
-    Near <-->|"Local HTTP / SSE"| Studio
-    Dev --> Studio
-    Dev --> Runtime
-    Enterprise --> Portal
-    Gateway -.->|"Future capability reuse"| Runtime
-```
-
-> Near defaults to the local Python Runtime. Enterprise currently uses an independent Go Gateway online path. The dashed line indicates evolution only, not a default production call.
-
-### Core Framework Internals
-
-```mermaid
-graph TD
-    subgraph "User Interface Layer"
-        Desktop["Near Desktop (Electron + React)"]
-        CLI["CLI (agx serve / loop / run / project)"]
-        SDK[Python SDK]
-    end
-
-    subgraph "Studio Runtime Layer"
-        StudioServer["Studio Server (FastAPI)"]
-        SessionMgr[Session Manager]
-        MetaAgent["Meta-Agent (CEO Dispatcher)"]
-        TeamMgr[Agent Team Manager]
-        AvatarSys["Avatar & Group Chat"]
-    end
-
-    subgraph "Core Framework Layer"
-        subgraph "Orchestration"
-            WorkflowEngine[Workflow Engine]
-            Flow["Flow System"]
-        end
-        subgraph "Execution"
-            AgentRuntime["Agent Runtime (Studio)"]
-            AgentExecutor["Agent Executor (Core)"]
-            TaskValidator[Task Validator & Output Parser]
-        end
-        subgraph "Core Components"
-            Agent[Agent]
-            Task[Task]
-            Tool[Tool System & MCP Hub]
-            Memory["Memory (Mem0 / Short-term / Workspace)"]
-            LLM["LLM Providers (OpenAI / Anthropic / Ollama / 10+)"]
-        end
-        Collaboration["Collaboration & Delegation"]
-        Hooks["Hooks System"]
-    end
-
-    subgraph "Platform Services Layer"
-        subgraph "Observability"
-            Monitoring["Monitoring & Trajectory"]
-            Prometheus[Prometheus / OpenTelemetry]
-        end
-        subgraph "Protocols"
-            A2A["A2A Protocol"]
-            MCP["MCP Protocol"]
-        end
-        subgraph "Security"
-            Safety["Safety Layer (Leak Detection / Sanitizer / Policy)"]
-            Sandbox["Execution Sandbox"]
-        end
-        subgraph "Storage"
-            KVStore["Key-Value (SQLite / Redis)"]
-            VectorStore["Vector (Milvus / Qdrant / Chroma)"]
-            GraphStore["Graph (Neo4j / NetworkX)"]
-        end
-    end
-
-    subgraph "Domain Extensions"
-        Embodiment["GUI Agent / Embodiment"]
-        Knowledge["Knowledge & GraphRAG"]
-    end
-
-    Desktop --> StudioServer
-    CLI --> StudioServer
-    SDK --> AgentExecutor
-
-    StudioServer --> SessionMgr
-    SessionMgr --> MetaAgent
-    MetaAgent --> TeamMgr
-    MetaAgent --> AvatarSys
-    TeamMgr --> AgentRuntime
-
-    AgentRuntime --> Agent
-    AgentExecutor --> Agent
-    WorkflowEngine --> AgentExecutor
-
-    Agent --> Tool
-    Agent --> Memory
-    Agent --> LLM
-    Agent --> Hooks
-
-    AgentRuntime --> Monitoring
-    AgentExecutor --> Monitoring
-    Agent --> A2A
-    Tool --> MCP
-
-    Agent --> Safety
-    Memory --> KVStore
-    Memory --> VectorStore
-    Knowledge --> GraphStore
-```
-
 ## Development Progress
 
 ### ✅ Completed Modules (M1-M11, M13-M17)
@@ -592,7 +466,7 @@ graph TD
 | **M7** | ✅ | Orchestration Engine — Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, parallel execution |
 | **M8** | ✅ | Communication Protocols — A2A (client / server / AgentCard / skill-as-tool), MCP resource access, AGUI protocol |
 | **M9** | ✅ | Observability — Callbacks, real-time monitoring, trajectory analysis, span tree, WebSocket streaming, Prometheus / OpenTelemetry integration |
-| **M10** | ✅ | Developer Experience — CLI (`agx` with 15+ commands), Studio Server (FastAPI REST + SSE), Near Desktop (Electron + React + Zustand, multi-pane) |
+| **M10** | ✅ | Developer Experience — CLI (`agx` with 20+ commands), Studio Server (FastAPI REST + SSE), Near Desktop (Electron + React + Zustand, multi-pane) |
 | **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and multi-backend sandbox; Studio does not yet use one complete `SafetyLayer` pipeline |
 | **M13** | ✅ | Knowledge & Retrieval — Knowledge base with document processing, chunkers, graphers (GraphRAG), readers; retrieval (vector / BM25 / graph / hybrid / auto); embeddings (OpenAI / Bailian / SiliconFlow / LiteLLM) |
 | **M14** | ✅ | Avatar & Collaboration — Avatar registry, group chat (user-directed / meta-routed / round-robin), delegation, role-playing, conversation patterns, team management |

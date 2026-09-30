@@ -1,5 +1,8 @@
 <div align="center">
-<img src="assets/agenticx-logo.svg" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/agenticx-logo-orange-dark.svg" />
+  <img src="assets/agenticx-logo-orange-light.svg" alt="AgenticX — Unified Multi-Agent Platform" width="480" />
+</picture>
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -444,135 +447,6 @@ python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
 | **Spec Coding** | 规范驱动的代码生成 | [examples/agenticx-for-spec-coding/](examples/agenticx-for-spec-coding/) |
 | **Vibe Coding** | AI 辅助创意编程 | [examples/agenticx-for-vibecoding/](examples/agenticx-for-vibecoding/) |
 
-## 技术架构
-
-### 产品与运行链路
-
-```mermaid
-flowchart TB
-    subgraph Entry["产品与开发入口"]
-        Near["Near Desktop<br/>本机优先工作台"]
-        Dev["Python SDK · agx CLI<br/>REST API + SSE"]
-        Enterprise["AgenticX Enterprise<br/>Portal · Admin · Go Gateway"]
-    end
-
-    subgraph PythonRuntime["AgenticX Python Runtime"]
-        Studio["Studio Server<br/>会话 · 分身 · 群聊"]
-        Runtime["Agent Runtime<br/>编排 · 委派 · 流式事件"]
-        Capabilities["Tools · MCP · Memory · KB<br/>LLM · Skills · Hooks"]
-        Studio <--> Runtime
-        Runtime <--> Capabilities
-    end
-
-    subgraph EnterprisePath["Enterprise 当前在线链路"]
-        Portal["Web Portal"] --> BFF["Portal BFF"]
-        BFF --> Gateway["Go AI Gateway<br/>合规 · 路由 · 审计"]
-        Gateway --> Models["兼容模型服务"]
-    end
-
-    Near <-->|"本机 HTTP / SSE"| Studio
-    Dev --> Studio
-    Dev --> Runtime
-    Enterprise --> Portal
-    Gateway -.->|"未来能力复用"| Runtime
-```
-
-> Near 默认使用本机 Python Runtime；Enterprise 当前使用独立 Go Gateway 在线链路。虚线只表示演进关系，不代表默认生产调用。
-
-### 核心框架内部结构
-
-```mermaid
-graph TD
-    subgraph "用户界面层"
-        Desktop["Near Desktop (Electron + React)"]
-        CLI["CLI 命令行 (agx serve / loop / run / project)"]
-        SDK[Python SDK]
-    end
-
-    subgraph "Studio 运行时层"
-        StudioServer["Studio 服务 (FastAPI)"]
-        SessionMgr[会话管理器]
-        MetaAgent["元智能体 (CEO 调度器)"]
-        TeamMgr[智能体团队管理器]
-        AvatarSys["分身 & 群聊系统"]
-    end
-
-    subgraph "核心框架层"
-        subgraph "编排"
-            WorkflowEngine[工作流引擎]
-            Flow["Flow 流程系统"]
-        end
-        subgraph "执行"
-            AgentRuntime["AgentRuntime (Studio 路径)"]
-            AgentExecutor["AgentExecutor (Core 路径)"]
-            TaskValidator[任务验证 & 输出解析]
-        end
-        subgraph "核心组件"
-            Agent[智能体 Agent]
-            Task[任务 Task]
-            Tool["工具系统 & MCP Hub"]
-            Memory["记忆 (Mem0 / 短期 / 工作区)"]
-            LLM["LLM 提供方 (OpenAI / Anthropic / Ollama / 10+)"]
-        end
-        Collaboration["协作 & 委派"]
-        Hooks["Hooks 钩子系统"]
-    end
-
-    subgraph "平台服务层"
-        subgraph "可观测性"
-            Monitoring["监控 & 轨迹分析"]
-            Prometheus[Prometheus / OpenTelemetry]
-        end
-        subgraph "通信协议"
-            A2A["A2A 智能体间协议"]
-            MCP["MCP 协议"]
-        end
-        subgraph "安全治理"
-            Safety["安全层 (泄露检测 / 清洗 / 策略)"]
-            Sandbox["执行沙箱"]
-        end
-        subgraph "存储"
-            KVStore["键值存储 (SQLite / Redis)"]
-            VectorStore["向量存储 (Milvus / Qdrant / Chroma)"]
-            GraphStore["图存储 (Neo4j / NetworkX)"]
-        end
-    end
-
-    subgraph "领域扩展"
-        Embodiment["GUI Agent / 具身智能"]
-        Knowledge["知识系统 & GraphRAG"]
-    end
-
-    Desktop --> StudioServer
-    CLI --> StudioServer
-    SDK --> AgentExecutor
-
-    StudioServer --> SessionMgr
-    SessionMgr --> MetaAgent
-    MetaAgent --> TeamMgr
-    MetaAgent --> AvatarSys
-    TeamMgr --> AgentRuntime
-
-    AgentRuntime --> Agent
-    AgentExecutor --> Agent
-    WorkflowEngine --> AgentExecutor
-
-    Agent --> Tool
-    Agent --> Memory
-    Agent --> LLM
-    Agent --> Hooks
-
-    AgentRuntime --> Monitoring
-    AgentExecutor --> Monitoring
-    Agent --> A2A
-    Tool --> MCP
-
-    Agent --> Safety
-    Memory --> KVStore
-    Memory --> VectorStore
-    Knowledge --> GraphStore
-```
-
 ## 开发进展
 
 ### ✅ 已完成模块 (M1-M11, M13-M17)
@@ -588,7 +462,7 @@ graph TD
 | **M7** | ✅ | 编排引擎 — 图式工作流引擎 + Flow 系统（装饰器、执行计划），条件路由、并行执行 |
 | **M8** | ✅ | 通信协议 — A2A（客户端 / 服务端 / AgentCard / 技能即工具）、MCP 资源访问、AGUI 协议 |
 | **M9** | ✅ | 可观测性 — 回调系统、实时监控、轨迹分析、Span Tree、WebSocket 流式推送、Prometheus / OpenTelemetry 集成 |
-| **M10** | ✅ | 开发者体验 — CLI（`agx` 含 15+ 命令）、Studio Server（FastAPI REST + SSE）、Near Desktop（Electron + React + Zustand，多窗格） |
+| **M10** | ✅ | 开发者体验 — CLI（`agx` 含 20+ 命令）、Studio Server（FastAPI REST + SSE）、Near Desktop（Electron + React + Zustand，多窗格） |
 | **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与多后端沙箱；Studio 尚未统一接入完整 `SafetyLayer` 管线 |
 | **M13** | ✅ | 知识与检索 — 知识库（文档处理、分块器、图构建器 GraphRAG、读取器）；检索（向量 / BM25 / 图 / 混合 / 自动）；嵌入（OpenAI / 百炼 / SiliconFlow / LiteLLM） |
 | **M14** | ✅ | 分身与协作 — 分身注册中心、群聊（用户指定 / 智能路由 / 轮流回复）、委派、角色扮演、会话模式、团队管理 |
