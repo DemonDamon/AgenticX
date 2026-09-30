@@ -1,10 +1,5 @@
 <div align="center">
-<img src="assets/near-app-icon.png" alt="Near" width="168" />
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/agenticx-logo-orange-dark.svg" />
-  <img src="assets/agenticx-logo-orange-light.svg" alt="AgenticX — Unified Multi-Agent Platform" width="480" />
-</picture>
+<img src="assets/near-app-icon.png" alt="Near" height="150" align="middle" />&nbsp;&nbsp;&nbsp;<picture><source media="(prefers-color-scheme: dark)" srcset="assets/agenticx-logo-orange-dark.svg" /><img src="assets/agenticx-logo-orange-light.svg" alt="AgenticX — Unified Multi-Agent Platform" height="130" align="middle" /></picture>
 
 <!-- [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/) -->
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
