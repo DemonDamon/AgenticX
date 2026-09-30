@@ -1242,32 +1242,88 @@ def _automation_task_mcp_preflight(
     }
 
 
+_EXECUTION_CONTRACT_HEADER = "## Execution Contract (Auto Injected)"
+
+# Shared rules. The last item is the time-window constraint, inserted after the
+# preflight strategy line so the on-disk shape stays stable.
+_CONTRACT_RULES_ZH = (
+    "这是执行任务，不是方案讨论。禁止输出“是否按此方案执行”。",
+    "禁止把 MCP 工具名当作 bash 命令执行（例如 firecrawl_scrape）。",
+    "mcp_call 参数字段优先使用 arguments；调用前核对目标工具 schema。",
+    "若某工具参数校验失败，立即按 schema 修正并继续执行；不要向用户追问。",
+    "时间窗口必须严格限定在最近 7 天，无法解析日期的条目直接丢弃。",
+)
+_CONTRACT_RULES_EN = (
+    "This is an execution task, not a planning discussion. Do not ask whether to proceed with this plan.",
+    "Do not run MCP tool names as bash commands (for example firecrawl_scrape).",
+    "Prefer the arguments field for mcp_call parameters; check the target tool schema before calling.",
+    "If a tool parameter check fails, correct it against the schema and continue. Do not ask the user.",
+    "Keep the time window strictly within the last 7 days. Drop entries whose dates cannot be parsed.",
+)
+
+
+def _strip_leading_execution_contract(instruction: str) -> str:
+    """Drop a previously auto-injected contract so an update can replace it."""
+    text = instruction.strip()
+    if not text.startswith(_EXECUTION_CONTRACT_HEADER):
+        return text
+    rest = text[len(_EXECUTION_CONTRACT_HEADER) :].lstrip("\r\n")
+    parts = re.split(r"\n[ \t]*\n", rest, maxsplit=1)
+    if len(parts) == 1:
+        return ""
+    return parts[1].strip()
+
+
+def _instruction_prefers_chinese(instruction: str) -> bool:
+    """True when the user's own instruction is predominantly Chinese.
+
+    Paths and URLs are ignored so an English task that mentions a Chinese
+    directory name still stays in English.
+    """
+    sample = re.sub(r"https?://\S+", " ", instruction)
+    sample = re.sub(r"(?:(?:~|\.{1,2})?/[\w.\-]+)+", " ", sample)
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", sample))
+    if cjk == 0:
+        return False
+    latin = len(re.findall(r"[A-Za-z]", sample))
+    return cjk >= latin
+
+
 def _augment_automation_instruction_with_contract(
     instruction: str,
     *,
     preflight: Dict[str, Any],
 ) -> str:
-    """Inject a strict execution contract to reduce runtime ask-backs."""
+    """Inject a strict execution contract in the same language as the instruction."""
+    body = _strip_leading_execution_contract(instruction)
+    prefers_zh = _instruction_prefers_chinese(body)
+    rules = _CONTRACT_RULES_ZH if prefers_zh else _CONTRACT_RULES_EN
     strategy = str(preflight.get("strategy", "")).strip()
     hints = preflight.get("hints", [])
     if not isinstance(hints, list):
         hints = []
     hint_lines = [f"- {str(h).strip()}" for h in hints if str(h).strip()]
-    strategy_line = strategy or "Use connected crawler MCP tools only."
+    if prefers_zh:
+        strategy_line = strategy or "仅使用已连接的爬虫 MCP 工具。"
+        strategy_label = "预检策略"
+        hints_label = "预检提示"
+    else:
+        strategy_line = strategy or "Use connected crawler MCP tools only."
+        strategy_label = "Preflight strategy"
+        hints_label = "Preflight hints"
     block_lines = [
-        "## Execution Contract (Auto Injected)",
-        "- 这是执行任务，不是方案讨论。禁止输出“是否按此方案执行”。",
-        "- 禁止把 MCP 工具名当作 bash 命令执行（例如 firecrawl_scrape）。",
-        "- mcp_call 参数字段优先使用 arguments；调用前核对目标工具 schema。",
-        "- 若某工具参数校验失败，立即按 schema 修正并继续执行；不要向用户追问。",
-        f"- Preflight strategy: {strategy_line}",
-        "- 时间窗口必须严格限定在最近 7 天，无法解析日期的条目直接丢弃。",
+        _EXECUTION_CONTRACT_HEADER,
+        *(f"- {rule}" for rule in rules[:-1]),
+        f"- {strategy_label}: {strategy_line}",
+        f"- {rules[-1]}",
     ]
     if hint_lines:
-        block_lines.append("- Preflight hints:")
+        block_lines.append(f"- {hints_label}:")
         block_lines.extend(hint_lines)
     contract = "\n".join(block_lines).strip()
-    return f"{contract}\n\n{instruction.strip()}"
+    if not body:
+        return contract
+    return f"{contract}\n\n{body}"
 
 
 def _model_choice_with_label(

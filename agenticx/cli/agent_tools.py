@@ -2336,7 +2336,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "instruction": {
                         "type": "string",
                         "description": (
-                            "Prompt for the automation runner on each trigger. Must use the same Python/paths as verified during setup. "
+                            "Prompt for the automation runner on each trigger. Write it in the language the user asked for; "
+                            "the auto-injected Execution Contract follows that language. "
+                            "Must use the same Python/paths as verified during setup. "
                             "Meta-Agent should have already installed deps (pip) in the task workspace or a dedicated venv and confirmed the script runs."
                         ),
                     },
@@ -2426,8 +2428,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "instruction": {
                         "type": "string",
                         "description": (
-                            "New prompt for the automation runner. When provided, the tool re-runs MCP preflight and re-injects "
-                            "the Execution Contract, replacing any previously auto-injected contract block."
+                            "New prompt for the automation runner. Write it in the language the user asked for. "
+                            "When provided, the tool re-runs MCP preflight and re-injects the Execution Contract "
+                            "in that same language, replacing any previously auto-injected contract block."
                         ),
                     },
                     "frequency_type": {
