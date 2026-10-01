@@ -2640,22 +2640,29 @@ export function App() {
                         onOpenClarification={onOpenClarification}
                         onSubmitClarification={onSubmitClarification}
                       />
-                    ) : mainView === "avatars" ? (
-                      <AvatarGalleryView />
-                    ) : mainView === "groups" ? (
-                      <ProjectsView />
-                    ) : mainView === "collab" ? (
-                      <CollabRoomPanel variant="page" />
-                    ) : mainView === "automation" ? (
-                      <AutomationView />
-                    ) : mainView === "wiki" ? (
-                      <WikiBrowseView />
                     ) : (
-                      <PaneManager
-                        onOpenConfirm={onOpenConfirm}
-                        onOpenClarification={onOpenClarification}
-                        onSubmitClarification={onSubmitClarification}
-                      />
+                      <>
+                        {/*
+                          Keep PaneManager mounted across landing views (automation /
+                          avatars / …). Unmounting wiped the contenteditable composer
+                          (and raced draft persistence). Hide instead of unmount.
+                        */}
+                        <div
+                          className={mainView === "chat" ? "h-full min-h-0" : "hidden"}
+                          aria-hidden={mainView !== "chat"}
+                        >
+                          <PaneManager
+                            onOpenConfirm={onOpenConfirm}
+                            onOpenClarification={onOpenClarification}
+                            onSubmitClarification={onSubmitClarification}
+                          />
+                        </div>
+                        {mainView === "avatars" ? <AvatarGalleryView /> : null}
+                        {mainView === "groups" ? <ProjectsView /> : null}
+                        {mainView === "collab" ? <CollabRoomPanel variant="page" /> : null}
+                        {mainView === "automation" ? <AutomationView /> : null}
+                        {mainView === "wiki" ? <WikiBrowseView /> : null}
+                      </>
                     )}
                   </div>
                 </div>

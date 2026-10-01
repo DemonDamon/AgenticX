@@ -5572,12 +5572,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       const key = composerDraftKeyRef.current;
       if (!key) return;
-      // Prefer live DOM if still mounted (layout cleanup runs before teardown).
+      // Prefer mirrored keystrokes over a possibly-already-cleared DOM during teardown.
+      // Never let an empty DOM read wipe a non-empty draft we already captured.
+      const mirrored = lastComposerDraftTextRef.current;
       const el = composerRef.current;
-      if (el) {
-        lastComposerDraftTextRef.current = extractComposerTextRef.current();
-      }
-      upsertComposerDraft(key, lastComposerDraftTextRef.current);
+      const fromDom = el ? extractComposerTextRef.current() : "";
+      const text = fromDom.trim() ? fromDom : mirrored;
+      lastComposerDraftTextRef.current = text;
+      upsertComposerDraft(key, text);
     };
   }, [pane.id, pane.sessionId]);
 
