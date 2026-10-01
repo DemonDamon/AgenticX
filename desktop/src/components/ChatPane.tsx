@@ -5544,7 +5544,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         lastComposerDraftTextRef.current = value;
       }
       syncComposerFromValue(visible);
-      focusComposerEnd();
+      // Restore must not steal caret from other panes (multi-pane grid).
+      if (!restoringComposerDraftRef.current) {
+        focusComposerEnd();
+      }
     },
     [
       contextFiles,
@@ -5555,6 +5558,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       syncComposerFromValue,
     ]
   );
+
+  const setComposerTextRef = useRef(setComposerText);
+  setComposerTextRef.current = setComposerText;
 
   const applyAtMentionReplacement = useCallback(
     (mention: string, options?: Parameters<typeof setComposerText>[1]) => {
@@ -5653,6 +5659,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   // Restore after mount / session jump. Separate from the layout flush effect so a
   // cancelled restore timer never skips the unmount save.
+  //
+  // CRITICAL: do NOT depend on setComposerText — it changes whenever contextFiles
+  // changes, and restore itself calls setContextFiles → infinite restore loop that
+  // steals focus (via focusComposerEnd) so only one pane appears typeable.
   const composerDraftRestorePassRef = useRef(0);
   const contextFilesRef = useRef(contextFiles);
   contextFilesRef.current = contextFiles;
@@ -5684,7 +5694,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           return;
         }
       }
-      setComposerText(draftText);
+      setComposerTextRef.current(draftText);
       setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
       restoringComposerDraftRef.current = false;
     }, 0);
@@ -5692,7 +5702,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       window.clearTimeout(timer);
       restoringComposerDraftRef.current = false;
     };
-  }, [pane.id, pane.sessionId, setComposerText, persistComposerDraftNow]);
+  }, [pane.id, pane.sessionId, persistComposerDraftNow]);
 
   const handleCrewAppendDirective = useCallback(
     (agentId: string) => {
