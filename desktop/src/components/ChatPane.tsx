@@ -111,6 +111,7 @@ import {
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { VirtualizedMessageList } from "./messages/VirtualizedMessageList";
 import { JevRouteChip } from "./messages/JevRouteChip";
 import { Conversation } from "./messages/Conversation";
 import { MarkdownContext } from "./messages/markdown-components";
@@ -232,6 +233,7 @@ import {
   matchSlashCommandQuery,
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
+  shouldCommitComposerPlain,
 } from "../utils/composer-input-sync";
 import { buildCommandSendText, buildPerfDiagnosisText, filterCommands, parsePerfCommandInput } from "../utils/command-send";
 import {
@@ -326,6 +328,7 @@ import {
   mergeSessionMessagesTail,
   retainUnpersistedLiveUserTurns,
 } from "../utils/session-message-merge";
+import { shouldResetPagingAfterPollMerge } from "../utils/session-poll-paging";
 import {
   buildPendingToolFallback,
   buildDeferredToolResultResolution,
@@ -3959,7 +3962,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return;
       }
       try {
-        const result = await window.agenticxDesktop.loadSessionMessages(currentSid);
+        // Tail-only: never pull the full messages.json into the pane window on
+        // every poll — that resets paging and re-hydrates every historical row.
+        const page = await window.agenticxDesktop.loadSessionMessagesPage(currentSid, {
+          tailLimit: 40,
+        });
         if (!active) return;
         // Session may have changed while the load was in flight (e.g. user
         // clicked "新对话" mid-poll). Never overwrite the new session's pane
@@ -3968,36 +3975,48 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
         ).trim();
         if (latestSid !== currentSid) return;
-        if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
-          if (result.messages.length <= lastPollCountRef.current) return;
-          lastPollCountRef.current = result.messages.length;
-          // 增量合并而非整表替换：mergeSessionMessagesTail 以 sid 为 id 前缀并
-          // 复用内存行 id，已有气泡的 React key 稳定，不会整列表重挂载闪烁。
-          const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
-          const current = livePane?.messages ?? [];
-          const merged = mergeSessionMessagesTail(
-            current,
-            result.messages as LoadedSessionMessage[],
-            currentSid
-          );
-          const latest =
-            useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
-          const retained = retainUnpersistedLiveUserTurns(latest, merged);
-          const changed =
-            retained.length !== latest.length ||
-            String(retained[retained.length - 1]?.content ?? "") !==
-              String(latest[latest.length - 1]?.content ?? "");
-          if (!changed) return;
-          setPaneMessages(pane.id, retained);
-          // 全量合并后内存已覆盖完整磁盘历史，复位分页游标，避免顶部
-          // 「加载更早消息」按旧 oldestLoadedIndex 拉取与内存同 id 的行。
-          if (livePane?.hasOlderMessages || (livePane?.oldestLoadedIndex ?? 0) > 0) {
-            setPaneMessagePaging(pane.id, {
-              oldestLoadedIndex: 0,
-              hasOlderMessages: false,
-              loadingOlderMessages: false,
-            });
-          }
+        if (!page.ok || !Array.isArray(page.messages) || page.messages.length === 0) return;
+        const diskTotal =
+          typeof page.total_count === "number" && Number.isFinite(page.total_count)
+            ? page.total_count
+            : page.messages.length;
+        if (diskTotal <= lastPollCountRef.current) return;
+        lastPollCountRef.current = diskTotal;
+        // 增量合并而非整表替换：mergeSessionMessagesTail 以 sid 为 id 前缀并
+        // 复用内存行 id，已有气泡的 React key 稳定，不会整列表重挂载闪烁。
+        const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+        const current = livePane?.messages ?? [];
+        const previousLen = current.length;
+        const merged = mergeSessionMessagesTail(
+          current,
+          page.messages as LoadedSessionMessage[],
+          currentSid
+        );
+        const latest =
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
+        const retained = retainUnpersistedLiveUserTurns(latest, merged);
+        const changed =
+          retained.length !== latest.length ||
+          String(retained[retained.length - 1]?.content ?? "") !==
+            String(latest[latest.length - 1]?.content ?? "");
+        if (!changed) return;
+        setPaneMessages(pane.id, retained);
+        const hadOlder = Boolean(livePane?.hasOlderMessages);
+        const oldestLoadedIndex = livePane?.oldestLoadedIndex ?? 0;
+        if (
+          shouldResetPagingAfterPollMerge({
+            hadOlder,
+            oldestLoadedIndex,
+            mergedLen: retained.length,
+            previousLen,
+            grewTailOnly: true,
+          })
+        ) {
+          setPaneMessagePaging(pane.id, {
+            oldestLoadedIndex: 0,
+            hasOlderMessages: false,
+            loadingOlderMessages: false,
+          });
         }
       } catch {
         // ignore polling failures
@@ -4863,7 +4882,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const next = isComposerNonEmpty(value);
         return prev === next ? prev : next;
       });
-      setComposerPlain(value);
+      // Slash menu needs composerPlain; ordinary typing must not re-render ChatPane.
+      setComposerPlain((prev) =>
+        shouldCommitComposerPlain(prev, value, caretOffset) ? value : prev
+      );
       updateAtStateFromText(value, caretOffset);
     },
     [updateAtStateFromText]
@@ -9090,9 +9112,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ? lastAdjacentClusterKey(groupClusterByMessageId, groupedVisibleMessages)
         : null;
 
-    return (
+    return {
+      mainRows,
+      footer: (
     <>
-      {mainRows}
       {widgetFlowRewriting && !streamTextForCurrentSession.trim() ? (
         <WidgetFlowRewriteStatusLine />
       ) : null}
@@ -9262,7 +9285,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         />
       )}
     </>
-    );
+      ),
+    };
   }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
@@ -13952,7 +13976,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   )}
                 </div>
               ) : null}
-              {renderedMessages}
+              <VirtualizedMessageList
+                scrollRef={listRef}
+                count={renderedMessages.mainRows.length}
+                estimateSize={96}
+                overscan={8}
+                renderItem={(index) => renderedMessages.mainRows[index] ?? null}
+                getItemKey={(index) => {
+                  const row = renderedMessages.mainRows[index];
+                  if (row && typeof row === "object" && "key" in row && row.key != null) {
+                    return String(row.key);
+                  }
+                  return index;
+                }}
+              />
+              {renderedMessages.footer}
             </MessageThread>
           ) : null}
           {debateNudgeText ? (

@@ -10,6 +10,8 @@ import os
 from datetime import datetime
 from typing import Any
 
+from agenticx.studio.avatar_url_compact import compact_stored_avatar_url
+
 
 def normalize_forward_attachment(raw: Any) -> dict[str, Any] | None:
     """Normalize one attachment payload from the Desktop forward client."""
@@ -71,7 +73,7 @@ def normalize_forward_items(messages: list[Any]) -> list[dict[str, Any]]:
             continue
         sender = str(item.get("sender", "") or "").strip() or "unknown"
         role = str(item.get("role", "") or "").strip() or "assistant"
-        avatar_url = str(item.get("avatar_url", "") or "").strip()
+        avatar_url = compact_stored_avatar_url(str(item.get("avatar_url", "") or ""))
         content = str(item.get("content", "") or "").strip()
         timestamp_raw = item.get("timestamp")
         try:

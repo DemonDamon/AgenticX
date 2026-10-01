@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, List, Mapping, Sequence
 
+from agenticx.studio.avatar_url_compact import compact_stored_avatar_url
+
 
 @dataclass
 class GroupMessage:
@@ -101,7 +103,7 @@ class GroupChatContext:
             "sender_name": str(agent_name or "") or str(agent_id or ""),
             "agent_id": str(agent_id or ""),
             "avatar_name": str(agent_name or "") or str(agent_id or ""),
-            "avatar_url": str(avatar_url or ""),
+            "avatar_url": compact_stored_avatar_url(str(avatar_url or "")),
         }
         if attachments:
             row["attachments"] = [dict(item) for item in attachments]

@@ -8,6 +8,7 @@ import {
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
   shouldCommitComposerHasText,
+  shouldCommitComposerPlain,
 } from "./composer-input-sync";
 
 describe("isComposerNonEmpty", () => {
@@ -45,6 +46,26 @@ describe("matchSlashCommandQuery", () => {
     expect(matchSlashCommandQuery("/Perf")).toBeNull();
     expect(matchSlashCommandQuery("/a b")).toBeNull();
     expect(matchSlashCommandQuery("/perf", 2)).toBeNull();
+  });
+});
+
+describe("shouldCommitComposerPlain", () => {
+  it("does not commit ordinary prose keystrokes", () => {
+    expect(shouldCommitComposerPlain("", "h")).toBe(false);
+    expect(shouldCommitComposerPlain("he", "hel")).toBe(false);
+    expect(shouldCommitComposerPlain("你好", "你好啊")).toBe(false);
+  });
+
+  it("commits when entering, refining, or leaving a slash command", () => {
+    expect(shouldCommitComposerPlain("", "/")).toBe(true);
+    expect(shouldCommitComposerPlain("/", "/p")).toBe(true);
+    expect(shouldCommitComposerPlain("/pe", "/per")).toBe(true);
+    expect(shouldCommitComposerPlain("/perf", "/perf ")).toBe(true);
+    expect(shouldCommitComposerPlain("/perf", "")).toBe(true);
+  });
+
+  it("does not commit when the slash query is unchanged", () => {
+    expect(shouldCommitComposerPlain("/perf", "/perf")).toBe(false);
   });
 });
 

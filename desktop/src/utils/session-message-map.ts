@@ -16,6 +16,7 @@ import {
   sanitizeSuggestedQuestions,
 } from "./assistant-output";
 import { sanitizeLoadedBlocks } from "./content-blocks";
+import { compactStoredAvatarUrl } from "./compact-stored-avatar-url";
 
 export type BranchLineage = {
   parentSessionId: string;
@@ -341,7 +342,7 @@ export function mapLoadedSessionMessage(
           sender: String(entry.sender || "").trim() || "unknown",
           role: String(entry.role || "").trim() || "assistant",
           content: String(entry.content || ""),
-          avatarUrl: String(entry.avatar_url || "").trim() || undefined,
+          avatarUrl: compactStoredAvatarUrl(entry.avatar_url) || undefined,
           timestamp: typeof entry.timestamp === "number" ? entry.timestamp : undefined,
         }))
     : [];
@@ -371,7 +372,7 @@ export function mapLoadedSessionMessage(
     speakerUserId: item.sender_id != null ? String(item.sender_id).trim() || undefined : undefined,
     speakerName: item.sender_name != null ? String(item.sender_name).trim() || undefined : undefined,
     avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
-    avatarUrl: item.avatar_url,
+    avatarUrl: compactStoredAvatarUrl(item.avatar_url) || undefined,
     provider: item.provider,
     model: item.model,
     usage: parseMessageUsage(item.usage),

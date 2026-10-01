@@ -41,6 +41,7 @@ from agenticx.runtime.agent_runtime import (
     _has_inline_tool_markup,
     _strip_inline_tool_markup,
 )
+from agenticx.studio.avatar_url_compact import compact_stored_avatar_url
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 from agenticx.workspace.loader import (
     ensure_group_workspace,
@@ -2855,7 +2856,9 @@ class SessionManager:
                 "content": str(item.get("content", "")),
                 "agent_id": str(item.get("agent_id", "meta") or "meta"),
                 "avatar_name": str(item.get("avatar_name", "") or ""),
-                "avatar_url": str(item.get("avatar_url", "") or ""),
+                "avatar_url": compact_stored_avatar_url(
+                    str(item.get("avatar_url", "") or "")
+                ),
                 "provider": str(item.get("provider", "") or ""),
                 "model": str(item.get("model", "") or ""),
                 "quoted_message_id": str(item.get("quoted_message_id", "") or ""),
