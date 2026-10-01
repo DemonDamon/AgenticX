@@ -15,24 +15,27 @@ Suggested-Impl-Model: Composer 2.5
 
 新增 `desktop/src/utils/composer-draft-store.ts`（对齐 `pending-message-queue.ts` 的 scoped localStorage 模式）：
 
-- Key：`agx-composer-drafts-v1::<backendScope>`
+- Key：`agx-composer-drafts-v1::<backendScope>`（payload version=2，兼容读 v1）
 - Draft map key：`session:<sessionId>`（有会话）或 `pane:<paneId>`（空白/懒创建会话）
-- 仅持久化**纯文本**（`extractComposerText` 序列化结果，含 `@` 占位）；不做附件 blob
-- 上限：单条 100_000 字符；最多 80 条（按 `updatedAt` 淘汰）
+- 持久化纯文本 + `attachments[]`（含图片 `dataUrl` / `sourcePath` 等 chip 字段）
+- 上限：单条文本 100_000 字符；最多 8 个附件；单图 dataUrl ≤ 3.5MB；最多 80 条草稿（按 `updatedAt` 淘汰）
 
-`ChatPane` 接线：输入防抖写入、blur/unmount 立即 flush、session 切换时「存旧→载新」、发送成功清空、修复悬空的 `migrateActiveComposerDraftToSession`。
+`ChatPane` 接线：输入落盘、附件变更落盘、layout unmount flush、session 切换存旧载新、发送成功清空、`migrateActiveComposerDraftToSession` 带附件迁移。
+
+`App.tsx`：非 chat 主视图用 CSS `hidden` keep-alive，避免卸载丢状态。
 
 ## In scope
 
 - 文本草稿存/取/迁移/清空
-- Pro `ChatPane` 主路径（用户截图场景）
+- 输入框附件（图片等 contextFiles）与文本一并持久/恢复
+- Pro `ChatPane` 主路径
 - 单元测试 `composer-draft-store.test.ts`
+- 导航 keep-alive（`App.tsx`）
 
 ## Out of scope
 
-- 附件 / contextFiles / quoteTargets 持久化（下一批）
+- quoteTargets 持久化
 - Lite `ChatView`（可后续复用同一 store）
-- 改 `App.tsx` 条件渲染为 keep-alive（本次用持久化，不改导航架构）
 
 ## Suggested impl models
 

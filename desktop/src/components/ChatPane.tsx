@@ -502,10 +502,11 @@ import {
 } from "../utils/pending-message-queue";
 import {
   clearComposerDraft,
-  getComposerDraftText,
+  getComposerDraft,
   migrateActiveComposerDraftToSession,
   resolveComposerDraftKey,
   upsertComposerDraft,
+  type ComposerDraftAttachment,
 } from "../utils/composer-draft-store";
 import {
   bootstrapMarkerForSessionBinding,
@@ -2836,6 +2837,58 @@ type AttachedFile = {
   htmlElementRef?: { tagName: string; selectorHint: string; comment?: string };
 };
 
+function contextFilesToDraftAttachments(
+  files: Record<string, AttachedFile>,
+): ComposerDraftAttachment[] {
+  return Object.entries(files).map(([key, file]) => {
+    const row: ComposerDraftAttachment = {
+      key,
+      name: file.name,
+      size: file.size,
+      mimeType: file.mimeType,
+      status: file.status,
+      content: file.content || "",
+    };
+    if (file.dataUrl) row.dataUrl = file.dataUrl;
+    if (file.sourcePath) row.sourcePath = file.sourcePath;
+    if (file.referenceToken) row.referenceToken = true;
+    if (file.composerRefLabel) row.composerRefLabel = file.composerRefLabel;
+    if (file.lineRange) row.lineRange = file.lineRange;
+    if (file.spreadsheetRef) row.spreadsheetRef = file.spreadsheetRef;
+    if (file.snippetRef) row.snippetRef = file.snippetRef;
+    if (file.snippetContent) row.snippetContent = file.snippetContent;
+    if (file.htmlElementRef) row.htmlElementRef = file.htmlElementRef;
+    if (file.errorText) row.errorText = file.errorText;
+    return row;
+  });
+}
+
+function draftAttachmentsToContextFiles(
+  attachments: ComposerDraftAttachment[],
+): Record<string, AttachedFile> {
+  const out: Record<string, AttachedFile> = {};
+  for (const att of attachments) {
+    out[att.key] = {
+      name: att.name,
+      size: att.size,
+      mimeType: att.mimeType,
+      status: att.status,
+      content: att.content || "",
+      ...(att.dataUrl ? { dataUrl: att.dataUrl } : {}),
+      ...(att.sourcePath ? { sourcePath: att.sourcePath } : {}),
+      ...(att.referenceToken ? { referenceToken: true } : {}),
+      ...(att.composerRefLabel ? { composerRefLabel: att.composerRefLabel } : {}),
+      ...(att.lineRange ? { lineRange: att.lineRange } : {}),
+      ...(att.spreadsheetRef ? { spreadsheetRef: att.spreadsheetRef } : {}),
+      ...(att.snippetRef ? { snippetRef: att.snippetRef } : {}),
+      ...(att.snippetContent ? { snippetContent: att.snippetContent } : {}),
+      ...(att.htmlElementRef ? { htmlElementRef: att.htmlElementRef } : {}),
+      ...(att.errorText ? { errorText: att.errorText } : {}),
+    };
+  }
+  return out;
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
@@ -3407,9 +3460,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   /** Unsent composer drafts: keyed by session:… or pane:… in localStorage. */
   const composerDraftKeyRef = useRef(resolveComposerDraftKey(pane.id, pane.sessionId));
   const composerDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const restoringComposerDraftRef = useRef(false);
+  /** True until first draft restore completes — prevents empty contextFiles from wiping storage. */
+  const restoringComposerDraftRef = useRef(true);
   /** Latest serialized composer text; layout-unmount flush must not depend on DOM. */
   const lastComposerDraftTextRef = useRef("");
+  /** Latest ready/parsing attachments for draft flush (mirrors contextFiles). */
+  const lastComposerAttachmentsRef = useRef<ComposerDraftAttachment[]>([]);
   /** Last caret inside composer — survives blur when quoting from message context menu. */
   const composerSavedRangeRef = useRef<Range | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
@@ -5510,8 +5566,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   /**
    * Unmount cleanup must NOT rely on composerRef alone: React runs useEffect
-   * cleanups after DOM teardown. Mirror text into lastComposerDraftTextRef and
-   * flush from useLayoutEffect so Automation / Avatars nav switches keep drafts.
+   * cleanups after DOM teardown. Mirror text + attachments into refs and
+   * flush from useLayoutEffect so Automation / Avatars / session switches keep drafts.
    */
   const extractComposerTextRef = useRef(extractComposerText);
   extractComposerTextRef.current = extractComposerText;
@@ -5527,7 +5583,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const text =
       explicitText !== undefined ? explicitText : lastComposerDraftTextRef.current;
     lastComposerDraftTextRef.current = text;
-    upsertComposerDraft(key, text);
+    upsertComposerDraft(key, text, lastComposerAttachmentsRef.current);
   }, []);
 
   const captureComposerDraftFromDom = useCallback(() => {
@@ -5552,9 +5608,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       composerDraftSaveTimerRef.current = null;
     }
     lastComposerDraftTextRef.current = "";
+    lastComposerAttachmentsRef.current = [];
     const key = composerDraftKeyRef.current.trim();
     if (key) clearComposerDraft(key);
   }, []);
+
+  // Keep attachment mirror in sync; persist when chips change (add/remove/ready).
+  useEffect(() => {
+    lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(contextFiles);
+    if (restoringComposerDraftRef.current) return;
+    persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
+  }, [contextFiles, persistComposerDraftNow]);
 
   // Flush while the fiber still owns the DOM (before React tears down the pane on
   // mainView switches like Automation / Avatars). useEffect cleanups are too late.
@@ -5562,7 +5626,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     const prevKey = composerDraftKeyRef.current;
     if (prevKey && prevKey !== nextKey) {
-      upsertComposerDraft(prevKey, lastComposerDraftTextRef.current);
+      upsertComposerDraft(
+        prevKey,
+        lastComposerDraftTextRef.current,
+        lastComposerAttachmentsRef.current,
+      );
     }
     composerDraftKeyRef.current = nextKey;
     return () => {
@@ -5579,33 +5647,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const fromDom = el ? extractComposerTextRef.current() : "";
       const text = fromDom.trim() ? fromDom : mirrored;
       lastComposerDraftTextRef.current = text;
-      upsertComposerDraft(key, text);
+      upsertComposerDraft(key, text, lastComposerAttachmentsRef.current);
     };
   }, [pane.id, pane.sessionId]);
 
   // Restore after mount / session jump. Separate from the layout flush effect so a
   // cancelled restore timer never skips the unmount save.
   const composerDraftRestorePassRef = useRef(0);
+  const contextFilesRef = useRef(contextFiles);
+  contextFilesRef.current = contextFiles;
   useEffect(() => {
     const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     composerDraftKeyRef.current = nextKey;
     restoringComposerDraftRef.current = true;
-    const draftText = getComposerDraftText(nextKey);
+    const draft = getComposerDraft(nextKey);
+    const draftText = draft?.text ?? "";
+    const draftAttachments = draft?.attachments ?? [];
     lastComposerDraftTextRef.current = draftText;
+    lastComposerAttachmentsRef.current = draftAttachments;
     const restorePass = ++composerDraftRestorePassRef.current;
     const isFirstPass = restorePass === 1;
     const timer = window.setTimeout(() => {
-      if (!draftText.trim() && isFirstPass) {
-        // Mount race: user may have typed before this tick. Don't clobber.
-        const live = extractComposerTextRef.current();
-        if (live.trim()) {
-          lastComposerDraftTextRef.current = live;
+      const liveText = extractComposerTextRef.current();
+      const liveFiles = contextFilesRef.current;
+      const liveHasText = Boolean(liveText.trim());
+      const liveHasFiles = Object.keys(liveFiles).length > 0;
+      if (!draftText.trim() && draftAttachments.length === 0 && isFirstPass) {
+        // Mount race: user may have typed / attached before this tick. Don't clobber.
+        if (liveHasText || liveHasFiles) {
+          if (liveHasText) lastComposerDraftTextRef.current = liveText;
+          if (liveHasFiles) {
+            lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(liveFiles);
+          }
           restoringComposerDraftRef.current = false;
-          persistComposerDraftNow(undefined, live);
+          persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
           return;
         }
       }
       setComposerText(draftText);
+      setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
       restoringComposerDraftRef.current = false;
     }, 0);
     return () => {

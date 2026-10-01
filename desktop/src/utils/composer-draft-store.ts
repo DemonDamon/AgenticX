@@ -2,17 +2,42 @@ import { readScopedLocalStorage, scopedKey } from "./backend-scope";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "agx-composer-drafts-v1";
 
-const STORAGE_VERSION = 1;
+/** v2 adds attachments; still read v1 payloads. */
+const STORAGE_VERSION = 2;
+const LEGACY_STORAGE_VERSION = 1;
 export const MAX_COMPOSER_DRAFT_TEXT_CHARS = 100_000;
 export const MAX_COMPOSER_DRAFT_ENTRIES = 80;
+export const MAX_COMPOSER_DRAFT_ATTACHMENTS = 8;
+/** Cap per-image data URL so localStorage quota stays usable (~5MB typical). */
+export const MAX_COMPOSER_DRAFT_DATA_URL_CHARS = 3_500_000;
+
+export type ComposerDraftAttachment = {
+  key: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  status: "parsing" | "ready" | "error";
+  content: string;
+  dataUrl?: string;
+  sourcePath?: string;
+  referenceToken?: boolean;
+  composerRefLabel?: string;
+  lineRange?: { start: number; end: number };
+  spreadsheetRef?: { sheet: string; a1: string };
+  snippetRef?: string;
+  snippetContent?: string;
+  htmlElementRef?: { tagName: string; selectorHint: string; comment?: string };
+  errorText?: string;
+};
 
 export type ComposerDraftEntry = {
   text: string;
+  attachments: ComposerDraftAttachment[];
   updatedAt: number;
 };
 
 type ComposerDraftCollection = {
-  version: typeof STORAGE_VERSION;
+  version: number;
   drafts: Record<string, ComposerDraftEntry>;
 };
 
@@ -28,12 +53,94 @@ function normalizeDraftKey(raw: unknown): string {
   return boundedString(raw, 320).trim();
 }
 
+function normalizeLineRange(value: unknown): { start: number; end: number } | undefined {
+  if (!isRecord(value)) return undefined;
+  const start = Number(value.start);
+  const end = Number(value.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined;
+  return { start, end };
+}
+
+function normalizeAttachment(value: unknown): ComposerDraftAttachment | null {
+  if (!isRecord(value)) return null;
+  const key = boundedString(value.key, 512).trim();
+  const name = boundedString(value.name, 512).trim();
+  if (!key || !name) return null;
+  const statusRaw = String(value.status || "ready");
+  const status: ComposerDraftAttachment["status"] =
+    statusRaw === "parsing" || statusRaw === "error" ? statusRaw : "ready";
+  const size = Number(value.size);
+  const mimeType = boundedString(value.mimeType, 256) || "application/octet-stream";
+  const content = boundedString(value.content, MAX_COMPOSER_DRAFT_TEXT_CHARS);
+  const dataUrlRaw = typeof value.dataUrl === "string" ? value.dataUrl : "";
+  const dataUrl =
+    dataUrlRaw && dataUrlRaw.length <= MAX_COMPOSER_DRAFT_DATA_URL_CHARS
+      ? dataUrlRaw
+      : undefined;
+  // Drop ready images that lost their payload (oversized) — chip would be useless.
+  if (status === "ready" && mimeType.startsWith("image/") && !dataUrl && !String(value.sourcePath || "").trim()) {
+    return null;
+  }
+  const attachment: ComposerDraftAttachment = {
+    key,
+    name,
+    size: Number.isFinite(size) && size >= 0 ? size : 0,
+    mimeType,
+    status,
+    content,
+  };
+  if (dataUrl) attachment.dataUrl = dataUrl;
+  const sourcePath = boundedString(value.sourcePath, 2048).trim();
+  if (sourcePath) attachment.sourcePath = sourcePath;
+  if (value.referenceToken === true) attachment.referenceToken = true;
+  const composerRefLabel = boundedString(value.composerRefLabel, 512).trim();
+  if (composerRefLabel) attachment.composerRefLabel = composerRefLabel;
+  const lineRange = normalizeLineRange(value.lineRange);
+  if (lineRange) attachment.lineRange = lineRange;
+  if (isRecord(value.spreadsheetRef)) {
+    const sheet = boundedString(value.spreadsheetRef.sheet, 256).trim();
+    const a1 = boundedString(value.spreadsheetRef.a1, 64).trim();
+    if (sheet && a1) attachment.spreadsheetRef = { sheet, a1 };
+  }
+  const snippetRef = boundedString(value.snippetRef, 512).trim();
+  if (snippetRef) attachment.snippetRef = snippetRef;
+  const snippetContent = boundedString(value.snippetContent, MAX_COMPOSER_DRAFT_TEXT_CHARS);
+  if (snippetContent) attachment.snippetContent = snippetContent;
+  if (isRecord(value.htmlElementRef)) {
+    const tagName = boundedString(value.htmlElementRef.tagName, 64).trim();
+    const selectorHint = boundedString(value.htmlElementRef.selectorHint, 512).trim();
+    const comment = boundedString(value.htmlElementRef.comment, 2000).trim();
+    if (tagName) {
+      attachment.htmlElementRef = {
+        tagName,
+        selectorHint,
+        ...(comment ? { comment } : {}),
+      };
+    }
+  }
+  const errorText = boundedString(value.errorText, 512).trim();
+  if (errorText) attachment.errorText = errorText;
+  return attachment;
+}
+
+function normalizeAttachments(value: unknown): ComposerDraftAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const out: ComposerDraftAttachment[] = [];
+  for (const item of value.slice(0, MAX_COMPOSER_DRAFT_ATTACHMENTS)) {
+    const att = normalizeAttachment(item);
+    if (att) out.push(att);
+  }
+  return out;
+}
+
 function normalizeDraftEntry(value: unknown): ComposerDraftEntry | null {
   if (!isRecord(value)) return null;
   const text = boundedString(value.text, MAX_COMPOSER_DRAFT_TEXT_CHARS);
+  const attachments = normalizeAttachments(value.attachments);
   const updatedAt = Number(value.updatedAt);
-  if (!text.trim() || !Number.isFinite(updatedAt) || updatedAt <= 0) return null;
-  return { text, updatedAt };
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return null;
+  if (!text.trim() && attachments.length === 0) return null;
+  return { text, attachments, updatedAt };
 }
 
 /** Session-bound draft key (preferred when a real session exists). */
@@ -64,7 +171,11 @@ export function parseComposerDrafts(
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed) || parsed.version !== STORAGE_VERSION || !isRecord(parsed.drafts)) {
+    if (
+      !isRecord(parsed) ||
+      (parsed.version !== STORAGE_VERSION && parsed.version !== LEGACY_STORAGE_VERSION) ||
+      !isRecord(parsed.drafts)
+    ) {
       return {};
     }
     const drafts: Record<string, ComposerDraftEntry> = {};
@@ -93,6 +204,23 @@ function pruneDrafts(
   return next;
 }
 
+function stripAttachmentDataUrls(
+  drafts: Record<string, ComposerDraftEntry>,
+): Record<string, ComposerDraftEntry> {
+  const next: Record<string, ComposerDraftEntry> = {};
+  for (const [key, entry] of Object.entries(drafts)) {
+    next[key] = {
+      ...entry,
+      attachments: entry.attachments.map((att) => {
+        if (!att.dataUrl) return att;
+        const { dataUrl: _drop, ...rest } = att;
+        return rest;
+      }),
+    };
+  }
+  return next;
+}
+
 export function serializeComposerDrafts(
   drafts: Record<string, ComposerDraftEntry>,
 ): string {
@@ -115,37 +243,59 @@ export function loadComposerDrafts(): Record<string, ComposerDraftEntry> {
 }
 
 export function saveComposerDrafts(drafts: Record<string, ComposerDraftEntry>): boolean {
-  const raw = serializeComposerDrafts(drafts);
-  try {
+  const tryWrite = (payload: Record<string, ComposerDraftEntry>) => {
+    const raw = serializeComposerDrafts(payload);
     window.localStorage.setItem(scopedKey(COMPOSER_DRAFT_STORAGE_KEY), raw);
+  };
+  try {
+    tryWrite(drafts);
     return true;
   } catch {
-    return false;
+    // Quota: drop image payloads and retry once (path refs still survive).
+    try {
+      tryWrite(stripAttachmentDataUrls(drafts));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-export function getComposerDraftText(key: string): string {
+export function getComposerDraft(key: string): ComposerDraftEntry | null {
   const normalized = normalizeDraftKey(key);
-  if (!normalized) return "";
-  return loadComposerDrafts()[normalized]?.text ?? "";
+  if (!normalized) return null;
+  return loadComposerDrafts()[normalized] ?? null;
 }
 
-/** Upsert draft text; blank/whitespace-only clears the slot. */
-export function upsertComposerDraft(key: string, text: string): void {
+export function getComposerDraftText(key: string): string {
+  return getComposerDraft(key)?.text ?? "";
+}
+
+export function getComposerDraftAttachments(key: string): ComposerDraftAttachment[] {
+  return getComposerDraft(key)?.attachments ?? [];
+}
+
+/** Upsert draft; blank text + no attachments clears the slot. */
+export function upsertComposerDraft(
+  key: string,
+  text: string,
+  attachments: ComposerDraftAttachment[] = [],
+): void {
   const normalized = normalizeDraftKey(key);
   if (!normalized) return;
-  const trimmedCapable = boundedString(text, MAX_COMPOSER_DRAFT_TEXT_CHARS);
+  const entry = normalizeDraftEntry({
+    text: boundedString(text, MAX_COMPOSER_DRAFT_TEXT_CHARS),
+    attachments,
+    updatedAt: Date.now(),
+  });
   const drafts = loadComposerDrafts();
-  if (!trimmedCapable.trim()) {
+  if (!entry) {
     if (!(normalized in drafts)) return;
     delete drafts[normalized];
     saveComposerDrafts(drafts);
     return;
   }
-  drafts[normalized] = {
-    text: trimmedCapable,
-    updatedAt: Date.now(),
-  };
+  drafts[normalized] = entry;
   saveComposerDrafts(drafts);
 }
 
@@ -174,6 +324,7 @@ export function migrateActiveComposerDraftToSession(
   if (!from) return;
   drafts[toKey] = {
     text: from.text,
+    attachments: from.attachments,
     updatedAt: Date.now(),
   };
   delete drafts[fromKey];

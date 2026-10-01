@@ -3,6 +3,8 @@ import {
   COMPOSER_DRAFT_STORAGE_KEY,
   MAX_COMPOSER_DRAFT_ENTRIES,
   clearComposerDraft,
+  getComposerDraft,
+  getComposerDraftAttachments,
   getComposerDraftText,
   migrateActiveComposerDraftToSession,
   parseComposerDrafts,
@@ -40,10 +42,10 @@ describe("composer-draft-store", () => {
     expect(resolveComposerDraftKey("pane-1", null)).toBe("pane:pane-1");
   });
 
-  it("parseComposerDrafts rejects bad payloads", () => {
+  it("parseComposerDrafts rejects bad payloads and accepts v1/v2", () => {
     expect(parseComposerDrafts(null)).toEqual({});
     expect(parseComposerDrafts("{")).toEqual({});
-    expect(parseComposerDrafts(JSON.stringify({ version: 2, drafts: {} }))).toEqual({});
+    expect(parseComposerDrafts(JSON.stringify({ version: 99, drafts: {} }))).toEqual({});
     expect(
       parseComposerDrafts(
         JSON.stringify({
@@ -54,7 +56,7 @@ describe("composer-draft-store", () => {
           },
         }),
       ),
-    ).toEqual({ "session:b": { text: "ok", updatedAt: 2 } });
+    ).toEqual({ "session:b": { text: "ok", attachments: [], updatedAt: 2 } });
   });
 
   it("upsert / get / clear round-trip via scoped localStorage", () => {
@@ -66,6 +68,44 @@ describe("composer-draft-store", () => {
     expect(getComposerDraftText("session:s1")).toBe("");
   });
 
+  it("persists image attachments with dataUrl", () => {
+    const dataUrl = "data:image/png;base64,aaaa";
+    upsertComposerDraft("session:img", "带图", [
+      {
+        key: "img-1",
+        name: "image.png",
+        size: 12,
+        mimeType: "image/png",
+        status: "ready",
+        content: "[图片: image.png]",
+        dataUrl,
+      },
+    ]);
+    expect(getComposerDraftText("session:img")).toBe("带图");
+    const atts = getComposerDraftAttachments("session:img");
+    expect(atts).toHaveLength(1);
+    expect(atts[0]?.name).toBe("image.png");
+    expect(atts[0]?.dataUrl).toBe(dataUrl);
+    expect(getComposerDraft("session:img")?.attachments[0]?.mimeType).toBe("image/png");
+  });
+
+  it("attachment-only draft is kept; blank clears", () => {
+    upsertComposerDraft("pane:p1", "", [
+      {
+        key: "img-1",
+        name: "a.png",
+        size: 1,
+        mimeType: "image/png",
+        status: "ready",
+        content: "[图片]",
+        dataUrl: "data:image/png;base64,x",
+      },
+    ]);
+    expect(getComposerDraftAttachments("pane:p1")).toHaveLength(1);
+    upsertComposerDraft("pane:p1", "  \n", []);
+    expect(getComposerDraft("pane:p1")).toBeNull();
+  });
+
   it("blank upsert clears the slot", () => {
     upsertComposerDraft("pane:p1", "draft");
     upsertComposerDraft("pane:p1", "  \n");
@@ -73,16 +113,27 @@ describe("composer-draft-store", () => {
   });
 
   it("migrateActiveComposerDraftToSession moves pane draft onto session", () => {
-    upsertComposerDraft("pane:pane-x", "pending send");
+    upsertComposerDraft("pane:pane-x", "pending send", [
+      {
+        key: "f1",
+        name: "a.png",
+        size: 1,
+        mimeType: "image/png",
+        status: "ready",
+        content: "[图片]",
+        dataUrl: "data:image/png;base64,y",
+      },
+    ]);
     migrateActiveComposerDraftToSession("pane-x", "sess-new");
     expect(getComposerDraftText("pane:pane-x")).toBe("");
     expect(getComposerDraftText("session:sess-new")).toBe("pending send");
+    expect(getComposerDraftAttachments("session:sess-new")[0]?.name).toBe("a.png");
   });
 
   it("serialize prunes to MAX_COMPOSER_DRAFT_ENTRIES by updatedAt", () => {
-    const drafts: Record<string, { text: string; updatedAt: number }> = {};
+    const drafts: Record<string, { text: string; attachments: []; updatedAt: number }> = {};
     for (let i = 0; i < MAX_COMPOSER_DRAFT_ENTRIES + 5; i += 1) {
-      drafts[`session:s${i}`] = { text: `t${i}`, updatedAt: i + 1 };
+      drafts[`session:s${i}`] = { text: `t${i}`, attachments: [], updatedAt: i + 1 };
     }
     const parsed = parseComposerDrafts(serializeComposerDrafts(drafts));
     expect(Object.keys(parsed)).toHaveLength(MAX_COMPOSER_DRAFT_ENTRIES);
