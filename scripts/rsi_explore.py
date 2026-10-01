@@ -49,6 +49,20 @@ _FAKE_ERROR_MSGS = [
     {"role": "assistant", "content": "final answer"},
 ]
 
+# AIDE² (arXiv:2609.26457) §3.5 failure-memory 门控: bug 率 ≥15% 才注入错误
+# 签名——机制在错误稀少时保持沉默。对应到本驱动器: exploit 模式的经验
+# 注入同样按近期失败率门控, 失败率低时 hints 休眠不打扰顺畅的探索。
+HINTS_FAIL_RATE_GATE = 0.15
+
+
+def _recent_fail_rate(store: TrajectoryStore) -> float | None:
+    """store 内累计轨迹失败率（无轨迹 → None, 门控不生效）。"""
+    trajs = list(store.iter_trajectories())
+    if not trajs:
+        return None
+    fails = sum(1 for t in trajs if t.status != "pass")
+    return fails / len(trajs)
+
 
 def _fake_trial(trials_dir: Path, task_path: str, round_no: int) -> tuple[float, Path]:
     """dry 模式: 伪造 harbor trial 产物（result.json + agent 轨迹）。"""
@@ -112,9 +126,14 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
     trials_root = Path(trials_root)
     prev = trials_root.parent / "experience" / f"round_{round_no - 1}.json"
     hints = ""
+    hints_gated = False
     if hints_mode == "exploit" and round_no > 1 and prev.exists():
-        hints = format_hints(
-            ExperienceMemory(prev).voted_lessons(min_votes=min_votes, k=8))
+        rate = _recent_fail_rate(store)
+        if rate is not None and rate < HINTS_FAIL_RATE_GATE:
+            hints_gated = True    # 失败率低 → 注入休眠（AIDE² 式门控）
+        else:
+            hints = format_hints(
+                ExperienceMemory(prev).voted_lessons(min_votes=min_votes, k=8))
 
     if memory.path.exists() and (memory.is_frozen or memory.all_lessons()):
         # 真跑踩坑修复: 既往运行的冻结记忆会让本轮 add() 被静默跳过,
@@ -168,7 +187,8 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
         if not memory.is_frozen:
             memory.add(lessons, round_no)
         results.append({"task": task_name, "reward": float(reward),
-                        "hints": hints, "hints_mode": hints_mode})
+                        "hints": hints, "hints_mode": hints_mode,
+                        "hints_gated": hints_gated})
     if srv is not None:
         srv.shutdown()
 
