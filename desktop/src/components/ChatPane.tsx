@@ -3408,6 +3408,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const composerDraftKeyRef = useRef(resolveComposerDraftKey(pane.id, pane.sessionId));
   const composerDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoringComposerDraftRef = useRef(false);
+  /** Latest serialized composer text; layout-unmount flush must not depend on DOM. */
+  const lastComposerDraftTextRef = useRef("");
   /** Last caret inside composer — survives blur when quoting from message context menu. */
   const composerSavedRangeRef = useRef<Range | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
@@ -5482,6 +5484,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         el.appendChild(document.createTextNode(textBuffer));
       }
       const visible = stripComposerQuotePlaceholders(value);
+      if (!restoringComposerDraftRef.current) {
+        lastComposerDraftTextRef.current = value;
+      }
       syncComposerFromValue(visible);
       focusComposerEnd();
     },
@@ -5503,75 +5508,109 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [readSerializedComposerAroundCaret, setComposerText]
   );
 
-  const flushComposerDraft = useCallback(
-    (explicitKey?: string, explicitText?: string) => {
-      if (restoringComposerDraftRef.current) return;
-      if (composerDraftSaveTimerRef.current != null) {
-        clearTimeout(composerDraftSaveTimerRef.current);
-        composerDraftSaveTimerRef.current = null;
-      }
-      const key = (explicitKey ?? composerDraftKeyRef.current).trim();
-      if (!key) return;
-      const text =
-        explicitText !== undefined ? explicitText : extractComposerText();
-      upsertComposerDraft(key, text);
-    },
-    [extractComposerText],
-  );
+  /**
+   * Unmount cleanup must NOT rely on composerRef alone: React runs useEffect
+   * cleanups after DOM teardown. Mirror text into lastComposerDraftTextRef and
+   * flush from useLayoutEffect so Automation / Avatars nav switches keep drafts.
+   */
+  const extractComposerTextRef = useRef(extractComposerText);
+  extractComposerTextRef.current = extractComposerText;
 
-  const scheduleComposerDraftSave = useCallback(() => {
-    if (restoringComposerDraftRef.current || imeComposingRef.current) return;
+  const persistComposerDraftNow = useCallback((explicitKey?: string, explicitText?: string) => {
+    if (restoringComposerDraftRef.current) return;
     if (composerDraftSaveTimerRef.current != null) {
       clearTimeout(composerDraftSaveTimerRef.current);
-    }
-    composerDraftSaveTimerRef.current = setTimeout(() => {
       composerDraftSaveTimerRef.current = null;
-      flushComposerDraft();
-    }, 300);
-  }, [flushComposerDraft]);
+    }
+    const key = (explicitKey ?? composerDraftKeyRef.current).trim();
+    if (!key) return;
+    const text =
+      explicitText !== undefined ? explicitText : lastComposerDraftTextRef.current;
+    lastComposerDraftTextRef.current = text;
+    upsertComposerDraft(key, text);
+  }, []);
+
+  const captureComposerDraftFromDom = useCallback(() => {
+    if (restoringComposerDraftRef.current) return;
+    const text = extractComposerText();
+    lastComposerDraftTextRef.current = text;
+    persistComposerDraftNow(undefined, text);
+  }, [extractComposerText, persistComposerDraftNow]);
+
+  const scheduleComposerDraftSave = useCallback(() => {
+    if (imeComposingRef.current) return;
+    // Always mirror DOM text — even during restore — so unmount flush cannot miss keystrokes.
+    const text = extractComposerText();
+    lastComposerDraftTextRef.current = text;
+    if (restoringComposerDraftRef.current) return;
+    persistComposerDraftNow(undefined, text);
+  }, [extractComposerText, persistComposerDraftNow]);
 
   const clearActiveComposerDraft = useCallback(() => {
     if (composerDraftSaveTimerRef.current != null) {
       clearTimeout(composerDraftSaveTimerRef.current);
       composerDraftSaveTimerRef.current = null;
     }
+    lastComposerDraftTextRef.current = "";
     const key = composerDraftKeyRef.current.trim();
     if (key) clearComposerDraft(key);
   }, []);
 
-  const extractComposerTextRef = useRef(extractComposerText);
-  extractComposerTextRef.current = extractComposerText;
-  const flushComposerDraftRef = useRef(flushComposerDraft);
-  flushComposerDraftRef.current = flushComposerDraft;
-
-  // Persist / restore unsent composer text across mainView switches (e.g. Automation)
-  // and history session jumps. ChatPane unmounts when leaving the chat shell.
-  useEffect(() => {
+  // Flush while the fiber still owns the DOM (before React tears down the pane on
+  // mainView switches like Automation / Avatars). useEffect cleanups are too late.
+  useLayoutEffect(() => {
     const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     const prevKey = composerDraftKeyRef.current;
     if (prevKey && prevKey !== nextKey) {
-      flushComposerDraftRef.current(prevKey);
+      upsertComposerDraft(prevKey, lastComposerDraftTextRef.current);
     }
+    composerDraftKeyRef.current = nextKey;
+    return () => {
+      if (composerDraftSaveTimerRef.current != null) {
+        clearTimeout(composerDraftSaveTimerRef.current);
+        composerDraftSaveTimerRef.current = null;
+      }
+      const key = composerDraftKeyRef.current;
+      if (!key) return;
+      // Prefer live DOM if still mounted (layout cleanup runs before teardown).
+      const el = composerRef.current;
+      if (el) {
+        lastComposerDraftTextRef.current = extractComposerTextRef.current();
+      }
+      upsertComposerDraft(key, lastComposerDraftTextRef.current);
+    };
+  }, [pane.id, pane.sessionId]);
+
+  // Restore after mount / session jump. Separate from the layout flush effect so a
+  // cancelled restore timer never skips the unmount save.
+  const composerDraftRestorePassRef = useRef(0);
+  useEffect(() => {
+    const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     composerDraftKeyRef.current = nextKey;
     restoringComposerDraftRef.current = true;
     const draftText = getComposerDraftText(nextKey);
+    lastComposerDraftTextRef.current = draftText;
+    const restorePass = ++composerDraftRestorePassRef.current;
+    const isFirstPass = restorePass === 1;
     const timer = window.setTimeout(() => {
+      if (!draftText.trim() && isFirstPass) {
+        // Mount race: user may have typed before this tick. Don't clobber.
+        const live = extractComposerTextRef.current();
+        if (live.trim()) {
+          lastComposerDraftTextRef.current = live;
+          restoringComposerDraftRef.current = false;
+          persistComposerDraftNow(undefined, live);
+          return;
+        }
+      }
       setComposerText(draftText);
       restoringComposerDraftRef.current = false;
     }, 0);
     return () => {
       window.clearTimeout(timer);
       restoringComposerDraftRef.current = false;
-      if (composerDraftSaveTimerRef.current != null) {
-        clearTimeout(composerDraftSaveTimerRef.current);
-        composerDraftSaveTimerRef.current = null;
-      }
-      const key = composerDraftKeyRef.current;
-      // Skip if contenteditable already gone — avoid wiping a blur/debounce-saved draft with "".
-      if (!key || !composerRef.current) return;
-      upsertComposerDraft(key, extractComposerTextRef.current());
     };
-  }, [pane.id, pane.sessionId, setComposerText]);
+  }, [pane.id, pane.sessionId, setComposerText, persistComposerDraftNow]);
 
   const handleCrewAppendDirective = useCallback(
     (agentId: string) => {
@@ -14587,6 +14626,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     const next = domTextLooksNonEmpty(composerRef.current?.textContent);
                     return prev === next ? prev : next;
                   });
+                  // Mirror during IME so a mid-composition nav switch still persists text.
+                  lastComposerDraftTextRef.current = (
+                    composerRef.current?.innerText || ""
+                  ).replace(/\u00a0/g, " ");
                   saveComposerCaret();
                   return;
                 }
@@ -14619,7 +14662,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }}
               onBlur={() => {
                 imeComposingRef.current = false;
-                flushComposerDraft();
+                captureComposerDraftFromDom();
               }}
               onDragOver={(e) => {
                 if (composerAcceptsDragTypes(e.dataTransfer?.types ?? [])) {
