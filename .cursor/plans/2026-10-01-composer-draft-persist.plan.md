@@ -18,7 +18,8 @@ Suggested-Impl-Model: Composer 2.5
 - Key：`agx-composer-drafts-v1::<backendScope>`（payload version=2，兼容读 v1）
 - Draft map key：`session:<sessionId>`（有会话）或 `pane:<paneId>`（空白/懒创建会话）
 - 持久化纯文本 + `attachments[]`（含图片 `dataUrl` / `sourcePath` 等 chip 字段）
-- 上限：单条文本 100_000 字符；最多 8 个附件；单图 dataUrl ≤ 3.5MB；最多 80 条草稿（按 `updatedAt` 淘汰）
+- 图片二进制进 IndexedDB（`composer-draft-blob-store`）；localStorage 只存元数据 + `hasBlob`
+- 上限：单条文本 100_000 字符；最多 8 个附件；最多 80 条草稿（按 `updatedAt` 淘汰）
 
 `ChatPane` 接线：输入落盘、附件变更落盘、layout unmount flush、session 切换存旧载新、发送成功清空、`migrateActiveComposerDraftToSession` 带附件迁移。
 

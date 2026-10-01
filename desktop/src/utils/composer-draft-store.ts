@@ -1,4 +1,12 @@
 import { readScopedLocalStorage, scopedKey } from "./backend-scope";
+import {
+  deleteAllDraftAttachmentBlobsSync,
+  deleteDraftAttachmentBlobSync,
+  getDraftAttachmentBlob,
+  getDraftAttachmentBlobSync,
+  migrateDraftAttachmentBlobsSync,
+  putDraftAttachmentBlobSync,
+} from "./composer-draft-blob-store";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "agx-composer-drafts-v1";
 
@@ -8,8 +16,12 @@ const LEGACY_STORAGE_VERSION = 1;
 export const MAX_COMPOSER_DRAFT_TEXT_CHARS = 100_000;
 export const MAX_COMPOSER_DRAFT_ENTRIES = 80;
 export const MAX_COMPOSER_DRAFT_ATTACHMENTS = 8;
-/** Cap per-image data URL so localStorage quota stays usable (~5MB typical). */
-export const MAX_COMPOSER_DRAFT_DATA_URL_CHARS = 3_500_000;
+/**
+ * localStorage must NOT hold large image dataUrls (quota ~5MB).
+ * Payloads live in composer-draft-blob-store (memory + IndexedDB).
+ * Kept as a soft inline cap if a tiny dataUrl is ever embedded.
+ */
+export const MAX_COMPOSER_DRAFT_DATA_URL_CHARS = 48_000;
 
 export type ComposerDraftAttachment = {
   key: string;
@@ -19,6 +31,8 @@ export type ComposerDraftAttachment = {
   status: "parsing" | "ready" | "error";
   content: string;
   dataUrl?: string;
+  /** True when image bytes live in the blob store (not in localStorage). */
+  hasBlob?: boolean;
   sourcePath?: string;
   referenceToken?: boolean;
   composerRefLabel?: string;
@@ -77,8 +91,16 @@ function normalizeAttachment(value: unknown): ComposerDraftAttachment | null {
     dataUrlRaw && dataUrlRaw.length <= MAX_COMPOSER_DRAFT_DATA_URL_CHARS
       ? dataUrlRaw
       : undefined;
-  // Drop ready images that lost their payload (oversized) — chip would be useless.
-  if (status === "ready" && mimeType.startsWith("image/") && !dataUrl && !String(value.sourcePath || "").trim()) {
+  const hasBlob = value.hasBlob === true || Boolean(dataUrlRaw && !dataUrl);
+  const sourcePath = boundedString(value.sourcePath, 2048).trim();
+  // Ready images need either inline/tiny dataUrl, a blob-store marker, or a path.
+  if (
+    status === "ready" &&
+    mimeType.startsWith("image/") &&
+    !dataUrl &&
+    !hasBlob &&
+    !sourcePath
+  ) {
     return null;
   }
   const attachment: ComposerDraftAttachment = {
@@ -90,7 +112,7 @@ function normalizeAttachment(value: unknown): ComposerDraftAttachment | null {
     content,
   };
   if (dataUrl) attachment.dataUrl = dataUrl;
-  const sourcePath = boundedString(value.sourcePath, 2048).trim();
+  if (hasBlob) attachment.hasBlob = true;
   if (sourcePath) attachment.sourcePath = sourcePath;
   if (value.referenceToken === true) attachment.referenceToken = true;
   const composerRefLabel = boundedString(value.composerRefLabel, 512).trim();
@@ -121,6 +143,28 @@ function normalizeAttachment(value: unknown): ComposerDraftAttachment | null {
   const errorText = boundedString(value.errorText, 512).trim();
   if (errorText) attachment.errorText = errorText;
   return attachment;
+}
+
+function attachmentsForLocalStorage(
+  attachments: ComposerDraftAttachment[],
+): ComposerDraftAttachment[] {
+  return attachments.map((att) => {
+    if (!att.dataUrl) return att;
+    const { dataUrl: _drop, ...rest } = att;
+    return { ...rest, hasBlob: true };
+  });
+}
+
+function mergeAttachmentBlobsSync(
+  draftKey: string,
+  attachments: ComposerDraftAttachment[],
+): ComposerDraftAttachment[] {
+  return attachments.map((att) => {
+    if (att.dataUrl) return att;
+    const blob = getDraftAttachmentBlobSync(draftKey, att.key);
+    if (!blob) return att;
+    return { ...att, dataUrl: blob, hasBlob: true };
+  });
 }
 
 function normalizeAttachments(value: unknown): ComposerDraftAttachment[] {
@@ -211,11 +255,7 @@ function stripAttachmentDataUrls(
   for (const [key, entry] of Object.entries(drafts)) {
     next[key] = {
       ...entry,
-      attachments: entry.attachments.map((att) => {
-        if (!att.dataUrl) return att;
-        const { dataUrl: _drop, ...rest } = att;
-        return rest;
-      }),
+      attachments: attachmentsForLocalStorage(entry.attachments),
     };
   }
   return next;
@@ -228,7 +268,11 @@ export function serializeComposerDrafts(
   for (const [rawKey, rawEntry] of Object.entries(drafts)) {
     const key = normalizeDraftKey(rawKey);
     if (!key) continue;
-    const entry = normalizeDraftEntry(rawEntry);
+    // Never embed large dataUrls in the localStorage JSON payload.
+    const entry = normalizeDraftEntry({
+      ...rawEntry,
+      attachments: attachmentsForLocalStorage(rawEntry.attachments ?? []),
+    });
     if (entry) bounded[key] = entry;
   }
   const pruned = pruneDrafts(bounded);
@@ -251,7 +295,7 @@ export function saveComposerDrafts(drafts: Record<string, ComposerDraftEntry>): 
     tryWrite(drafts);
     return true;
   } catch {
-    // Quota: drop image payloads and retry once (path refs still survive).
+    // Quota: metadata-only retry (blobs already offloaded).
     try {
       tryWrite(stripAttachmentDataUrls(drafts));
       return true;
@@ -261,10 +305,21 @@ export function saveComposerDrafts(drafts: Record<string, ComposerDraftEntry>): 
   }
 }
 
+function withSyncedBlobs(
+  key: string,
+  entry: ComposerDraftEntry | null,
+): ComposerDraftEntry | null {
+  if (!entry) return null;
+  return {
+    ...entry,
+    attachments: mergeAttachmentBlobsSync(key, entry.attachments),
+  };
+}
+
 export function getComposerDraft(key: string): ComposerDraftEntry | null {
   const normalized = normalizeDraftKey(key);
   if (!normalized) return null;
-  return loadComposerDrafts()[normalized] ?? null;
+  return withSyncedBlobs(normalized, loadComposerDrafts()[normalized] ?? null);
 }
 
 export function getComposerDraftText(key: string): string {
@@ -275,6 +330,31 @@ export function getComposerDraftAttachments(key: string): ComposerDraftAttachmen
   return getComposerDraft(key)?.attachments ?? [];
 }
 
+/**
+ * Cold-start hydrate: pull image payloads from IndexedDB when the in-memory
+ * blob cache is empty (e.g. after app restart / pane close across reloads).
+ */
+export async function hydrateComposerDraft(
+  key: string,
+): Promise<ComposerDraftEntry | null> {
+  const normalized = normalizeDraftKey(key);
+  if (!normalized) return null;
+  const entry = loadComposerDrafts()[normalized] ?? null;
+  if (!entry) return null;
+  const attachments = await Promise.all(
+    entry.attachments.map(async (att) => {
+      if (att.dataUrl) return att;
+      const fromMem = getDraftAttachmentBlobSync(normalized, att.key);
+      if (fromMem) return { ...att, dataUrl: fromMem, hasBlob: true };
+      if (!att.hasBlob && !att.mimeType.startsWith("image/")) return att;
+      const fromIdb = await getDraftAttachmentBlob(normalized, att.key);
+      if (!fromIdb) return att;
+      return { ...att, dataUrl: fromIdb, hasBlob: true };
+    }),
+  );
+  return { ...entry, attachments };
+}
+
 /** Upsert draft; blank text + no attachments clears the slot. */
 export function upsertComposerDraft(
   key: string,
@@ -283,18 +363,38 @@ export function upsertComposerDraft(
 ): void {
   const normalized = normalizeDraftKey(key);
   if (!normalized) return;
+
+  // Offload image bytes before localStorage normalize (which strips large dataUrls).
+  const keptKeys = new Set<string>();
+  for (const att of attachments) {
+    const ak = String(att.key || "").trim();
+    if (!ak) continue;
+    keptKeys.add(ak);
+    if (att.dataUrl) putDraftAttachmentBlobSync(normalized, ak, att.dataUrl);
+  }
+
   const entry = normalizeDraftEntry({
     text: boundedString(text, MAX_COMPOSER_DRAFT_TEXT_CHARS),
-    attachments,
+    attachments: attachmentsForLocalStorage(attachments),
     updatedAt: Date.now(),
   });
   const drafts = loadComposerDrafts();
   if (!entry) {
+    deleteAllDraftAttachmentBlobsSync(normalized);
     if (!(normalized in drafts)) return;
     delete drafts[normalized];
     saveComposerDrafts(drafts);
     return;
   }
+
+  // Drop blob payloads for attachments removed from this draft.
+  const prev = drafts[normalized];
+  if (prev) {
+    for (const old of prev.attachments) {
+      if (!keptKeys.has(old.key)) deleteDraftAttachmentBlobSync(normalized, old.key);
+    }
+  }
+
   drafts[normalized] = entry;
   saveComposerDrafts(drafts);
 }
@@ -302,6 +402,7 @@ export function upsertComposerDraft(
 export function clearComposerDraft(key: string): void {
   const normalized = normalizeDraftKey(key);
   if (!normalized) return;
+  deleteAllDraftAttachmentBlobsSync(normalized);
   const drafts = loadComposerDrafts();
   if (!(normalized in drafts)) return;
   delete drafts[normalized];
@@ -322,6 +423,11 @@ export function migrateActiveComposerDraftToSession(
   const drafts = loadComposerDrafts();
   const from = drafts[fromKey];
   if (!from) return;
+  migrateDraftAttachmentBlobsSync(
+    fromKey,
+    toKey,
+    from.attachments.map((a) => a.key),
+  );
   drafts[toKey] = {
     text: from.text,
     attachments: from.attachments,

@@ -87,6 +87,31 @@ describe("composer-draft-store", () => {
     expect(atts[0]?.name).toBe("image.png");
     expect(atts[0]?.dataUrl).toBe(dataUrl);
     expect(getComposerDraft("session:img")?.attachments[0]?.mimeType).toBe("image/png");
+    // localStorage must stay metadata-only (no embedded dataUrl payload).
+    const raw = window.localStorage.getItem(scopedKey(COMPOSER_DRAFT_STORAGE_KEY)) || "";
+    expect(raw).not.toContain("data:image/png;base64,aaaa");
+    expect(raw).toContain('"hasBlob":true');
+  });
+
+  it("keeps oversized image payloads via blob store (not dropped)", () => {
+    const dataUrl = `data:image/png;base64,${"A".repeat(80_000)}`;
+    upsertComposerDraft("session:big", "大图", [
+      {
+        key: "big-1",
+        name: "big.png",
+        size: 60_000,
+        mimeType: "image/png",
+        status: "ready",
+        content: "[图片: big.png]",
+        dataUrl,
+      },
+    ]);
+    const atts = getComposerDraftAttachments("session:big");
+    expect(atts).toHaveLength(1);
+    expect(atts[0]?.dataUrl).toBe(dataUrl);
+    const raw = window.localStorage.getItem(scopedKey(COMPOSER_DRAFT_STORAGE_KEY)) || "";
+    expect(raw.length).toBeLessThan(20_000);
+    expect(raw).not.toContain(dataUrl.slice(0, 40));
   });
 
   it("attachment-only draft is kept; blank clears", () => {
