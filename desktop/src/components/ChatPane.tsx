@@ -501,6 +501,13 @@ import {
   queuedMessagesForSession,
 } from "../utils/pending-message-queue";
 import {
+  clearComposerDraft,
+  getComposerDraftText,
+  migrateActiveComposerDraftToSession,
+  resolveComposerDraftKey,
+  upsertComposerDraft,
+} from "../utils/composer-draft-store";
+import {
   bootstrapMarkerForSessionBinding,
   ensureWorkspaceSessionBeforeFirstMessage,
   shouldKeepNewTopicWorkspaceControls,
@@ -3397,6 +3404,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
+  /** Unsent composer drafts: keyed by session:… or pane:… in localStorage. */
+  const composerDraftKeyRef = useRef(resolveComposerDraftKey(pane.id, pane.sessionId));
+  const composerDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoringComposerDraftRef = useRef(false);
   /** Last caret inside composer — survives blur when quoting from message context menu. */
   const composerSavedRangeRef = useRef<Range | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
@@ -5491,6 +5502,76 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     },
     [readSerializedComposerAroundCaret, setComposerText]
   );
+
+  const flushComposerDraft = useCallback(
+    (explicitKey?: string, explicitText?: string) => {
+      if (restoringComposerDraftRef.current) return;
+      if (composerDraftSaveTimerRef.current != null) {
+        clearTimeout(composerDraftSaveTimerRef.current);
+        composerDraftSaveTimerRef.current = null;
+      }
+      const key = (explicitKey ?? composerDraftKeyRef.current).trim();
+      if (!key) return;
+      const text =
+        explicitText !== undefined ? explicitText : extractComposerText();
+      upsertComposerDraft(key, text);
+    },
+    [extractComposerText],
+  );
+
+  const scheduleComposerDraftSave = useCallback(() => {
+    if (restoringComposerDraftRef.current || imeComposingRef.current) return;
+    if (composerDraftSaveTimerRef.current != null) {
+      clearTimeout(composerDraftSaveTimerRef.current);
+    }
+    composerDraftSaveTimerRef.current = setTimeout(() => {
+      composerDraftSaveTimerRef.current = null;
+      flushComposerDraft();
+    }, 300);
+  }, [flushComposerDraft]);
+
+  const clearActiveComposerDraft = useCallback(() => {
+    if (composerDraftSaveTimerRef.current != null) {
+      clearTimeout(composerDraftSaveTimerRef.current);
+      composerDraftSaveTimerRef.current = null;
+    }
+    const key = composerDraftKeyRef.current.trim();
+    if (key) clearComposerDraft(key);
+  }, []);
+
+  const extractComposerTextRef = useRef(extractComposerText);
+  extractComposerTextRef.current = extractComposerText;
+  const flushComposerDraftRef = useRef(flushComposerDraft);
+  flushComposerDraftRef.current = flushComposerDraft;
+
+  // Persist / restore unsent composer text across mainView switches (e.g. Automation)
+  // and history session jumps. ChatPane unmounts when leaving the chat shell.
+  useEffect(() => {
+    const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
+    const prevKey = composerDraftKeyRef.current;
+    if (prevKey && prevKey !== nextKey) {
+      flushComposerDraftRef.current(prevKey);
+    }
+    composerDraftKeyRef.current = nextKey;
+    restoringComposerDraftRef.current = true;
+    const draftText = getComposerDraftText(nextKey);
+    const timer = window.setTimeout(() => {
+      setComposerText(draftText);
+      restoringComposerDraftRef.current = false;
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      restoringComposerDraftRef.current = false;
+      if (composerDraftSaveTimerRef.current != null) {
+        clearTimeout(composerDraftSaveTimerRef.current);
+        composerDraftSaveTimerRef.current = null;
+      }
+      const key = composerDraftKeyRef.current;
+      // Skip if contenteditable already gone — avoid wiping a blur/debounce-saved draft with "".
+      if (!key || !composerRef.current) return;
+      upsertComposerDraft(key, extractComposerTextRef.current());
+    };
+  }, [pane.id, pane.sessionId, setComposerText]);
 
   const handleCrewAppendDirective = useCallback(
     (agentId: string) => {
@@ -9710,6 +9791,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         });
         if (found.kind === "hit") {
           setComposerText("");
+          clearActiveComposerDraft();
           clearQuoteTargets();
           await resolveActionConfirmation(found.confirmation, decision, "manual");
           return;
@@ -9758,6 +9840,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         timestamp: Date.now(),
       });
       setComposerText("");
+      clearActiveComposerDraft();
       clearQuoteTargets();
       setContextFiles({});
       return true;
@@ -10108,6 +10191,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
     setComposerText("");
+    clearActiveComposerDraft();
     clearQuoteTargets();
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
     setContextFiles({});
@@ -12865,7 +12949,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
       });
       if (result.ok && result.session_id) {
-        migrateActiveComposerDraftToSession(result.session_id);
+        migrateActiveComposerDraftToSession(pane.id, result.session_id);
         freshlyCreatedSessionRef.current = result.session_id;
         setPaneSessionId(pane.id, result.session_id, {
           provider: chatProvider || undefined,
@@ -12949,6 +13033,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
       const draftText = detail?.draftText;
       if (draftText) {
+        // Persist before the session-switch restore effect reads the pane key, so a
+        // prefilled「新建任务」draft is not wiped by an empty restore.
+        upsertComposerDraft(resolveComposerDraftKey(pane.id, ""), draftText);
         // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
         // renders from direct DOM writes, so we must go through
         // setComposerText to actually show the draft text in the box.
@@ -14506,6 +14593,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
                 syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
+                scheduleComposerDraftSave();
               }}
               onKeyUp={() => {
                 saveComposerCaret();
@@ -14524,12 +14612,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
                 syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
+                scheduleComposerDraftSave();
                 window.setTimeout(() => {
                   imeComposingRef.current = false;
                 }, 0);
               }}
               onBlur={() => {
                 imeComposingRef.current = false;
+                flushComposerDraft();
               }}
               onDragOver={(e) => {
                 if (composerAcceptsDragTypes(e.dataTransfer?.types ?? [])) {
