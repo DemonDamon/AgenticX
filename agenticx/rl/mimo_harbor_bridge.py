@@ -45,6 +45,7 @@ description = "MiMo-V2.6-RL-oss {domain} task (imported)"
 [metadata]
 domain = "{domain}"
 source = "mimo-rl-oss"
+integrity_note = {integrity_note}
 
 [verifier]
 timeout_sec = {timeout}
@@ -72,6 +73,17 @@ mcp_servers = []
 # --runInBand 单进程 + --ci 关 watch; 只对含 jest 的命令追加
 _JEST_ARGS = "--runInBand --ci"
 
+# AIDE² (arXiv:2609.26457) §3.5 private-split 提示: 固定告知 agent
+# "held-out 测试在事后应用"。直接抑制改测试文件类 reward hacking
+# （001457 实测: agent 改测试文件 → test_patch 冲突 → verifier 梯度失真）。
+_PRIVATE_SPLIT_NOTE = (
+    "\n\n---\n\n"
+    "Note: your work will be verified against a held-out test suite that is "
+    "applied only after you finish — you cannot see these tests, and any "
+    "edits to test files will make the verification patch fail to apply. "
+    "Prefer robust, generalizable solutions."
+)
+
 
 def _safe_test_command(cmd: str) -> str:
     """test_command 转译: jest 命令追加安全参数, 其余原样。"""
@@ -94,8 +106,14 @@ export CI=false
 cd "{cwd}"
 
 # 1) apply test patch: verifier 测试 + mimo_test_command.sh（patch 自带）
+#    apply 失败 = agent 改动了 patch 目标文件（001457 实测: 改测试文件）→
+#    记 hacking 嫌疑标记（AIDE² §3.4 hacking-rate 度量的最小落地）, reward 0
 if [ -f /tests/test_patch.diff ]; then
-  git apply /tests/test_patch.diff || {{ echo 0 > /logs/verifier/reward.txt; exit 0; }}
+  if ! git apply /tests/test_patch.diff; then
+    echo patch_conflict > /logs/verifier/hack_flag.txt
+    echo 0 > /logs/verifier/reward.txt
+    exit 0
+  fi
 fi
 
 # 2) jest 系命令注入单进程参数（防容器 OOM）
@@ -138,11 +156,14 @@ def _safe_name(task_id: str) -> str:
 
 
 def materialize_task(task: dict, out_root: Path, *, org: str = "mimo",
-                     mirror: str | None = DEFAULT_MIRROR) -> Path:
+                     mirror: str | None = DEFAULT_MIRROR,
+                     integrity_note: bool = True) -> Path:
     """把池内单任务物化为 harbor 任务目录, 返回目录路径。
 
     task 字段来自 datasets/task_pool.json 的 tasks[] 条目。
     extras: code 域带 test_patch（含测试 diff）; test_command 在 verifier_ref。
+    integrity_note: 追加 AIDE² 式 private-split 提示（默认开）——RL 训练数据
+    生成的标准配置, 被 hack 的通过会污染 GRPO reward 信号。
     """
     tid = task["task_id"]
     name = _safe_name(tid)
@@ -163,10 +184,14 @@ def materialize_task(task: dict, out_root: Path, *, org: str = "mimo",
     timeout = int(task.get("extras", {}).get("timeout_sec", 900))
     cfg = _TASK_TOML.format(
         org=org, name=name, domain=domain, image=image,
-        timeout=timeout, agent_timeout=max(timeout, 1800))
+        timeout=timeout, agent_timeout=max(timeout, 1800),
+        integrity_note="true" if integrity_note else "false")
     (d / "task.toml").write_text(cfg)
 
-    (d / "instruction.md").write_text(task["instruction"] or "")
+    instruction = task["instruction"] or ""
+    if integrity_note:
+        instruction += _PRIVATE_SPLIT_NOTE
+    (d / "instruction.md").write_text(instruction)
 
     test_command = _safe_test_command(task.get("verifier_ref", ""))
     if domain == "code":

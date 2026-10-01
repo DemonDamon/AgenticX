@@ -4,7 +4,8 @@ import json
 import pytest
 
 from agenticx.rl.harbor_reward import (
-    extract_reward, make_agent_env, make_trial_config, run_harbor_trial,
+    extract_reward, make_agent_env, make_trial_config, read_hack_flag,
+    run_harbor_trial,
 )
 
 
@@ -40,6 +41,15 @@ def test_extract_reward_from_result_json(tmp_path):
 def test_extract_reward_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         extract_reward(tmp_path / "nope")
+
+
+def test_read_hack_flag(tmp_path):
+    # 无标记 → False; test.sh 写入 hack_flag.txt（patch 冲突）→ True
+    assert read_hack_flag(tmp_path) is False
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+    (verifier / "hack_flag.txt").write_text("patch_conflict")
+    assert read_hack_flag(tmp_path) is True
 
 
 def _write_trial(trials_dir, reward):

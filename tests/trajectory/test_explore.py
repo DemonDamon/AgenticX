@@ -150,6 +150,40 @@ def test_hints_mode_explore_skips_injection(tmp_path):
     assert "FileNotFoundError" in rep2["results"][0]["hints"]
 
 
+# --- AIDE² (arXiv:2609.26457) §3.5: failure-memory 门控 ---
+
+
+def test_hints_dormant_when_fail_rate_low(tmp_path):
+    """exploit 模式下失败率 <15% → 经验注入休眠（错误稀少时机制沉默）。"""
+    tasks = ["/tmp/fakeA", "/tmp/fakeB"]
+    store = TrajectoryStore(tmp_path / "store")
+    m1 = ExperienceMemory(tmp_path / "experience" / "round_1.json")
+    run_round(1, tasks, m1, store, trials_root=tmp_path / "trials", dry=True,
+              skip_split_guard=True)
+    # 2 失败 + 12 历史 pass → 失败率 2/14 ≈ 14.3% < 15% → 门控触发
+    for i in range(12):
+        _seed_pass_traj(store, f"hist-pass-{i}")
+
+    m2 = ExperienceMemory(tmp_path / "experience" / "round_2.json")
+    rep = run_round(2, tasks, m2, store, trials_root=tmp_path / "trials",
+                    dry=True, skip_split_guard=True)
+    assert rep["results"][0]["hints"] == ""        # 休眠
+    assert rep["results"][0]["hints_gated"] is True
+    assert rep["results"][0]["hints_mode"] == "exploit"
+
+    # 对照: 无门控参数语义不变——失败率高（纯 dry 两失败）时照常注入
+    store2 = TrajectoryStore(tmp_path / "store2")
+    m1b = ExperienceMemory(tmp_path / "experience2" / "round_1.json")
+    run_round(1, tasks, m1b, store2, trials_root=tmp_path / "trials2",
+              dry=True, skip_split_guard=True)
+    m2b = ExperienceMemory(tmp_path / "experience2" / "round_2.json")
+    rep2 = run_round(2, tasks, m2b, store2,
+                     trials_root=tmp_path / "trials2", dry=True,
+                     skip_split_guard=True)
+    assert "FileNotFoundError" in rep2["results"][0]["hints"]
+    assert rep2["results"][0]["hints_gated"] is False
+
+
 def test_run_round_evolve_scheduler_smoke(tmp_path):
     """--evolve-scheduler: 轮末在 train 区回放上演化调度器, 报告字段就位。"""
     memory = ExperienceMemory(tmp_path / "exp.json")

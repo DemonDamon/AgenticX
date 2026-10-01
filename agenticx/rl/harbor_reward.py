@@ -69,6 +69,16 @@ def extract_reward(trial_dir: Path) -> float:
     return float(r["verifier_result"]["rewards"]["reward"])
 
 
+def read_hack_flag(trial_dir: Path) -> bool:
+    """patch 冲突标记: agent 改动与 test_patch 冲突（reward hacking 嫌疑）。
+
+    AIDE² (arXiv:2609.26457) §3.4 hacking-rate 度量在 code 域的最小落地:
+    test.sh 在 git apply 失败时写 verifier/hack_flag.txt（001457 实测案例
+    即此形态——agent 改测试文件 → patch 冲突 → reward 0）。
+    """
+    return (Path(trial_dir) / "verifier" / "hack_flag.txt").exists()
+
+
 def run_harbor_trial(task_path: str, model_name: str, base_url: str, *,
                      trials_dir: Path, runner: Callable | None = None,
                      timeout: float = 1800.0,
