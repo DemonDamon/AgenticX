@@ -110,18 +110,32 @@ export function __resetDraftBlobMemoryForTests(): void {
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: IDBDatabase | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const timer = window.setTimeout(() => finish(null), 1500);
     try {
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-      req.onerror = () => resolve(null);
+      req.onerror = () => {
+        window.clearTimeout(timer);
+        finish(null);
+      };
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(IDB_STORE)) {
           db.createObjectStore(IDB_STORE);
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        window.clearTimeout(timer);
+        finish(req.result);
+      };
     } catch {
-      resolve(null);
+      window.clearTimeout(timer);
+      finish(null);
     }
   });
 }

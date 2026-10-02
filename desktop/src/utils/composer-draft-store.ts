@@ -355,11 +355,18 @@ export async function hydrateComposerDraft(
   return { ...entry, attachments };
 }
 
-/** Upsert draft; blank text + no attachments clears the slot. */
+/**
+ * Upsert draft.
+ * - Non-empty text/attachments → save
+ * - Empty payload + `allowEmptyClear: true` → delete slot (user cleared / send success)
+ * - Empty payload without allowEmptyClear → **no-op** (flush/unmount must not wipe
+ *   a previously saved draft when composer refs were already cleared by restore)
+ */
 export function upsertComposerDraft(
   key: string,
   text: string,
   attachments: ComposerDraftAttachment[] = [],
+  options?: { allowEmptyClear?: boolean },
 ): void {
   const normalized = normalizeDraftKey(key);
   if (!normalized) return;
@@ -380,6 +387,10 @@ export function upsertComposerDraft(
   });
   const drafts = loadComposerDrafts();
   if (!entry) {
+    if (!options?.allowEmptyClear) {
+      // Preserve whatever is already stored for this key.
+      return;
+    }
     deleteAllDraftAttachmentBlobsSync(normalized);
     if (!(normalized in drafts)) return;
     delete drafts[normalized];

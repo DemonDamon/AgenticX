@@ -127,14 +127,32 @@ describe("composer-draft-store", () => {
       },
     ]);
     expect(getComposerDraftAttachments("pane:p1")).toHaveLength(1);
-    upsertComposerDraft("pane:p1", "  \n", []);
+    upsertComposerDraft("pane:p1", "  \n", [], { allowEmptyClear: true });
     expect(getComposerDraft("pane:p1")).toBeNull();
   });
 
   it("blank upsert clears the slot", () => {
     upsertComposerDraft("pane:p1", "draft");
-    upsertComposerDraft("pane:p1", "  \n");
+    upsertComposerDraft("pane:p1", "  \n", [], { allowEmptyClear: true });
     expect(getComposerDraftText("pane:p1")).toBe("");
+  });
+
+  it("empty flush does not wipe an existing session draft", () => {
+    upsertComposerDraft("session:keep", "别删我", [
+      {
+        key: "img-1",
+        name: "a.png",
+        size: 1,
+        mimeType: "image/png",
+        status: "ready",
+        content: "[图片]",
+        dataUrl: "data:image/png;base64,keep",
+      },
+    ]);
+    // Simulate unmount/session-switch flush with already-cleared composer refs.
+    upsertComposerDraft("session:keep", "", []);
+    expect(getComposerDraftText("session:keep")).toBe("别删我");
+    expect(getComposerDraftAttachments("session:keep")[0]?.dataUrl).toContain("keep");
   });
 
   it("migrateActiveComposerDraftToSession moves pane draft onto session", () => {

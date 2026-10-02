@@ -5590,7 +5590,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const text =
       explicitText !== undefined ? explicitText : lastComposerDraftTextRef.current;
     lastComposerDraftTextRef.current = text;
-    upsertComposerDraft(key, text, lastComposerAttachmentsRef.current);
+    // User-driven persist may clear (empty composer). Flush/unmount must not.
+    upsertComposerDraft(key, text, lastComposerAttachmentsRef.current, {
+      allowEmptyClear: true,
+    });
   }, []);
 
   const captureComposerDraftFromDom = useCallback(() => {
@@ -5633,6 +5636,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     const prevKey = composerDraftKeyRef.current;
     if (prevKey && prevKey !== nextKey) {
+      // Empty flush must NOT clear a previously saved session draft (refs may
+      // already be wiped by a prior restore). Only write when we have payload.
       upsertComposerDraft(
         prevKey,
         lastComposerDraftTextRef.current,
@@ -5640,13 +5645,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       );
     }
     composerDraftKeyRef.current = nextKey;
+    const keyForThisCommit = nextKey;
     return () => {
       if (composerDraftSaveTimerRef.current != null) {
         clearTimeout(composerDraftSaveTimerRef.current);
         composerDraftSaveTimerRef.current = null;
       }
-      const key = composerDraftKeyRef.current;
-      if (!key) return;
+      if (!keyForThisCommit) return;
       // Prefer mirrored keystrokes over a possibly-already-cleared DOM during teardown.
       // Never let an empty DOM read wipe a non-empty draft we already captured.
       const mirrored = lastComposerDraftTextRef.current;
@@ -5654,7 +5659,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const fromDom = el ? extractComposerTextRef.current() : "";
       const text = fromDom.trim() ? fromDom : mirrored;
       lastComposerDraftTextRef.current = text;
-      upsertComposerDraft(key, text, lastComposerAttachmentsRef.current);
+      // ifEmpty skip (default): closing an already-cleared composer must not
+      // delete the session draft that was flushed earlier.
+      upsertComposerDraft(keyForThisCommit, text, lastComposerAttachmentsRef.current);
     };
   }, [pane.id, pane.sessionId]);
 
@@ -5678,32 +5685,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void (async () => {
-        // Cold start / app restart: pull image bytes from IndexedDB.
-        const draft = (await hydrateComposerDraft(nextKey)) ?? syncDraft;
-        if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
-        const draftText = draft?.text ?? "";
-        const draftAttachments = draft?.attachments ?? [];
-        lastComposerDraftTextRef.current = draftText;
-        lastComposerAttachmentsRef.current = draftAttachments;
-        const liveText = extractComposerTextRef.current();
-        const liveFiles = contextFilesRef.current;
-        const liveHasText = Boolean(liveText.trim());
-        const liveHasFiles = Object.keys(liveFiles).length > 0;
-        if (!draftText.trim() && draftAttachments.length === 0 && isFirstPass) {
-          // Mount race: user may have typed / attached before this tick. Don't clobber.
-          if (liveHasText || liveHasFiles) {
-            if (liveHasText) lastComposerDraftTextRef.current = liveText;
-            if (liveHasFiles) {
-              lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(liveFiles);
+        try {
+          // Cold start / app restart: pull image bytes from IndexedDB.
+          const draft = (await hydrateComposerDraft(nextKey)) ?? syncDraft;
+          if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
+          const draftText = draft?.text ?? "";
+          const draftAttachments = draft?.attachments ?? [];
+          lastComposerDraftTextRef.current = draftText;
+          lastComposerAttachmentsRef.current = draftAttachments;
+          const liveText = extractComposerTextRef.current();
+          const liveFiles = contextFilesRef.current;
+          const liveHasText = Boolean(liveText.trim());
+          const liveHasFiles = Object.keys(liveFiles).length > 0;
+          if (!draftText.trim() && draftAttachments.length === 0 && isFirstPass) {
+            // Mount race: user may have typed / attached before this tick. Don't clobber.
+            if (liveHasText || liveHasFiles) {
+              if (liveHasText) lastComposerDraftTextRef.current = liveText;
+              if (liveHasFiles) {
+                lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(liveFiles);
+              }
+              restoringComposerDraftRef.current = false;
+              persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
+              return;
             }
+          }
+          setComposerTextRef.current(draftText);
+          setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
+        } finally {
+          if (!cancelled && restorePass === composerDraftRestorePassRef.current) {
             restoringComposerDraftRef.current = false;
-            persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
-            return;
           }
         }
-        setComposerTextRef.current(draftText);
-        setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
-        restoringComposerDraftRef.current = false;
       })();
     }, 0);
     return () => {
