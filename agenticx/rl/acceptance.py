@@ -68,7 +68,7 @@ def wilcoxon_gate(baseline: Sequence[float], candidate: Sequence[float],
         return AcceptDecision(False, float(stat), float(p), mb, mc, n_pairs,
                               "no_mean_gain")
     stat, p = wilcoxon(candidate, baseline, zero_method="wilcox")
-    accepted = p < alpha
+    accepted = bool(p < alpha)     # scipy 返回 np.float64 → np.bool_ 不可 JSON
     return AcceptDecision(
         accepted, float(stat), float(p), mb, mc, n_pairs,
         "significant_gain" if accepted else "not_significant")
@@ -88,7 +88,7 @@ def mannwhitney_gate(baseline: Sequence[float], candidate: Sequence[float],
     if mc < mb + min_improve:
         return AcceptDecision(False, float(stat), float(p), mb, mc, n_pairs,
                               "no_mean_gain")
-    accepted = p < alpha
+    accepted = bool(p < alpha)     # scipy 返回 np.float64 → np.bool_ 不可 JSON
     return AcceptDecision(
         accepted, float(stat), float(p), mb, mc, n_pairs,
         "significant_gain" if accepted else "not_significant")
