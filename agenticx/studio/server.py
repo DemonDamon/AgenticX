@@ -950,6 +950,19 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("install_mcp_crash_guard failed (non-fatal): %s", exc)
 
+        # ActionProposal startup recovery: leftover executing → outcome_unknown.
+        try:
+            from agenticx.runtime.action_proposals import recover_interrupted_proposals
+
+            _recovered_n = recover_interrupted_proposals()
+            if _recovered_n:
+                logger.info(
+                    "action_proposals: recovered %s interrupted proposal(s)",
+                    _recovered_n,
+                )
+        except Exception as exc:
+            logger.debug("action_proposals recovery skipped (non-fatal): %s", exc)
+
         # Initialise process-level MCP hub and kick off background restore.
         from agenticx.runtime.global_mcp_manager import GlobalMcpManager as _GmcpM
 

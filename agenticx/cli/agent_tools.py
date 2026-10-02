@@ -4092,24 +4092,25 @@ def _normalize_action_confirmation_summary(raw: Any) -> List[Dict[str, str]]:
     return out
 
 
-def build_action_confirmation_tool_result(
+def _classify_action_confirmation_answer(
     answer: Dict[str, Any],
     *,
     approve_label: str = "确认执行",
     reject_label: str = "取消",
 ) -> str:
-    """Render action-confirmation answers as explicit tool-result guidance."""
+    """Classify a confirmation answer as approve|reject|timeout|suspended|ambiguous."""
     if isinstance(answer, dict):
         if answer.get("__timeout__"):
-            return (
-                "[ACTION_CONFIRMATION_EXPIRED] 确认已失效。不得继续该动作，"
-                "若仍需执行必须重新生成预览。"
-            )
+            return "timeout"
         if answer.get("__suspended__"):
-            return "[ACTION_CONFIRMATION_SUSPENDED] 无人值守会话不能确认外部写操作。"
+            return "suspended"
 
     answer_text = str((answer or {}).get("answer_text", "") or "").strip()
-    selected = [str(x).strip() for x in list((answer or {}).get("selected_options", []) or []) if str(x).strip()]
+    selected = [
+        str(x).strip()
+        for x in list((answer or {}).get("selected_options", []) or [])
+        if str(x).strip()
+    ]
     approve = str(approve_label or "确认执行").strip() or "确认执行"
     reject = str(reject_label or "取消").strip() or "取消"
 
@@ -4118,16 +4119,54 @@ def build_action_confirmation_tool_result(
     reject_hits = {reject, "取消", "拒绝", "不用了", "no", "n"}
 
     if any(opt in approve_hits or opt.lower() in approve_hits for opt in selected):
-        return "[ACTION_CONFIRMED] 用户已确认执行。"
+        return "approve"
     if any(opt in reject_hits or opt.lower() in reject_hits for opt in selected):
-        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+        return "reject"
     if answer_text in approve_hits or lowered in {x.lower() for x in approve_hits if x.isascii()}:
-        return "[ACTION_CONFIRMED] 用户已确认执行。"
+        return "approve"
     if answer_text in reject_hits or lowered in {x.lower() for x in reject_hits if x.isascii()}:
-        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+        return "reject"
+    return "ambiguous"
 
+
+def build_action_confirmation_tool_result(
+    answer: Dict[str, Any],
+    *,
+    approve_label: str = "确认执行",
+    reject_label: str = "取消",
+    proposal_id: str = "",
+    proposal_status: str = "",
+) -> str:
+    """Render action-confirmation answers as explicit tool-result guidance."""
+    verdict = _classify_action_confirmation_answer(
+        answer if isinstance(answer, dict) else {},
+        approve_label=approve_label,
+        reject_label=reject_label,
+    )
+    pid = str(proposal_id or "").strip()
+    status = str(proposal_status or "").strip()
+    suffix = ""
+    if pid:
+        suffix = f" proposal_id={pid}"
+        if status:
+            suffix += f" status={status}"
+        suffix += "。不得静默重放同一 proposal；若需重试必须新建审阅提案。"
+
+    if verdict == "timeout":
+        base = (
+            "[ACTION_CONFIRMATION_EXPIRED] 确认已失效。不得继续该动作，"
+            "若仍需执行必须重新生成预览。"
+        )
+        return base if not pid else f"{base}{suffix}"
+    if verdict == "suspended":
+        base = "[ACTION_CONFIRMATION_SUSPENDED] 无人值守会话不能确认外部写操作。"
+        return base if not pid else f"{base}{suffix}"
+    if verdict == "approve":
+        return f"[ACTION_CONFIRMED] 用户已确认执行。{suffix}".rstrip()
+    if verdict == "reject":
+        return f"[ACTION_REJECTED] 用户已取消执行。不得继续该动作。{suffix}".rstrip()
     # Ambiguous / empty answers must never silently approve an external write.
-    return "[ACTION_REJECTED] 用户未明确确认。不得继续该动作。"
+    return f"[ACTION_REJECTED] 用户未明确确认。不得继续该动作。{suffix}".rstrip()
 
 
 async def _request_action_confirmation(
@@ -4142,13 +4181,24 @@ async def _request_action_confirmation(
     emit_event: Optional[Any] = None,
     is_unattended: bool = False,
     caller_context: Optional[Dict[str, Any]] = None,
+    session_id: str = "",
 ) -> str:
     """Block for a binary action confirmation via the clarification transport.
 
     Emits ``clarification_required`` with ``context.kind = action_confirmation``
     so Desktop can render the dedicated confirm card while still resolving
     through ``POST /api/clarify``.
+
+    Persists an ActionProposal before the UI prompt; approve/deny goes through
+    ``ActionProposalService.decide`` so outcome_unknown / expired states are
+    durable and silent retry of the same proposal is refused.
     """
+    from agenticx.runtime.action_proposals import (
+        HashMismatchError,
+        ProposalExpiredError,
+        get_default_service,
+    )
+
     title_text = str(title or "").strip()[:200]
     if not title_text:
         return (
@@ -4163,11 +4213,31 @@ async def _request_action_confirmation(
     source_text = str(source or "").strip()[:80]
     request_id = str(uuid.uuid4())
     expires_at_ms = int((time.time() + ttl) * 1000)
+    sid = str(session_id or "").strip()
+
+    proposal_payload: Dict[str, Any] = {
+        "title": title_text,
+        "summary": summary_rows,
+        "approve_label": approve,
+        "reject_label": reject,
+        "source": source_text,
+        "request_id": request_id,
+    }
+    proposal_service = get_default_service()
+    proposal = proposal_service.propose(
+        proposal_payload,
+        ttl_seconds=ttl,
+        session_id=sid,
+        proposal_id=request_id,
+    )
 
     # Controlled context only — never trust caller-provided kind/secrets.
     payload_context: Dict[str, Any] = {
         "kind": "action_confirmation",
         "request_id": request_id,
+        "proposal_id": proposal.id,
+        "proposal_hash": proposal.hash,
+        "proposal_status": proposal.status,
         "title": title_text,
         "summary": summary_rows,
         "approve_label": approve,
@@ -4181,8 +4251,9 @@ async def _request_action_confirmation(
 
     if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
         _log.info(
-            "[action_confirm] suspended id=%s title=%s (unattended)",
+            "[action_confirm] suspended id=%s proposal=%s title=%s (unattended)",
             request_id,
+            proposal.id,
             title_text[:80],
         )
         if emit_event is not None:
@@ -4199,11 +4270,21 @@ async def _request_action_confirmation(
                     },
                 }
             )
-        return build_action_confirmation_tool_result({"__suspended__": True})
+        return build_action_confirmation_tool_result(
+            {"__suspended__": True},
+            proposal_id=proposal.id,
+            proposal_status=proposal.status,
+        )
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
-    _log.info("[action_confirm] requested id=%s title=%s ttl=%.1fs", request_id, title_text[:80], ttl)
+    _log.info(
+        "[action_confirm] requested id=%s proposal=%s title=%s ttl=%.1fs",
+        request_id,
+        proposal.id,
+        title_text[:80],
+        ttl,
+    )
     wait_task = asyncio.create_task(
         gate.request_clarification(
             title_text,
@@ -4254,10 +4335,42 @@ async def _request_action_confirmation(
                 },
             }
         )
-    return build_action_confirmation_tool_result(
-        answer if isinstance(answer, dict) else {},
+
+    answer_dict = answer if isinstance(answer, dict) else {}
+    verdict = _classify_action_confirmation_answer(
+        answer_dict,
         approve_label=approve,
         reject_label=reject,
+    )
+    final_status = proposal.status
+    if verdict == "timeout":
+        expired = proposal_service.mark_expired(proposal.id)
+        final_status = expired.status if expired is not None else "expired"
+    elif verdict == "approve":
+        try:
+            decided = proposal_service.decide(proposal.id, proposal.hash, "approve")
+            final_status = decided.status
+        except ProposalExpiredError:
+            final_status = "expired"
+            answer_dict = {"__timeout__": True}
+            verdict = "timeout"
+        except HashMismatchError:
+            final_status = "denied"
+            answer_dict = {"answer_text": "", "selected_options": [reject]}
+            verdict = "reject"
+    elif verdict == "reject":
+        decided = proposal_service.decide(proposal.id, proposal.hash, "deny")
+        final_status = decided.status
+    elif verdict == "ambiguous":
+        decided = proposal_service.decide(proposal.id, proposal.hash, "deny")
+        final_status = decided.status
+
+    return build_action_confirmation_tool_result(
+        answer_dict,
+        approve_label=approve,
+        reject_label=reject,
+        proposal_id=proposal.id,
+        proposal_status=final_status,
     )
 
 
@@ -10396,6 +10509,7 @@ async def dispatch_tool_async(
                 clarify_gate=clarify_gate,
                 emit_event=event_callback,
                 is_unattended=is_unattended,
+                session_id=_studio_session_id(session),
             )
         if name == "list_files":
             return _tool_list_files(arguments, session)
