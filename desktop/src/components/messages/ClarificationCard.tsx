@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Check, ChevronUp, Clock, Send } from "lucide-react";
-import type { ClarificationDecision, PendingClarification } from "../../store";
+import { AlertCircle, Check, ChevronUp, Clock, ExternalLink, Send } from "lucide-react";
+import type { ChoicePanelOption, ClarificationDecision, PendingClarification } from "../../store";
 import { buildClarificationAnswerText, inferClarificationDecisions, toggleDecisionSelection, type ClarificationAnswer } from "../../utils/clarification-notice";
 import { ASSISTANT_INLINE_CARD_SHELL_CLASS, GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
 
@@ -55,11 +55,22 @@ export function ClarificationCard({
   const { t } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
   const shellClass = groupChatRail ? GROUP_INLINE_CARD_SHELL_CLASS : ASSISTANT_INLINE_CARD_SHELL_CLASS;
+  const isChoicePanel = Boolean(prompt.panelId && (prompt.choiceOptions?.length ?? 0) > 0);
+  const isComparison = prompt.panelType === "comparison";
+  const isSuperseded = prompt.superseded === true;
+  const choiceOptions: ChoicePanelOption[] = useMemo(
+    () => (prompt.choiceOptions ?? []).filter((o) => o.id && o.label),
+    [prompt.choiceOptions],
+  );
   const opts = useMemo(
-    () => (prompt.options ?? []).filter((o) => typeof o === "string" && o.trim().length > 0),
-    [prompt.options],
+    () =>
+      isChoicePanel
+        ? choiceOptions.map((o) => o.label)
+        : (prompt.options ?? []).filter((o) => typeof o === "string" && o.trim().length > 0),
+    [isChoicePanel, choiceOptions, prompt.options],
   );
   const decisions = useMemo(() => {
+    if (isChoicePanel) return [];
     const explicit = (prompt.decisions ?? []).filter((d) => d.question.trim() && (d.options?.length ?? 0) > 0);
     const source = explicit.length > 0 ? explicit : inferClarificationDecisions(prompt.context, opts);
     return source.map((d) => ({
@@ -67,7 +78,7 @@ export function ClarificationCard({
       selectionMode: d.selectionMode === "multiple" ? ("multiple" as const) : ("single" as const),
       exclusiveOptions: Array.isArray(d.exclusiveOptions) ? d.exclusiveOptions : [],
     }));
-  }, [prompt.decisions, prompt.context, opts]);
+  }, [isChoicePanel, prompt.decisions, prompt.context, opts]);
   const groupedMode = decisions.length > 0;
   const hasMultipleDecision = decisions.some((d) => d.selectionMode === "multiple");
   // `request_clarification` intentionally permits prompt-only, open-ended
@@ -75,10 +86,13 @@ export function ClarificationCard({
   // an optional alternative hidden behind a checkbox. Also keep malformed
   // persisted payloads answerable when they provide neither choices nor a
   // free-text flag.
-  const openEnded = !groupedMode && opts.length === 0;
-  const canFree = prompt.allowFreeText !== false || openEnded;
+  const openEnded = !isChoicePanel && !groupedMode && opts.length === 0;
+  const canFree = isChoicePanel
+    ? !isComparison && prompt.allowFreeText !== false
+    : prompt.allowFreeText !== false || openEnded;
 
   const [selectedFlat, setSelectedFlat] = useState<Set<string>>(() => new Set());
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [selectedByDecision, setSelectedByDecision] = useState<Record<string, string[]>>({});
   const [customByDecision, setCustomByDecision] = useState<Record<string, string>>({});
   const [customOpen, setCustomOpen] = useState(false);
@@ -93,7 +107,19 @@ export function ClarificationCard({
     const ctx = prompt.context;
     if (!ctx || typeof ctx !== "object") return [] as Array<[string, string]>;
     return Object.entries(ctx)
-      .filter(([k, v]) => k !== "request_id" && v !== null && v !== undefined && String(v).trim())
+      .filter(
+        ([k, v]) =>
+          k !== "request_id" &&
+          k !== "kind" &&
+          k !== "panel_id" &&
+          k !== "candidate_set_version" &&
+          k !== "panel_type" &&
+          k !== "choice_options" &&
+          k !== "superseded" &&
+          v !== null &&
+          v !== undefined &&
+          String(v).trim(),
+      )
       .map(([k, v]) => [k, String(v)] as [string, string]);
   }, [prompt.context]);
 
@@ -104,7 +130,11 @@ export function ClarificationCard({
   };
 
   const canSubmit = useMemo(() => {
-    if (answered) return false;
+    if (answered || isSuperseded) return false;
+    if (isChoicePanel) {
+      if (selectedChoiceId) return true;
+      return canFree && customText.trim().length > 0;
+    }
     if (groupedMode) {
       return decisions.every((d) => decisionAnswered(d));
     }
@@ -112,6 +142,9 @@ export function ClarificationCard({
     return selectedFlat.size > 0 || hasCustom;
   }, [
     answered,
+    isSuperseded,
+    isChoicePanel,
+    selectedChoiceId,
     canFree,
     customOpen,
     customText,
@@ -124,7 +157,7 @@ export function ClarificationCard({
   ]);
 
   const toggleFlatOption = (opt: string) => {
-    if (answered || submitting) return;
+    if (answered || submitting || isSuperseded) return;
     setError(null);
     setSelectedFlat((prev) => {
       const next = new Set(prev);
@@ -135,8 +168,15 @@ export function ClarificationCard({
     if (customOpen) setCustomOpen(false);
   };
 
+  const selectChoiceOption = (optionId: string) => {
+    if (answered || submitting || isSuperseded) return;
+    setError(null);
+    setSelectedChoiceId((prev) => (prev === optionId ? null : optionId));
+    if (customOpen) setCustomOpen(false);
+  };
+
   const selectDecisionOption = (decision: ClarificationDecision, opt: string) => {
-    if (answered || submitting) return;
+    if (answered || submitting || isSuperseded) return;
     setError(null);
     setSelectedByDecision((prev) => {
       const next = toggleDecisionSelection(decision, prev[decision.id] ?? [], opt);
@@ -149,12 +189,24 @@ export function ClarificationCard({
   };
 
   const setDecisionCustom = (decisionId: string, value: string) => {
-    if (answered || submitting) return;
+    if (answered || submitting || isSuperseded) return;
     setError(null);
     setCustomByDecision((prev) => ({ ...prev, [decisionId]: value }));
   };
 
   const buildAnswer = (): ClarificationAnswer => {
+    if (isChoicePanel) {
+      const selected = choiceOptions.find((o) => o.id === selectedChoiceId);
+      const label = selected?.label ?? "";
+      const custom = canFree && customText.trim() ? customText.trim() : "";
+      return {
+        answerText: custom,
+        selectedOptions: label ? [label] : [],
+        panelId: prompt.panelId,
+        candidateSetVersion: prompt.candidateSetVersion,
+        optionId: selected?.id,
+      };
+    }
     if (groupedMode) {
       const selectedOptions = decisions
         .map((d) => {
@@ -176,7 +228,7 @@ export function ClarificationCard({
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit || submitting || answered) return;
+    if (!canSubmit || submitting || answered || isSuperseded) return;
 
     setSubmitting(true);
     setError(null);
@@ -218,7 +270,7 @@ export function ClarificationCard({
   };
 
   const handleSkip = () => {
-    if (answered || submitting) return;
+    if (answered || submitting || isSuperseded) return;
     setError(null);
     const empty: ClarificationAnswer = { answerText: "", selectedOptions: [] };
     // Skip MUST resolve the backend gate, otherwise the turn hangs until timeout.
@@ -311,9 +363,16 @@ export function ClarificationCard({
   // ── Active question ───────────────────────────────────────────────────────
   return (
     <div
-      className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}
+      className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm ${isSuperseded ? "opacity-70" : ""}`}
       role="dialog"
-      aria-label={t("clarify.needsInput")}
+      aria-label={
+        isChoicePanel
+          ? isComparison
+            ? t("clarify.comparisonTitle")
+            : t("clarify.choicePanelTitle")
+          : t("clarify.needsInput")
+      }
+      aria-disabled={isSuperseded || undefined}
     >
       {/* Header — no hard divider; rely on spacing + subtle tint */}
       <div className="flex items-center justify-between bg-surface-card-strong/20 px-3 py-2">
@@ -321,10 +380,14 @@ export function ClarificationCard({
           <span className="flex h-5 w-5 items-center justify-center text-[var(--ui-btn-primary-bg)]">
             <ClarificationGlyph className="h-4 w-4" />
           </span>
-          {t("clarify.needsInput")}
+          {isChoicePanel
+            ? isComparison
+              ? t("clarify.comparisonTitle")
+              : t("clarify.choicePanelTitle")
+            : t("clarify.needsInput")}
         </div>
         <div className="flex items-center gap-1">
-          {onReply && (
+          {onReply && !isSuperseded && (
             <button
               type="button"
               onClick={() => onReply(prompt)}
@@ -351,6 +414,15 @@ export function ClarificationCard({
           {prompt.prompt}
         </div>
 
+        {isSuperseded && (
+          <div
+            role="status"
+            className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-200"
+          >
+            {t("clarify.supersededHint")}
+          </div>
+        )}
+
         {contextSnapshot.length > 0 && (
           <div className="mt-2 rounded-md bg-surface-panel/40 px-2.5 py-2 text-[11px] text-text-muted">
             <div className="mb-1 text-[10px] uppercase tracking-[0.4px] text-text-faint">{t("clarify.snapshot")}</div>
@@ -365,7 +437,74 @@ export function ClarificationCard({
           </div>
         )}
 
-        {groupedMode ? (
+        {isChoicePanel ? (
+          <div
+            className="mt-3 space-y-2"
+            role="radiogroup"
+            aria-label={isComparison ? t("clarify.comparisonTitle") : t("clarify.choicePanelTitle")}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-[0.5px] text-text-faint">
+                {isComparison ? t("clarify.comparisonTitle") : t("clarify.recommended")}
+              </div>
+              <div className="text-[10px] text-text-faint">{t("clarify.singleSelect")}</div>
+            </div>
+            {choiceOptions.map((opt) => {
+              const isOn = selectedChoiceId === opt.id;
+              const sources = opt.sources ?? [];
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isOn}
+                  disabled={submitting || isSuperseded}
+                  onClick={() => selectChoiceOption(opt.id)}
+                  className={
+                    "w-full rounded-lg border px-3 py-2 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 " +
+                    (isOn
+                      ? "border-[var(--ui-btn-primary-bg)] bg-[var(--ui-btn-primary-bg)]/10"
+                      : "border-[var(--border-muted)] hover:border-[var(--ui-btn-primary-bg)]/50 hover:bg-surface-hover")
+                  }
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-medium text-text-strong">{opt.label}</span>
+                    {isOn && <Check className="h-3.5 w-3.5 text-[var(--ui-btn-primary-bg)]" />}
+                  </div>
+                  {(opt.details?.length ?? 0) > 0 && (
+                    <ul className="mt-1 space-y-0.5 text-[11px] text-text-muted">
+                      {opt.details!.map((d) => (
+                        <li key={d}>· {d}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {isComparison && sources.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      <div className="text-[10px] uppercase tracking-[0.4px] text-text-faint">
+                        {t("clarify.sourcesLabel")}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {sources.map((src) => (
+                          <a
+                            key={`${opt.id}:${src.url}`}
+                            href={src.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-muted)] px-2 py-0.5 text-[10px] text-text-muted hover:border-[var(--ui-btn-primary-bg)]/40 hover:text-text-strong"
+                          >
+                            <ExternalLink className="h-2.5 w-2.5" />
+                            {src.title}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : groupedMode ? (
           <div className="mt-3 space-y-3">
             {decisions.map((decision, idx) => {
               const isMultiple = decision.selectionMode === "multiple";
@@ -469,8 +608,8 @@ export function ClarificationCard({
           )
         )}
 
-        {/* Flat mode: one global custom reply */}
-        {canFree && !groupedMode && (
+        {/* Flat / choice-panel mode: one global custom reply */}
+        {canFree && !groupedMode && !isComparison && (
           <div className="mt-2">
 {openEnded ? (
               <label
@@ -484,11 +623,15 @@ export function ClarificationCard({
                 <input
                   type="checkbox"
                   checked={customOpen}
+                  disabled={isSuperseded}
                   onChange={(e) => {
                     const v = e.target.checked;
                     setCustomOpen(v);
                     if (!v) setCustomText("");
-                    if (v) setSelectedFlat(new Set());
+                    if (v) {
+                      setSelectedFlat(new Set());
+                      setSelectedChoiceId(null);
+                    }
                     setError(null);
                   }}
                   className="h-3.5 w-3.5 accent-[var(--ui-btn-primary-bg)]"
@@ -500,13 +643,14 @@ export function ClarificationCard({
               <textarea
                 id={openEnded ? `clarify-open-answer-${prompt.requestId}` : undefined}
                 value={customText}
+                disabled={isSuperseded}
                 onChange={(e) => {
                   setCustomText(e.target.value);
                   setError(null);
                 }}
                 placeholder={openEnded ? t("clarify.openAnswerPlaceholder") : t("clarify.customPlaceholderShort")}
                 rows={3}
-                className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40"
+                className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40 disabled:opacity-50"
               />
             )}
           </div>
@@ -535,47 +679,55 @@ export function ClarificationCard({
       {/* Actions — soft footer, no top rule */}
       <div className="flex items-center justify-between px-3 pb-2.5 pt-1 text-xs">
         <div className="text-[11px] text-text-faint">
-          {groupedMode
-            ? hasMultipleDecision
-              ? t("clarify.submitHintGroupedMulti")
-              : t("clarify.submitHintGrouped")
-            : openEnded
-              ? t("clarify.submitHintOpenEnded")
-              : t("clarify.submitHintFlat")}
+          {isSuperseded
+            ? t("clarify.supersededHint")
+            : isChoicePanel
+              ? t("clarify.submitHintChoice")
+              : groupedMode
+                ? hasMultipleDecision
+                  ? t("clarify.submitHintGroupedMulti")
+                  : t("clarify.submitHintGrouped")
+                : openEnded
+                  ? t("clarify.submitHintOpenEnded")
+                  : t("clarify.submitHintFlat")}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSkip}
-            disabled={submitting}
-            className="rounded px-2 py-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-          >
-            {t("clarify.skipDefault")}
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
-            className={
-              "flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium shadow-sm transition active:opacity-90 disabled:cursor-not-allowed " +
-              (canSubmit
-                ? "text-[var(--ui-btn-primary-text)]"
-                : "bg-surface-hover text-text-muted")
-            }
-            style={canSubmit ? { background: "var(--ui-btn-primary-bg)" } : undefined}
-          >
-            {submitting ? (
-              <>
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/60 border-t-transparent" />
-                {t("clarify.submitting")}
-              </>
-            ) : (
-              <>
-                <Send className="h-3.5 w-3.5" />
-                {t("clarify.submitDecision")}
-              </>
-            )}
-          </button>
+          {!isSuperseded && (
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={submitting}
+              className="rounded px-2 py-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+            >
+              {t("clarify.skipDefault")}
+            </button>
+          )}
+          {!isSuperseded && (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit || submitting}
+              className={
+                "flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium shadow-sm transition active:opacity-90 disabled:cursor-not-allowed " +
+                (canSubmit
+                  ? "text-[var(--ui-btn-primary-text)]"
+                  : "bg-surface-hover text-text-muted")
+              }
+              style={canSubmit ? { background: "var(--ui-btn-primary-bg)" } : undefined}
+            >
+              {submitting ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/60 border-t-transparent" />
+                  {t("clarify.submitting")}
+                </>
+              ) : (
+                <>
+                  <Send className="h-3.5 w-3.5" />
+                  {t("clarify.submitDecision")}
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -4,6 +4,8 @@ import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
+import { buildClarifyRequestBody } from "./utils/clarification-notice";
+import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
@@ -2103,7 +2105,7 @@ export function App() {
   const onSubmitClarification = useCallback(
     async (
       requestId: string,
-      answer: { answerText: string; selectedOptions: string[] },
+      answer: ClarifySubmitAnswer,
       sessionId?: string,
       agentId = "meta",
     ): Promise<boolean> => {
@@ -2137,13 +2139,14 @@ export function App() {
       const res = await fetch(`${apiBase}/api/clarify`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({
-          session_id: sid,
-          request_id: requestId,
-          agent_id: agentId,
-          answer_text: answer.answerText ?? "",
-          selected_options: answer.selectedOptions ?? [],
-        }),
+        body: JSON.stringify(
+          buildClarifyRequestBody({
+            sessionId: sid,
+            requestId,
+            agentId,
+            answer,
+          }),
+        ),
       });
 
       // 404 means the gate is already resolved/missing — treat as "already handled".

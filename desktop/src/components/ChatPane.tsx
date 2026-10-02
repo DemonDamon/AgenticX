@@ -532,7 +532,7 @@ import {
   findRunningActionConfirmationToolMessage,
   findRunningClarificationToolMessage,
 } from "../utils/clarification-inline";
-import { parseClarificationDecisions } from "../utils/clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions, buildClarifyRequestBody } from "../utils/clarification-notice";
 import {
   buildActionConfirmationAnswer,
   findResolvableActionConfirmation,
@@ -11801,7 +11801,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
                   // Clarification: paint the inline card before stream commit so the
                   // card appears on the same SSE frame as tool_call (no extra frame wait).
-                  if (toolNameStr === "request_clarification") {
+                  if (toolNameStr === "request_clarification" || toolNameStr === "present_choices") {
                     const clarifyExtras = toolCallId
                       ? buildClarificationMessageExtras(
                           toolArgs,
@@ -12219,6 +12219,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const clarifyAllowFreeText = payload.data?.allow_free_text !== false;
               const clarifyContext = payload.data?.context;
               const clarifyDecisions = parseClarificationDecisions(payload.data?.decisions);
+              const choiceFields = parseChoicePanelFields(
+                clarifyContext && typeof clarifyContext === "object"
+                  ? (clarifyContext as Record<string, unknown>)
+                  : undefined,
+              );
               const actionConfirm =
                 clarifyContext && typeof clarifyContext === "object"
                   ? parseActionConfirmationContext({
@@ -12326,13 +12331,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 await fetch(`${apiBase}/api/clarify`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-                  body: JSON.stringify({
-                    session_id: requestSessionId,
-                    request_id: clarifyReqId,
-                    agent_id: eventAgentId,
-                    answer_text: answer?.answerText ?? "",
-                    selected_options: answer?.selectedOptions ?? [],
-                  }),
+                  body: JSON.stringify(
+                    buildClarifyRequestBody({
+                      sessionId: requestSessionId,
+                      requestId: clarifyReqId,
+                      agentId: eventAgentId,
+                      answer: {
+                        answerText: answer?.answerText ?? "",
+                        selectedOptions: answer?.selectedOptions ?? [],
+                        panelId: answer?.panelId,
+                        candidateSetVersion: answer?.candidateSetVersion,
+                        optionId: answer?.optionId,
+                      },
+                    }),
+                  ),
                 });
               }
               // Meta: inline card — patch the running tool row when possible so the
@@ -12350,7 +12362,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   agentId: "meta",
                   sessionId: requestSessionId,
                   context: clarifyContext,
+                  ...choiceFields,
                 };
+                // New versioned panel → mark prior choice panels in this pane as superseded.
+                if (choiceFields.panelId) {
+                  useAppStore.setState((state) => ({
+                    panes: state.panes.map((p) => {
+                      if (p.id !== pane.id) return p;
+                      return {
+                        ...p,
+                        messages: (p.messages ?? []).map((m) => {
+                          const cp = m.clarificationPrompt;
+                          if (
+                            !cp?.panelId ||
+                            cp.panelId === choiceFields.panelId ||
+                            cp.superseded
+                          ) {
+                            return m;
+                          }
+                          return {
+                            ...m,
+                            clarificationPrompt: { ...cp, superseded: true },
+                          };
+                        }),
+                      };
+                    }),
+                  }));
+                }
                 const metaPatch = {
                   content: clarifyPrompt,
                   clarificationPrompt: promptPayload,
@@ -12380,7 +12418,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       undefined,
                       undefined,
                       {
-                        toolName: "request_clarification",
+                        toolName: choiceFields.panelId ? "present_choices" : "request_clarification",
                         toolStatus: "running",
                         toolArgs: {
                           prompt: clarifyPrompt,

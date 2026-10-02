@@ -95,6 +95,11 @@ class ClarifyResponse(BaseModel):
     agent_id: str = "meta"
     answer_text: str = ""
     selected_options: List[str] = Field(default_factory=list)
+    # Optional versioned choice-panel fields (present_choices). When set,
+    # /api/clarify validates candidate_set_version before resolving the gate.
+    panel_id: Optional[str] = None
+    candidate_set_version: Optional[int] = None
+    option_id: Optional[str] = None
 
 
 class SessionState(BaseModel):

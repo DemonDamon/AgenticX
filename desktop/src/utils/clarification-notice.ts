@@ -6,9 +6,15 @@
  * the agent, and dedupe against the persisted chat_history row.
  */
 
+import type { ChoicePanelOption, PendingClarification } from "../store";
+
 export type ClarificationAnswer = {
   answerText: string;
   selectedOptions: string[];
+  /** Versioned choice panel select payload (present_choices). */
+  panelId?: string;
+  candidateSetVersion?: number;
+  optionId?: string;
 };
 
 export type ClarificationDecisionPayload = {
@@ -28,7 +34,109 @@ export type PendingClarificationPayload = {
   agentId: string;
   sessionId: string;
   context?: Record<string, unknown> | undefined;
+  panelId?: string;
+  candidateSetVersion?: number;
+  panelType?: "clarification" | "comparison";
+  choiceOptions?: ChoicePanelOption[];
+  superseded?: boolean;
 };
+
+/** Extract versioned choice-panel fields from clarification context / metadata. */
+export function parseChoicePanelFields(
+  context: Record<string, unknown> | undefined | null,
+): Pick<
+  PendingClarification,
+  "panelId" | "candidateSetVersion" | "panelType" | "choiceOptions" | "superseded"
+> {
+  if (!context || typeof context !== "object") return {};
+  if (context.kind !== "choice_panel") return {};
+  const panelId = String(context.panel_id ?? "").trim() || undefined;
+  const rawVersion = context.candidate_set_version;
+  const candidateSetVersion =
+    typeof rawVersion === "number" && Number.isFinite(rawVersion)
+      ? rawVersion
+      : typeof rawVersion === "string" && rawVersion.trim()
+        ? Number(rawVersion)
+        : undefined;
+  const panelType =
+    context.panel_type === "comparison"
+      ? ("comparison" as const)
+      : context.panel_type === "clarification"
+        ? ("clarification" as const)
+        : undefined;
+  const rawOpts = Array.isArray(context.choice_options) ? context.choice_options : [];
+  const choiceOptions: ChoicePanelOption[] = [];
+  for (const item of rawOpts.slice(0, 12)) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const id = String(rec.id ?? "").trim();
+    const label = String(rec.label ?? "").trim();
+    if (!id || !label) continue;
+    const details = Array.isArray(rec.details)
+      ? rec.details.map((d) => String(d).trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const sources: ChoicePanelOption["sources"] = [];
+    if (Array.isArray(rec.sources)) {
+      for (const s of rec.sources.slice(0, 5)) {
+        if (!s || typeof s !== "object") continue;
+        const src = s as Record<string, unknown>;
+        const title = String(src.title ?? "").trim();
+        const url = String(src.url ?? "").trim();
+        if (!title || !url) continue;
+        if (!/^https?:\/\//i.test(url)) continue;
+        sources.push({ title, url });
+      }
+    }
+    choiceOptions.push({
+      id,
+      label,
+      details: details.length > 0 ? details : undefined,
+      sources: sources.length > 0 ? sources : undefined,
+    });
+  }
+  return {
+    panelId,
+    candidateSetVersion:
+      candidateSetVersion !== undefined && Number.isFinite(candidateSetVersion)
+        ? candidateSetVersion
+        : undefined,
+    panelType,
+    choiceOptions: choiceOptions.length > 0 ? choiceOptions : undefined,
+    superseded: context.superseded === true,
+  };
+}
+
+/**
+ * Attach panel_id / candidate_set_version / option_id onto a clarify POST body
+ * when the answer (or prompt) carries versioned choice-panel fields.
+ */
+export function buildClarifyRequestBody(args: {
+  sessionId: string;
+  requestId: string;
+  agentId?: string;
+  answer: ClarificationAnswer;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    session_id: args.sessionId,
+    request_id: args.requestId,
+    agent_id: args.agentId || "meta",
+    answer_text: args.answer.answerText ?? "",
+    selected_options: args.answer.selectedOptions ?? [],
+  };
+  const panelId = (args.answer.panelId || "").trim();
+  if (panelId) {
+    body.panel_id = panelId;
+    if (
+      typeof args.answer.candidateSetVersion === "number" &&
+      Number.isFinite(args.answer.candidateSetVersion)
+    ) {
+      body.candidate_set_version = args.answer.candidateSetVersion;
+    }
+    const optionId = (args.answer.optionId || "").trim();
+    if (optionId) body.option_id = optionId;
+  }
+  return body;
+}
 
 function normalizeExclusiveOptions(
   raw: unknown,
@@ -214,6 +322,8 @@ export function clarificationPayloadFromMeta(
   if (!requestId) return null;
   const rawOptions = Array.isArray(m.options) ? m.options : [];
   const decisions = parseClarificationDecisions(m.decisions);
+  const context = (m.context as Record<string, unknown> | undefined) ?? undefined;
+  const choiceFields = parseChoicePanelFields(context);
   return {
     requestId,
     prompt: String(m.prompt || ""),
@@ -222,6 +332,7 @@ export function clarificationPayloadFromMeta(
     allowFreeText: m.allow_free_text !== false,
     agentId,
     sessionId,
-    context: (m.context as Record<string, unknown> | undefined) ?? undefined,
+    context,
+    ...choiceFields,
   };
 }

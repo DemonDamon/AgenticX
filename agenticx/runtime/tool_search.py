@@ -36,6 +36,7 @@ _VALID_STRATEGIES = frozenset({"adaptive", "manual"})
 CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
     {
         "request_clarification",
+        "present_choices",
         "request_action_confirmation",
         "bash_exec",
         "bash_bg_start",

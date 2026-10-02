@@ -480,6 +480,18 @@ export type ClarificationDecision = {
   exclusiveOptions: string[];
 };
 
+export type ChoicePanelSource = {
+  title: string;
+  url: string;
+};
+
+export type ChoicePanelOption = {
+  id: string;
+  label: string;
+  details?: string[];
+  sources?: ChoicePanelSource[];
+};
+
 export type PendingClarification = {
   requestId: string;
   prompt: string;
@@ -490,6 +502,13 @@ export type PendingClarification = {
   agentId: string;
   sessionId: string;
   context?: Record<string, unknown>;
+  /** Versioned structured choice panel (present_choices). */
+  panelId?: string;
+  candidateSetVersion?: number;
+  panelType?: "clarification" | "comparison";
+  choiceOptions?: ChoicePanelOption[];
+  /** True when a newer panel superseded this one — UI must disable selection. */
+  superseded?: boolean;
 };
 
 export type SubAgent = {

@@ -830,6 +830,76 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "present_choices",
+            "description": (
+                "Present a versioned structured choice panel: either clarification buttons or a sourced "
+                "comparison card (max 3 options). Comparison options MUST each include at least one http(s) "
+                "source URL. This only asks the user for a preference — it performs no external write. "
+                "The panel carries a candidate_set_version; a superseded/outdated panel cannot be selected. "
+                "Prefer this over flattening multi-option research into free text. Continues the same turn "
+                "from the user's selection."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short panel title / question shown to the user (1-200 chars).",
+                    },
+                    "panel_type": {
+                        "type": "string",
+                        "enum": ["clarification", "comparison"],
+                        "description": (
+                            "clarification = preference buttons; comparison = sourced contrast cards "
+                            "(each option needs ≥1 http(s) source; at most 3 visible)."
+                        ),
+                    },
+                    "options": {
+                        "type": "array",
+                        "description": "1-12 clarification options, or 1-3 comparison options with sources.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Stable option id (optional; auto-assigned if omitted).",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Visible option label.",
+                                },
+                                "details": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "0-4 short detail lines (required grounding for comparison).",
+                                },
+                                "sources": {
+                                    "type": "array",
+                                    "description": "Citation sources. Required (≥1 http/https) for comparison.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "url": {"type": "string"},
+                                        },
+                                        "required": ["title", "url"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["label"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["title", "panel_type", "options"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "request_action_confirmation",
             "description": (
                 "Ask the user to confirm or cancel an irreversible / external write action and BLOCK until they "
@@ -4480,6 +4550,61 @@ async def _request_clarification(
             }
         )
     return build_clarification_tool_result(answer)
+
+
+async def _present_choices(
+    *,
+    title: str,
+    panel_type: str,
+    options: Any,
+    session: Optional[Any] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Create a versioned choice panel and block via the clarification gate.
+
+    Validation (comparison sources, max 3 options, etc.) lives in
+    :mod:`agenticx.runtime.choice_panels.store` so ``/api/clarify`` only needs
+    to re-check version on select.
+    """
+    from agenticx.runtime.choice_panels.store import (
+        ValidationError,
+        get_choice_panel_store,
+        panel_to_clarification_context,
+    )
+
+    sid = str(
+        getattr(session, "session_id", "")
+        or getattr(session, "_session_id", "")
+        or getattr(session, "id", "")
+        or ""
+    ).strip() or "default"
+    store = get_choice_panel_store()
+    try:
+        panel = store.create_panel(
+            session_id=sid,
+            panel_type=panel_type,
+            title=title,
+            options=options,
+        )
+    except ValidationError as exc:
+        return f"ERROR: present_choices rejected — {exc}"
+
+    labels = [opt.label for opt in panel.options]
+    ctx = panel_to_clarification_context(panel)
+    # Free-text is allowed for clarification panels, disabled for sourced comparisons.
+    allow_free = panel.panel_type == "clarification"
+    return await _request_clarification(
+        panel.title,
+        options=labels,
+        decisions=None,
+        allow_free_text=allow_free,
+        context=ctx,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
 
 
 def _path_from_arg(path_arg: str) -> Path:
@@ -10485,6 +10610,24 @@ async def dispatch_tool_async(
                 decisions=decisions,
                 allow_free_text=allow_free_text,
                 context=ctx,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
+        if name == "present_choices":
+            title = str(arguments.get("title", "") or "").strip()
+            if not title:
+                return (
+                    "ERROR: present_choices requires a non-empty `title`. "
+                    "请立即重新调用 present_choices 并填写 title / panel_type / options。"
+                )
+            panel_type = str(arguments.get("panel_type", "") or "").strip()
+            raw_opts = arguments.get("options")
+            return await _present_choices(
+                title=title,
+                panel_type=panel_type,
+                options=raw_opts,
+                session=session,
                 clarify_gate=clarify_gate,
                 emit_event=event_callback,
                 is_unattended=is_unattended,

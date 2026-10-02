@@ -9,7 +9,7 @@ import {
   isViewImageInjectMetadata,
   VIEW_IMAGE_INJECT_LEGACY_PREFIX,
 } from "./view-image-inject";
-import { parseClarificationDecisions } from "./clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions } from "./clarification-notice";
 import { parseActionConfirmationContext } from "./action-confirmation";
 import {
   parseAssistantOutputForUi,
@@ -492,6 +492,7 @@ export function mapLoadedSessionMessage(
         } else {
           const rawOptions = Array.isArray(m.options) ? m.options : [];
           const decisions = parseClarificationDecisions(m.decisions);
+          const choiceFields = parseChoicePanelFields(rawContext);
           mapped.clarificationPrompt = {
             requestId,
             prompt: String(m.prompt ?? item.content ?? ""),
@@ -501,6 +502,7 @@ export function mapLoadedSessionMessage(
             agentId,
             sessionId,
             context: rawContext,
+            ...choiceFields,
           };
           if (m.suspended === true) mapped.clarificationSuspended = true;
         }

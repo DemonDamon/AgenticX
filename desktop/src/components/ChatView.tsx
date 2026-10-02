@@ -1578,7 +1578,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   const rawArgs = JSON.stringify(toolArgs);
                   const content =
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
-                  if (toolNameStr === "request_clarification") {
+                  if (toolNameStr === "request_clarification" || toolNameStr === "present_choices") {
                     const clarifyExtras = toolCallId
                       ? buildClarificationMessageExtras(toolArgs, toolCallId, toolGroupId, sessionId)
                       : null;

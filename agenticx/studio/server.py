@@ -2737,6 +2737,33 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # Versioned choice panel: validate candidate_set_version before resolving
+        # the gate so a stale select never writes selected_id or unblocks the turn.
+        panel_id = str(getattr(payload, "panel_id", None) or "").strip()
+        if panel_id:
+            from agenticx.runtime.choice_panels.store import (
+                StaleChoiceError,
+                get_choice_panel_store,
+            )
+
+            option_id = str(getattr(payload, "option_id", None) or "").strip()
+            if not option_id and payload.selected_options:
+                option_id = str(payload.selected_options[0] or "").strip()
+            try:
+                get_choice_panel_store().select(
+                    session_id=payload.session_id,
+                    panel_id=panel_id,
+                    candidate_set_version=int(
+                        getattr(payload, "candidate_set_version", None) or 0
+                    ),
+                    option_id=option_id,
+                )
+            except StaleChoiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409, detail="candidate_set_version invalid"
+                ) from exc
         gate = managed.get_clarify_gate(payload.agent_id)
         if payload.agent_id != "meta" and managed.team_manager is not None:
             team_gate = managed.team_manager.get_clarify_gate(payload.agent_id)
@@ -2746,6 +2773,13 @@ def create_studio_app() -> FastAPI:
             "answer_text": payload.answer_text or "",
             "selected_options": list(payload.selected_options or []),
         }
+        if panel_id:
+            answer["panel_id"] = panel_id
+            answer["candidate_set_version"] = getattr(
+                payload, "candidate_set_version", None
+            )
+            if getattr(payload, "option_id", None):
+                answer["option_id"] = payload.option_id
         ok = gate.resolve(payload.request_id, answer)
         if not ok:
             raise HTTPException(status_code=404, detail="clarification request not found")

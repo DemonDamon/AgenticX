@@ -146,7 +146,7 @@ export function buildToolCardTitle(message: Message, t?: ChatTranslate): string 
   if (name === "todo_write") return "todo_write";
   // 澄清 / 确认行记的是用户自己的回答。标题直接给答案，而不是 "request_clarification"：
   // 关掉工具详情时这张卡默认是收起的，标题就是用户唯一能看到的一行。
-  if (name === "request_clarification" || name === "request_action_confirmation") {
+  if (name === "request_clarification" || name === "present_choices" || name === "request_action_confirmation") {
     const decided = summarizeUserDecision(name, String(message.content ?? ""), t);
     if (decided) return decided;
     return name === "request_action_confirmation"

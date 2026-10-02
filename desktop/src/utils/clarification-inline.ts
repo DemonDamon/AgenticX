@@ -1,18 +1,27 @@
 import type { Message } from "../store";
-import { parseClarificationDecisions } from "./clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions } from "./clarification-notice";
 
 export function parseClarificationToolArgs(toolArgs: Record<string, unknown>) {
-  const prompt = String(toolArgs.prompt ?? "").trim();
-  if (!prompt) return null;
+  const cleanPrompt = String(toolArgs.prompt ?? "").trim();
+  const titleFallback = String(toolArgs.title ?? "").trim();
+  if (!cleanPrompt && !titleFallback) return null;
+  const resolvedPrompt = cleanPrompt || titleFallback;
   const options = Array.isArray(toolArgs.options)
-    ? (toolArgs.options as unknown[]).map((o) => String(o)).filter(Boolean)
+    ? (toolArgs.options as unknown[])
+        .map((o) => {
+          if (o && typeof o === "object" && "label" in (o as object)) {
+            return String((o as { label?: unknown }).label ?? "").trim();
+          }
+          return String(o).trim();
+        })
+        .filter(Boolean)
     : [];
   const allowFreeText = toolArgs.allow_free_text !== false;
   const context =
     toolArgs.context && typeof toolArgs.context === "object"
       ? (toolArgs.context as Record<string, unknown>)
       : undefined;
-  return { prompt, options, allowFreeText, context };
+  return { prompt: resolvedPrompt, options, allowFreeText, context };
 }
 
 export function buildClarificationPromptFromToolArgs(
@@ -24,6 +33,7 @@ export function buildClarificationPromptFromToolArgs(
   const parsed = parseClarificationToolArgs(toolArgs);
   if (!parsed) return null;
   const decisions = parseClarificationDecisions(toolArgs.decisions);
+  const choiceFields = parseChoicePanelFields(parsed.context);
   return {
     requestId: requestId ?? `pending:${toolCallId}`,
     prompt: parsed.prompt,
@@ -33,6 +43,7 @@ export function buildClarificationPromptFromToolArgs(
     agentId: "meta",
     sessionId,
     context: parsed.context,
+    ...choiceFields,
   } satisfies NonNullable<Message["clarificationPrompt"]>;
 }
 
@@ -52,9 +63,13 @@ export function buildClarificationMessageExtras(
     requestId,
   );
   if (!clarificationPrompt) return null;
+  const toolName =
+    toolArgs && typeof toolArgs === "object" && "panel_type" in toolArgs
+      ? "present_choices"
+      : "request_clarification";
   return {
     toolCallId,
-    toolName: "request_clarification",
+    toolName,
     toolArgs,
     toolStatus: "running" as const,
     toolGroupId,
@@ -77,7 +92,7 @@ export function findRunningClarificationToolMessage(messages: Message[]) {
     .find(
       (m) =>
         m.role === "tool" &&
-        m.toolName === "request_clarification" &&
+        (m.toolName === "request_clarification" || m.toolName === "present_choices") &&
         Boolean(m.toolCallId) &&
         (m.toolStatus === "running" || m.toolStatus === "pending"),
     );

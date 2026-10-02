@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClarificationAnswerText,
+  buildClarifyRequestBody,
   isClarificationMessage,
   clarificationPayloadFromMeta,
+  parseChoicePanelFields,
   parseClarificationDecisions,
   toggleDecisionSelection,
   type ClarificationDecisionPayload,
@@ -247,5 +249,77 @@ describe("clarificationPayloadFromMeta", () => {
       "s",
     );
     expect(payload?.allowFreeText).toBe(true);
+  });
+
+  it("parses choice panel fields from context", () => {
+    const payload = clarificationPayloadFromMeta(
+      {
+        kind: "clarification",
+        request_id: "r1",
+        prompt: "pick",
+        context: {
+          kind: "choice_panel",
+          panel_id: "p1",
+          candidate_set_version: 2,
+          panel_type: "comparison",
+          choice_options: [
+            {
+              id: "a",
+              label: "A",
+              details: ["d"],
+              sources: [{ title: "t", url: "https://example.com/a" }],
+            },
+          ],
+        },
+      },
+      "meta",
+      "sess",
+    );
+    expect(payload?.panelId).toBe("p1");
+    expect(payload?.candidateSetVersion).toBe(2);
+    expect(payload?.panelType).toBe("comparison");
+    expect(payload?.choiceOptions?.[0]?.sources?.[0]?.url).toBe("https://example.com/a");
+  });
+});
+
+describe("parseChoicePanelFields / buildClarifyRequestBody", () => {
+  it("ignores non-choice context", () => {
+    expect(parseChoicePanelFields({ kind: "other" })).toEqual({});
+  });
+
+  it("serializes panel version fields for /api/clarify", () => {
+    expect(
+      buildClarifyRequestBody({
+        sessionId: "s1",
+        requestId: "r1",
+        agentId: "meta",
+        answer: {
+          answerText: "",
+          selectedOptions: ["Rocky Shore"],
+          panelId: "panel-1",
+          candidateSetVersion: 3,
+          optionId: "rocky",
+        },
+      }),
+    ).toEqual({
+      session_id: "s1",
+      request_id: "r1",
+      agent_id: "meta",
+      answer_text: "",
+      selected_options: ["Rocky Shore"],
+      panel_id: "panel-1",
+      candidate_set_version: 3,
+      option_id: "rocky",
+    });
+  });
+
+  it("omits panel fields when panelId missing", () => {
+    const body = buildClarifyRequestBody({
+      sessionId: "s1",
+      requestId: "r1",
+      answer: { answerText: "x", selectedOptions: [] },
+    });
+    expect(body.panel_id).toBeUndefined();
+    expect(body.candidate_set_version).toBeUndefined();
   });
 });
