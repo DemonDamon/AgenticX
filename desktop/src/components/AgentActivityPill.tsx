@@ -3,17 +3,20 @@ import type { AgentActivitySummary } from "../utils/agent-activity";
 
 type Props = {
   summary: AgentActivitySummary;
+  /** 子智能体已全部结束，主智能体正在汇总其结果。 */
+  summarizing?: boolean;
   onOpen: () => void;
 };
 
-export function AgentActivityPill({ summary, onOpen }: Props) {
+export function AgentActivityPill({ summary, summarizing = false, onOpen }: Props) {
   const { t } = useTranslation("chat");
-  if (summary.active <= 0) return null;
+  if (summary.active <= 0 && !summarizing) return null;
   const needsUser = summary.awaitingConfirm > 0 || summary.awaitingInput > 0;
   const parts: string[] = [];
   if (summary.running > 0) parts.push(t("activity.running", { count: summary.running }));
   if (summary.awaitingConfirm > 0) parts.push(t("activity.awaiting", { count: summary.awaitingConfirm }));
   if (summary.awaitingInput > 0) parts.push(t("activity.input", { count: summary.awaitingInput }));
+  if (summary.active <= 0 && summarizing) parts.push(t("activity.summarizing"));
   return (
     <div className="flex justify-center px-4 pb-1.5">
       <button

@@ -1470,6 +1470,9 @@ export function App() {
               attempts: 0,
               queuedAt: Date.now(),
             });
+            useAppStore
+              .getState()
+              .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
           }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
@@ -1738,6 +1741,9 @@ export function App() {
       }
     } finally {
       autoReportingRef.current = false;
+      useAppStore
+        .getState()
+        .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
     }
   }, [apiBase, apiToken, resolvePaneForSession]);
 

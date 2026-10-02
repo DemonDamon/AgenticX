@@ -1042,6 +1042,7 @@
     "running": "{{count}} sub-agent(s) running",
     "awaiting": "{{count}} awaiting your confirm",
     "input": "{{count}} awaiting your input",
-    "open": "View"
+    "open": "View",
+    "summarizing": "Summarizing sub-agent results…"
   }
 }

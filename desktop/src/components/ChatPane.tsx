@@ -8899,7 +8899,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [onSubmitClarification, resumeGroupActivityThinking],
   );
 
-  const subAgentsPending = useMemo(() => summarizeAgentActivity(paneSubAgents).active > 0, [paneSubAgents]);
+  const reportPendingForSession = useAppStore((st) =>
+    st.reportPendingSessionIds.includes((pane?.sessionId ?? "").trim()),
+  );
+  const subAgentsPending = useMemo(
+    () => summarizeAgentActivity(paneSubAgents).active > 0 || reportPendingForSession,
+    [paneSubAgents, reportPendingForSession],
+  );
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -14452,7 +14458,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
 
         {!liftComposer && !isGroupPane ? (
-          <AgentActivityPill summary={agentActivitySummary} onOpen={toggleWorkspaceSidePanel} />
+          <AgentActivityPill summary={agentActivitySummary} summarizing={reportPendingForSession} onOpen={toggleWorkspaceSidePanel} />
         ) : null}
 
         {/* 收藏 Toast：位于消息列表与输入框之间，水平居中 */}

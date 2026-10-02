@@ -607,6 +607,8 @@ type AppState = {
   status: UiStatus;
   messages: Message[];
   subAgents: SubAgent[];
+  /** 子智能体已结束、但主智能体的汇总汇报尚未完成的会话 id（用于在汇总完成前不呈现“已完成”UI）。 */
+  reportPendingSessionIds: string[];
   selectedSubAgent: string | null;
   codePreview: string;
   confirm: ConfirmState;
@@ -997,6 +999,7 @@ type AppState = {
   clearMessages: () => void;
   addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
+  setReportPendingSessions: (sessionIds: string[]) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
   removeSubAgent: (id: string) => void;
   setSelectedSubAgent: (id: string | null) => void;
@@ -1414,6 +1417,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   forwardAutoReply: null,
   subAgents: [],
+  reportPendingSessionIds: [],
   selectedSubAgent: null,
   codePreview: "",
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
@@ -3145,6 +3149,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === state.activePaneId ? { ...pane, messages: [] } : pane
       ),
     })),
+  setReportPendingSessions: (sessionIds) =>
+    set((state) => {
+      const next = Array.from(new Set(sessionIds.map((id) => id.trim()).filter(Boolean))).sort();
+      const prev = state.reportPendingSessionIds;
+      if (prev.length === next.length && prev.every((id, i) => id === next[i])) return state;
+      return { reportPendingSessionIds: next };
+    }),
   addSubAgent: (item) =>
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);

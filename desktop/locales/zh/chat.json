@@ -1042,6 +1042,7 @@
     "running": "{{count}} 个子智能体运行中",
     "awaiting": "{{count}} 个待你确认",
     "input": "{{count}} 个等待你的输入",
-    "open": "查看"
+    "open": "查看",
+    "summarizing": "正在汇总子智能体的结果…"
   }
 }
