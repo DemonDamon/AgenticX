@@ -44,7 +44,9 @@ from agenticx.trainer.heldout import heldout_split    # noqa: E402
 
 _FAKE_ERROR_MSGS = [
     {"role": "user", "content": "solve the task"},
-    {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+    {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "1", "type": "function",
+         "function": {"name": "read_file", "arguments": "{}"}}]},
     {"role": "tool", "content": "error: FileNotFoundError: config.yaml not found"},
     {"role": "assistant", "content": "final answer"},
 ]
@@ -152,6 +154,13 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
         base_url = f"http://host.docker.internal:{srv.server_address[1]}/v1"
 
     results = []
+    # SP25 决策点 sidecar：轮级累积，断点重跑可续（已存在则加载追加）
+    from agenticx.learning.trajectory.decision_mining import mine_tool_decisions
+    from agenticx.rl.decision import DecisionLog
+    decisions_dir = trials_root.parent / "decisions"
+    decisions_path = decisions_dir / f"round_{round_no}.jsonl"
+    dlog = (DecisionLog.load(decisions_path)
+            if decisions_path.exists() else DecisionLog())
     for task_path in tasks:
         task_name = Path(task_path).name
         if not skip_split_guard:
@@ -174,6 +183,16 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
         messages = json.loads((trial_dir / "agent" /
                                "agenticx.trajectory.json")
                               .read_text())["messages"]
+        # SP25: 从本 trial 轨迹挖 tool_selection 决策点 + 终局 outcome 回填
+        # （断点重跑幂等：同 rollout 已挖过则跳过；outcome 重填是覆盖式安全操作）
+        if any(r.rollout_id == trial_dir.name for r in dlog.records):
+            mined = 0
+        else:
+            mined = mine_tool_decisions(dlog, messages,
+                                        rollout_id=trial_dir.name,
+                                        task_id=task_name)
+        dlog.backfill_outcome(trial_dir.name,
+                              task_status="pass" if reward >= 1.0 else "fail")
         task_trajs = [t for t in store.iter_trajectories()
                       if t.task_id == task_name]
         pass_msgs = [t.messages for t in task_trajs if t.status == "pass"]
@@ -188,13 +207,18 @@ def run_round(round_no: int, tasks: list[str], memory: ExperienceMemory,
             memory.add(lessons, round_no)
         results.append({"task": task_name, "reward": float(reward),
                         "hints": hints, "hints_mode": hints_mode,
-                        "hints_gated": hints_gated})
+                        "hints_gated": hints_gated,
+                        "decisions_mined": mined})
     if srv is not None:
         srv.shutdown()
 
     memory.freeze()
+    # SP25: 决策点 sidecar 落盘（raw 只追加；补标走 backfill_decisions.py）
+    dlog.save(decisions_path)
     report = {"round": round_no, "results": results, "evolution": None,
-              "scheduler_evolution": None}
+              "scheduler_evolution": None,
+              "decisions": {"points": len(dlog.records),
+                            "file": str(decisions_path)}}
     if evolve:
         from dataclasses import asdict
         evo = _evolve(store, trials_root.parent / "policies")
