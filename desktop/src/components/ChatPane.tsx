@@ -404,6 +404,7 @@ import { NearBoxHero } from "./brand/NearBoxHero";
 import { QuickStartCards } from "./brand/QuickStartCards";
 import { AgentActivityPill } from "./AgentActivityPill";
 import { summarizeAgentActivity } from "../utils/agent-activity";
+import { isSubAgentSummaryDump } from "../utils/subagent-summary-message";
 import type { ScratchChatDraft } from "../utils/scratch-chat";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -3714,6 +3715,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           return !(confirmId && ownedIds.has(confirmId));
         }
         if (shouldHideEmptyAssistantPlaceholder(item)) return false;
+        if (isSubAgentSummaryDump(item)) return false;
         if (isInterruptedAssistantPlaceholder(item)) return false;
         if (!paneHasUserMessage && isTurnInterruptionNoticeMessage(item)) return false;
         return !item.agentId || item.agentId === "meta";
@@ -8897,6 +8899,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [onSubmitClarification, resumeGroupActivityThinking],
   );
 
+  const subAgentsPending = useMemo(() => summarizeAgentActivity(paneSubAgents).active > 0, [paneSubAgents]);
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -8968,8 +8971,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
               imAssistantVisual={
                 message.role === "assistant" && reactCol
-                  ? reactShowActions ? "compact-inline-with-actions" : "compact-inline"
-                  : "default"
+                  ? reactShowActions && !subAgentsPending ? "compact-inline-with-actions" : "compact-inline"
+                  : message.role === "assistant" && subAgentsPending && message.id === lastAssistantMessageId
+                    ? "compact-inline"
+                    : "default"
               }
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
@@ -9203,7 +9208,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   {useUnifiedReActCard ? (
                     (() => {
                       const actionTailReady =
-                        !hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0;
+                        !hasStreamingRow && !sessionWorkInProgress && !subAgentsPending && workMessages.length > 0;
                       const rhythmEndIdx =
                         actionTailReady && groupedWork.length > 0
                           ? groupedWork.length - 1
@@ -9617,7 +9622,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     </>
       ),
     };
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, subAgentsPending, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

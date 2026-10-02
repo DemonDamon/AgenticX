@@ -5,6 +5,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
 import { buildClarifyRequestBody } from "./utils/clarification-notice";
+import { shouldDeferAutoReport } from "./utils/auto-report-gate";
 import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
@@ -416,6 +417,7 @@ export function App() {
     sessionId: string;
     status: "completed" | "failed" | "paused";
     attempts?: number;
+    queuedAt?: number;
   }>>([]);
   const autoReportingRef = useRef(false);
   const directNoticeSentRef = useRef<Set<string>>(new Set());
@@ -1466,6 +1468,7 @@ export function App() {
                     ? "paused"
                     : "failed",
               attempts: 0,
+              queuedAt: Date.now(),
             });
           }
 
@@ -1572,6 +1575,16 @@ export function App() {
     try {
       for (const [sid, items] of bySession) {
         const store = useAppStore.getState();
+        if (
+          shouldDeferAutoReport({
+            sessionId: sid,
+            subAgents: store.subAgents,
+            oldestQueuedAt: Math.min(...items.map((it) => it.queuedAt ?? Date.now())),
+            now: Date.now(),
+          })
+        ) {
+          continue;
+        }
         const matchingPane = resolvePaneForSession(sid, items[0]?.agentId);
         if (!matchingPane) {
           for (const it of items) retryAgentIds.add(it.agentId);
@@ -1601,11 +1614,11 @@ export function App() {
         const agentLines = items
           .map((it) => {
             const state = it.status === "completed" ? "已完成" : it.status === "paused" ? "已暂停" : "失败";
-            return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 300)}`;
+            return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 2000)}`;
           })
           .join("\n");
         const triggerMsg =
-          `[系统通知] 以下子智能体已结束或暂停（可能成功、失败或因限流/轮次触顶暂停），请立即向用户主动汇报：完成情况/暂停原因/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
+          `[系统通知] 以下子智能体已全部结束或暂停（可能成功、失败或因限流/轮次触顶暂停）。请结合用户最初的请求，直接完成其中尚未完成的后续步骤（例如汇总、对比、成稿），基于这些产出给出最终结果；不要只复述状态，也不要原样粘贴子智能体的输出。若有失败或暂停，说明原因并给出下一步建议；有产出文件请列出。\n${agentLines}`;
 
         const paneProvider = String(matchingPane.modelProvider ?? "").trim();
         const paneModel = String(matchingPane.modelName ?? "").trim();
