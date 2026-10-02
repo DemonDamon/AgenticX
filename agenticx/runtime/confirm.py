@@ -18,8 +18,17 @@ _log = logging.getLogger(__name__)
 _VALID_TIMEOUT_ACTIONS = frozenset({"approve", "reject", "skip"})
 CONFIRM_RISK_LOW = "low"
 PROTECTED_CONFIRM_RISKS = frozenset(
-    {"high", "destructive", "computer_use", "non_whitelisted", "policy"}
+    {"high", "destructive", "computer_use", "non_whitelisted", "policy", "robot"}
 )
+
+#: 不能被 permissions.allowed_tools / 无人值守脚本放行等捷径跳过的风险。
+#: 这些操作有物理后果，只接受确认门的逐次决定。
+NON_WAIVABLE_CONFIRM_RISKS = frozenset({"robot"})
+
+
+def is_non_waivable_confirm(context: Optional[Dict[str, Any]] = None) -> bool:
+    raw = (context or {}).get("risk")
+    return isinstance(raw, str) and raw.strip().lower() in NON_WAIVABLE_CONFIRM_RISKS
 
 
 def normalize_confirm_risk(context: Optional[Dict[str, Any]] = None) -> str:
@@ -50,6 +59,7 @@ PROTECTED_CONFIRM_REASONS: Dict[str, str] = {
     "computer_use": "这条操作会读取或控制本机桌面",
     "non_whitelisted": "这条命令不在默认可直接执行的白名单里",
     "policy": "这条操作会改动技能或长期记忆等配置",
+    "robot": "这条操作会让真实机器人运动",
 }
 UNKNOWN_PROTECTED_CONFIRM_REASON = "系统无法判定这步的风险，按受保护处理"
 

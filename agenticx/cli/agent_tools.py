@@ -57,6 +57,7 @@ from agenticx.runtime.confirm import (
     ConfirmGate,
     SyncConfirmGate,
     confirm_denial_note,
+    is_non_waivable_confirm,
     is_protected_confirm,
     protected_confirm_reason,
 )
@@ -4030,14 +4031,17 @@ async def _confirm(
     path_allow = bool(path_raw) and _path_allowed_without_confirm(Path(str(path_raw)))
     if set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES:
         path_allow = False
-    if tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow:
+    non_waivable = is_non_waivable_confirm(payload_context)
+    if not non_waivable and (
+        tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow
+    ):
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by permissions allow rule",
             request_id,
             payload_context.get("tool"),
         )
         return True
-    if _unattended_workspace_script_allowed(payload_context, risk_codes, session):
+    if not non_waivable and _unattended_workspace_script_allowed(payload_context, risk_codes, session):
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by unattended workspace-script rule",
             request_id,
@@ -10524,6 +10528,16 @@ async def dispatch_tool_async(
             return await _tool_wb_bridge_describe(arguments, session)
         if name == "wb_bridge_stop":
             return await _tool_wb_bridge_stop(arguments, session)
+        if name.startswith("robot_"):
+            from agenticx.robot_bridge.tools import (
+                ROBOT_TOOL_NAMES,
+                dispatch_robot_tool,
+            )
+
+            if name in ROBOT_TOOL_NAMES:
+                return await dispatch_robot_tool(
+                    name, arguments, session, confirm_gate=gate, emit_event=event_callback
+                )
         if name == "desktop_screenshot":
             return await _tool_desktop_screenshot(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "desktop_mouse_click":

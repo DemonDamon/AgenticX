@@ -125,6 +125,56 @@ class ComputerUseSettings:
 
 
 @dataclass
+class RobotSettings:
+    """Robot policy bridge integration. Default off."""
+
+    enabled: bool = False
+    bridge_url: str = "http://127.0.0.1:8766"
+    token: str = ""
+    token_file: str = "~/.agenticx/robot_bridge.token"
+    default_max_relative_target: Optional[float] = 10.0
+    confirm_each_task: bool = True
+    load_timeout_s: float = 300.0
+    stop_timeout_s: float = 30.0
+    home_tolerance: float = 5.0
+    offline_backbone: bool = True
+    profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+def _robot_settings_from_raw(raw: Dict[str, Any]) -> RobotSettings:
+    def _f(key: str, default: float) -> float:
+        try:
+            return float(raw.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    mrt_raw = raw.get("default_max_relative_target", 10.0)
+    try:
+        mrt = None if mrt_raw is None else float(mrt_raw)
+    except (TypeError, ValueError):
+        mrt = 10.0
+    profiles: Dict[str, Dict[str, Any]] = {}
+    raw_profiles = raw.get("profiles") or {}
+    if isinstance(raw_profiles, dict):
+        for name, prof in raw_profiles.items():
+            if isinstance(prof, dict) and str(prof.get("type") or "").strip():
+                profiles[str(name)] = dict(prof)
+    return RobotSettings(
+        enabled=bool(raw.get("enabled", False)),
+        bridge_url=str(raw.get("bridge_url") or "http://127.0.0.1:8766"),
+        token=str(raw.get("token") or ""),
+        token_file=str(raw.get("token_file") or "~/.agenticx/robot_bridge.token"),
+        default_max_relative_target=mrt,
+        confirm_each_task=bool(raw.get("confirm_each_task", True)),
+        load_timeout_s=_f("load_timeout_s", 300.0),
+        stop_timeout_s=_f("stop_timeout_s", 30.0),
+        home_tolerance=_f("home_tolerance", 5.0),
+        offline_backbone=bool(raw.get("offline_backbone", True)),
+        profiles=profiles,
+    )
+
+
+@dataclass
 class BrowserControlSettings:
     """WorkPanel in-app browser control (near_browser_* tools)."""
 
@@ -206,6 +256,7 @@ class AgxConfig:
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
+    robot: RobotSettings = field(default_factory=RobotSettings)
     browser_control: BrowserControlSettings = field(default_factory=BrowserControlSettings)
     ops: OpsSettings = field(default_factory=OpsSettings)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
@@ -398,6 +449,10 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if not isinstance(cu_raw, dict):
             cu_raw = {}
 
+        robot_raw = merged.get("robot", {}) or {}
+        if not isinstance(robot_raw, dict):
+            robot_raw = {}
+
         bc_raw = merged.get("browser_control", {}) or {}
         if not isinstance(bc_raw, dict):
             bc_raw = {}
@@ -438,6 +493,7 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
                 scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
             ),
+            robot=_robot_settings_from_raw(robot_raw),
             browser_control=BrowserControlSettings(
                 enabled=bool(bc_raw.get("enabled", True)),
             ),
@@ -591,6 +647,9 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                         value = pcfg.get(secret_field)
                         if isinstance(value, str) and value and secret_field == "api_key":
                             pcfg[secret_field] = cls._mask(value)
+        robot = merged.get("robot")
+        if isinstance(robot, dict) and isinstance(robot.get("token"), str) and robot["token"]:
+            robot["token"] = cls._mask(robot["token"])
         return merged
 
     @staticmethod
