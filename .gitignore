@@ -132,3 +132,7 @@ harness-lab/jobs/
 harness-lab/logs/
 harness-lab/registry-local.json
 harness-lab/*.log
+.worktrees/
+
+# Code deep research local clones (do not commit third-party source)
+research/codedeepresearch/*/upstream/
