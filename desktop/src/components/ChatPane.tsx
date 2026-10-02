@@ -9091,7 +9091,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onResumeTask={() => void resumeCurrentTask()}
               resumeInFlight={resumeInFlight}
               isFutileResume={isFutileResumeFlag}
-              sessionBusy={sessionBusy}
+              sessionBusy={sessionBusy || subAgentsPending}
               isLastAssistantInPane={
                 message.role === "assistant" && message.id === lastAssistantMessageId
               }
