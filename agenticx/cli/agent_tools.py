@@ -3647,11 +3647,64 @@ async def _tool_near_browser_http(
     return _format_near_browser_result(text)
 
 
+def _near_browser_attach_profile_id(result: str, profile_id: str) -> str:
+    """Merge stable profile_id into a JSON bridge response when possible."""
+    pid = str(profile_id or "").strip()
+    if not pid:
+        return result
+    raw = str(result or "").strip()
+    if not raw or raw.startswith("ERROR:"):
+        return result
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return json.dumps(
+            {"ok": True, "result": raw, "profile_id": pid},
+            ensure_ascii=False,
+        )
+    if isinstance(payload, dict):
+        payload.setdefault("profile_id", pid)
+        return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(
+        {"ok": True, "result": payload, "profile_id": pid},
+        ensure_ascii=False,
+    )
+
+
 async def _tool_near_browser_open(arguments: Dict[str, Any], session: StudioSession) -> str:
     url = str(arguments.get("url") or "").strip()
     if not url:
         return "ERROR: near_browser_open requires parameter url"
-    return await _tool_near_browser_http(session, "open", {"url": url}, timeout_sec=30.0)
+    from agenticx.tools.near_browser.profile import get_or_create_browser_profile_id
+    from agenticx.tools.near_browser.url_guard import UrlGuardError, validate_public_http_url
+
+    try:
+        validated = validate_public_http_url(url)
+    except UrlGuardError as exc:
+        return f"ERROR: {exc.message}"
+
+    session_id = _studio_session_id(session)
+    if not session_id:
+        return "ERROR: near_browser tools require an active Studio session"
+    try:
+        profile_id = get_or_create_browser_profile_id(session_id)
+    except Exception as exc:
+        return f"ERROR: failed to bind browser profile for session: {exc}"
+
+    _log.info(
+        "near_browser_open session=%s profile_id=%s host=%s pinned=%s",
+        session_id,
+        profile_id,
+        validated.hostname,
+        validated.address,
+    )
+    result = await _tool_near_browser_http(
+        session,
+        "open",
+        {"url": validated.url, "profile_id": profile_id},
+        timeout_sec=30.0,
+    )
+    return _near_browser_attach_profile_id(result, profile_id)
 
 
 async def _tool_near_browser_snapshot(arguments: Dict[str, Any], session: StudioSession) -> str:
