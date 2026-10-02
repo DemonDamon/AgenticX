@@ -46,3 +46,18 @@ def load_automation_tasks() -> List[Dict[str, Any]]:
 def save_automation_tasks(tasks: List[Dict[str, Any]]) -> None:
     """Persist tasks via the session storage backend (local file by default)."""
     get_sync_storage().save_automation_tasks(tasks)
+
+
+def attach_durable_job_id(
+    task: Dict[str, Any], durable_job_id: str
+) -> Dict[str, Any]:
+    """Return a shallow copy of ``task`` with optional ``durable_job_id`` set.
+
+    Bridge to ``agenticx.runtime.durable_jobs``: when an automation trigger
+    creates/claims a durable job row, callers may attach the job id here.
+    The field is optional — Desktop readers must tolerate its absence.
+    Does not mutate the input dict or change the JSON schema of other keys.
+    """
+    out = dict(task)
+    out["durable_job_id"] = durable_job_id
+    return out
