@@ -2957,12 +2957,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
   const closePaneAndCleanupEmptySession = () => {
+    // Flush unsent composer (text + images) onto the session key BEFORE the pane
+    // unmounts / before we consider deleting an empty session.
+    const flushed = flushComposerDraftBeforeCloseRef.current();
     void (async () => {
       const sid = String(pane.sessionId ?? "").trim();
       const hasUser = pane.messages.some(
         (m) => m.role === "user" && String(m.content ?? "").trim().length > 0,
       );
-      if (sid && !hasUser && typeof window.agenticxDesktop?.deleteSession === "function") {
+      // Never delete a session that still has an unsent composer draft — otherwise
+      // Close pane wipes the only handle to recover text/images from history.
+      if (
+        sid &&
+        !hasUser &&
+        !flushed.hasDraft &&
+        typeof window.agenticxDesktop?.deleteSession === "function"
+      ) {
         try {
           await window.agenticxDesktop.deleteSession(sid);
         } catch {
@@ -3467,6 +3477,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const lastComposerDraftTextRef = useRef("");
   /** Latest ready/parsing attachments for draft flush (mirrors contextFiles). */
   const lastComposerAttachmentsRef = useRef<ComposerDraftAttachment[]>([]);
+  /** Close-pane must flush drafts before removePane; assigned once helpers exist. */
+  const flushComposerDraftBeforeCloseRef = useRef<() => { key: string; hasDraft: boolean }>(
+    () => ({ key: "", hasDraft: false }),
+  );
   /** Last caret inside composer — survives blur when quoting from message context menu. */
   const composerSavedRangeRef = useRef<Range | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
@@ -5622,6 +5636,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const key = composerDraftKeyRef.current.trim();
     if (key) clearComposerDraft(key);
   }, []);
+
+  flushComposerDraftBeforeCloseRef.current = () => {
+    const key = resolveComposerDraftKey(pane.id, pane.sessionId);
+    const text = extractComposerText();
+    const attachments = contextFilesToDraftAttachments(contextFiles);
+    lastComposerDraftTextRef.current = text;
+    lastComposerAttachmentsRef.current = attachments;
+    const hasDraft = Boolean(text.trim() || attachments.length > 0);
+    if (key && hasDraft) {
+      upsertComposerDraft(key, text, attachments);
+    }
+    return { key, hasDraft };
+  };
 
   // Keep attachment mirror in sync; persist when chips change (add/remove/ready).
   useEffect(() => {
