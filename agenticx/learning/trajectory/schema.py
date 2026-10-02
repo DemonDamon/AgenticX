@@ -4,6 +4,9 @@
 - 决策沿袭：decision_lineage 记录知识引用/工具序列/验证/修正，不是裸三元组
 - 复合 reward：components 为多源信号预留（P0 仅 verifier，运营商场景扩展 user/structural/kpi）
 - label=-1.0 为"未标注"哨兵：session 轨迹无验证器，进库待标注，构建器只消费已标注轨迹
+- token 真值对齐（SP24，设计规格移植自 JAZ RolloutRecorder）：reward 留在本记录
+  （驱动侧），token-native rollout（agenticx.rl.rollout.TokenRollout）刻意不含
+  reward，两者经 rollout_id 对齐——"轨迹是事实，reward 是判断"
 """
 from __future__ import annotations
 
@@ -48,6 +51,7 @@ class RSITrajectory:
     token_usage: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    rollout_id: str = ""                               # 对齐 TokenRollout（token 真值）；空=未采集
 
     @property
     def trajectory_id(self) -> str:
