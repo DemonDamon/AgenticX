@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { shouldOfferSessionRemember } from "../utils/confirm-remember";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { createPortal } from "react-dom";
@@ -23,7 +24,7 @@ type Props = {
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
   onModelChange?: (agentId: string, provider: string, model: string) => void;
-  onConfirmResolve?: (agentId: string, approved: boolean) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean, remember?: "session") => void;
   selected?: boolean;
 };
 
@@ -247,11 +248,13 @@ function ThinkingDots() {
 function ConfirmWithCountdown({
   question,
   agentId,
+  context,
   onConfirmResolve,
 }: {
   question: string;
   agentId: string;
-  onConfirmResolve?: (agentId: string, approved: boolean) => void;
+  context?: Record<string, unknown>;
+  onConfirmResolve?: (agentId: string, approved: boolean, remember?: "session") => void;
 }) {
   const { t } = useTranslation("chat");
   const [remaining, setRemaining] = useState(AUTO_CONFIRM_SECONDS);
@@ -284,6 +287,12 @@ function ConfirmWithCountdown({
     if (resolvedRef.current) return;
     resolvedRef.current = true;
     onConfirmResolve?.(agentId, true);
+  };
+
+  const handleApproveRemember = () => {
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
+    onConfirmResolve?.(agentId, true, "session");
   };
 
   const handleDeny = () => {
@@ -323,6 +332,14 @@ function ConfirmWithCountdown({
         >
           {t("subagent.deny")}
         </button>
+        {shouldOfferSessionRemember(context) ? (
+          <button
+            className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-[11px] text-text-muted transition hover:bg-surface-hover"
+            onClick={handleApproveRemember}
+          >
+            {t("confirm.rememberSession")}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -1310,6 +1327,7 @@ export function SubAgentCard({
             <ConfirmWithCountdown
               question={subAgent.pendingConfirm.question}
               agentId={subAgent.id}
+              context={subAgent.pendingConfirm.context}
               onConfirmResolve={onConfirmResolve}
             />
           ) : subAgent.status === "awaiting_confirm" ? (

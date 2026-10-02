@@ -215,6 +215,7 @@
     "expired": "已过期",
     "resolving": "提交中",
     "uncertain": "结果未确认",
+    "rememberSession": "本会话不再询问",
     "pending": "等待确认",
     "remaining": "剩余 {{countdown}}",
     "uncertainHint": "请求可能已送达，请对照后续执行结果。",

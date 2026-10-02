@@ -67,6 +67,7 @@ from agenticx.cli.studio_mcp import (
 from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAutoConfirmGate
+from agenticx.runtime.confirm import is_protected_confirm
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.checkpoint import CheckpointStore
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
@@ -2723,10 +2724,24 @@ def create_studio_app() -> FastAPI:
             team_gate = managed.team_manager.get_confirm_gate(payload.agent_id)
             if team_gate is not None:
                 gate = team_gate
+        remembered = False
+        if payload.approved and payload.remember == "session":
+            pending_meta = getattr(gate, "_pending_meta", {}) or {}
+            remember_ctx = (pending_meta.get(payload.request_id) or {}).get("context") or {}
+            remember_tool = str(remember_ctx.get("tool") or "")
+            if remember_tool and not is_protected_confirm(remember_ctx):
+                sticky_target = managed.studio_session
+                if payload.agent_id != "meta" and managed.team_manager is not None:
+                    sticky_target = (
+                        getattr(managed.team_manager, "_agent_sessions", {}).get(payload.agent_id)
+                        or sticky_target
+                    )
+                sticky_target.sticky_allowed_tools.add(remember_tool)
+                remembered = True
         ok = gate.resolve(payload.request_id, payload.approved)
         if not ok:
             raise HTTPException(status_code=404, detail="confirm request not found")
-        return {"ok": True}
+        return {"ok": True, "remembered": remembered}
 
     @app.post("/api/clarify")
     async def post_clarify(

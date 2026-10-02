@@ -215,6 +215,7 @@
     "expired": "Expired",
     "resolving": "Submitting",
     "uncertain": "Outcome unclear",
+    "rememberSession": "Don't ask again this session",
     "pending": "Waiting for confirmation",
     "remaining": "{{countdown}} left",
     "uncertainHint": "The request may have been delivered. Check what happens next.",

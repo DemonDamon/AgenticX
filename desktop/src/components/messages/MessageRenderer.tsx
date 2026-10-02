@@ -32,6 +32,8 @@ import { JevDecisionCard } from "./JevDecisionCard";
 import { isJevDecisionMessage } from "../../utils/jev-decision";
 import { useTypesafeSettings } from "../../hooks/useTypesafeSettings";
 import { InlineConfirmCard } from "./InlineConfirmCard";
+import { shouldOfferSessionRemember } from "../../utils/confirm-remember";
+import { i18n } from "../../i18n/i18n";
 import { GroupSenderRail } from "./GroupSenderRail";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
@@ -107,7 +109,11 @@ type Props = {
   onEditMessage?: (message: Message, newContent: string) => void;
   selectable?: boolean;
   selected?: boolean;
-  onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+  onResolveInlineConfirm?: (
+    confirm: NonNullable<Message["inlineConfirm"]>,
+    approved: boolean,
+    remember?: "session",
+  ) => void;
   onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   omitSuggestedQuestions?: boolean;
   actionRhythmBodyTail?: boolean;
@@ -329,7 +335,11 @@ export function renderToolMessageExtras(
   message: Message,
   opts: {
     onRevealPath?: (path: string) => void;
-    onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+    onResolveInlineConfirm?: (
+      confirm: NonNullable<Message["inlineConfirm"]>,
+      approved: boolean,
+      remember?: "session",
+    ) => void;
   }
 ): ReactNode {
   const inlineConfirm = message.inlineConfirm;
@@ -350,6 +360,15 @@ export function renderToolMessageExtras(
         >
           拒绝
         </button>
+        {shouldOfferSessionRemember(inlineConfirm.context) ? (
+          <button
+            type="button"
+            className="rounded border border-border bg-transparent px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+            onClick={() => opts.onResolveInlineConfirm!(inlineConfirm, true, "session")}
+          >
+            {i18n.t("confirm.rememberSession", { ns: "chat" })}
+          </button>
+        ) : null}
       </div>
     ) : null;
   const path = extractPathFromToolResult(message.content);

@@ -858,7 +858,7 @@ type Props = {
   onRetrySubAgent: (agentId: string) => void;
   onChatSubAgent: (agentId: string) => void;
   onModelChangeSubAgent?: (agentId: string, provider: string, model: string) => void;
-  onConfirmResolveSubAgent?: (agentId: string, approved: boolean) => void;
+  onConfirmResolveSubAgent?: (agentId: string, approved: boolean, remember?: "session") => void;
   /** Align「待办」status with StickyTaskBar (in_progress spinner + idle promote). */
   todoLiveness?: "active" | "stalled" | "idle";
   todoExecutionState?: string;

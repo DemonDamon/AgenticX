@@ -4044,6 +4044,20 @@ async def _confirm(
             payload_context.get("tool"),
         )
         return True
+    sticky_tool = str(payload_context.get("tool") or "")
+    if (
+        session is not None
+        and sticky_tool
+        and sticky_tool in getattr(session, "sticky_allowed_tools", set())
+        and not is_protected_confirm(payload_context)
+        and not (set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES)
+    ):
+        _log.info(
+            "[confirm] auto-approved id=%s tool=%s by session sticky allow",
+            request_id,
+            sticky_tool,
+        )
+        return True
     # 受保护的请求带上「为什么问你」。界面自己也能按 risk 推，但理由由后端给出才有
     # 唯一出处——risk 取值将来加一个，不用记得同步改两处文案。
     if is_protected_confirm(payload_context):

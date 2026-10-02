@@ -9067,7 +9067,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onEditMessage={canRetryThisUserMessage ? editUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
-              onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
+              onResolveInlineConfirm={(confirm, approved, remember) =>
+                void resolveGroupInlineConfirm(confirm, approved, remember)
+              }
               selectable={rowSelectable}
               selected={rowSelectable && isSelected}
               onFollowupClick={sendFollowupChip}
@@ -9122,7 +9124,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             renderExtras={(m) =>
               renderToolMessageExtras(m, {
                 onRevealPath: (p) => void revealFileInTaskspace(p),
-                onResolveInlineConfirm: (c, a) => void resolveGroupInlineConfirm(c, a),
+                onResolveInlineConfirm: (c, a, r) => void resolveGroupInlineConfirm(c, a, r),
               })
             }
             selectable={groupSelectable}
@@ -13663,7 +13665,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
-  const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {
+  const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean, remember?: "session") => {
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const sub = subAgents.find((item) => item.id === agentId);
     if (!sub?.pendingConfirm) return;
@@ -13686,6 +13688,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           request_id: sub.pendingConfirm.requestId,
           approved,
           agent_id: agentId,
+          ...(approved && remember ? { remember } : {}),
         }),
       });
     } catch {
@@ -13693,7 +13696,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
-  async function resolveGroupInlineConfirm(confirm: PendingConfirm, approved: boolean) {
+  async function resolveGroupInlineConfirm(
+    confirm: PendingConfirm,
+    approved: boolean,
+    remember?: "session",
+  ) {
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const targetSessionId = (confirm.sessionId ?? pane.sessionId).trim() || pane.sessionId;
     const paneMessages =
@@ -13716,6 +13723,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           request_id: confirm.requestId,
           approved,
           agent_id: confirm.agentId,
+          ...(approved && remember ? { remember } : {}),
         }),
       });
     } catch {
@@ -15429,8 +15437,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onModelChangeSubAgent={(agentId, provider, model) =>
               void changePaneSubAgentModel(agentId, provider, model)
             }
-            onConfirmResolveSubAgent={(agentId, approved) =>
-              void resolvePaneSubAgentConfirm(agentId, approved)
+            onConfirmResolveSubAgent={(agentId, approved, remember) =>
+              void resolvePaneSubAgentConfirm(agentId, approved, remember)
             }
             todoLiveness={taskLiveness}
             todoExecutionState={sessionExecutionState}
@@ -15575,8 +15583,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onModelChangeSubAgent={(agentId, provider, model) =>
                   void changePaneSubAgentModel(agentId, provider, model)
                 }
-                onConfirmResolveSubAgent={(agentId, approved) =>
-                  void resolvePaneSubAgentConfirm(agentId, approved)
+                onConfirmResolveSubAgent={(agentId, approved, remember) =>
+                  void resolvePaneSubAgentConfirm(agentId, approved, remember)
                 }
                 todoLiveness={taskLiveness}
                 todoExecutionState={sessionExecutionState}
