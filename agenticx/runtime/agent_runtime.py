@@ -7274,11 +7274,12 @@ class AgentRuntime:
 
                 while True:
                     if await _check_should_stop():
-                        dispatch_task.cancel()
-                        try:
-                            await dispatch_task
-                        except asyncio.CancelledError:
-                            pass
+                        # Turn abort only: cancel in-flight turn-scoped tool wait.
+                        # Must NOT call DurableJobStore.control(cancel) — durable
+                        # jobs survive chat stop until cancel_durable_job.
+                        from agenticx.runtime.turn_abort import cancel_turn_scoped_dispatch
+
+                        await cancel_turn_scoped_dispatch(dispatch_task)
                         for ev in iter_content_block_end_events(
                             tool_name,
                             tool_call_id,

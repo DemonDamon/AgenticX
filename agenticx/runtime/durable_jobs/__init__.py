@@ -4,6 +4,11 @@
 Author: Damon Li
 """
 
+from agenticx.runtime.durable_jobs.access import (
+    get_durable_job_store,
+    reset_durable_job_store,
+    set_durable_job_store,
+)
 from agenticx.runtime.durable_jobs.models import DurableJob, JobStatus
 from agenticx.runtime.durable_jobs.store import DurableJobStore, LostLeaseError
 from agenticx.runtime.durable_jobs.worker import DurableJobWorker
@@ -14,4 +19,7 @@ __all__ = [
     "DurableJobWorker",
     "JobStatus",
     "LostLeaseError",
+    "get_durable_job_store",
+    "reset_durable_job_store",
+    "set_durable_job_store",
 ]

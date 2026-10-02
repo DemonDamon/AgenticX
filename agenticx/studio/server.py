@@ -2683,10 +2683,18 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        manager.request_interrupt(session_id)
+        # Turn abort only — does not cancel durable jobs (use cancel_durable_job).
+        from agenticx.runtime.turn_abort import abort_chat_turn
+
+        turn_result = abort_chat_turn(manager, session_id)
         manager.set_execution_state(session_id, "interrupted")
         await manager.persist_async(session_id)
-        return {"ok": True, "session_id": session_id}
+        return {
+            "ok": bool(turn_result.get("ok")),
+            "session_id": session_id,
+            "scope": "turn",
+            "durable_jobs_cancelled": False,
+        }
 
     @app.post("/api/confirm")
     async def post_confirm(
