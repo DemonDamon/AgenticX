@@ -28,7 +28,8 @@
 ## Upstream
 - URL: https://github.com/deepseek-ai/deepseek-harness.git
 - Branch/tag: master (origin/master)
-- Locked SHA: 47f943859bef60e4160492346772ded9b24f765a
+- Original S0–S8 locked SHA: 47f943859bef60e4160492346772ded9b24f765a
+- Current checkout SHA: c389f96bf3a9b6807cb71ed6bdad5849be0df6d8（2026-09-08 增量复核）
 - License: MIT
 - Main languages: TypeScript (pnpm monorepo), Python SDK (`python/`), native landlock (`native/`)
 - Monorepo: yes
@@ -46,18 +47,27 @@
 
 ## Artifacts
 - `meta.md`
-- `upstream/` @ 47f943859bef60e4160492346772ded9b24f765a
+- `upstream/` @ c389f96bf3a9b6807cb71ed6bdad5849be0df6d8
 - `deepseek-harness_source_notes.md`
 - `deepseek-harness_code_index.md`
 - `deepseek-harness_deepwiki.md`
 - `deepseek-harness_agenticx_gap_analysis.md`
 - `deepseek-harness_proposal.md`
 - `deepseek-harness_delta_2026-08-24.md` — 锁定日后增量（对照 `b150a551b8` / 0.1.1-rc.2）；**未重锁** `upstream/`
+- `deepseek-harness_near_strategy_2026-09-08.md` — 最新核心代码复核、五点校正与 Near 差异化战略
 
 ## Follow-up (2026-08-24)
 - Trigger: 微信推文与 rc.7→0.1.1 发版。
 - Result: 原 SELECTIVE_ADOPT 不改；新增增量 P1 **D-001**（取消流前缀写入模型可见历史）。见 `deepseek-harness_delta_2026-08-24.md`。
 - Local clone: `upstream/` 仍为 `47f943859b`；增量源码按 GitHub `b150a551b8` 核对。
+
+## Follow-up (2026-09-08)
+- Trigger: 用户提供“DSH 是自进化 Agent 基石”的五点摘要，要求拉取最新核心代码并判断 Near 如何形成差异化。
+- Checkout: `upstream/` 已更新到 `origin/master` 的 `c389f96bf3`（`dsh-v0.1.3-alpha.2-133-gc389f96bf3`）。
+- Key correction: DSH 已具备进程内动态插件不可变 Package、define/activate 分离、current/next、审批、失败保留旧版本、回滚与 package-owned runtime invariants；“缺诊断/回滚”已部分过时，但动态 Package 尚非持久化 Learning Store，且并非所有 profile 都支持运行时换树。
+- Remaining gap: 未发现基于真实用户任务的个性化 held-out eval、反事实 replay、多目标自动晋级与长期偏好漂移闭环。
+- Near verdict: 不整体迁移 Cordis；先用统一 run ledger 收敛 TeamManager 多实例/fallback，再建设 Personal Eval OS、User Constitution、Meta-only Observation Ledger、Avatar Portfolio Evolution、Reversible Capability ChangeSet。
+- Detail: `deepseek-harness_near_strategy_2026-09-08.md`。
 
 ## S8 gate checklist
 - [x] upstream/ exists; SHA locked in this file
