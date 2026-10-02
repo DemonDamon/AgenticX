@@ -91,4 +91,4 @@ migrateActiveComposerDraftToSession(pane.id, result.session_id);
 
 ### FR-3 no-scope-creep
 
-禁止：改导航 keep-alive、改附件模型、改 Lite、顺手重构 composer。
+禁止：改附件数据模型、改 Lite、顺手重构 composer。（导航 keep-alive 与附件随草稿持久化属于 In scope，见上文；此前本行与 In scope 自相矛盾，已更正。）
