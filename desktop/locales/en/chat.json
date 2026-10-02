@@ -1005,5 +1005,43 @@
       "outcome_supported": "Outcome supported",
       "not_applicable": "N/A"
     }
+  },
+  "quickStart": {
+    "summarize": {
+      "title": "Summarize a document",
+      "desc": "Paste an article or report for key points",
+      "prompt": "Please summarize the document I paste next: key points, conclusions and to-dos."
+    },
+    "weekly": {
+      "title": "Write a weekly report",
+      "desc": "Tell me what you did this week",
+      "prompt": "Based on what I describe next, write a clear weekly report highlighting results and next week's plan."
+    },
+    "minutes": {
+      "title": "Meeting minutes",
+      "desc": "Paste notes, get structured minutes",
+      "prompt": "Turn the meeting notes I paste next into minutes: topics, decisions, action items with owners and dates."
+    },
+    "explainCode": {
+      "title": "Explain code",
+      "desc": "Paste code and get the logic explained",
+      "prompt": "Explain the code I paste next step by step: purpose, key logic, potential issues."
+    },
+    "plan": {
+      "title": "Make a plan",
+      "desc": "Describe a goal, get actionable steps",
+      "prompt": "Make a step-by-step plan for the goal I describe next, with milestones and risks."
+    },
+    "translate": {
+      "title": "Translate & polish",
+      "desc": "Translate and keep it natural",
+      "prompt": "Translate the text I send next into the target language, keeping terminology and polishing it to read naturally."
+    }
+  },
+  "activity": {
+    "running": "{{count}} sub-agent(s) running",
+    "awaiting": "{{count}} awaiting your confirm",
+    "input": "{{count}} awaiting your input",
+    "open": "View"
   }
 }

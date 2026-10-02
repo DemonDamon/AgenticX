@@ -401,6 +401,9 @@ import {
   type DestinationKind,
 } from "./shell/destination-rail";
 import { NearBoxHero } from "./brand/NearBoxHero";
+import { QuickStartCards } from "./brand/QuickStartCards";
+import { AgentActivityPill } from "./AgentActivityPill";
+import { summarizeAgentActivity } from "../utils/agent-activity";
 import type { ScratchChatDraft } from "../utils/scratch-chat";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -532,7 +535,7 @@ import {
   findRunningActionConfirmationToolMessage,
   findRunningClarificationToolMessage,
 } from "../utils/clarification-inline";
-import { parseChoicePanelFields, parseClarificationDecisions, buildClarifyRequestBody } from "../utils/clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions, buildClarifyRequestBody, type ClarificationAnswer } from "../utils/clarification-notice";
 import {
   buildActionConfirmationAnswer,
   findResolvableActionConfirmation,
@@ -2473,11 +2476,11 @@ type Props = {
     allowFreeText: boolean,
     agentId?: string,
     context?: Record<string, unknown>
-  ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
+  ) => Promise<ClarificationAnswer | null>;
   /** Direct inline submit for the clarification card (non-blocking) */
   onSubmitClarification?: (
     requestId: string,
-    answer: { answerText: string; selectedOptions: string[] },
+    answer: ClarificationAnswer,
     sessionId?: string,
     agentId?: string
   ) => Promise<boolean> | boolean;
@@ -8884,7 +8887,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const handleSubmitClarification = useCallback(
     (
       requestId: string,
-      answer: { answerText: string; selectedOptions: string[] },
+      answer: ClarificationAnswer,
       sessionId?: string,
       agentId?: string,
     ) => {
@@ -14046,6 +14049,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => window.removeEventListener("resize", onResize);
   }, [pane.historyOpen]);
 
+  const agentActivitySummary = useMemo(() => summarizeAgentActivity(paneSubAgents), [paneSubAgents]);
+
   const isBrandEmptyState =
     (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
     (!!pane.sessionId && visibleMessages.length === 0);
@@ -14441,6 +14446,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
         </div>
 
+        {!liftComposer && !isGroupPane ? (
+          <AgentActivityPill summary={agentActivitySummary} onOpen={toggleWorkspaceSidePanel} />
+        ) : null}
+
         {/* 收藏 Toast：位于消息列表与输入框之间，水平居中 */}
         {favoriteToastOpen && (
           <div className="pointer-events-none flex justify-center px-4 pb-1 pt-1">
@@ -14463,6 +14472,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           {liftComposer ? (
             <div className="relative z-10 mb-6 flex w-full max-w-4xl flex-col items-center gap-3 text-center text-xs">
               <NearBoxHero size={160} />
+              {!isGroupPane && !isAutomationTaskPane ? (
+                <QuickStartCards
+                  onPick={(prompt) => {
+                    setComposerText(prompt);
+                    requestAnimationFrame(focusComposerEnd);
+                  }}
+                />
+              ) : null}
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>
