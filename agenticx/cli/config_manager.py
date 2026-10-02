@@ -10,6 +10,8 @@ import copy
 from dataclasses import asdict, dataclass, field
 import os
 from pathlib import Path
+import shutil
+import stat
 import threading
 from typing import Any, Dict, Optional, Tuple
 
@@ -305,8 +307,23 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
     @classmethod
     def _dump_yaml(cls, path: Path, data: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+        text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            if path.exists():
+                os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         # 不靠 mtime 兜底：同一纳秒内先写后读理论上会读到陈旧值。
         cls._invalidate_yaml_cache(path)
 
