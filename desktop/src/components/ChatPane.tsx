@@ -2956,6 +2956,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return resolveMetaDisplayName(mp?.avatarName);
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
+  /** Last-pane Close cannot removePane; park UI so history reopen re-runs restore. */
+  const parkComposerOnLastPaneCloseRef = useRef<() => void>(() => {});
   const closePaneAndCleanupEmptySession = () => {
     // Flush unsent composer (text + images) onto the session key BEFORE the pane
     // unmounts / before we consider deleting an empty session.
@@ -2979,7 +2981,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           /* ignore */
         }
       }
+      const paneCountBefore = useAppStore.getState().panes.length;
       removePane(pane.id);
+      // Single pane: removePane is a no-op. Park the chat (clear messages + session
+      // binding + composer UI) while leaving session:<sid> draft in localStorage so
+      // "open from history" can restore text/images. Without this, Close looks like
+      // it did nothing and a later remount/restart often shows an empty composer.
+      if (paneCountBefore <= 1) {
+        const store = useAppStore.getState();
+        store.clearPaneMessages(pane.id);
+        store.setPaneSessionId(pane.id, "");
+        parkComposerOnLastPaneCloseRef.current();
+      }
     })();
   };
   const addPane = useAppStore((s) => s.addPane);
@@ -5650,6 +5663,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return { key, hasDraft };
   };
 
+  parkComposerOnLastPaneCloseRef.current = () => {
+    // Visual clear only — session:<sid> draft was already flushed and must stay.
+    lastComposerDraftTextRef.current = "";
+    lastComposerAttachmentsRef.current = [];
+    setContextFiles({});
+    setComposerTextRef.current("");
+  };
+
   // Keep attachment mirror in sync; persist when chips change (add/remove/ready).
   useEffect(() => {
     lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(contextFiles);
@@ -5698,6 +5719,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   // CRITICAL: do NOT depend on setComposerText — it changes whenever contextFiles
   // changes, and restore itself calls setContextFiles → infinite restore loop that
   // steals focus (via focusComposerEnd) so only one pane appears typeable.
+  //
+  // Apply sync metadata IMMEDIATELY (text + in-memory blobs), then hydrate IDB
+  // for cold-start images. Waiting solely on setTimeout(0)+await IDB left the
+  // composer empty after Close→history reopen / app restart even when LS had data.
   const composerDraftRestorePassRef = useRef(0);
   const contextFilesRef = useRef(contextFiles);
   contextFilesRef.current = contextFiles;
@@ -5705,50 +5730,90 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const nextKey = resolveComposerDraftKey(pane.id, pane.sessionId);
     composerDraftKeyRef.current = nextKey;
     restoringComposerDraftRef.current = true;
-    // Sync metadata first (memory-cache blobs available in-process after close/reopen).
     const syncDraft = getComposerDraft(nextKey);
     const restorePass = ++composerDraftRestorePassRef.current;
     const isFirstPass = restorePass === 1;
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          // Cold start / app restart: pull image bytes from IndexedDB.
-          const draft = (await hydrateComposerDraft(nextKey)) ?? syncDraft;
+
+    const applyDraft = (draftText: string, draftAttachments: ComposerDraftAttachment[]) => {
+      lastComposerDraftTextRef.current = draftText;
+      lastComposerAttachmentsRef.current = draftAttachments;
+      setComposerTextRef.current(draftText);
+      setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
+    };
+
+    const finishRestoring = () => {
+      if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
+      // Wait until contextFiles commit so the persist effect still sees restoring=true.
+      queueMicrotask(() => {
+        requestAnimationFrame(() => {
           if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
-          const draftText = draft?.text ?? "";
-          const draftAttachments = draft?.attachments ?? [];
-          lastComposerDraftTextRef.current = draftText;
-          lastComposerAttachmentsRef.current = draftAttachments;
-          const liveText = extractComposerTextRef.current();
-          const liveFiles = contextFilesRef.current;
-          const liveHasText = Boolean(liveText.trim());
-          const liveHasFiles = Object.keys(liveFiles).length > 0;
-          if (!draftText.trim() && draftAttachments.length === 0 && isFirstPass) {
-            // Mount race: user may have typed / attached before this tick. Don't clobber.
-            if (liveHasText || liveHasFiles) {
-              if (liveHasText) lastComposerDraftTextRef.current = liveText;
-              if (liveHasFiles) {
-                lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(liveFiles);
-              }
-              restoringComposerDraftRef.current = false;
-              persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
-              return;
-            }
-          }
-          setComposerTextRef.current(draftText);
-          setContextFiles(draftAttachmentsToContextFiles(draftAttachments));
-        } finally {
-          if (!cancelled && restorePass === composerDraftRestorePassRef.current) {
-            restoringComposerDraftRef.current = false;
-          }
+          restoringComposerDraftRef.current = false;
+        });
+      });
+    };
+
+    const liveText = extractComposerTextRef.current();
+    const liveFiles = contextFilesRef.current;
+    const liveHasText = Boolean(liveText.trim());
+    const liveHasFiles = Object.keys(liveFiles).length > 0;
+    const syncText = syncDraft?.text ?? "";
+    const syncAtt = syncDraft?.attachments ?? [];
+    const syncHas = Boolean(syncText.trim() || syncAtt.length > 0);
+
+    if (!syncHas && isFirstPass && (liveHasText || liveHasFiles)) {
+      // Mount race: user typed before restore tick — keep live, don't clobber.
+      if (liveHasText) lastComposerDraftTextRef.current = liveText;
+      if (liveHasFiles) {
+        lastComposerAttachmentsRef.current = contextFilesToDraftAttachments(liveFiles);
+      }
+      restoringComposerDraftRef.current = false;
+      persistComposerDraftNow(undefined, lastComposerDraftTextRef.current);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Sync path first (text always in LS; blobs may already be in memory after close).
+    applyDraft(syncText, syncAtt);
+
+    // Retry once after paint in case contenteditable ref was null on first apply.
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
+      const el = composerRef.current;
+      const domEmpty = !el || !(el.innerText || "").replace(/\u00a0/g, " ").trim();
+      if (syncText.trim() && domEmpty) {
+        setComposerTextRef.current(syncText);
+      }
+    });
+
+    void (async () => {
+      try {
+        // Cold start / app restart: pull image bytes from IndexedDB.
+        const draft = (await hydrateComposerDraft(nextKey)) ?? syncDraft;
+        if (cancelled || restorePass !== composerDraftRestorePassRef.current) return;
+        const draftText = draft?.text ?? "";
+        const draftAttachments = draft?.attachments ?? [];
+        const hydratedAddsBlob = draftAttachments.some(
+          (att) => att.dataUrl && !syncAtt.some((s) => s.key === att.key && s.dataUrl),
+        );
+        const textChanged = draftText !== syncText;
+        if (textChanged || hydratedAddsBlob || draftAttachments.length !== syncAtt.length) {
+          applyDraft(draftText, draftAttachments);
         }
-      })();
-    }, 0);
+      } catch {
+        // Sync apply already ran; keep whatever is on screen.
+      } finally {
+        finishRestoring();
+      }
+    })();
+
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
-      restoringComposerDraftRef.current = false;
+      window.cancelAnimationFrame(raf);
+      // Do NOT flip restoring→false here: a sessionId jump must keep the guard up
+      // until the next restore pass applies, or empty contextFiles persist can wipe
+      // the session draft that Close just flushed.
     };
   }, [pane.id, pane.sessionId, persistComposerDraftNow]);
 
