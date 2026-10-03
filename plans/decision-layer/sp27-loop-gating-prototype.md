@@ -20,7 +20,7 @@ gating 的两个落点都不是"替换 LLM"：
 ## 任务
 
 ### T1 DecisionRouter 组件
-- [ ] 新建 `agenticx/agents/decision_router.py`：
+- [x] 新建 `agenticx/agents/decision_router.py`：
   - `RouterVerdict`：action（`pass`/`nudge`）、probs、confidence（top-1 prob）、
     argmax_symbol、latency_ms、degraded（bool）
   - `DecisionRouter(scorer, decision_type, tau_high=0.8, tau_low=0.5)`：
@@ -31,7 +31,7 @@ gating 的两个落点都不是"替换 LLM"：
     可序列化字段（后续可回流训练数据）
 
 ### T2 agent loop 接入（tool_selection validator）
-- [ ] `react_agent_async.py` `_loop`：normalized tool_calls 确定后、dispatch 前
+- [x] `react_agent_async.py` `_loop`：normalized tool_calls 确定后、dispatch 前
   - 新 kwargs `decision_gate: dict | None = None`（None=默认 off，现状逐字节等价）
   - gate 配置：`{"mode": "observe"|"nudge", "router": {...}}`；router 由
     `make_scorer` 构造注入，agent 不依赖具体服务
@@ -39,20 +39,23 @@ gating 的两个落点都不是"替换 LLM"：
   - nudge：错配且高置信 → 本轮照常执行 + 追加 system nudge 影响下一轮
     （对齐 loop_detector.nudge 先例，不 block 执行）
   - 遥测落盘：gate 结束（finish/error）时 dump 到 session 目录或指定路径
-- [ ] 测试：flag off 行为等价（无 router 调用）；observe 记录字段完整；
+- [x] 测试：flag off 行为等价（无 router 调用）；observe 记录字段完整；
   scorer 抛异常 → degraded + 原路径继续
 
 ### T3 回放侧 DecisionHeadPolicy
-- [ ] 新建 `agenticx/learning/trajectory/decision_policy.py`：
+- [x] 新建 `agenticx/learning/trajectory/decision_policy.py`：
   - `DecisionHeadPolicy(scorer, state_builder, tau_abort)`：`act(obs, ctx)` 把
     StepFeatures 渲染成 state 文本 → yes_no 题（continue/abort）→ scorer probs
     → abort 概率 ≥ tau 才 abort，否则 continue（fail-open → continue）
   - state_builder：StepFeatures 字段的确定性文本化（版本号
     `step-features-v1`，沿用 SP25 训推一致纪律）
-- [ ] A/B 脚本 `scripts/eval_gating_ab.py`：
+- [x] A/B 脚本 `scripts/eval_gating_ab.py`：
   - 回放侧：`policy_report` 跑 4 基线 + DecisionHeadPolicy，≥3 seeds，
     train/held-out 双区汇总（成功率/步数/放弃率）
   - live 侧：`--live` 跑 observe 模式一致性报告（环境可得时）
+    ——执行记录：live harbor 环境本轮不可得，按"环境可得时"条款诚实
+    推迟；observe 语义已由 tests/agents/test_decision_router.py 的
+    15 项集成测试覆盖（含 flag-off 逐字节等价）
   - mock scorer 全链路冒烟；报告落 `results/decision-layer/gating/`
 
 ## 做成什么样
@@ -65,11 +68,14 @@ gating 的两个落点都不是"替换 LLM"：
 
 ## 验收
 
-- [ ] flag off：现有 agent 测试回归全绿，无新增调用路径
-- [ ] fail-open 三处验证：scorer 异常 / 超时语义（degraded）/ 题型不匹配 → 原路径
-- [ ] nudge 模式注入的消息可被关闭（gate 配置一次性），不与 loop_detector 冲突
-- [ ] 回放 A/B：DecisionHeadPolicy 与 4 基线同表可比，3 seeds 数字落盘
-- [ ] mock 冒烟：observe→遥测落盘→nudge 注入→报告生成一条命令可重跑
+- [x] flag off：现有 agent 测试回归全绿，无新增调用路径
+  （tests/rl + tests/trajectory + tests/agents + react smoke = 386 通过）
+- [x] fail-open 三处验证：scorer 异常 / 超时语义（degraded）/ 题型不匹配 → 原路径
+- [x] nudge 模式注入的消息可被关闭（gate 配置一次性），不与 loop_detector 冲突
+- [x] 回放 A/B：DecisionHeadPolicy 与 4 基线同表可比，3 seeds 数字落盘
+  （12 tasks/30 attempts，startlux 4B 真实 scorer 1670 次打分；
+  结果见 results/decision-layer/gating/gating_ab.md）
+- [x] mock 冒烟：observe→遥测落盘→nudge 注入→报告生成一条命令可重跑
 
 ## 明确不做
 
