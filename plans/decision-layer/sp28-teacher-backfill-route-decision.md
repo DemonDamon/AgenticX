@@ -12,15 +12,15 @@ master plan 第五节的框架产出 Go/No-Go 路线报告——这是整个判�
 ## 任务
 
 ### T1 批量补标（train/calib，禁 test）
-- [ ] `scripts/backfill_decisions.py` 增加：
+- [x] `scripts/backfill_decisions.py` 增加：
   - `--exclude-test`（默认开！补标范围 = split ∈ {train, calib, ""}），
     补完断言输出文件中 test 划分 teacher 标签数为 0
   - `--scorer startlux` 配置档直通（SP26 已建）
   - `--split-filter` 可选覆盖（如只补 tool_selection）
-- [ ] 幂等验证：同参数重跑补 0 条（`backfill_teacher` 已有幂等语义，补 CLI 侧证明）
+- [x] 幂等验证：同参数重跑补 0 条（`backfill_teacher` 已有幂等语义，补 CLI 侧证明）
 
 ### T2 Go/No-Go 报告
-- [ ] 新建 `scripts/decision_route_report.py`：
+- [x] 新建 `scripts/decision_route_report.py`：
   - 输入：SP26 基线报告 json + SP27 A/B 报告 json + 补标统计
   - 输出：`plans/decision-layer/route-decision.md`（进版本库，决策资产）
   - 内容框架：
@@ -29,11 +29,11 @@ master plan 第五节的框架产出 Go/No-Go 路线报告——这是整个判�
        框架逐条对照，阈值此时用真实分布定标并写明依据
     3. 若判 B/C：给出 SP29 立项输入（数据量、缺口决策类型、基线数字）
     4. 若判兜底（数据不足）：给出采集侧调整建议（反馈 SP25 优先级）
-- [ ] mock 模式可全流程演练（报告生成逻辑不依赖真实 scorer）
+- [x] mock 模式可全流程演练（报告生成逻辑不依赖真实 scorer）
 
 ### T3 master plan 回填
-- [ ] 状态表登记三个 SP 的产出与数字
-- [ ] 第八节核心价值终答回填（V1-V4 各配一个真实数字或明确结论）
+- [x] 状态表登记三个 SP 的产出与数字
+- [x] 第八节核心价值终答回填（V1-V4 各配一个真实数字或明确结论）
 
 ## 做成什么样
 
@@ -44,11 +44,11 @@ master plan 第五节的框架产出 Go/No-Go 路线报告——这是整个判�
 
 ## 验收
 
-- [ ] 补标幂等：重跑补 0 条；test 零渗透有断言输出
-- [ ] held-out 守卫：补标输入若混入考试任务决策点即抛 HeldoutViolation
+- [x] 补标幂等：重跑补 0 条；test 零渗透有断言输出
+- [x] held-out 守卫：补标输入若混入考试任务决策点即抛 HeldoutViolation
       （复用 load_trainable_decisions）
-- [ ] 报告含明确路线建议（不允许"都行"式结论；兜底结论也必须给采集侧动作）
-- [ ] mock 演练：T1→T2→T3 一条链路冒烟可重跑
+- [x] 报告含明确路线建议（不允许"都行"式结论；兜底结论也必须给采集侧动作）
+- [x] mock 演练：T1→T2→T3 一条链路冒烟可重跑
 
 ## 明确不做
 
