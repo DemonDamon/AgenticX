@@ -52,7 +52,7 @@ Cloudflare Clef——"判断层"已成共识方向。
 
 | # | 文件 | 内容 | 前置 | 状态 |
 |---|---|---|---|---|
-| SP26 | [sp26-decision-head-baseline.md](sp26-decision-head-baseline.md) | 决策头基线：scorer 库化 + 本地服务化 + test 划分评测 | SP25 | ☐ |
+| SP26 | [sp26-decision-head-baseline.md](sp26-decision-head-baseline.md) | 决策头基线：scorer 库化 + 本地服务化 + test 划分评测 | SP25 | ✅ |
 | SP27 | [sp27-loop-gating-prototype.md](sp27-loop-gating-prototype.md) | loop gating：DecisionRouter + validator 接入 + 回放 policy 对照 | SP26 | ☐ |
 | SP28 | [sp28-teacher-backfill-route-decision.md](sp28-teacher-backfill-route-decision.md) | teacher 批量补标 + 三路线 Go/No-Go 报告 | SP26, SP27 | ☐ |
 
@@ -82,7 +82,7 @@ Cloudflare Clef——"判断层"已成共识方向。
 
 ## 六、总验收标准
 
-- [ ] SP26：test 划分分决策类型 accuracy/ECE 报告落盘；scorer 单测绿；mock 全链路冒烟
+- [x] SP26：test 划分分决策类型 accuracy/ECE 报告落盘；scorer 单测绿；mock 全链路冒烟
 - [ ] SP27：router 单测绿（阈值/升级/降级/fail-open）；flag off 默认行为不变有测试；
       回放 policy_report 含 decision head vs 4 基线（train/held-out 双区、≥3 seeds）
 - [ ] SP28：补标幂等（重跑补 0 条）；test 零补标有断言；Go/No-Go 报告含明确路线建议
@@ -93,7 +93,9 @@ Cloudflare Clef——"判断层"已成共识方向。
 
 | 日期 | 动作 | 产出 |
 |---|---|---|
-| （执行时回填） | | |
+| 2026-10-03 | SP26 完成（commit 待记） | decision_scorers 库（mock/openai/systemone 三路）+ decision_eval 指标库 + eval CLI + serve 脚本；34+34 单测绿（rl/trajectory 回归 341 绿） |
+| 2026-10-03 | SP26 关键发现 1：真实 TB 数据 bash-only | 12 个 job 挖出 1259 决策点全部单候选——tool_selection 在当前域内数据上退化（top1=1.0 为官方短路）；域内基线需 multi-tool harness 或转向 error_classification/continue_stop |
+| 2026-10-03 | SP26 关键发现 2：0.8B/4B 全链路实测通过 | hf-mirror 下载 + llama-server + 官方 gguf_server（/v1/systemone）；合成多工具数据 0.8B top1=0.45/ECE=0.295、4B top1=0.45/ECE=0.317（无语义信号，仅管线验证）；weights 许可 CC BY-NC 4.0 |
 
 ## 八、核心价值终答（全部完成后回填，回答"做这么多事的核心价值是什么"）
 
