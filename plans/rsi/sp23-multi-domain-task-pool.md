@@ -52,3 +52,20 @@ format-code-task-001457（github-actions-tagger 仓库）:
 - general 域整域接入（judge 比例未知, 需逐环境筛选, SP24）
 - harbor_reward 侧 PooledTask 消费适配（等真跑排期一起做）
 - 难度分层标注（依赖首轮通过率数据）
+
+## SP26 候选：任务池扩充来源（2026-10-03 更新, 按优先级）
+
+首轮校准后（DS V4.1 Flash 40-50% 甜点区）, 扩池优先级重排：
+
+1. **SETA-Env 接入（首选, 新加入）**
+   - 来源: `camel-ai/SETA-Env`（HF）, NeurIPS 2026, 4,500+ 可验证终端环境
+   - 优势: 任务目录 `task.toml + instruction.md + environment/ + tests/`
+     与我们 mimo_harbor_bridge 物化格式**同构**, harbor 直接消费;
+     且论文层面可引 SETA（环境层）+ AIDE²（harness 层）+ 我们（权重层）
+     三层正交叙事
+   - 接入三步: 下载 → 格式校验 + TB 4.0 held-out 污染检查
+     （12 个隔离任务的 ID/名称重叠扫描, 外来数据人工过闸）→ 抽 10 校准
+   - 参考: 同系训练配方 `github.com/camel-ai/seta`（Qwen3-8B GRPO / GLM-5.2
+     LoRA 与我们 8×4090 规模匹配, 可对照超参）
+2. **general 域 deterministic 筛选**（原有候选, 925 环境逐个判 judge 比例）
+3. **ORCA-bench 接入**（原有候选, 降级——SETA 路径更短且规模更大）
