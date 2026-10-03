@@ -7,7 +7,9 @@
 
 Recursive self-improvement (RSI) 近期在 harness 层被证明可行（AIDE², arXiv:2609.26457：
 8 天自主运行发现 7 项可泛化改进，且 reward hacking 比率出现未显式优化的下降）。
-但 harness 层 RSI 的能力上界受冻结的底层模型限制。我们研究**权重层 RSI**：
+但 harness 层 RSI 的能力上界受冻结的底层模型限制。与此同时，环境规模化路线的
+收益已趋缓（SETA, NeurIPS 2026：4,500 个可验证终端环境上对 291B 模型全参
+GRPO 训练，TB 2.0 pass@1 仅 40%→43%）。我们研究**权重层 RSI**：
 以 GRPO 训练循环为外环，任务池、reward 信号与经验飞轮为内环的自改进系统。
 
 前半篇（本稿）交付三件事：
@@ -33,7 +35,9 @@ Recursive self-improvement (RSI) 近期在 harness 层被证明可行（AIDE², 
 | 已验证 | 8 天 7 项改进，4 基准泛化 | （本工作） |
 
 两者正交可叠加：AIDE² 发现的 harness 机制（bandit 搜索、failure memory 门控）
-可作为我们训练分布的 curriculum 结构。
+可作为我们训练分布的 curriculum 结构。更广义地，终端 agent 能力的杠杆有三个
+正交维度：**环境规模化**（SETA：加更多训练环境）、**harness 层自改进**
+（AIDE²：改 agent 代码）、**权重层自改进**（本工作：改模型本身）。
 
 ### 1.2 权重层 RSI 的三个前置问题
 
@@ -47,6 +51,12 @@ Recursive self-improvement (RSI) 近期在 harness 层被证明可行（AIDE², 
 
 ## 2. 相关工作
 
+- **SETA**（arXiv:2607.10891, NeurIPS 2026）：环境规模化层的标杆——
+  4,500 个可验证终端环境 + 环境合成流水线（SETA-Synth/SETA-Evol），全开源。
+  与本工作两点交叉：(a) 外部锚点——其 DeepSeek-V4-Flash 基线（TB 2.0
+  pass@1=40%）与我们的校准基线（40%）跨任务集一致（§4.4）；(b) 其
+  64×H200 全参 GRPO 仅获 +3pp，为"单轮环境规模化收益趋缓、迭代自改进
+  是下一杠杆"提供外部证据。
 - **AIDE²**（arXiv:2609.26457）：harness 层 RSI 的标杆。其 (a) public/private
   信号分离、(b) 固定预算评估、(c) 统计性接受判据，全部移植进本工作的管线。
   其 related work 明确将权重层自适应列为 open direction。
@@ -119,6 +129,11 @@ GRPO 的 0/1 reward 下，通过率 0% 的任务全为负样本（无正向梯�
 
 DS V4.1 Flash 可用：40% 通过率处于甜点区中位，正负梯度均衡，
 任务池无需更换。（GLM-5.3 Flash 备选未启用。）
+
+**外部锚点**：SETA（NeurIPS 2026）报告 DeepSeek-V4-Flash 在其 terminal
+agent harness 下 TB 2.0 基线 pass@1 = 40%。不同任务集、同代同级模型给出
+一致的 40% 水平线——交叉印证本校准结果非孤例，同时为 A2/A5 的预期
+表现提供了外部参照系（SETA 全参训练后 +3pp）。
 
 ## 5. Reward 信号完整性管线
 
