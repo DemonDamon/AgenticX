@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldDeferAutoReport } from "./auto-report-gate";
+import { shouldDeferAutoReport, shouldNotifySubagentCompletion } from "./auto-report-gate";
 
 describe("shouldDeferAutoReport", () => {
   const now = 1_000_000;
@@ -51,5 +51,24 @@ describe("shouldDeferAutoReport", () => {
         now,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldNotifySubagentCompletion", () => {
+  it("does not notify when a sub-agent is first seen already terminal (restart hydrate)", () => {
+    expect(shouldNotifySubagentCompletion(undefined, "completed")).toBe(false);
+    expect(shouldNotifySubagentCompletion(undefined, "failed")).toBe(false);
+    expect(shouldNotifySubagentCompletion(undefined, "paused")).toBe(false);
+  });
+
+  it("notifies when status transitions from active to terminal in this process", () => {
+    expect(shouldNotifySubagentCompletion("running", "completed")).toBe(true);
+    expect(shouldNotifySubagentCompletion("pending", "failed")).toBe(true);
+    expect(shouldNotifySubagentCompletion("awaiting_confirm", "paused")).toBe(true);
+  });
+
+  it("does not notify when already terminal", () => {
+    expect(shouldNotifySubagentCompletion("completed", "completed")).toBe(false);
+    expect(shouldNotifySubagentCompletion("failed", "paused")).toBe(false);
   });
 });

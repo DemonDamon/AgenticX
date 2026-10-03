@@ -3724,7 +3724,7 @@ class AgentRuntime:
         elif body.strip():
             session.agent_messages.append({"role": "assistant", "content": body})
 
-        if not is_system_trigger:
+        if (not is_system_trigger) or body.strip():
             persisted_metadata: Dict[str, Any] = {
                 "turn_terminal": True,
                 "terminal_reason": terminal_reason,

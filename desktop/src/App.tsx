@@ -5,7 +5,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
 import { buildClarifyRequestBody } from "./utils/clarification-notice";
-import { shouldDeferAutoReport } from "./utils/auto-report-gate";
+import { shouldDeferAutoReport, shouldNotifySubagentCompletion } from "./utils/auto-report-gate";
 import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
@@ -1321,8 +1321,9 @@ export function App() {
           if (!id) continue;
           subAgentSessionRef.current[id] = sid;
 
-          const exists = subAgentsRef.current.some((sub) => sub.id === id);
-          if (!exists) {
+          const existing = subAgentsRef.current.find((sub) => sub.id === id);
+          const prevStatus = existing?.status;
+          if (!existing) {
             addSubAgent({
               id,
               name: item.name ?? id,
@@ -1335,7 +1336,6 @@ export function App() {
           }
 
           const status = item.status ?? "running";
-          const existing = subAgentsRef.current.find((sub) => sub.id === id);
           const hasPendingConfirm = !!(item.pending_confirm?.request_id);
           const hasPendingClarification = !!(item.pending_clarification?.request_id);
           const effectiveStatus =
@@ -1428,6 +1428,7 @@ export function App() {
             !completionNotifiedRef.current.has(id)
           ) {
             completionNotifiedRef.current.add(id);
+            if (shouldNotifySubagentCompletion(prevStatus, effectiveStatus)) {
             const agentName = item.name ?? id;
             const emoji = effectiveStatus === "completed" ? "✅" : effectiveStatus === "paused" ? "⏸" : "❌";
             const statusLabel =
@@ -1473,6 +1474,7 @@ export function App() {
             useAppStore
               .getState()
               .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            }
           }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
