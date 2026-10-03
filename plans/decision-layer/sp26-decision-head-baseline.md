@@ -16,34 +16,34 @@ logprobs 再归一）和一个 mock scorer，但它们锁在脚本里，无法�
 ## 任务
 
 ### T1 scorer 库化
-- [ ] 新建 `agenticx/rl/decision_scorers.py`：
+- [x] 新建 `agenticx/rl/decision_scorers.py`：
   - `make_scorer(name, **cfg)` 工厂，name ∈ {`mock`, `openai`, `startlux`}
   - `mock_scorer`：从 backfill_decisions.py 原样迁移（sha256 确定性）
   - `OpenAICompatScorer`：受限 softmax 标注机迁移 + prompt 模板参数化
     （默认模板与现状逐字节一致，防数据集漂移）；`_LETTERS` 字母位映射保持
   - `startlux` = openai 的配置档：默认 base_url/model 指向本地 llama.cpp/ollama
     服务（ GGUF 部署 StartLux-Decision-4B），仅是预设值不含新逻辑
-- [ ] `scripts/backfill_decisions.py` 改薄壳调库，行为与 CLI 参数不变
+- [x] `scripts/backfill_decisions.py` 改薄壳调库，行为与 CLI 参数不变
 
 ### T2 评测 harness
-- [ ] 新建 `agenticx/rl/decision_eval.py`（库，可测）：
+- [x] 新建 `agenticx/rl/decision_eval.py`（库，可测）：
   - `top1_accuracy(records)`：argmax(probs) vs `label_for(qid).hard`（execution 真值）
   - `expected_calibration_error(records, n_bins=15)`：等频分桶 ECE
   - `fit_temperature(calib_records)`：单参数温度缩放（NLL 网格/黄金分割），
     只在 calib 划分拟合，不改变 argmax
   - `eval_split(records)`：分 decision_type × question 汇总，输出 dict 报告
-- [ ] 新建 `scripts/eval_decision_baseline.py`（CLI）：
+- [x] 新建 `scripts/eval_decision_baseline.py`（CLI）：
   - `--data`（decisions.jsonl 或目录，目录则合并 rounds；也接受 `.labeled.jsonl`）
   - 纪律强制：无 split 的数据要求 `--assign-split` 显式确认；只评 test 划分；
     calib 拟温度后 test 只读一次
   - `--scorer mock|openai|startlux`（现场打分）或直接用已补标文件的 teacher probs
   - `--limit`；报告落 `results/decision-layer/baseline/`（json + md）
-- [ ] 测试夹具：合成轨迹 → `mine_tool_decisions` → 指定标注 → 三分，全链路纯内存
+- [x] 测试夹具：合成轨迹 → `mine_tool_decisions` → 指定标注 → 三分，全链路纯内存
 
 ### T3 本地服务化路径（真实模型）
-- [ ] `scripts/serve_decision_model.sh`：HF 下载 GGUF（0.8B 冒烟 + 4B Q8/Q4）+
+- [x] `scripts/serve_decision_model.sh`：HF 下载 GGUF（0.8B 冒烟 + 4B Q8/Q4）+
   llama.cpp `llama-server` 启动 + logprobs 可用性一步验证（curl top_logprobs）
-- [ ] 环境验证：网络可达则真实跑一轮 0.8B/4B 基线并落盘；不可达则报告标记
+- [x] 环境验证：网络可达则真实跑一轮 0.8B/4B 基线并落盘；不可达则报告标记
   `degraded: model-unavailable`，endpoint 路径留配置
 
 ## 做成什么样
@@ -56,13 +56,13 @@ logprobs 再归一）和一个 mock scorer，但它们锁在脚本里，无法�
 
 ## 验收
 
-- [ ] mock 全链路冒烟：合成→切分→calib 拟温→test 评测→报告落盘，一条命令可重跑
-- [ ] openai scorer 用 fake client 单测：prompt 构造、logprobs→probs 映射、
+- [x] mock 全链路冒烟：合成→切分→calib 拟温→test 评测→报告落盘，一条命令可重跑
+- [x] openai scorer 用 fake client 单测：prompt 构造、logprobs→probs 映射、
   未命中候选 -30 兜底、probs 长度与 symbols 对齐
-- [ ] 温度拟合数值正确性：手工构造可解析的夹具验证（如两样本 probs+hard
+- [x] 温度拟合数值正确性：手工构造可解析的夹具验证（如两样本 probs+hard
   label 的闭式解邻域）
-- [ ] test 只读一次：harness 内部断言 eval 只发生在 test 切分
-- [ ] （若可得）真实基线数字落盘并在 master plan 状态表登记
+- [x] test 只读一次：harness 内部断言 eval 只发生在 test 切分
+- [x] （若可得）真实基线数字落盘并在 master plan 状态表登记
 
 ## 明确不做
 
