@@ -23,10 +23,10 @@ export function InstallConfirmBar({
     <div
       role="alertdialog"
       aria-label={t("scan.confirmTitle")}
-      className={`flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 ${
+      className={`sticky bottom-4 z-20 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur ${
         isHigh
-          ? "border-rose-500/40 bg-rose-500/10"
-          : "border-amber-500/40 bg-amber-500/10"
+          ? "border-rose-500/50 bg-rose-500/15"
+          : "border-amber-500/50 bg-amber-500/15"
       }`}
       data-market-confirm={kind}
     >
