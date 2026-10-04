@@ -193,6 +193,16 @@ describe("RunModePicker", () => {
     expect(next.style.top).toBeUndefined();
   });
 
+  it("opens upward from the lower half even if a short estimate would still fit below", () => {
+    // Composer sits near the window bottom; leftover pixels are the Dock overlay.
+    const next = withWindow({ innerWidth: 1280, innerHeight: 800 }, () =>
+      runModePanelStyle(fakeRect({ left: 40, top: 520, bottom: 548 })),
+    );
+    expect(next.placement).toBe("up");
+    expect(next.style.bottom).toBe(800 - 520 + 6);
+    expect(next.style.top).toBeUndefined();
+  });
+
   it("keeps the current mode when confirmDialog is unavailable", async () => {
     const setRunMode = vi.fn();
     await applyRunMode({
