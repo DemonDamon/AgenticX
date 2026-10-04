@@ -137,6 +137,7 @@ type Props = {
   senderAvatarId?: string;
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  presenting?: boolean;
   streamStalled?: boolean;
   streamStalledSeconds?: number;
   onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
@@ -436,6 +437,7 @@ export function MessageRenderer({
   senderAvatarId,
   sessionBusy = false,
   isLastAssistantInPane = false,
+  presenting = false,
   streamStalled = false,
   streamStalledSeconds = 0,
   onSkillManageApply,
@@ -614,6 +616,7 @@ export function MessageRenderer({
         senderAvatarId={senderAvatarId ?? (showSenderIdentity && message.role === "user" ? "user-self" : undefined)}
         sessionBusy={sessionBusy}
         isLastAssistantInPane={isLastAssistantInPane}
+        presenting={presenting}
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}

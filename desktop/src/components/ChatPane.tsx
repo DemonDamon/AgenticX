@@ -481,6 +481,7 @@ import {
   type PaneSessionMode,
 } from "../utils/pane-fresh-session";
 import { lastPaneCloseAction } from "../utils/pane-close-home";
+import { shouldShowReActBlockActionTail } from "../utils/im-bubble-actions";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
 import {
@@ -9109,6 +9110,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               resumeInFlight={resumeInFlight}
               isFutileResume={isFutileResumeFlag}
               sessionBusy={sessionBusy || subAgentsPending}
+              presenting={replayPresenting}
               isLastAssistantInPane={
                 message.role === "assistant" && message.id === lastAssistantMessageId
               }
@@ -9224,8 +9226,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   ) : null}
                   {useUnifiedReActCard ? (
                     (() => {
-                      const actionTailReady =
-                        !hasStreamingRow && !sessionWorkInProgress && !subAgentsPending && workMessages.length > 0;
+                      const actionTailReady = shouldShowReActBlockActionTail({
+                        hasStreamingRow,
+                        sessionWorkInProgress,
+                        subAgentsPending,
+                        hasWorkMessages: workMessages.length > 0,
+                        presenting: replayPresenting,
+                      });
                       const rhythmEndIdx =
                         actionTailReady && groupedWork.length > 0
                           ? groupedWork.length - 1
@@ -9639,7 +9646,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     </>
       ),
     };
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, subAgentsPending, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, subAgentsPending, replayPresenting, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

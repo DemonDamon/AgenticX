@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons, shouldShowReActBlockActionTail } from "../../utils/im-bubble-actions";
 import { i18n } from "../../i18n/i18n";
 import { ChatImAvatar, ImBubble } from "./ImBubble";
 import {
@@ -69,6 +69,10 @@ describe("shouldShowAssistantIconButtons", () => {
       })
     ).toBe(true);
   });
+
+  it("hides actions during run presentation", () => {
+    expect(shouldShowAssistantIconButtons({ ...baseVisible, presenting: true })).toBe(false);
+  });
 });
 
 const baseFollowups = {
@@ -125,6 +129,31 @@ describe("shouldShowAssistantFollowups", () => {
         keepActionsWhileBusy: true,
       })
     ).toBe(true);
+  });
+
+  it("hides followups during run presentation", () => {
+    expect(shouldShowAssistantFollowups({ ...baseFollowups, presenting: true })).toBe(false);
+  });
+});
+
+describe("shouldShowReActBlockActionTail", () => {
+  const ready = {
+    hasStreamingRow: false,
+    sessionWorkInProgress: false,
+    subAgentsPending: false,
+    hasWorkMessages: true,
+  };
+
+  it("shows the peeled action row when the turn is idle", () => {
+    expect(shouldShowReActBlockActionTail(ready)).toBe(true);
+  });
+
+  it("hides the peeled action row during run presentation", () => {
+    expect(shouldShowReActBlockActionTail({ ...ready, presenting: true })).toBe(false);
+  });
+
+  it("hides the peeled action row while tools are still running", () => {
+    expect(shouldShowReActBlockActionTail({ ...ready, sessionWorkInProgress: true })).toBe(false);
   });
 });
 

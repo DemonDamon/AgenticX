@@ -128,6 +128,8 @@ type Props = {
   /** When true, suppress action buttons on the last assistant bubble while the session is busy/stalled. */
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  /** Run replay presentation: hide copy/quote chrome. */
+  presenting?: boolean;
   /** Replace animated streaming dots with a stalled indicator on the __stream__ placeholder. */
   streamStalled?: boolean;
   streamStalledSeconds?: number;
@@ -424,6 +426,7 @@ export function ImBubble({
   senderAvatarId,
   sessionBusy = false,
   isLastAssistantInPane = false,
+  presenting = false,
   streamStalled = false,
   streamStalledSeconds = 0,
   lightboxGallery,
@@ -703,6 +706,7 @@ export function ImBubble({
     sessionBusy,
     isLastAssistantInPane,
     keepActionsWhileBusy: showSenderIdentity,
+    presenting,
   });
   const assistantTextClassName = !isUser
     ? getAssistantTextClassName({
@@ -749,6 +753,7 @@ export function ImBubble({
     sessionBusy,
     isLastAssistantInPane,
     keepActionsWhileBusy: showSenderIdentity,
+    presenting,
   }) ? (
       <>
         <HoverTip label={t("actions.copy")}>
