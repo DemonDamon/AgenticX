@@ -833,6 +833,8 @@ type Props = {
   /** Trae-style: enlarge work panel to dominate the pane (main content). */
   expanded?: boolean;
   onToggleExpand?: () => void;
+  /** Compact overlay already has the pane toolbar workspace toggle; hide the duplicate dock control. */
+  showDockToggle?: boolean;
   focusRequest?: WorkPanelFocus;
   onFocusRequestHandled?: () => void;
   onPickFileForReference?: (taskspaceId: string, path: string) => void;
@@ -989,6 +991,7 @@ export function WorkPanel({
   onClose,
   expanded = false,
   onToggleExpand,
+  showDockToggle = true,
   focusRequest,
   onFocusRequestHandled,
   onPickFileForReference,
@@ -2782,6 +2785,7 @@ export function WorkPanel({
         </button>
         </div>
 
+        {onToggleExpand || showDockToggle ? (
         <div className="flex shrink-0 items-center pr-3">
         {onToggleExpand ? (
           <HoverTip label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}>
@@ -2802,6 +2806,7 @@ export function WorkPanel({
           </HoverTip>
         ) : null}
 
+        {showDockToggle ? (
         <HoverTip label={t("work.hideTools")}>
           <button
             type="button"
@@ -2813,7 +2818,9 @@ export function WorkPanel({
             <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
         </HoverTip>
+        ) : null}
         </div>
+        ) : null}
       </div>
 
       {plusMenu}

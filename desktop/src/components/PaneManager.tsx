@@ -11,6 +11,7 @@ import {
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { shouldUsePaneTabs } from "../utils/pane-tab-mode";
 import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
@@ -50,26 +51,9 @@ type Props = {
 
 const COLUMNS = 2;
 const MIN_PCT = 15;
-/** 主区宽度低于此值且 ≥2 窗格时改为 Tab 切换，避免并排挤压变形（680px 最窄窗口场景）。 */
-const PANE_TAB_ONLY_MAX_WIDTH = 920;
-/** 并排双窗格时单窗格最低舒适宽度；低于则走 Tab 模式。 */
-const PANE_COMFORT_MIN_WIDTH = 400;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
-}
-
-function shouldUsePaneTabs(containerWidth: number, paneCount: number): boolean {
-  if (paneCount < 2) return false;
-  const w =
-    containerWidth > 0
-      ? containerWidth
-      : typeof window !== "undefined"
-        ? window.innerWidth
-        : 0;
-  if (w <= 0) return false;
-  if (w < PANE_TAB_ONLY_MAX_WIDTH) return true;
-  return w / paneCount < PANE_COMFORT_MIN_WIDTH;
 }
 
 function PaneTabStrip({
@@ -235,7 +219,11 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   };
 
   const isMulti = paneCount >= 2;
-  const paneTabMode = shouldUsePaneTabs(containerWidth, paneCount);
+  const paneTabMode = shouldUsePaneTabs({
+    containerWidth,
+    paneCount,
+    windowWidth: typeof window !== "undefined" ? window.innerWidth : 0,
+  });
   const paneIds = durablePanes.map((p) => p.id);
   const activeDragPane = activeDragId ? durablePanes.find((p) => p.id === activeDragId) : undefined;
 

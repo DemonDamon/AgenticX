@@ -480,6 +480,7 @@ import {
   setPanePendingSessionMode,
   type PaneSessionMode,
 } from "../utils/pane-fresh-session";
+import { lastPaneCloseAction } from "../utils/pane-close-home";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
 import {
@@ -688,6 +689,10 @@ const KB_RETRIEVAL_MODE_OPTIONS: {
 
 /** 多分窗下仅看窗口宽度不可靠：按单窗格可视宽度切换到「侧栏抽屉」模式（对齐左侧主导航 overlay，不并排挤压会话区）。 */
 const CHATPANE_SIDE_OVERLAY_BREAK = 760;
+/** DestinationRail `w-10` — compact overlay docks to its left. */
+const DESTINATION_RAIL_WIDTH_PX = 40;
+/** Keep enough chat column so the overlay does not swallow the whole pane. */
+const COMPACT_OVERLAY_CHAT_RESERVE_PX = 280;
 
 /** 程序化展开工作区：窄窗格时与其它侧栏互斥，避免并排挤压。 */
 function openWorkspaceSidebarForPane(
@@ -2963,7 +2968,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return resolveMetaDisplayName(mp?.avatarName);
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
-  /** Last-pane Close cannot removePane; park UI so history reopen re-runs restore. */
+  const resetSolePaneToMetaHome = useAppStore((s) => s.resetSolePaneToMetaHome);
   const parkComposerOnLastPaneCloseRef = useRef<() => void>(() => {});
   const closePaneAndCleanupEmptySession = () => {
     // Flush unsent composer (text + images) onto the session key BEFORE the pane
@@ -2989,17 +2994,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
       }
       const paneCountBefore = useAppStore.getState().panes.length;
-      removePane(pane.id);
-      // Single pane: removePane is a no-op. Park the chat (clear messages + session
-      // binding + composer UI) while leaving session:<sid> draft in localStorage so
-      // "open from history" can restore text/images. Without this, Close looks like
-      // it did nothing and a later remount/restart often shows an empty composer.
-      if (paneCountBefore <= 1) {
-        const store = useAppStore.getState();
-        store.clearPaneMessages(pane.id);
-        store.setPaneSessionId(pane.id, "");
+      if (lastPaneCloseAction(paneCountBefore) === "reset-meta-home") {
+        const homeId = resetSolePaneToMetaHome();
+        markPaneAwaitingFreshSession(homeId);
+        clearPaneLazyInheritParent(homeId);
+        prepareFreshComposerPaneDraft(homeId);
         parkComposerOnLastPaneCloseRef.current();
+        return;
       }
+      removePane(pane.id);
     })();
   };
   const addPane = useAppStore((s) => s.addPane);
@@ -13463,24 +13466,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         )
       : 720;
   const minTaskspaceWidth = 220;
+  const compactSidePanels = paneWidth > 0 && paneWidth < CHATPANE_SIDE_OVERLAY_BREAK;
   /**
    * Trae Work expand: work panel becomes the main canvas (flex-1);
    * chat collapses to a floating bottom composer — not a squeezed left column.
    */
-  const workExpandedLayout = workPanelExpanded && workspacePanelOpen;
+  const workExpandedLayout =
+    workspacePanelOpen && (workPanelExpanded || compactSidePanels);
   const maxSpawnsWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.42)) : 420;
   const minSpawnsWidth = 220;
   const minRunDrawerWidth = 280;
   const maxRunDrawerWidth = paneWidth > 0 ? Math.max(320, Math.floor(paneWidth * 0.48)) : 480;
   const maxHistoryWidth = paneWidth > 0 ? Math.max(220, Math.floor(paneWidth * 0.35)) : 360;
   const minHistoryWidth = 200;
-
-  const compactSidePanels = paneWidth > 0 && paneWidth < CHATPANE_SIDE_OVERLAY_BREAK;
-  const clampOverlayAside = (preferred: number, minPx: number) =>
-    paneWidth > 0
-      ? Math.min(Math.max(preferred, minPx), Math.max(Math.floor(paneWidth * 0.94), minPx))
-      : preferred;
-  const overlayTaskspaceWidth = clampOverlayAside(taskspaceWidth, minTaskspaceWidth);
+  const clampOverlayAside = (preferred: number, minPx: number) => {
+    if (paneWidth <= 0) return Math.max(preferred, minPx);
+    const maxPx = Math.max(
+      minPx,
+      paneWidth - DESTINATION_RAIL_WIDTH_PX - COMPACT_OVERLAY_CHAT_RESERVE_PX,
+    );
+    return Math.min(Math.max(preferred, minPx), maxPx);
+  };
   const overlayHistoryWidth = clampOverlayAside(historyWidth, minHistoryWidth);
   const overlaySpawnsWidth = clampOverlayAside(spawnsWidth, minSpawnsWidth);
   const overlayRunDrawerWidth = clampOverlayAside(runDrawerWidth, minRunDrawerWidth);
@@ -14313,7 +14319,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                 }`}
                 onClick={toggleWorkspaceSidePanel}
-                title={t("toolbar.workbench")}
                 aria-label={t("toolbar.workbench")}
                 aria-pressed={workspacePanelOpen}
               >
@@ -15397,7 +15402,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
       </div>
 
-      {!compactSidePanels && workspacePanelOpen ? (
+      {workspacePanelOpen ? (
         <div
           className={
             workExpandedLayout
@@ -15421,8 +15426,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={closeWorkspacePanelOnly}
-            expanded={workPanelExpanded}
-            onToggleExpand={toggleWorkPanelExpand}
+            expanded={workExpandedLayout}
+            onToggleExpand={compactSidePanels ? undefined : toggleWorkPanelExpand}
             tintColor={paneTint}
             focusRequest={workPanelFocus}
             onFocusRequestHandled={() => setWorkPanelFocus(null)}
@@ -15526,10 +15531,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
       ) : null}
       {compactSidePanels &&
-      (workspacePanelOpen ||
-        pane.memoryGraphOpen ||
-        pane.spawnsColumnOpen ||
-        pane.runDrawerOpen) ? (
+      !workspacePanelOpen &&
+      (pane.memoryGraphOpen || pane.spawnsColumnOpen || pane.runDrawerOpen) ? (
         <>
           <div
             aria-hidden
@@ -15538,113 +15541,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
             onClick={dismissAuxiliaryOverlays}
           />
-          {workspacePanelOpen ? (
-            <div
-              className={
-                workExpandedLayout
-                  ? "pointer-events-auto absolute bottom-0 left-0 right-10 top-0 z-50 overflow-hidden bg-surface-base"
-                  : "pointer-events-auto absolute bottom-0 right-10 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
-              }
-              style={
-                workExpandedLayout
-                  ? ({ WebkitAppRegion: "no-drag" } as CSSProperties)
-                  : ({ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties)
-              }
-            >
-              {!workExpandedLayout ? (
-                <div
-                  className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-                  onMouseDown={startResizeTaskspace}
-                  title={t("layout.resizeWorkbench")}
-                >
-                  <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-                </div>
-              ) : null}
-              <WorkPanel
-                paneId={pane.id}
-                sessionId={pane.sessionId}
-                activeTaskspaceId={pane.activeTaskspaceId}
-                onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-                autoRefreshKey={taskspaceAutoRefreshKey}
-                onClose={closeWorkspacePanelOnly}
-                expanded={workPanelExpanded}
-                onToggleExpand={toggleWorkPanelExpand}
-                tintColor={paneTint}
-                focusRequest={workPanelFocus}
-                onFocusRequestHandled={() => setWorkPanelFocus(null)}
-                onPickFileForReference={(taskspaceId, path) => {
-                  void insertWorkspaceFileReference(taskspaceId, path);
-                }}
-                onPickDirectoryForReference={({ taskspaceId, relPath, label }) => {
-                  void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
-                }}
-                onQuotePreviewSnippet={insertWorkspaceSnippetReference}
-                onOpenScratchChat={openScratchFromDraft}
-                onQuoteTerminalSelection={quoteTerminalSelection}
-                onQuoteBrowserSelection={(payload) => {
-                  const text = String(payload.text || "").trim();
-                  if (!text) return;
-                  let host = "";
-                  try {
-                    host = new URL(payload.url).hostname;
-                  } catch {
-                    /* ignore */
-                  }
-                  const label = (payload.title || host || t("layout.webPage")).trim().slice(0, 48);
-                  addQuoteTarget(
-                    {
-                      id: `web-${crypto.randomUUID()}`,
-                      role: "assistant",
-                      content: text,
-                      avatarName: label,
-                    },
-                    text,
-                  );
-                }}
-                onSearchBrowserSelection={(text) => {
-                  const q = String(text || "").trim();
-                  if (!q) return;
-                  if (!pane.taskspacePanelOpen) {
-                    openWorkspaceSidebarForPane(
-                      pane.id,
-                      paneRef.current?.clientWidth ?? paneWidth,
-                      openSidePanel,
-                    );
-                  }
-                  setWorkPanelFocus({
-                    kind: "browser",
-                    url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
-                    title: t("layout.searchTitle", { query: q }),
-                  });
-                }}
-                previewOpenRequest={pendingWorkspacePreviewRequest}
-                onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
-                onEnsureSessionForWorkspace={materializeLazySession}
-                subAgents={paneSubAgents}
-                selectedSubAgent={selectedSubAgent}
-                onCancelSubAgent={(agentId) => void cancelPaneSubAgent(agentId)}
-                onRetrySubAgent={(agentId) => void retryPaneSubAgent(agentId)}
-                onChatSubAgent={togglePaneSubAgentChat}
-                onModelChangeSubAgent={(agentId, provider, model) =>
-                  void changePaneSubAgentModel(agentId, provider, model)
-                }
-                onConfirmResolveSubAgent={(agentId, approved, remember) =>
-                  void resolvePaneSubAgentConfirm(agentId, approved, remember)
-                }
-                todoLiveness={taskLiveness}
-                todoExecutionState={sessionExecutionState}
-                groupId={isGroupPane ? groupChatId : null}
-                avatarList={avatars}
-                metaLeaderLabel={metaLeaderDisplayName}
-                groupActiveAgentIds={groupActiveAgentIds}
-                groupActivityHint={groupActivityHint}
-                groupMemberPhase={groupMemberPhase}
-                onCrewAppendDirective={handleCrewAppendDirective}
-                onCrewSwitchModel={handleCrewSwitchModel}
-                onCrewInterrupt={handleCrewInterrupt}
-              />
-            </div>
-          ) : null}
           {pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
             <div
               className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)]"

@@ -1,6 +1,23 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+type Placement = "above" | "below";
+
+/** Flip when the preferred side would clip into the window chrome / viewport edge. */
+export function pickHoverTipPlacement(
+  preferred: Placement,
+  anchor: { top: number; bottom: number },
+  viewportHeight: number,
+  tipHeight = 40,
+  gap = 6,
+  edgePad = 8,
+): Placement {
+  const need = tipHeight + gap + edgePad;
+  if (preferred === "above" && anchor.top < need) return "below";
+  if (preferred === "below" && viewportHeight - anchor.bottom < need) return "above";
+  return preferred;
+}
+
 type Props = {
   label: string;
   /** Show delay; native `title` is often ~500–1000ms and cannot be tuned. */
@@ -10,7 +27,7 @@ type Props = {
   /** Tooltip horizontal anchor; `end` keeps the bubble inside narrow right-aligned rows. */
   tooltipAlign?: "center" | "end";
   /** Default sits above the target; `below` is for composer chips. */
-  placement?: "above" | "below";
+  placement?: Placement;
   /** Extra classes on the hover target wrapper (e.g. `w-full min-w-0` for block text). */
   className?: string;
   children: ReactNode;
@@ -26,7 +43,7 @@ export function HoverTip({
   children,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{ x: number; y: number } | null>(null);
+  const [coords, setCoords] = useState<{ x: number; y: number; placement: Placement } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
 
@@ -41,11 +58,12 @@ export function HoverTip({
     const el = anchorRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const y = placement === "below" ? rect.bottom : rect.top;
+    const resolved = pickHoverTipPlacement(placement, rect, window.innerHeight);
+    const y = resolved === "below" ? rect.bottom : rect.top;
     if (tooltipAlign === "end") {
-      setCoords({ x: rect.right, y });
+      setCoords({ x: rect.right, y, placement: resolved });
     } else {
-      setCoords({ x: rect.left + rect.width / 2, y });
+      setCoords({ x: rect.left + rect.width / 2, y, placement: resolved });
     }
   };
 
@@ -77,10 +95,10 @@ export function HoverTip({
               top: coords.y,
               transform:
                 tooltipAlign === "end"
-                  ? placement === "below"
+                  ? coords.placement === "below"
                     ? "translate(-100%, 6px)"
                     : "translate(-100%, calc(-100% - 6px))"
-                  : placement === "below"
+                  : coords.placement === "below"
                     ? "translate(-50%, 6px)"
                     : "translate(-50%, calc(-100% - 6px))",
             }}

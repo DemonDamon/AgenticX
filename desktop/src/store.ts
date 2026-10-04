@@ -804,6 +804,8 @@ type AppState = {
   clearComposePreview: (restorePaneId?: string) => void;
   promoteComposePreview: () => string | null;
   removePane: (paneId: string) => void;
+  /** Last-pane Close: replace the sole pane with Meta 「新建任务」 empty home. */
+  resetSolePaneToMetaHome: () => string;
   /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
   removePanesForAutomationTaskId: (taskId: string) => void;
   reorderPanes: (fromIndex: number, toIndex: number) => void;
@@ -2137,6 +2139,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePaneId: state.activePaneId === preview.id ? paneId : state.activePaneId,
     }));
     return paneId;
+  },
+  resetSolePaneToMetaHome: () => {
+    const fresh = makeDefaultPane();
+    set({
+      panes: [fresh],
+      activePaneId: fresh.id,
+      activeAvatarId: null,
+      mainView: "chat",
+    });
+    return fresh.id;
   },
   removePane: (paneId) =>
     set((state) => {

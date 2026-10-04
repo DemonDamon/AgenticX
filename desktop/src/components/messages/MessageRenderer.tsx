@@ -529,7 +529,7 @@ export function MessageRenderer({
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
-        <TerminalLine>
+        <TerminalLine
           message={displayMessage}
           badge={assistantBadge}
           onRevealPath={onRevealPath}
@@ -546,7 +546,7 @@ export function MessageRenderer({
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
-        <CleanBlock>
+        <CleanBlock
           message={displayMessage}
           badge={assistantBadge}
           onRevealPath={onRevealPath}
