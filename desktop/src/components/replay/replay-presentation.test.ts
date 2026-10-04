@@ -186,12 +186,78 @@ describe("bindMessagesToRun + slice", () => {
   });
 
   it("holds unmatched in-run rows until the last seq", () => {
-    const extra = [...messages.slice(0, 5), msg("orphan", "assistant", "对不上的旁注")];
+    const extra = [
+      ...messages.slice(0, 5),
+      msg("orphan-tool", "tool", "旁注", { toolCallId: "missing" }),
+    ];
     const binding = bindMessagesToRun(extra, events);
     expect(sliceMessagesForPresentation(extra, binding, 7, 8).map((item) => item.id))
-      .not.toContain("orphan");
+      .not.toContain("orphan-tool");
     expect(sliceMessagesForPresentation(extra, binding, 8, 8).map((item) => item.id))
-      .toContain("orphan");
+      .toContain("orphan-tool");
+  });
+
+  it("keeps the final ReAct reply on the completed beat, not the mid-turn intro", () => {
+    const react = [
+      msg("cur-user", "user", "查参数"),
+      msg("intro", "assistant", "我先去官网查定价。"),
+      msg("cur-tool", "tool", "ok", { toolCallId: "call-1", toolStatus: "done" }),
+      msg("final", "assistant", "全场性价比结论很长。"),
+      msg("next-user", "user", "再写一篇推文"),
+    ];
+    const binding = bindMessagesToRun(react, events);
+    expect(sliceMessagesForPresentation(react, binding, 5, 8).map((item) => item.id))
+      .toEqual(["cur-user", "intro", "cur-tool"]);
+    expect(sliceMessagesForPresentation(react, binding, 7, 8).map((item) => item.id))
+      .toEqual(["cur-user", "intro", "cur-tool", "final"]);
+    const done = sliceMessagesForPresentation(react, binding, 8, 8);
+    expect(done.find((item) => item.id === "final")?.content).toBe("全场性价比结论很长。");
+    expect(done.map((item) => item.id)).not.toContain("next-user");
+  });
+
+  it("does not reveal the next user turn before the previous final reply", () => {
+    const sessionEvents = [
+      event(1, "user_message", { title: "第一问", payload: { text: "第一问" } }),
+      event(2, "tool_call", { toolCallId: "call-1" }),
+      event(3, "tool_result", { toolCallId: "call-1" }),
+      event(4, "assistant_output_completed"),
+      event(5, "user_message", { title: "第二问", payload: { text: "第二问" } }),
+      event(6, "assistant_output_completed"),
+    ];
+    const session = [
+      msg("u1", "user", "第一问"),
+      msg("intro", "assistant", "先去查。"),
+      msg("tool", "tool", "ok", { toolCallId: "call-1", toolStatus: "done" }),
+      msg("a1", "assistant", "第一轮完整结论。"),
+      msg("u2", "user", "第二问"),
+      msg("a2", "assistant", "第二轮完整结论。"),
+    ];
+    const binding = bindMessagesToRun(session, sessionEvents);
+    expect(sliceMessagesForPresentation(session, binding, 4, 6).map((item) => item.id))
+      .toEqual(["u1", "intro", "tool", "a1"]);
+    expect(sliceMessagesForPresentation(session, binding, 5, 6).map((item) => item.id))
+      .toEqual(["u1", "intro", "tool", "a1", "u2"]);
+  });
+
+  it("shows a mid-turn model failure before the next user message", () => {
+    const failEvents = [
+      event(1, "user_message", { title: "写推文", payload: { text: "写推文" } }),
+      event(2, "error"),
+      event(3, "run_completed"),
+      event(4, "user_message", { title: "写推文补充", payload: { text: "写推文补充" } }),
+      event(5, "assistant_output_completed"),
+    ];
+    const failSession = [
+      msg("u1", "user", "写推文"),
+      msg("fail", "tool", "模型调用失败：temperature=0"),
+      msg("u2", "user", "写推文补充"),
+      msg("a2", "assistant", "第二轮回答"),
+    ];
+    const binding = bindMessagesToRun(failSession, failEvents);
+    expect(sliceMessagesForPresentation(failSession, binding, 2, 5).map((item) => item.id))
+      .toEqual(["u1", "fail"]);
+    expect(sliceMessagesForPresentation(failSession, binding, 4, 5).map((item) => item.id))
+      .toEqual(["u1", "fail", "u2"]);
   });
 
   it("refuses a running run or a chat that cannot align a user/assistant row", () => {

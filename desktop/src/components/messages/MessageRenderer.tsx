@@ -690,7 +690,7 @@ export function MessageRenderer({
         <TurnInterruptionNoticeLine
           message={message}
           resumeInFlight={resumeInFlight}
-          onResume={onResumeTask}
+          onResume={presenting ? undefined : onResumeTask}
           isFutile={isFutileResume}
         />
       );
