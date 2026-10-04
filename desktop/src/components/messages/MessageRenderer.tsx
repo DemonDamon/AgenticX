@@ -57,6 +57,7 @@ import {
   collectSessionFileChanges,
   collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
+  shouldHoldTurnArtifactCard,
 } from "../../utils/session-artifacts";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
 import { TurnArtifactCard } from "./TurnArtifactCard";
@@ -269,11 +270,13 @@ function assistantHandoff(
     onOpenAllArtifacts?: () => void;
     onOpenAllChanges?: () => void;
   },
+  sessionBusy = false,
 ): { paths: string[]; card: ReactNode } {
   if (
     message.role !== "assistant"
     || isStreamingAssistantId(message.id)
     || message.presentationHoldDeliverables
+    || shouldHoldTurnArtifactCard(allMessages, message.id, sessionBusy)
   ) {
     return { paths: [], card: null };
   }
@@ -522,11 +525,11 @@ export function MessageRenderer({
       const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
-        <TerminalLine
+        <TerminalLine>
           message={displayMessage}
           badge={assistantBadge}
           onRevealPath={onRevealPath}
@@ -539,11 +542,11 @@ export function MessageRenderer({
       const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
-        <CleanBlock
+        <CleanBlock>
           message={displayMessage}
           badge={assistantBadge}
           onRevealPath={onRevealPath}
@@ -566,7 +569,7 @@ export function MessageRenderer({
     const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
     return withHandoffContext(
       handoff.paths,
       onRevealPath,

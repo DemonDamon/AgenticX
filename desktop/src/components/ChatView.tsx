@@ -2741,6 +2741,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       noBubbleBorder={reactWorkCol}
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                       allMessages={messages}
+                      sessionBusy={streaming}
                       onFollowupClick={(t) => void send(t)}
                       onOpenClarification={onOpenClarification}
                       onSubmitClarification={onSubmitClarification}

@@ -960,6 +960,28 @@ export function collectTurnArtifactPaths(
   return selectSessionDeliverablePaths(turnMsgs, collectSessionArtifactPaths(turnMsgs));
 }
 
+/**
+ * Hold the chat handoff card until the open user turn finishes.
+ *
+ * Mid-ReAct, the last persisted assistant is briefly "the last assistant"
+ * (no `__stream__` row during tool gaps / next-thought wait). Files from earlier
+ * writes would otherwise flash on that thought bubble before the turn ends.
+ */
+export function shouldHoldTurnArtifactCard(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+  sessionBusy: boolean,
+): boolean {
+  if (!sessionBusy) return false;
+  const list = messages ?? [];
+  const idx = list.findIndex((row) => row.id === assistantMessageId);
+  if (idx < 0) return false;
+  for (let i = idx + 1; i < list.length; i += 1) {
+    if (list[i]?.role === "user") return false;
+  }
+  return true;
+}
+
 export type ArtifactChangeRow = {
   path: string;
   added: number;

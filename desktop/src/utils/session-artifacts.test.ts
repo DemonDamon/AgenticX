@@ -22,6 +22,7 @@ import {
   isSessionUserAttachmentPath,
   orderTurnArtifactsForCard,
   pickPrimaryTurnArtifact,
+  shouldHoldTurnArtifactCard,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -865,6 +866,40 @@ describe("turn artifacts + primary pick", () => {
     expect(collectTurnArtifactPaths(messages, "final")).toEqual([html, py]);
     expect(pickPrimaryTurnArtifact(collectTurnArtifactPaths(messages, "final"))).toBe(html);
     expect(orderTurnArtifactsForCard([py, html])).toEqual([html, py]);
+  });
+
+  it("holds the handoff card on the open turn while the session is busy", () => {
+    const sh = "/tmp/install.sh";
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "安装技能", timestamp: 1 },
+      assistantMsg({ id: "think-1", content: "" }),
+      toolMsg({
+        id: "t-bash-1",
+        toolName: "bash_exec",
+        content: `OK: wrote ${sh}`,
+      }),
+      assistantMsg({ id: "think-2", content: "" }),
+    ];
+    expect(shouldHoldTurnArtifactCard(messages, "think-2", true)).toBe(true);
+    expect(shouldHoldTurnArtifactCard(messages, "think-2", false)).toBe(false);
+  });
+
+  it("does not hold a previous turn's card while a later turn is busy", () => {
+    const a = "/tmp/a.txt";
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "先写", timestamp: 1 },
+      toolMsg({
+        id: "t-a",
+        toolName: "file_write",
+        toolArgs: { path: a, content: "a\n" },
+        content: `OK: wrote ${a}`,
+      }),
+      assistantMsg({ id: "a1", content: "写好了" }),
+      { id: "u2", role: "user", content: "继续", timestamp: 2 },
+      assistantMsg({ id: "a2", content: "" }),
+    ];
+    expect(shouldHoldTurnArtifactCard(messages, "a1", true)).toBe(false);
+    expect(shouldHoldTurnArtifactCard(messages, "a2", true)).toBe(true);
   });
 
   it("returns empty paths for an earlier assistant in the same turn", () => {
