@@ -1139,6 +1139,8 @@ export function WorkPanel({
    */
   const [diskArtifactPaths, setDiskArtifactPaths] = useState<string[]>([]);
   const [artifactHighlightPath, setArtifactHighlightPath] = useState<string | null>(null);
+  const artifactSyncDoneKeyRef = useRef<string>("");
+  const diskArtifactSessionRef = useRef<string>("");
   /**
    * User-focused summary section (产物 / 变更). Ref is written synchronously so
    * same-tick auto-expand effects do not reopen 待办 / 参考 / 子智能体.
@@ -1152,17 +1154,26 @@ export function WorkPanel({
     setPinnedSummarySectionState(section);
   };
 
-  // Tail-loaded panes only hold the last 3 rounds / 40 messages. Re-scan the
-  // full `messages.json` so older file_write / bash artifacts stay listed.
-  // Keep polling while the summary tab exists: group chat writes often land
-  // on disk without file_write rows, and WorkspacePanel already refreshes
-  // every 3s — without this,「任务产物」stays on the first listing.
+  // Drop stale disk paths immediately on history/session switch. When summary
+  // is closed, resync is disabled — without this clear, prior session paths
+  // linger and get auto-mounted into the newly selected session.
   useEffect(() => {
     const sid = String(sessionId || "").trim();
+    const prevSid = diskArtifactSessionRef.current;
+    diskArtifactSessionRef.current = sid;
+    if (sid !== prevSid) {
+      setDiskArtifactPaths([]);
+      artifactSyncDoneKeyRef.current = "";
+    }
     if (!sid) {
       setDiskArtifactPaths([]);
       return;
     }
+    // Tail-loaded panes only hold the last 3 rounds / 40 messages. Re-scan the
+    // full `messages.json` so older file_write / bash artifacts stay listed.
+    // Keep polling while the summary tab exists: group chat writes often land
+    // on disk without file_write rows, and WorkspacePanel already refreshes
+    // every 3s — without this,「任务产物」stays on the first listing.
     return startPersistedArtifactPathResync({
       sessionId: sid,
       enabled: summaryTabOpen && activeKind === "summary",
@@ -1291,7 +1302,6 @@ export function WorkPanel({
     () => [...artifactPaths].sort().join("\0"),
     [artifactPaths],
   );
-  const artifactSyncDoneKeyRef = useRef<string>("");
 
   /**
    * Only list paths that exist on disk. Text extraction alone can false-positive

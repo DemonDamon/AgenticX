@@ -135,6 +135,46 @@ describe("ensureArtifactTaskspacesForSession", () => {
     expect(result.ok).toBe(true);
     expect(linkIntoSessionWorkspace).not.toHaveBeenCalled();
   });
+
+  it("does not auto-link foreign session store paths", async () => {
+    const mine = "b548c80c-70bf-480a-9ae3-321b6b305315";
+    const other = "84f8c4bb-5d23-46a9-8057-713785963cac";
+    const foreign = `/Users/damon/.agenticx/taskspaces/${other}/default/2026W40_三板块周报对比.md`;
+    const own = `/Users/damon/.agenticx/taskspaces/${mine}/default/guide.md`;
+    const linkIntoSessionWorkspace = vi.fn(
+      async (_payload: { sessionId: string; sources: string[]; mode?: string }) => ({
+        ok: true,
+        linked: 1,
+        defaultDir: `/Users/damon/.agenticx/taskspaces/${mine}/default`,
+      }),
+    );
+    const listTaskspaces = vi.fn(async () => ({
+      ok: true,
+      workspaces: [
+        {
+          id: "default",
+          path: `/Users/damon/.agenticx/taskspaces/${mine}/default`,
+          label: "default",
+        },
+      ],
+    }));
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        listTaskspaces,
+        linkIntoSessionWorkspace,
+      },
+      dispatchEvent: vi.fn(() => true),
+    });
+
+    const result = await ensureArtifactTaskspacesForSession(mine, [foreign, own]);
+    expect(result.ok).toBe(true);
+    expect(linkIntoSessionWorkspace).toHaveBeenCalledTimes(1);
+    expect(linkIntoSessionWorkspace.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: mine,
+      sources: [own],
+      mode: "reference",
+    });
+  });
 });
 
 describe("loadPersistedSessionArtifactPaths", () => {

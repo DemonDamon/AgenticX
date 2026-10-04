@@ -151,6 +151,9 @@ export function collectWorkspaceListingArtifactPaths(opts: {
   const seen = new Set<string>();
   for (const entry of opts.entries ?? []) {
     if (String(entry.type || "").trim() !== "file") continue;
+    // Reference/copy mounts are visibility links — never treat as this
+    // session's deliverables (prevents cross-session remount loops).
+    if (String(entry.mount_mode || "").trim()) continue;
     const name = String(entry.name || "").trim();
     if (!name || name.startsWith(".")) continue;
     if (!looksLikeArtifactFile(name)) continue;
@@ -164,6 +167,41 @@ export function collectWorkspaceListingArtifactPaths(opts: {
     addPath(paths, seen, absoluteTaskspacePath(root, rel));
   }
   return paths;
+}
+
+/** Match `…/.agenticx/sessions|<taskspaces>/<sessionId>/…` (abs or `~/`). */
+const AGENTICX_SESSION_STORE_RE =
+  /(?:^|\/)\.agenticx\/(?:sessions|taskspaces)\/([^/]+)\//;
+
+/**
+ * True when `path` lives under another session's AgenticX store
+ * (`~/.agenticx/sessions|<taskspaces>/<otherId>/…`). Paths outside that
+ * layout (Desktop, project dirs, /tmp) are never "foreign".
+ */
+export function isForeignAgenticxSessionPath(
+  path: string,
+  ownerSessionId: string,
+): boolean {
+  const sid = String(ownerSessionId || "").trim();
+  if (!sid) return false;
+  const normalized = expandArtifactHomePath(String(path || "").trim())
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  if (!normalized) return false;
+  const match = normalized.match(AGENTICX_SESSION_STORE_RE);
+  if (!match?.[1]) return false;
+  return match[1] !== sid;
+}
+
+/** Drop paths that belong to a different session's AgenticX store. */
+export function filterArtifactPathsForSession(
+  paths: string[] | undefined | null,
+  ownerSessionId: string,
+): string[] {
+  const sid = String(ownerSessionId || "").trim();
+  const list = (paths ?? []).map((p) => String(p || "").trim()).filter(Boolean);
+  if (!sid) return list;
+  return list.filter((p) => !isForeignAgenticxSessionPath(p, sid));
 }
 
 /** Best-effort $HOME for expanding `~/…` during normalize (Node/Electron/Vitest). */
@@ -724,13 +762,17 @@ export function collectSessionArtifactPaths(
   }
 
   for (const agent of subAgents ?? []) {
+    if (sid) {
+      const agentSid = String(agent.sessionId || "").trim();
+      if (agentSid && agentSid !== sid) continue;
+    }
     if (agent.resultFile) addPath(paths, seen, agent.resultFile);
     for (const file of agent.outputFiles ?? []) addPath(paths, seen, file);
   }
 
   for (const extra of extraPaths ?? []) addPath(paths, seen, extra);
 
-  return paths;
+  return sid ? filterArtifactPathsForSession(paths, sid) : paths;
 }
 
 /**

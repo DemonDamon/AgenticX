@@ -17,6 +17,8 @@ import {
   matchesHandoffAncestor,
   displayChatLocalPath,
   collectWorkspaceListingArtifactPaths,
+  filterArtifactPathsForSession,
+  isForeignAgenticxSessionPath,
   isSessionUserAttachmentPath,
   orderTurnArtifactsForCard,
   pickPrimaryTurnArtifact,
@@ -328,6 +330,40 @@ describe("collectSessionArtifactPaths", () => {
       }),
     ];
     expect(collectSessionArtifactPaths(messages, null, null, "sess-a")).toEqual(["/tmp/a.txt"]);
+  });
+
+  it("drops foreign AgenticX session store paths from extras / subAgents", () => {
+    const mine = "b548c80c-70bf-480a-9ae3-321b6b305315";
+    const other = "84f8c4bb-5d23-46a9-8057-713785963cac";
+    const ownMd = `/Users/damon/.agenticx/taskspaces/${mine}/default/guide.md`;
+    const foreignMd = `/Users/damon/.agenticx/taskspaces/${other}/default/2026W40_三板块周报对比.md`;
+    const foreignSa = `/Users/damon/.agenticx/sessions/27129e59-4e6f-49b2-9c7c-ae2a94088307/subagent_results/sa-754e1431.md`;
+    const desktop = "/Users/damon/Desktop/ok.md";
+    const subAgents: SubAgent[] = [
+      {
+        id: "sa-other",
+        name: "other",
+        role: "researcher",
+        status: "completed",
+        task: "x",
+        sessionId: other,
+        resultFile: foreignSa,
+        events: [],
+      },
+      {
+        id: "sa-mine",
+        name: "mine",
+        role: "researcher",
+        status: "completed",
+        task: "x",
+        sessionId: mine,
+        resultFile: ownMd,
+        events: [],
+      },
+    ];
+    expect(
+      collectSessionArtifactPaths([], subAgents, [ownMd, foreignMd, desktop], mine),
+    ).toEqual([ownMd, desktop]);
   });
 
   it("dedupes ~/Desktop/file and /Users/<name>/Desktop/file as one artifact", () => {
@@ -1090,6 +1126,23 @@ describe("default workspace listing → 任务产物", () => {
     expect(isWalkableWorkspaceArtifactDir({ name: "venv", type: "dir" })).toBe(false);
   });
 
+  it("skips mounted reference files so they cannot remount-loop", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          {
+            name: "2026W40_三板块周报对比.md",
+            type: "file",
+            path: "2026W40_三板块周报对比.md",
+            mount_mode: "reference",
+          },
+          { name: "guide.md", type: "file", path: "guide.md" },
+        ],
+      }),
+    ).toEqual([`${root}/guide.md`]);
+  });
+
   it("does not treat chat-upload attachments/ as 任务产物", () => {
     expect(
       collectWorkspaceListingArtifactPaths({
@@ -1114,6 +1167,33 @@ describe("default workspace listing → 任务产物", () => {
         ],
       }),
     ).toEqual([`${root}/output/report.md`]);
+  });
+});
+
+describe("filterArtifactPathsForSession", () => {
+  const mine = "b548c80c-70bf-480a-9ae3-321b6b305315";
+  const other = "84f8c4bb-5d23-46a9-8057-713785963cac";
+
+  it("keeps own session store + external paths; drops other session store", () => {
+    const paths = [
+      `/Users/damon/.agenticx/taskspaces/${mine}/default/a.md`,
+      `/Users/damon/.agenticx/taskspaces/${other}/default/b.md`,
+      `~/.agenticx/sessions/${other}/subagent_results/sa-1.md`,
+      "/Users/damon/Desktop/c.md",
+      "/tmp/d.md",
+    ];
+    expect(filterArtifactPathsForSession(paths, mine)).toEqual([
+      `/Users/damon/.agenticx/taskspaces/${mine}/default/a.md`,
+      "/Users/damon/Desktop/c.md",
+      "/tmp/d.md",
+    ]);
+    expect(
+      isForeignAgenticxSessionPath(
+        `/Users/damon/.agenticx/taskspaces/${other}/default/b.md`,
+        mine,
+      ),
+    ).toBe(true);
+    expect(isForeignAgenticxSessionPath("/Users/damon/Desktop/c.md", mine)).toBe(false);
   });
 });
 
