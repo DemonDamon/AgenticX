@@ -33,6 +33,37 @@ def test_gpt5_chat_and_non_gpt5_do_not_require_fixed_one():
     assert model_requires_fixed_temperature_one("gpt-5-chat-latest") is False
     assert model_requires_fixed_temperature_one("glm-5.2") is False
     assert model_requires_fixed_temperature_one("MiniMax-M2.7") is False
+    assert model_requires_fixed_temperature_one("kimi-k2.6") is False
+
+
+def test_kimi_k3_and_k27_require_temperature_one():
+    assert model_requires_fixed_temperature_one("kimi-k3") is True
+    assert model_requires_fixed_temperature_one("bailian/kimi-k3") is True
+    assert model_requires_fixed_temperature_one("kimi-k3-preview") is True
+    assert model_requires_fixed_temperature_one("kimi-k2.7") is True
+    assert model_requires_fixed_temperature_one("kimi-k2.7-code") is True
+    assert model_requires_fixed_temperature_one("moonshot/kimi-k2.7-code") is True
+
+
+def test_resolve_chat_temperature_kimi_k3_uses_one():
+    assert resolve_chat_temperature("kimi-k3", provider="bailian") == 1.0
+    assert resolve_chat_temperature("bailian/kimi-k3", provider="bailian", default=0.2) == 1.0
+    assert resolve_chat_temperature("kimi-k2.7-code", provider="kimi") == 1.0
+
+
+def test_sanitize_chat_call_kwargs_rewrites_kimi_k3_temperature():
+    out = sanitize_chat_call_kwargs(
+        {"temperature": 0.2, "max_tokens": 128},
+        "kimi-k3",
+        provider="bailian",
+    )
+    assert out["temperature"] == 1.0
+    assert out["max_tokens"] == 128
+
+
+def test_chat_temperature_kwargs_kimi_k3_shape():
+    assert _chat_temperature_kwargs("kimi-k3", "bailian") == {"temperature": 1.0}
+    assert _chat_temperature_kwargs("bailian/kimi-k3", "bailian") == {"temperature": 1.0}
 
 
 def test_resolve_chat_temperature_gpt5_uses_one():

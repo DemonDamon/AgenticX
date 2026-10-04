@@ -127,7 +127,8 @@ class BailianProvider(BaseLLMProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
+        self._apply_sampling_constraints(request_params)
         _apply_enable_thinking_to_native_params(
             request_params,
             str(request_params.get("model", "") or self.model),
@@ -221,7 +222,8 @@ class BailianProvider(BaseLLMProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
+        self._apply_sampling_constraints(request_params)
         _apply_enable_thinking_to_native_params(
             request_params,
             str(request_params.get("model", "") or self.model),
@@ -282,9 +284,20 @@ class BailianProvider(BaseLLMProvider):
          
          return MockResponse(response_data)
      
+    def _apply_sampling_constraints(self, params: Dict[str, Any]) -> None:
+        """Force temperature=1 for SKUs that reject other values (e.g. kimi-k3)."""
+        from agenticx.llms.sampling_params import sanitize_chat_call_kwargs
+
+        sanitize_chat_call_kwargs(
+            params,
+            str(params.get("model") or self.model or ""),
+            provider="bailian",
+        )
+
     def _prepare_bailian_params(self, request_params: Dict[str, Any]) -> Dict[str, Any]:
          """Handle Bailian-specific params and keep OpenAI client compatibility."""
          params = request_params.copy()
+         self._apply_sampling_constraints(params)
          return _apply_enable_thinking_to_openai_params(
              params,
              str(params.get("model", "") or self.model),
@@ -429,7 +442,8 @@ class BailianProvider(BaseLLMProvider):
                 "stream": True,
                 **kwargs
             }
-            
+            self._apply_sampling_constraints(request_params)
+
             if self.client is None:
                 raise ValueError("Client not initialized")
                 
@@ -563,6 +577,7 @@ class BailianProvider(BaseLLMProvider):
         request_params["stream_options"] = stream_options
         if tools:
             request_params["tools"] = tools
+        self._apply_sampling_constraints(request_params)
         _apply_enable_thinking_to_native_params(request_params, self.model)
 
         url = f"{self.base_url}/chat/completions"
@@ -661,7 +676,8 @@ class BailianProvider(BaseLLMProvider):
                 "stream": True,
                 **kwargs
             }
-            
+            self._apply_sampling_constraints(request_params)
+
             response_stream = await async_client.chat.completions.create(**request_params)
             
             async for chunk in response_stream:
