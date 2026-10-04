@@ -182,7 +182,14 @@ export type GroupChat = {
 };
 
 /** Main-area view router state for button-style sidebar navigation. */
-export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation" | "wiki";
+export type MainView =
+  | "chat"
+  | "avatars"
+  | "groups"
+  | "collab"
+  | "automation"
+  | "wiki"
+  | "market";
 
 /** Sidebar「+」快捷创建：收件人栏意图。不落盘。 */
 export type QuickComposeIntent = "expert" | "group";

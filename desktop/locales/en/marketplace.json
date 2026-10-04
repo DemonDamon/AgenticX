@@ -1,0 +1,78 @@
+{
+  "title": "Marketplace",
+  "subtitle": "Discover and install plugins, skills and other extensions to expand what Near can do.",
+  "manage": "Manage",
+  "tabs": {
+    "plugins": "Plugins",
+    "skills": "Skills"
+  },
+  "search": {
+    "plugins": "Search plugins",
+    "skills": "Search skills"
+  },
+  "featured": {
+    "sectionTitle": "Featured",
+    "office": {
+      "title": "Office & Creation",
+      "desc": "Documents, spreadsheets, slides and written content in one place."
+    },
+    "connectors": {
+      "title": "Connect Your Tools",
+      "desc": "Plug into code hosting, notes and data services so agents can read and write them."
+    },
+    "toolkit": {
+      "title": "Pro Toolkit",
+      "desc": "Curated third-party tools that add professional capabilities out of the box."
+    }
+  },
+  "filters": {
+    "all": "All",
+    "recommended": "Featured picks",
+    "enterprise": "Official",
+    "thirdParty": "Third-party",
+    "mcp": "MCP connectors",
+    "tool": "Curated tools"
+  },
+  "actions": {
+    "install": "Install",
+    "installing": "Installing…",
+    "use": "Use",
+    "detail": "Details",
+    "openSite": "Visit site",
+    "goConfig": "Configure"
+  },
+  "badge": {
+    "mcp": "Connector",
+    "tool": "Tool",
+    "installed": "Installed"
+  },
+  "useDraft": "Please use the \"{{name}}\" skill to help me with my task.",
+  "pluginDetail": {
+    "tools": "Provided tools",
+    "env": "Required configuration",
+    "installHint": "You can adjust the configuration in Settings after installing"
+  },
+  "scan": {
+    "confirmTitle": "Confirm installation",
+    "nonHighRisk": "This skill contains content that needs attention. Continue installing?",
+    "highRisk": "This skill contains high-risk content. Continue only if you trust its source and purpose.",
+    "verdict": "Scan verdict: {{verdict}}",
+    "cancel": "Cancel",
+    "continueInstall": "Continue"
+  },
+  "installQueue": "Installing {{count}} skills…",
+  "empty": {
+    "title": "Nothing here yet",
+    "desc": "Try a different keyword or filter."
+  },
+  "loading": "Loading…",
+  "loadFailed": "Failed to load. Please try again later.",
+  "onboarding": {
+    "title": "Do more with extensions",
+    "point1": "Research, write documents and build spreadsheets — generated content on demand",
+    "point2": "Connect everyday tools to check messages, handle files and move work forward",
+    "point3": "Extensions bring professional capabilities so complex tasks finish faster",
+    "point4": "No complex setup — install, state your need, get results",
+    "gotIt": "Got it"
+  }
+}

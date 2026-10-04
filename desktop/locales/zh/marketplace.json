@@ -1,0 +1,78 @@
+{
+  "title": "插件市场",
+  "subtitle": "发现并安装插件、技能等扩展，拓展 Near 的能力。",
+  "manage": "管理",
+  "tabs": {
+    "plugins": "插件",
+    "skills": "技能"
+  },
+  "search": {
+    "plugins": "搜索插件",
+    "skills": "搜索技能"
+  },
+  "featured": {
+    "sectionTitle": "精选推荐",
+    "office": {
+      "title": "办公创作",
+      "desc": "文档、表格、演示与图文内容的一站式创作扩展。"
+    },
+    "connectors": {
+      "title": "连接常用工具",
+      "desc": "接入代码托管、笔记、数据平台等服务，让智能体直接读写。"
+    },
+    "toolkit": {
+      "title": "专业工具集",
+      "desc": "精选第三方工具，装上即得专业领域能力。"
+    }
+  },
+  "filters": {
+    "all": "全部",
+    "recommended": "官方推荐",
+    "enterprise": "企业官方",
+    "thirdParty": "第三方",
+    "mcp": "MCP 连接器",
+    "tool": "精选工具"
+  },
+  "actions": {
+    "install": "安装",
+    "installing": "安装中…",
+    "use": "使用",
+    "detail": "详情",
+    "openSite": "前往官网",
+    "goConfig": "前往配置"
+  },
+  "badge": {
+    "mcp": "连接器",
+    "tool": "工具",
+    "installed": "已安装"
+  },
+  "useDraft": "请使用技能「{{name}}」帮我完成任务。",
+  "pluginDetail": {
+    "tools": "提供的工具",
+    "env": "所需配置",
+    "installHint": "安装后可在设置中调整配置"
+  },
+  "scan": {
+    "confirmTitle": "安装确认",
+    "nonHighRisk": "该技能包含需要留意的内容，确认要继续安装吗？",
+    "highRisk": "该技能包含高风险内容，请确认你了解其来源与用途后继续。",
+    "verdict": "扫描结论：{{verdict}}",
+    "cancel": "取消",
+    "continueInstall": "继续安装"
+  },
+  "installQueue": "正在安装 {{count}} 个技能…",
+  "empty": {
+    "title": "暂无内容",
+    "desc": "换个关键词或筛选条件试试。"
+  },
+  "loading": "加载中…",
+  "loadFailed": "加载失败，请稍后重试",
+  "onboarding": {
+    "title": "装上扩展，轻松完成更多事",
+    "point1": "查资料、写文档、做表格，直接生成需要的内容",
+    "point2": "连接常用工具，帮你查消息、处理文件、推进工作",
+    "point3": "扩展自带专业能力，复杂任务也能更快完成",
+    "point4": "无需复杂设置，安装后说出需求，就能拿到结果",
+    "gotIt": "我知道了"
+  }
+}

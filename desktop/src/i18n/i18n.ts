@@ -10,6 +10,8 @@ import zhSidebar from "../../locales/zh/sidebar.json";
 import enSidebar from "../../locales/en/sidebar.json";
 import zhWorkspace from "../../locales/zh/workspace.json";
 import enWorkspace from "../../locales/en/workspace.json";
+import zhMarketplace from "../../locales/zh/marketplace.json";
+import enMarketplace from "../../locales/en/marketplace.json";
 import { LOCALE_STORAGE_KEY } from "./locales";
 import { resolveAppLocale } from "./resolve-locale";
 
@@ -30,7 +32,7 @@ void i18n.use(initReactI18next).init({
   lng: initial,
   fallbackLng: "zh",
   defaultNS: "common",
-  ns: ["common", "settings", "chat", "sidebar", "workspace"],
+  ns: ["common", "settings", "chat", "sidebar", "workspace", "marketplace"],
   resources: {
     zh: {
       common: zhCommon,
@@ -38,6 +40,7 @@ void i18n.use(initReactI18next).init({
       chat: zhChat,
       sidebar: zhSidebar,
       workspace: zhWorkspace,
+      marketplace: zhMarketplace,
     },
     en: {
       common: enCommon,
@@ -45,6 +48,7 @@ void i18n.use(initReactI18next).init({
       chat: enChat,
       sidebar: enSidebar,
       workspace: enWorkspace,
+      marketplace: enMarketplace,
     },
   },
   interpolation: { escapeValue: false },

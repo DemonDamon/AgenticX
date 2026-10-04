@@ -17,6 +17,7 @@ import { AvatarGalleryView } from "./components/gallery/AvatarGalleryView";
 import { ProjectsView } from "./components/groups/ProjectsView";
 import { AutomationView } from "./components/automation/AutomationView";
 import { WikiBrowseView } from "./components/wiki/WikiBrowseView";
+import { MarketplaceView } from "./components/marketplace/MarketplaceView";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
@@ -2686,6 +2687,7 @@ export function App() {
                         {mainView === "collab" ? <CollabRoomPanel variant="page" /> : null}
                         {mainView === "automation" ? <AutomationView /> : null}
                         {mainView === "wiki" ? <WikiBrowseView /> : null}
+                        {mainView === "market" ? <MarketplaceView /> : null}
                       </>
                     )}
                   </div>

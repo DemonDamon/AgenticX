@@ -12,6 +12,8 @@ import zhWorkspace from "../../locales/zh/workspace.json";
 import enWorkspace from "../../locales/en/workspace.json";
 import zhElectron from "../../locales/zh/electron.json";
 import enElectron from "../../locales/en/electron.json";
+import zhMarketplace from "../../locales/zh/marketplace.json";
+import enMarketplace from "../../locales/en/marketplace.json";
 
 const NAMESPACES: Array<{ name: string; zh: unknown; en: unknown }> = [
   { name: "common", zh: zhCommon, en: enCommon },
@@ -20,6 +22,7 @@ const NAMESPACES: Array<{ name: string; zh: unknown; en: unknown }> = [
   { name: "sidebar", zh: zhSidebar, en: enSidebar },
   { name: "workspace", zh: zhWorkspace, en: enWorkspace },
   { name: "electron", zh: zhElectron, en: enElectron },
+  { name: "marketplace", zh: zhMarketplace, en: enMarketplace },
 ];
 
 describe("i18n message key parity", () => {

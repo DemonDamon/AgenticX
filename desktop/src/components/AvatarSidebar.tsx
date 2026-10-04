@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
-import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
+import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Store, Users, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import {
@@ -46,6 +46,7 @@ const NAV_ENTRY_DEFS = [
   { kind: "view" as const, id: "collab" as const, icon: Users },
   { kind: "view" as const, id: "automation" as const, icon: AlarmClock },
   { kind: "view" as const, id: "wiki" as const, icon: BookOpen },
+  { kind: "view" as const, id: "market" as const, icon: Store },
 ];
 
 const NAV_LABEL_KEY: Record<(typeof NAV_ENTRY_DEFS)[number]["id"], string> = {
@@ -55,6 +56,7 @@ const NAV_LABEL_KEY: Record<(typeof NAV_ENTRY_DEFS)[number]["id"], string> = {
   collab: "nav.collab",
   automation: "nav.automation",
   wiki: "nav.wiki",
+  market: "nav.market",
 };
 
 export function AvatarSidebar({ onToggleSidebar }: Props) {
