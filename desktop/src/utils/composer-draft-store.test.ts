@@ -6,8 +6,10 @@ import {
   getComposerDraft,
   getComposerDraftAttachments,
   getComposerDraftText,
+  flushComposerDraftOnKeyChange,
   migrateActiveComposerDraftToSession,
   parseComposerDrafts,
+  prepareFreshComposerPaneDraft,
   resolveComposerDraftKey,
   serializeComposerDrafts,
   upsertComposerDraft,
@@ -171,6 +173,34 @@ describe("composer-draft-store", () => {
     expect(getComposerDraftText("pane:pane-x")).toBe("");
     expect(getComposerDraftText("session:sess-new")).toBe("pending send");
     expect(getComposerDraftAttachments("session:sess-new")[0]?.name).toBe("a.png");
+  });
+
+  it("flushComposerDraftOnKeyChange does not resurrect pane draft after migrate to session", () => {
+    upsertComposerDraft("pane:pane-x", "请并行派 3 个子智能体");
+    migrateActiveComposerDraftToSession("pane-x", "sess-hist");
+    expect(getComposerDraftText("pane:pane-x")).toBe("");
+    flushComposerDraftOnKeyChange(
+      "pane:pane-x",
+      "session:sess-hist",
+      "请并行派 3 个子智能体",
+    );
+    expect(getComposerDraftText("pane:pane-x")).toBe("");
+    expect(getComposerDraftText("session:sess-hist")).toBe("请并行派 3 个子智能体");
+  });
+
+  it("flushComposerDraftOnKeyChange still persists session draft when leaving a bound session", () => {
+    upsertComposerDraft("session:sess-old", "follow-up");
+    flushComposerDraftOnKeyChange("session:sess-old", "pane:pane-x", "follow-up");
+    expect(getComposerDraftText("session:sess-old")).toBe("follow-up");
+  });
+
+  it("prepareFreshComposerPaneDraft clears leftover pane query unless prefill is explicit", () => {
+    upsertComposerDraft("pane:meta-1", "请并行派 3 个子智能体");
+    prepareFreshComposerPaneDraft("meta-1");
+    expect(getComposerDraftText("pane:meta-1")).toBe("");
+
+    prepareFreshComposerPaneDraft("meta-1", "AI 创建模板");
+    expect(getComposerDraftText("pane:meta-1")).toBe("AI 创建模板");
   });
 
   it("serialize prunes to MAX_COMPOSER_DRAFT_ENTRIES by updatedAt", () => {

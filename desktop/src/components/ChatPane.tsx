@@ -506,9 +506,12 @@ import {
 } from "../utils/pending-message-queue";
 import {
   clearComposerDraft,
+  composerDraftKeyForPane,
+  flushComposerDraftOnKeyChange,
   getComposerDraft,
   hydrateComposerDraft,
   migrateActiveComposerDraftToSession,
+  prepareFreshComposerPaneDraft,
   resolveComposerDraftKey,
   upsertComposerDraft,
   type ComposerDraftAttachment,
@@ -5653,7 +5656,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     lastComposerAttachmentsRef.current = [];
     const key = composerDraftKeyRef.current.trim();
     if (key) clearComposerDraft(key);
-  }, []);
+    const paneKey = composerDraftKeyForPane(pane.id);
+    if (paneKey && paneKey !== key) clearComposerDraft(paneKey);
+  }, [pane.id]);
 
   flushComposerDraftBeforeCloseRef.current = () => {
     const key = resolveComposerDraftKey(pane.id, pane.sessionId);
@@ -5691,8 +5696,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (prevKey && prevKey !== nextKey) {
       // Empty flush must NOT clear a previously saved session draft (refs may
       // already be wiped by a prior restore). Only write when we have payload.
-      upsertComposerDraft(
+      // Pane → session is migrate's job; rewriting pane: would bring the sent
+      // query back when the user later clicks 「新建任务」.
+      flushComposerDraftOnKeyChange(
         prevKey,
+        nextKey,
         lastComposerDraftTextRef.current,
         lastComposerAttachmentsRef.current,
       );
@@ -13284,6 +13292,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setPanePendingSessionMode(pane.id, sessionMode);
     setPaneSessionMode(pane.id, sessionMode);
     setKbRetrievalModeForPane("", pane.id, kbNewSessionDefaultRef.current);
+    // Drop leftover pane: drafts from the previous lazy-create cycle so 「新建任务」
+    // does not restore the query that was already sent in the last session.
+    prepareFreshComposerPaneDraft(pane.id);
+    lastComposerDraftTextRef.current = "";
+    lastComposerAttachmentsRef.current = [];
+    setContextFiles({});
+    setComposerText("");
+    setComposerHasText(false);
     // Mark this pane as explicitly awaiting a brand-new session, so
     // WorkspacePanel's auto-restore effect will not snap it back to the
     // previously-running session (which would trap new messages in the
@@ -13333,7 +13349,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (draftText) {
         // Persist before the session-switch restore effect reads the pane key, so a
         // prefilled「新建任务」draft is not wiped by an empty restore.
-        upsertComposerDraft(resolveComposerDraftKey(pane.id, ""), draftText);
+        prepareFreshComposerPaneDraft(pane.id, draftText);
+        lastComposerDraftTextRef.current = draftText;
         // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
         // renders from direct DOM writes, so we must go through
         // setComposerText to actually show the draft text in the box.

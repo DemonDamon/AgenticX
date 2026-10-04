@@ -421,6 +421,43 @@ export function clearComposerDraft(key: string): void {
 }
 
 /**
+ * Flush the outgoing composer key when the pane rebinds.
+ * After lazy createSession, migrate already moved pane → session. Writing the
+ * pane key again would re-seed 「新建任务」 with the query that was just sent.
+ */
+export function flushComposerDraftOnKeyChange(
+  prevKey: string,
+  nextKey: string,
+  text: string,
+  attachments: ComposerDraftAttachment[] = [],
+): void {
+  const from = normalizeDraftKey(prevKey);
+  const to = normalizeDraftKey(nextKey);
+  if (!from || from === to) return;
+  if (from.startsWith("pane:") && to.startsWith("session:")) return;
+  upsertComposerDraft(from, text, attachments);
+}
+
+/**
+ * 「新建任务」empty composer uses the pane key. Drop leftover first-query drafts
+ * unless the caller explicitly prefills (avatar gallery AI 创建).
+ */
+export function prepareFreshComposerPaneDraft(
+  paneId: string,
+  draftText?: string,
+  attachments: ComposerDraftAttachment[] = [],
+): void {
+  const key = composerDraftKeyForPane(paneId);
+  if (!key) return;
+  const text = String(draftText ?? "");
+  if (text.trim()) {
+    upsertComposerDraft(key, text, attachments);
+    return;
+  }
+  clearComposerDraft(key);
+}
+
+/**
  * Move a pane-scoped draft onto a newly created session key.
  * Used when lazy createSession finally allocates a session_id.
  */
