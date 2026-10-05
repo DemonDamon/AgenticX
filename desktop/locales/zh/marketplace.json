@@ -61,14 +61,20 @@
   "manageView": {
     "back": "返回市场",
     "title": "管理",
-    "subtitle": "管理已添加的插件与技能，开关技能或直接体验。",
+    "subtitle": "管理已添加的插件、技能、专家与指令，开关能力或直接体验。",
     "advancedSettings": "高级设置",
     "tabs": {
-      "plugins": "插件 ({{count}})",
-      "skills": "技能 ({{count}})"
+      "mcp": "插件 ({{count}})",
+      "skills": "技能 ({{count}})",
+      "agents": "专家 ({{count}})",
+      "commands": "指令 ({{count}})"
     },
-    "searchPlugins": "搜索插件",
-    "searchSkills": "搜索技能",
+    "search": {
+      "mcp": "搜索插件",
+      "skills": "搜索技能",
+      "agents": "搜索专家",
+      "commands": "搜索指令"
+    },
     "empty": "暂无已安装内容",
     "connected": "已连接",
     "disconnected": "未连接",
@@ -76,7 +82,19 @@
     "tryIt": "体验",
     "enableSkill": "启用技能 {{name}}",
     "disableSkill": "停用技能 {{name}}",
-    "toggleFailed": "技能 {{name}} 开关失败，请重试"
+    "toggleFailed": "技能 {{name}} 开关失败，请重试",
+    "agentKind": "专家",
+    "edit": "编辑",
+    "editAgent": "在画廊中编辑专家",
+    "editCommand": "在设置中编辑指令",
+    "commandBuiltin": "内置",
+    "commandCustom": "自定义",
+    "enableCommand": "启用指令 {{name}}",
+    "disableCommand": "停用指令 {{name}}",
+    "toggleCommandFailed": "指令 {{name}} 开关失败，请重试",
+    "delete": "删除",
+    "confirmDelete": "确认删除",
+    "deleteCommandFailed": "指令 {{name}} 删除失败，请重试"
   },
   "pluginDetail": {
     "tools": "提供的工具",

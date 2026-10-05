@@ -37,6 +37,46 @@ export type ManageMcpRow = {
   logoUrl?: string;
 };
 
+/** 专家 Tab 行输入(listAvatars 返回的最小投影)。 */
+export type ManageAgentRowInput = {
+  id: string;
+  name: string;
+  role?: string;
+  description?: string;
+  avatar_url?: string;
+};
+
+export type ManageAgentRow = {
+  key: string;
+  id: string;
+  name: string;
+  description: string;
+  avatarUrl?: string;
+};
+
+/** 指令 Tab 行输入(builtin 开关态 + 自定义指令存储行的最小投影)。 */
+export type ManageCommandRowInput = {
+  name: string;
+  description?: string;
+  builtin?: boolean;
+  scope?: string;
+  /** builtin 指令启停态;自定义指令忽略。 */
+  enabled?: boolean;
+  /** 自定义指令存储 id(删除用;builtin 行忽略)。 */
+  id?: string;
+};
+
+export type ManageCommandRow = {
+  key: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  /** builtin 启停态;自定义指令恒视为可用。 */
+  enabled: boolean;
+  /** 自定义指令存储 id(builtin 行为空)。 */
+  commandId?: string;
+};
+
 function matchesQuery(query: string, ...fields: Array<string | undefined>): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -80,6 +120,41 @@ export function buildManageMcpRows(
         logoUrl: entry?.logoUrl,
       };
     });
+}
+
+/** 专家行拼装:按名称/描述过滤;描述取 description → role 回退。 */
+export function buildManageAgentRows(
+  agents: readonly ManageAgentRowInput[],
+  query: string,
+): ManageAgentRow[] {
+  return agents
+    .filter((a) => a.id && a.name)
+    .filter((a) => matchesQuery(query, a.name, a.description, a.role))
+    .map((a) => ({
+      key: `agent:${a.id}`,
+      id: a.id,
+      name: a.name,
+      description: String(a.description ?? a.role ?? ""),
+      avatarUrl: a.avatar_url,
+    }));
+}
+
+/** 指令行拼装:builtin 行带启停态,自定义行带存储 id(编辑/删除用)。 */
+export function buildManageCommandRows(
+  commands: readonly ManageCommandRowInput[],
+  query: string,
+): ManageCommandRow[] {
+  return commands
+    .filter((c) => c.name)
+    .filter((c) => matchesQuery(query, c.name, c.description))
+    .map((c) => ({
+      key: `command:${c.builtin ? "builtin" : (c.scope ?? "global")}:${c.name}`,
+      name: c.name,
+      description: String(c.description ?? ""),
+      builtin: Boolean(c.builtin),
+      enabled: c.builtin ? c.enabled !== false : true,
+      commandId: c.builtin ? undefined : c.id,
+    }));
 }
 
 /**

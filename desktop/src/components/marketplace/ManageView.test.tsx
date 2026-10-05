@@ -12,6 +12,8 @@ function renderView(props?: Partial<Parameters<typeof ManageView>[0]>) {
         onBack={() => {}}
         onUse={() => {}}
         onOpenAdvancedSettings={() => {}}
+        onEditAgent={() => {}}
+        onEditCommands={() => {}}
         mcpEntries={[]}
         {...props}
       />
@@ -21,20 +23,21 @@ function renderView(props?: Partial<Parameters<typeof ManageView>[0]>) {
 
 /** renderToStaticMarkup 不跑 useEffect,bridge 不会被调用;初始态 loading=true、计数为 0。 */
 describe("ManageView", () => {
-  it("renders back link, header, tabs and loading state", () => {
+  it("renders back link, header, four kind tabs and loading state", () => {
     const html = renderView();
     expect(html).toContain(i18n.t("manageView.back", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manageView.title", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manageView.subtitle", { ns: "marketplace" }));
-    expect(html).toContain(i18n.t("manageView.tabs.plugins", { ns: "marketplace", count: 0 }));
-    expect(html).toContain(i18n.t("manageView.tabs.skills", { ns: "marketplace", count: 0 }));
+    for (const key of ["mcp", "skills", "agents", "commands"] as const) {
+      expect(html).toContain(i18n.t(`manageView.tabs.${key}`, { ns: "marketplace", count: 0 }));
+    }
     expect(html).toContain(i18n.t("manageView.advancedSettings", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("loading", { ns: "marketplace" }));
   });
 
-  it("renders search placeholder for the default plugins tab", () => {
+  it("renders search placeholder for the default mcp tab", () => {
     const html = renderView();
-    expect(html).toContain(i18n.t("manageView.searchPlugins", { ns: "marketplace" }));
+    expect(html).toContain(i18n.t("manageView.search.mcp", { ns: "marketplace" }));
   });
 
   it("renders header in English", async () => {

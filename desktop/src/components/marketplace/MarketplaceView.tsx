@@ -219,6 +219,8 @@ export function MarketplaceView() {
           onBack={() => setView("market")}
           onUse={(name) => newMetaTask(t("useDraft", { name }))}
           onOpenAdvancedSettings={() => openSettings("skills")}
+          onEditAgent={() => setMainView("avatars")}
+          onEditCommands={() => openSettings("commands")}
           mcpEntries={data.mcpEntries}
           initialSkills={data.skillItems}
         />

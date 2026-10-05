@@ -1,15 +1,34 @@
 /**
- * 市场内嵌的管理视图:已配置的 MCP 插件与本地技能的行式列表,
- * 支持搜索、技能全局开关(禁用/启用)与「体验」回聊天预填。
- * 后端暂无 MCP server 级开关与技能卸载能力,本轮 MCP 行只展示连接状态。
+ * 市场内嵌的管理视图:已配置的 MCP 插件、本地技能、数字专家与指令的行式列表,
+ * 支持搜索、技能全局开关、指令内置开关/删除与「体验」回聊天预填。
+ * 专家编辑跳画廊、自定义指令编辑跳设置页;MCP 行展示连接状态。
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Loader2, MessageSquarePlus, Search, Settings2 } from "lucide-react";
-import { buildManageMcpRows, buildManageSkillRows, findUnmatchedServerNames, matchServerLogoEntry, type ManageSkillRowInput } from "./manage-model";
+import { ArrowLeft, Loader2, MessageSquarePlus, Pencil, Search, Settings2, Trash2 } from "lucide-react";
+import {
+  buildManageAgentRows,
+  buildManageCommandRows,
+  buildManageMcpRows,
+  buildManageSkillRows,
+  findUnmatchedServerNames,
+  matchServerLogoEntry,
+  type ManageAgentRowInput,
+  type ManageCommandRowInput,
+  type ManageSkillRowInput,
+} from "./manage-model";
 import { extractMcpServerNames, type MarketMcpEntry } from "./model";
+import { pickGradientFor } from "./icon-model";
 import { MarketIcon } from "./MarketIcon";
+import { useAppStore } from "../../store";
+import {
+  deleteCommand,
+  fetchCommands,
+  setBuiltinEnabled,
+  type BuiltinCommand,
+  type StoredCommand,
+} from "../../services/commandsApi";
 
 type Props = {
   onBack: () => void;
@@ -17,26 +36,45 @@ type Props = {
   onUse: (name: string) => void;
   /** 跳到设置页的技能配置(扫描路径等高级能力)。 */
   onOpenAdvancedSettings: () => void;
+  /** 专家编辑:跳数字专家画廊。 */
+  onEditAgent: () => void;
+  /** 自定义指令编辑:跳设置页指令配置。 */
+  onEditCommands: () => void;
   /** 市场条目(用于 MCP 行匹配上游 logo)。 */
   mcpEntries: readonly MarketMcpEntry[];
   /** 市场视图已拉过的技能列表:有则首屏直出,后台再静默刷新。 */
   initialSkills?: readonly ManageSkillRowInput[];
 };
 
-type ManageTab = "plugins" | "skills";
+type ManageTab = "mcp" | "skills" | "agents" | "commands";
 
-export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, initialSkills }: Props) {
+export function ManageView({
+  onBack,
+  onUse,
+  onOpenAdvancedSettings,
+  onEditAgent,
+  onEditCommands,
+  mcpEntries,
+  initialSkills,
+}: Props) {
   const { t } = useTranslation("marketplace");
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
 
-  const [tab, setTab] = useState<ManageTab>("plugins");
+  const [tab, setTab] = useState<ManageTab>("mcp");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(!initialSkills || initialSkills.length === 0);
   const [skills, setSkills] = useState<ManageSkillRowInput[]>(() => (initialSkills ? [...initialSkills] : []));
   const [servers, setServers] = useState<Array<{ name: string; connected: boolean; tool_count?: number }>>([]);
+  const [agents, setAgents] = useState<ManageAgentRowInput[]>([]);
+  const [builtinCommands, setBuiltinCommands] = useState<BuiltinCommand[]>([]);
+  const [customCommands, setCustomCommands] = useState<StoredCommand[]>([]);
   /** logo 索引:市场过滤条目 + 后台拉的全量市场列表(含未认证/非托管条目)。 */
   const [logoEntries, setLogoEntries] = useState<MarketMcpEntry[]>(() => [...mcpEntries]);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  /** 指令删除行内二次确认:待确认的行 key。 */
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
 
   const reloadSkills = useCallback(async () => {
     const res = await window.agenticxDesktop.loadSkills().catch(() => null);
@@ -51,6 +89,22 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
         : [],
     );
   }, []);
+
+  const reloadAgents = useCallback(async () => {
+    const res = await window.agenticxDesktop.listAvatars().catch(() => null);
+    if (res?.ok) setAgents(res.avatars ?? []);
+  }, []);
+
+  const reloadCommands = useCallback(async () => {
+    if (!apiBase) return;
+    try {
+      const loaded = await fetchCommands(apiBase, apiToken, "global");
+      setBuiltinCommands(loaded.builtins);
+      setCustomCommands(loaded.commands);
+    } catch {
+      /* 指令加载失败降级为空列表 */
+    }
+  }, [apiBase, apiToken]);
 
   /** 按名搜索市场并拉详情,富化出候选条目(server 名 + 上游 logo)。 */
   const searchLogoCandidates = useCallback(async (serverName: string): Promise<MarketMcpEntry[]> => {
@@ -87,11 +141,15 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
 
   useEffect(() => {
     if (loading) {
-      void Promise.all([reloadSkills(), reloadServers()]).finally(() => setLoading(false));
+      void Promise.all([reloadSkills(), reloadServers(), reloadAgents(), reloadCommands()]).finally(() =>
+        setLoading(false),
+      );
     } else {
-      // 首屏已直出,两路后台刷新到最新即可。
+      // 首屏已直出,各路后台刷新到最新即可。
       void reloadSkills();
       void reloadServers();
+      void reloadAgents();
+      void reloadCommands();
     }
     // 后台按名搜索市场,为没有 logo 匹配的 MCP 行补上游 logo(不挡首屏,静默失败)。
     void (async () => {
@@ -122,6 +180,18 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
 
   const skillRows = useMemo(() => buildManageSkillRows(skills, query), [skills, query]);
   const mcpRows = useMemo(() => buildManageMcpRows(servers, logoEntries, query), [servers, logoEntries, query]);
+  const agentRows = useMemo(() => buildManageAgentRows(agents, query), [agents, query]);
+  const commandRows = useMemo(
+    () =>
+      buildManageCommandRows(
+        [
+          ...builtinCommands.map((b) => ({ ...b, builtin: true })),
+          ...customCommands.map((c) => ({ ...c, builtin: false, scope: "global" })),
+        ],
+        query,
+      ),
+    [builtinCommands, customCommands, query],
+  );
 
   /** 技能全局开关:读当前 settings,整体回写 disabledSkills(PUT 会失效列表缓存)。 */
   const toggleSkill = async (name: string, disabled: boolean) => {
@@ -154,7 +224,49 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
     }
   };
 
-  const rows = tab === "skills" ? skillRows.length : mcpRows.length;
+  /** 内置指令开关:PUT 后端 builtin 启停态,成功后刷新列表。 */
+  const toggleBuiltinCommand = async (name: string, enabled: boolean) => {
+    setToggleBusyName(name);
+    setMsg("");
+    try {
+      await setBuiltinEnabled(apiBase, apiToken, name, enabled);
+      await reloadCommands();
+    } catch (e) {
+      setMsg(t("manageView.toggleCommandFailed", { name }));
+    } finally {
+      setToggleBusyName(null);
+    }
+  };
+
+  /** 自定义指令删除:行内二次确认后调 DELETE,成功后刷新列表。 */
+  const removeCustomCommand = async (commandId: string, name: string) => {
+    setToggleBusyName(name);
+    setPendingDeleteKey(null);
+    setMsg("");
+    try {
+      await deleteCommand(apiBase, apiToken, commandId, "global");
+      await reloadCommands();
+    } catch (e) {
+      setMsg(t("manageView.deleteCommandFailed", { name }));
+    } finally {
+      setToggleBusyName(null);
+    }
+  };
+
+  const tabCounts: Record<ManageTab, number> = {
+    mcp: servers.length,
+    skills: skills.length,
+    agents: agents.length,
+    commands: builtinCommands.length + customCommands.length,
+  };
+  const rows =
+    tab === "skills"
+      ? skillRows.length
+      : tab === "agents"
+        ? agentRows.length
+        : tab === "commands"
+          ? commandRows.length
+          : mcpRows.length;
 
   return (
     <div>
@@ -188,7 +300,7 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
           aria-label={t("manageView.title")}
           className="flex items-center gap-1 rounded-lg border border-border bg-surface-card p-1"
         >
-          {(["plugins", "skills"] as const).map((key) => (
+          {(["mcp", "skills", "agents", "commands"] as const).map((key) => (
             <button
               key={key}
               type="button"
@@ -201,7 +313,7 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
               }`}
               onClick={() => setTab(key)}
             >
-              {t(`manageView.tabs.${key}`, { count: key === "skills" ? skills.length : servers.length })}
+              {t(`manageView.tabs.${key}`, { count: tabCounts[key] })}
             </button>
           ))}
         </div>
@@ -210,10 +322,10 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
           <input
             type="text"
             className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-accent"
-            placeholder={t(tab === "plugins" ? "manageView.searchPlugins" : "manageView.searchSkills")}
+            placeholder={t(`manageView.search.${tab}`)}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label={t(tab === "plugins" ? "manageView.searchPlugins" : "manageView.searchSkills")}
+            aria-label={t(`manageView.search.${tab}`)}
           />
         </div>
       </div>
@@ -283,41 +395,177 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
                   </button>
                 </div>
               ))
-            : mcpRows.map((row) => (
-                <div
-                  key={row.key}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"
-                  data-manage-mcp={row.name}
-                >
-                  <MarketIcon name={row.name} logoUrl={row.logoUrl} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-[13px] font-semibold text-text-strong">{row.name}</span>
-                      <span
-                        className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
-                          row.connected
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                            : "border-border bg-surface-panel text-text-faint"
-                        }`}
-                      >
-                        {t(row.connected ? "manageView.connected" : "manageView.disconnected")}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 line-clamp-1 text-[12px] text-text-muted">
-                      {t("manageView.toolCount", { count: row.toolCount })}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                    title={t("manageView.tryIt")}
-                    onClick={() => onUse(row.name)}
+            : tab === "agents"
+              ? agentRows.map((row) => (
+                  <div
+                    key={row.key}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"
+                    data-manage-agent={row.name}
                   >
-                    <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    {t("manageView.tryIt")}
-                  </button>
-                </div>
-              ))}
+                    {row.avatarUrl ? (
+                      <img
+                        src={row.avatarUrl}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded-xl object-cover ring-1 ring-black/[0.06]"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${pickGradientFor(
+                          row.name,
+                        )} text-sm font-semibold text-white shadow-sm ring-1 ring-white/15`}
+                      >
+                        {row.name.slice(0, 1)}
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[13px] font-semibold text-text-strong">{row.name}</span>
+                        <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                          {t("manageView.agentKind")}
+                        </span>
+                      </div>
+                      {row.description ? (
+                        <p className="mt-0.5 line-clamp-1 text-[12px] text-text-muted">{row.description}</p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                      title={t("manageView.tryIt")}
+                      onClick={() => onUse(row.name)}
+                    >
+                      <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                      {t("manageView.tryIt")}
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                      title={t("manageView.editAgent")}
+                      onClick={onEditAgent}
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      {t("manageView.edit")}
+                    </button>
+                  </div>
+                ))
+              : tab === "commands"
+                ? commandRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"
+                      data-manage-command={row.name}
+                    >
+                      <span className="font-mono text-[13px] font-semibold text-text-strong">/{row.name}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                            {t(row.builtin ? "manageView.commandBuiltin" : "manageView.commandCustom")}
+                          </span>
+                        </div>
+                        {row.description ? (
+                          <p className="mt-0.5 line-clamp-1 text-[12px] text-text-muted">{row.description}</p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                        title={t("manageView.tryIt")}
+                        onClick={() => onUse(row.name)}
+                      >
+                        <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                        {t("manageView.tryIt")}
+                      </button>
+                      {row.builtin ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={row.enabled}
+                          aria-label={t(row.enabled ? "manageView.disableCommand" : "manageView.enableCommand", { name: row.name })}
+                          disabled={toggleBusyName === row.name}
+                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
+                            row.enabled ? "bg-emerald-500" : "bg-surface-hover"
+                          }`}
+                          onClick={() => void toggleBuiltinCommand(row.name, !row.enabled)}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                              row.enabled ? "left-[18px]" : "left-0.5"
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                            title={t("manageView.editCommand")}
+                            onClick={onEditCommands}
+                          >
+                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                            {t("manageView.edit")}
+                          </button>
+                          <button
+                            type="button"
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1.5 text-xs transition disabled:opacity-40 ${
+                              pendingDeleteKey === row.key
+                                ? "border-rose-500/50 bg-rose-500/10 text-rose-400"
+                                : "border-border text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                            }`}
+                            disabled={toggleBusyName === row.name}
+                            title={t("manageView.deleteCommand")}
+                            onClick={() => {
+                              if (pendingDeleteKey === row.key && row.commandId) {
+                                void removeCustomCommand(row.commandId, row.name);
+                              } else {
+                                setPendingDeleteKey(row.key);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                            {pendingDeleteKey === row.key
+                              ? t("manageView.confirmDelete")
+                              : t("manageView.delete")}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))
+                : mcpRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"
+                      data-manage-mcp={row.name}
+                    >
+                      <MarketIcon name={row.name} logoUrl={row.logoUrl} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-[13px] font-semibold text-text-strong">{row.name}</span>
+                          <span
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
+                              row.connected
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                                : "border-border bg-surface-panel text-text-faint"
+                            }`}
+                          >
+                            {t(row.connected ? "manageView.connected" : "manageView.disconnected")}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-1 text-[12px] text-text-muted">
+                          {t("manageView.toolCount", { count: row.toolCount })}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                        title={t("manageView.tryIt")}
+                        onClick={() => onUse(row.name)}
+                      >
+                        <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                        {t("manageView.tryIt")}
+                      </button>
+                    </div>
+                  ))}
         </div>
       )}
     </div>

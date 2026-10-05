@@ -61,14 +61,20 @@
   "manageView": {
     "back": "Back to market",
     "title": "Manage",
-    "subtitle": "Manage added plugins and skills: toggle skills or try them right away.",
+    "subtitle": "Manage added plugins, skills, agents and commands: toggle capabilities or try them right away.",
     "advancedSettings": "Advanced settings",
     "tabs": {
-      "plugins": "Plugins ({{count}})",
-      "skills": "Skills ({{count}})"
+      "mcp": "Plugins ({{count}})",
+      "skills": "Skills ({{count}})",
+      "agents": "Agents ({{count}})",
+      "commands": "Commands ({{count}})"
     },
-    "searchPlugins": "Search plugins",
-    "searchSkills": "Search skills",
+    "search": {
+      "mcp": "Search plugins",
+      "skills": "Search skills",
+      "agents": "Search agents",
+      "commands": "Search commands"
+    },
     "empty": "Nothing installed yet",
     "connected": "Connected",
     "disconnected": "Not connected",
@@ -76,7 +82,19 @@
     "tryIt": "Try it",
     "enableSkill": "Enable skill {{name}}",
     "disableSkill": "Disable skill {{name}}",
-    "toggleFailed": "Failed to toggle skill {{name}}, please retry"
+    "toggleFailed": "Failed to toggle skill {{name}}, please retry",
+    "agentKind": "Agent",
+    "edit": "Edit",
+    "editAgent": "Edit agent in gallery",
+    "editCommand": "Edit command in settings",
+    "commandBuiltin": "Built-in",
+    "commandCustom": "Custom",
+    "enableCommand": "Enable command {{name}}",
+    "disableCommand": "Disable command {{name}}",
+    "toggleCommandFailed": "Failed to toggle command {{name}}, please retry",
+    "delete": "Delete",
+    "confirmDelete": "Confirm",
+    "deleteCommandFailed": "Failed to delete command {{name}}, please retry"
   },
   "pluginDetail": {
     "tools": "Provided tools",

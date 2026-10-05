@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildManageAgentRows,
+  buildManageCommandRows,
   buildManageMcpRows,
   buildManageSkillRows,
   findUnmatchedServerNames,
@@ -139,5 +141,59 @@ describe("matchServerLogoEntry", () => {
 
   it("returns undefined when no candidate matches", () => {
     expect(matchServerLogoEntry("xiniudata", candidates)).toBeUndefined();
+  });
+});
+
+describe("buildManageAgentRows", () => {
+  const agents = [
+    { id: "a1", name: "写作助手", role: "写作", avatar_url: "https://x/1.png" },
+    { id: "a2", name: "Code Reviewer", description: "Reviews pull requests" },
+    { id: "", name: "broken" },
+  ];
+
+  it("maps avatar rows with role/description fallback and filters invalid ids", () => {
+    const rows = buildManageAgentRows(agents, "");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      key: "agent:a1",
+      id: "a1",
+      name: "写作助手",
+      description: "写作",
+      avatarUrl: "https://x/1.png",
+    });
+    expect(rows[1]).toMatchObject({ description: "Reviews pull requests", avatarUrl: undefined });
+  });
+
+  it("filters by name and description (case-insensitive)", () => {
+    expect(buildManageAgentRows(agents, "写作")).toHaveLength(1);
+    expect(buildManageAgentRows(agents, "review")).toHaveLength(1);
+    expect(buildManageAgentRows(agents, "nope")).toHaveLength(0);
+  });
+});
+
+describe("buildManageCommandRows", () => {
+  const commands = [
+    { name: "plan", description: "Make a plan", builtin: true, enabled: true },
+    { name: "summarize", description: "Summarize thread", builtin: true, enabled: false },
+    { id: "c3", name: "deploy-check", description: "Custom deploy guard", builtin: false, scope: "global" },
+  ];
+
+  it("maps builtin rows with enabled state and custom rows with command id", () => {
+    const rows = buildManageCommandRows(commands, "");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ key: "command:builtin:plan", builtin: true, enabled: true });
+    expect(rows[1]).toMatchObject({ builtin: true, enabled: false });
+    expect(rows[2]).toMatchObject({
+      key: "command:global:deploy-check",
+      builtin: false,
+      enabled: true,
+      commandId: "c3",
+    });
+  });
+
+  it("filters by name and description (case-insensitive)", () => {
+    expect(buildManageCommandRows(commands, "plan")).toHaveLength(1);
+    expect(buildManageCommandRows(commands, "deploy")).toHaveLength(1);
+    expect(buildManageCommandRows(commands, "nope")).toHaveLength(0);
   });
 });
