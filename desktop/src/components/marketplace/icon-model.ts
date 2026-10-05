@@ -76,12 +76,13 @@ export function pickMarketIconGlyph(name: string): MarketIconGlyph {
   return "sparkles";
 }
 
-/** 品牌图标(官方矢量 logo,经 Simple Icons CDN 按 slug 引用)。 */
-export type MarketBrandIcon = { slug: string };
+/** 品牌图标:brand key 经 brand-assets.ts 解析为本地打包资产或 CDN 矢量。 */
+export type MarketBrandIcon = { brand: string };
 
 /**
- * 知名品牌关键词 → Simple Icons slug(仅收录 CDN 实测可用的 slug)。
- * 无命中的名称走渐变底座;CDN 不可达时组件层回退渐变。
+ * 品牌关键词 → brand key。
+ * 国际品牌 key 即 Simple Icons slug(CDN 兜底);国产服务 key 对应本地打包资产
+ * (brand-assets.ts)。规则顺序即优先级,先具体后一般。CDN 不可达时组件层回退渐变。
  */
 const BRAND_RULES: ReadonlyArray<readonly [readonly string[], string]> = [
   [["supabase"], "supabase"],
@@ -108,13 +109,33 @@ const BRAND_RULES: ReadonlyArray<readonly [readonly string[], string]> = [
   [["cloudflare"], "cloudflare"],
   [["阿里云", "aliyun", "alibabacloud"], "alibabacloud"],
   [["微信", "wechat", "weixin"], "wechat"],
+  // 国产服务(本地打包官方图标,见 assets/marketplace/brands)
+  [["飞书", "lark", "feishu"], "feishu"],
+  [["博查", "bocha"], "bocha"],
+  [["智谱", "zhipu", "chatglm"], "zhipu"],
+  [["通义", "千问", "qwen", "tongyi"], "qwen"],
+  [["kimi", "moonshot", "月之暗面"], "kimi"],
+  [["豆包", "doubao"], "doubao"],
+  [["混元", "hunyuan"], "hunyuan"],
+  [["minimax"], "minimax"],
+  [["百川", "baichuan"], "baichuan"],
+  [["腾讯", "tencent"], "tencent"],
+  [["百度", "baidu"], "baidu"],
+  [["知乎", "zhihu"], "zhihu"],
+  [["哔哩哔哩", "b站", "bilibili"], "bilibili"],
+  [["淘宝", "taobao"], "taobao"],
+  [["小红书", "xiaohongshu"], "xiaohongshu"],
+  [["美团", "meituan"], "meituan"],
+  [["快手", "kuaishou"], "kuaishou"],
+  [["秘塔", "metaso"], "metaso"],
+  [["mineru"], "mineru"],
 ];
 
-/** 按名称关键词匹配知名品牌官方图标;无命中返回 null。 */
+/** 按名称关键词匹配品牌图标;无命中返回 null。 */
 export function pickBrandIcon(name: string): MarketBrandIcon | null {
   const n = name.toLowerCase();
-  for (const [keywords, slug] of BRAND_RULES) {
-    if (keywords.some((k) => n.includes(k))) return { slug };
+  for (const [keywords, brand] of BRAND_RULES) {
+    if (keywords.some((k) => n.includes(k))) return { brand };
   }
   return null;
 }

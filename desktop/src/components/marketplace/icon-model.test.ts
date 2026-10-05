@@ -52,21 +52,44 @@ describe("pickMarketIconGlyph", () => {
 });
 
 describe("pickBrandIcon", () => {
-  it("matches known brand names (case-insensitive)", () => {
-    expect(pickBrandIcon("supabase")).toEqual({ slug: "supabase" });
-    expect(pickBrandIcon("Supabase 数据库")).toEqual({ slug: "supabase" });
-    expect(pickBrandIcon("GitHub MCP Server")).toEqual({ slug: "github" });
-    expect(pickBrandIcon("claude-code")).toEqual({ slug: "anthropic" });
-    expect(pickBrandIcon("postgres 查询工具")).toEqual({ slug: "postgresql" });
+  it("matches known brand names (case-insensitively)", () => {
+    expect(pickBrandIcon("supabase")).toEqual({ brand: "supabase" });
+    expect(pickBrandIcon("Supabase 数据库")).toEqual({ brand: "supabase" });
+    expect(pickBrandIcon("GitHub MCP Server")).toEqual({ brand: "github" });
+    expect(pickBrandIcon("claude-code")).toEqual({ brand: "anthropic" });
+    expect(pickBrandIcon("postgres 查询工具")).toEqual({ brand: "postgresql" });
   });
 
   it("matches Chinese brand names", () => {
-    expect(pickBrandIcon("阿里云百炼")).toEqual({ slug: "alibabacloud" });
-    expect(pickBrandIcon("微信公众号助手")).toEqual({ slug: "wechat" });
+    expect(pickBrandIcon("阿里云百炼")).toEqual({ brand: "alibabacloud" });
+    expect(pickBrandIcon("微信公众号助手")).toEqual({ brand: "wechat" });
+  });
+
+  it("matches CN service brands by Chinese or English keywords", () => {
+    expect(pickBrandIcon("博查搜索")).toEqual({ brand: "bocha" });
+    expect(pickBrandIcon("bocha-search-mcp")).toEqual({ brand: "bocha" });
+    expect(pickBrandIcon("feishu-mcp")).toEqual({ brand: "feishu" });
+    expect(pickBrandIcon("lark-mcp")).toEqual({ brand: "feishu" });
+    expect(pickBrandIcon("智谱联网搜索")).toEqual({ brand: "zhipu" });
+    expect(pickBrandIcon("chatglm")).toEqual({ brand: "zhipu" });
+    expect(pickBrandIcon("通义千问")).toEqual({ brand: "qwen" });
+    expect(pickBrandIcon("kimi").brand).toBe("kimi");
+    expect(pickBrandIcon("moonshot-mcp")).toEqual({ brand: "kimi" });
+    expect(pickBrandIcon("豆包")).toEqual({ brand: "doubao" });
+    expect(pickBrandIcon("腾讯会议")).toEqual({ brand: "tencent" });
+    expect(pickBrandIcon("百度地图")).toEqual({ brand: "baidu" });
+    expect(pickBrandIcon("知乎热榜")).toEqual({ brand: "zhihu" });
+    expect(pickBrandIcon("哔哩哔哩")).toEqual({ brand: "bilibili" });
+    expect(pickBrandIcon("小红书笔记")).toEqual({ brand: "xiaohongshu" });
+    expect(pickBrandIcon("美团外卖")).toEqual({ brand: "meituan" });
+    expect(pickBrandIcon("metaso-search")).toEqual({ brand: "metaso" });
+    expect(pickBrandIcon("秘塔AI搜索")).toEqual({ brand: "metaso" });
+    expect(pickBrandIcon("mineru-docparser")).toEqual({ brand: "mineru" });
   });
 
   it("returns null for unknown names", () => {
     expect(pickBrandIcon("decidealot")).toBeNull();
-    expect(pickBrandIcon("mineru-docparser")).toBeNull();
+    expect(pickBrandIcon("12306-mcp")).toBeNull();
+    expect(pickBrandIcon("xiniudata")).toBeNull();
   });
 });
