@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Loader2, MessageSquarePlus, Search, Settings2 } from "lucide-react";
-import { buildManageMcpRows, buildManageSkillRows, type ManageSkillRowInput } from "./manage-model";
+import { buildManageMcpRows, buildManageSkillRows, findUnmatchedServerNames, matchServerLogoEntry, type ManageSkillRowInput } from "./manage-model";
 import { extractMcpServerNames, type MarketMcpEntry } from "./model";
 import { MarketIcon } from "./MarketIcon";
 
@@ -52,6 +52,39 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
     );
   }, []);
 
+  /** 按名搜索市场并拉详情,富化出候选条目(server 名 + 上游 logo)。 */
+  const searchLogoCandidates = useCallback(async (serverName: string): Promise<MarketMcpEntry[]> => {
+    const res = await window.agenticxDesktop
+      .mcpMarketplaceList({ search: serverName, page: 1, pageSize: 5 })
+      .catch(() => null);
+    if (!res?.ok || !Array.isArray(res.items)) return [];
+    const raws = (res.items as Array<Record<string, unknown>>)
+      .filter((raw) => String(raw.logo_url ?? "").trim() && String(raw.id ?? "").trim())
+      .slice(0, 3);
+    const candidates: MarketMcpEntry[] = [];
+    for (const raw of raws) {
+      const serverId = String(raw.id);
+      try {
+        const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId });
+        const item = (detail?.item as Record<string, unknown> | undefined) ?? undefined;
+        const names = extractMcpServerNames(item);
+        const logo = String(item?.logo_url ?? raw.logo_url ?? "").trim();
+        if (names.length > 0 && logo) {
+          candidates.push({
+            serverId,
+            name: String(raw.chinese_name || raw.name || serverId),
+            description: "",
+            serverNames: names,
+            logoUrl: logo,
+          });
+        }
+      } catch {
+        /* 单条失败跳过 */
+      }
+    }
+    return candidates;
+  }, []);
+
   useEffect(() => {
     if (loading) {
       void Promise.all([reloadSkills(), reloadServers()]).finally(() => setLoading(false));
@@ -60,32 +93,30 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, 
       void reloadSkills();
       void reloadServers();
     }
-    // 后台拉全量市场列表,扩充 MCP 行的 logo 匹配范围(不挡首屏)。
-    void window.agenticxDesktop
-      .mcpMarketplaceList({ page: 1, pageSize: 100 })
-      .then((res) => {
-        if (!res?.ok) return;
-        const raws = (res.items ?? []) as Array<Record<string, unknown>>;
-        setLogoEntries((prev) => {
-          const merged = [...prev];
-          for (const raw of raws) {
-            const logo = String(raw.logo_url ?? "").trim();
-            const names = extractMcpServerNames(raw);
-            if (!logo || names.length === 0) continue;
-            const serverId = String(raw.id ?? raw.name ?? "");
-            if (!serverId || merged.some((e) => e.serverId === serverId)) continue;
-            merged.push({
-              serverId,
-              name: String(raw.chinese_name || raw.name || serverId),
-              description: "",
-              serverNames: names,
-              logoUrl: logo,
-            });
-          }
-          return merged;
-        });
-      })
-      .catch(() => {});
+    // 后台按名搜索市场,为没有 logo 匹配的 MCP 行补上游 logo(不挡首屏,静默失败)。
+    void (async () => {
+      const status = await window.agenticxDesktop.loadMcpStatus("").catch(() => null);
+      if (!status?.ok || !Array.isArray(status.servers)) return;
+      const unmatched = findUnmatchedServerNames(
+        status.servers.map((s) => ({ name: s.name })),
+        mcpEntries,
+      ).slice(0, 8);
+      const found = await Promise.all(
+        unmatched.map(async (name) => {
+          const candidates = await searchLogoCandidates(name);
+          return matchServerLogoEntry(name, candidates);
+        }),
+      );
+      const hits = found.filter((e): e is MarketMcpEntry => Boolean(e));
+      if (hits.length === 0) return;
+      setLogoEntries((prev) => {
+        const merged = [...prev];
+        for (const e of hits) {
+          if (!merged.some((x) => x.serverId === e.serverId)) merged.push(e);
+        }
+        return merged;
+      });
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -3,7 +3,7 @@
  * 不依赖 React/bridge,便于单测;数据拉取与交互见 ManageView。
  */
 
-import type { MarketMcpEntry } from "./model";
+import { normalizeSkillName, type MarketMcpEntry } from "./model";
 
 /** 技能 Tab 行输入(/api/skills items 的最小投影)。 */
 export type ManageSkillRowInput = {
@@ -59,7 +59,7 @@ export function buildManageSkillRows(
     }));
 }
 
-/** 插件行拼装:server 名与市场条目的 serverNames 匹配拿 logo,按名称过滤。 */
+/** 插件行拼装:server 名与市场条目的 serverNames 归一化匹配拿 logo,按名称过滤。 */
 export function buildManageMcpRows(
   servers: readonly ManageMcpServerInput[],
   mcpEntries: readonly MarketMcpEntry[],
@@ -68,7 +68,10 @@ export function buildManageMcpRows(
   return servers
     .filter((s) => matchesQuery(query, s.name))
     .map((s) => {
-      const entry = mcpEntries.find((e) => e.serverNames.includes(s.name));
+      const target = normalizeSkillName(s.name);
+      const entry = mcpEntries.find((e) =>
+        e.serverNames.some((n) => normalizeSkillName(n) === target),
+      );
       return {
         key: `mcp:${s.name}`,
         name: s.name,
@@ -77,4 +80,43 @@ export function buildManageMcpRows(
         logoUrl: entry?.logoUrl,
       };
     });
+}
+
+/**
+ * 筛出在市场条目里没有 logo 匹配的本机 server 名(去重、保持出现顺序)。
+ * ManageView 用它驱动后台按名搜索市场、补齐上游 logo。
+ */
+export function findUnmatchedServerNames(
+  servers: readonly ManageMcpServerInput[],
+  mcpEntries: readonly MarketMcpEntry[],
+): string[] {
+  const matched = new Set<string>();
+  for (const e of mcpEntries) {
+    if (!e.logoUrl) continue;
+    for (const n of e.serverNames) matched.add(normalizeSkillName(n));
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of servers) {
+    const key = normalizeSkillName(s.name);
+    if (key && !matched.has(key) && !seen.has(key)) {
+      seen.add(key);
+      out.push(s.name);
+    }
+  }
+  return out;
+}
+
+/**
+ * 从「按名搜索 + 详情富化」得到的候选里,挑出 server 名匹配且带 logo 的市场条目
+ * (归一化比较;找不到返回 undefined,由图标组件走品牌/渐变兜底)。
+ */
+export function matchServerLogoEntry(
+  serverName: string,
+  candidates: readonly MarketMcpEntry[],
+): MarketMcpEntry | undefined {
+  const target = normalizeSkillName(serverName);
+  return candidates.find(
+    (e) => Boolean(e.logoUrl) && e.serverNames.some((n) => normalizeSkillName(n) === target),
+  );
 }
