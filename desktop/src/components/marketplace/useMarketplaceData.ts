@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   extractMcpServerNames,
   normalizeSkillName,
+  type MarketLocalSkill,
   type MarketMcpEntry,
   type MarketRegistrySkill,
 } from "./model";
@@ -17,6 +18,8 @@ export type MarketplaceData = {
   loadError: string | null;
   /** 本地已装技能名(归一化小写),用于卡片「已安装」判定。 */
   localSkillNames: ReadonlySet<string>;
+  /** 本地已装的市场技能(source=registry/bundle),目录外的装完技能靠它可见。 */
+  localMarketSkills: MarketLocalSkill[];
   registryItems: MarketRegistrySkill[];
   /** 富化后的 MCP 市场条目(仅官方认证 + 托管 + 可解析 server 名)。 */
   mcpEntries: MarketMcpEntry[];
@@ -28,10 +31,24 @@ const INITIAL: MarketplaceData = {
   loading: true,
   loadError: null,
   localSkillNames: new Set<string>(),
+  localMarketSkills: [],
   registryItems: [],
   mcpEntries: [],
   configuredMcpNames: new Set<string>(),
 };
+
+/** 视为"从市场安装"的本地技能来源(与 model.ts 的 MARKET_LOCAL_SOURCES 一致)。 */
+const MARKET_LOCAL_SOURCES = new Set(["registry", "bundle"]);
+
+function toLocalSkillProjection(items: Array<{ name: string; description: string; source?: string }>) {
+  return items
+    .filter((s) => MARKET_LOCAL_SOURCES.has(String(s.source ?? "")))
+    .map((s) => ({
+      name: String(s.name ?? ""),
+      description: String(s.description ?? ""),
+      source: String(s.source ?? ""),
+    }));
+}
 
 /** 与 MCPMarketplacePanel 的 cleanDescription 同逻辑:去 HTML 标签 + 压缩空白。 */
 function cleanDescription(input: unknown): string {
@@ -62,9 +79,9 @@ export function useMarketplaceData() {
     ]);
     if (seq !== seqRef.current) return;
 
-    const localSkillNames = new Set<string>(
-      (skillsRes?.ok ? skillsRes.items ?? [] : []).map((s) => normalizeSkillName(s.name)),
-    );
+    const localSkills = skillsRes?.ok ? skillsRes.items ?? [] : [];
+    const localSkillNames = new Set<string>(localSkills.map((s) => normalizeSkillName(s.name)));
+    const localMarketSkills = toLocalSkillProjection(localSkills);
     const registryItems: MarketRegistrySkill[] = registryRes?.ok ? (registryRes.items ?? []) : [];
 
     // MCP 市场:按 id 去重 → 逐条拉详情提取 server 名 → 过滤官方认证 + 托管 + 有 server 名。
@@ -110,6 +127,7 @@ export function useMarketplaceData() {
     patch({
       loading: false,
       localSkillNames,
+      localMarketSkills,
       registryItems,
       mcpEntries,
       configuredMcpNames,
@@ -120,7 +138,7 @@ export function useMarketplaceData() {
     });
   }, [patch]);
 
-  /** 技能安装成功后的轻量刷新:只更新本地技能名集合。 */
+  /** 技能安装成功后的轻量刷新:更新本地技能名集合与已装市场技能卡片。 */
   const reloadSkills = useCallback(async () => {
     try {
       await window.agenticxDesktop.refreshSkills();
@@ -129,9 +147,11 @@ export function useMarketplaceData() {
     }
     const res = await window.agenticxDesktop.loadSkills().catch(() => null);
     if (!res?.ok) return;
+    const items = res.items ?? [];
     setData((prev) => ({
       ...prev,
-      localSkillNames: new Set((res.items ?? []).map((s) => normalizeSkillName(s.name))),
+      localSkillNames: new Set(items.map((s) => normalizeSkillName(s.name))),
+      localMarketSkills: toLocalSkillProjection(items),
     }));
   }, []);
 

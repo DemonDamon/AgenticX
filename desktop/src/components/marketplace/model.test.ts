@@ -79,6 +79,35 @@ describe("buildSkillItems", () => {
   });
 });
 
+describe("buildSkillItems with local market skills", () => {
+  const localMarketSkills = [
+    { name: "decidealot", description: "Installed from clawhub earlier", source: "registry" },
+    { name: "deep research", description: "Local copy colliding with registry catalog entry", source: "registry" },
+    { name: "builtin_skill", description: "Not market-installed", source: "builtin" },
+  ];
+
+  it("adds installed cards for market-installed local skills missing from the catalog", () => {
+    const items = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames, localMarketSkills);
+    const decidealot = items.find((it) => it.name === "decidealot");
+    expect(decidealot?.installed).toBe(true);
+    expect(decidealot?.tier).toBe("third_party");
+    expect(decidealot?.origin).toBe("registry");
+  });
+
+  it("dedupes local skills already covered by recommended/registry entries", () => {
+    const items = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames, localMarketSkills);
+    const deep = items.filter((it) => normalizeSkillName(it.name) === "deep research");
+    expect(deep).toHaveLength(1);
+    expect(deep[0].origin).toBe("registry");
+    expect(deep[0].source).toBe("clawhub");
+  });
+
+  it("ignores non-market local skills", () => {
+    const items = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames, localMarketSkills);
+    expect(items.some((it) => it.name === "builtin_skill")).toBe(false);
+  });
+});
+
 describe("filterSkills", () => {
   const items = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames);
 

@@ -22,6 +22,20 @@ export type MarketRegistrySkill = {
 
 export type MarketSkillOrigin = "recommended" | "registry";
 
+/**
+ * 本地已装的市场技能最小投影(来自 /api/skills,source 为 registry/bundle)。
+ * registry 目录只返回前 N 项,市场安装过的技能可能不在目录里——
+ * 这些技能由本地列表补一张恒为已装态的卡片,保证装完可见、可搜。
+ */
+export type MarketLocalSkill = {
+  name: string;
+  description: string;
+  source: string;
+};
+
+/** 视为"从市场安装"的本地技能来源。 */
+const MARKET_LOCAL_SOURCES = new Set(["registry", "bundle"]);
+
 /** 技能 Tab 的卡片条目:官方推荐位与 registry 检索结果统一为一套渲染模型。 */
 export type MarketSkillItem = {
   key: string;
@@ -93,11 +107,15 @@ export function isMcpInstalled(
   return serverNames.some((n) => normalizedConfigured.has(normalizeSkillName(n)));
 }
 
-/** 技能列表拼装:推荐位在前,registry 结果去重(与推荐位重名的丢弃)后追加。 */
+/**
+ * 技能列表拼装:推荐位在前,registry 结果去重(与推荐位重名的丢弃)后追加;
+ * 最后补上本地已装但不在推荐位/目录里的市场技能(恒为已装态)。
+ */
 export function buildSkillItems(
   recommended: readonly RecommendedSkill[],
   registryItems: readonly MarketRegistrySkill[],
   localNames: ReadonlySet<string>,
+  localMarketSkills: readonly MarketLocalSkill[] = [],
 ): MarketSkillItem[] {
   const recommendedNames = new Set(recommended.map((r) => normalizeSkillName(r.name)));
   const recommendedItems: MarketSkillItem[] = recommended.map((r) => ({
@@ -128,7 +146,27 @@ export function buildSkillItems(
       cta: "install",
       installed: isSkillInstalled(r.name, localNames),
     }));
-  return [...recommendedItems, ...registrySkillItems];
+  const coveredNames = new Set(recommendedNames);
+  for (const r of registryItems) {
+    if (r.name) coveredNames.add(normalizeSkillName(r.name));
+  }
+  const localSkillItems: MarketSkillItem[] = localMarketSkills
+    .filter(
+      (s) =>
+        MARKET_LOCAL_SOURCES.has(s.source) &&
+        s.name &&
+        !coveredNames.has(normalizeSkillName(s.name)),
+    )
+    .map((s) => ({
+      key: `local:${s.name}`,
+      name: s.name,
+      description: s.description,
+      provider: s.source,
+      origin: "registry",
+      tier: "third_party",
+      installed: true,
+    }));
+  return [...recommendedItems, ...registrySkillItems, ...localSkillItems];
 }
 
 function matchesSkillQuery(item: MarketSkillItem, query: string): boolean {

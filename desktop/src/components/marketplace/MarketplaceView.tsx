@@ -68,8 +68,8 @@ export function MarketplaceView() {
   });
 
   const skillItems = useMemo(
-    () => buildSkillItems(RECOMMENDED_SKILLS, data.registryItems, data.localSkillNames),
-    [data.registryItems, data.localSkillNames],
+    () => buildSkillItems(RECOMMENDED_SKILLS, data.registryItems, data.localSkillNames, data.localMarketSkills),
+    [data.registryItems, data.localSkillNames, data.localMarketSkills],
   );
   const filteredSkills = useMemo(
     () => filterSkills(skillItems, skillTag, skillQuery),
