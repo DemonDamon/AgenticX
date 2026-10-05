@@ -1,10 +1,12 @@
 /**
  * 插件市场静态配置:精选卡(Featured)定义。
- * 点击精选卡 = 切到目标 Tab 并预选筛选 chip,视觉用 lucide 图标 + 渐变底座。
+ * 点击精选卡 = 切到目标 Tab 并预选筛选 chip。
+ * 图标为手绘双色 SVG(assets/marketplace/featured-*.svg),淡色底座替代重渐变。
  */
 
-import { FileText, Plug, Wrench } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import officeIcon from "../assets/marketplace/featured-office.svg";
+import connectorsIcon from "../assets/marketplace/featured-connectors.svg";
+import toolkitIcon from "../assets/marketplace/featured-toolkit.svg";
 
 /** 精选卡跳转目标:Tab + 预选筛选 chip。 */
 export type FeaturedTarget = {
@@ -14,29 +16,30 @@ export type FeaturedTarget = {
 
 export type FeaturedCardDef = {
   id: "office" | "connectors" | "toolkit";
-  icon: LucideIcon;
-  /** 图标底座渐变(tailwind from-* to-*)。 */
-  gradient: string;
+  /** 手绘图标(bundled SVG URL)。 */
+  iconSrc: string;
+  /** 图标淡色底座(tailwind 类)。 */
+  tint: string;
   target: FeaturedTarget;
 };
 
 export const FEATURED_CARDS: FeaturedCardDef[] = [
   {
     id: "office",
-    icon: FileText,
-    gradient: "from-sky-500 to-blue-600",
+    iconSrc: officeIcon,
+    tint: "bg-blue-50 ring-1 ring-blue-100",
     target: { tab: "skills", tag: "recommended" },
   },
   {
     id: "connectors",
-    icon: Plug,
-    gradient: "from-violet-500 to-purple-600",
+    iconSrc: connectorsIcon,
+    tint: "bg-violet-50 ring-1 ring-violet-100",
     target: { tab: "plugins", tag: "mcp" },
   },
   {
     id: "toolkit",
-    icon: Wrench,
-    gradient: "from-emerald-500 to-teal-600",
+    iconSrc: toolkitIcon,
+    tint: "bg-emerald-50 ring-1 ring-emerald-100",
     target: { tab: "plugins", tag: "tool" },
   },
 ];
