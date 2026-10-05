@@ -7,10 +7,11 @@
 import officeIcon from "../assets/marketplace/featured-office.svg";
 import connectorsIcon from "../assets/marketplace/featured-connectors.svg";
 import toolkitIcon from "../assets/marketplace/featured-toolkit.svg";
+import type { MarketTab } from "../components/marketplace/model";
 
-/** 精选卡跳转目标:Tab + 预选筛选 chip。 */
+/** 精选卡跳转目标:Tab + 预选筛选 chip(无 chips 的 Tab 传 "all" 占位)。 */
 export type FeaturedTarget = {
-  tab: "plugins" | "skills";
+  tab: MarketTab;
   tag: string;
 };
 
@@ -34,12 +35,12 @@ export const FEATURED_CARDS: FeaturedCardDef[] = [
     id: "connectors",
     iconSrc: connectorsIcon,
     tint: "bg-violet-50 ring-1 ring-violet-100",
-    target: { tab: "plugins", tag: "mcp" },
+    target: { tab: "mcp", tag: "all" },
   },
   {
     id: "toolkit",
     iconSrc: toolkitIcon,
     tint: "bg-emerald-50 ring-1 ring-emerald-100",
-    target: { tab: "plugins", tag: "tool" },
+    target: { tab: "skills", tag: "installable" },
   },
 ];

@@ -15,21 +15,22 @@ function renderView() {
 
 /** renderToStaticMarkup 不跑 useEffect,bridge 不会被调用;初始态 loading=true。 */
 describe("MarketplaceView", () => {
-  it("renders header, tabs, featured cards and loading state", () => {
+  it("renders header, kind tabs, featured cards and loading state", () => {
     const html = renderView();
     expect(html).toContain(i18n.t("title", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manage", { ns: "marketplace" }));
-    expect(html).toContain(i18n.t("tabs.plugins", { ns: "marketplace" }));
-    expect(html).toContain(i18n.t("tabs.skills", { ns: "marketplace" }));
+    for (const tab of ["all", "mcp", "skills", "agents", "commands"] as const) {
+      expect(html).toContain(i18n.t(`tabs.${tab}`, { ns: "marketplace" }));
+    }
     for (const id of ["office", "connectors", "toolkit"] as const) {
       expect(html).toContain(i18n.t(`featured.${id}.title`, { ns: "marketplace" }));
     }
     expect(html).toContain(i18n.t("loading", { ns: "marketplace" }));
   });
 
-  it("renders search placeholders for the active plugins tab", () => {
+  it("renders search placeholder for the default all tab", () => {
     const html = renderView();
-    expect(html).toContain(i18n.t("search.plugins", { ns: "marketplace" }));
+    expect(html).toContain(i18n.t("search.all", { ns: "marketplace" }));
   });
 
   it("renders chrome in English", async () => {

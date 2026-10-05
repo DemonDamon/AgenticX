@@ -7,15 +7,18 @@ import { MainViewShell } from "../ds/MainViewShell";
 import { FeaturedCards } from "./FeaturedCards";
 import { FilterChips } from "./FilterChips";
 import { SkillGrid } from "./SkillGrid";
-import { PluginGrid } from "./PluginGrid";
+import { UnifiedGrid } from "./UnifiedGrid";
 import { PluginDetailModal } from "./PluginDetailModal";
 import { InstallConfirmBar } from "./InstallConfirmBar";
 import {
-  buildPluginItems,
   buildSkillItems,
-  filterPlugins,
+  buildUnifiedItems,
   filterSkills,
+  filterUnifiedItems,
   skillFilterTags,
+  tabToKindFilter,
+  type MarketTab,
+  type MarketplaceItem,
 } from "./model";
 import { RECOMMENDED_SKILLS } from "../../data/recommended-skills";
 import { buildOfficeCliInstallPrompt } from "../../utils/officecli-install-prompt";
@@ -24,15 +27,14 @@ import { useMarketplaceData } from "./useMarketplaceData";
 import { useSkillInstall } from "./useSkillInstall";
 import { ManageView } from "./ManageView";
 import { MarketOnboardingModal, MARKET_ONBOARDING_DISMISSED_KEY } from "./MarketOnboardingModal";
-import type { FeaturedTarget } from "../../data/marketplace-config";
 
-/** Market content tab: plugins (connectors + curated tools) vs skills. */
-export type MarketTab = "plugins" | "skills";
+/** 市场顶栏五 Tab:全部混排统一卡片,MCP/技能/专家/指令按 kind 分域浏览。 */
+const MARKET_TABS: readonly MarketTab[] = ["all", "mcp", "skills", "agents", "commands"];
 
 /**
- * Full-screen marketplace view: browse, search, install and use plugins
- * (MCP connectors + curated tools) and skills. Mounted from App when
- * `mainView === "market"`.
+ * Full-screen marketplace view: browse, search, install and use every kind of
+ * extension (MCP connectors, skills, agents, commands) in one place.
+ * Mounted from App when `mainView === "market"`.
  */
 export function MarketplaceView() {
   const { t } = useTranslation("marketplace");
@@ -48,12 +50,10 @@ export function MarketplaceView() {
   const reloadSkills = data.reloadSkills;
   const { status: installStatus, install, confirm, cancelConfirm } = useSkillInstall(reloadSkills);
 
-  const [activeTab, setActiveTab] = useState<MarketTab>("plugins");
+  const [activeTab, setActiveTab] = useState<MarketTab>("all");
   /** 市场内部子视图:主浏览页 vs 已装内容管理页。 */
   const [view, setView] = useState<"market" | "manage">("market");
-  const [pluginQuery, setPluginQuery] = useState("");
-  const [skillQuery, setSkillQuery] = useState("");
-  const [pluginTag, setPluginTag] = useState("all");
+  const [query, setQuery] = useState("");
   const [skillTag, setSkillTag] = useState("all");
   const [promptBusy, setPromptBusy] = useState(false);
   const [promptMsg, setPromptMsg] = useState("");
@@ -75,38 +75,31 @@ export function MarketplaceView() {
     [data.registryItems, data.localSkillNames, data.localMarketSkills],
   );
   const filteredSkills = useMemo(
-    () => filterSkills(skillItems, skillTag, skillQuery),
-    [skillItems, skillTag, skillQuery],
+    () => filterSkills(skillItems, skillTag, query),
+    [skillItems, skillTag, query],
   );
   const skillTags = useMemo(() => skillFilterTags(skillItems), [skillItems]);
 
-  const pluginItems = useMemo(
+  /** 统一条目:连接器 + 技能 + 专家 + 指令(专家/指令数据源后续接入)。 */
+  const unifiedItems = useMemo(
     () =>
-      buildPluginItems(
+      buildUnifiedItems(
         data.mcpEntries,
-        RECOMMENDED_SKILLS,
+        skillItems,
+        [],
+        [],
         data.configuredMcpNames,
-        data.localSkillNames,
       ),
-    [data.mcpEntries, data.configuredMcpNames, data.localSkillNames],
+    [data.mcpEntries, skillItems, data.configuredMcpNames],
   );
-  const filteredPlugins = useMemo(
-    () =>
-      filterPlugins(
-        pluginItems,
-        pluginTag === "mcp" || pluginTag === "tool" ? pluginTag : "all",
-        pluginQuery,
-      ),
-    [pluginItems, pluginTag, pluginQuery],
+  const filteredUnified = useMemo(
+    () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query),
+    [unifiedItems, activeTab, query],
   );
 
-  const query = activeTab === "plugins" ? pluginQuery : skillQuery;
-  const setQuery = activeTab === "plugins" ? setPluginQuery : setSkillQuery;
-
-  const onFeaturedPick = useCallback((target: FeaturedTarget) => {
+  const onFeaturedPick = useCallback((target: { tab: MarketTab; tag: string }) => {
     setActiveTab(target.tab);
     if (target.tab === "skills") setSkillTag(target.tag);
-    else setPluginTag(target.tag);
   }, []);
 
   /** 推荐位安装:把安装指引交给 Meta-Agent 在新会话里执行(与设置页链路一致)。 */
@@ -152,6 +145,28 @@ export function MarketplaceView() {
     },
     // runInstallPromptInMetaAgent 每渲染重建,此处仅读 store action 与纯函数,安全。
     [addPane, setForwardAutoReply, setMainView, ts],
+  );
+
+  /** 统一卡片安装分派:registry 技能走扫描安装链路,推荐位走 Meta-Agent 提示词。 */
+  const installUnifiedItem = useCallback(
+    (item: MarketplaceItem) => {
+      if (item.origin === "registry") {
+        void install({ source: item.source ?? "", name: item.name });
+      } else {
+        onInstallRecommended(item.id);
+      }
+    },
+    [install, onInstallRecommended],
+  );
+
+  /** 统一卡片「使用」:按 kind 选草稿模板回聊天预填。 */
+  const useUnifiedItem = useCallback(
+    (item: MarketplaceItem) => {
+      if (item.kind === "agent") newMetaTask(t("useDraftAgent", { name: item.name }));
+      else if (item.kind === "command") newMetaTask(t("useDraftCommand", { name: item.name }));
+      else newMetaTask(t("useDraft", { name: item.name }));
+    },
+    [newMetaTask, t],
   );
 
   /** MCP 安装:详情浮层确认后执行,成功后刷新本机名册(与设置页链路一致)。 */
@@ -230,7 +245,7 @@ export function MarketplaceView() {
           aria-label={t("title")}
           className="flex items-center gap-1 rounded-lg border border-border bg-surface-card p-1"
         >
-          {(["plugins", "skills"] as const).map((tab) => (
+          {MARKET_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
@@ -252,10 +267,10 @@ export function MarketplaceView() {
           <input
             type="text"
             className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-accent"
-            placeholder={t(activeTab === "plugins" ? "search.plugins" : "search.skills")}
+            placeholder={t(`search.${activeTab}`)}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label={t(activeTab === "plugins" ? "search.plugins" : "search.skills")}
+            aria-label={t(`search.${activeTab}`)}
           />
         </div>
       </div>
@@ -277,7 +292,7 @@ export function MarketplaceView() {
           </div>
         ) : null}
 
-        {activeTab === "skills" && statusMessage ? (
+        {(activeTab === "skills" || activeTab === "all") && statusMessage ? (
           <div
             className={`whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-card px-3 py-2 text-xs leading-relaxed ${statusTone}`}
             role="status"
@@ -287,7 +302,7 @@ export function MarketplaceView() {
           </div>
         ) : null}
 
-        {activeTab === "plugins" && mcpStatus ? (
+        {(activeTab === "mcp" || activeTab === "all") && mcpStatus ? (
           <div
             className={`whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-card px-3 py-2 text-xs leading-relaxed ${
               mcpStatus.kind === "error"
@@ -303,7 +318,7 @@ export function MarketplaceView() {
           </div>
         ) : null}
 
-        {activeTab === "skills" && installStatus.queuedKeys.length > 0 ? (
+        {(activeTab === "skills" || activeTab === "all") && installStatus.queuedKeys.length > 0 ? (
           <div className="text-[11px] text-text-faint">
             {t("installQueue", { count: installStatus.queuedKeys.length })}
           </div>
@@ -328,34 +343,30 @@ export function MarketplaceView() {
               onInstallRecommended={(item) => onInstallRecommended(item.id)}
               onUse={(item) => newMetaTask(t("useDraft", { name: item.name }))}
             />
-            {needsConfirm ? (
-              <InstallConfirmBar
-                kind={confirmKind}
-                busy={installStatus.busy}
-                onConfirm={() => void confirm(confirmKind)}
-                onCancel={cancelConfirm}
-              />
-            ) : null}
           </>
         ) : (
-          <>
-            <FilterChips
-              tags={["all", "mcp", "tool"]}
-              active={pluginTag}
-              onSelect={setPluginTag}
-            />
-            <PluginGrid
-              items={filteredPlugins}
-              promptBusy={promptBusy}
-              onOpenMcpDetail={(item) => setDetailServerId(item.serverId ?? null)}
-              onInstallTool={(item) => onInstallRecommended(item.id)}
-              onUseTool={(item) => newMetaTask(t("useDraft", { name: item.name }))}
-            />
-          </>
+          <UnifiedGrid
+            items={filteredUnified}
+            installingKey={installStatus.installingKey}
+            queuedKeys={installStatus.queuedKeys}
+            promptBusy={promptBusy}
+            onOpenMcpDetail={(item) => setDetailServerId(item.serverId ?? null)}
+            onInstallSkill={installUnifiedItem}
+            onUse={useUnifiedItem}
+          />
         )}
       </div>
       </>
       )}
+
+      {(activeTab === "skills" || activeTab === "all") && needsConfirm && view === "market" ? (
+        <InstallConfirmBar
+          kind={confirmKind}
+          busy={installStatus.busy}
+          onConfirm={() => void confirm(confirmKind)}
+          onCancel={cancelConfirm}
+        />
+      ) : null}
 
       <PluginDetailModal
         serverId={detailServerId}

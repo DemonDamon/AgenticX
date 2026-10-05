@@ -68,27 +68,72 @@ export type MarketMcpEntry = {
   logoUrl?: string;
 };
 
-export type MarketPluginKind = "mcp" | "tool";
+/**
+ * 市场统一条目 kind:MCP 连接器 / 技能(含精选工具位) / 数字专家 / 指令。
+ * 「精选工具」是推荐位技能里 cta=install 的子集,在统一模型下归入 skill,
+ * 由技能 Tab 的 installable 筛选 chip 提供原「专业工具集」入口。
+ */
+export type MarketItemKind = "mcp" | "skill" | "agent" | "command";
 
-/** 插件 Tab 的卡片条目:MCP 连接器与精选可安装工具(cta=install)混合。 */
-export type MarketPluginItem = {
+/** 市场页顶栏 Tab:全部 + 四类能力扩展(全部页混排统一卡片)。 */
+export type MarketTab = "all" | "mcp" | "skills" | "agents" | "commands";
+
+/** MarketTab → 统一条目 kind 筛选值(Tab 用复数标签,kind 用单数)。 */
+export function tabToKindFilter(tab: MarketTab): "all" | MarketItemKind {
+  if (tab === "skills") return "skill";
+  if (tab === "agents") return "agent";
+  if (tab === "commands") return "command";
+  if (tab === "mcp") return "mcp";
+  return "all";
+}
+
+/** 全部 Tab 及专家/指令 Tab 的统一卡片条目:各 kind 的展示与安装链路字段并集。 */
+export type MarketplaceItem = {
   key: string;
-  kind: MarketPluginKind;
+  kind: MarketItemKind;
   name: string;
   description: string;
   installed: boolean;
-  /** kind=mcp */
-  serverId?: string;
-  serverNames?: string[];
-  /** kind=mcp:上游 logo 地址。 */
-  logoUrl?: string;
-  /** kind=tool(来自官方推荐技能) */
-  id?: string;
+  /** 提供方/作者(技能与推荐位);连接器场景缺省回退 serverId。 */
   provider?: string;
+  /** 图标链入参(优先级:iconSrc → 品牌 → logoUrl,见 MarketIcon)。 */
   iconSrc?: string;
+  logoUrl?: string;
+  /** kind=mcp:市场条目 id,详情浮层入口。 */
+  serverId?: string;
+  /** kind=skill:推荐位 id(Meta-Agent 安装提示词)。 */
+  id?: string;
+  /** kind=skill:registry 安装来源(扫描安装链路)。 */
+  source?: string;
+  origin?: MarketSkillOrigin;
+  cta?: RecommendedSkillCta;
   officialUrl?: string;
   category?: string;
   tier?: RecommendedSkillTier;
+  version?: string;
+  /** kind=agent:专家头像地址。 */
+  avatarUrl?: string;
+  /** kind=command:内置(true)或自定义(false)。 */
+  builtin?: boolean;
+  /** kind=command:作用域标识(builtin/global/…)。 */
+  commandScope?: string;
+};
+
+/** 专家条目输入(listAvatars 返回的最小投影)。 */
+export type MarketAgentInput = {
+  id: string;
+  name: string;
+  role?: string;
+  description?: string;
+  avatar_url?: string;
+};
+
+/** 指令条目输入(builtin 开关与自定义指令的最小投影)。 */
+export type MarketCommandInput = {
+  name: string;
+  description?: string;
+  builtin?: boolean;
+  scope?: string;
 };
 
 /** 统一名称归一:去首尾空白 + 小写,作为已装匹配的键。 */
@@ -185,7 +230,7 @@ function matchesSkillQuery(item: MarketSkillItem, query: string): boolean {
 
 /**
  * 技能筛选:
- * - "all" 全部;"recommended" 仅推荐位;
+ * - "all" 全部;"recommended" 仅推荐位;"installable" 可安装位(registry 条目 + cta=install 推荐位);
  * - "enterprise" / "third_party" 按来源档;
  * - 其余值按类目精确匹配。
  * query 对名称/描述/提供方做大小写不敏感的包含匹配。
@@ -195,6 +240,8 @@ export function filterSkills(items: readonly MarketSkillItem[], tag: string, que
     if (tag === "all") return matchesSkillQuery(it, query);
     if (tag === "recommended") {
       if (it.origin !== "recommended") return false;
+    } else if (tag === "installable") {
+      if (it.origin !== "registry" && it.cta !== "install") return false;
     } else if (tag === "enterprise" || tag === "third_party") {
       if (it.tier !== tag) return false;
     } else if (it.category !== tag) {
@@ -204,67 +251,129 @@ export function filterSkills(items: readonly MarketSkillItem[], tag: string, que
   });
 }
 
-/** 筛选 chips:all + recommended + 出现过的来源档 + 出现过的类目(保持 encounter 顺序)。 */
+/**
+ * 筛选 chips:all + recommended + installable(存在可安装条目时) + 出现过的来源档 + 出现过的类目
+ * (保持 encounter 顺序)。
+ */
 export function skillFilterTags(items: readonly MarketSkillItem[]): string[] {
   const tiers: string[] = [];
   const categories: string[] = [];
+  let installable = false;
   for (const it of items) {
     if (it.tier && !tiers.includes(it.tier)) tiers.push(it.tier);
     if (it.category && !categories.includes(it.category)) categories.push(it.category);
+    if (it.origin === "registry" || it.cta === "install") installable = true;
   }
-  return ["all", "recommended", ...tiers, ...categories];
+  return [
+    "all",
+    "recommended",
+    ...(installable ? ["installable"] : []),
+    ...tiers,
+    ...categories,
+  ];
 }
 
-/** 插件列表拼装:MCP 连接器在前,后接 cta=install 的精选工具(外链指引类不进插件网格)。 */
-export function buildPluginItems(
+/** MCP 连接器 → 统一条目(已装判定走本机名册)。 */
+export function buildMcpItems(
   mcpEntries: readonly MarketMcpEntry[],
-  tools: readonly RecommendedSkill[],
   configuredMcp: ReadonlySet<string>,
-  localSkillNames: ReadonlySet<string>,
-): MarketPluginItem[] {
-  const mcpItems: MarketPluginItem[] = mcpEntries.map((entry) => ({
+): MarketplaceItem[] {
+  return mcpEntries.map((entry) => ({
     key: `mcp:${entry.serverId}`,
     kind: "mcp",
     name: entry.name,
     description: entry.description,
     installed: isMcpInstalled(entry.serverNames, configuredMcp),
+    provider: entry.serverId,
     serverId: entry.serverId,
-    serverNames: entry.serverNames,
     logoUrl: entry.logoUrl,
   }));
-  const toolItems: MarketPluginItem[] = tools
-    .filter((tool) => tool.cta === "install")
-    .map((tool) => ({
-      key: `tool:${tool.id}`,
-      kind: "tool",
-      name: tool.name,
-      description: tool.description,
-      installed: isSkillInstalled(tool.name, localSkillNames),
-      id: tool.id,
-      provider: tool.provider,
-      iconSrc: tool.icon_src,
-      officialUrl: tool.official_url,
-      category: tool.category,
-      tier: tool.tier,
-    }));
-  return [...mcpItems, ...toolItems];
 }
 
-function matchesPluginQuery(item: MarketPluginItem, query: string): boolean {
+/** 本地专家 → 统一条目(本地资产,恒为已装态)。 */
+export function buildAgentItems(avatars: readonly MarketAgentInput[]): MarketplaceItem[] {
+  return avatars
+    .filter((a) => a.id && a.name)
+    .map((a) => ({
+      key: `agent:${a.id}`,
+      kind: "agent",
+      name: a.name,
+      description: String(a.description ?? a.role ?? ""),
+      installed: true,
+      avatarUrl: a.avatar_url,
+    }));
+}
+
+/** 指令(builtin + 自定义) → 统一条目(本机能力,恒为已装态)。 */
+export function buildCommandItems(commands: readonly MarketCommandInput[]): MarketplaceItem[] {
+  return commands
+    .filter((c) => c.name)
+    .map((c) => ({
+      key: `command:${c.builtin ? "builtin" : (c.scope ?? "global")}:${c.name}`,
+      kind: "command",
+      name: c.name,
+      description: String(c.description ?? ""),
+      installed: true,
+      builtin: Boolean(c.builtin),
+      commandScope: c.builtin ? "builtin" : (c.scope ?? "global"),
+    }));
+}
+
+/** 技能卡片条目 → 统一条目投影(保留 registry/推荐位安装链路字段)。 */
+function toUnifiedSkillItem(item: MarketSkillItem): MarketplaceItem {
+  return {
+    key: item.key,
+    kind: "skill",
+    name: item.name,
+    description: item.description,
+    installed: item.installed,
+    provider: item.provider,
+    iconSrc: item.iconSrc,
+    id: item.id,
+    source: item.source,
+    origin: item.origin,
+    cta: item.cta,
+    officialUrl: item.officialUrl,
+    category: item.category,
+    tier: item.tier,
+    version: item.version,
+  };
+}
+
+/**
+ * 全部 Tab 混排:MCP 连接器 → 技能(推荐位在前,由 skillItems 顺序保证) → 专家 → 指令。
+ * 「精选工具」不再单列:推荐位技能统一归 skill,由 installable chip 提供筛选入口。
+ */
+export function buildUnifiedItems(
+  mcpEntries: readonly MarketMcpEntry[],
+  skillItems: readonly MarketSkillItem[],
+  agents: readonly MarketAgentInput[],
+  commands: readonly MarketCommandInput[],
+  configuredMcp: ReadonlySet<string>,
+): MarketplaceItem[] {
+  return [
+    ...buildMcpItems(mcpEntries, configuredMcp),
+    ...skillItems.map(toUnifiedSkillItem),
+    ...buildAgentItems(agents),
+    ...buildCommandItems(commands),
+  ];
+}
+
+function matchesUnifiedQuery(item: MarketplaceItem, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
 }
 
-/** 插件筛选:tag 为 "all" | "mcp" | "tool";query 对名称/描述做包含匹配。 */
-export function filterPlugins(
-  items: readonly MarketPluginItem[],
-  tag: "all" | MarketPluginKind,
+/** 统一条目筛选:kind 为 "all" 或具体 kind;query 对名称/描述做包含匹配。 */
+export function filterUnifiedItems(
+  items: readonly MarketplaceItem[],
+  kind: "all" | MarketItemKind,
   query: string,
-): MarketPluginItem[] {
+): MarketplaceItem[] {
   return items.filter((it) => {
-    if (tag !== "all" && it.kind !== tag) return false;
-    return matchesPluginQuery(it, query);
+    if (kind !== "all" && it.kind !== kind) return false;
+    return matchesUnifiedQuery(it, query);
   });
 }
 

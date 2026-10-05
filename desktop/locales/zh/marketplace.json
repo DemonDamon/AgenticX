@@ -3,12 +3,18 @@
   "subtitle": "发现并安装插件、技能等扩展，拓展 Near 的能力。",
   "manage": "管理",
   "tabs": {
-    "plugins": "插件",
-    "skills": "技能"
+    "all": "全部",
+    "mcp": "MCP",
+    "skills": "技能",
+    "agents": "专家",
+    "commands": "指令"
   },
   "search": {
-    "plugins": "搜索插件",
-    "skills": "搜索技能"
+    "all": "搜索插件市场",
+    "mcp": "搜索 MCP 连接器",
+    "skills": "搜索技能",
+    "agents": "搜索专家",
+    "commands": "搜索指令"
   },
   "featured": {
     "sectionTitle": "精选推荐",
@@ -28,6 +34,7 @@
   "filters": {
     "all": "全部",
     "recommended": "官方推荐",
+    "installable": "可安装工具",
     "enterprise": "企业官方",
     "thirdParty": "第三方",
     "mcp": "MCP 连接器",
@@ -43,10 +50,14 @@
   },
   "badge": {
     "mcp": "连接器",
-    "tool": "工具",
+    "skill": "技能",
+    "agent": "专家",
+    "command": "指令",
     "installed": "已安装"
   },
   "useDraft": "请使用技能「{{name}}」帮我完成任务。",
+  "useDraftAgent": "请让数字专家「{{name}}」帮我完成任务。",
+  "useDraftCommand": "请使用指令 /{{name}} 帮我完成任务。",
   "manageView": {
     "back": "返回市场",
     "title": "管理",

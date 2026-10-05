@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildPluginItems,
+  buildAgentItems,
+  buildCommandItems,
+  buildMcpItems,
   buildSkillItems,
-  filterPlugins,
+  buildUnifiedItems,
   filterSkills,
+  filterUnifiedItems,
   isMcpInstalled,
   isSkillInstalled,
   normalizeSkillName,
@@ -131,6 +134,12 @@ describe("filterSkills", () => {
     expect(office.every((it) => it.category === "Office 创作")).toBe(true);
   });
 
+  it("keeps installable entries for the installable tag", () => {
+    const installable = filterSkills(items, "installable", "");
+    expect(installable.length).toBeGreaterThan(0);
+    expect(installable.every((it) => it.origin === "registry" || it.cta === "install")).toBe(true);
+  });
+
   it("matches query against name/description/provider case-insensitively", () => {
     const byName = filterSkills(items, "all", "officecli");
     expect(byName.some((it) => normalizeSkillName(it.name) === "officecli")).toBe(true);
@@ -148,43 +157,147 @@ describe("skillFilterTags", () => {
     expect(tags).toContain("enterprise");
     expect(tags).toContain("third_party");
   });
+
+  it("inserts installable after recommended when installable entries exist", () => {
+    const items = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames);
+    const tags = skillFilterTags(items);
+    expect(tags.indexOf("installable")).toBe(2);
+  });
+
+  it("omits installable when nothing is installable", () => {
+    const onlyOfficialSite = RECOMMENDED_SKILLS.filter((s) => s.cta !== "install");
+    const tags = skillFilterTags(buildSkillItems(onlyOfficialSite, [], new Set()));
+    expect(tags).not.toContain("installable");
+  });
 });
 
-describe("buildPluginItems", () => {
+describe("buildMcpItems", () => {
   const mcpEntries = [
-    { serverId: "github", name: "GitHub", description: "Code hosting", serverNames: ["github"] },
+    {
+      serverId: "github",
+      name: "GitHub",
+      description: "Code hosting",
+      serverNames: ["github"],
+      logoUrl: "https://x/github.png",
+    },
     { serverId: "zhihu", name: "Zhihu", description: "Q&A data", serverNames: ["zhihu"] },
   ];
 
-  it("merges mcp entries and cta=install tools, skipping official_site tools", () => {
-    const items = buildPluginItems(mcpEntries, RECOMMENDED_SKILLS, new Set(["github"]), localNames);
-    expect(items.some((it) => it.kind === "mcp" && it.key === "mcp:github")).toBe(true);
-    expect(items.some((it) => it.kind === "tool")).toBe(true);
-    // tools with official_site cta are excluded from the plugin grid
-    const tencent = items.find((it) => it.name === "腾讯文档");
-    expect(tencent).toBeUndefined();
-  });
-
-  it("marks installed state for mcp (roster) and tools (local skills)", () => {
-    const items = buildPluginItems(mcpEntries, RECOMMENDED_SKILLS, new Set(["github"]), localNames);
-    expect(items.find((it) => it.key === "mcp:github")?.installed).toBe(true);
+  it("maps entries to unified kind=mcp items with roster-based install state", () => {
+    const items = buildMcpItems(mcpEntries, new Set(["github"]));
+    expect(items).toHaveLength(2);
+    const gh = items.find((it) => it.key === "mcp:github");
+    expect(gh?.kind).toBe("mcp");
+    expect(gh?.installed).toBe(true);
+    expect(gh?.serverId).toBe("github");
+    expect(gh?.logoUrl).toBe("https://x/github.png");
     expect(items.find((it) => it.key === "mcp:zhihu")?.installed).toBe(false);
-    const officecli = items.find((it) => it.key.startsWith("tool:officecli"));
-    expect(officecli?.installed).toBe(true);
   });
 });
 
-describe("filterPlugins", () => {
-  const mcpEntries = [{ serverId: "github", name: "GitHub", description: "Code hosting", serverNames: ["github"] }];
-  const items = buildPluginItems(mcpEntries, RECOMMENDED_SKILLS, new Set(), new Set());
+describe("buildAgentItems", () => {
+  it("maps local avatars to always-installed kind=agent items", () => {
+    const items = buildAgentItems([
+      { id: "a1", name: "写作助手", role: "写作", avatar_url: "https://x/1.png" },
+      { id: "a2", name: "Code Reviewer" },
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      key: "agent:a1",
+      kind: "agent",
+      name: "写作助手",
+      installed: true,
+      avatarUrl: "https://x/1.png",
+    });
+    expect(items[0].description).toBe("写作");
+    expect(items[1].description).toBe("");
+  });
+});
+
+describe("buildCommandItems", () => {
+  it("maps builtin and custom commands with scope-aware keys and builtin flag", () => {
+    const items = buildCommandItems([
+      { name: "plan", description: "Make a plan", builtin: true },
+      { name: "deploy-check", description: "Custom", builtin: false, scope: "global" },
+    ]);
+    expect(items[0]).toMatchObject({
+      key: "command:builtin:plan",
+      kind: "command",
+      installed: true,
+      builtin: true,
+    });
+    expect(items[1]).toMatchObject({
+      key: "command:global:deploy-check",
+      builtin: false,
+      commandScope: "global",
+    });
+  });
+});
+
+describe("buildUnifiedItems", () => {
+  const mcpEntries = [
+    { serverId: "github", name: "GitHub", description: "Code hosting", serverNames: ["github"] },
+  ];
+  const agents = [{ id: "a1", name: "写作助手", role: "写作" }];
+  const commands = [{ name: "plan", description: "Make a plan", builtin: true }];
+  const skillItems = buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames);
+
+  it("merges mcp, skills, agents and commands in stable kind order", () => {
+    const items = buildUnifiedItems(mcpEntries, skillItems, agents, commands, new Set(["github"]));
+    const kinds = items.map((it) => it.kind);
+    expect(kinds[0]).toBe("mcp");
+    expect(kinds.lastIndexOf("mcp")).toBeLessThan(kinds.indexOf("skill"));
+    expect(kinds.lastIndexOf("skill")).toBeLessThan(kinds.indexOf("agent"));
+    expect(kinds.lastIndexOf("agent")).toBeLessThan(kinds.indexOf("command"));
+  });
+
+  it("projects skill items with install-flow fields preserved", () => {
+    const items = buildUnifiedItems(mcpEntries, skillItems, agents, commands, new Set());
+    const officecli = items.find((it) => it.kind === "skill" && it.id === "officecli");
+    expect(officecli).toMatchObject({
+      name: "OfficeCLI",
+      provider: "iOfficeAI",
+      origin: "recommended",
+      installed: true,
+    });
+    expect(officecli?.iconSrc).toBeTruthy();
+    const deep = items.find((it) => it.kind === "skill" && it.name === "Deep Research");
+    expect(deep).toMatchObject({ origin: "registry", source: "clawhub", installed: false });
+  });
+
+  it("marks mcp install state via the configured roster", () => {
+    const items = buildUnifiedItems(mcpEntries, skillItems, agents, commands, new Set(["github"]));
+    expect(items.find((it) => it.key === "mcp:github")?.installed).toBe(true);
+  });
+});
+
+describe("filterUnifiedItems", () => {
+  const mcpEntries = [
+    { serverId: "github", name: "GitHub", description: "Code hosting", serverNames: ["github"] },
+  ];
+  const agents = [{ id: "a1", name: "写作助手", role: "写作" }];
+  const commands = [{ name: "plan", description: "Make a plan", builtin: true }];
+  const items = buildUnifiedItems(
+    mcpEntries,
+    buildSkillItems(RECOMMENDED_SKILLS, registryItems, localNames),
+    agents,
+    commands,
+    new Set(),
+  );
 
   it("filters by kind tag", () => {
-    expect(filterPlugins(items, "mcp", "").every((it) => it.kind === "mcp")).toBe(true);
-    expect(filterPlugins(items, "tool", "").every((it) => it.kind === "tool")).toBe(true);
+    expect(filterUnifiedItems(items, "mcp", "").every((it) => it.kind === "mcp")).toBe(true);
+    expect(filterUnifiedItems(items, "skill", "").every((it) => it.kind === "skill")).toBe(true);
+    expect(filterUnifiedItems(items, "agent", "").every((it) => it.kind === "agent")).toBe(true);
+    expect(filterUnifiedItems(items, "command", "").every((it) => it.kind === "command")).toBe(true);
+    expect(filterUnifiedItems(items, "all", "").length).toBe(items.length);
   });
 
   it("matches query against name and description", () => {
-    expect(filterPlugins(items, "all", "github").some((it) => it.key === "mcp:github")).toBe(true);
-    expect(filterPlugins(items, "all", "zzz-none")).toHaveLength(0);
+    expect(filterUnifiedItems(items, "all", "github").some((it) => it.key === "mcp:github")).toBe(
+      true,
+    );
+    expect(filterUnifiedItems(items, "all", "写作助手").some((it) => it.kind === "agent")).toBe(true);
+    expect(filterUnifiedItems(items, "all", "zzz-none")).toHaveLength(0);
   });
 });

@@ -3,12 +3,18 @@
   "subtitle": "Discover and install plugins, skills and other extensions to expand what Near can do.",
   "manage": "Manage",
   "tabs": {
-    "plugins": "Plugins",
-    "skills": "Skills"
+    "all": "All",
+    "mcp": "MCP",
+    "skills": "Skills",
+    "agents": "Agents",
+    "commands": "Commands"
   },
   "search": {
-    "plugins": "Search plugins",
-    "skills": "Search skills"
+    "all": "Search the marketplace",
+    "mcp": "Search MCP connectors",
+    "skills": "Search skills",
+    "agents": "Search agents",
+    "commands": "Search commands"
   },
   "featured": {
     "sectionTitle": "Featured",
@@ -28,6 +34,7 @@
   "filters": {
     "all": "All",
     "recommended": "Featured picks",
+    "installable": "Installable tools",
     "enterprise": "Official",
     "thirdParty": "Third-party",
     "mcp": "MCP connectors",
@@ -43,10 +50,14 @@
   },
   "badge": {
     "mcp": "Connector",
-    "tool": "Tool",
+    "skill": "Skill",
+    "agent": "Agent",
+    "command": "Command",
     "installed": "Installed"
   },
   "useDraft": "Please use the \"{{name}}\" skill to help me with my task.",
+  "useDraftAgent": "Please have the \"{{name}}\" agent help me with my task.",
+  "useDraftCommand": "Please use the /{{name}} command to help me with my task.",
   "manageView": {
     "back": "Back to market",
     "title": "Manage",
