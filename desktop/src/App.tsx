@@ -1300,6 +1300,9 @@ export function App() {
             model?: string;
             task?: string;
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+            delegation?: boolean;
+            kind?: string;
+            avatar_session_id?: string;
             result_summary?: string;
             result_file?: string;
             output_files?: string[];
@@ -1324,6 +1327,12 @@ export function App() {
 
           const existing = subAgentsRef.current.find((sub) => sub.id === id);
           const prevStatus = existing?.status;
+          const itemKind: "delegate" | "subagent" =
+            item.delegation === true || item.kind === "delegate" ? "delegate" : "subagent";
+          const itemAvatarSessionId =
+            typeof item.avatar_session_id === "string" && item.avatar_session_id.trim()
+              ? item.avatar_session_id.trim()
+              : undefined;
           if (!existing) {
             addSubAgent({
               id,
@@ -1333,6 +1342,8 @@ export function App() {
               model: item.model ?? undefined,
               task: item.task ?? "",
               sessionId: sid,
+              avatarSessionId: itemAvatarSessionId,
+              kind: itemKind,
             });
           }
 
@@ -1417,6 +1428,8 @@ export function App() {
             currentAction,
             provider: item.provider ?? existing?.provider,
             model: item.model ?? existing?.model,
+            avatarSessionId: itemAvatarSessionId ?? existing?.avatarSessionId,
+            kind: itemKind,
             resultSummary: summaryText || undefined,
             resultFile,
             outputFiles,

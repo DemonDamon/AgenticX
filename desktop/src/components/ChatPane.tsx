@@ -342,6 +342,10 @@ import {
   buildSubAgentFromRunRecord,
   hydrateSessionSubAgentsFromDisk,
 } from "../utils/subagent-hydrate";
+import {
+  mapStartedEvent,
+  mapTerminalSessionPatch,
+} from "../utils/subagent-entry-mapper";
 import { fetchRunActivityPage, fetchRunDetail } from "./subagent/run-drawer-api";
 import type { SubAgentRunRecord } from "./subagent/badge-vm";
 import {
@@ -4606,7 +4610,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const openDelegatedAvatarSession = async (agentId: string): Promise<boolean> => {
     const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
-    const targetSessionId = (sub?.sessionId ?? "").trim();
+    // 委派卡片归属发起方会话（sessionId），跳转目标分身会话用 avatarSessionId。
+    const targetSessionId = (sub?.avatarSessionId ?? sub?.sessionId ?? "").trim();
     if (!targetSessionId) return false;
 
     const targetName = String(sub?.name ?? "").trim();
@@ -12516,37 +12521,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const alreadyTracked = subAgents.some((sub) => sub.id === subId);
                 const avatarSessionId =
                   (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim()) || "";
-                addSubAgent({
-                  id: subId,
-                  name: payload.data?.name ?? subId,
-                  role: payload.data?.role ?? (isDelegation ? "delegated avatar" : "worker"),
-                  provider: payload.data?.provider ?? undefined,
-                  model: payload.data?.model ?? undefined,
-                  task: payload.data?.task ?? "",
-                  sessionId: avatarSessionId || requestSessionId || undefined,
-                });
-                updateSubAgent(subId, {
-                  status: "running",
-                  currentAction: isDelegation ? "委派执行中" : "执行中",
-                  ...(isRetry || alreadyTracked
-                    ? { resultSummary: "", liveOutput: "", outputFiles: [] as string[] }
-                    : {}),
-                });
-                addSubAgentEvent(
-                  subId,
-                  {
-                    type: isRetry || alreadyTracked
-                      ? "retry"
-                      : isDelegation
-                        ? "delegation_started"
-                        : "started",
-                    content: isRetry || alreadyTracked
-                      ? "已重新启动"
-                      : isDelegation
-                        ? `已委派给 ${payload.data?.name ?? subId}`
-                        : "已启动",
-                  }
-                );
+                // 委派运行归属发起方会话（与后端 run 账本一致）；分身会话自身流上的委派事件不重复登记。
+                const started = mapStartedEvent(payload.data, requestSessionId);
+                if (started) {
+                  addSubAgent({
+                    id: started.id,
+                    name: started.name,
+                    role: started.role,
+                    provider: started.provider,
+                    model: started.model,
+                    task: started.task,
+                    sessionId: started.sessionId,
+                    avatarSessionId: started.avatarSessionId,
+                    kind: started.kind,
+                  });
+                  updateSubAgent(subId, {
+                    status: "running",
+                    currentAction: started.currentAction,
+                    kind: started.kind,
+                    avatarSessionId: started.avatarSessionId,
+                    ...(isRetry || alreadyTracked
+                      ? { resultSummary: "", liveOutput: "", outputFiles: [] as string[] }
+                      : {}),
+                  });
+                  addSubAgentEvent(
+                    subId,
+                    {
+                      type: isRetry || alreadyTracked
+                        ? "retry"
+                        : isDelegation
+                          ? "delegation_started"
+                          : "started",
+                      content: isRetry || alreadyTracked
+                        ? "已重新启动"
+                        : isDelegation
+                          ? `已委派给 ${payload.data?.name ?? subId}`
+                          : "已启动",
+                    }
+                  );
+                }
                 if (isDelegation && avatarSessionId && !isGroupPane) {
                   const dlgName = String(payload.data?.name ?? "").trim();
                   const dlgAvatarId = typeof payload.data?.avatar_id === "string" ? payload.data.avatar_id.trim() : "";
@@ -12605,9 +12618,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   currentAction: display,
                   resultSummary:
                     typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
-                  sessionId:
-                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
-                      || undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, { type: "paused", content: display });
                 // Also drop a visible note into the avatar pane so the user does
@@ -12637,9 +12648,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   resultSummary: summary,
                   resultFile,
                   outputFiles: resolveSubAgentOutputPaths(summary, { resultFile }),
-                  sessionId:
-                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
-                      || undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(
                   subId,
@@ -12656,9 +12665,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
                   currentAction: text,
-                  sessionId:
-                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
-                      || undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, { type: isDelegation ? "delegation_error" : "error", content: text });
               }

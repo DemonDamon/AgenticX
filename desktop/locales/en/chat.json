@@ -285,6 +285,8 @@
     "copyHeaderPath": "Saved to: {{path}}",
     "expandCard": "Expand card",
     "collapseCard": "Collapse card",
+    "delegationBadge": "Delegated",
+    "delegationBadgeHint": "Run delegated to a digital avatar; owned by the initiating session",
     "waitingConfirmPopup": "Waiting for confirmation… check the dialog",
     "waitingInputNamed": "Waiting for your input: {{prompt}}",
     "waitingInputPopup": "Waiting for your input… check the dialog",

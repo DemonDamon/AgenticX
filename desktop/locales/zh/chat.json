@@ -285,6 +285,8 @@
     "copyHeaderPath": "落盘路径: {{path}}",
     "expandCard": "展开整卡",
     "collapseCard": "折叠整卡",
+    "delegationBadge": "委派",
+    "delegationBadgeHint": "委派给数字分身执行的运行，归属发起方会话",
     "waitingConfirmPopup": "等待确认中… 请查看弹窗或稍候",
     "waitingInputNamed": "等待你的输入：{{prompt}}",
     "waitingInputPopup": "等待你的输入… 请查看弹窗",

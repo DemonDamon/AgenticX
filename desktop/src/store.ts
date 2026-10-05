@@ -527,6 +527,10 @@ export type SubAgent = {
   status: SubAgentStatus;
   task: string;
   sessionId?: string;
+  /** 委派运行（dlg-*）的目标分身会话；工作区归属用 sessionId，「对话」跳转用本字段。 */
+  avatarSessionId?: string;
+  /** 运行类型：delegate=委派到数字分身，subagent=spawn 的临时子智能体。 */
+  kind?: "delegate" | "subagent";
   progress?: number;
   currentAction?: string;
   liveOutput?: string;
@@ -1006,7 +1010,7 @@ type AppState = {
   mergeLastMessageByRole: (role: MsgRole, patch: Partial<Message>) => boolean;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
-  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
+  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string; avatarSessionId?: string; kind?: SubAgent["kind"] }) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
   setReportPendingSessions: (sessionIds: string[]) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;

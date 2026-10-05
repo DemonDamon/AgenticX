@@ -64,6 +64,7 @@ import {
 } from "../utils/desktop-task-notify";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
+import { mapStartedEvent, mapTerminalSessionPatch } from "../utils/subagent-entry-mapper";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
@@ -842,7 +843,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const openDelegatedAvatarSession = useCallback(
     async (agentId: string) => {
       const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
-      const targetSessionId = (sub?.sessionId ?? "").trim();
+      // 委派卡片归属发起方会话（sessionId），跳转目标分身会话用 avatarSessionId。
+      const targetSessionId = (sub?.avatarSessionId ?? sub?.sessionId ?? "").trim();
       if (!targetSessionId) return false;
 
       const matchedAvatar = avatars.find((item) => item.name === (sub?.name ?? ""));
@@ -1957,26 +1959,34 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const subId = payload.data?.agent_id;
               if (subId) {
                 const isDelegation = Boolean(payload.data?.delegation);
-                addSubAgent({
-                  id: subId,
-                  name: payload.data?.name ?? subId,
-                  role: payload.data?.role ?? (isDelegation ? "delegated avatar" : "worker"),
-                  provider: payload.data?.provider ?? undefined,
-                  model: payload.data?.model ?? undefined,
-                  task: payload.data?.task ?? "",
-                  sessionId: isDelegation ? sessionId : (typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined),
-                });
-                updateSubAgent(subId, {
-                  status: "running",
-                  currentAction: isDelegation ? "委派执行中" : "执行中",
-                });
-                addSubAgentEvent(
-                  subId,
-                  {
-                    type: isDelegation ? "delegation_started" : "started",
-                    content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动",
-                  }
-                );
+                // 委派运行归属发起方会话；分身会话自身流上的委派事件不重复登记。
+                const started = mapStartedEvent(payload.data, sessionId);
+                if (started) {
+                  addSubAgent({
+                    id: started.id,
+                    name: started.name,
+                    role: started.role,
+                    provider: started.provider,
+                    model: started.model,
+                    task: started.task,
+                    sessionId: started.sessionId,
+                    avatarSessionId: started.avatarSessionId,
+                    kind: started.kind,
+                  });
+                  updateSubAgent(subId, {
+                    status: "running",
+                    currentAction: started.currentAction,
+                    kind: started.kind,
+                    avatarSessionId: started.avatarSessionId,
+                  });
+                  addSubAgentEvent(
+                    subId,
+                    {
+                      type: isDelegation ? "delegation_started" : "started",
+                      content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动",
+                    }
+                  );
+                }
               }
             }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
@@ -2026,7 +2036,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   resultSummary: summary,
                   resultFile,
                   outputFiles: resolveSubAgentOutputPaths(summary, { resultFile }),
-                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, {
                   type: isDelegation ? "delegation_completed" : "completed",
@@ -2042,7 +2052,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
                   currentAction: payload.data?.text ?? "执行异常",
-                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, {
                   type: isDelegation ? "delegation_error" : "error",

@@ -1313,6 +1313,14 @@ export function SubAgentCard({
               {subAgent.id}
             </span>
           ) : null}
+          {!collapsed && subAgent.kind === "delegate" ? (
+            <span
+              className="inline-flex shrink-0 items-center rounded-full border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] px-2 py-0.5 text-[10px] font-medium leading-none text-[var(--kb-citation-fg)]"
+              title={t("subagent.delegationBadgeHint")}
+            >
+              {t("subagent.delegationBadge")}
+            </span>
+          ) : null}
         </div>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
