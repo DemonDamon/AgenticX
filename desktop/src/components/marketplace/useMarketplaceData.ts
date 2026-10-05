@@ -7,10 +7,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   extractMcpServerNames,
   normalizeSkillName,
+  type MarketAgentInput,
+  type MarketCommandInput,
   type MarketLocalSkill,
   type MarketMcpEntry,
   type MarketRegistrySkill,
 } from "./model";
+import { useAppStore } from "../../store";
+import { fetchCommands } from "../../services/commandsApi";
 
 export type MarketplaceData = {
   loading: boolean;
@@ -27,6 +31,10 @@ export type MarketplaceData = {
   mcpEntries: MarketMcpEntry[];
   /** 本机已配置的 MCP server 名,用于连接器「已安装」判定。 */
   configuredMcpNames: ReadonlySet<string>;
+  /** 本地数字专家(listAvatars 投影,市场专家 Tab 数据源)。 */
+  agents: MarketAgentInput[];
+  /** 指令(启用中的内置 + 自定义 global 指令,市场指令 Tab 数据源)。 */
+  commands: MarketCommandInput[];
 };
 
 const INITIAL: MarketplaceData = {
@@ -38,6 +46,8 @@ const INITIAL: MarketplaceData = {
   registryItems: [],
   mcpEntries: [],
   configuredMcpNames: new Set<string>(),
+  agents: [],
+  commands: [],
 };
 
 /** 视为"从市场安装"的本地技能来源(与 model.ts 的 MARKET_LOCAL_SOURCES 一致)。 */
@@ -65,21 +75,28 @@ function cleanDescription(input: unknown): string {
 export function useMarketplaceData() {
   const [data, setData] = useState<MarketplaceData>(INITIAL);
   const seqRef = useRef(0);
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
 
   const patch = useCallback((partial: Partial<MarketplaceData>) => {
     setData((prev) => ({ ...prev, ...partial }));
   }, []);
 
-  /** 全量刷新:四路并行,失败的分支单独降级。 */
+  /** 全量刷新:六路并行,失败的分支单独降级。 */
   const reload = useCallback(async () => {
     const seq = ++seqRef.current;
     patch({ loading: true, loadError: null });
-    const [skillsRes, registryRes, mcpListRes, mcpStatusRes] = await Promise.all([
-      window.agenticxDesktop.loadSkills().catch(() => null),
-      window.agenticxDesktop.searchRegistry({ q: "" }).catch(() => null),
-      window.agenticxDesktop.mcpMarketplaceList({ page: 1, pageSize: 20 }).catch(() => null),
-      window.agenticxDesktop.loadMcpStatus("").catch(() => null),
-    ]);
+    const [skillsRes, registryRes, mcpListRes, mcpStatusRes, avatarsRes, commandsRes] =
+      await Promise.all([
+        window.agenticxDesktop.loadSkills().catch(() => null),
+        window.agenticxDesktop.searchRegistry({ q: "" }).catch(() => null),
+        window.agenticxDesktop.mcpMarketplaceList({ page: 1, pageSize: 20 }).catch(() => null),
+        window.agenticxDesktop.loadMcpStatus("").catch(() => null),
+        window.agenticxDesktop.listAvatars().catch(() => null),
+        apiBase
+          ? fetchCommands(apiBase, apiToken, "global").catch(() => null)
+          : Promise.resolve(null),
+      ]);
     if (seq !== seqRef.current) return;
 
     const localSkills = skillsRes?.ok ? skillsRes.items ?? [] : [];
@@ -128,6 +145,30 @@ export function useMarketplaceData() {
       ),
     );
 
+    const agents: MarketAgentInput[] = avatarsRes?.ok
+      ? (avatarsRes.avatars ?? []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          description: a.description,
+          avatar_url: a.avatar_url,
+        }))
+      : [];
+    // 指令:启用中的内置指令 + 自定义 global 指令(停用的内置指令不出现在市场)。
+    const commands: MarketCommandInput[] = commandsRes
+      ? [
+          ...(commandsRes.builtins ?? [])
+            .filter((b) => b.enabled !== false)
+            .map((b) => ({ name: b.name, description: b.description, builtin: true })),
+          ...(commandsRes.commands ?? []).map((c) => ({
+            name: c.name,
+            description: c.description,
+            builtin: false,
+            scope: "global",
+          })),
+        ]
+      : [];
+
     patch({
       loading: false,
       localSkillNames,
@@ -141,12 +182,14 @@ export function useMarketplaceData() {
       registryItems,
       mcpEntries,
       configuredMcpNames,
+      agents,
+      commands,
       loadError:
         !registryRes?.ok && !mcpListRes?.ok
           ? String(registryRes?.error ?? mcpListRes?.error ?? "load failed")
           : null,
     });
-  }, [patch]);
+  }, [patch, apiBase, apiToken]);
 
   /** 技能安装成功后的轻量刷新:更新本地技能名集合与已装市场技能卡片。 */
   const reloadSkills = useCallback(async () => {

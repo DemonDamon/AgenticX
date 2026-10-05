@@ -80,17 +80,17 @@ export function MarketplaceView() {
   );
   const skillTags = useMemo(() => skillFilterTags(skillItems), [skillItems]);
 
-  /** 统一条目:连接器 + 技能 + 专家 + 指令(专家/指令数据源后续接入)。 */
+  /** 统一条目:连接器 + 技能 + 专家 + 指令。 */
   const unifiedItems = useMemo(
     () =>
       buildUnifiedItems(
         data.mcpEntries,
         skillItems,
-        [],
-        [],
+        data.agents,
+        data.commands,
         data.configuredMcpNames,
       ),
-    [data.mcpEntries, skillItems, data.configuredMcpNames],
+    [data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
   );
   const filteredUnified = useMemo(
     () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query),
