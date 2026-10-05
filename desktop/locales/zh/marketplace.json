@@ -18,6 +18,8 @@
   },
   "featured": {
     "sectionTitle": "精选推荐",
+    "categories": "按场景分类",
+    "noSamples": "暂无条目",
     "office": {
       "title": "办公创作",
       "desc": "文档、表格、演示与图文内容的一站式创作扩展。"

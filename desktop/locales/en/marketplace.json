@@ -18,6 +18,8 @@
   },
   "featured": {
     "sectionTitle": "Featured",
+    "categories": "Browse by category",
+    "noSamples": "No items yet",
     "office": {
       "title": "Office & Creation",
       "desc": "Documents, spreadsheets, slides and written content in one place."

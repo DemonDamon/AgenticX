@@ -5,18 +5,22 @@ import { useAppStore } from "../../store";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { MainViewShell } from "../ds/MainViewShell";
 import { FeaturedCards } from "./FeaturedCards";
+import { FeaturedCategoryCards } from "./FeaturedCategoryCards";
 import { FilterChips } from "./FilterChips";
 import { SkillGrid } from "./SkillGrid";
 import { UnifiedGrid } from "./UnifiedGrid";
 import { PluginDetailModal } from "./PluginDetailModal";
 import { InstallConfirmBar } from "./InstallConfirmBar";
 import {
+  ALL_CATEGORIES,
   buildSkillItems,
   buildUnifiedItems,
+  CATEGORY_META,
   filterSkills,
   filterUnifiedItems,
   skillFilterTags,
   tabToKindFilter,
+  type MarketCategory,
   type MarketTab,
   type MarketplaceItem,
 } from "./model";
@@ -55,6 +59,8 @@ export function MarketplaceView() {
   const [view, setView] = useState<"market" | "manage">("market");
   const [query, setQuery] = useState("");
   const [skillTag, setSkillTag] = useState("all");
+  /** 场景分类筛选(全部 / 具体分类);仅 MCP 与技能 tab 生效。 */
+  const [categoryFilter, setCategoryFilter] = useState<MarketCategory | "all">("all");
   const [promptBusy, setPromptBusy] = useState(false);
   const [promptMsg, setPromptMsg] = useState("");
   const [detailServerId, setDetailServerId] = useState<string | null>(null);
@@ -93,13 +99,19 @@ export function MarketplaceView() {
     [data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
   );
   const filteredUnified = useMemo(
-    () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query),
-    [unifiedItems, activeTab, query],
+    () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query, categoryFilter),
+    [unifiedItems, activeTab, query, categoryFilter],
   );
 
   const onFeaturedPick = useCallback((target: { tab: MarketTab; tag: string }) => {
     setActiveTab(target.tab);
     if (target.tab === "skills") setSkillTag(target.tag);
+  }, []);
+
+  /** 点击精选分类大卡:切到全部 tab 并预选该场景分类。 */
+  const onPickCategory = useCallback((category: MarketCategory) => {
+    setActiveTab("all");
+    setCategoryFilter(category);
   }, []);
 
   /** 推荐位安装:把安装指引交给 Meta-Agent 在新会话里执行(与设置页链路一致)。 */
@@ -258,7 +270,10 @@ export function MarketplaceView() {
                   ? "bg-surface-card-strong font-medium text-text-strong"
                   : "text-text-muted hover:text-text-strong"
               }`}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => {
+                setActiveTab(tab);
+                setCategoryFilter("all");
+              }}
             >
               {t(`tabs.${tab}`)}
             </button>
@@ -279,6 +294,40 @@ export function MarketplaceView() {
 
       <div className="space-y-5">
         <FeaturedCards onPick={onFeaturedPick} />
+
+        {(activeTab === "all" || activeTab === "mcp" || activeTab === "skills") ? (
+          <FeaturedCategoryCards items={unifiedItems} onPickCategory={onPickCategory} />
+        ) : null}
+
+        {(activeTab === "all" || activeTab === "mcp" || activeTab === "skills") ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                categoryFilter === "all"
+                  ? "bg-accent text-white"
+                  : "bg-surface-card text-text-muted hover:bg-surface-hover"
+              }`}
+              onClick={() => setCategoryFilter("all")}
+            >
+              {t("filters.all")}
+            </button>
+            {ALL_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                  categoryFilter === cat
+                    ? "bg-accent text-white"
+                    : "bg-surface-card text-text-muted hover:bg-surface-hover"
+                }`}
+                onClick={() => setCategoryFilter(cat)}
+              >
+                {CATEGORY_META[cat].label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {data.loadError ? (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
