@@ -47,6 +47,26 @@
     "installed": "已安装"
   },
   "useDraft": "请使用技能「{{name}}」帮我完成任务。",
+  "manageView": {
+    "back": "返回市场",
+    "title": "管理",
+    "subtitle": "管理已添加的插件与技能，开关技能或直接体验。",
+    "advancedSettings": "高级设置",
+    "tabs": {
+      "plugins": "插件 ({{count}})",
+      "skills": "技能 ({{count}})"
+    },
+    "searchPlugins": "搜索插件",
+    "searchSkills": "搜索技能",
+    "empty": "暂无已安装内容",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "toolCount": "提供 {{count}} 个工具",
+    "tryIt": "体验",
+    "enableSkill": "启用技能 {{name}}",
+    "disableSkill": "停用技能 {{name}}",
+    "toggleFailed": "技能 {{name}} 开关失败，请重试"
+  },
   "pluginDetail": {
     "tools": "提供的工具",
     "env": "所需配置",

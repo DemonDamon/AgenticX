@@ -47,6 +47,26 @@
     "installed": "Installed"
   },
   "useDraft": "Please use the \"{{name}}\" skill to help me with my task.",
+  "manageView": {
+    "back": "Back to market",
+    "title": "Manage",
+    "subtitle": "Manage added plugins and skills: toggle skills or try them right away.",
+    "advancedSettings": "Advanced settings",
+    "tabs": {
+      "plugins": "Plugins ({{count}})",
+      "skills": "Skills ({{count}})"
+    },
+    "searchPlugins": "Search plugins",
+    "searchSkills": "Search skills",
+    "empty": "Nothing installed yet",
+    "connected": "Connected",
+    "disconnected": "Not connected",
+    "toolCount": "Provides {{count}} tools",
+    "tryIt": "Try it",
+    "enableSkill": "Enable skill {{name}}",
+    "disableSkill": "Disable skill {{name}}",
+    "toggleFailed": "Failed to toggle skill {{name}}, please retry"
+  },
   "pluginDetail": {
     "tools": "Provided tools",
     "env": "Required configuration",

@@ -22,6 +22,7 @@ import { buildOfficeCliInstallPrompt } from "../../utils/officecli-install-promp
 import { buildArchscribeInstallPrompt } from "../../utils/archscribe-install-prompt";
 import { useMarketplaceData } from "./useMarketplaceData";
 import { useSkillInstall } from "./useSkillInstall";
+import { ManageView } from "./ManageView";
 import { MarketOnboardingModal, MARKET_ONBOARDING_DISMISSED_KEY } from "./MarketOnboardingModal";
 import type { FeaturedTarget } from "../../data/marketplace-config";
 
@@ -48,6 +49,8 @@ export function MarketplaceView() {
   const { status: installStatus, install, confirm, cancelConfirm } = useSkillInstall(reloadSkills);
 
   const [activeTab, setActiveTab] = useState<MarketTab>("plugins");
+  /** 市场内部子视图:主浏览页 vs 已装内容管理页。 */
+  const [view, setView] = useState<"market" | "manage">("market");
   const [pluginQuery, setPluginQuery] = useState("");
   const [skillQuery, setSkillQuery] = useState("");
   const [pluginTag, setPluginTag] = useState("all");
@@ -196,6 +199,15 @@ export function MarketplaceView() {
 
   return (
     <MainViewShell>
+      {view === "manage" ? (
+        <ManageView
+          onBack={() => setView("market")}
+          onUse={(name) => newMetaTask(t("useDraft", { name }))}
+          onOpenAdvancedSettings={() => openSettings("skills")}
+          mcpEntries={data.mcpEntries}
+        />
+      ) : (
+      <>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-text-strong">{t("title")}</h2>
@@ -204,7 +216,7 @@ export function MarketplaceView() {
         <button
           type="button"
           className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-          onClick={() => openSettings("skills")}
+          onClick={() => setView("manage")}
         >
           <Settings2 className="h-3.5 w-3.5" />
           {t("manage")}
@@ -341,6 +353,8 @@ export function MarketplaceView() {
           </>
         )}
       </div>
+      </>
+      )}
 
       <PluginDetailModal
         serverId={detailServerId}
