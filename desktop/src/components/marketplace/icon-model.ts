@@ -75,3 +75,46 @@ export function pickMarketIconGlyph(name: string): MarketIconGlyph {
   }
   return "sparkles";
 }
+
+/** 品牌图标(官方矢量 logo,经 Simple Icons CDN 按 slug 引用)。 */
+export type MarketBrandIcon = { slug: string };
+
+/**
+ * 知名品牌关键词 → Simple Icons slug(仅收录 CDN 实测可用的 slug)。
+ * 无命中的名称走渐变底座;CDN 不可达时组件层回退渐变。
+ */
+const BRAND_RULES: ReadonlyArray<readonly [readonly string[], string]> = [
+  [["supabase"], "supabase"],
+  [["github"], "github"],
+  [["gitlab"], "gitlab"],
+  [["anthropic", "claude"], "anthropic"],
+  [["deepseek"], "deepseek"],
+  [["gemini"], "googlegemini"],
+  [["ollama"], "ollama"],
+  [["notion"], "notion"],
+  [["figma"], "figma"],
+  [["docker"], "docker"],
+  [["kubernetes", "k8s"], "kubernetes"],
+  [["postgres"], "postgresql"],
+  [["mysql"], "mysql"],
+  [["mongodb", "mongo"], "mongodb"],
+  [["redis"], "redis"],
+  [["elasticsearch"], "elasticsearch"],
+  [["jenkins"], "jenkins"],
+  [["sentry"], "sentry"],
+  [["stripe"], "stripe"],
+  [["grafana"], "grafana"],
+  [["vercel"], "vercel"],
+  [["cloudflare"], "cloudflare"],
+  [["阿里云", "aliyun", "alibabacloud"], "alibabacloud"],
+  [["微信", "wechat", "weixin"], "wechat"],
+];
+
+/** 按名称关键词匹配知名品牌官方图标;无命中返回 null。 */
+export function pickBrandIcon(name: string): MarketBrandIcon | null {
+  const n = name.toLowerCase();
+  for (const [keywords, slug] of BRAND_RULES) {
+    if (keywords.some((k) => n.includes(k))) return { slug };
+  }
+  return null;
+}

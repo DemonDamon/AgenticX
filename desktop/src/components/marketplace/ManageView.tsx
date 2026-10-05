@@ -7,8 +7,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Loader2, MessageSquarePlus, Search, Settings2 } from "lucide-react";
-import { buildManageMcpRows, buildManageSkillRows } from "./manage-model";
-import type { MarketMcpEntry } from "./model";
+import { buildManageMcpRows, buildManageSkillRows, type ManageSkillRowInput } from "./manage-model";
+import { extractMcpServerNames, type MarketMcpEntry } from "./model";
 import { MarketIcon } from "./MarketIcon";
 
 type Props = {
@@ -19,41 +19,78 @@ type Props = {
   onOpenAdvancedSettings: () => void;
   /** 市场条目(用于 MCP 行匹配上游 logo)。 */
   mcpEntries: readonly MarketMcpEntry[];
+  /** 市场视图已拉过的技能列表:有则首屏直出,后台再静默刷新。 */
+  initialSkills?: readonly ManageSkillRowInput[];
 };
 
 type ManageTab = "plugins" | "skills";
 
-export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries }: Props) {
+export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries, initialSkills }: Props) {
   const { t } = useTranslation("marketplace");
 
   const [tab, setTab] = useState<ManageTab>("plugins");
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [skills, setSkills] = useState<Array<{ name: string; description: string; source?: string; globally_disabled?: boolean }>>([]);
+  const [loading, setLoading] = useState(!initialSkills || initialSkills.length === 0);
+  const [skills, setSkills] = useState<ManageSkillRowInput[]>(() => (initialSkills ? [...initialSkills] : []));
   const [servers, setServers] = useState<Array<{ name: string; connected: boolean; tool_count?: number }>>([]);
+  /** logo 索引:市场过滤条目 + 后台拉的全量市场列表(含未认证/非托管条目)。 */
+  const [logoEntries, setLogoEntries] = useState<MarketMcpEntry[]>(() => [...mcpEntries]);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
-  const reload = useCallback(async () => {
-    const [skillsRes, mcpRes] = await Promise.all([
-      window.agenticxDesktop.loadSkills().catch(() => null),
-      window.agenticxDesktop.loadMcpStatus("").catch(() => null),
-    ]);
-    setSkills(skillsRes?.ok ? skillsRes.items ?? [] : []);
+  const reloadSkills = useCallback(async () => {
+    const res = await window.agenticxDesktop.loadSkills().catch(() => null);
+    if (res?.ok) setSkills(res.items ?? []);
+  }, []);
+
+  const reloadServers = useCallback(async () => {
+    const res = await window.agenticxDesktop.loadMcpStatus("").catch(() => null);
     setServers(
-      mcpRes?.ok && Array.isArray(mcpRes.servers)
-        ? mcpRes.servers.map((s) => ({ name: s.name, connected: s.connected, tool_count: s.tool_count }))
+      res?.ok && Array.isArray(res.servers)
+        ? res.servers.map((s) => ({ name: s.name, connected: s.connected, tool_count: s.tool_count }))
         : [],
     );
-    setLoading(false);
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (loading) {
+      void Promise.all([reloadSkills(), reloadServers()]).finally(() => setLoading(false));
+    } else {
+      // 首屏已直出,两路后台刷新到最新即可。
+      void reloadSkills();
+      void reloadServers();
+    }
+    // 后台拉全量市场列表,扩充 MCP 行的 logo 匹配范围(不挡首屏)。
+    void window.agenticxDesktop
+      .mcpMarketplaceList({ page: 1, pageSize: 100 })
+      .then((res) => {
+        if (!res?.ok) return;
+        const raws = (res.items ?? []) as Array<Record<string, unknown>>;
+        setLogoEntries((prev) => {
+          const merged = [...prev];
+          for (const raw of raws) {
+            const logo = String(raw.logo_url ?? "").trim();
+            const names = extractMcpServerNames(raw);
+            if (!logo || names.length === 0) continue;
+            const serverId = String(raw.id ?? raw.name ?? "");
+            if (!serverId || merged.some((e) => e.serverId === serverId)) continue;
+            merged.push({
+              serverId,
+              name: String(raw.chinese_name || raw.name || serverId),
+              description: "",
+              serverNames: names,
+              logoUrl: logo,
+            });
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const skillRows = useMemo(() => buildManageSkillRows(skills, query), [skills, query]);
-  const mcpRows = useMemo(() => buildManageMcpRows(servers, mcpEntries, query), [servers, mcpEntries, query]);
+  const mcpRows = useMemo(() => buildManageMcpRows(servers, logoEntries, query), [servers, logoEntries, query]);
 
   /** 技能全局开关:读当前 settings,整体回写 disabledSkills(PUT 会失效列表缓存)。 */
   const toggleSkill = async (name: string, disabled: boolean) => {
@@ -78,7 +115,7 @@ export function ManageView({ onBack, onUse, onOpenAdvancedSettings, mcpEntries }
         setMsg(res.error ?? t("manageView.toggleFailed", { name }));
         return;
       }
-      await reload();
+      await reloadSkills();
     } catch (e) {
       setMsg(String(e));
     } finally {

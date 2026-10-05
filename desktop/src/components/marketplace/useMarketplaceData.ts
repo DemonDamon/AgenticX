@@ -18,6 +18,8 @@ export type MarketplaceData = {
   loadError: string | null;
   /** 本地已装技能名(归一化小写),用于卡片「已安装」判定。 */
   localSkillNames: ReadonlySet<string>;
+  /** 本地技能全量列表(供管理视图复用,避免二次请求)。 */
+  skillItems: Array<{ name: string; description: string; source?: string; globally_disabled?: boolean }>;
   /** 本地已装的市场技能(source=registry/bundle),目录外的装完技能靠它可见。 */
   localMarketSkills: MarketLocalSkill[];
   registryItems: MarketRegistrySkill[];
@@ -31,6 +33,7 @@ const INITIAL: MarketplaceData = {
   loading: true,
   loadError: null,
   localSkillNames: new Set<string>(),
+  skillItems: [],
   localMarketSkills: [],
   registryItems: [],
   mcpEntries: [],
@@ -128,6 +131,12 @@ export function useMarketplaceData() {
     patch({
       loading: false,
       localSkillNames,
+      skillItems: localSkills.map((s) => ({
+        name: s.name,
+        description: s.description,
+        source: s.source,
+        globally_disabled: s.globally_disabled,
+      })),
       localMarketSkills,
       registryItems,
       mcpEntries,

@@ -22,7 +22,7 @@ import {
   Sparkles,
   Video,
 } from "lucide-react";
-import { pickGradientFor, pickMarketIconGlyph, type MarketIconGlyph } from "./icon-model";
+import { pickBrandIcon, pickGradientFor, pickMarketIconGlyph, type MarketIconGlyph } from "./icon-model";
 
 const GLYPH_ICONS: Record<MarketIconGlyph, typeof Sparkles> = {
   map: Map,
@@ -54,7 +54,10 @@ type Props = {
 
 export function MarketIcon({ name, logoUrl, iconSrc, className = "h-10 w-10" }: Props) {
   const [broken, setBroken] = useState(false);
-  const img = iconSrc || logoUrl;
+  // 图标优先级:推荐位图标 → 知名品牌官方矢量(CDN) → 上游 logo → 渐变底座。
+  const brand = pickBrandIcon(name);
+  const img =
+    iconSrc || (brand ? `https://cdn.simpleicons.org/${brand.slug}` : logoUrl);
   if (img && !broken) {
     return (
       <img

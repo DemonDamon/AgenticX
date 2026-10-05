@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MARKET_GRADIENTS,
   hashName,
+  pickBrandIcon,
   pickGradientFor,
   pickMarketIconGlyph,
 } from "./icon-model";
@@ -47,5 +48,25 @@ describe("pickMarketIconGlyph", () => {
 
   it("falls back to sparkles when no keyword matches", () => {
     expect(pickMarketIconGlyph("decidealot")).toBe("sparkles");
+  });
+});
+
+describe("pickBrandIcon", () => {
+  it("matches known brand names (case-insensitive)", () => {
+    expect(pickBrandIcon("supabase")).toEqual({ slug: "supabase" });
+    expect(pickBrandIcon("Supabase 数据库")).toEqual({ slug: "supabase" });
+    expect(pickBrandIcon("GitHub MCP Server")).toEqual({ slug: "github" });
+    expect(pickBrandIcon("claude-code")).toEqual({ slug: "anthropic" });
+    expect(pickBrandIcon("postgres 查询工具")).toEqual({ slug: "postgresql" });
+  });
+
+  it("matches Chinese brand names", () => {
+    expect(pickBrandIcon("阿里云百炼")).toEqual({ slug: "alibabacloud" });
+    expect(pickBrandIcon("微信公众号助手")).toEqual({ slug: "wechat" });
+  });
+
+  it("returns null for unknown names", () => {
+    expect(pickBrandIcon("decidealot")).toBeNull();
+    expect(pickBrandIcon("mineru-docparser")).toBeNull();
   });
 });

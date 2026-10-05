@@ -205,6 +205,7 @@ export function MarketplaceView() {
           onUse={(name) => newMetaTask(t("useDraft", { name }))}
           onOpenAdvancedSettings={() => openSettings("skills")}
           mcpEntries={data.mcpEntries}
+          initialSkills={data.skillItems}
         />
       ) : (
       <>
