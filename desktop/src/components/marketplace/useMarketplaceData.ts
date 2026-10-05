@@ -136,6 +136,9 @@ export function useMarketplaceData() {
         description: cleanDescription(raw.description),
         serverNames: names,
         logoUrl: String(raw.logo_url ?? "").trim() || undefined,
+        categories: Array.isArray((raw as { categories?: unknown }).categories)
+          ? ((raw as { categories: unknown[] }).categories.filter((c): c is string => typeof c === "string"))
+          : undefined,
       });
     }
 

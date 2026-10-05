@@ -66,7 +66,98 @@ export type MarketMcpEntry = {
   serverNames: string[];
   /** 上游 logo 地址,卡片图标优先用它。 */
   logoUrl?: string;
+  /** 上游返回的原始分类标签(如 ["browser-automation"]),用于映射场景分类。 */
+  categories?: string[];
 };
+
+/**
+ * 场景分类:按用户使用场景组织市场条目(研发工具/内容创作/数据分析等)。
+ * MCP 上游 categories(英文标签)与技能 category(中文)都映射到这套枚举。
+ */
+export type MarketCategory =
+  | "dev_tools"
+  | "content_creation"
+  | "data_analysis"
+  | "ecommerce"
+  | "finance"
+  | "legal"
+  | "efficiency"
+  | "ui_design"
+  | "research"
+  | "other";
+
+/** 分类元数据:中文名 + lucide 图标名 + 一句话描述,供精选大卡与筛选 chip 共用。 */
+export const CATEGORY_META: Record<MarketCategory, { label: string; icon: string; desc: string }> = {
+  dev_tools: { label: "研发工具", icon: "Code2", desc: "代码托管、原型开发、浏览器自动化等研发提效扩展" },
+  content_creation: { label: "内容创作", icon: "PenLine", desc: "文档、表格、演示、图文与图片视频创作" },
+  data_analysis: { label: "数据分析", icon: "BarChart3", desc: "数据清洗、统计分析、报表与可视化" },
+  ecommerce: { label: "电商营销", icon: "ShoppingBag", desc: "选品、图片生成、SEO 与营销内容" },
+  finance: { label: "金融投资", icon: "TrendingUp", desc: "行情、财报、个股分析与投研辅助" },
+  legal: { label: "法务合规", icon: "Scale", desc: "合同审查、合规检查与法律文书辅助" },
+  efficiency: { label: "效率提升", icon: "Zap", desc: "自动化、日程、会议与知识管理" },
+  ui_design: { label: "界面设计", icon: "Palette", desc: "UI 设计、前端设计工具集与设计系统" },
+  research: { label: "调研分析", icon: "Search", desc: "网页抓取、搜索、知识库与行业研究" },
+  other: { label: "其他", icon: "Boxes", desc: "未归类的扩展能力" },
+};
+
+/** 全部分类枚举顺序(精选大卡与筛选 chip 按此顺序展示)。 */
+export const ALL_CATEGORIES: MarketCategory[] = [
+  "dev_tools",
+  "content_creation",
+  "data_analysis",
+  "ecommerce",
+  "finance",
+  "legal",
+  "efficiency",
+  "ui_design",
+  "research",
+];
+
+/** MCP 上游英文分类标签 → 场景分类的关键词映射(命中即归类)。 */
+const MCP_CATEGORY_KEYWORDS: { category: MarketCategory; keywords: string[] }[] = [
+  { category: "dev_tools", keywords: ["browser", "automation", "develop", "devops", "code", "git", "github", "gitlab", "ci", "deploy"] },
+  { category: "content_creation", keywords: ["content", "writing", "document", "image", "video", "ppt", "slide", "office", "doc"] },
+  { category: "data_analysis", keywords: ["data", "analytic", "database", "sql", "chart", "visualiz", "statistic"] },
+  { category: "ecommerce", keywords: ["e-commerce", "ecommerce", "shop", "commerce", "marketing", "seo"] },
+  { category: "finance", keywords: ["finance", "trading", "stock", "market", "invest", "quant"] },
+  { category: "legal", keywords: ["legal", "law", "compliance", "contract"] },
+  { category: "efficiency", keywords: ["productivity", "efficiency", "automation", "calendar", "meeting", "note", "task"] },
+  { category: "ui_design", keywords: ["ui", "design", "frontend", "figma", "mockup", "prototype"] },
+  { category: "research", keywords: ["research", "search", "web", "crawl", "scrape", "knowledge"] },
+];
+
+/**
+ * 将 MCP 上游 categories(英文标签数组)映射到场景分类。
+ * 取第一个命中关键词的分类;全未命中返回 other。
+ */
+export function mapMcpCategories(rawCategories: readonly string[] | undefined): MarketCategory {
+  if (!rawCategories || rawCategories.length === 0) return "other";
+  for (const raw of rawCategories) {
+    const tag = String(raw).toLowerCase();
+    for (const { category, keywords } of MCP_CATEGORY_KEYWORDS) {
+      if (keywords.some((k) => tag.includes(k))) return category;
+    }
+  }
+  return "other";
+}
+
+/** 技能中文 category → 场景分类的关键词映射。 */
+const SKILL_CATEGORY_KEYWORDS: { category: MarketCategory; keywords: string[] }[] = [
+  { category: "content_creation", keywords: ["office", "文档", "创作", "ppt", "演示", "图文", "图片", "视频"] },
+  { category: "dev_tools", keywords: ["架构", "代码", "开发", "cli", "工具集"] },
+  { category: "research", keywords: ["知识库", "笔记", "检索", "搜索", "研究"] },
+  { category: "efficiency", keywords: ["会议", "日程", "协作"] },
+];
+
+/** 将技能的中文 category 字符串映射到场景分类;未命中或为空返回 other。 */
+export function mapSkillCategory(rawCategory: string | undefined): MarketCategory {
+  if (!rawCategory) return "other";
+  const tag = rawCategory.toLowerCase();
+  for (const { category, keywords } of SKILL_CATEGORY_KEYWORDS) {
+    if (keywords.some((k) => tag.includes(k.toLowerCase()))) return category;
+  }
+  return "other";
+}
 
 /**
  * 市场统一条目 kind:MCP 连接器 / 技能(含精选工具位) / 数字专家 / 指令。
@@ -108,7 +199,8 @@ export type MarketplaceItem = {
   origin?: MarketSkillOrigin;
   cta?: RecommendedSkillCta;
   officialUrl?: string;
-  category?: string;
+  /** 场景分类(MCP 由上游 categories 映射;技能由中文 category 映射)。 */
+  category?: MarketCategory;
   tier?: RecommendedSkillTier;
   version?: string;
   /** kind=agent:专家头像地址。 */
@@ -287,6 +379,7 @@ export function buildMcpItems(
     provider: entry.serverId,
     serverId: entry.serverId,
     logoUrl: entry.logoUrl,
+    category: mapMcpCategories(entry.categories),
   }));
 }
 
@@ -334,7 +427,7 @@ function toUnifiedSkillItem(item: MarketSkillItem): MarketplaceItem {
     origin: item.origin,
     cta: item.cta,
     officialUrl: item.officialUrl,
-    category: item.category,
+    category: mapSkillCategory(item.category),
     tier: item.tier,
     version: item.version,
   };
@@ -365,14 +458,16 @@ function matchesUnifiedQuery(item: MarketplaceItem, query: string): boolean {
   return item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
 }
 
-/** 统一条目筛选:kind 为 "all" 或具体 kind;query 对名称/描述做包含匹配。 */
+/** 统一条目筛选:kind 为 "all" 或具体 kind;category 为可选场景分类;query 对名称/描述做包含匹配。 */
 export function filterUnifiedItems(
   items: readonly MarketplaceItem[],
   kind: "all" | MarketItemKind,
   query: string,
+  category?: MarketCategory | "all",
 ): MarketplaceItem[] {
   return items.filter((it) => {
     if (kind !== "all" && it.kind !== kind) return false;
+    if (category && category !== "all" && it.category !== category) return false;
     return matchesUnifiedQuery(it, query);
   });
 }

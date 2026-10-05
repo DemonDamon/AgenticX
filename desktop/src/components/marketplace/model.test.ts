@@ -9,6 +9,8 @@ import {
   filterUnifiedItems,
   isMcpInstalled,
   isSkillInstalled,
+  mapMcpCategories,
+  mapSkillCategory,
   normalizeSkillName,
   skillFilterTags,
 } from "./model";
@@ -171,6 +173,40 @@ describe("skillFilterTags", () => {
   });
 });
 
+describe("mapMcpCategories", () => {
+  it("maps known upstream category tags to a scenario category", () => {
+    expect(mapMcpCategories(["browser-automation"])).toBe("dev_tools");
+    expect(mapMcpCategories(["data-analysis"])).toBe("data_analysis");
+    expect(mapMcpCategories(["content-generation"])).toBe("content_creation");
+    expect(mapMcpCategories(["finance"])).toBe("finance");
+    expect(mapMcpCategories(["e-commerce"])).toBe("ecommerce");
+  });
+
+  it("falls back to other for unknown or empty categories", () => {
+    expect(mapMcpCategories(["totally-unknown-tag"])).toBe("other");
+    expect(mapMcpCategories([])).toBe("other");
+  });
+
+  it("picks the first mappable category when multiple are provided", () => {
+    expect(mapMcpCategories(["unknown", "productivity"])).toBe("efficiency");
+  });
+});
+
+describe("mapSkillCategory", () => {
+  it("maps known Chinese skill categories to a scenario category", () => {
+    expect(mapSkillCategory("Office 创作")).toBe("content_creation");
+    expect(mapSkillCategory("文档协作")).toBe("content_creation");
+    expect(mapSkillCategory("架构可视化")).toBe("dev_tools");
+    expect(mapSkillCategory("知识库")).toBe("research");
+    expect(mapSkillCategory("会议")).toBe("efficiency");
+  });
+
+  it("falls back to other for unknown or undefined categories", () => {
+    expect(mapSkillCategory("从未见过的类目")).toBe("other");
+    expect(mapSkillCategory(undefined)).toBe("other");
+  });
+});
+
 describe("buildMcpItems", () => {
   const mcpEntries = [
     {
@@ -179,6 +215,7 @@ describe("buildMcpItems", () => {
       description: "Code hosting",
       serverNames: ["github"],
       logoUrl: "https://x/github.png",
+      categories: ["development"],
     },
     { serverId: "zhihu", name: "Zhihu", description: "Q&A data", serverNames: ["zhihu"] },
   ];
@@ -191,6 +228,7 @@ describe("buildMcpItems", () => {
     expect(gh?.installed).toBe(true);
     expect(gh?.serverId).toBe("github");
     expect(gh?.logoUrl).toBe("https://x/github.png");
+    expect(gh?.category).toBe("dev_tools");
     expect(items.find((it) => it.key === "mcp:zhihu")?.installed).toBe(false);
   });
 });
