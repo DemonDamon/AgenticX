@@ -3,11 +3,12 @@
  * 展示描述 / 将添加的 server / 所需环境变量表单,「安装」后由父级执行安装。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { Modal } from "../ds/Modal";
 import { extractMcpServerNames } from "./model";
+import { getSkillsForPlugin, type PluginBundledSkill } from "../../data/plugin-skill-bundles";
 
 type Props = {
   serverId: string | null;
@@ -15,6 +16,10 @@ type Props = {
   onClose: () => void;
   /** 返回是否安装成功(成功则关闭浮层)。 */
   onInstall: (serverId: string, env: Record<string, string>) => Promise<boolean>;
+  /** 已安装的技能名集合,用于标记配套技能的安装态。 */
+  installedSkillNames?: readonly string[];
+  /** 安装单个配套技能(registry 或 recommended)。 */
+  onInstallSkill?: (skill: PluginBundledSkill) => void;
 };
 
 type DetailState = {
@@ -41,10 +46,37 @@ function cleanDescription(input: unknown): string {
     .trim();
 }
 
-export function PluginDetailModal({ serverId, installing, onClose, onInstall }: Props) {
+export function PluginDetailModal({
+  serverId,
+  installing,
+  onClose,
+  onInstall,
+  installedSkillNames,
+  onInstallSkill,
+}: Props) {
   const { t } = useTranslation("marketplace");
   const [detail, setDetail] = useState<DetailState>(EMPTY_DETAIL);
   const [envForm, setEnvForm] = useState<Record<string, string>>({});
+
+  /** 该插件所有 server 名对应的配套技能(去重)。 */
+  const bundledSkills = useMemo<PluginBundledSkill[]>(() => {
+    const seen = new Set<string>();
+    const out: PluginBundledSkill[] = [];
+    for (const name of detail.serverNames) {
+      for (const s of getSkillsForPlugin(name)) {
+        const key = s.kind === "registry" ? `${s.source}:${s.name}` : `rec:${s.id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(s);
+        }
+      }
+    }
+    return out;
+  }, [detail.serverNames]);
+
+  const installedSet = useMemo(() => new Set(installedSkillNames ?? []), [installedSkillNames]);
+  const isSkillInstalled = (s: PluginBundledSkill) =>
+    s.kind === "registry" ? installedSet.has(s.name) : installedSet.has(s.id);
 
   useEffect(() => {
     if (!serverId) return;
@@ -131,6 +163,42 @@ export function PluginDetailModal({ serverId, installing, onClose, onInstall }: 
               )}
               <p className="mt-2 text-[11px] text-text-faint">{t("pluginDetail.installHint")}</p>
             </div>
+
+            {bundledSkills.length > 0 ? (
+              <div>
+                <div className="mb-1.5 text-xs font-medium text-text-strong">
+                  {t("pluginDetail.bundledSkills")}
+                </div>
+                <div className="space-y-1.5">
+                  {bundledSkills.map((s) => {
+                    const installed = isSkillInstalled(s);
+                    return (
+                      <div
+                        key={s.kind === "registry" ? `${s.source}:${s.name}` : s.id}
+                        className="flex items-center gap-2 rounded-md border border-border bg-surface-card px-2.5 py-1.5"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-text-strong">{s.label}</span>
+                        {installed ? (
+                          <span className="shrink-0 rounded-full border border-emerald-500/40 px-1.5 text-[10px] text-emerald-400">
+                            {t("pluginDetail.skillInstalled")}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+                            disabled={!onInstallSkill}
+                            onClick={() => onInstallSkill?.(s)}
+                          >
+                            {t("actions.install")}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-text-faint">{t("pluginDetail.bundledSkillsHint")}</p>
+              </div>
+            ) : null}
           </>
         )}
       </div>

@@ -4,8 +4,10 @@ import {
   buildManageCommandRows,
   buildManageMcpRows,
   buildManageSkillRows,
-  findUnmatchedServerNames,
+  buildAuthRows,
   matchServerLogoEntry,
+  findUnmatchedServerNames,
+  type ManageAuthServerInput,
 } from "./manage-model";
 import type { MarketMcpEntry } from "./model";
 
@@ -168,6 +170,48 @@ describe("buildManageAgentRows", () => {
     expect(buildManageAgentRows(agents, "写作")).toHaveLength(1);
     expect(buildManageAgentRows(agents, "review")).toHaveLength(1);
     expect(buildManageAgentRows(agents, "nope")).toHaveLength(0);
+  });
+});
+
+describe("buildAuthRows", () => {
+  const servers: ManageAuthServerInput[] = [
+    { name: "feishu", connected: true, env: { APP_ID: "x", APP_SECRET: "y" } },
+    { name: "github", connected: true },
+    { name: "fetch", connected: true },
+    { name: "custom-data", connected: false, env: { API_TOKEN: "abc" } },
+    { name: "plain-server", connected: true },
+  ];
+  const entries: MarketMcpEntry[] = [
+    { serverId: "feishu", name: "飞书", description: "Lark", serverNames: ["feishu"], logoUrl: "https://x/feishu.png" },
+  ];
+
+  it("includes servers with credential env vars or known OAuth provider names", () => {
+    const rows = buildAuthRows(servers, entries, "");
+    const names = rows.map((r) => r.name);
+    expect(names).toContain("feishu");
+    expect(names).toContain("github");
+    expect(names).toContain("custom-data");
+    expect(names).not.toContain("fetch");
+    expect(names).not.toContain("plain-server");
+  });
+
+  it("marks connected state and hasCredentials correctly", () => {
+    const rows = buildAuthRows(servers, entries, "");
+    const feishu = rows.find((r) => r.name === "feishu");
+    expect(feishu?.connected).toBe(true);
+    expect(feishu?.hasCredentials).toBe(true);
+    const github = rows.find((r) => r.name === "github");
+    expect(github?.hasCredentials).toBe(false);
+  });
+
+  it("filters by name case-insensitively", () => {
+    expect(buildAuthRows(servers, entries, "feishu")).toHaveLength(1);
+    expect(buildAuthRows(servers, entries, "nope")).toHaveLength(0);
+  });
+
+  it("matches marketplace logo by server name", () => {
+    const rows = buildAuthRows(servers, entries, "");
+    expect(rows.find((r) => r.name === "feishu")?.logoUrl).toBe("https://x/feishu.png");
   });
 });
 

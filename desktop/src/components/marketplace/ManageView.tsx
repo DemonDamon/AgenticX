@@ -12,9 +12,11 @@ import {
   buildManageCommandRows,
   buildManageMcpRows,
   buildManageSkillRows,
+  buildAuthRows,
   findUnmatchedServerNames,
   matchServerLogoEntry,
   type ManageAgentRowInput,
+  type ManageAuthServerInput,
   type ManageCommandRowInput,
   type ManageSkillRowInput,
 } from "./manage-model";
@@ -46,7 +48,7 @@ type Props = {
   initialSkills?: readonly ManageSkillRowInput[];
 };
 
-type ManageTab = "mcp" | "skills" | "agents" | "commands";
+type ManageTab = "mcp" | "skills" | "agents" | "commands" | "auth";
 
 export function ManageView({
   onBack,
@@ -65,7 +67,7 @@ export function ManageView({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(!initialSkills || initialSkills.length === 0);
   const [skills, setSkills] = useState<ManageSkillRowInput[]>(() => (initialSkills ? [...initialSkills] : []));
-  const [servers, setServers] = useState<Array<{ name: string; connected: boolean; tool_count?: number }>>([]);
+  const [servers, setServers] = useState<ManageAuthServerInput[]>([]);
   const [agents, setAgents] = useState<ManageAgentRowInput[]>([]);
   const [builtinCommands, setBuiltinCommands] = useState<BuiltinCommand[]>([]);
   const [customCommands, setCustomCommands] = useState<StoredCommand[]>([]);
@@ -83,10 +85,26 @@ export function ManageView({
 
   const reloadServers = useCallback(async () => {
     const res = await window.agenticxDesktop.loadMcpStatus("").catch(() => null);
-    setServers(
+    const base =
       res?.ok && Array.isArray(res.servers)
         ? res.servers.map((s) => ({ name: s.name, connected: s.connected, tool_count: s.tool_count }))
-        : [],
+        : [];
+    // 从 mcp.json 读取各 server 的 env/headers,用于应用授权 tab 判定凭证状态。
+    let envMap: Record<string, { env?: Record<string, string>; headers?: Record<string, string> }> = {};
+    try {
+      const raw = await window.agenticxDesktop.mcpGetRaw({}).catch(() => null);
+      if (raw?.ok && raw.text) {
+        const parsed = JSON.parse(raw.text) as { mcpServers?: Record<string, { env?: Record<string, string>; headers?: Record<string, string> }> };
+        envMap = parsed.mcpServers ?? {};
+      }
+    } catch {
+      /* mcp.json 读取失败降级为无凭证信息 */
+    }
+    setServers(
+      base.map((s) => {
+        const cfg = envMap[s.name] ?? {};
+        return { ...s, env: cfg.env, headers: cfg.headers };
+      }),
     );
   }, []);
 
@@ -192,6 +210,7 @@ export function ManageView({
       ),
     [builtinCommands, customCommands, query],
   );
+  const authRows = useMemo(() => buildAuthRows(servers, logoEntries, query), [servers, logoEntries, query]);
 
   /** 技能全局开关:读当前 settings,整体回写 disabledSkills(PUT 会失效列表缓存)。 */
   const toggleSkill = async (name: string, disabled: boolean) => {
@@ -258,6 +277,7 @@ export function ManageView({
     skills: skills.length,
     agents: agents.length,
     commands: builtinCommands.length + customCommands.length,
+    auth: authRows.length,
   };
   const rows =
     tab === "skills"
@@ -266,7 +286,9 @@ export function ManageView({
         ? agentRows.length
         : tab === "commands"
           ? commandRows.length
-          : mcpRows.length;
+          : tab === "auth"
+            ? authRows.length
+            : mcpRows.length;
 
   return (
     <div>
@@ -300,7 +322,7 @@ export function ManageView({
           aria-label={t("manageView.title")}
           className="flex items-center gap-1 rounded-lg border border-border bg-surface-card p-1"
         >
-          {(["mcp", "skills", "agents", "commands"] as const).map((key) => (
+          {(["mcp", "skills", "agents", "commands", "auth"] as const).map((key) => (
             <button
               key={key}
               type="button"
@@ -531,7 +553,48 @@ export function ManageView({
                       )}
                     </div>
                   ))
-                : mcpRows.map((row) => (
+                : tab === "auth"
+                  ? authRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"
+                        data-manage-auth={row.name}
+                      >
+                        <MarketIcon name={row.name} logoUrl={row.logoUrl} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate text-[13px] font-semibold text-text-strong">{row.name}</span>
+                            <span
+                              className={`shrink-0 rounded-full border px-1.5 text-[10px] ${
+                                row.connected
+                                  ? "border-emerald-500/40 text-emerald-400"
+                                  : "border-border text-text-faint"
+                              }`}
+                            >
+                              {row.connected ? t("manageView.connected") : t("manageView.disconnected")}
+                            </span>
+                            {!row.hasCredentials ? (
+                              <span className="shrink-0 rounded-full border border-amber-500/40 px-1.5 text-[10px] text-amber-400">
+                                {t("manageView.authNoCredential")}
+                              </span>
+                            ) : null}
+                          </div>
+                          {row.description ? (
+                            <p className="mt-0.5 line-clamp-1 text-[12px] text-text-muted">{row.description}</p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                          title={t("manageView.authReconnect")}
+                          onClick={onOpenAdvancedSettings}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          {t("manageView.authReconnect")}
+                        </button>
+                      </div>
+                    ))
+                  : mcpRows.map((row) => (
                     <div
                       key={row.key}
                       className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3 transition-colors hover:bg-surface-hover/40"

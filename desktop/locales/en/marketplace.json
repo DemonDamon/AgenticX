@@ -69,13 +69,15 @@
       "mcp": "Plugins ({{count}})",
       "skills": "Skills ({{count}})",
       "agents": "Agents ({{count}})",
-      "commands": "Commands ({{count}})"
+      "commands": "Commands ({{count}})",
+      "auth": "Authorizations ({{count}})"
     },
     "search": {
       "mcp": "Search plugins",
       "skills": "Search skills",
       "agents": "Search agents",
-      "commands": "Search commands"
+      "commands": "Search commands",
+      "auth": "Search authorized apps"
     },
     "empty": "Nothing installed yet",
     "connected": "Connected",
@@ -96,12 +98,17 @@
     "toggleCommandFailed": "Failed to toggle command {{name}}, please retry",
     "delete": "Delete",
     "confirmDelete": "Confirm",
-    "deleteCommandFailed": "Failed to delete command {{name}}, please retry"
+    "deleteCommandFailed": "Failed to delete command {{name}}, please retry",
+    "authNoCredential": "No credential",
+    "authReconnect": "Configure"
   },
   "pluginDetail": {
     "tools": "Provided tools",
     "env": "Required configuration",
-    "installHint": "You can adjust the configuration in Settings after installing"
+    "installHint": "You can adjust configuration in settings after install",
+    "bundledSkills": "Bundled skills",
+    "bundledSkillsHint": "Install these bundled skills along with the plugin for full capability.",
+    "skillInstalled": "Installed"
   },
   "scan": {
     "confirmTitle": "Confirm installation",

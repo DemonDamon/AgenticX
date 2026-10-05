@@ -157,6 +157,87 @@ export function buildManageCommandRows(
     }));
 }
 
+/** 应用授权行输入:server 最小投影 + 可选 env/headers(由 ManageView 从 mcp.json 富化)。 */
+export type ManageAuthServerInput = ManageMcpServerInput & {
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+};
+
+export type ManageAuthRow = {
+  key: string;
+  name: string;
+  description: string;
+  connected: boolean;
+  /** 是否已配置凭证(env/headers 含 token/key/secret 等)。 */
+  hasCredentials: boolean;
+  logoUrl?: string;
+};
+
+/** 已知 OAuth/账号型提供商(server 名包含以下关键词即视为授权应用,即使暂无凭证)。 */
+const OAUTH_PROVIDER_KEYWORDS = [
+  "feishu",
+  "lark",
+  "github",
+  "gitlab",
+  "tencent",
+  "docs",
+  "meeting",
+  "ima",
+  "dingtalk",
+  "ding",
+  "wecom",
+  "wechat",
+  "weixin",
+  "notion",
+  "slack",
+];
+
+/** 凭证字段名关键词(env/headers 的 key 命中即视为已配置凭证)。 */
+const CREDENTIAL_KEY_PATTERN = /(token|key|secret|password|credential|auth|access)/i;
+
+function hasCredentialFields(
+  env?: Record<string, string>,
+  headers?: Record<string, string>,
+): boolean {
+  const keys = [...Object.keys(env ?? {}), ...Object.keys(headers ?? {})];
+  return keys.some((k) => CREDENTIAL_KEY_PATTERN.test(k));
+}
+
+function isKnownOAuthProvider(name: string): boolean {
+  const n = name.toLowerCase();
+  return OAUTH_PROVIDER_KEYWORDS.some((k) => n.includes(k));
+}
+
+/**
+ * 应用授权行拼装:筛选需要账号/凭证的 MCP 连接
+ * (env/headers 含凭证字段 或 属于已知 OAuth 提供商),
+ * 按名称过滤,匹配市场条目拿 logo。
+ */
+export function buildAuthRows(
+  servers: readonly ManageAuthServerInput[],
+  mcpEntries: readonly MarketMcpEntry[],
+  query: string,
+): ManageAuthRow[] {
+  return servers
+    .filter((s) => s.name)
+    .filter((s) => hasCredentialFields(s.env, s.headers) || isKnownOAuthProvider(s.name))
+    .filter((s) => matchesQuery(query, s.name))
+    .map((s) => {
+      const target = normalizeSkillName(s.name);
+      const entry = mcpEntries.find((e) =>
+        e.serverNames.some((n) => normalizeSkillName(n) === target),
+      );
+      return {
+        key: `auth:${s.name}`,
+        name: s.name,
+        description: entry?.description ?? "",
+        connected: Boolean(s.connected),
+        hasCredentials: hasCredentialFields(s.env, s.headers),
+        logoUrl: entry?.logoUrl,
+      };
+    });
+}
+
 /**
  * 筛出在市场条目里没有 logo 匹配的本机 server 名(去重、保持出现顺序)。
  * ManageView 用它驱动后台按名搜索市场、补齐上游 logo。

@@ -69,13 +69,15 @@
       "mcp": "插件 ({{count}})",
       "skills": "技能 ({{count}})",
       "agents": "专家 ({{count}})",
-      "commands": "指令 ({{count}})"
+      "commands": "指令 ({{count}})",
+      "auth": "应用授权 ({{count}})"
     },
     "search": {
       "mcp": "搜索插件",
       "skills": "搜索技能",
       "agents": "搜索专家",
-      "commands": "搜索指令"
+      "commands": "搜索指令",
+      "auth": "搜索已授权应用"
     },
     "empty": "暂无已安装内容",
     "connected": "已连接",
@@ -96,12 +98,17 @@
     "toggleCommandFailed": "指令 {{name}} 开关失败，请重试",
     "delete": "删除",
     "confirmDelete": "确认删除",
-    "deleteCommandFailed": "指令 {{name}} 删除失败，请重试"
+    "deleteCommandFailed": "指令 {{name}} 删除失败，请重试",
+    "authNoCredential": "未配置凭证",
+    "authReconnect": "配置凭证"
   },
   "pluginDetail": {
     "tools": "提供的工具",
     "env": "所需配置",
-    "installHint": "安装后可在设置中调整配置"
+    "installHint": "安装后可在设置中调整配置",
+    "bundledSkills": "配套技能",
+    "bundledSkillsHint": "安装插件时可一并安装这些配套技能，获得更完整的能力。",
+    "skillInstalled": "已安装"
   },
   "scan": {
     "confirmTitle": "安装确认",

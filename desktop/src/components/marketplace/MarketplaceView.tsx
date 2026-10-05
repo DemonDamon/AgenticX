@@ -25,6 +25,7 @@ import {
   type MarketplaceItem,
 } from "./model";
 import { RECOMMENDED_SKILLS } from "../../data/recommended-skills";
+import { getSkillsForPlugin } from "../../data/plugin-skill-bundles";
 import { buildOfficeCliInstallPrompt } from "../../utils/officecli-install-prompt";
 import { buildArchscribeInstallPrompt } from "../../utils/archscribe-install-prompt";
 import { useMarketplaceData } from "./useMarketplaceData";
@@ -181,7 +182,20 @@ export function MarketplaceView() {
     [newMetaTask, t],
   );
 
-  /** MCP 安装:详情浮层确认后执行,成功后刷新本机名册(与设置页链路一致)。 */
+  /** 插件详情浮层里安装配套技能:registry 走扫描安装,推荐位走 Meta-Agent 提示词。 */
+  const onInstallBundledSkill = useCallback(
+    (skill: { kind: "registry" | "recommended"; source?: string; name?: string; id?: string }) => {
+      if (skill.kind === "registry" && skill.source && skill.name) {
+        void install({ source: skill.source, name: skill.name });
+      } else if (skill.kind === "recommended" && skill.id) {
+        onInstallRecommended(skill.id);
+      }
+    },
+    [install, onInstallRecommended],
+  );
+
+  /** MCP 安装:详情浮层确认后执行,成功后刷新本机名册(与设置页链路一致),
+   *  并自动安装该插件配套的、尚未安装的技能(registry 走扫描安装,推荐位走 Meta-Agent)。 */
   const installMcp = async (serverId: string, env: Record<string, string>): Promise<boolean> => {
     setMcpInstalling(true);
     setMcpStatus({ message: ts("mcp.installingNamed", { id: serverId }), kind: "info" });
@@ -202,6 +216,8 @@ export function MarketplaceView() {
         kind: "success",
       });
       await data.reloadMcpStatus();
+      // 安装成功后,自动安装配套技能(逐个、失败不阻塞)。
+      await installBundledSkillsForServers(installedNames);
       return true;
     } catch (err) {
       setMcpStatus({
@@ -213,6 +229,33 @@ export function MarketplaceView() {
       setMcpInstalling(false);
     }
   };
+
+  /** 按 server 名查找配套技能,安装尚未安装的项;单个失败不阻断其余。 */
+  const installBundledSkillsForServers = useCallback(
+    async (serverNames: string[]) => {
+      const seen = new Set<string>();
+      for (const name of serverNames) {
+        for (const s of getSkillsForPlugin(name)) {
+          const key = s.kind === "registry" ? `${s.source}:${s.name}` : `rec:${s.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const alreadyInstalled =
+            s.kind === "registry" ? data.localSkillNames.has(s.name) : data.localSkillNames.has(s.id);
+          if (alreadyInstalled) continue;
+          try {
+            if (s.kind === "registry") {
+              await install({ source: s.source, name: s.name });
+            } else {
+              onInstallRecommended(s.id);
+            }
+          } catch {
+            /* 单个配套技能安装失败不阻断 MCP 安装结果 */
+          }
+        }
+      }
+    },
+    [data.localSkillNames, install, onInstallRecommended],
+  );
 
   const statusMessage = promptMsg || installStatus.message;
   const statusTone =
@@ -424,6 +467,8 @@ export function MarketplaceView() {
         installing={mcpInstalling}
         onClose={() => setDetailServerId(null)}
         onInstall={installMcp}
+        installedSkillNames={Array.from(data.localSkillNames)}
+        onInstallSkill={onInstallBundledSkill}
       />
 
       <MarketOnboardingModal
