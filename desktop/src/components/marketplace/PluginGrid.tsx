@@ -1,12 +1,13 @@
 /**
- * 插件 Tab 的卡片网格:MCP 连接器(紫色渐变 Plug 底座)与精选工具(自带图标)混合。
+ * 插件 Tab 的卡片网格:MCP 连接器与精选工具混合,图标统一走 MarketIcon
+ * (上游 logo 优先,无图回退渐变底座 + 行业图标)。
  * MCP 主按钮(安装/使用)都打开详情浮层;工具走 Meta-Agent 安装或「使用」回对话。
  */
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, Loader2, MessageSquarePlus, Plug, SquarePlus } from "lucide-react";
+import { CheckCircle2, Loader2, MessageSquarePlus, SquarePlus } from "lucide-react";
 import type { MarketPluginItem } from "./model";
+import { MarketIcon } from "./MarketIcon";
 
 type Props = {
   items: readonly MarketPluginItem[];
@@ -15,36 +16,6 @@ type Props = {
   onInstallTool: (item: MarketPluginItem) => void;
   onUseTool: (item: MarketPluginItem) => void;
 };
-
-function PluginIcon({ item }: { item: MarketPluginItem }) {
-  const [broken, setBroken] = useState(false);
-  if (item.kind === "mcp" || broken || !item.iconSrc) {
-    return (
-      <span
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm ${
-          item.kind === "mcp" ? "bg-gradient-to-br from-violet-500 to-purple-600" : "bg-surface-panel"
-        }`}
-      >
-        {item.kind === "mcp" ? (
-          <Plug className="h-5 w-5" aria-hidden />
-        ) : (
-          <span className="text-[14px] font-semibold text-text-subtle">
-            {(item.name || "?").slice(0, 1).toUpperCase()}
-          </span>
-        )}
-      </span>
-    );
-  }
-  return (
-    <img
-      src={item.iconSrc}
-      alt=""
-      className="h-10 w-10 shrink-0 rounded-lg bg-white object-cover ring-1 ring-black/[0.04]"
-      loading="lazy"
-      onError={() => setBroken(true)}
-    />
-  );
-}
 
 export function PluginGrid({ items, promptBusy, onOpenMcpDetail, onInstallTool, onUseTool }: Props) {
   const { t } = useTranslation("marketplace");
@@ -67,7 +38,7 @@ export function PluginGrid({ items, promptBusy, onOpenMcpDetail, onInstallTool, 
           data-market-plugin={item.name}
         >
           <div className="flex items-center gap-2.5">
-            <PluginIcon item={item} />
+            <MarketIcon name={item.name} logoUrl={item.logoUrl} iconSrc={item.iconSrc} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-semibold tracking-tight text-text-strong">
                 {item.name}

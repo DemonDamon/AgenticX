@@ -4,10 +4,10 @@
  * 推荐位 cta=official_site → 打开官网。已安装 → 「使用」回到对话并预填草稿。
  */
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, ExternalLink, Loader2, MessageSquarePlus, SquarePlus } from "lucide-react";
 import type { MarketSkillItem } from "./model";
+import { MarketIcon } from "./MarketIcon";
 
 type Props = {
   items: readonly MarketSkillItem[];
@@ -19,26 +19,6 @@ type Props = {
   onInstallRecommended: (item: MarketSkillItem) => void;
   onUse: (item: MarketSkillItem) => void;
 };
-
-function SkillIcon({ item }: { item: MarketSkillItem }) {
-  const [broken, setBroken] = useState(false);
-  if (broken || !item.iconSrc) {
-    return (
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-panel text-[14px] font-semibold text-text-subtle">
-        {(item.name || "?").slice(0, 1).toUpperCase()}
-      </div>
-    );
-  }
-  return (
-    <img
-      src={item.iconSrc}
-      alt=""
-      className="h-10 w-10 shrink-0 rounded-full bg-white object-cover ring-1 ring-black/[0.04]"
-      loading="lazy"
-      onError={() => setBroken(true)}
-    />
-  );
-}
 
 export function SkillGrid({
   items,
@@ -73,7 +53,7 @@ export function SkillGrid({
             data-market-skill={item.name}
           >
             <div className="flex items-center gap-2.5">
-              <SkillIcon item={item} />
+              <MarketIcon name={item.name} iconSrc={item.iconSrc} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-semibold tracking-tight text-text-strong">
                   {item.name}

@@ -115,6 +115,7 @@ export function useMarketplaceData() {
         name: String(raw.chinese_name || raw.name || serverId || "").trim(),
         description: cleanDescription(raw.description),
         serverNames: names,
+        logoUrl: String(raw.logo_url ?? "").trim() || undefined,
       });
     }
 

@@ -64,6 +64,8 @@ export type MarketMcpEntry = {
   description: string;
   /** 详情里 server_config 声明的 mcpServers 键,用于已装判定。 */
   serverNames: string[];
+  /** 上游 logo 地址,卡片图标优先用它。 */
+  logoUrl?: string;
 };
 
 export type MarketPluginKind = "mcp" | "tool";
@@ -78,6 +80,8 @@ export type MarketPluginItem = {
   /** kind=mcp */
   serverId?: string;
   serverNames?: string[];
+  /** kind=mcp:上游 logo 地址。 */
+  logoUrl?: string;
   /** kind=tool(来自官方推荐技能) */
   id?: string;
   provider?: string;
@@ -226,6 +230,7 @@ export function buildPluginItems(
     installed: isMcpInstalled(entry.serverNames, configuredMcp),
     serverId: entry.serverId,
     serverNames: entry.serverNames,
+    logoUrl: entry.logoUrl,
   }));
   const toolItems: MarketPluginItem[] = tools
     .filter((tool) => tool.cta === "install")
