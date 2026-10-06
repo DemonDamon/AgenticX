@@ -59,6 +59,7 @@
   },
   "useDraft": "请使用技能「{{name}}」帮我完成任务。",
   "useDraftAgent": "请让数字专家「{{name}}」帮我完成任务。",
+  "useDraftAgentDirect": "你好 {{name}}，请帮我完成以下任务：",
   "useDraftCommand": "请使用指令 /{{name}} 帮我完成任务。",
   "manageView": {
     "back": "返回市场",

@@ -407,6 +407,8 @@ import {
 import { NearBoxHero } from "./brand/NearBoxHero";
 import { QuickStartCards } from "./brand/QuickStartCards";
 import { AgentActivityPill } from "./AgentActivityPill";
+import { usePaneNavigation } from "../hooks/usePaneNavigation";
+import { markExpertAutoSendConsumed, matchExpertDirectSend } from "../utils/expert-direct-route";
 import { summarizeAgentActivity } from "../utils/agent-activity";
 import { isSubAgentSummaryDump } from "../utils/subagent-summary-message";
 import type { ScratchChatDraft } from "../utils/scratch-chat";
@@ -2966,6 +2968,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
   const metaLeaderDisplayName = useMemo(() => {
@@ -10004,6 +10007,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const isContinuation = !!continuation;
     const composerDisplayText = buildComposerDisplayText();
     const text = userText.trim();
+    // 专家指令直达：Meta 会话里发送「请让数字专家「X」帮我完成任务。」时改道到
+    // 专家专属对话直接执行（原文全文送达，无委派、无子智能体、无弹窗）。
+    if (
+      pane.avatarId === null &&
+      !isContinuation &&
+      !options?.suppressUserEcho &&
+      !options?.retryAttachments &&
+      attachmentEntries.length === 0 &&
+      text
+    ) {
+      const route = matchExpertDirectSend(text, useAppStore.getState().avatars);
+      if (route) {
+        // 清掉 Meta composer 的指令文本与持久化草稿，避免残留。
+        lastComposerDraftTextRef.current = "";
+        setComposerText("");
+        setComposerHasText(false);
+        prepareFreshComposerPaneDraft(pane.id);
+        deliverExpertInstruction(route.avatarId, route.avatarName, route.instruction, {
+          autoSend: true,
+        });
+        return;
+      }
+    }
     const hasQuotePayloadEarly = quoteTargetsRef.current.length > 0;
     // Quote-only turns: keep user_input empty (chips carry context); avoid "见附件" placeholder.
     const messageText = isContinuation
@@ -13359,8 +13385,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   createNewTopicRef.current = createNewTopic;
   useEffect(() => {
     const onNewTopic = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { paneId?: string; draftText?: string } | undefined;
+      const detail = (e as CustomEvent).detail as
+        | { paneId?: string; draftText?: string; autoSend?: boolean }
+        | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
+      // 专家指令直达 autoSend：派发方在 ack-retry 等 acknowledged，先确认再执行。
+      if (detail?.autoSend) markExpertAutoSendConsumed(pane.id);
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
       const draftText = detail?.draftText;
       if (draftText) {
@@ -13372,6 +13402,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         // renders from direct DOM writes, so we must go through
         // setComposerText to actually show the draft text in the box.
         window.setTimeout(() => setComposerText(draftText), 0);
+        if (detail?.autoSend) {
+          // 直达执行：新话题草稿落位后自动发送，专家在主聊天界面直接开始运行。
+          window.setTimeout(() => void sendChatRef.current(draftText), 0);
+        }
       }
     };
     window.addEventListener("agenticx:pane:new-topic", onNewTopic);

@@ -205,6 +205,8 @@ export type MarketplaceItem = {
   version?: string;
   /** kind=agent:专家头像地址。 */
   avatarUrl?: string;
+  /** kind=agent:专家头像 id(「使用」直达其专属对话)。 */
+  avatarId?: string;
   /** kind=command:内置(true)或自定义(false)。 */
   builtin?: boolean;
   /** kind=command:作用域标识(builtin/global/…)。 */
@@ -394,6 +396,7 @@ export function buildAgentItems(avatars: readonly MarketAgentInput[]): Marketpla
       description: String(a.description ?? a.role ?? ""),
       installed: true,
       avatarUrl: a.avatar_url,
+      avatarId: a.id,
     }));
 }
 

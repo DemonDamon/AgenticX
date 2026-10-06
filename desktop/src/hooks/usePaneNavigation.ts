@@ -14,6 +14,8 @@ import {
 import { scratchHistoryBlocklist } from "../utils/scratch-chat";
 import { schedulePrefetchSessionTail } from "../utils/session-tail-cache";
 import { resolveGroupTitle } from "../utils/quick-compose";
+import { prepareFreshComposerPaneDraft } from "../utils/composer-draft-store";
+import { consumeExpertAutoSendAck } from "../utils/expert-direct-route";
 
 /**
  * Shared pane-navigation logic used by the nav sidebar, the avatar gallery
@@ -271,5 +273,47 @@ export function usePaneNavigation() {
     }, 0);
   }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);
 
-  return { openMetaOrAvatarPane, openGroupPane, newMetaTask };
+  /**
+   * 专家指令直达：打开/聚焦专家专属 pane 并把指令送进其对话。
+   * autoSend=true 时在新话题里自动发送（专家直接执行）；pane 尚未挂载时
+   * 用 ack-retry 兜底派发，草稿先行持久化避免指令丢失。
+   */
+  const deliverExpertInstruction = useCallback(
+    (
+      avatarId: string,
+      avatarName: string,
+      instruction: string,
+      opts?: { autoSend?: boolean },
+    ) => {
+      if (!avatarId || !instruction.trim()) return;
+      setMainView("chat");
+      const existing = panes.find((item) => item.avatarId === avatarId && !item.composePreview);
+      const paneId = existing?.id ?? addPane(avatarId, avatarName, "");
+      setActivePaneId(paneId);
+      setActiveAvatarId(avatarId);
+      // 草稿先持久化：目标 pane 未挂载、事件未被消费时，挂载后恢复草稿兜底。
+      prepareFreshComposerPaneDraft(paneId, instruction);
+      const dispatch = () =>
+        window.dispatchEvent(
+          new CustomEvent("agenticx:pane:new-topic", {
+            detail: { paneId, draftText: instruction, autoSend: opts?.autoSend ?? false },
+          }),
+        );
+      if (!opts?.autoSend) {
+        window.setTimeout(dispatch, 0);
+        return;
+      }
+      void (async () => {
+        for (let attempt = 0; attempt < 20; attempt++) {
+          dispatch();
+          await new Promise((resolve) => window.setTimeout(resolve, 150));
+          if (consumeExpertAutoSendAck(paneId)) return;
+        }
+        // 20 次均未确认（pane 一直未挂载）：草稿已持久化，降级为预填不丢指令。
+      })();
+    },
+    [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]
+  );
+
+  return { openMetaOrAvatarPane, openGroupPane, newMetaTask, deliverExpertInstruction };
 }

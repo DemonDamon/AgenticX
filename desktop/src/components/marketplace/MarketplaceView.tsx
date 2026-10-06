@@ -49,7 +49,7 @@ export function MarketplaceView() {
   const addPane = useAppStore((s) => s.addPane);
   const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
   const setMainView = useAppStore((s) => s.setMainView);
-  const { newMetaTask } = usePaneNavigation();
+  const { newMetaTask, deliverExpertInstruction } = usePaneNavigation();
 
   const data = useMarketplaceData();
   const reloadSkills = data.reloadSkills;
@@ -172,14 +172,17 @@ export function MarketplaceView() {
     [install, onInstallRecommended],
   );
 
-  /** 统一卡片「使用」:按 kind 选草稿模板回聊天预填。 */
+  /** 统一卡片「使用」:专家直达其专属对话预填;其余走 Meta 草稿模板。 */
   const useUnifiedItem = useCallback(
     (item: MarketplaceItem) => {
-      if (item.kind === "agent") newMetaTask(t("useDraftAgent", { name: item.name }));
-      else if (item.kind === "command") newMetaTask(t("useDraftCommand", { name: item.name }));
+      if (item.kind === "agent" && item.avatarId) {
+        deliverExpertInstruction(item.avatarId, item.name, t("useDraftAgentDirect", { name: item.name }));
+      } else if (item.kind === "agent") {
+        newMetaTask(t("useDraftAgent", { name: item.name }));
+      } else if (item.kind === "command") newMetaTask(t("useDraftCommand", { name: item.name }));
       else newMetaTask(t("useDraft", { name: item.name }));
     },
-    [newMetaTask, t],
+    [newMetaTask, deliverExpertInstruction, t],
   );
 
   /** 插件详情浮层里安装配套技能:registry 走扫描安装,推荐位走 Meta-Agent 提示词。 */

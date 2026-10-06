@@ -59,6 +59,7 @@
   },
   "useDraft": "Please use the \"{{name}}\" skill to help me with my task.",
   "useDraftAgent": "Please have the \"{{name}}\" agent help me with my task.",
+  "useDraftAgentDirect": "Hi {{name}}, please help me with the following task:",
   "useDraftCommand": "Please use the /{{name}} command to help me with my task.",
   "manageView": {
     "back": "Back to market",
