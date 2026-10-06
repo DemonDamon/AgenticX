@@ -1,0 +1,37 @@
+{
+  "id": "ipinfo",
+  "displayName": "IP Info",
+  "description": "IP 归属信息查询（公网 IP、地理位置、运营商）",
+  "homepageUrl": "https://ipinfo.io",
+  "categories": ["network"],
+  "baseUrl": "https://ipinfo.io",
+  "auth": { "type": "none" },
+  "actions": [
+    {
+      "id": "ipinfo.lookup_self",
+      "title": "查询出口 IP 归属",
+      "description": "返回当前出口公网 IP 的归属信息，无需参数",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "http": { "method": "GET", "path": "/json" }
+    },
+    {
+      "id": "ipinfo.lookup",
+      "title": "查询指定 IP 归属",
+      "description": "返回指定 IP 的归属信息",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ip": { "type": "string", "description": "待查询的 IP 地址，如 8.8.8.8" }
+        },
+        "required": ["ip"]
+      },
+      "http": { "method": "GET", "path": "/{ip}/json" }
+    }
+  ]
+}

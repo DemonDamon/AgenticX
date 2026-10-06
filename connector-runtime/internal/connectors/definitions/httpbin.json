@@ -1,0 +1,50 @@
+{
+  "id": "httpbin",
+  "displayName": "HTTPBin",
+  "description": "HTTP 请求调试服务：回显请求内容、探测状态码",
+  "homepageUrl": "https://httpbin.org",
+  "categories": ["devtools", "testing"],
+  "baseUrl": "https://httpbin.org",
+  "auth": { "type": "none" },
+  "actions": [
+    {
+      "id": "httpbin.get",
+      "title": "GET 回显",
+      "description": "发送 GET 请求，返回请求回显（headers、来源等）",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "http": { "method": "GET", "path": "/get" }
+    },
+    {
+      "id": "httpbin.status_check",
+      "title": "状态码探测",
+      "description": "请求 /status/{code}。注意：code 为 2xx 才视为执行成功，其他状态码将返回上游错误",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "description": "期望返回的 HTTP 状态码，如 200" }
+        },
+        "required": ["code"]
+      },
+      "http": { "method": "GET", "path": "/status/{code}" }
+    },
+    {
+      "id": "httpbin.echo_post",
+      "title": "POST 回显",
+      "description": "以输入 JSON 为请求体发送 POST，返回回显",
+      "operationType": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string", "description": "任意回显字段" }
+        }
+      },
+      "http": { "method": "POST", "path": "/post" }
+    }
+  ]
+}

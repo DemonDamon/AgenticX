@@ -1,0 +1,53 @@
+{
+  "id": "jsonplaceholder",
+  "displayName": "JSONPlaceholder",
+  "description": "假数据 REST API（帖子/评论），适合演示与联调",
+  "homepageUrl": "https://jsonplaceholder.typicode.com",
+  "categories": ["devtools", "mock-data"],
+  "baseUrl": "https://jsonplaceholder.typicode.com",
+  "auth": { "type": "none" },
+  "actions": [
+    {
+      "id": "jsonplaceholder.list_posts",
+      "title": "列出帖子",
+      "description": "返回帖子列表（前 100 条）",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "http": { "method": "GET", "path": "/posts" }
+    },
+    {
+      "id": "jsonplaceholder.get_post",
+      "title": "查询单个帖子",
+      "description": "按 id 返回单个帖子",
+      "operationType": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "description": "帖子 id（1-100）" }
+        },
+        "required": ["id"]
+      },
+      "http": { "method": "GET", "path": "/posts/{id}" }
+    },
+    {
+      "id": "jsonplaceholder.create_post",
+      "title": "创建帖子",
+      "description": "以输入 JSON 为请求体创建帖子（假数据，不持久化）",
+      "operationType": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "userId": { "type": "integer" }
+        },
+        "required": ["title"]
+      },
+      "http": { "method": "POST", "path": "/posts" }
+    }
+  ]
+}
