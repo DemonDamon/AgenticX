@@ -6576,6 +6576,200 @@ function stopWechatHealthCheck(): void {
   }
 }
 
+// ── Connector Runtime Sidecar（连接器网关·内置形态）──────────────
+// 按需拉起的本地连接器网关：市场安装内置形态 / 连接管理时 ensure；
+// runtime token 注入 mcp.json 供对话侧访问 /mcp，admin token 只留主进程
+// 经代理 IPC 转发管理面调用；桌面退出时回收进程。
+
+type ConnectorRuntimeEnsureResult =
+  | { ok: true; port: number; runtimeToken: string }
+  | { ok: false; error: "binary_not_found" | "health_timeout" | "start_failed" };
+
+let connectorRuntimeProcess: ChildProcess | null = null;
+let connectorRuntimePort = 0;
+let connectorRuntimeRuntimeToken = "";
+let connectorRuntimeAdminToken = "";
+let connectorRuntimeRestartCount = 0;
+const CONNECTOR_RUNTIME_MAX_RESTARTS = 3;
+let connectorRuntimeHealthTimer: ReturnType<typeof setInterval> | null = null;
+let connectorRuntimeStarting: Promise<ConnectorRuntimeEnsureResult> | null = null;
+
+/** 二进制位置：打包后在 resources/sidecar/（electron-builder extraResources），开发态用 stage 目录。 */
+function getConnectorRuntimeBinaryPath(): string {
+  const exe = process.platform === "win32" ? "connector-runtime.exe" : "connector-runtime";
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "sidecar", exe);
+  }
+  const archDir = process.platform === "win32" ? "win-amd64" : process.arch === "x64" ? "x64" : "arm64";
+  return path.join(__dirname, "..", "..", "bundled-sidecar", archDir, exe);
+}
+
+async function ensureConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
+  if (connectorRuntimeProcess && !connectorRuntimeProcess.killed && connectorRuntimePort) {
+    return { ok: true, port: connectorRuntimePort, runtimeToken: connectorRuntimeRuntimeToken };
+  }
+  if (!connectorRuntimeStarting) {
+    connectorRuntimeStarting = startConnectorRuntime().finally(() => {
+      connectorRuntimeStarting = null;
+    });
+  }
+  return connectorRuntimeStarting;
+}
+
+async function startConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
+  const binaryPath = getConnectorRuntimeBinaryPath();
+  if (!fs.existsSync(binaryPath)) {
+    console.info("[connector-runtime] binary not found:", binaryPath);
+    return { ok: false, error: "binary_not_found" };
+  }
+  try {
+    const port = await findFreePort();
+    const runtimeToken = crypto.randomBytes(24).toString("hex");
+    const adminToken = crypto.randomBytes(24).toString("hex");
+    const dataDir = path.join(CONFIG_DIR, "connector-runtime");
+    fs.mkdirSync(dataDir, { recursive: true });
+    const args = [
+      "serve",
+      "--addr", `127.0.0.1:${port}`,
+      "--runtime-token", runtimeToken,
+      "--admin-token", adminToken,
+      "--data-dir", dataDir,
+    ];
+    console.info("[connector-runtime] spawn", { binaryPath, port });
+    connectorRuntimeProcess = spawn(binaryPath, args, {
+      cwd: os.homedir(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    connectorRuntimePort = port;
+    connectorRuntimeRuntimeToken = runtimeToken;
+    connectorRuntimeAdminToken = adminToken;
+    connectorRuntimeProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.info("[connector-runtime]", line);
+    });
+    connectorRuntimeProcess.stderr?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.warn("[connector-runtime:err]", line);
+    });
+    connectorRuntimeProcess.on("exit", (code) => {
+      if (!isQuitting) {
+        console.info(`[connector-runtime] exited (code=${String(code)})`);
+        if (connectorRuntimeRestartCount < CONNECTOR_RUNTIME_MAX_RESTARTS) {
+          connectorRuntimeRestartCount++;
+          console.info(
+            `[connector-runtime] auto-restart attempt ${connectorRuntimeRestartCount}/${CONNECTOR_RUNTIME_MAX_RESTARTS}`,
+          );
+          setTimeout(() => void ensureConnectorRuntime(), 2000);
+        }
+      }
+      connectorRuntimeProcess = null;
+      connectorRuntimePort = 0;
+      connectorRuntimeRuntimeToken = "";
+      connectorRuntimeAdminToken = "";
+    });
+    // 等待 /healthz 就绪再放行（安装流程要立即写入可用的 mcp.json）。
+    const ready = await waitForConnectorRuntimeHealth(port, 10_000);
+    if (!ready) {
+      stopConnectorRuntime();
+      return { ok: false, error: "health_timeout" };
+    }
+    startConnectorRuntimeHealthCheck();
+    connectorRuntimeRestartCount = 0;
+    console.info("[connector-runtime] started on port", port);
+    return { ok: true, port, runtimeToken };
+  } catch (err) {
+    console.error("[connector-runtime] start failed:", err);
+    return { ok: false, error: "start_failed" };
+  }
+}
+
+async function waitForConnectorRuntimeHealth(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+      const resp = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (resp.ok) return true;
+    } catch { /* not ready yet */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+function startConnectorRuntimeHealthCheck(): void {
+  stopConnectorRuntimeHealthCheck();
+  connectorRuntimeHealthTimer = setInterval(async () => {
+    if (!connectorRuntimePort || !connectorRuntimeProcess) return;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(`http://127.0.0.1:${connectorRuntimePort}/healthz`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error(`health check: ${resp.status}`);
+    } catch {
+      console.warn("[connector-runtime] health check failed");
+    }
+  }, 30_000);
+}
+
+function stopConnectorRuntimeHealthCheck(): void {
+  if (connectorRuntimeHealthTimer) {
+    clearInterval(connectorRuntimeHealthTimer);
+    connectorRuntimeHealthTimer = null;
+  }
+}
+
+function stopConnectorRuntime(): void {
+  stopConnectorRuntimeHealthCheck();
+  if (!connectorRuntimeProcess) return;
+  try { connectorRuntimeProcess.kill("SIGTERM"); } catch { /* noop */ }
+  connectorRuntimeProcess = null;
+  connectorRuntimePort = 0;
+  connectorRuntimeRuntimeToken = "";
+  connectorRuntimeAdminToken = "";
+}
+
+type ConnectorRuntimeAdminResult = {
+  ok: boolean;
+  status: number;
+  body?: unknown;
+  error?: string;
+};
+
+/** 管理面代理：admin token 只驻留主进程，渲染层只发 method/path/body。 */
+async function connectorRuntimeAdmin(req: {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  body?: unknown;
+}): Promise<ConnectorRuntimeAdminResult> {
+  const ensure = await ensureConnectorRuntime();
+  if (!ensure.ok) return { ok: false, status: 0, error: ensure.error };
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const resp = await fetch(`http://127.0.0.1:${connectorRuntimePort}${req.path}`, {
+      method: req.method,
+      headers: {
+        Authorization: `Bearer ${connectorRuntimeAdminToken}`,
+        ...(req.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const text = await resp.text();
+    let body: unknown = text;
+    try { body = text ? JSON.parse(text) : null; } catch { /* keep raw text */ }
+    return { ok: resp.ok, status: resp.status, body };
+  } catch {
+    return { ok: false, status: 0, error: "request_failed" };
+  }
+}
+
 type PtyTerminalSession = {
   kind: "pty";
   pty: import("node-pty").IPty;
@@ -8488,6 +8682,38 @@ function registerIpc(): void {
       return { ok: false };
     }
   });
+
+  // ── Connector Runtime Sidecar IPC ─────────────────────────────
+
+  ipcMain.handle("connector-runtime-ensure", async () => {
+    const r = await ensureConnectorRuntime();
+    return r.ok
+      ? { ok: true, port: r.port, runtimeToken: r.runtimeToken }
+      : { ok: false, error: r.error };
+  });
+
+  ipcMain.handle("connector-runtime-status", async () => {
+    return {
+      running: !!connectorRuntimeProcess && !connectorRuntimeProcess.killed,
+      port: connectorRuntimePort,
+    };
+  });
+
+  ipcMain.handle(
+    "connector-runtime-admin",
+    async (
+      _event,
+      payload: { method?: string; path?: string; body?: unknown },
+    ): Promise<ConnectorRuntimeAdminResult> => {
+      const method = String(payload?.method ?? "GET").toUpperCase();
+      const reqPath = String(payload?.path ?? "");
+      if (!reqPath.startsWith("/admin/")) return { ok: false, status: 0, error: "forbidden_path" };
+      if (method !== "GET" && method !== "POST" && method !== "PUT" && method !== "DELETE") {
+        return { ok: false, status: 0, error: "forbidden_method" };
+      }
+      return await connectorRuntimeAdmin({ method, path: reqPath, body: payload?.body });
+    },
+  );
 
   ipcMain.handle("load-wechat-binding", async () => {
     try {
@@ -13080,6 +13306,7 @@ if (!gotTheLock) {
       tmeetAuthProcess = null;
     }
     stopWechatSidecar();
+    stopConnectorRuntime();
     stopStudioServe();
     stopNearBrowserBridge();
   });

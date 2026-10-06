@@ -1,16 +1,24 @@
 /**
- * 连接器网关安装弹层:双形态(托管一键装 / 自建填 URL+token),
- * 确认后经 mcpPutRaw 本地直写主 MCP 配置(不经市场上游),
+ * 连接器网关安装弹层:双形态(内置 sidecar 一键装 / 自建填 URL+token)。
+ * 内置形态先经 connectorRuntimeEnsure 拉起本地 sidecar(拿端口与 runtime token),
+ * 再经 mcpPutRaw 本地直写主 MCP 配置(不经市场上游);
  * 纯函数合并逻辑见 gateway-model.applyGatewayToMcpJson。
+ * 已安装时提供连接管理入口(见 GatewayConnectionsModal)。
  */
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, Loader2, ShieldCheck } from "lucide-react";
+import { Cable, Loader2, ShieldCheck } from "lucide-react";
 import { Modal } from "../ds/Modal";
 import { i18n } from "../../i18n/i18n";
-import { CONNECTOR_GATEWAY, defaultGatewayForm } from "../../data/connector-gateway";
-import { applyGatewayToMcpJson, type GatewayForm, type GatewayFormMode } from "./gateway-model";
+import { defaultGatewayForm } from "../../data/connector-gateway";
+import {
+  applyGatewayToMcpJson,
+  buildBuiltinGatewayForm,
+  type GatewayForm,
+  type GatewayFormMode,
+} from "./gateway-model";
+import { GatewayConnectionsModal } from "./GatewayConnectionsModal";
 
 type Props = {
   open: boolean;
@@ -27,15 +35,16 @@ function mt(key: string, opts?: Record<string, unknown>): string {
   return String(i18n.t(key, { ns: "marketplace", ...(opts ?? {}) }));
 }
 
-const MODES: readonly GatewayFormMode[] = ["hosted", "self"];
+const MODES: readonly GatewayFormMode[] = ["builtin", "self"];
 
 export function GatewayInstallModal({ open, configPath, installed, onClose, onInstalled }: Props) {
   const { t } = useTranslation("marketplace");
   const [form, setForm] = useState<GatewayForm>(defaultGatewayForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
 
-  // 每次打开重置为托管默认表单,避免上一次的自建输入残留。
+  // 每次打开重置为内置默认表单,避免上一次的自建输入残留。
   useEffect(() => {
     if (open) {
       setForm(defaultGatewayForm());
@@ -44,22 +53,27 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
   }, [open]);
 
   const setMode = (mode: GatewayFormMode) => {
-    setForm((prev) =>
-      mode === "hosted"
-        ? { ...prev, mode, url: CONNECTOR_GATEWAY.hostedUrl }
-        : { ...prev, mode, url: "" },
-    );
+    setForm((prev) => ({ ...prev, mode, url: mode === "self" ? "" : prev.url }));
   };
 
   const handleInstall = async () => {
     setSaving(true);
     setError(null);
     try {
+      let effective = form;
+      if (form.mode === "builtin") {
+        // 先拉起本地 sidecar,拿端口与 runtime token 再生成配置。
+        const ensure = await window.agenticxDesktop.connectorRuntimeEnsure();
+        if (!ensure.ok) {
+          throw new Error(mt(`gateway.ensureFailed.${ensure.error}`));
+        }
+        effective = buildBuiltinGatewayForm(ensure.port, ensure.runtimeToken);
+      }
       const raw = await window.agenticxDesktop.mcpGetRaw({ path: configPath });
       if (!raw.ok || typeof raw.text !== "string") {
         throw new Error(mt("gateway.cannotReadConfig"));
       }
-      const applied = applyGatewayToMcpJson(raw.text, form);
+      const applied = applyGatewayToMcpJson(raw.text, effective);
       if (!applied.ok) {
         throw new Error(
           applied.error === "invalid_json"
@@ -80,12 +94,7 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
   return (
     <Modal open={open} title={t("gateway.modalTitle")} onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-xs leading-relaxed text-text-muted">
-          {t("gateway.intro", {
-            providers: t("gateway.supplyProviders"),
-            actions: t("gateway.supplyActions"),
-          })}
-        </p>
+        <p className="text-xs leading-relaxed text-text-muted">{t("gateway.intro")}</p>
 
         <div className="flex gap-1 rounded-lg border border-border bg-surface-card p-1" role="tablist">
           {MODES.map((mode) => (
@@ -107,33 +116,36 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
         </div>
 
         <p className="text-[11px] leading-relaxed text-text-faint">
-          {form.mode === "hosted" ? t("gateway.hostedHint") : t("gateway.selfHint")}
+          {form.mode === "builtin" ? t("gateway.builtinHint") : t("gateway.selfHint")}
         </p>
 
-        <label className="block text-[11px] text-text-muted">
-          {t("gateway.url")}
-          <input
-            type="text"
-            className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent disabled:opacity-60"
-            value={form.url}
-            placeholder="http://127.0.0.1:8787"
-            disabled={form.mode === "hosted"}
-            onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
-          />
-        </label>
+        {form.mode === "self" ? (
+          <>
+            <label className="block text-[11px] text-text-muted">
+              {t("gateway.url")}
+              <input
+                type="text"
+                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                value={form.url}
+                placeholder="http://127.0.0.1:8787"
+                onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
+              />
+            </label>
 
-        <label className="block text-[11px] text-text-muted">
-          {t("gateway.token")}
-          <input
-            type="password"
-            autoComplete="off"
-            className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
-            value={form.token}
-            placeholder="oc_pat_…"
-            onChange={(e) => setForm((prev) => ({ ...prev, token: e.target.value }))}
-          />
-        </label>
-        <p className="text-[11px] leading-relaxed text-text-faint">{t("gateway.tokenHint")}</p>
+            <label className="block text-[11px] text-text-muted">
+              {t("gateway.token")}
+              <input
+                type="password"
+                autoComplete="off"
+                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                value={form.token}
+                placeholder="…"
+                onChange={(e) => setForm((prev) => ({ ...prev, token: e.target.value }))}
+              />
+            </label>
+            <p className="text-[11px] leading-relaxed text-text-faint">{t("gateway.tokenHint")}</p>
+          </>
+        ) : null}
 
         <div className="flex items-start gap-2 rounded-md border border-border bg-surface-card px-2.5 py-2 text-[11px] leading-relaxed text-text-muted">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden />
@@ -153,14 +165,18 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
         ) : null}
 
         <div className="flex items-center justify-between gap-2 pt-1">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 text-[11px] text-text-muted transition hover:text-text-strong"
-            onClick={() => window.open(CONNECTOR_GATEWAY.officialUrl, "_blank", "noopener,noreferrer")}
-          >
-            <ExternalLink className="h-3 w-3" aria-hidden />
-            {t("gateway.officialDocs")}
-          </button>
+          {installed ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-[11px] text-text-muted transition hover:text-text-strong"
+              onClick={() => setConnectionsOpen(true)}
+            >
+              <Cable className="h-3 w-3" aria-hidden />
+              {t("gateway.manageConnections")}
+            </button>
+          ) : (
+            <span />
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -182,6 +198,8 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
           </div>
         </div>
       </div>
+
+      <GatewayConnectionsModal open={connectionsOpen} onClose={() => setConnectionsOpen(false)} />
     </Modal>
   );
 }

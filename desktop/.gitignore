@@ -5,3 +5,6 @@ bundled-backend/win-amd64/agx-server.exe
 bundled-backend/win-amd64/agx-wechat-sidecar.exe
 bundled-backend/win-arm64/agx-server.exe
 bundled-backend/win-arm64/agx-wechat-sidecar.exe
+bundled-sidecar/arm64/connector-runtime
+bundled-sidecar/x64/connector-runtime
+bundled-sidecar/win-amd64/connector-runtime.exe

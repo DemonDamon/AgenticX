@@ -196,6 +196,22 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   wechatClearCredentials: async () =>
     ipcRenderer.invoke("wechat-clear-credentials") as Promise<{ ok: boolean }>,
 
+  /** 连接器网关（内置 sidecar）：确保已启动并返回端口与 runtime token（写入 mcp.json 用）。 */
+  connectorRuntimeEnsure: async () =>
+    ipcRenderer.invoke("connector-runtime-ensure") as Promise<
+      { ok: true; port: number; runtimeToken: string } | { ok: false; error: string }
+    >,
+  connectorRuntimeStatus: async () =>
+    ipcRenderer.invoke("connector-runtime-status") as Promise<{ running: boolean; port: number }>,
+  /** 管理面代理（admin token 只留主进程）。 */
+  connectorRuntimeAdmin: async (payload: { method: string; path: string; body?: unknown }) =>
+    ipcRenderer.invoke("connector-runtime-admin", payload) as Promise<{
+      ok: boolean;
+      status: number;
+      body?: unknown;
+      error?: string;
+    }>,
+
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },

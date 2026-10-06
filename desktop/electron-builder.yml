@@ -40,6 +40,10 @@ mac:
       to: backend
       filter:
         - "**/*"
+    - from: bundled-sidecar/${arch}
+      to: sidecar
+      filter:
+        - "**/*"
 win:
   artifactName: "${productName}-${version}-win-x64.${ext}"
   target:
@@ -48,6 +52,10 @@ win:
   extraResources:
     - from: bundled-backend/win-amd64
       to: backend
+      filter:
+        - "**/*"
+    - from: bundled-sidecar/win-amd64
+      to: sidecar
       filter:
         - "**/*"
 linux:

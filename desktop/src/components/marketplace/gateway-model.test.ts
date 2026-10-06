@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   GATEWAY_DEFAULT_SERVER_NAME,
   applyGatewayToMcpJson,
+  buildBuiltinGatewayForm,
   buildGatewayMarketItem,
   buildGatewayServerConfig,
   isGatewayInstalled,
@@ -10,13 +11,8 @@ import {
   type GatewayForm,
 } from "./gateway-model";
 
-/** 托管形态表单(与数据文件默认值一致)。 */
-const hostedForm: GatewayForm = {
-  mode: "hosted",
-  url: "https://connector.oomol.com/mcp",
-  token: "",
-  serverName: "",
-};
+/** 内置形态表单(sidecar 就绪信息构建,本地端点)。 */
+const builtinForm: GatewayForm = buildBuiltinGatewayForm(41719, "rt-secret-123");
 
 /** 自建形态表单(带 token)。 */
 const selfForm: GatewayForm = {
@@ -26,31 +22,48 @@ const selfForm: GatewayForm = {
   serverName: "my-gateway",
 };
 
+describe("buildBuiltinGatewayForm", () => {
+  it("builds a local /mcp endpoint form with the runtime token", () => {
+    expect(builtinForm).toEqual({
+      mode: "builtin",
+      url: "http://127.0.0.1:41719/mcp",
+      token: "rt-secret-123",
+      serverName: GATEWAY_DEFAULT_SERVER_NAME,
+    });
+  });
+
+  it("produces a config payload accepted by buildGatewayServerConfig", () => {
+    const res = buildGatewayServerConfig(builtinForm);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.config).toEqual({
+      url: "http://127.0.0.1:41719/mcp",
+      headers: { Authorization: "Bearer rt-secret-123" },
+    });
+  });
+});
+
 describe("normalizeGatewayUrl", () => {
   it("passes through a well-formed /mcp endpoint", () => {
-    expect(normalizeGatewayUrl("https://connector.oomol.com/mcp")).toBe(
-      "https://connector.oomol.com/mcp",
-    );
+    expect(normalizeGatewayUrl("https://gw.example.com/mcp")).toBe("https://gw.example.com/mcp");
+  });
+
+  it("keeps local http endpoints untouched", () => {
+    expect(normalizeGatewayUrl("http://127.0.0.1:41719/mcp")).toBe("http://127.0.0.1:41719/mcp");
   });
 
   it("strips trailing slashes", () => {
-    expect(normalizeGatewayUrl("https://connector.oomol.com/mcp/")).toBe(
-      "https://connector.oomol.com/mcp",
-    );
-    expect(normalizeGatewayUrl("https://connector.oomol.com/mcp///")).toBe(
-      "https://connector.oomol.com/mcp",
-    );
+    expect(normalizeGatewayUrl("https://gw.example.com/mcp/")).toBe("https://gw.example.com/mcp");
+    expect(normalizeGatewayUrl("https://gw.example.com/mcp///")).toBe("https://gw.example.com/mcp");
   });
 
   it("appends /mcp when the path is empty or root-only", () => {
-    expect(normalizeGatewayUrl("https://connector.oomol.com")).toBe(
-      "https://connector.oomol.com/mcp",
-    );
+    expect(normalizeGatewayUrl("https://gw.example.com")).toBe("https://gw.example.com/mcp");
     expect(normalizeGatewayUrl("http://127.0.0.1:8787/")).toBe("http://127.0.0.1:8787/mcp");
   });
 
   it("defaults the scheme to https for bare hosts", () => {
-    expect(normalizeGatewayUrl("connector.oomol.com")).toBe("https://connector.oomol.com/mcp");
+    expect(normalizeGatewayUrl("gw.example.com")).toBe("https://gw.example.com/mcp");
   });
 
   it("keeps custom non-root paths untouched", () => {
@@ -63,7 +76,7 @@ describe("normalizeGatewayUrl", () => {
   });
 
   it("rejects non-http(s) schemes", () => {
-    expect(normalizeGatewayUrl("ftp://connector.oomol.com")).toBeNull();
+    expect(normalizeGatewayUrl("ftp://gw.example.com")).toBeNull();
     expect(normalizeGatewayUrl("file:///etc/passwd")).toBeNull();
   });
 
@@ -74,10 +87,10 @@ describe("normalizeGatewayUrl", () => {
 
 describe("resolveGatewayServerName", () => {
   it("falls back to the default server name when blank", () => {
-    expect(resolveGatewayServerName({ ...hostedForm, serverName: "" })).toBe(
+    expect(resolveGatewayServerName({ ...builtinForm, serverName: "" })).toBe(
       GATEWAY_DEFAULT_SERVER_NAME,
     );
-    expect(resolveGatewayServerName({ ...hostedForm, serverName: "   " })).toBe(
+    expect(resolveGatewayServerName({ ...builtinForm, serverName: "   " })).toBe(
       GATEWAY_DEFAULT_SERVER_NAME,
     );
   });
@@ -90,14 +103,6 @@ describe("resolveGatewayServerName", () => {
 });
 
 describe("buildGatewayServerConfig", () => {
-  it("builds a streamable-http payload without headers when token is empty", () => {
-    const res = buildGatewayServerConfig(hostedForm);
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.serverName).toBe(GATEWAY_DEFAULT_SERVER_NAME);
-    expect(res.config).toEqual({ url: "https://connector.oomol.com/mcp" });
-  });
-
   it("adds a Bearer Authorization header when token is present", () => {
     const res = buildGatewayServerConfig(selfForm);
     expect(res.ok).toBe(true);
@@ -109,28 +114,39 @@ describe("buildGatewayServerConfig", () => {
     });
   });
 
-  it("normalizes the url before building the payload", () => {
-    const res = buildGatewayServerConfig({ ...hostedForm, url: "connector.oomol.com/" });
+  it("builds a payload without headers when token is empty", () => {
+    const res = buildGatewayServerConfig({ ...selfForm, token: "", serverName: "" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.config.url).toBe("https://connector.oomol.com/mcp");
+    expect(res.serverName).toBe(GATEWAY_DEFAULT_SERVER_NAME);
+    expect(res.config).toEqual({ url: "http://127.0.0.1:8787/mcp" });
+  });
+
+  it("normalizes the url before building the payload", () => {
+    const res = buildGatewayServerConfig({ ...selfForm, url: "gw.example.com/" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.config.url).toBe("https://gw.example.com/mcp");
   });
 
   it("fails with invalid_url for unusable urls", () => {
-    const res = buildGatewayServerConfig({ ...hostedForm, url: "ftp://x" });
+    const res = buildGatewayServerConfig({ ...selfForm, url: "ftp://x" });
     expect(res).toEqual({ ok: false, error: "invalid_url" });
   });
 });
 
 describe("applyGatewayToMcpJson", () => {
-  it("creates mcpServers in an empty document", () => {
-    const res = applyGatewayToMcpJson("{}", hostedForm);
+  it("creates mcpServers in an empty document (builtin form)", () => {
+    const res = applyGatewayToMcpJson("{}", builtinForm);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.existed).toBe(false);
     expect(JSON.parse(res.text)).toEqual({
       mcpServers: {
-        [GATEWAY_DEFAULT_SERVER_NAME]: { url: "https://connector.oomol.com/mcp" },
+        [GATEWAY_DEFAULT_SERVER_NAME]: {
+          url: "http://127.0.0.1:41719/mcp",
+          headers: { Authorization: "Bearer rt-secret-123" },
+        },
       },
     });
   });
@@ -159,18 +175,18 @@ describe("applyGatewayToMcpJson", () => {
     const doc = JSON.stringify({
       mcpServers: { [GATEWAY_DEFAULT_SERVER_NAME]: { url: "https://old.example/mcp" } },
     });
-    const res = applyGatewayToMcpJson(doc, hostedForm);
+    const res = applyGatewayToMcpJson(doc, builtinForm);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.existed).toBe(true);
     const parsed = JSON.parse(res.text) as { mcpServers: Record<string, unknown> };
     expect((parsed.mcpServers[GATEWAY_DEFAULT_SERVER_NAME] as { url: string }).url).toBe(
-      "https://connector.oomol.com/mcp",
+      "http://127.0.0.1:41719/mcp",
     );
   });
 
   it("writes pretty-printed json with a trailing newline", () => {
-    const res = applyGatewayToMcpJson("{}", hostedForm);
+    const res = applyGatewayToMcpJson("{}", builtinForm);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.text.endsWith("\n")).toBe(true);
@@ -178,19 +194,19 @@ describe("applyGatewayToMcpJson", () => {
   });
 
   it("fails with invalid_json for corrupt documents", () => {
-    const res = applyGatewayToMcpJson("{ not json", hostedForm);
+    const res = applyGatewayToMcpJson("{ not json", builtinForm);
     expect(res).toEqual({ ok: false, error: "invalid_json" });
   });
 
   it("propagates invalid_url", () => {
-    const res = applyGatewayToMcpJson("{}", { ...hostedForm, url: "" });
+    const res = applyGatewayToMcpJson("{}", { ...selfForm, url: "" });
     expect(res).toEqual({ ok: false, error: "invalid_url" });
   });
 });
 
 describe("isGatewayInstalled", () => {
   it("matches the configured roster case-insensitively", () => {
-    expect(isGatewayInstalled(new Set(["Open-Connector"]), GATEWAY_DEFAULT_SERVER_NAME)).toBe(true);
+    expect(isGatewayInstalled(new Set(["Connector-Runtime"]), GATEWAY_DEFAULT_SERVER_NAME)).toBe(true);
     expect(isGatewayInstalled(new Set(["github"]), GATEWAY_DEFAULT_SERVER_NAME)).toBe(false);
     expect(isGatewayInstalled(new Set(["my-gateway"]), "my-gateway")).toBe(true);
   });
@@ -200,14 +216,14 @@ describe("buildGatewayMarketItem", () => {
   it("builds the featured gateway card as a special mcp item", () => {
     const item = buildGatewayMarketItem({
       name: "连接器网关",
-      description: "1,500+ 服务 · 11,000+ 动作",
-      provider: "open-connector",
+      description: "精选连接器 · 凭据留在网关侧",
+      provider: "AgenticX",
       installed: false,
     });
     expect(item).toMatchObject({
-      key: "mcp:open-connector-gateway",
+      key: "mcp:connector-runtime-gateway",
       kind: "mcp",
-      serverId: "open-connector-gateway",
+      serverId: "connector-runtime-gateway",
       gateway: true,
       name: "连接器网关",
       installed: false,

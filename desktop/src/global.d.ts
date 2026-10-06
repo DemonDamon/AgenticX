@@ -616,6 +616,17 @@ declare global {
       wechatSidecarPort: () => Promise<{ port: number; running: boolean }>;
       wechatClearCredentials: () => Promise<{ ok: boolean }>;
 
+      /** 连接器网关（内置 sidecar） */
+      connectorRuntimeEnsure: () => Promise<
+        { ok: true; port: number; runtimeToken: string } | { ok: false; error: string }
+      >;
+      connectorRuntimeStatus: () => Promise<{ running: boolean; port: number }>;
+      connectorRuntimeAdmin: (payload: {
+        method: string;
+        path: string;
+        body?: unknown;
+      }) => Promise<{ ok: boolean; status: number; body?: unknown; error?: string }>;
+
       onOpenSettings: (cb: () => void) => void;
       onSkillsChanged: (cb: () => void) => () => void;
       onAutomationTaskProgress: (cb: (payload: AutomationTaskProgress) => void) => () => void;

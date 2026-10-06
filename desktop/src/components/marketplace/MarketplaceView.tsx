@@ -97,10 +97,7 @@ export function MarketplaceView() {
     () =>
       buildGatewayMarketItem({
         name: t("gateway.name"),
-        description: t("gateway.cardDesc", {
-          providers: t("gateway.supplyProviders"),
-          actions: t("gateway.supplyActions"),
-        }),
+        description: t("gateway.cardDesc"),
         provider: t("gateway.provider"),
         installed: isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName),
       }),

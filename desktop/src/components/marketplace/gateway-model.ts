@@ -1,7 +1,7 @@
 /**
- * 连接器网关(open-connector)纯函数层:URL 规范化、MCP server 配置构建、
+ * 连接器网关纯函数层:URL 规范化、MCP server 配置构建、
  * mcp.json 合并写入与市场精选卡条目。不依赖 React / bridge,便于单测;
- * 弹层编排(读写配置文件、刷新名册)见 GatewayInstallModal。
+ * 弹层编排(读写配置文件、拉起 sidecar、刷新名册)见 GatewayInstallModal。
  */
 
 import {
@@ -12,10 +12,14 @@ import {
 } from "../../utils/mcp-remote-config";
 import { isMcpInstalled, type MarketplaceItem } from "./model";
 
-/** 网关安装形态:托管服务一键装 vs 自建(填 URL + 可选 token)。 */
-export type GatewayFormMode = "hosted" | "self";
+/** 网关安装形态:内置 sidecar 一键装 vs 自建(填 URL + 可选 token)。 */
+export type GatewayFormMode = "builtin" | "self";
 
-/** 安装弹层表单:hosted 形态 url 由数据文件默认值填充,两种形态统一处理。 */
+/**
+ * 安装弹层表单:
+ * - builtin 形态 url/token 由 sidecar 就绪信息动态填充(见 buildBuiltinGatewayForm);
+ * - self 形态由用户填写。
+ */
 export type GatewayForm = {
   mode: GatewayFormMode;
   url: string;
@@ -24,15 +28,25 @@ export type GatewayForm = {
 };
 
 /** 默认写入 mcp.json 的 server 名(已装判定与覆盖提示都按它匹配)。 */
-export const GATEWAY_DEFAULT_SERVER_NAME = "open-connector";
+export const GATEWAY_DEFAULT_SERVER_NAME = "connector-runtime";
 
 /** 市场精选卡的 serverId 特例标记(区别于上游市场条目,详情走网关弹层)。 */
-export const GATEWAY_MARKET_SERVER_ID = "open-connector-gateway";
+export const GATEWAY_MARKET_SERVER_ID = "connector-runtime-gateway";
+
+/** 由 sidecar 就绪信息构建内置形态表单(url 指向本机 /mcp 端点)。 */
+export function buildBuiltinGatewayForm(port: number, runtimeToken: string): GatewayForm {
+  return {
+    mode: "builtin",
+    url: `http://127.0.0.1:${port}/mcp`,
+    token: runtimeToken,
+    serverName: GATEWAY_DEFAULT_SERVER_NAME,
+  };
+}
 
 /**
  * 规范化网关端点 URL:
  * - 去首尾空白与尾部斜杠;无协议默认补 https://;
- * - 仅接受 http(s);路径为空或仅 / 时补 /mcp 后缀(open-connector 端点约定);
+ * - 仅接受 http(s);路径为空或仅 / 时补 /mcp 后缀(网关端点约定);
  * - 无法解析返回 null。
  */
 export function normalizeGatewayUrl(raw: string): string | null {
