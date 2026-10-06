@@ -61,6 +61,7 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 - [gateway/keypool-pat-overview.md](./gateway/keypool-pat-overview.md) — Key 轮转、配额选择、PAT
 - [gateway/api-tokens.md](./gateway/api-tokens.md) — `agx-pat-` 创建与吊销
 - [gateway/mcp-hosting-overview.md](./gateway/mcp-hosting-overview.md) — MCP 托管总览
+- [gateway/governance-mcp-gateway-reference.md](./gateway/governance-mcp-gateway-reference.md) — 治理 MCP 网关参照设计（open-connector 机制映射）
 
 ### 数据与权限
 

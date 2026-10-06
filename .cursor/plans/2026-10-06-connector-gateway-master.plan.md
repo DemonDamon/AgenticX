@@ -1,7 +1,7 @@
 # 连接器网关接入总体规划（open-connector）
 
 日期：2026-10-06
-状态：规划完成，待实施
+状态：两个 subplan 均已实施（01 桌面端市场条目 commit `af2965d4`；02 Enterprise 参照文档见 enterprise/docs/gateway/governance-mcp-gateway-reference.md）
 研究依据：`research/codedeepresearch/open-connector/`（SELECTIVE_ADOPT，锁定 SHA eb4cb13）
 
 ## 背景
