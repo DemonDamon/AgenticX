@@ -1,5 +1,8 @@
 /** Helpers for reading/writing remote MCP entries in mcp.json (no secrets in localStorage). */
 
+/** 主 MCP 配置路径(设置页、市场本地直写共用的单一来源)。 */
+export const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
+
 export type McpJsonDocument = Record<string, unknown> & {
   mcpServers?: Record<string, unknown>;
 };

@@ -120,6 +120,35 @@
     "continueInstall": "Continue"
   },
   "installQueue": "Installing {{count}} skills…",
+  "gateway": {
+    "name": "Connector Gateway",
+    "provider": "open-connector",
+    "cardDesc": "{{providers}} services · {{actions}} actions · credentials stay on the gateway",
+    "supplyProviders": "1,500+",
+    "supplyActions": "11,000+",
+    "modalTitle": "Install Connector Gateway",
+    "intro": "One MCP config connects you to {{providers}} services and {{actions}} actions; search and invoke actions right in the chat after install.",
+    "mode": {
+      "hosted": "Hosted service",
+      "self": "Self-hosted gateway"
+    },
+    "hostedHint": "Hosted by OOMOL and ready to use; paste the access token issued by the hosted service.",
+    "selfHint": "Connect to your own open-connector instance (Docker / single binary); URL and token follow your instance config.",
+    "url": "Gateway URL",
+    "token": "Access token (optional)",
+    "tokenHint": "The gateway runtime token; leave empty if the endpoint has no auth.",
+    "security": "Service credentials and OAuth grants stay on the gateway; the local chat only sends action calls and receives results.",
+    "installedHint": "Gateway already installed; installing again overwrites the existing open-connector config.",
+    "officialDocs": "Official docs",
+    "cancel": "Cancel",
+    "install": "Install",
+    "installing": "Installing…",
+    "installOk": "Connector Gateway written to local MCP config ({{name}}).",
+    "installFailed": "Install failed: {{reason}}",
+    "invalidUrl": "Invalid gateway URL. Please check and retry.",
+    "cannotReadConfig": "Cannot read the local MCP config file.",
+    "saveFailed": "Failed to write the MCP config."
+  },
   "empty": {
     "title": "Nothing here yet",
     "desc": "Try a different keyword or filter."

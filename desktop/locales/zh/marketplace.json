@@ -120,6 +120,35 @@
     "continueInstall": "继续安装"
   },
   "installQueue": "正在安装 {{count}} 个技能…",
+  "gateway": {
+    "name": "连接器网关",
+    "provider": "open-connector",
+    "cardDesc": "{{providers}} 服务 · {{actions}} 动作 · 凭据留在网关侧",
+    "supplyProviders": "1,500+",
+    "supplyActions": "11,000+",
+    "modalTitle": "安装连接器网关",
+    "intro": "一条 MCP 配置接入 {{providers}} 个服务、{{actions}} 个动作;安装后可在对话中搜索并调用动作。",
+    "mode": {
+      "hosted": "托管服务",
+      "self": "自建网关"
+    },
+    "hostedHint": "由 OOMOL 官方托管,开箱即用;需填入托管服务发放的访问令牌。",
+    "selfHint": "连接自部署的 open-connector 实例(Docker / 单文件二进制),地址与令牌以实例配置为准。",
+    "url": "网关地址",
+    "token": "访问令牌(可选)",
+    "tokenHint": "网关 runtime token;留空表示该端点未开启鉴权。",
+    "security": "各服务的账号凭据与 OAuth 授权都保留在网关侧,本地对话只发送动作指令、取回结果。",
+    "installedHint": "网关已安装,再次安装将覆盖现有 open-connector 配置。",
+    "officialDocs": "官方文档",
+    "cancel": "取消",
+    "install": "安装",
+    "installing": "安装中…",
+    "installOk": "连接器网关已写入本机 MCP 配置({{name}})。",
+    "installFailed": "安装失败:{{reason}}",
+    "invalidUrl": "网关地址无效,请检查后重试。",
+    "cannotReadConfig": "无法读取本机 MCP 配置文件。",
+    "saveFailed": "写入 MCP 配置失败。"
+  },
   "empty": {
     "title": "暂无内容",
     "desc": "换个关键词或筛选条件试试。"

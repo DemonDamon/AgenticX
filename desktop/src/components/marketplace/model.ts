@@ -192,6 +192,8 @@ export type MarketplaceItem = {
   logoUrl?: string;
   /** kind=mcp:市场条目 id,详情浮层入口。 */
   serverId?: string;
+  /** kind=mcp:连接器网关精选条目特例标记,安装走网关弹层而非上游详情浮层。 */
+  gateway?: boolean;
   /** kind=skill:推荐位 id(Meta-Agent 安装提示词)。 */
   id?: string;
   /** kind=skill:registry 安装来源(扫描安装链路)。 */

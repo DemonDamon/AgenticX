@@ -145,7 +145,11 @@ import { McpRemoteServerModal } from "./settings/mcp/McpRemoteServerModal";
 import { McpRemoteServerDetail } from "./settings/mcp/McpRemoteServerDetail";
 import { McpGatewayImportPanel } from "./settings/mcp/McpGatewayImportPanel";
 import { ConnectorsTab } from "./settings/connectors/ConnectorsTab";
-import { mcpRemoteHostLabel, mcpTransportBadgeLabel } from "../utils/mcp-remote-config";
+import {
+  MCP_PRIMARY_CONFIG_PATH,
+  mcpRemoteHostLabel,
+  mcpTransportBadgeLabel,
+} from "../utils/mcp-remote-config";
 import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
 import {
   VoiceSettingsPanel,
@@ -355,7 +359,6 @@ function providerDraftMapsEqual(
   });
 }
 
-const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 const BUNDLED_DEFAULT_MCP_NAMES_FALLBACK = ["browser-use", "firecrawl"] as const;
 
 /** 与后端 `connection_state` 对齐；缺省时按 connected 推断（兼容旧 Studio） */

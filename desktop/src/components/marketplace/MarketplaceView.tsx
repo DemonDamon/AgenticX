@@ -32,6 +32,10 @@ import { useMarketplaceData } from "./useMarketplaceData";
 import { useSkillInstall } from "./useSkillInstall";
 import { ManageView } from "./ManageView";
 import { MarketOnboardingModal, MARKET_ONBOARDING_DISMISSED_KEY } from "./MarketOnboardingModal";
+import { GatewayInstallModal } from "./GatewayInstallModal";
+import { buildGatewayMarketItem, isGatewayInstalled } from "./gateway-model";
+import { CONNECTOR_GATEWAY } from "../../data/connector-gateway";
+import { MCP_PRIMARY_CONFIG_PATH } from "../../utils/mcp-remote-config";
 
 /** 市场顶栏五 Tab:全部混排统一卡片,MCP/技能/专家/指令按 kind 分域浏览。 */
 const MARKET_TABS: readonly MarketTab[] = ["all", "mcp", "skills", "agents", "commands"];
@@ -65,6 +69,7 @@ export function MarketplaceView() {
   const [promptBusy, setPromptBusy] = useState(false);
   const [promptMsg, setPromptMsg] = useState("");
   const [detailServerId, setDetailServerId] = useState<string | null>(null);
+  const [gatewayOpen, setGatewayOpen] = useState(false);
   const [mcpInstalling, setMcpInstalling] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<{ message: string; kind: "info" | "success" | "error" } | null>(
     null,
@@ -87,17 +92,35 @@ export function MarketplaceView() {
   );
   const skillTags = useMemo(() => skillFilterTags(skillItems), [skillItems]);
 
-  /** 统一条目:连接器 + 技能 + 专家 + 指令。 */
+  /** 连接器网关精选卡:置顶于统一条目之首,文案走 i18n,已装态按本机名册判定。 */
+  const gatewayItem = useMemo(
+    () =>
+      buildGatewayMarketItem({
+        name: t("gateway.name"),
+        description: t("gateway.cardDesc", {
+          providers: t("gateway.supplyProviders"),
+          actions: t("gateway.supplyActions"),
+        }),
+        provider: t("gateway.provider"),
+        installed: isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName),
+      }),
+    [t, data.configuredMcpNames],
+  );
+
+  /** 统一条目:连接器网关精选卡(置顶) + 连接器 + 技能 + 专家 + 指令。 */
   const unifiedItems = useMemo(
     () =>
-      buildUnifiedItems(
-        data.mcpEntries,
-        skillItems,
-        data.agents,
-        data.commands,
-        data.configuredMcpNames,
-      ),
-    [data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
+      [
+        gatewayItem,
+        ...buildUnifiedItems(
+          data.mcpEntries,
+          skillItems,
+          data.agents,
+          data.commands,
+          data.configuredMcpNames,
+        ),
+      ],
+    [gatewayItem, data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
   );
   const filteredUnified = useMemo(
     () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query, categoryFilter),
@@ -447,7 +470,11 @@ export function MarketplaceView() {
             installingKey={installStatus.installingKey}
             queuedKeys={installStatus.queuedKeys}
             promptBusy={promptBusy}
-            onOpenMcpDetail={(item) => setDetailServerId(item.serverId ?? null)}
+            onOpenMcpDetail={(item) => {
+              // 网关精选卡走专属安装弹层(本地直写),其余连接器走上游详情浮层。
+              if (item.gateway) setGatewayOpen(true);
+              else setDetailServerId(item.serverId ?? null);
+            }}
             onInstallSkill={installUnifiedItem}
             onUse={useUnifiedItem}
           />
@@ -472,6 +499,18 @@ export function MarketplaceView() {
         onInstall={installMcp}
         installedSkillNames={Array.from(data.localSkillNames)}
         onInstallSkill={onInstallBundledSkill}
+      />
+
+      <GatewayInstallModal
+        open={gatewayOpen}
+        configPath={MCP_PRIMARY_CONFIG_PATH}
+        installed={isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName)}
+        onClose={() => setGatewayOpen(false)}
+        onInstalled={async (message) => {
+          setGatewayOpen(false);
+          setMcpStatus({ message, kind: "success" });
+          await data.reloadMcpStatus();
+        }}
       />
 
       <MarketOnboardingModal
