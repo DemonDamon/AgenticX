@@ -49,3 +49,8 @@
 
 ## Verdict
 SELECTIVE_ADOPT —— 市场以「连接器网关」精选条目最小接入（复用现有安装管线），不做目录收割/进程内嵌/连接 UI。
+
+## Follow-up（2026-10-06 实施收口）
+- subplan 01（桌面端）已实施：市场「连接器网关」精选卡 + 双形态安装弹层，commit `af2965d4`；CDP 实机验证 AC-1/2/3（截图 screenshots-subplan01/），AC-4 降级为观察项（托管端点需 runtime token，401 实测）
+- subplan 02（Enterprise）已实施：治理 MCP 网关参照设计文档 `enterprise/docs/gateway/governance-mcp-gateway-reference.md`（机制映射 8 行全带 Evidence ID），commit `fea9229b`
+- 后续信号：网关条目真实使用量 → 是否投入 sidecar 内置；Enterprise PoC（自托管实例）承接 AC-4 验证与凭据/策略定序
