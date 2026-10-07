@@ -7,10 +7,12 @@
     "mcp": "MCP",
     "skills": "Skills",
     "agents": "Agents",
-    "commands": "Commands"
+    "commands": "Commands",
+    "connectors": "Connectors"
   },
   "search": {
     "all": "Search the marketplace",
+    "connectors": "Search connectors",
     "mcp": "Search MCP connectors",
     "skills": "Search skills",
     "agents": "Search agents",
@@ -48,14 +50,20 @@
     "use": "Use",
     "detail": "Details",
     "openSite": "Visit site",
-    "goConfig": "Configure"
+    "goConfig": "Configure",
+    "connect": "Connect",
+    "manage": "Manage",
+    "notWired": "Not wired",
+    "reauth": "Re-authorize"
   },
   "badge": {
     "mcp": "Connector",
     "skill": "Skill",
     "agent": "Agent",
     "command": "Command",
-    "installed": "Installed"
+    "installed": "Installed",
+    "connector": "Connector",
+    "needsReauth": "Re-auth needed"
   },
   "useDraft": "Please use the \"{{name}}\" skill to help me with my task.",
   "useDraftAgent": "Please have the \"{{name}}\" agent help me with my task.",
@@ -183,5 +191,12 @@
     "point3": "Extensions bring professional capabilities so complex tasks finish faster",
     "point4": "No complex setup — install, state your need, get results",
     "gotIt": "Got it"
+  },
+  "connectors": {
+    "showUnwired": "Show not-yet-wired",
+    "unwiredTitle": "\"{{name}}\" is not wired yet",
+    "unwiredBody": "Near will not fake a connected state. This entry has no real path yet (native CLI or remote MCP URL + token). Use a wired connector, or add an official Streamable HTTP MCP endpoint later via custom credentials.",
+    "unwiredHint": "Suggested handshake: {{auth}} (needs an official MCP URL and token before it can be instantiated).",
+    "unwiredClose": "Got it"
   }
 }

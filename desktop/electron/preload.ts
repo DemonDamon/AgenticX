@@ -628,8 +628,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-feishu-logout"),
   nativeConnectorFeishuCancel: async () =>
     ipcRenderer.invoke("native-connector-feishu-cancel"),
-  nativeConnectorWecomLogin: async (payload: { botId: string; botSecret: string }) =>
-    ipcRenderer.invoke("native-connector-wecom-login", payload),
+  nativeConnectorWecomLogin: async (payload: {
+    mode?: "qrcode" | "manual";
+    botId?: string;
+    botSecret?: string;
+  }) => ipcRenderer.invoke("native-connector-wecom-login", payload),
   nativeConnectorWecomLogout: async () =>
     ipcRenderer.invoke("native-connector-wecom-logout"),
   nativeConnectorWecomCancel: async () =>
@@ -720,13 +723,29 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
   onNativeConnectorWecomProgress: (
     callback: (payload: {
-      phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+      phase:
+        | "installing"
+        | "initializing"
+        | "waiting_scan"
+        | "probing"
+        | "success"
+        | "disconnected"
+        | "error";
+      loginUrl?: string;
     }) => void,
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       payload: {
-        phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+        phase:
+          | "installing"
+          | "initializing"
+          | "waiting_scan"
+          | "probing"
+          | "success"
+          | "disconnected"
+          | "error";
+        loginUrl?: string;
       },
     ) => callback(payload);
     ipcRenderer.on("native-connector-wecom-progress", handler);

@@ -2,6 +2,7 @@
  * 统一条目卡片网格:「全部」「MCP」「专家」「指令」Tab 共用。
  * 卡片按 kind 出 badge,CTA 分派:
  * - mcp:未装 → 打开详情浮层安装;已装 → 「使用」回对话
+ * - connector:已接线 → 「连接/管理」走设置或网关弹层(不进聊天);未接线 → 「暂未接线」说明
  * - skill:已装 → 「使用」;registry → 扫描安装;推荐位 install → Meta-Agent 安装;official_site → 外链
  * - agent/command:本机资产恒已装 → 「使用」
  */
@@ -21,6 +22,10 @@ type Props = {
   onOpenMcpDetail: (item: MarketplaceItem) => void;
   onInstallSkill: (item: MarketplaceItem) => void;
   onUse: (item: MarketplaceItem) => void;
+  /** 已接线原生连接器:打开设置握手,不进聊天。 */
+  onConnectNative?: (item: MarketplaceItem) => void;
+  /** 未接线条目:打开「暂未接线」说明。 */
+  onUnwiredConnector?: (item: MarketplaceItem) => void;
 };
 
 export function UnifiedGrid({
@@ -31,6 +36,8 @@ export function UnifiedGrid({
   onOpenMcpDetail,
   onInstallSkill,
   onUse,
+  onConnectNative,
+  onUnwiredConnector,
 }: Props) {
   const { t } = useTranslation("marketplace");
 
@@ -79,7 +86,11 @@ export function UnifiedGrid({
                   ) : null}
                 </div>
               </div>
-              {item.installed ? (
+              {item.kind === "connector" && item.health === "degraded" ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                  {t("badge.needsReauth")}
+                </span>
+              ) : item.installed ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
                   <CheckCircle2 className="h-3 w-3" aria-hidden />
                   {t("badge.installed")}
@@ -92,7 +103,51 @@ export function UnifiedGrid({
             </p>
 
             <div className="mt-auto flex items-center justify-end gap-2 pt-2.5">
-              {item.kind === "mcp" ? (
+              {item.kind === "connector" ? (
+                item.wired === false ? (
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => onUnwiredConnector?.(item)}
+                  >
+                    {t("actions.notWired")}
+                  </button>
+                ) : item.gateway ? (
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+                    onClick={() => onOpenMcpDetail(item)}
+                  >
+                    {item.installed ? (
+                      <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                    {item.installed ? t("actions.manage") : t("actions.connect")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 ${
+                      item.health === "degraded" ? "bg-amber-500" : "bg-accent"
+                    }`}
+                    onClick={() => onConnectNative?.(item)}
+                  >
+                    {item.health === "degraded" ? (
+                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                    ) : item.installed ? (
+                      <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                    {item.health === "degraded"
+                      ? t("actions.reauth")
+                      : item.installed
+                        ? t("actions.manage")
+                        : t("actions.connect")}
+                  </button>
+                )
+              ) : item.kind === "mcp" ? (
                 <button
                   type="button"
                   className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"

@@ -35,7 +35,7 @@ export const FEATURED_CARDS: FeaturedCardDef[] = [
     id: "connectors",
     iconSrc: connectorsIcon,
     tint: "bg-violet-50 ring-1 ring-violet-100",
-    target: { tab: "mcp", tag: "all" },
+    target: { tab: "connectors", tag: "all" },
   },
   {
     id: "toolkit",

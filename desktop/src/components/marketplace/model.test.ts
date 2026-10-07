@@ -6,7 +6,9 @@ import {
   buildSkillItems,
   buildUnifiedItems,
   filterSkills,
+  buildConnectorSupplyItems,
   filterUnifiedItems,
+  tabToKindFilter,
   isMcpInstalled,
   isSkillInstalled,
   mapMcpCategories,
@@ -337,5 +339,87 @@ describe("filterUnifiedItems", () => {
     );
     expect(filterUnifiedItems(items, "all", "写作助手").some((it) => it.kind === "agent")).toBe(true);
     expect(filterUnifiedItems(items, "all", "zzz-none")).toHaveLength(0);
+  });
+});
+
+describe("connectors tab supply", () => {
+  it("tabToKindFilter maps connectors → connector", () => {
+    expect(tabToKindFilter("connectors")).toBe("connector");
+  });
+
+  it("filterUnifiedItems connectors includes gateway mcp + connector kind", () => {
+    const items = [
+      { key: "mcp:gw", kind: "mcp" as const, name: "GW", description: "", installed: false, gateway: true },
+      { key: "connector:native:wecom", kind: "connector" as const, name: "企微", description: "", installed: false, wired: true },
+      { key: "mcp:fetch", kind: "mcp" as const, name: "Fetch", description: "", installed: false },
+      { key: "skill:x", kind: "skill" as const, name: "Skill", description: "", installed: true },
+    ];
+    const filtered = filterUnifiedItems(items, "connector", "");
+    expect(filtered.map((i) => i.key).sort()).toEqual(["connector:native:wecom", "mcp:gw"]);
+  });
+
+  it("buildConnectorSupplyItems hides unwired by default", () => {
+    const items = buildConnectorSupplyItems(
+      [
+        {
+          id: "native:wecom",
+          kind: "native",
+          connectorId: "wecom",
+          auth: "none",
+          wired: true,
+          fallbackName: "企微",
+          fallbackDescription: "d",
+        },
+        {
+          id: "native:slack",
+          kind: "native",
+          connectorId: "slack",
+          auth: "oauth2",
+          wired: false,
+          fallbackName: "Slack",
+          fallbackDescription: "d",
+        },
+      ],
+      { wiredOnly: true },
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]?.connectorId).toBe("wecom");
+  });
+});
+
+
+describe("buildConnectorSupplyItems connected SSOT", () => {
+  it("marks installed only when health is connected (not degraded)", () => {
+    const items = buildConnectorSupplyItems(
+      [
+        {
+          id: "native:github",
+          kind: "native",
+          connectorId: "github",
+          auth: "oauth2",
+          wired: true,
+          fallbackName: "GitHub",
+          fallbackDescription: "d",
+        },
+        {
+          id: "native:wecom",
+          kind: "native",
+          connectorId: "wecom",
+          auth: "none",
+          wired: true,
+          fallbackName: "企微",
+          fallbackDescription: "d",
+        },
+      ],
+      {
+        wiredOnly: true,
+        healthByConnectorId: { github: "degraded", wecom: "connected" },
+      },
+    );
+    const gh = items.find((i) => i.connectorId === "github");
+    const we = items.find((i) => i.connectorId === "wecom");
+    expect(gh?.health).toBe("degraded");
+    expect(gh?.installed).toBe(false);
+    expect(we?.installed).toBe(true);
   });
 });

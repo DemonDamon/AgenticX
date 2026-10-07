@@ -160,14 +160,14 @@ export function mapSkillCategory(rawCategory: string | undefined): MarketCategor
 }
 
 /**
- * 市场统一条目 kind:MCP 连接器 / 技能(含精选工具位) / 数字专家 / 指令。
+ * 市场统一条目 kind:MCP / 技能 / 专家 / 指令 / 连接器(原生+网关供给)。
  * 「精选工具」是推荐位技能里 cta=install 的子集,在统一模型下归入 skill,
  * 由技能 Tab 的 installable 筛选 chip 提供原「专业工具集」入口。
  */
-export type MarketItemKind = "mcp" | "skill" | "agent" | "command";
+export type MarketItemKind = "mcp" | "skill" | "agent" | "command" | "connector";
 
-/** 市场页顶栏 Tab:全部 + 四类能力扩展(全部页混排统一卡片)。 */
-export type MarketTab = "all" | "mcp" | "skills" | "agents" | "commands";
+/** 市场页顶栏 Tab:全部 + 连接器 + MCP/技能/专家/指令(全部页混排统一卡片)。 */
+export type MarketTab = "all" | "connectors" | "mcp" | "skills" | "agents" | "commands";
 
 /** MarketTab → 统一条目 kind 筛选值(Tab 用复数标签,kind 用单数)。 */
 export function tabToKindFilter(tab: MarketTab): "all" | MarketItemKind {
@@ -175,6 +175,7 @@ export function tabToKindFilter(tab: MarketTab): "all" | MarketItemKind {
   if (tab === "agents") return "agent";
   if (tab === "commands") return "command";
   if (tab === "mcp") return "mcp";
+  if (tab === "connectors") return "connector";
   return "all";
 }
 
@@ -194,6 +195,18 @@ export type MarketplaceItem = {
   serverId?: string;
   /** kind=mcp:连接器网关精选条目特例标记,安装走网关弹层而非上游详情浮层。 */
   gateway?: boolean;
+  /** kind=connector:供给类型 native|mcp|gateway。 */
+  supplyKind?: "native" | "mcp" | "gateway";
+  /** kind=connector:握手类型。 */
+  authType?: "none" | "api_key" | "custom_credential" | "oauth2";
+  /** kind=connector:原生目录 id（设置页定位）。 */
+  connectorId?: string;
+  /** kind=connector:是否已有真实接线路径；false 时仅展示说明、不走安装。 */
+  wired?: boolean;
+  /** kind=connector:对应 CONNECTOR_SUPPLY.id。 */
+  supplyId?: string;
+  /** kind=connector:探活健康态（connected|degraded|…）；绿标仅 connected。 */
+  health?: "connected" | "degraded" | "disconnected" | "unwired";
   /** kind=skill:推荐位 id(Meta-Agent 安装提示词)。 */
   id?: string;
   /** kind=skill:registry 安装来源(扫描安装链路)。 */
@@ -471,10 +484,96 @@ export function filterUnifiedItems(
   category?: MarketCategory | "all",
 ): MarketplaceItem[] {
   return items.filter((it) => {
-    if (kind !== "all" && it.kind !== kind) return false;
+    if (kind === "connector") {
+      // 连接器 Tab：原生/网关供给；网关精选卡仍是 kind=mcp + gateway 标记。
+      if (!(it.kind === "connector" || it.gateway === true)) return false;
+    } else if (kind === "mcp") {
+      // MCP Tab 不重复展示已归入连接器的原生卡片；网关精选仍可在 MCP 看见。
+      if (it.kind === "connector") return false;
+      if (it.kind !== "mcp") return false;
+    } else if (kind !== "all" && it.kind !== kind) {
+      return false;
+    }
     if (category && category !== "all" && it.category !== category) return false;
     return matchesUnifiedQuery(it, query);
   });
+}
+
+/**
+ * 从供给表构建市场「连接器」条目。
+ * wiredOnly=true（默认）时隐藏尚未接入占位，避免死点击与假「已连接」。
+ */
+export function buildConnectorSupplyItems(
+  entries: readonly {
+    id: string;
+    kind: "native" | "mcp" | "gateway";
+    connectorId?: string;
+    auth: "none" | "api_key" | "custom_credential" | "oauth2";
+    wired: boolean;
+    fallbackName: string;
+    fallbackDescription: string;
+    iconSrc?: string;
+  }[],
+  opts?: {
+    wiredOnly?: boolean;
+    /** 覆盖展示名/描述（i18n）。key=entry.id */
+    display?: Record<string, { name?: string; description?: string; provider?: string }>;
+    /** 网关已装态。 */
+    gatewayInstalled?: boolean;
+    /** @deprecated prefer healthByConnectorId */
+    connectedByConnectorId?: Readonly<Record<string, boolean>>;
+    /** 原生/MCP 合并健康态（设置页同源探活）。key=connectorId */
+    healthByConnectorId?: Readonly<Record<string, "connected" | "degraded" | "disconnected" | "unwired">>;
+  },
+): MarketplaceItem[] {
+  const wiredOnly = opts?.wiredOnly !== false;
+  const display = opts?.display ?? {};
+  const connectedMap = opts?.connectedByConnectorId ?? {};
+  const healthMap = opts?.healthByConnectorId ?? {};
+  const out: MarketplaceItem[] = [];
+  for (const e of entries) {
+    if (wiredOnly && !e.wired) continue;
+    const d = display[e.id] ?? {};
+    if (e.kind === "gateway") {
+      const gwInstalled = Boolean(opts?.gatewayInstalled);
+      out.push({
+        key: `connector:${e.id}`,
+        kind: "connector",
+        name: d.name ?? e.fallbackName,
+        description: d.description ?? e.fallbackDescription,
+        installed: gwInstalled,
+        provider: d.provider ?? "Near",
+        gateway: true,
+        supplyKind: "gateway",
+        authType: e.auth,
+        wired: e.wired,
+        supplyId: e.id,
+        serverId: "connector-runtime-gateway",
+        health: gwInstalled ? "connected" : "disconnected",
+      });
+      continue;
+    }
+    const health =
+      (e.connectorId && healthMap[e.connectorId]) ||
+      (e.connectorId && connectedMap[e.connectorId] ? "connected" : e.wired ? "disconnected" : "unwired");
+    const installed = health === "connected";
+    out.push({
+      key: `connector:${e.id}`,
+      kind: "connector",
+      name: d.name ?? e.fallbackName,
+      description: d.description ?? e.fallbackDescription,
+      installed,
+      provider: e.kind,
+      iconSrc: e.iconSrc,
+      supplyKind: e.kind,
+      authType: e.auth,
+      connectorId: e.connectorId,
+      wired: e.wired,
+      supplyId: e.id,
+      health,
+    });
+  }
+  return out;
 }
 
 /**

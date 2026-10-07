@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, RefreshCw, Search, Settings2 } from "lucide-react";
 import { useAppStore } from "../../store";
@@ -19,11 +19,17 @@ import {
   filterSkills,
   filterUnifiedItems,
   skillFilterTags,
+  buildConnectorSupplyItems,
   tabToKindFilter,
   type MarketCategory,
   type MarketTab,
   type MarketplaceItem,
 } from "./model";
+import {
+  CONNECTOR_SUPPLY,
+  listUnwiredSupply,
+  listWiredSupply,
+} from "../settings/connectors/connector-supply";
 import { RECOMMENDED_SKILLS } from "../../data/recommended-skills";
 import { getSkillsForPlugin } from "../../data/plugin-skill-bundles";
 import { buildOfficeCliInstallPrompt } from "../../utils/officecli-install-prompt";
@@ -35,10 +41,12 @@ import { MarketOnboardingModal, MARKET_ONBOARDING_DISMISSED_KEY } from "./Market
 import { GatewayInstallModal } from "./GatewayInstallModal";
 import { buildGatewayMarketItem, isGatewayInstalled } from "./gateway-model";
 import { CONNECTOR_GATEWAY } from "../../data/connector-gateway";
+import { ConnectorsTab } from "../settings/connectors/ConnectorsTab";
+import type { ConnectorId } from "../settings/connectors/connector-catalog";
 import { MCP_PRIMARY_CONFIG_PATH } from "../../utils/mcp-remote-config";
 
-/** 市场顶栏五 Tab:全部混排统一卡片,MCP/技能/专家/指令按 kind 分域浏览。 */
-const MARKET_TABS: readonly MarketTab[] = ["all", "mcp", "skills", "agents", "commands"];
+/** 市场顶栏 Tab:全部 + 连接器(一等) + MCP/技能/专家/指令。 */
+const MARKET_TABS: readonly MarketTab[] = ["all", "connectors", "mcp", "skills", "agents", "commands"];
 
 /**
  * Full-screen marketplace view: browse, search, install and use every kind of
@@ -50,6 +58,9 @@ export function MarketplaceView() {
   const { t: ts } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
   const openSettings = useAppStore((s) => s.openSettings);
+  const sessionId = useAppStore((s) => s.sessionId);
+  const activePaneId = useAppStore((s) => s.activePaneId);
+  const panes = useAppStore((s) => s.panes);
   const addPane = useAppStore((s) => s.addPane);
   const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
   const setMainView = useAppStore((s) => s.setMainView);
@@ -70,6 +81,16 @@ export function MarketplaceView() {
   const [promptMsg, setPromptMsg] = useState("");
   const [detailServerId, setDetailServerId] = useState<string | null>(null);
   const [gatewayOpen, setGatewayOpen] = useState(false);
+  /** 连接器 Tab：是否展示尚未接入占位（默认隐藏，避免死点击）。 */
+  const [showUnwiredConnectors, setShowUnwiredConnectors] = useState(false);
+  const [unwiredSheet, setUnwiredSheet] = useState<MarketplaceItem | null>(null);
+  /** 市场直开握手：不经过设置墙网格。 */
+  const [handshakeConnectorId, setHandshakeConnectorId] = useState<ConnectorId | null>(null);
+  const [handshakeSeq, setHandshakeSeq] = useState(0);
+  /** 与设置页同源的健康态（native + MCP 探活 SSOT）。 */
+  const [connectorHealthById, setConnectorHealthById] = useState<
+    Record<string, "connected" | "degraded" | "disconnected" | "unwired">
+  >({});
   const [mcpInstalling, setMcpInstalling] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<{ message: string; kind: "info" | "success" | "error" } | null>(
     null,
@@ -104,11 +125,76 @@ export function MarketplaceView() {
     [t, data.configuredMcpNames],
   );
 
-  /** 统一条目:连接器网关精选卡(置顶) + 连接器 + 技能 + 专家 + 指令。 */
+  const effectiveSessionId = useMemo(() => {
+    const pane = panes.find((p) => p.id === activePaneId);
+    return String(pane?.sessionId ?? sessionId ?? "").trim();
+  }, [panes, activePaneId, sessionId]);
+
+  /** 拉取与设置页同一套健康态（GitHub 含 MCP PAT 探活），供市场卡片 SSOT。 */
+  const refreshConnectorHealth = useCallback(async () => {
+    const wiredNatives = listWiredSupply().filter((e) => e.kind === "native" && e.connectorId);
+    const next: Record<string, "connected" | "degraded" | "disconnected" | "unwired"> = {};
+    await Promise.all(
+      wiredNatives.map(async (e) => {
+        const id = e.connectorId!;
+        if (id === "tapd") {
+          try {
+            const res = await window.agenticxDesktop.loadMcpStatus(effectiveSessionId || "");
+            const server = res?.ok
+              ? (res.servers ?? []).find((s) => s.name === "tapd")
+              : undefined;
+            next[id] = server?.connected ? "connected" : "disconnected";
+          } catch {
+            next[id] = "disconnected";
+          }
+          return;
+        }
+        try {
+          const res = await window.agenticxDesktop.nativeConnectorStatus(id);
+          if (res?.health === "connected" || res?.health === "degraded" || res?.health === "disconnected") {
+            next[id] = res.health;
+          } else {
+            next[id] = res?.connected ? "connected" : "disconnected";
+          }
+        } catch {
+          next[id] = "disconnected";
+        }
+      }),
+    );
+    setConnectorHealthById(next);
+  }, [effectiveSessionId]);
+
+  useEffect(() => {
+    void refreshConnectorHealth();
+  }, [refreshConnectorHealth]);
+
+  /** 原生连接器供给 → 市场卡片（默认仅 wired；可展开尚未接入说明卡）。 */
+  const connectorItems = useMemo(() => {
+    const natives = CONNECTOR_SUPPLY.filter((e) => e.kind === "native");
+    const entries = showUnwiredConnectors ? natives : listWiredSupply(natives);
+    const display: Record<string, { name?: string; description?: string }> = {};
+    for (const e of natives) {
+      if (!e.connectorId) continue;
+      display[e.id] = {
+        name: ts(`connectors.catalog.${e.connectorId}.name`, { defaultValue: e.fallbackName }),
+        description: ts(`connectors.catalog.${e.connectorId}.description`, {
+          defaultValue: e.fallbackDescription,
+        }),
+      };
+    }
+    return buildConnectorSupplyItems(entries, {
+      wiredOnly: false,
+      display,
+      healthByConnectorId: connectorHealthById,
+    });
+  }, [showUnwiredConnectors, ts, connectorHealthById]);
+
+  /** 统一条目:网关精选(置顶) + 原生连接器 + MCP/技能/专家/指令。 */
   const unifiedItems = useMemo(
     () =>
       [
         gatewayItem,
+        ...connectorItems,
         ...buildUnifiedItems(
           data.mcpEntries,
           skillItems,
@@ -117,8 +203,10 @@ export function MarketplaceView() {
           data.configuredMcpNames,
         ),
       ],
-    [gatewayItem, data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
+    [gatewayItem, connectorItems, data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
   );
+
+  const unwiredCount = useMemo(() => listUnwiredSupply().length, []);
   const filteredUnified = useMemo(
     () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query, categoryFilter),
     [unifiedItems, activeTab, query, categoryFilter],
@@ -359,6 +447,19 @@ export function MarketplaceView() {
       </div>
 
       <div className="space-y-5">
+        {activeTab === "connectors" && unwiredCount > 0 ? (
+          <label className="flex items-center justify-end gap-2 text-[12px] text-text-muted">
+            <span>{t("connectors.showUnwired")}</span>
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-border"
+              checked={showUnwiredConnectors}
+              onChange={(e) => setShowUnwiredConnectors(e.target.checked)}
+              aria-label={t("connectors.showUnwired")}
+            />
+          </label>
+        ) : null}
+
         <FeaturedCards onPick={onFeaturedPick} />
 
         {(activeTab === "all" || activeTab === "mcp" || activeTab === "skills") ? (
@@ -468,12 +569,20 @@ export function MarketplaceView() {
             queuedKeys={installStatus.queuedKeys}
             promptBusy={promptBusy}
             onOpenMcpDetail={(item) => {
-              // 网关精选卡走专属安装弹层(本地直写),其余连接器走上游详情浮层。
+              // 网关精选卡走专属安装弹层(本地直写),其余 MCP 走上游详情浮层。
               if (item.gateway) setGatewayOpen(true);
               else setDetailServerId(item.serverId ?? null);
             }}
             onInstallSkill={installUnifiedItem}
             onUse={useUnifiedItem}
+            onConnectNative={(item) => {
+              // 直开与设置页 openConnector 同一握手弹层，跳过设置墙网格。
+              const id = item.connectorId as ConnectorId | undefined;
+              if (!id) return;
+              setHandshakeConnectorId(id);
+              setHandshakeSeq((n) => n + 1);
+            }}
+            onUnwiredConnector={(item) => setUnwiredSheet(item)}
           />
         )}
       </div>
@@ -521,6 +630,61 @@ export function MarketplaceView() {
           setOnboardingOpen(false);
         }}
       />
+
+
+      {handshakeConnectorId ? (
+        <ConnectorsTab
+          sessionId={effectiveSessionId}
+          tapdConnected={Boolean((connectorHealthById.tapd === "connected"))}
+          onRefreshMcp={async () => {
+            await data.reloadMcpStatus();
+            await refreshConnectorHealth();
+          }}
+          autoOpenId={handshakeConnectorId}
+          autoOpenSeq={handshakeSeq}
+          presentation="handshake-only"
+          onHandshakeDismiss={() => setHandshakeConnectorId(null)}
+          onConnectionChange={() => {
+            void refreshConnectorHealth();
+          }}
+        />
+      ) : null}
+
+      {unwiredSheet ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unwired-connector-title"
+          onClick={() => setUnwiredSheet(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-surface-panel p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="unwired-connector-title" className="text-sm font-semibold text-text-strong">
+              {t("connectors.unwiredTitle", { name: unwiredSheet.name })}
+            </h3>
+            <p className="mt-2 text-xs leading-relaxed text-text-muted">
+              {t("connectors.unwiredBody")}
+            </p>
+            <p className="mt-2 text-[11px] text-text-faint">
+              {t("connectors.unwiredHint", {
+                auth: unwiredSheet.authType ?? "custom_credential",
+              })}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:bg-surface-hover"
+                onClick={() => setUnwiredSheet(null)}
+              >
+                {t("connectors.unwiredClose")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </MainViewShell>
   );
 }

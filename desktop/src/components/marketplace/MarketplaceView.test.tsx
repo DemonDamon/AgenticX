@@ -19,7 +19,7 @@ describe("MarketplaceView", () => {
     const html = renderView();
     expect(html).toContain(i18n.t("title", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manage", { ns: "marketplace" }));
-    for (const tab of ["all", "mcp", "skills", "agents", "commands"] as const) {
+    for (const tab of ["all", "connectors", "mcp", "skills", "agents", "commands"] as const) {
       expect(html).toContain(i18n.t(`tabs.${tab}`, { ns: "marketplace" }));
     }
     for (const id of ["office", "connectors", "toolkit"] as const) {

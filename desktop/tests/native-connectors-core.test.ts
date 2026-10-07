@@ -6,12 +6,19 @@ import {
   buildQqmailManagedSkill,
   extractAuthorizationUrl,
   extractFeishuDeviceFlow,
+  applyGithubMcpPatToDocument,
+  detectGithubCliLoginSuccess,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
+  githubTokenFingerprint,
+  nextGithubAuthStdin,
   extractLastJsonObject,
   extractQqmailAuthUrl,
   isTapdValidationSuccess,
+  extractWecomLoginUrl,
   isWecomProbeSuccessful,
+  wecomInitLooksExpired,
+  wecomInitLooksSuccess,
   mergeTapdMcpDocument,
   nativeConnectorAvailability,
   parseFeishuAuthStatus,
@@ -469,6 +476,34 @@ describe("extractFeishuDeviceFlow", () => {
   });
 });
 
+describe("extractWecomLoginUrl", () => {
+  it("takes the last official WeCom https URL", () => {
+    expect(
+      extractWecomLoginUrl(
+        "open https://evil.example/x then https://work.weixin.qq.com/wework_admin/loginpage_wx?qrcode=abc",
+      ),
+    ).toBe("https://work.weixin.qq.com/wework_admin/loginpage_wx?qrcode=abc");
+  });
+
+  it("rejects non-WeCom hosts", () => {
+    expect(extractWecomLoginUrl("https://example.com/login")).toBeNull();
+  });
+});
+
+describe("wecomInitLooksExpired", () => {
+  it("detects expired QR copy", () => {
+    expect(wecomInitLooksExpired("二维码已过期，请重新扫码")).toBe(true);
+    expect(wecomInitLooksExpired("waiting")).toBe(false);
+  });
+});
+
+describe("wecomInitLooksSuccess", () => {
+  it("detects init success copy", () => {
+    expect(wecomInitLooksSuccess("企业微信机器人凭证验证成功\n初始化完成 ✅")).toBe(true);
+    expect(wecomInitLooksSuccess("请选择接入方式")).toBe(false);
+  });
+});
+
 describe("buildQqmailManagedSkill", () => {
   it("requires request_action_confirmation with 240s TTL and same-token reuse", () => {
     const skill = buildQqmailManagedSkill("/opt/agently-cli");
@@ -482,5 +517,54 @@ describe("buildQqmailManagedSkill", () => {
     expect(skill).toContain("[ACTION_CONFIRMATION_EXPIRED]");
     expect(skill).toContain("/opt/agently-cli");
     expect(skill).not.toContain("等用户明确许可后");
+  });
+});
+
+describe("detectGithubCliLoginSuccess", () => {
+  it("detects logged-in and authentication-complete banners", () => {
+    expect(detectGithubCliLoginSuccess("✓ Authentication complete. Press Enter to continue...")).toBe(true);
+    expect(detectGithubCliLoginSuccess("Logged in as DemonDamon")).toBe(true);
+    expect(detectGithubCliLoginSuccess("waiting for authorization")).toBe(false);
+  });
+});
+
+describe("nextGithubAuthStdin", () => {
+  it("answers Press Enter / git / continue prompts once", () => {
+    const answered = new Set<string>();
+    expect(nextGithubAuthStdin("Press Enter to open github.com in your browser", answered)).toBe("\n");
+    expect(nextGithubAuthStdin("Press Enter to open github.com in your browser", answered)).toBeNull();
+    expect(nextGithubAuthStdin("Authenticate Git with your GitHub credentials? (Y/n)", answered)).toBe("Y\n");
+    expect(nextGithubAuthStdin("Authentication complete. Press Enter to continue…", answered)).toBe("\n");
+  });
+});
+
+describe("applyGithubMcpPatToDocument", () => {
+  it("updates github env token when server exists", () => {
+    const doc = {
+      mcpServers: {
+        github: {
+          command: "docker",
+          args: ["run"],
+          env: { GITHUB_PERSONAL_ACCESS_TOKEN: "old" },
+        },
+      },
+    };
+    const { document, updated, hadGithubServer } = applyGithubMcpPatToDocument(doc, "new-token-value-1234567890");
+    expect(hadGithubServer).toBe(true);
+    expect(updated).toBe(true);
+    expect(document.mcpServers?.github?.env?.GITHUB_PERSONAL_ACCESS_TOKEN).toBe("new-token-value-1234567890");
+  });
+
+  it("no-ops when github server missing", () => {
+    const r = applyGithubMcpPatToDocument({ mcpServers: {} }, "tok");
+    expect(r.updated).toBe(false);
+    expect(r.hadGithubServer).toBe(false);
+  });
+});
+
+describe("githubTokenFingerprint", () => {
+  it("encodes length and last4 without full secret", () => {
+    expect(githubTokenFingerprint("gho_abcdefghij")).toBe("14:ghij");
+    expect(githubTokenFingerprint("")).toBe("");
   });
 });

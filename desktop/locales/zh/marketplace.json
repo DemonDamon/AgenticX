@@ -7,10 +7,12 @@
     "mcp": "MCP",
     "skills": "技能",
     "agents": "专家",
-    "commands": "指令"
+    "commands": "指令",
+    "connectors": "连接器"
   },
   "search": {
     "all": "搜索插件市场",
+    "connectors": "搜索连接器",
     "mcp": "搜索 MCP 连接器",
     "skills": "搜索技能",
     "agents": "搜索专家",
@@ -48,14 +50,20 @@
     "use": "使用",
     "detail": "详情",
     "openSite": "前往官网",
-    "goConfig": "前往配置"
+    "goConfig": "前往配置",
+    "connect": "连接",
+    "manage": "管理",
+    "notWired": "暂未接线",
+    "reauth": "重新授权"
   },
   "badge": {
     "mcp": "连接器",
     "skill": "技能",
     "agent": "专家",
     "command": "指令",
-    "installed": "已安装"
+    "installed": "已安装",
+    "connector": "连接器",
+    "needsReauth": "需重新授权"
   },
   "useDraft": "请使用技能「{{name}}」帮我完成任务。",
   "useDraftAgent": "请让数字专家「{{name}}」帮我完成任务。",
@@ -183,5 +191,12 @@
     "point3": "扩展自带专业能力，复杂任务也能更快完成",
     "point4": "无需复杂设置，安装后说出需求，就能拿到结果",
     "gotIt": "我知道了"
+  },
+  "connectors": {
+    "showUnwired": "显示尚未接入",
+    "unwiredTitle": "「{{name}}」尚未接入",
+    "unwiredBody": "Near 不会伪造「已连接」。该条目还没有官方可调用路径（原生 CLI / 远程 MCP 地址 + 密钥）。请改用已接线的连接器，或在有官方 Streamable HTTP MCP 端点后再用「自定义凭据」接入。",
+    "unwiredHint": "建议握手类型：{{auth}}（需官方 MCP 地址与密钥后才能实例化）。",
+    "unwiredClose": "知道了"
   }
 }

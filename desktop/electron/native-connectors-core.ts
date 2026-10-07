@@ -127,6 +127,91 @@ export function extractGithubDeviceUrl(output: string): string | null {
   }
 }
 
+/** gh auth login --web finished in CLI output (browser may already show success). */
+export function detectGithubCliLoginSuccess(output: string): boolean {
+  return (
+    /logged\s+in\s+as\s+\S+/i.test(output) ||
+    /✓\s*authentication\s+complete/i.test(output) ||
+    /authentication\s+complete\.\s*press\s+enter/i.test(output) ||
+    /configured\s+git\s+protocol/i.test(output)
+  );
+}
+
+/**
+ * Auto-answers for non-interactive gh auth login prompts.
+ * Returns the stdin chunk to write, or null when nothing to send.
+ */
+export function nextGithubAuthStdin(output: string, answered: Set<string>): string | null {
+  if (/Press Enter to open/i.test(output) && !answered.has("open")) {
+    answered.add("open");
+    return "\n";
+  }
+  if (/Authenticate Git with your GitHub credentials\?/i.test(output) && !answered.has("git")) {
+    answered.add("git");
+    return "Y\n";
+  }
+  if (/Upload your SSH public key/i.test(output) && !answered.has("ssh")) {
+    answered.add("ssh");
+    return "n\n";
+  }
+  if (/Title for your SSH key/i.test(output) && !answered.has("ssh_title")) {
+    answered.add("ssh_title");
+    return "\n";
+  }
+  // After "Authentication complete. Press Enter to continue…"
+  if (/Press Enter to continue/i.test(output) && !answered.has("continue")) {
+    answered.add("continue");
+    return "\n";
+  }
+  return null;
+}
+
+/** Merge gh token into mcp.json github server env without logging secrets. */
+export function applyGithubMcpPatToDocument(
+  document: {
+    mcpServers?: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+    [k: string]: unknown;
+  },
+  token: string,
+): {
+  document: {
+    mcpServers?: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+    [k: string]: unknown;
+  };
+  updated: boolean;
+  hadGithubServer: boolean;
+} {
+  const trimmed = token.trim();
+  const servers = { ...(document.mcpServers ?? {}) };
+  const existing = servers.github;
+  if (!existing || typeof existing !== "object") {
+    return { document, updated: false, hadGithubServer: false };
+  }
+  const prev = String(existing.env?.GITHUB_PERSONAL_ACCESS_TOKEN ?? "").trim();
+  if (prev === trimmed) {
+    return { document, updated: false, hadGithubServer: true };
+  }
+  servers.github = {
+    ...existing,
+    env: {
+      ...(existing.env ?? {}),
+      GITHUB_PERSONAL_ACCESS_TOKEN: trimmed,
+    },
+  };
+  return {
+    document: { ...document, mcpServers: servers },
+    updated: true,
+    hadGithubServer: true,
+  };
+}
+
+/** Compare tokens without retaining full secret in caller logs. */
+export function githubTokenFingerprint(token: string): string {
+  const t = token.trim();
+  if (!t) return "";
+  return `${t.length}:${t.slice(-4)}`;
+}
+
 /** Extract the last balanced JSON object from mixed stdout/stderr logs. */
 export function extractLastJsonObject(output: string): Record<string, unknown> | null {
   for (let end = output.length - 1; end >= 0; end -= 1) {
@@ -337,6 +422,33 @@ export function wecomNpmPlatformPackage(platform: string, arch: string): string 
     "win32-x64": "@wecom/cli-win32-x64",
   };
   return map[`${platform}-${arch}`] ?? null;
+}
+
+/** Official WeCom login pages only (QR / bot bind). Reject other hosts. */
+export function extractWecomLoginUrl(output: string): string | null {
+  const matches = output.match(/https:\/\/[^\s"'<>]+/giu);
+  if (!matches?.length) return null;
+  for (let i = matches.length - 1; i >= 0; i -= 1) {
+    try {
+      const url = new URL(matches[i]);
+      if (url.protocol !== "https:") continue;
+      const host = url.hostname.toLowerCase();
+      if (host === "work.weixin.qq.com" || host.endsWith(".weixin.qq.com")) {
+        return url.toString();
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+  return null;
+}
+
+export function wecomInitLooksExpired(output: string): boolean {
+  return /二维码已过期|二维码失效|已过期[,，]?请重新|expired/i.test(output);
+}
+
+export function wecomInitLooksSuccess(output: string): boolean {
+  return /初始化完成|凭证验证成功/.test(output);
 }
 
 /** Probe stdout is usable when it is non-empty JSON without an `error` field. */

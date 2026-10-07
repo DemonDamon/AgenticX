@@ -1197,6 +1197,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorTmeetLogin: () => Promise<{
         ok: boolean;
@@ -1259,8 +1262,9 @@ declare global {
         error?: string;
       }>;
       nativeConnectorWecomLogin: (payload: {
-        botId: string;
-        botSecret: string;
+        mode?: "qrcode" | "manual";
+        botId?: string;
+        botSecret?: string;
       }) => Promise<{
         ok: boolean;
         available: boolean;
@@ -1343,7 +1347,15 @@ declare global {
       ) => () => void;
       onNativeConnectorWecomProgress: (
         callback: (payload: {
-          phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+          phase:
+            | "installing"
+            | "initializing"
+            | "waiting_scan"
+            | "probing"
+            | "success"
+            | "disconnected"
+            | "error";
+          loginUrl?: string;
         }) => void,
       ) => () => void;
       onNativeConnectorQqmailProgress: (

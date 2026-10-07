@@ -1429,7 +1429,11 @@
     "wecomTitle": "WeCom connector",
     "wecomConnect": "Connect",
     "wecomName": "WeCom",
-    "wecomHint": "Uses the official WeCom CLI (wecom-cli). Create an API-mode bot in the WeCom admin console, then paste Bot ID and Secret. Near writes a hosted skill for messages, docs, sheets, contacts, todos, and meetings. Credentials are encrypted by the CLI.",
+    "wecomHint": "Uses the official WeCom CLI. Scan in this dialog by default (expired QR codes refresh here, not in chat). You can also paste a Bot ID and Secret. Near then writes a hosted skill for messages, docs, sheets, contacts, todos, and meetings.",
+    "wecomModeQr": "Scan QR",
+    "wecomModeManual": "Enter credentials",
+    "wecomQrHint": "Click Connect, then scan in this window. Do not paste login links into chat — they expire quickly.",
+    "wecomOpenLogin": "Open login page in browser",
     "botIdPh": "WeCom bot ID",
     "botSecretPh": "WeCom bot secret",
     "howBotCreds": "How to get Bot ID / Secret",
@@ -1493,6 +1497,7 @@
     "phaseConnError": "Connection did not finish",
     "phaseWecomInstall": "First use: downloading WeCom CLI…",
     "phaseWecomInit": "Configuring bot credentials…",
+    "phaseWecomScan": "Scan the QR code in this window with WeCom…",
     "phaseWecomProbe": "Checking credentials…",
     "phaseConnOk": "Connected",
     "phaseQqmailInstall": "First use: downloading Agent Mail CLI…",
@@ -1551,7 +1556,14 @@
         "name": "BigQuery",
         "description": "Query and analyze datasets"
       }
-    }
+    },
+    "needsReauth": "Re-auth needed",
+    "needsReauthHint": "Chat GitHub MCP credentials are invalid; re-authorize or update the Personal Access Token.",
+    "needsReauthAria": "Re-authorize {{name}}",
+    "reauthAria": "Re-authorize {{name}}",
+    "githubNativeOkMcpDegraded": "GitHub CLI is signed in; chat MCP still needs a valid token. Sync was attempted — check status.",
+    "githubMcpSynced": "Synced GitHub CLI token into MCP",
+    "githubReauth": "Re-authorize"
   },
   "codeIndex": {
     "loading": "Loading code semantic index…",

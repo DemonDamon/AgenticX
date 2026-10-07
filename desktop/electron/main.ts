@@ -155,11 +155,18 @@ import {
   buildTapdMcpEntry,
   extractAuthorizationUrl,
   extractFeishuDeviceFlow,
+  applyGithubMcpPatToDocument,
+  detectGithubCliLoginSuccess,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
+  githubTokenFingerprint,
+  nextGithubAuthStdin,
   extractQqmailAuthUrl,
   isTapdValidationSuccess,
+  extractWecomLoginUrl,
   isWecomProbeSuccessful,
+  wecomInitLooksExpired,
+  wecomInitLooksSuccess,
   mergeTapdMcpDocument,
   parseFeishuAuthStatus,
   parseGithubAuthStatus,
@@ -3296,6 +3303,15 @@ type NativeConnectorStatusResult = {
   label: string;
   error?: string;
   account?: string;
+  /**
+   * Agent-usable health (SSOT). For GitHub: native gh OK is not enough when
+   * mcp.json PAT is present but returns 401 — that is "degraded".
+   */
+  health?: "connected" | "degraded" | "disconnected";
+  /** Whether ~/.agenticx/mcp.json has a github server with a non-empty token slot. */
+  mcpConfigured?: boolean;
+  /** MCP PAT probe against api.github.com/user; omitted when not configured. */
+  mcpAuthOk?: boolean;
 };
 
 const TMEET_PACKAGE_VERSION = "1.0.11";
@@ -4145,6 +4161,121 @@ function removeGithubSkill(): void {
   fs.rmSync(skillDir, { recursive: true, force: true });
 }
 
+
+/** mcp.json on disk (agent GitHub tools); never log token values. */
+function readAgenticxMcpGithubTokenMeta(): { configured: boolean; token: string } {
+  try {
+    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    if (!fs.existsSync(mcpPath)) return { configured: false, token: "" };
+    const raw = JSON.parse(fs.readFileSync(mcpPath, "utf8")) as {
+      mcpServers?: Record<string, { env?: Record<string, string> }>;
+    };
+    const servers = raw.mcpServers ?? {};
+    const gh = servers.github;
+    if (!gh || typeof gh !== "object") return { configured: false, token: "" };
+    const token = String(gh.env?.GITHUB_PERSONAL_ACCESS_TOKEN ?? "").trim();
+    return { configured: token.length > 0, token };
+  } catch {
+    return { configured: false, token: "" };
+  }
+}
+
+/**
+ * Probe MCP GitHub PAT with GET /user. Returns null when no token configured.
+ * Does not log the token.
+ */
+async function probeGithubMcpPatAuth(token: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const resp = await fetch("https://api.github.com/user", {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "Near-Desktop-Connector-Health",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: controller.signal,
+    });
+    if (resp.status === 401 || resp.status === 403) return false;
+    return resp.ok;
+  } catch {
+    // Network blip: do not mark degraded as auth_invalid; treat as unknown→not ok for safety when configured
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function resolveGithubHealthLabel(input: {
+  nativeConnected: boolean;
+  mcpConfigured: boolean;
+  mcpAuthOk: boolean | null;
+  nativeLabel: string;
+}): { health: "connected" | "degraded" | "disconnected"; connected: boolean; label: string; error?: string } {
+  // `connected` = native CLI session (handshake / Disconnect 按钮).
+  // `health` = agent MCP usable (marketplace 绿标仅 connected).
+  if (input.mcpConfigured && input.mcpAuthOk === false) {
+    return {
+      health: "degraded",
+      connected: input.nativeConnected,
+      label: input.nativeConnected ? "需重新授权" : "需重新授权",
+      error:
+        "GitHub MCP 凭据无效或已过期（API 401/403）。CLI 登录正常也不能让对话工具读仓；完成浏览器授权后会尝试同步 token，若仍失败请更新 mcp.json 中的 Personal Access Token。",
+    };
+  }
+  if (input.nativeConnected || input.mcpAuthOk === true) {
+    return {
+      health: "connected",
+      connected: true,
+      label: input.nativeConnected ? input.nativeLabel : "已连接",
+    };
+  }
+  return {
+    health: "disconnected",
+    connected: false,
+    label: input.nativeLabel || "可用",
+  };
+}
+
+/**
+ * After native `gh` login succeeds, copy `gh auth token` into mcp.json github PAT
+ * so chat MCP stops 401. Never logs the token value.
+ */
+async function syncGithubMcpPatFromGhCli(): Promise<{ synced: boolean; reason?: string }> {
+  try {
+    const raw = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+    const token = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l && !l.startsWith("error") && !/\s/.test(l));
+    if (!token || token.length < 20) {
+      return { synced: false, reason: "no_token" };
+    }
+    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    if (!fs.existsSync(mcpPath)) {
+      return { synced: false, reason: "no_mcp_json" };
+    }
+    let parsed: {
+      mcpServers?: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+      [k: string]: unknown;
+    };
+    try {
+      parsed = JSON.parse(fs.readFileSync(mcpPath, "utf8")) as typeof parsed;
+    } catch {
+      return { synced: false, reason: "mcp_parse_error" };
+    }
+    const { document, updated, hadGithubServer } = applyGithubMcpPatToDocument(parsed, token);
+    if (!hadGithubServer) return { synced: false, reason: "no_github_server" };
+    if (!updated) return { synced: false, reason: "unchanged" };
+    fs.writeFileSync(mcpPath, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    return { synced: true };
+  } catch {
+    return { synced: false, reason: "sync_failed" };
+  }
+}
+
 async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
   try {
     let binaryPath = await resolveGhBinaryPath();
@@ -4152,42 +4283,61 @@ async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
     if (!binaryPath && fs.existsSync(managedSkillMarker)) {
       binaryPath = await ensureGhBinaryInstalled();
     }
+    let nativeConnected = false;
+    let nativeLabel = "可用";
+    let nativeError: string | undefined;
+    let account: string | undefined;
+    let nativeOk = true;
+
     if (!binaryPath) {
       tryPersistGithubConnectorStatus(false);
-      return {
-        ok: true,
-        available: true,
-        connected: false,
-        label: "可用",
-      };
-    }
-    const status = parseGithubAuthStatus(
-      await runGhCommand(["auth", "status", "--hostname", "github.com"]),
-    );
-    if (status.connected && binaryPath) {
-      try {
-        ensureGithubSkill(binaryPath);
-      } catch (error) {
-        tryPersistGithubConnectorStatus(false);
-        return {
-          ok: false,
-          available: true,
-          connected: false,
-          label: "连接异常",
-          error: error instanceof Error ? error.message : String(error),
-        };
+    } else {
+      const status = parseGithubAuthStatus(
+        await runGhCommand(["auth", "status", "--hostname", "github.com"]),
+      );
+      nativeConnected = Boolean(status.connected);
+      nativeLabel = status.label;
+      nativeError = status.error;
+      account = status.account;
+      nativeOk = !status.error;
+      if (status.connected && binaryPath) {
+        try {
+          ensureGithubSkill(binaryPath);
+        } catch (error) {
+          tryPersistGithubConnectorStatus(false);
+          nativeConnected = false;
+          nativeOk = false;
+          nativeLabel = "连接异常";
+          nativeError = error instanceof Error ? error.message : String(error);
+        }
+      } else if (!status.connected) {
+        removeGithubSkill();
       }
-    } else if (!status.connected) {
-      removeGithubSkill();
+      tryPersistGithubConnectorStatus(nativeConnected && !nativeError);
     }
-    tryPersistGithubConnectorStatus(status.connected && !status.error);
+
+    const mcpMeta = readAgenticxMcpGithubTokenMeta();
+    let mcpAuthOk: boolean | null = null;
+    if (mcpMeta.configured) {
+      mcpAuthOk = await probeGithubMcpPatAuth(mcpMeta.token);
+    }
+    const merged = resolveGithubHealthLabel({
+      nativeConnected,
+      mcpConfigured: mcpMeta.configured,
+      mcpAuthOk,
+      nativeLabel,
+    });
+
     return {
-      ok: !status.error,
-      available: !status.error,
-      connected: status.connected,
-      label: status.label,
-      error: status.error,
-      account: status.account,
+      ok: true,
+      available: true,
+      connected: merged.connected,
+      label: merged.label,
+      error: merged.error ?? nativeError,
+      account,
+      health: merged.health,
+      mcpConfigured: mcpMeta.configured,
+      mcpAuthOk: mcpAuthOk ?? undefined,
     };
   } catch (error) {
     tryPersistGithubConnectorStatus(false);
@@ -4197,9 +4347,11 @@ async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
       connected: false,
       label: "暂不可用",
       error: error instanceof Error ? error.message : String(error),
+      health: "disconnected",
     };
   }
 }
+
 
 function sendGithubProgress(
   phase: "installing" | "code_ready" | "opening_browser" | "waiting" | "success" | "disconnected" | "error",
@@ -4230,9 +4382,24 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
     let settled = false;
     let proc: ChildProcess | null = null;
     let timeout: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const answered = new Set<string>();
+    let beforeFingerprint = "";
+    let wasConnectedBefore = false;
+    /** True when this attempt observed login evidence (not merely a prior session). */
+    let authCompleted = false;
+
+    const stopPoll = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
     const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
       if (settled) return;
       settled = true;
+      stopPoll();
       cancelActiveGithubLogin = null;
       if (timeout) clearTimeout(timeout);
       const currentProc = proc;
@@ -4252,14 +4419,78 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
       }
       if (proc && githubAuthProcess === proc) githubAuthProcess = null;
       githubAuthBusy = false;
-      const status = result ?? (await getGithubStatus());
-      if (status.error === "已取消") {
+
+      if (result?.error === "已取消") {
         sendGithubProgress("disconnected");
-      } else {
-        sendGithubProgress(status.connected ? "success" : "error");
+        resolve(result);
+        return;
       }
-      resolve(status);
-    };
+
+      // Re-check evidence (token may have refreshed after browser success).
+      let fingerprintNow = "";
+      let nativeNow = false;
+      try {
+        const nativeOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        nativeNow = parseGithubAuthStatus(nativeOut).connected;
+        if (nativeNow) {
+          try {
+            const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+            const token = tok
+              .split("\n")
+              .map((l) => l.trim())
+              .find((l) => l && !/\s/.test(l));
+            fingerprintNow = githubTokenFingerprint(token ?? "");
+          } catch {
+            fingerprintNow = "";
+          }
+        }
+      } catch {
+        nativeNow = false;
+      }
+      const tokenChanged = Boolean(beforeFingerprint && fingerprintNow && fingerprintNow !== beforeFingerprint);
+      const newlyConnected = nativeNow && !wasConnectedBefore;
+      const evidence =
+        authCompleted ||
+        detectGithubCliLoginSuccess(output) ||
+        tokenChanged ||
+        newlyConnected ||
+        result === undefined;
+
+      if (!evidence) {
+        sendGithubProgress("error");
+        resolve(
+          result ?? {
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: "GitHub 授权未完成",
+          },
+        );
+        return;
+      }
+
+      if (nativeNow) {
+        await syncGithubMcpPatFromGhCli();
+      }
+      const status = await getGithubStatus();
+      if (status.connected || status.health === "connected" || status.health === "degraded") {
+        sendGithubProgress("success");
+        resolve(status);
+        return;
+      }
+      sendGithubProgress("error");
+      resolve(
+        result ?? {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: "GitHub 授权未完成",
+        },
+      );
+    }
+
     cancelActiveGithubLogin = (reason) => {
       void finish(
         {
@@ -4272,11 +4503,48 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
         true,
       );
     };
+
+    const tryFinishFromNativeAuth = async (force = false) => {
+      if (settled) return;
+      if (!force && !codeSent && !opened) return;
+      try {
+        const statusOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        const parsed = parseGithubAuthStatus(statusOut);
+        let fp = "";
+        try {
+          const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+          const token = tok
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l && !/\s/.test(l));
+          fp = githubTokenFingerprint(token ?? "");
+        } catch {
+          fp = "";
+        }
+        const tokenChanged = Boolean(beforeFingerprint && fp && fp !== beforeFingerprint);
+        const newlyConnected = parsed.connected && !wasConnectedBefore;
+        const outputSuccess = detectGithubCliLoginSuccess(output);
+        if (outputSuccess || tokenChanged || newlyConnected) {
+          authCompleted = true;
+          void finish(undefined, true);
+          return;
+        }
+        // Process exiting: accept existing session only if this flow showed a device code / URL.
+        if (force && parsed.connected && (codeSent || opened)) {
+          authCompleted = true;
+          void finish(undefined, true);
+        }
+      } catch {
+        // ignore poll errors
+      }
+    };
+
     const consume = (chunk: Buffer) => {
       output = `${output}${chunk.toString("utf8")}`.slice(-32768);
-      if (/Press Enter to open/i.test(output) && proc?.stdin && !proc.stdin.destroyed) {
+      const stdinChunk = nextGithubAuthStdin(output, answered);
+      if (stdinChunk && proc?.stdin && !proc.stdin.destroyed) {
         try {
-          proc.stdin.write("\n");
+          proc.stdin.write(stdinChunk);
         } catch {
           // ignore
         }
@@ -4306,73 +4574,105 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
             ),
           );
       }
+      if (detectGithubCliLoginSuccess(output)) {
+        void tryFinishFromNativeAuth(true);
+      }
     };
-    void ensureGhBinaryInstalled()
-      .then((binaryPath) => {
-        proc = spawn(
-          binaryPath,
-          ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
-          {
-            stdio: ["pipe", "pipe", "pipe"],
-            env: {
-              ...process.env,
-              NO_COLOR: "1",
-              // Prefer Near-controlled browser open when gh respects BROWSER.
-              BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
-              GH_PROMPT: "disabled",
-            },
-          },
-        );
-        githubAuthProcess = proc;
-        timeout = setTimeout(() => {
-          void finish(
+
+    void (async () => {
+      try {
+        const beforeOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        wasConnectedBefore = parseGithubAuthStatus(beforeOut).connected;
+        try {
+          const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+          const token = tok
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l && !/\s/.test(l));
+          beforeFingerprint = githubTokenFingerprint(token ?? "");
+        } catch {
+          beforeFingerprint = "";
+        }
+      } catch {
+        wasConnectedBefore = false;
+        beforeFingerprint = "";
+      }
+
+      void ensureGhBinaryInstalled()
+        .then((binaryPath) => {
+          proc = spawn(
+            binaryPath,
+            ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
             {
-              ok: false,
-              available: true,
-              connected: false,
-              label: "连接超时",
-              error: "浏览器授权已超时，请重试",
+              stdio: ["pipe", "pipe", "pipe"],
+              env: {
+                ...process.env,
+                NO_COLOR: "1",
+                // Prefer Near-controlled browser open when gh respects BROWSER.
+                BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
+                GH_PROMPT: "disabled",
+              },
             },
-            true,
           );
-        }, 5 * 60 * 1000);
-        proc.stdout?.on("data", consume);
-        proc.stderr?.on("data", consume);
-        proc.on("error", () => {
-          void finish(
-            {
-              ok: false,
-              available: true,
-              connected: false,
-              label: "连接失败",
-              error: "无法启动 GitHub 授权",
-            },
-            true,
-          );
-        });
-        proc.on("exit", (code) => {
-          if (code === 0) {
-            void finish();
-            return;
-          }
+          githubAuthProcess = proc;
+          timeout = setTimeout(() => {
+            void finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接超时",
+                error: "浏览器授权已超时，请重试",
+              },
+              true,
+            );
+          }, 5 * 60 * 1000);
+          // Browser can show success while `gh` stays blocked on a prompt — poll native auth.
+          pollTimer = setInterval(() => {
+            void tryFinishFromNativeAuth(false);
+          }, 2000);
+          proc.stdout?.on("data", consume);
+          proc.stderr?.on("data", consume);
+          proc.on("error", () => {
+            void finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: "无法启动 GitHub 授权",
+              },
+              true,
+            );
+          });
+          proc.on("exit", (code) => {
+            if (code === 0) {
+              void finish();
+              return;
+            }
+            // Process died but browser may have completed — prefer native status.
+            void tryFinishFromNativeAuth(true).then(() => {
+              if (settled) return;
+              void finish({
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: opened || codeSent ? "GitHub 授权未完成或已取消" : "未能获取 GitHub 授权码",
+              });
+            });
+          });
+        })
+        .catch((error) => {
           void finish({
             ok: false,
             available: true,
             connected: false,
-            label: "连接失败",
-            error: opened || codeSent ? "GitHub 授权未完成或已取消" : "未能获取 GitHub 授权码",
+            label: "安装失败",
+            error: error instanceof Error ? error.message : String(error),
           });
         });
-      })
-      .catch((error) => {
-        void finish({
-          ok: false,
-          available: true,
-          connected: false,
-          label: "安装失败",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+    })();
   });
 }
 
@@ -5438,7 +5738,7 @@ description: 使用企业微信官方 CLI (wecom-cli) 操作消息、文档、�
 
 category 取值：contact（通讯录）/ doc（文档、智能表格）/ meeting（会议）/ msg（消息）/ schedule（日程）/ todo（待办）。
 
-读取类调用（get_*、list、query）可直接执行；写操作（发消息、创建/删除文档或记录、创建/取消会议或日程、创建/更新/删除待办）必须先向用户展示参数并确认后再执行。不得输出或读取本机凭据文件。若调用返回 error 字段，引导用户前往「设置 → 连接器 → 企业微信」重新连接。
+读取类调用（get_*、list、query）可直接执行；写操作（发消息、创建/删除文档或记录、创建/取消会议或日程、创建/更新/删除待办）必须先向用户展示参数并确认后再执行。不得输出或读取本机凭据文件。若调用返回 error 字段或尚未登录，引导用户前往「设置 → 连接器 → 企业微信」扫码或填写凭据。禁止在对话里生成、粘贴或要求用户打开登录链接/二维码（链接会过期，且不应把登录过程写进聊天记录）。
 `;
   if (!directoryExists) {
     const parentDir = path.dirname(skillDir);
@@ -5536,14 +5836,21 @@ async function getWecomStatus(): Promise<NativeConnectorStatusResult> {
 type WecomProgressPhase =
   | "installing"
   | "initializing"
+  | "waiting_scan"
   | "probing"
   | "success"
   | "disconnected"
   | "error";
 
-function sendWecomProgress(phase: WecomProgressPhase): void {
+function sendWecomProgress(
+  phase: WecomProgressPhase,
+  extra?: { loginUrl?: string },
+): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("native-connector-wecom-progress", { phase });
+  mainWindow.webContents.send("native-connector-wecom-progress", {
+    phase,
+    ...extra,
+  });
 }
 
 function stripAnsiForWecom(text: string): string {
@@ -5655,10 +5962,90 @@ function runWecomInitViaPty(
   });
 }
 
-function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnectorStatusResult> {
-  const id = botId.trim();
-  const secret = botSecret.trim();
-  if (!id || !secret) {
+/**
+ * QR path: keep the first cliclack option (扫码接入). Push login URLs to the
+ * renderer so the dialog can refresh the QR without putting links in chat.
+ */
+function runWecomQrInitViaPty(
+  binaryPath: string,
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve, reject) => {
+    const ptyMod = requireNodePty();
+    if (!ptyMod) {
+      reject(new Error("本机无法启动伪终端（node-pty），无法完成企业微信扫码初始化"));
+      return;
+    }
+    let output = "";
+    let selectedQr = false;
+    let lastLoginUrl = "";
+    let settled = false;
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (wecomAuthPty === pty) wecomAuthPty = null;
+      resolve({ code, output });
+    };
+    const pty = ptyMod.spawn(binaryPath, ["init"], {
+      name: "xterm-256color",
+      cols: 100,
+      rows: 40,
+      cwd: os.homedir(),
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        TERM: "xterm-256color",
+      } as Record<string, string>,
+    });
+    wecomAuthPty = pty;
+    const timeout = setTimeout(() => {
+      try {
+        pty.kill();
+      } catch {
+        // ignore
+      }
+      if (!settled) {
+        settled = true;
+        wecomAuthPty = null;
+        reject(new Error("企业微信扫码初始化已超时，请重试"));
+      }
+    }, 8 * 60 * 1000);
+
+    pty.onData((chunk: string) => {
+      output = `${output}${chunk}`.slice(-65536);
+      const plain = stripAnsiForWecom(output);
+      if (!selectedQr && /请选择企微机器人接入方式/.test(plain)) {
+        selectedQr = true;
+        setTimeout(() => {
+          try {
+            pty.write("\r");
+          } catch {
+            // ignore
+          }
+        }, 120);
+      }
+      const loginUrl = extractWecomLoginUrl(plain);
+      if (loginUrl && loginUrl !== lastLoginUrl) {
+        lastLoginUrl = loginUrl;
+        sendWecomProgress("waiting_scan", { loginUrl });
+      }
+    });
+
+    pty.onExit(({ exitCode }) => {
+      finish(typeof exitCode === "number" ? exitCode : 1);
+    });
+  });
+}
+
+function startWecomLogin(payload: {
+  mode?: string;
+  botId?: string;
+  botSecret?: string;
+}): Promise<NativeConnectorStatusResult> {
+  const mode = payload.mode === "manual" ? "manual" : "qrcode";
+  const id = String(payload.botId || "").trim();
+  const secret = String(payload.botSecret || "").trim();
+  if (mode === "manual" && (!id || !secret)) {
     return Promise.resolve({
       ok: false,
       available: true,
@@ -5721,11 +6108,32 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
         const binaryPath = await ensureWecomCliBinaryInstalled();
         if (settled) return;
         sendWecomProgress("initializing");
-        const initResult = await runWecomInitViaPty(binaryPath, id, secret);
+        let initResult: { code: number; output: string };
+        if (mode === "manual") {
+          initResult = await runWecomInitViaPty(binaryPath, id, secret);
+        } else {
+          let attempt = 0;
+          for (;;) {
+            attempt += 1;
+            initResult = await runWecomQrInitViaPty(binaryPath);
+            if (settled) return;
+            const cyclePlain = stripAnsiForWecom(initResult.output);
+            if (wecomInitLooksSuccess(cyclePlain) && initResult.code === 0) {
+              break;
+            }
+            if (wecomInitLooksExpired(cyclePlain) && attempt < 8) {
+              sendWecomProgress("waiting_scan");
+              continue;
+            }
+            break;
+          }
+        }
         if (settled) return;
         const plain = stripAnsiForWecom(initResult.output);
         if (initResult.code !== 0 || /初始化失败/.test(plain)) {
-          clearWecomLocalCredentials();
+          if (mode === "manual") {
+            clearWecomLocalCredentials();
+          }
           await finish({
             ok: false,
             available: true,
@@ -5733,7 +6141,9 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
             label: "连接失败",
             error: /初始化失败/.test(plain)
               ? "企业微信机器人凭证验证失败，请检查 Bot ID / Secret"
-              : `企业微信初始化失败（退出码 ${initResult.code}）`,
+              : wecomInitLooksExpired(plain)
+                ? "登录二维码已过期，请重新点连接"
+                : `企业微信初始化失败（退出码 ${initResult.code}）`,
           });
           return;
         }
@@ -5746,7 +6156,9 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
         if (settled) return;
         const probeText = probe.stdout.trim() || probe.stderr.trim();
         if (!isWecomProbeSuccessful(probeText)) {
-          clearWecomLocalCredentials();
+          if (mode === "manual") {
+            clearWecomLocalCredentials();
+          }
           removeWecomSkill();
           tryPersistWecomConnectorStatus(false);
           await finish({
@@ -5754,7 +6166,10 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
             available: true,
             connected: false,
             label: "连接失败",
-            error: "企业微信凭据校验未通过，请确认 Bot ID / Secret 正确",
+            error:
+              mode === "manual"
+                ? "企业微信凭据校验未通过，请确认 Bot ID / Secret 正确"
+                : "企业微信扫码后校验未通过，请重新连接",
           });
           return;
         }
@@ -6601,7 +7016,8 @@ function getConnectorRuntimeBinaryPath(): string {
     return path.join(process.resourcesPath, "sidecar", exe);
   }
   const archDir = process.platform === "win32" ? "win-amd64" : process.arch === "x64" ? "x64" : "arm64";
-  return path.join(__dirname, "..", "..", "bundled-sidecar", archDir, exe);
+  // dist-electron/main.js → ../bundled-sidecar/<arch>/ （再多一层 .. 会落到仓库根，开发态找不到二进制）
+  return path.join(__dirname, "..", "bundled-sidecar", archDir, exe);
 }
 
 async function ensureConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
@@ -8530,9 +8946,13 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "native-connector-wecom-login",
-    async (_event, payload: { botId?: string; botSecret?: string }) => {
+    async (_event, payload: { mode?: string; botId?: string; botSecret?: string }) => {
       try {
-        return await startWecomLogin(String(payload?.botId || ""), String(payload?.botSecret || ""));
+        return await startWecomLogin({
+          mode: payload?.mode,
+          botId: String(payload?.botId || ""),
+          botSecret: String(payload?.botSecret || ""),
+        });
       } catch (error) {
         return {
           ok: false,

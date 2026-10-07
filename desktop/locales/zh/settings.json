@@ -1429,7 +1429,11 @@
     "wecomTitle": "企业微信连接器",
     "wecomConnect": "连接",
     "wecomName": "企业微信",
-    "wecomHint": "使用企业微信官方 CLI（wecom-cli）。请先在企业微信管理后台创建 API 模式智能机器人，复制 Bot ID 与 Secret 填入下方。连接后 Near 会写入托管技能，Agent 可通过 wecom-cli 操作消息、文档、智能表格、通讯录、待办与会议。凭证由 CLI 加密保存在本机。",
+    "wecomHint": "使用企业微信官方 CLI。默认在本弹层扫码接入（二维码过期会自动换新，不会写进聊天）。也可以改填管理后台的 Bot ID / Secret。连接后 Near 写入托管技能，Agent 可操作消息、文档、智能表格、通讯录、待办与会议。",
+    "wecomModeQr": "扫码接入",
+    "wecomModeManual": "填写凭据",
+    "wecomQrHint": "点连接后在本窗口扫码。不要把登录链接发到对话里，链接很快会过期。",
+    "wecomOpenLogin": "在浏览器打开登录页",
     "botIdPh": "请输入企业微信机器人 Bot ID",
     "botSecretPh": "请输入企业微信机器人 Secret",
     "howBotCreds": "如何获取 Bot ID / Secret",
@@ -1493,6 +1497,7 @@
     "phaseConnError": "连接未完成",
     "phaseWecomInstall": "首次使用，正在下载企业微信 CLI…",
     "phaseWecomInit": "正在配置机器人凭据…",
+    "phaseWecomScan": "请用企业微信扫描本窗口二维码…",
     "phaseWecomProbe": "正在校验凭据…",
     "phaseConnOk": "连接成功",
     "phaseQqmailInstall": "首次使用，正在下载 Agent Mail CLI…",
@@ -1551,7 +1556,14 @@
         "name": "BigQuery",
         "description": "查询和分析数据集"
       }
-    }
+    },
+    "needsReauth": "需重新授权",
+    "needsReauthHint": "对话侧 GitHub MCP 凭据失效；请重新授权或更新 Personal Access Token。",
+    "needsReauthAria": "需重新授权 {{name}}",
+    "reauthAria": "重新授权 {{name}}",
+    "githubNativeOkMcpDegraded": "GitHub CLI 已登录；对话 MCP 仍需有效 Token，已尝试同步，请确认状态。",
+    "githubMcpSynced": "已将 GitHub CLI Token 同步到 MCP",
+    "githubReauth": "重新授权"
   },
   "codeIndex": {
     "loading": "加载代码语义索引…",

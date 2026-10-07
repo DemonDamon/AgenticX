@@ -426,7 +426,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       return;
     }
     if (id === "wecom") {
-      // Bot ID/Secret form lives in Settings Modal.
+      // QR / credential form lives in Settings Modal — login must not go through chat.
       goToSettings();
       return;
     }
