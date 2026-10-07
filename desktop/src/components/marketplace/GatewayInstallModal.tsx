@@ -125,7 +125,7 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
               {t("gateway.url")}
               <input
                 type="text"
-                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                 value={form.url}
                 placeholder="http://127.0.0.1:8787"
                 onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
@@ -137,7 +137,7 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
               <input
                 type="password"
                 autoComplete="off"
-                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                className="mt-0.5 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                 value={form.token}
                 placeholder="…"
                 onChange={(e) => setForm((prev) => ({ ...prev, token: e.target.value }))}
@@ -188,7 +188,7 @@ export function GatewayInstallModal({ open, configPath, installed, onClose, onIn
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
               onClick={() => void handleInstall()}
               disabled={saving}
             >

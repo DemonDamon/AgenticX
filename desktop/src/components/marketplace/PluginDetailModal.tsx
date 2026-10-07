@@ -151,7 +151,7 @@ export function PluginDetailModal({
                       {key}
                       <input
                         type="text"
-                        className="mt-1 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-accent"
+                        className="mt-1 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                         value={envForm[key] ?? ""}
                         onChange={(e) => setEnvForm((prev) => ({ ...prev, [key]: e.target.value }))}
                         autoComplete="off"
@@ -213,7 +213,7 @@ export function PluginDetailModal({
         </button>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
           disabled={installing || detail.loading}
           onClick={async () => {
             if (!serverId) return;

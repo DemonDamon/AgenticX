@@ -182,7 +182,7 @@ export function CreateConnectorModal({
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
             disabled={saving}
             onClick={() => void handleSubmit()}
           >
@@ -250,7 +250,7 @@ export function CreateConnectorModal({
                   href={docsUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-flex items-center gap-1 text-[12px] text-accent hover:underline"
+                  className="mt-1 inline-flex items-center gap-1 text-[12px] text-[rgb(var(--theme-color-rgb,59,130,246))] hover:underline"
                 >
                   {t("connectors.create.howToGetCredential")}
                   <ExternalLink className="h-3 w-3" aria-hidden />

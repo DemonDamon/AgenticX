@@ -87,6 +87,12 @@ export type MarketBrandIcon = { brand: string };
 const BRAND_RULES: ReadonlyArray<readonly [readonly string[], string]> = [
   [["supabase"], "supabase"],
   [["github"], "github"],
+  [["agent mail", "qqmail", "agently mail", "agently"], "qqmail"],
+  [["slack"], "slack"],
+  [["gmail"], "gmail"],
+  [["google drive", "gdrive"], "gdrive"],
+  [["airtable"], "airtable"],
+  [["bigquery"], "bigquery"],
   [["gitlab"], "gitlab"],
   [["anthropic", "claude"], "anthropic"],
   [["deepseek"], "deepseek"],

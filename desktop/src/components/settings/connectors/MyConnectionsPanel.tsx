@@ -14,6 +14,7 @@ import type { ConnectorId } from "./connector-catalog";
 import {
   buildMyConnectionRows,
   removeMcpServerFromDocument,
+  type ConfiguredMcpEntry,
   type MyConnectionRow,
 } from "./my-connections-model";
 
@@ -26,6 +27,8 @@ type Props = {
   healthByConnectorId: Readonly<Record<string, ConnectorHealth | undefined>>;
   accountsByConnectorId?: Readonly<Record<string, string | undefined>>;
   configuredMcpNames: readonly string[];
+  /** 与 names 对应的元数据；用于排除 marketplace/stdio。 */
+  configuredMcpEntries?: readonly ConfiguredMcpEntry[];
   gatewayInstalled?: boolean;
   displayNames?: Readonly<Record<string, string>>;
   /** 断开或删除后通知宿主刷新 marketplace / settings SSOT。 */
@@ -81,6 +84,7 @@ export function MyConnectionsPanel({
   healthByConnectorId,
   accountsByConnectorId,
   configuredMcpNames,
+  configuredMcpEntries,
   gatewayInstalled,
   displayNames,
   onChanged,
@@ -99,6 +103,7 @@ export function MyConnectionsPanel({
         healthByConnectorId,
         accountsByConnectorId,
         configuredMcpNames,
+        configuredMcpEntries,
         gatewayInstalled,
         displayNames,
         query,
@@ -107,6 +112,7 @@ export function MyConnectionsPanel({
       healthByConnectorId,
       accountsByConnectorId,
       configuredMcpNames,
+      configuredMcpEntries,
       gatewayInstalled,
       displayNames,
       query,
@@ -201,7 +207,7 @@ export function MyConnectionsPanel({
                     </span>
                   ) : (
                     <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-                      {t("badge.installed")}
+                      {t("badge.connected")}
                     </span>
                   )}
                 </div>

@@ -37,7 +37,7 @@ export function MarketOnboardingModal({
             const Icon = POINT_ICONS[i - 1];
             return (
               <li key={i} className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgba(var(--theme-color-rgb),0.1)] text-[rgb(var(--theme-color-rgb,59,130,246))]">
                   <Icon className="h-4 w-4" aria-hidden />
                 </span>
                 <span className="text-[13px] leading-relaxed text-text-muted">
@@ -50,7 +50,7 @@ export function MarketOnboardingModal({
         <div className="flex justify-center border-t border-border px-4 pt-4">
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-5 py-2 text-[13px] font-medium text-white transition hover:opacity-90"
+            className="inline-flex items-center gap-1.5 rounded-md bg-btnPrimary px-5 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
             onClick={onDismiss}
           >
             <Check className="h-4 w-4" aria-hidden />

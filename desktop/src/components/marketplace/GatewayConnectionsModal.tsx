@@ -214,7 +214,7 @@ export function GatewayConnectionsModal({ open, onClose }: Props) {
                   <div className="mt-2 space-y-1.5 rounded-md border border-border bg-surface-panel p-2">
                     <input
                       type="text"
-                      className="w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                      className="w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                       placeholder={t("gateway.connections.namePlaceholder")}
                       value={keyName}
                       onChange={(e) => setKeyName(e.target.value)}
@@ -222,7 +222,7 @@ export function GatewayConnectionsModal({ open, onClose }: Props) {
                     <input
                       type="password"
                       autoComplete="off"
-                      className="w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                      className="w-full rounded-md border border-border bg-surface-card px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                       placeholder={t("gateway.connections.keyPlaceholder")}
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
@@ -238,7 +238,7 @@ export function GatewayConnectionsModal({ open, onClose }: Props) {
                       </button>
                       <button
                         type="button"
-                        className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white transition hover:opacity-90 disabled:opacity-40"
+                        className="rounded-md bg-btnPrimary px-2.5 py-1 text-[11px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                         onClick={() => void handleCreate(app.id)}
                         disabled={saving || !keyName.trim() || !apiKey.trim()}
                       >

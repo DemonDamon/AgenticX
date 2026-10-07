@@ -1506,55 +1506,55 @@
     "catalog": {
       "tencent-meeting": {
         "name": "腾讯会议",
-        "description": "管理会议、录制、纪要与参会报告"
+        "description": "管理腾讯会议日程、录制回放、会议纪要与参会报告，在对话中创建会议、查询录制并汇总会后结论。"
       },
       "tapd": {
         "name": "TAPD",
-        "description": "管理需求、缺陷、任务与迭代"
+        "description": "管理 TAPD 需求、缺陷、任务与迭代，在对话中跟进研发进度、更新状态并汇总迭代交付情况。"
       },
       "github": {
         "name": "GitHub",
-        "description": "查看仓库、Issue 与 Pull Request"
+        "description": "查看 GitHub 仓库、Issue 与 Pull Request，在对话中检索代码变更、审阅讨论并跟踪开源协作进度。"
       },
       "feishu": {
         "name": "飞书",
-        "description": "消息、文档、多维表格、日历与任务"
+        "description": "飞书消息、云文档、多维表格、日历与任务：把团队协作与知识沉淀接到助手，便于催办、检索与日程安排。"
       },
       "wecom": {
         "name": "企业微信",
-        "description": "消息、文档、智能表格、通讯录、待办与会议"
+        "description": "企业微信消息、文档、智能表格、通讯录、待办与会议，把企业内部沟通与协作能力接入助手工作流。"
       },
       "qqmail": {
         "name": "Agent Mail",
-        "description": "Agent 专属邮箱：收发、搜索、回复与转发"
+        "description": "Agent 专属邮箱：收发、搜索、回复与转发邮件，让助手在隔离邮箱中处理通知、摘要与外联沟通。"
       },
       "gmail": {
         "name": "Gmail",
-        "description": "收发、搜索和整理邮件"
+        "description": "Gmail 收发、搜索与整理邮件：在对话中查找线程、起草回复并管理标签，把邮件工作流交给助手。"
       },
       "notion": {
         "name": "Notion",
-        "description": "浏览页面与数据库内容"
+        "description": "浏览与检索 Notion 页面与数据库内容，把知识库、项目笔记与结构化记录接到助手问答与摘要。"
       },
       "slack": {
         "name": "Slack",
-        "description": "读取频道并发送消息"
+        "description": "读取 Slack 频道并发送消息：汇总讨论、检索历史并代发通知，把团队即时通讯接到助手。"
       },
       "gdrive": {
         "name": "Google Drive",
-        "description": "查找与管理云端文件"
+        "description": "查找与管理 Google Drive 云端文件：搜索文档、整理目录并读取内容摘要，便于资料检索与协作。"
       },
       "airtable": {
         "name": "Airtable",
-        "description": "读取和更新表格记录"
+        "description": "读取和更新 Airtable 表格记录：查询视图、写入字段与同步业务数据，把轻量数据库接到助手。"
       },
       "supabase": {
         "name": "Supabase",
-        "description": "访问项目数据与服务"
+        "description": "访问 Supabase 项目数据与服务：查询表、调用边缘函数与管理后端资源，支撑应用数据对话操作。"
       },
       "bigquery": {
         "name": "BigQuery",
-        "description": "查询和分析数据集"
+        "description": "查询和分析 BigQuery 数据集：用自然语言发起分析、探索表结构与汇总指标，把数仓洞察带到对话里。"
       }
     },
     "needsReauth": "需重新授权",

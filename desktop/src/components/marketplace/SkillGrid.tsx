@@ -101,21 +101,21 @@ export function SkillGrid({
               {item.installed ? (
                 <button
                   type="button"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-strong bg-surface-cardSolid px-2.5 py-1.5 text-xs font-medium text-text-strong transition hover:bg-surface-hover"
                   onClick={() => onUse(item)}
                 >
                   <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
                   {t("actions.use")}
                 </button>
               ) : isInstalling || isQueued ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-faint">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-strong px-2.5 py-1.5 text-xs text-text-muted">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                   {t("actions.installing")}
                 </span>
               ) : isOfficialSite ? (
                 <button
                   type="button"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-strong bg-surface-cardSolid px-2.5 py-1.5 text-xs font-medium text-text-strong transition hover:bg-surface-hover"
                   onClick={() => {
                     if (item.officialUrl) window.open(item.officialUrl, "_blank", "noopener,noreferrer");
                   }}
@@ -126,7 +126,7 @@ export function SkillGrid({
               ) : (
                 <button
                   type="button"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-btnPrimary px-2.5 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                   disabled={item.origin === "recommended" && promptBusy}
                   onClick={() => {
                     if (item.origin === "registry") onInstallRegistry(item);

@@ -25,3 +25,17 @@ Vendor-published or carefully redrawn marks for marketplace cards (local packagi
 | dichan.png | Comate-matching redraw | House mark (dichan.com favicon used as reference) |
 | gildata.png | Comate-matching redraw | Blue G + gold arrow (Comate catalog ref; no stable public App Store icon) |
 | gitlab.svg / gitee.svg / linear.svg / asana.svg / zoom.svg / cloudflare.svg | Simple Icons (CC0) | |
+
+## Full-bleed retile (2026-10-07)
+
+Marketplace `MarketIcon` no longer wraps logos in a white matte. Stub PNGs that were
+glyph-on-white or had large white margins were retiled to solid brand backgrounds:
+
+| File | Change |
+|------|--------|
+| dichan.png | Redrawn: white house mark on blue gradient tile |
+| zsxq.png | Teal brand tile + white glyph (was teal-on-white) |
+| gildata.png | Blue brand tile + white G / gold arrow |
+| outlook.png | Cropped App Store matte; mark scaled on MS blue |
+| pkulaw / neocrm / lawstar | Cropped padding or brand-tile fill |
+| linear.svg | White fill for purple mark-tile in MarketIcon |

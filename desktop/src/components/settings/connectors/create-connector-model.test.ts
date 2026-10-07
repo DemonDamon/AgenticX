@@ -76,6 +76,7 @@ describe("buildCreateConnectorServerConfig", () => {
     expect(a.config).toEqual({
       url: "https://example.com/mcp",
       headers: { Authorization: "Bearer k1" },
+      _agenticx: { source: "connector" },
     });
     const b = buildCreateConnectorServerConfig("none", {
       name: "dingtalk",
@@ -83,7 +84,10 @@ describe("buildCreateConnectorServerConfig", () => {
       apiKey: "",
       token: "",
     });
-    expect(b.config).toEqual({ url: "http://127.0.0.1:9/mcp" });
+    expect(b.config).toEqual({
+      url: "http://127.0.0.1:9/mcp",
+      _agenticx: { source: "connector" },
+    });
   });
 });
 
@@ -104,6 +108,7 @@ describe("applyCreateConnectorToMcpJson", () => {
     expect(parsed.mcpServers.qingflow).toEqual({
       url: "https://mcp.example/qf",
       headers: { Authorization: "Bearer tok" },
+      _agenticx: { source: "connector" },
     });
 
     const dup = applyCreateConnectorToMcpJson(

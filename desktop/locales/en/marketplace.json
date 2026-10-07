@@ -62,6 +62,7 @@
     "agent": "Agent",
     "command": "Command",
     "installed": "Installed",
+    "connected": "Connected",
     "connector": "Connector",
     "needsReauth": "Re-auth needed"
   },
@@ -131,7 +132,7 @@
   "gateway": {
     "name": "Connector Gateway",
     "provider": "AgenticX",
-    "cardDesc": "Curated connectors · search-and-invoke action catalog · credentials stay on the gateway",
+    "cardDesc": "Curated connector catalog: search and invoke actions in chat; service credentials stay on the gateway while the desktop only sends calls and receives results.",
     "modalTitle": "Install Connector Gateway",
     "intro": "One MCP config connects you to the gateway connector catalog; search and invoke actions right in the chat after install.",
     "mode": {
@@ -249,107 +250,107 @@
     "supply": {
       "gildata": {
         "name": "Gildata MCP",
-        "description": "Gildata financial data MCP for AI: natural-language queries for stocks, funds, and more."
+        "description": "Gildata financial data MCP for AI: natural-language queries for stocks, funds, and macro indicators—bring research data into chat."
       },
       "yingmi": {
         "name": "Yingmi MCP",
-        "description": "Yingmi MCP for fund advisory and asset allocation — products, portfolios, holdings, and market data."
+        "description": "Yingmi MCP for fund advisory and asset allocation—products, portfolios, holdings, and market data for wealth Q&A in chat."
       },
       "comein": {
         "name": "Comein Research",
-        "description": "Comein MCP for broker research, listed-company roadshows, and investment research reports."
+        "description": "Comein MCP for broker research, listed-company roadshows, and investment reports—search and summarize research in conversation."
       },
       "dichan": {
         "name": "DICHAN AI",
-        "description": "Real-estate AI data services from DICHAN, using CRIC-authorized datasets."
+        "description": "Real-estate AI data from DICHAN with CRIC-authorized datasets—query properties, markets, and research insights from chat."
       },
       "kuaidi100": {
         "name": "Kuaidi100",
-        "description": "Parcel tracking across domestic and international carriers via Kuaidi100."
+        "description": "Parcel tracking across domestic and international carriers via Kuaidi100—look up tracking numbers, routes, and delivery status in chat."
       },
       "lawstar": {
         "name": "Law Star",
-        "description": "Law Star MCP for legal information retrieval — regulations, cases, and more."
+        "description": "Law Star MCP for legal information retrieval—regulations, cases, and statute lookup so the assistant can cite legal sources."
       },
       "esign": {
         "name": "eSign",
-        "description": "eSign electronic signature and contract data — contracts, tasks, parties, seals, and evidence."
+        "description": "eSign electronic signature and contract data—contracts, signing tasks, parties, seals, and evidence for contract workflows in chat."
       },
       "pkulaw": {
         "name": "PKULaw — Laws & Regulations",
-        "description": "PKULaw MCP legal data services for AI — statutes and case search."
+        "description": "PKULaw MCP legal data for AI—statutes and case search so the assistant can cite authoritative legal materials in conversation."
       },
       "neocrm": {
         "name": "Neocrm CRM",
-        "description": "Neocrm MCP for CRM data — accounts, leads, opportunities, and contacts."
+        "description": "Neocrm MCP for CRM data—accounts, leads, opportunities, and contacts to support sales follow-ups and pipeline insights in chat."
       },
       "dingtalk": {
         "name": "DingTalk CLI",
-        "description": "Enterprise messaging and todos; name-only instance after wiring."
+        "description": "DingTalk enterprise messaging and todos: name an instance after wiring (no credentials) to call messaging and schedule capabilities."
       },
       "qingflow": {
         "name": "Qingflow",
-        "description": "Low-code workflows and data tables; Token required after wiring."
+        "description": "Qingflow low-code workflows and data tables—connect approvals and business data; provide a Token after wiring to query and trigger flows."
       },
       "zsxq": {
         "name": "Zsxq",
-        "description": "Knowledge Planet content search and publishing; api_key required."
+        "description": "Knowledge Planet content search and publishing—find topics and highlights in chat; provide an api_key after wiring to read and write."
       },
       "amap": {
         "name": "Amap",
-        "description": "Geocoding, routing, and nearby search."
+        "description": "Amap location services: geocoding, routing, nearby POI search, and traffic—bring travel and local-life tools into the assistant."
       },
       "baidu-maps": {
         "name": "Baidu Maps",
-        "description": "Place search, routing, and coordinate conversion."
+        "description": "Baidu Maps: place search, routing, coordinate conversion, and nearby queries—answer navigation and geo questions in chat."
       },
       "tencent-maps": {
         "name": "Tencent Maps",
-        "description": "Location services and routing."
+        "description": "Tencent Maps location services: geocoding, routing, and nearby search—ask for places and travel plans in natural language."
       },
       "tencent-docs": {
         "name": "Tencent Docs",
-        "description": "Online docs, sheets, and slides; paste MCP endpoint and Token."
+        "description": "Tencent Docs online docs, sheets, and slides—paste the official MCP endpoint and Token to read and write collaborative content."
       },
       "wps": {
         "name": "WPS Office",
-        "description": "Document collaboration and project tools; paste MCP endpoint and Token."
+        "description": "WPS Office document collaboration and project tools—paste the official MCP endpoint and Token to work with cloud docs from chat."
       },
       "outlook": {
         "name": "Outlook",
-        "description": "Microsoft email, calendar, and contacts collaboration suite."
+        "description": "Microsoft Outlook email, calendar, and contacts—send mail, check schedules, and manage contacts from assistant workflows."
       },
       "zoom": {
         "name": "Zoom",
-        "description": "Meetings, chat, and whiteboard."
+        "description": "Zoom meetings, chat, and whiteboard—create and manage meetings, recordings, and chat history for pre/post-meeting automation."
       },
       "gitlab": {
         "name": "GitLab",
-        "description": "Repos, merge requests, and pipelines."
+        "description": "GitLab repos and DevOps—view repositories, merge requests, issues, and CI/CD pipelines; track changes and builds in chat."
       },
       "gitee": {
         "name": "Gitee",
-        "description": "Code hosting and collaboration."
+        "description": "Gitee code hosting and team collaboration—manage repos, pull requests, issues, and boards for domestic DevOps workflows."
       },
       "linear": {
         "name": "Linear",
-        "description": "Issue tracking and project management."
+        "description": "Linear issue tracking and project management—view and update issues, cycles, and project status for engineering teams in chat."
       },
       "asana": {
         "name": "Asana",
-        "description": "Tasks and project collaboration."
+        "description": "Asana tasks and project collaboration—manage projects, assignments, and progress; sync team todos and milestones with the assistant."
       },
       "tianyancha": {
         "name": "Tianyancha",
-        "description": "Enterprise registration and legal-risk information."
+        "description": "Tianyancha enterprise registration and legal-risk data—company profiles, shareholders, and judicial risk for due diligence in chat."
       },
       "qichacha": {
         "name": "Qichacha",
-        "description": "Enterprise and IP search."
+        "description": "Qichacha enterprise and IP search—business records, patents, trademarks, and related entities for KYC and verification in chat."
       },
       "cloudflare": {
         "name": "Cloudflare",
-        "description": "DNS and edge network API."
+        "description": "Cloudflare DNS and edge network APIs—manage DNS, CDN, and security rules; automate edge infrastructure from the assistant."
       }
     }
   }

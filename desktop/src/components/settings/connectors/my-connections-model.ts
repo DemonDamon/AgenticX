@@ -4,6 +4,13 @@
  */
 
 import { GATEWAY_DEFAULT_SERVER_NAME } from "../../marketplace/gateway-model";
+import {
+  isCustomConnectorMcpEntry,
+  mcpRemoteHostLabel,
+  readAgenticxMcpSource,
+  type McpJsonDocument,
+  getMcpServersMap,
+} from "../../../utils/mcp-remote-config";
 import type { ConnectorHealth } from "./connector-health";
 import {
   CONNECTOR_SUPPLY,
@@ -31,12 +38,27 @@ export type MyConnectionRow = {
   iconSrc?: string;
 };
 
+/** 本机已配置 MCP 的精简元数据，用于「我的连接」自定义远程过滤。 */
+export type ConfiguredMcpEntry = {
+  name: string;
+  url?: string;
+  command?: string;
+  transport?: string;
+  /** mcp.json `_agenticx.source`（若可读）。 */
+  agenticxSource?: string;
+};
+
 export type BuildMyConnectionsInput = {
   healthByConnectorId: Readonly<Record<string, ConnectorHealth | undefined>>;
   /** native 账号展示（如 GitHub login）。 */
   accountsByConnectorId?: Readonly<Record<string, string | undefined>>;
-  /** 本机 mcp.json 已配置的 server 名。 */
+  /** 本机 mcp.json / 合并状态中的 server 名。 */
   configuredMcpNames: ReadonlySet<string> | readonly string[];
+  /**
+   * 可选：与 configuredMcpNames 对应的元数据。
+   * 有则仅把 connector 来源 / URL 远程算作自定义连接；无元数据的名字不会出现在「我的连接」。
+   */
+  configuredMcpEntries?: readonly ConfiguredMcpEntry[];
   gatewayInstalled?: boolean;
   supply?: readonly ConnectorSupplyEntry[];
   /** supplyId → 展示名覆盖。 */
@@ -67,9 +89,83 @@ function matchesQuery(query: string, ...fields: Array<string | undefined>): bool
   return fields.some((f) => (f ?? "").toLowerCase().includes(q));
 }
 
+/** 从 loadMcpStatus servers 投影为 ConfiguredMcpEntry。 */
+export function configuredMcpEntriesFromStatus(
+  servers: ReadonlyArray<{
+    name?: string;
+    url?: string;
+    command?: string;
+    transport?: string;
+  }>,
+): ConfiguredMcpEntry[] {
+  const out: ConfiguredMcpEntry[] = [];
+  for (const s of servers) {
+    const name = String(s?.name ?? "").trim();
+    if (!name) continue;
+    out.push({
+      name,
+      url: typeof s.url === "string" ? s.url : undefined,
+      command: typeof s.command === "string" ? s.command : undefined,
+      transport: typeof s.transport === "string" ? s.transport : undefined,
+    });
+  }
+  return out;
+}
+
+/** 从 mcp.json 文档投影；带上 `_agenticx.source`。 */
+export function configuredMcpEntriesFromDocument(doc: McpJsonDocument): ConfiguredMcpEntry[] {
+  const servers = getMcpServersMap(doc);
+  const out: ConfiguredMcpEntry[] = [];
+  for (const [name, raw] of Object.entries(servers)) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      out.push({ name: trimmed });
+      continue;
+    }
+    const row = raw as Record<string, unknown>;
+    out.push({
+      name: trimmed,
+      url: typeof row.url === "string" ? row.url : undefined,
+      command: typeof row.command === "string" ? row.command : undefined,
+      transport: typeof row.transport === "string" ? row.transport : undefined,
+      agenticxSource: readAgenticxMcpSource(row),
+    });
+  }
+  return out;
+}
+
+/** 按 name 合并；后写覆盖先写的同名字段（非空优先由 merge 逻辑处理）。 */
+export function mergeConfiguredMcpEntries(
+  ...groups: Array<readonly ConfiguredMcpEntry[] | undefined>
+): ConfiguredMcpEntry[] {
+  const map = new Map<string, ConfiguredMcpEntry>();
+  for (const group of groups) {
+    if (!group) continue;
+    for (const e of group) {
+      const name = String(e.name ?? "").trim();
+      if (!name) continue;
+      const prev = map.get(name);
+      if (!prev) {
+        map.set(name, { ...e, name });
+        continue;
+      }
+      map.set(name, {
+        name,
+        url: e.url || prev.url,
+        command: e.command || prev.command,
+        transport: e.transport || prev.transport,
+        agenticxSource: e.agenticxSource || prev.agenticxSource,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
 /**
  * 仅列出真正有会话/配置的实例：native connected|degraded；gateway 已装；
- * 以及 mcp.json 中未归属原生/网关的自定义远程 MCP（「新建连接器」写入）。
+ * 以及「新建连接器」写入的自定义远程 MCP（带 `_agenticx.source=connector`，
+ * 或未打标但具备 http(s) URL 的远程；不含 marketplace/stdio 合并项）。
  * 不把未接线或完全断开的目录项塞进「我的连接」。
  */
 export function buildMyConnectionRows(input: BuildMyConnectionsInput): MyConnectionRow[] {
@@ -81,6 +177,13 @@ export function buildMyConnectionRows(input: BuildMyConnectionsInput): MyConnect
   const display = input.displayNames ?? {};
   const query = input.query ?? "";
   const rows: MyConnectionRow[] = [];
+
+  const entryByName = new Map<string, ConfiguredMcpEntry>();
+  for (const e of input.configuredMcpEntries ?? []) {
+    const name = String(e.name ?? "").trim();
+    if (!name) continue;
+    entryByName.set(name, { ...e, name });
+  }
 
   for (const entry of wired) {
     if (entry.kind === "gateway") {
@@ -125,7 +228,7 @@ export function buildMyConnectionRows(input: BuildMyConnectionsInput): MyConnect
     });
   }
 
-  // 已占用的 mcp server 名（原生同步项 / 网关），其余视为用户「新建连接器」自定义远程 MCP。
+  // 已占用的 mcp server 名（原生同步项 / 网关）；其余仅在确认为自定义远程时展示。
   const claimedMcp = new Set<string>([GATEWAY_DEFAULT_SERVER_NAME]);
   for (const entry of wired) {
     if (entry.connectorId) {
@@ -138,13 +241,17 @@ export function buildMyConnectionRows(input: BuildMyConnectionsInput): MyConnect
   }
   for (const name of mcpNames) {
     if (claimedMcp.has(name)) continue;
-    if (!matchesQuery(query, name)) continue;
+    const meta = entryByName.get(name);
+    // 无元数据或非自定义远程（stdio / marketplace）→ 不进「我的连接」
+    if (!meta || !isCustomConnectorMcpEntry(meta)) continue;
+    if (!matchesQuery(query, name, meta.url, mcpRemoteHostLabel(meta.url))) continue;
+    const host = mcpRemoteHostLabel(meta.url);
     rows.push({
       key: `mcp:${name}`,
       supplyId: `mcp:${name}`,
       kind: "mcp",
       name,
-      detail: name,
+      detail: host || name,
       health: "connected",
       action: "mcp_remove",
       mcpServerName: name,

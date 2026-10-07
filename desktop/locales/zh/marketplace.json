@@ -62,6 +62,7 @@
     "agent": "专家",
     "command": "指令",
     "installed": "已安装",
+    "connected": "已连接",
     "connector": "连接器",
     "needsReauth": "需重新授权"
   },
@@ -131,7 +132,7 @@
   "gateway": {
     "name": "连接器网关",
     "provider": "AgenticX",
-    "cardDesc": "精选连接器 · 搜索即用的动作目录 · 凭据留在网关侧",
+    "cardDesc": "精选连接器目录：在对话中搜索并调用动作；各服务凭据留在网关侧，本地只下发指令并取回结果。",
     "modalTitle": "安装连接器网关",
     "intro": "一条 MCP 配置接入网关连接器目录;安装后可在对话中搜索并调用动作。",
     "mode": {
@@ -249,107 +250,107 @@
     "supply": {
       "gildata": {
         "name": "恒生聚源MCP",
-        "description": "恒生聚源金融数据 MCP：面向 AI 的专业金融取数服务，支持自然语言查询股票/基金等。"
+        "description": "恒生聚源金融数据 MCP：面向 AI 的专业金融取数服务，支持自然语言查询股票、基金、宏观指标等，把投研数据接到对话里。"
       },
       "yingmi": {
         "name": "盈米MCP",
-        "description": "盈米 MCP 对接基金投顾与资产配置能力，汇聚基金产品、组合、持仓与行情等财富数据。"
+        "description": "盈米 MCP 对接基金投顾与资产配置能力，汇聚基金产品、组合、持仓与行情等财富数据，便于助手完成投顾问答与组合分析。"
       },
       "comein": {
         "name": "进门投研",
-        "description": "进门MCP覆盖券商研究所、上市公司、资管机构公开路演内容，整合国内外资研报等。"
+        "description": "进门 MCP 覆盖券商研究所、上市公司与资管机构的公开路演内容，整合国内外资研报，方便在对话中检索与摘要。"
       },
       "dichan": {
         "name": "深度智联",
-        "description": "把深度智联提供的房地产 AI 数据服务接入助手，使用经克而瑞授权的数据能力。"
+        "description": "把深度智联提供的房地产 AI 数据服务接入助手，使用经克而瑞授权的数据能力，支持楼盘、市场与投研类查询。"
       },
       "kuaidi100": {
         "name": "快递100",
-        "description": "快递100通过其网站提供快递物流信息的查询与跟踪服务，覆盖国内外多家快递公司。"
+        "description": "快递100 通过其服务提供快递物流信息的查询与跟踪，覆盖国内外多家承运商，可在对话中查单号、轨迹与签收状态。"
       },
       "lawstar": {
         "name": "法律之星",
-        "description": "法律之星通过其MCP服务站点提供法律信息检索与数据服务能力，覆盖法规、案例等。"
+        "description": "法律之星通过 MCP 提供法律信息检索与数据服务，覆盖法规、案例与条文解读，便于助手完成法律检索与引用。"
       },
       "esign": {
         "name": "e签宝电子签名",
-        "description": "e签宝对接电子签名与合同签署数据，汇聚合同、签署任务、签署方、印章与存证。"
+        "description": "e签宝对接电子签名与合同签署数据，汇聚合同、签署任务、签署方、印章与存证，支持签署进度查询与合同管理。"
       },
       "pkulaw": {
         "name": "北大法宝-检索法律法规",
-        "description": "北大法宝MCP服务平台为AI应用提供专业的法律数据服务，覆盖法规与案例检索。"
+        "description": "北大法宝 MCP 为 AI 应用提供专业法律数据服务，覆盖法规与案例检索，便于在对话中引用权威条文与裁判文书。"
       },
       "neocrm": {
         "name": "销售易 CRM",
-        "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据。"
+        "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据，支持跟进记录查询与商机洞察。"
       },
       "dingtalk": {
         "name": "钉钉 CLI",
-        "description": "企业通讯与待办；接线后仅需命名实例（无需凭据）。"
+        "description": "钉钉企业通讯与待办协作：接线后可命名实例并调用消息、日程等能力；本条目免凭据，仅需完成实例命名即可使用。"
       },
       "qingflow": {
         "name": "轻流",
-        "description": "低代码流程与数据表；接线后需填写 Token。"
+        "description": "轻流低代码流程与数据表平台：把审批流、表单与业务数据接到助手；接线后需填写 Token，即可查询与触发流程。"
       },
       "zsxq": {
         "name": "知识星球",
-        "description": "星球内容检索与发布；接线后需填写 api_key。"
+        "description": "知识星球内容检索与发布：在对话中搜索星球主题、精华与讨论；接线后需填写 api_key，完成授权即可读写内容。"
       },
       "amap": {
         "name": "高德地图",
-        "description": "地理编码、路径规划与周边检索。"
+        "description": "高德地图位置服务：地理编码、路径规划、周边 POI 检索与路况查询，把出行与本地生活能力接到助手对话里。"
       },
       "baidu-maps": {
         "name": "百度地图",
-        "description": "地点检索、路线规划与坐标转换。"
+        "description": "百度地图位置服务：地点检索、路线规划、坐标转换与周边查询，便于助手完成导航类问题与地理信息检索。"
       },
       "tencent-maps": {
         "name": "腾讯地图",
-        "description": "位置服务与路线规划。"
+        "description": "腾讯地图位置服务：地理编码、路线规划与周边检索，把地点查找与出行规划能力接入助手，支持自然语言提问。"
       },
       "tencent-docs": {
         "name": "腾讯文档",
-        "description": "在线文档、表格与幻灯片；可粘贴官方 MCP 端点与 Token。"
+        "description": "腾讯文档在线文档、表格与幻灯片协作；可粘贴官方 MCP 端点与 Token，在对话中读写文档内容与协作信息。"
       },
       "wps": {
         "name": "WPS Office",
-        "description": "文档协作与项目管理；可粘贴官方 MCP 端点与 Token。"
+        "description": "WPS Office 文档协作与项目管理：对接云文档、表格与团队空间；可粘贴官方 MCP 端点与 Token 后在对话中调用。"
       },
       "outlook": {
         "name": "Outlook",
-        "description": "微软推出的邮件收发、日程管理与联系人协同办公软件。"
+        "description": "微软 Outlook 邮件、日程与联系人协同：收发邮件、查询日历与管理联系人，把办公通讯能力接到助手工作流。"
       },
       "zoom": {
         "name": "Zoom",
-        "description": "会议、聊天与白板。"
+        "description": "Zoom 会议、聊天与白板协作：创建与管理会议、查询录制与聊天记录，把远程会议能力接入助手，便于会前会后自动化。"
       },
       "gitlab": {
         "name": "GitLab",
-        "description": "仓库、合并请求与流水线。"
+        "description": "GitLab 代码托管与 DevOps：查看仓库、合并请求、Issue 与 CI/CD 流水线，在对话中跟进变更与构建状态。"
       },
       "gitee": {
         "name": "Gitee",
-        "description": "代码托管与协作。"
+        "description": "Gitee 代码托管与团队协作：管理仓库、Pull Request、Issue 与项目看板，把国内代码协作流程接到助手对话。"
       },
       "linear": {
         "name": "Linear",
-        "description": "Issue 追踪与项目管理。"
+        "description": "Linear Issue 追踪与项目管理：查看与更新 Issue、周期与项目状态，适合工程团队在对话中推进研发任务。"
       },
       "asana": {
         "name": "Asana",
-        "description": "任务与项目协作。"
+        "description": "Asana 任务与项目协作：管理项目、任务分配与进度跟踪，把团队待办与里程碑同步到助手，便于催办与汇总。"
       },
       "tianyancha": {
         "name": "天眼查",
-        "description": "企业工商与法律风险信息。"
+        "description": "天眼查企业工商与法律风险信息：查询企业基本信息、股东、司法风险与经营状态，辅助尽职调查与客户背调。"
       },
       "qichacha": {
         "name": "企查查",
-        "description": "企业与知识产权查询。"
+        "description": "企查查企业与知识产权查询：工商信息、专利商标、诉讼与关联企业检索，便于在对话中完成企业尽调与核验。"
       },
       "cloudflare": {
         "name": "Cloudflare",
-        "description": "DNS 与边缘网络 API。"
+        "description": "Cloudflare DNS 与边缘网络 API：管理域名解析、CDN 与安全规则，把边缘基础设施运维能力接入助手自动化。"
       }
     }
   }

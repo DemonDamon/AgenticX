@@ -1,9 +1,9 @@
-import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { i18n } from "../../i18n/i18n";
 import { MarketplaceView } from "./MarketplaceView";
+import { __resetMarketplaceSessionCacheForTests } from "./useMarketplaceData";
 
 function renderView() {
   return renderToStaticMarkup(
@@ -13,9 +13,13 @@ function renderView() {
   );
 }
 
-/** renderToStaticMarkup 不跑 useEffect,bridge 不会被调用;初始态 loading=true。 */
+/** renderToStaticMarkup 不跑 useEffect,bridge 不会被调用;本地连接器供给仍可即时上屏。 */
 describe("MarketplaceView", () => {
-  it("renders header, kind tabs, featured cards and loading state", () => {
+  beforeEach(() => {
+    __resetMarketplaceSessionCacheForTests();
+  });
+
+  it("renders header, kind tabs, featured cards and connector grid without blocking spinner", () => {
     const html = renderView();
     expect(html).toContain(i18n.t("title", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manage", { ns: "marketplace" }));
@@ -25,7 +29,8 @@ describe("MarketplaceView", () => {
     for (const id of ["office", "connectors", "toolkit"] as const) {
       expect(html).toContain(i18n.t(`featured.${id}.title`, { ns: "marketplace" }));
     }
-    expect(html).toContain(i18n.t("loading", { ns: "marketplace" }));
+    // 全部 tab 有本地连接器供给,首屏不应被「加载中」挡住。
+    expect(html).not.toContain(i18n.t("loading", { ns: "marketplace" }));
   });
 
   it("renders search placeholder for the default all tab", () => {

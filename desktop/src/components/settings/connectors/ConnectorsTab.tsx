@@ -7,10 +7,18 @@ import { Toast } from "../../ds/Toast";
 import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
+import { MarketIcon } from "../../marketplace/MarketIcon";
 import type { ConnectorHealth } from "./connector-health";
 import { MyConnectionsPanel } from "./MyConnectionsPanel";
+import {
+  configuredMcpEntriesFromDocument,
+  configuredMcpEntriesFromStatus,
+  mergeConfiguredMcpEntries,
+  type ConfiguredMcpEntry,
+} from "./my-connections-model";
 import { CONNECTOR_SUPPLY } from "./connector-supply";
 import { GATEWAY_DEFAULT_SERVER_NAME, isGatewayInstalled } from "../../marketplace/gateway-model";
+import { parseMcpJsonDocument } from "../../../utils/mcp-remote-config";
 import { i18n } from "../../../i18n/i18n";
 
 function st(key: string, opts?: Record<string, unknown>): string {
@@ -115,17 +123,11 @@ function StatusLabel({
 
 function ConnectorIcon({ item, large = false }: { item: ConnectorDefinition; large?: boolean }) {
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center rounded-xl border border-border bg-white ${large ? "h-14 w-14" : "h-9 w-9"}`}
-      aria-hidden
-    >
-      <img
-        src={item.iconSrc}
-        alt=""
-        className={large ? "h-9 w-9 object-contain" : "h-[22px] w-[22px] object-contain"}
-        draggable={false}
-      />
-    </div>
+    <MarketIcon
+      name={item.name}
+      iconSrc={item.iconSrc}
+      className={large ? "h-14 w-14" : "h-9 w-9"}
+    />
   );
 }
 
@@ -193,6 +195,7 @@ export function ConnectorsTab({
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [configuredMcpNames, setConfiguredMcpNames] = useState<string[]>([]);
+  const [configuredMcpEntries, setConfiguredMcpEntries] = useState<ConfiguredMcpEntry[]>([]);
 
   const selected = useMemo(
     () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
@@ -269,24 +272,38 @@ export function ConnectorsTab({
 
 
   const reloadConfiguredMcpNames = useCallback(async () => {
+    let statusEntries: ConfiguredMcpEntry[] = [];
+    let statusNames: string[] = [];
     try {
       const res = await window.agenticxDesktop.loadMcpStatus(sessionId || "").catch(() => null);
       if (res?.ok && Array.isArray(res.servers)) {
-        setConfiguredMcpNames(res.servers.map((s) => s.name));
-        return;
+        statusNames = res.servers.map((s) => s.name).filter(Boolean);
+        statusEntries = configuredMcpEntriesFromStatus(res.servers);
       }
     } catch {
       /* fall through */
     }
+    let docEntries: ConfiguredMcpEntry[] = [];
     try {
       const raw = await window.agenticxDesktop.mcpGetRaw({}).catch(() => null);
       if (raw?.ok && raw.text) {
-        const parsed = JSON.parse(raw.text) as { mcpServers?: Record<string, unknown> };
-        setConfiguredMcpNames(Object.keys(parsed.mcpServers ?? {}));
+        try {
+          const doc = parseMcpJsonDocument(raw.text);
+          docEntries = configuredMcpEntriesFromDocument(doc);
+        } catch {
+          /* ignore parse */
+        }
       }
     } catch {
       /* ignore */
     }
+    const merged = mergeConfiguredMcpEntries(statusEntries, docEntries);
+    const names =
+      statusNames.length > 0
+        ? statusNames
+        : merged.map((e) => e.name);
+    setConfiguredMcpNames(names);
+    setConfiguredMcpEntries(merged.length > 0 ? merged : statusEntries);
   }, [sessionId]);
 
   useEffect(() => {
@@ -988,6 +1005,7 @@ export function ConnectorsTab({
             healthByConnectorId={myConnectionsHealth}
             accountsByConnectorId={myConnectionsAccounts}
             configuredMcpNames={configuredMcpNames}
+            configuredMcpEntries={configuredMcpEntries}
             gatewayInstalled={isGatewayInstalled(new Set(configuredMcpNames), GATEWAY_DEFAULT_SERVER_NAME)}
             displayNames={myConnectionsDisplayNames}
             onChanged={() => {
@@ -1013,8 +1031,8 @@ export function ConnectorsTab({
             return (
               <div
                 key={item.id}
-                className={`flex min-h-[88px] items-start gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 transition ${
-                  available ? "hover:bg-surface-hover" : "opacity-70"
+                className={`agx-market-card flex min-h-[96px] items-start gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 ${
+                  available ? "" : "opacity-70 pointer-events-none"
                 }`}
               >
                 <ConnectorIcon item={item} />
@@ -1030,7 +1048,7 @@ export function ConnectorsTab({
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-faint/50" aria-label={st("connectors.disconnectedAria")} />
                     ) : null}
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-muted">{st(`connectors.catalog.${item.id}.description`)}</p>
+                  <p className="mt-1 line-clamp-3 text-[13px] leading-[1.45] text-text-muted">{st(`connectors.catalog.${item.id}.description`)}</p>
                   {item.id === "github" && githubStatus.health === "degraded" ? (
                     <p className="mt-1 text-[11px] text-amber-400/90">{st("connectors.needsReauthHint")}</p>
                   ) : !available && !connected ? (

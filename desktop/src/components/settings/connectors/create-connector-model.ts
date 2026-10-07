@@ -10,6 +10,7 @@ import {
   getMcpServersMap,
   parseMcpJsonDocument,
   setMcpServersMap,
+  withAgenticxConnectorSource,
   type McpJsonDocument,
 } from "../../../utils/mcp-remote-config";
 
@@ -107,7 +108,7 @@ export function buildCreateConnectorServerConfig(
   }
   return {
     serverName,
-    config: buildRemoteMcpServerPayload(url, headers),
+    config: withAgenticxConnectorSource(buildRemoteMcpServerPayload(url, headers)),
   };
 }
 

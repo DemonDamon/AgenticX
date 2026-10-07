@@ -137,7 +137,10 @@ export type GatewayMarketItemDisplay = {
   iconSrc?: string;
 };
 
-/** 市场精选卡条目:kind=mcp + gateway 特例标记,安装/查看走网关弹层而非上游详情。 */
+/**
+ * 市场精选卡条目:kind=mcp + gateway 特例标记,安装/查看走网关弹层而非上游详情。
+ * UnifiedGrid 凭 gateway 标记出「已连接」(勿仅用 kind===connector,否则会落成「已安装」)。
+ */
 export function buildGatewayMarketItem(display: GatewayMarketItemDisplay): MarketplaceItem {
   return {
     key: `mcp:${GATEWAY_MARKET_SERVER_ID}`,

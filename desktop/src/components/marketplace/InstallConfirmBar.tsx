@@ -54,8 +54,8 @@ export function InstallConfirmBar({
         </button>
         <button
           type="button"
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 ${
-            isHigh ? "bg-rose-500 hover:bg-rose-500/90" : "bg-accent hover:opacity-90"
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-40 ${
+            isHigh ? "bg-rose-500 text-white hover:bg-rose-500/90" : "bg-btnPrimary text-btnPrimary-text hover:bg-btnPrimary-hover"
           }`}
           disabled={busy}
           onClick={onConfirm}

@@ -59,6 +59,16 @@ import yingmiIcon from "../../assets/connectors/stubs/yingmi.png";
 import zoomIcon from "../../assets/connectors/stubs/zoom.svg";
 import zsxqIcon from "../../assets/connectors/stubs/zsxq.png";
 
+import githubConnIcon from "../../assets/connectors/github.svg";
+import qqmailConnIcon from "../../assets/connectors/qqmail.svg";
+import gmailConnIcon from "../../assets/connectors/gmail.svg";
+import slackConnIcon from "../../assets/connectors/slack.svg";
+import notionConnIcon from "../../assets/connectors/notion.svg";
+import gdriveConnIcon from "../../assets/connectors/gdrive.svg";
+import airtableConnIcon from "../../assets/connectors/airtable.svg";
+import supabaseConnIcon from "../../assets/connectors/supabase.svg";
+import bigqueryConnIcon from "../../assets/connectors/bigquery.svg";
+
 export const BRAND_ICON_SRC: Readonly<Record<string, string>> = {
   feishu: feishuIcon,
   bocha: bochaIcon,
@@ -106,4 +116,62 @@ export const BRAND_ICON_SRC: Readonly<Record<string, string>> = {
   esign: esignIcon,
   pkulaw: pkulawIcon,
   neocrm: neocrmIcon,
+  github: githubConnIcon,
+  qqmail: qqmailConnIcon,
+  gmail: gmailConnIcon,
+  slack: slackConnIcon,
+  notion: notionConnIcon,
+  gdrive: gdriveConnIcon,
+  airtable: airtableConnIcon,
+  supabase: supabaseConnIcon,
+  bigquery: bigqueryConnIcon,
 };
+
+
+/**
+ * 字形标(SVG / Simple Icons)瓷砖底色:全出血品牌色,替代白垫。
+ * key 与 BRAND_RULES / Simple Icons slug 对齐。
+ */
+export const MARK_TILE_BG: Readonly<Record<string, string>> = {
+  github: "#24292F",
+  gitlab: "#FC6D26",
+  gitee: "#C71D23",
+  notion: "#000000",
+  linear: "#5E6AD2",
+  asana: "#F06A6A",
+  zoom: "#0B5CFF",
+  cloudflare: "#F38020",
+  supabase: "#3ECF8E",
+  gmail: "#EA4335",
+  slack: "#4A154B",
+  gdrive: "#1A73E8",
+  airtable: "#18BFFF",
+  bigquery: "#669DF6",
+  postgresql: "#4169E1",
+  mysql: "#4479A1",
+  mongodb: "#47A248",
+  redis: "#DC382D",
+  docker: "#2496ED",
+  kubernetes: "#2496ED",
+  vercel: "#000000",
+  stripe: "#635BFF",
+  figma: "#F24E1E",
+  jenkins: "#D24939",
+  grafana: "#F46800",
+  elasticsearch: "#005571",
+  sentry: "#362D59",
+  anthropic: "#D4A27F",
+  deepseek: "#4D6BFE",
+  googlegemini: "#8E75B2",
+  ollama: "#000000",
+  alibabacloud: "#FF6A00",
+  wechat: "#07C160",
+};
+
+/** 近黑字形:仅在深色/dim 瓷砖上需 CSS brightness(0) invert(1) 反白(浅色主题保持原色)。 */
+export const MARK_INVERT_BRANDS: ReadonlySet<string> = new Set([
+  "github",
+  "qqmail",
+  "vercel",
+  "ollama",
+]);

@@ -343,7 +343,7 @@ export function ManageView({
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />
           <input
             type="text"
-            className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-accent"
+            className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
             placeholder={t(`manageView.search.${tab}`)}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -428,14 +428,14 @@ export function ManageView({
                       <img
                         src={row.avatarUrl}
                         alt=""
-                        className="h-10 w-10 shrink-0 rounded-xl object-cover ring-1 ring-black/[0.06]"
+                        className="h-10 w-10 shrink-0 rounded-xl object-cover border border-border"
                         loading="lazy"
                       />
                     ) : (
                       <span
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${pickGradientFor(
                           row.name,
-                        )} text-sm font-semibold text-white shadow-sm ring-1 ring-white/15`}
+                        )} text-sm font-semibold text-white shadow-sm border border-border`}
                       >
                         {row.name.slice(0, 1)}
                       </span>

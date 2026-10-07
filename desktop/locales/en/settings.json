@@ -1506,55 +1506,55 @@
     "catalog": {
       "tencent-meeting": {
         "name": "Tencent Meeting",
-        "description": "Meetings, recordings, notes, and attendance reports"
+        "description": "Manage Tencent Meeting schedules, recordings, notes, and attendance—create meetings, find recordings, and summarize outcomes in chat."
       },
       "tapd": {
         "name": "TAPD",
-        "description": "Stories, bugs, tasks, and iterations"
+        "description": "Manage TAPD stories, bugs, tasks, and iterations—track delivery, update status, and summarize sprint progress in conversation."
       },
       "github": {
         "name": "GitHub",
-        "description": "Repos, issues, and pull requests"
+        "description": "Browse GitHub repos, issues, and pull requests—search changes, review discussions, and follow open-source collaboration in chat."
       },
       "feishu": {
         "name": "Feishu",
-        "description": "Messages, docs, bitable, calendar, and tasks"
+        "description": "Feishu messages, docs, bitable, calendar, and tasks—bring team collaboration and knowledge into the assistant for follow-ups and scheduling."
       },
       "wecom": {
         "name": "WeCom",
-        "description": "Messages, docs, sheets, contacts, todos, and meetings"
+        "description": "WeCom messages, docs, sheets, contacts, todos, and meetings—connect internal enterprise communication to assistant workflows."
       },
       "qqmail": {
         "name": "Agent Mail",
-        "description": "Agent inbox: send, search, reply, and forward"
+        "description": "Agent inbox for send, search, reply, and forward—let the assistant handle notifications and outreach in an isolated mailbox."
       },
       "gmail": {
         "name": "Gmail",
-        "description": "Send, search, and organize mail"
+        "description": "Send, search, and organize Gmail—find threads, draft replies, and manage labels so mail workflows stay in chat."
       },
       "notion": {
         "name": "Notion",
-        "description": "Browse pages and databases"
+        "description": "Browse Notion pages and databases—connect knowledge bases, project notes, and structured records to Q&A and summaries."
       },
       "slack": {
         "name": "Slack",
-        "description": "Read channels and send messages"
+        "description": "Read Slack channels and send messages—summarize discussions, search history, and post updates from the assistant."
       },
       "gdrive": {
         "name": "Google Drive",
-        "description": "Find and manage cloud files"
+        "description": "Find and manage Google Drive files—search docs, organize folders, and summarize content for research and collaboration."
       },
       "airtable": {
         "name": "Airtable",
-        "description": "Read and update records"
+        "description": "Read and update Airtable records—query views, write fields, and sync light database rows from conversation."
       },
       "supabase": {
         "name": "Supabase",
-        "description": "Access project data and services"
+        "description": "Access Supabase project data and services—query tables, call edge functions, and manage backend resources in chat."
       },
       "bigquery": {
         "name": "BigQuery",
-        "description": "Query and analyze datasets"
+        "description": "Query and analyze BigQuery datasets—explore schemas, run analyses, and summarize metrics from your warehouse in chat."
       }
     },
     "needsReauth": "Re-auth needed",

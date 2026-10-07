@@ -38,7 +38,7 @@ export function FilterChips({
             aria-pressed={isActive}
             className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
               isActive
-                ? "border-accent/60 bg-accent/10 font-medium text-text-strong"
+                ? "border-[rgba(var(--theme-color-rgb),0.45)] bg-[rgba(var(--theme-color-rgb),0.14)] font-medium text-text-strong"
                 : "border-border bg-surface-card text-text-muted hover:bg-surface-hover hover:text-text-strong"
             }`}
             onClick={() => onSelect(tag)}

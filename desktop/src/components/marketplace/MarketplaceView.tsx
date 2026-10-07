@@ -246,6 +246,7 @@ export function MarketplaceView() {
         healthByConnectorId: connectorHealthById,
         accountsByConnectorId: connectorAccountsById,
         configuredMcpNames: data.configuredMcpNames,
+        configuredMcpEntries: data.configuredMcpEntries,
         gatewayInstalled: isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName),
         displayNames: connectorDisplayNames,
         query: connectorsPane === "mine" ? query : "",
@@ -254,6 +255,7 @@ export function MarketplaceView() {
       connectorHealthById,
       connectorAccountsById,
       data.configuredMcpNames,
+      data.configuredMcpEntries,
       connectorDisplayNames,
       connectorsPane,
       query,
@@ -490,7 +492,7 @@ export function MarketplaceView() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />
           <input
             type="text"
-            className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-accent"
+            className="w-full rounded-md border border-border bg-surface-card py-1.5 pl-8 pr-3 text-[13px] text-text-primary outline-none transition placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
             placeholder={t(`search.${activeTab}`)}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -547,7 +549,7 @@ export function MarketplaceView() {
               type="button"
               className={`rounded-full px-3 py-1 text-xs transition-colors ${
                 categoryFilter === "all"
-                  ? "bg-accent text-white"
+                  ? "bg-btnPrimary text-btnPrimary-text"
                   : "bg-surface-card text-text-muted hover:bg-surface-hover"
               }`}
               onClick={() => setCategoryFilter("all")}
@@ -560,7 +562,7 @@ export function MarketplaceView() {
                 type="button"
                 className={`rounded-full px-3 py-1 text-xs transition-colors ${
                   categoryFilter === cat
-                    ? "bg-accent text-white"
+                    ? "bg-btnPrimary text-btnPrimary-text"
                     : "bg-surface-card text-text-muted hover:bg-surface-hover"
                 }`}
                 onClick={() => setCategoryFilter(cat)}
@@ -617,7 +619,10 @@ export function MarketplaceView() {
           </div>
         ) : null}
 
-        {data.loading ? (
+        {/* 有可展示条目(含本地连接器供给)时不整页挡「加载中」;仅在对应 tab 仍空时转圈。 */}
+        {data.loading &&
+        ((activeTab === "skills" && filteredSkills.length === 0) ||
+          (activeTab !== "skills" && filteredUnified.length === 0)) ? (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-faint">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             {t("loading")}
@@ -643,6 +648,7 @@ export function MarketplaceView() {
             healthByConnectorId={connectorHealthById}
             accountsByConnectorId={connectorAccountsById}
             configuredMcpNames={Array.from(data.configuredMcpNames)}
+            configuredMcpEntries={data.configuredMcpEntries}
             gatewayInstalled={isGatewayInstalled(
               data.configuredMcpNames,
               CONNECTOR_GATEWAY.serverName,

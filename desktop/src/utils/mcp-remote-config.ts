@@ -69,6 +69,62 @@ export function buildRemoteMcpServerPayload(
   return payload;
 }
 
+export const AGENTICX_MCP_META_KEY = "_agenticx" as const;
+export const AGENTICX_MCP_SOURCE_CONNECTOR = "connector" as const;
+
+/** Stamp a remote MCP payload as created via Near「新建连接器」. */
+export function withAgenticxConnectorSource(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const prev = config[AGENTICX_MCP_META_KEY];
+  const prevObj =
+    prev && typeof prev === "object" && !Array.isArray(prev)
+      ? (prev as Record<string, unknown>)
+      : {};
+  return {
+    ...config,
+    [AGENTICX_MCP_META_KEY]: { ...prevObj, source: AGENTICX_MCP_SOURCE_CONNECTOR },
+  };
+}
+
+export function readAgenticxMcpSource(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const meta = (raw as Record<string, unknown>)[AGENTICX_MCP_META_KEY];
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  const source = (meta as Record<string, unknown>).source;
+  return typeof source === "string" && source.trim() ? source.trim() : undefined;
+}
+
+/**
+ * True for「新建连接器」tagged entries, or untagged http(s) URL remotes (migration).
+ * Stdio marketplace / Cursor/`extra_search_paths` imports (command/args) return false.
+ */
+export function isCustomConnectorMcpConfig(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const row = raw as Record<string, unknown>;
+  if (readAgenticxMcpSource(row) === AGENTICX_MCP_SOURCE_CONNECTOR) return true;
+  const command = typeof row.command === "string" ? row.command.trim() : "";
+  if (command) return false;
+  const url = typeof row.url === "string" ? row.url.trim() : "";
+  return Boolean(url && /^https?:\/\//i.test(url));
+}
+
+/** Status-row / entry-shaped variant of {@link isCustomConnectorMcpConfig}. */
+export function isCustomConnectorMcpEntry(entry: {
+  url?: string;
+  command?: string;
+  transport?: string;
+  agenticxSource?: string;
+}): boolean {
+  if (entry.agenticxSource === AGENTICX_MCP_SOURCE_CONNECTOR) return true;
+  const command = String(entry.command ?? "").trim();
+  if (command) return false;
+  const url = String(entry.url ?? "").trim();
+  if (url && /^https?:\/\//i.test(url)) return true;
+  const transport = String(entry.transport ?? "").trim();
+  return transport === "sse" || transport === "streamable_http";
+}
+
 export function mcpTransportBadgeLabel(transport?: string): string {
   if (transport === "sse") return "SSE";
   if (transport === "streamable_http") return "Streamable HTTP";

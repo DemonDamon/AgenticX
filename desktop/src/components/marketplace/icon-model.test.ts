@@ -58,6 +58,8 @@ describe("pickBrandIcon", () => {
     expect(pickBrandIcon("GitHub MCP Server")).toEqual({ brand: "github" });
     expect(pickBrandIcon("claude-code")).toEqual({ brand: "anthropic" });
     expect(pickBrandIcon("postgres 查询工具")).toEqual({ brand: "postgresql" });
+    expect(pickBrandIcon("Slack MCP")).toEqual({ brand: "slack" });
+    expect(pickBrandIcon("Gmail 助手")).toEqual({ brand: "gmail" });
   });
 
   it("matches Chinese brand names", () => {
