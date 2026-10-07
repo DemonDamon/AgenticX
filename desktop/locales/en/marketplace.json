@@ -197,6 +197,160 @@
     "unwiredTitle": "\"{{name}}\" is not wired yet",
     "unwiredBody": "Near will not fake a connected state. This entry has no real path yet (native CLI or remote MCP URL + token). Use a wired connector, or add an official Streamable HTTP MCP endpoint later via custom credentials.",
     "unwiredHint": "Suggested handshake: {{auth}} (needs an official MCP URL and token before it can be instantiated).",
-    "unwiredClose": "Got it"
+    "unwiredClose": "Got it",
+    "myConnections": "My connections",
+    "browse": "Browse",
+    "myConnectionsEmpty": "No connected instances yet. Connect a connector above and it will show up here.",
+    "myConnectionsCount": "My connections ({{count}})",
+    "authFormHint": {
+      "name_only": "When wired, create an instance with a name only — no credentials.",
+      "api_key": "When wired, create an instance with an api_key.",
+      "token": "When wired, create an instance with a Token.",
+      "oauth_device": "When wired, authorize via browser / device code — no pasted secrets.",
+      "url_token": "When wired, provide the official MCP URL and Token."
+    },
+    "create": {
+      "title": "Create connector",
+      "subtitle": "Pick a template and configure credentials to create a runnable instance",
+      "selectedTemplate": "Selected template",
+      "nameDefault": "{{name}} connector",
+      "credentialSection": "New credential",
+      "howToGetCredential": "How to get credentials",
+      "advanced": "Advanced: MCP endpoint",
+      "advancedHint": "Saving to local mcp.json needs a Streamable HTTP / SSE URL. Official defaults are prefilled when known; otherwise paste a vendor or self-hosted endpoint.",
+      "close": "Close",
+      "submit": "Create connector",
+      "readFailed": "Failed to read mcp.json",
+      "writeFailed": "Failed to write mcp.json",
+      "formInvalid": "Fix required fields before creating",
+      "duplicate": "A connector with this name already exists — pick another name",
+      "success": "Created connector \"{{name}}\". Check My connections.",
+      "fields": {
+        "name": "Connector name",
+        "url": "MCP URL",
+        "apiKey": "API Key",
+        "token": "Token"
+      },
+      "placeholders": {
+        "name": "e.g. Qingflow connector",
+        "url": "https://mcp.example.com/sse",
+        "apiKey": "Enter API Key",
+        "token": "Enter Token value"
+      },
+      "errors": {
+        "required_name": "Connector name is required",
+        "invalid_name": "Name cannot produce a valid server id",
+        "required_url": "Enter an MCP URL under Advanced",
+        "invalid_url": "Invalid URL",
+        "required_api_key": "API Key is required",
+        "required_token": "Token is required"
+      }
+    },
+    "supply": {
+      "gildata": {
+        "name": "Gildata MCP",
+        "description": "Gildata financial data MCP for AI: natural-language queries for stocks, funds, and more."
+      },
+      "yingmi": {
+        "name": "Yingmi MCP",
+        "description": "Yingmi MCP for fund advisory and asset allocation — products, portfolios, holdings, and market data."
+      },
+      "comein": {
+        "name": "Comein Research",
+        "description": "Comein MCP for broker research, listed-company roadshows, and investment research reports."
+      },
+      "dichan": {
+        "name": "DICHAN AI",
+        "description": "Real-estate AI data services from DICHAN, using CRIC-authorized datasets."
+      },
+      "kuaidi100": {
+        "name": "Kuaidi100",
+        "description": "Parcel tracking across domestic and international carriers via Kuaidi100."
+      },
+      "lawstar": {
+        "name": "Law Star",
+        "description": "Law Star MCP for legal information retrieval — regulations, cases, and more."
+      },
+      "esign": {
+        "name": "eSign",
+        "description": "eSign electronic signature and contract data — contracts, tasks, parties, seals, and evidence."
+      },
+      "pkulaw": {
+        "name": "PKULaw — Laws & Regulations",
+        "description": "PKULaw MCP legal data services for AI — statutes and case search."
+      },
+      "neocrm": {
+        "name": "Neocrm CRM",
+        "description": "Neocrm MCP for CRM data — accounts, leads, opportunities, and contacts."
+      },
+      "dingtalk": {
+        "name": "DingTalk CLI",
+        "description": "Enterprise messaging and todos; name-only instance after wiring."
+      },
+      "qingflow": {
+        "name": "Qingflow",
+        "description": "Low-code workflows and data tables; Token required after wiring."
+      },
+      "zsxq": {
+        "name": "Zsxq",
+        "description": "Knowledge Planet content search and publishing; api_key required."
+      },
+      "amap": {
+        "name": "Amap",
+        "description": "Geocoding, routing, and nearby search."
+      },
+      "baidu-maps": {
+        "name": "Baidu Maps",
+        "description": "Place search, routing, and coordinate conversion."
+      },
+      "tencent-maps": {
+        "name": "Tencent Maps",
+        "description": "Location services and routing."
+      },
+      "tencent-docs": {
+        "name": "Tencent Docs",
+        "description": "Online docs, sheets, and slides; paste MCP endpoint and Token."
+      },
+      "wps": {
+        "name": "WPS Office",
+        "description": "Document collaboration and project tools; paste MCP endpoint and Token."
+      },
+      "outlook": {
+        "name": "Outlook",
+        "description": "Microsoft email, calendar, and contacts collaboration suite."
+      },
+      "zoom": {
+        "name": "Zoom",
+        "description": "Meetings, chat, and whiteboard."
+      },
+      "gitlab": {
+        "name": "GitLab",
+        "description": "Repos, merge requests, and pipelines."
+      },
+      "gitee": {
+        "name": "Gitee",
+        "description": "Code hosting and collaboration."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Issue tracking and project management."
+      },
+      "asana": {
+        "name": "Asana",
+        "description": "Tasks and project collaboration."
+      },
+      "tianyancha": {
+        "name": "Tianyancha",
+        "description": "Enterprise registration and legal-risk information."
+      },
+      "qichacha": {
+        "name": "Qichacha",
+        "description": "Enterprise and IP search."
+      },
+      "cloudflare": {
+        "name": "Cloudflare",
+        "description": "DNS and edge network API."
+      }
+    }
   }
 }

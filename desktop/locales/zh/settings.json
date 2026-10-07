@@ -1563,7 +1563,17 @@
     "reauthAria": "重新授权 {{name}}",
     "githubNativeOkMcpDegraded": "GitHub CLI 已登录；对话 MCP 仍需有效 Token，已尝试同步，请确认状态。",
     "githubMcpSynced": "已将 GitHub CLI Token 同步到 MCP",
-    "githubReauth": "重新授权"
+    "githubReauth": "重新授权",
+    "myConnections": {
+      "title": "我的连接",
+      "subtitle": "已授权的连接实例；删除会断开登录或移除本机 MCP 配置。",
+      "delete": "删除",
+      "deleteAria": "删除 {{name}}",
+      "confirmDelete": "确认删除",
+      "disconnectFail": "断开失败",
+      "empty": "暂无已连接实例",
+      "gatewayName": "连接器网关"
+    }
   },
   "codeIndex": {
     "loading": "加载代码语义索引…",

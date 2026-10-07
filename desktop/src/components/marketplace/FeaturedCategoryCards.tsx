@@ -71,7 +71,7 @@ export function FeaturedCategoryCards({
               key={cat}
               type="button"
               data-market-category={cat}
-              className="group flex flex-col gap-3 rounded-xl border border-border bg-surface-card p-4 text-left transition-colors hover:border-accent/50 hover:bg-surface-hover/40"
+              className="group flex flex-col gap-3 rounded-xl border border-border bg-surface-cardSolid p-4 text-left transition-colors hover:border-accent hover:bg-surface-cardSolidHover"
               onClick={() => onPickCategory(cat)}
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-accent">

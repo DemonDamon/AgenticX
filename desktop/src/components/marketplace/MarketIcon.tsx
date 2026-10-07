@@ -61,13 +61,17 @@ export function MarketIcon({ name, logoUrl, iconSrc, className = "h-10 w-10" }: 
   const img = iconSrc || brandSrc || logoUrl;
   if (img && !broken) {
     return (
-      <img
-        src={img}
-        alt=""
-        className={`${className} shrink-0 rounded-xl bg-white object-cover ring-1 ring-black/[0.06]`}
-        loading="lazy"
-        onError={() => setBroken(true)}
-      />
+      <span
+        className={`${className} flex shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 ring-1 ring-black/[0.06]`}
+      >
+        <img
+          src={img}
+          alt=""
+          className="h-full w-full object-contain"
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
+      </span>
     );
   }
   const Glyph = GLYPH_ICONS[pickMarketIconGlyph(name)] ?? Sparkles;

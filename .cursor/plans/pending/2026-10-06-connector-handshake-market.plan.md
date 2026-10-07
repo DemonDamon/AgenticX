@@ -40,9 +40,13 @@ Suggested-Impl-Model: Composer 2.5
 
 ### Task B：市场列表与「我的连接」（部分落地 2026-10-07）
 
-**已做：** 市场顶栏一等 `连接器` Tab；`connector-supply.ts`（native|mcp|gateway + auth）；默认只渲染 wired；未接线默认隐藏，可展开后点「暂未接线」说明层（不伪造已连接）；已接线「连接」→ 设置页握手，不进聊天；精选「连接常用工具」跳到连接器 Tab。
+**已做：** 市场顶栏一等 `连接器` Tab；`connector-supply.ts`（native|mcp|gateway + auth）；默认只渲染 wired；未接线默认隐藏，可展开后点「暂未接线」说明层（不伪造已连接）；已接线「连接」→ 握手弹层，不进聊天；精选「连接常用工具」跳到连接器 Tab。
 
-**未做：** 「我的连接」实例列表/删除；`custom_credential` 粘贴 MCP URL 表单写回；全量握手实例化。
+**已做（续 2026-10-07）：** 「我的连接」实例列表 + 确认删除（`my-connections-model.ts` / `MyConnectionsPanel.tsx`）；市场连接器 Tab 子视图「浏览 | 我的连接」；设置 → 连接器页顶栏同面板；删除走 native logout / `disconnectMcp` + `mcpPutRaw`，并回调刷新 health SSOT。
+
+**已做（续 UI 2026-10-07）：** 去掉「显示尚未接入」开关，目录始终全量展示；连接器网关补齐图标；MarketIcon 统一白底 contain 框；Comate 风格 stub 目录（钉钉/轻流/知识星球/地图/文档/代码等）带 auth + authFormHint（none→name_only、api_key、token、oauth_device），未接线仍「暂未接线」不伪造连接。
+
+**未做：** `custom_credential` / api_key / name-only **真实创建表单**写回 mcp.json；全量握手实例化（命名实例 / 多实例）；Task A 网关 auth 四元落地到 runtime；Task C oauth2 桌面回调扩展。
 
 ### Task B（原描述）
 

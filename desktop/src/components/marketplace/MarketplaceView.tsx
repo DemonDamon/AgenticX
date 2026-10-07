@@ -27,9 +27,11 @@ import {
 } from "./model";
 import {
   CONNECTOR_SUPPLY,
-  listUnwiredSupply,
+  GATEWAY_SUPPLY_ID,
+  listCatalogSupply,
   listWiredSupply,
 } from "../settings/connectors/connector-supply";
+import gatewayIcon from "../../assets/connectors/gateway.svg";
 import { RECOMMENDED_SKILLS } from "../../data/recommended-skills";
 import { getSkillsForPlugin } from "../../data/plugin-skill-bundles";
 import { buildOfficeCliInstallPrompt } from "../../utils/officecli-install-prompt";
@@ -43,6 +45,9 @@ import { buildGatewayMarketItem, isGatewayInstalled } from "./gateway-model";
 import { CONNECTOR_GATEWAY } from "../../data/connector-gateway";
 import { ConnectorsTab } from "../settings/connectors/ConnectorsTab";
 import type { ConnectorId } from "../settings/connectors/connector-catalog";
+import { MyConnectionsPanel } from "../settings/connectors/MyConnectionsPanel";
+import { CreateConnectorModal, type CreateConnectorTarget } from "../settings/connectors/CreateConnectorModal";
+import { buildMyConnectionRows } from "../settings/connectors/my-connections-model";
 import { MCP_PRIMARY_CONFIG_PATH } from "../../utils/mcp-remote-config";
 
 /** 市场顶栏 Tab:全部 + 连接器(一等) + MCP/技能/专家/指令。 */
@@ -81,15 +86,19 @@ export function MarketplaceView() {
   const [promptMsg, setPromptMsg] = useState("");
   const [detailServerId, setDetailServerId] = useState<string | null>(null);
   const [gatewayOpen, setGatewayOpen] = useState(false);
-  /** 连接器 Tab：是否展示尚未接入占位（默认隐藏，避免死点击）。 */
-  const [showUnwiredConnectors, setShowUnwiredConnectors] = useState(false);
   const [unwiredSheet, setUnwiredSheet] = useState<MarketplaceItem | null>(null);
+  const [createConnectorTarget, setCreateConnectorTarget] = useState<CreateConnectorTarget | null>(null);
   /** 市场直开握手：不经过设置墙网格。 */
   const [handshakeConnectorId, setHandshakeConnectorId] = useState<ConnectorId | null>(null);
   const [handshakeSeq, setHandshakeSeq] = useState(0);
+  /** 连接器 Tab 子视图：浏览市场 | 我的连接。 */
+  const [connectorsPane, setConnectorsPane] = useState<"browse" | "mine">("browse");
   /** 与设置页同源的健康态（native + MCP 探活 SSOT）。 */
   const [connectorHealthById, setConnectorHealthById] = useState<
     Record<string, "connected" | "degraded" | "disconnected" | "unwired">
+  >({});
+  const [connectorAccountsById, setConnectorAccountsById] = useState<
+    Record<string, string | undefined>
   >({});
   const [mcpInstalling, setMcpInstalling] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<{ message: string; kind: "info" | "success" | "error" } | null>(
@@ -121,6 +130,7 @@ export function MarketplaceView() {
         description: t("gateway.cardDesc"),
         provider: t("gateway.provider"),
         installed: isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName),
+        iconSrc: gatewayIcon,
       }),
     [t, data.configuredMcpNames],
   );
@@ -134,6 +144,7 @@ export function MarketplaceView() {
   const refreshConnectorHealth = useCallback(async () => {
     const wiredNatives = listWiredSupply().filter((e) => e.kind === "native" && e.connectorId);
     const next: Record<string, "connected" | "degraded" | "disconnected" | "unwired"> = {};
+    const accounts: Record<string, string | undefined> = {};
     await Promise.all(
       wiredNatives.map(async (e) => {
         const id = e.connectorId!;
@@ -156,38 +167,48 @@ export function MarketplaceView() {
           } else {
             next[id] = res?.connected ? "connected" : "disconnected";
           }
+          if (res?.account) accounts[id] = res.account;
         } catch {
           next[id] = "disconnected";
         }
       }),
     );
     setConnectorHealthById(next);
+    setConnectorAccountsById(accounts);
   }, [effectiveSessionId]);
 
   useEffect(() => {
     void refreshConnectorHealth();
   }, [refreshConnectorHealth]);
 
-  /** 原生连接器供给 → 市场卡片（默认仅 wired；可展开尚未接入说明卡）。 */
+  /** 全量连接器目录（wired + unwired stubs）；网关精选卡单独置顶。 */
   const connectorItems = useMemo(() => {
-    const natives = CONNECTOR_SUPPLY.filter((e) => e.kind === "native");
-    const entries = showUnwiredConnectors ? natives : listWiredSupply(natives);
+    const entries = listCatalogSupply().filter((e) => e.id !== GATEWAY_SUPPLY_ID);
     const display: Record<string, { name?: string; description?: string }> = {};
-    for (const e of natives) {
-      if (!e.connectorId) continue;
-      display[e.id] = {
-        name: ts(`connectors.catalog.${e.connectorId}.name`, { defaultValue: e.fallbackName }),
-        description: ts(`connectors.catalog.${e.connectorId}.description`, {
-          defaultValue: e.fallbackDescription,
-        }),
-      };
+    for (const e of entries) {
+      if (e.connectorId) {
+        display[e.id] = {
+          name: ts(`connectors.catalog.${e.connectorId}.name`, { defaultValue: e.fallbackName }),
+          description: ts(`connectors.catalog.${e.connectorId}.description`, {
+            defaultValue: e.fallbackDescription,
+          }),
+        };
+      } else {
+        const supplyKey = e.id.replace(/^stub:/, "");
+        display[e.id] = {
+          name: t(`connectors.supply.${supplyKey}.name`, { defaultValue: e.fallbackName }),
+          description: t(`connectors.supply.${supplyKey}.description`, {
+            defaultValue: e.fallbackDescription,
+          }),
+        };
+      }
     }
     return buildConnectorSupplyItems(entries, {
       wiredOnly: false,
       display,
       healthByConnectorId: connectorHealthById,
     });
-  }, [showUnwiredConnectors, ts, connectorHealthById]);
+  }, [t, ts, connectorHealthById]);
 
   /** 统一条目:网关精选(置顶) + 原生连接器 + MCP/技能/专家/指令。 */
   const unifiedItems = useMemo(
@@ -206,7 +227,38 @@ export function MarketplaceView() {
     [gatewayItem, connectorItems, data.mcpEntries, skillItems, data.agents, data.commands, data.configuredMcpNames],
   );
 
-  const unwiredCount = useMemo(() => listUnwiredSupply().length, []);
+  const connectorDisplayNames = useMemo(() => {
+    const display: Record<string, string> = {};
+    for (const e of CONNECTOR_SUPPLY) {
+      if (e.kind === "gateway") {
+        display[e.id] = t("gateway.name");
+        continue;
+      }
+      if (!e.connectorId) continue;
+      display[e.id] = ts(`connectors.catalog.${e.connectorId}.name`, { defaultValue: e.fallbackName });
+    }
+    return display;
+  }, [t, ts]);
+
+  const myConnectionRows = useMemo(
+    () =>
+      buildMyConnectionRows({
+        healthByConnectorId: connectorHealthById,
+        accountsByConnectorId: connectorAccountsById,
+        configuredMcpNames: data.configuredMcpNames,
+        gatewayInstalled: isGatewayInstalled(data.configuredMcpNames, CONNECTOR_GATEWAY.serverName),
+        displayNames: connectorDisplayNames,
+        query: connectorsPane === "mine" ? query : "",
+      }),
+    [
+      connectorHealthById,
+      connectorAccountsById,
+      data.configuredMcpNames,
+      connectorDisplayNames,
+      connectorsPane,
+      query,
+    ],
+  );
   const filteredUnified = useMemo(
     () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query, categoryFilter),
     [unifiedItems, activeTab, query, categoryFilter],
@@ -427,6 +479,7 @@ export function MarketplaceView() {
               onClick={() => {
                 setActiveTab(tab);
                 setCategoryFilter("all");
+                if (tab !== "connectors") setConnectorsPane("browse");
               }}
             >
               {t(`tabs.${tab}`)}
@@ -447,17 +500,39 @@ export function MarketplaceView() {
       </div>
 
       <div className="space-y-5">
-        {activeTab === "connectors" && unwiredCount > 0 ? (
-          <label className="flex items-center justify-end gap-2 text-[12px] text-text-muted">
-            <span>{t("connectors.showUnwired")}</span>
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 rounded border-border"
-              checked={showUnwiredConnectors}
-              onChange={(e) => setShowUnwiredConnectors(e.target.checked)}
-              aria-label={t("connectors.showUnwired")}
-            />
-          </label>
+        {activeTab === "connectors" ? (
+          <div
+            role="tablist"
+            aria-label={t("connectors.myConnections")}
+            className="flex items-center gap-1 rounded-lg border border-border bg-surface-panel p-0.5 w-fit"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={connectorsPane === "browse"}
+              className={`rounded-md px-2.5 py-1 text-[12px] transition ${
+                connectorsPane === "browse"
+                  ? "bg-surface-card font-medium text-text-strong"
+                  : "text-text-muted hover:text-text-strong"
+              }`}
+              onClick={() => setConnectorsPane("browse")}
+            >
+              {t("connectors.browse")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={connectorsPane === "mine"}
+              className={`rounded-md px-2.5 py-1 text-[12px] transition ${
+                connectorsPane === "mine"
+                  ? "bg-surface-card font-medium text-text-strong"
+                  : "text-text-muted hover:text-text-strong"
+              }`}
+              onClick={() => setConnectorsPane("mine")}
+            >
+              {t("connectors.myConnectionsCount", { count: myConnectionRows.length })}
+            </button>
+          </div>
         ) : null}
 
         <FeaturedCards onPick={onFeaturedPick} />
@@ -562,6 +637,27 @@ export function MarketplaceView() {
               onUse={(item) => newMetaTask(t("useDraft", { name: item.name }))}
             />
           </>
+        ) : activeTab === "connectors" && connectorsPane === "mine" ? (
+          <MyConnectionsPanel
+            sessionId={effectiveSessionId || ""}
+            healthByConnectorId={connectorHealthById}
+            accountsByConnectorId={connectorAccountsById}
+            configuredMcpNames={Array.from(data.configuredMcpNames)}
+            gatewayInstalled={isGatewayInstalled(
+              data.configuredMcpNames,
+              CONNECTOR_GATEWAY.serverName,
+            )}
+            displayNames={connectorDisplayNames}
+            query={query}
+            onChanged={() => {
+              void data.reloadMcpStatus();
+              void refreshConnectorHealth();
+            }}
+            onOpenHandshake={(id) => {
+              setHandshakeConnectorId(id);
+              setHandshakeSeq((n) => n + 1);
+            }}
+          />
         ) : (
           <UnifiedGrid
             items={filteredUnified}
@@ -581,6 +677,15 @@ export function MarketplaceView() {
               if (!id) return;
               setHandshakeConnectorId(id);
               setHandshakeSeq((n) => n + 1);
+            }}
+            onCreateConnector={(item) => {
+              setCreateConnectorTarget({
+                name: item.name,
+                authType: item.authType ?? "custom_credential",
+                description: item.description,
+                iconSrc: item.iconSrc,
+                supplyId: item.supplyId ?? item.id,
+              });
             }}
             onUnwiredConnector={(item) => setUnwiredSheet(item)}
           />
@@ -650,6 +755,23 @@ export function MarketplaceView() {
         />
       ) : null}
 
+      <CreateConnectorModal
+        open={Boolean(createConnectorTarget)}
+        target={createConnectorTarget}
+        configPath={MCP_PRIMARY_CONFIG_PATH}
+        onClose={() => setCreateConnectorTarget(null)}
+        onCreated={async ({ serverName }) => {
+          setMcpStatus({
+            message: t("connectors.create.success", { name: serverName }),
+            kind: "success",
+          });
+          await data.reloadMcpStatus();
+          await refreshConnectorHealth();
+          setConnectorsPane("mine");
+          setActiveTab("connectors");
+        }}
+      />
+
       {unwiredSheet ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -671,6 +793,11 @@ export function MarketplaceView() {
             <p className="mt-2 text-[11px] text-text-faint">
               {t("connectors.unwiredHint", {
                 auth: unwiredSheet.authType ?? "custom_credential",
+              })}
+            </p>
+            <p className="mt-1 text-[11px] text-text-faint">
+              {t(`connectors.authFormHint.${unwiredSheet.authFormHint ?? "token"}`, {
+                defaultValue: t("connectors.authFormHint.token"),
               })}
             </p>
             <div className="mt-4 flex justify-end gap-2">

@@ -134,6 +134,7 @@ export type GatewayMarketItemDisplay = {
   description: string;
   provider?: string;
   installed: boolean;
+  iconSrc?: string;
 };
 
 /** 市场精选卡条目:kind=mcp + gateway 特例标记,安装/查看走网关弹层而非上游详情。 */
@@ -147,5 +148,6 @@ export function buildGatewayMarketItem(display: GatewayMarketItemDisplay): Marke
     provider: display.provider,
     serverId: GATEWAY_MARKET_SERVER_ID,
     gateway: true,
+    iconSrc: display.iconSrc,
   };
 }

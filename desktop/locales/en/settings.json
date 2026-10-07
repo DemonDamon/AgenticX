@@ -1563,7 +1563,17 @@
     "reauthAria": "Re-authorize {{name}}",
     "githubNativeOkMcpDegraded": "GitHub CLI is signed in; chat MCP still needs a valid token. Sync was attempted — check status.",
     "githubMcpSynced": "Synced GitHub CLI token into MCP",
-    "githubReauth": "Re-authorize"
+    "githubReauth": "Re-authorize",
+    "myConnections": {
+      "title": "My connections",
+      "subtitle": "Authorized connector instances. Delete disconnects login or removes local MCP config.",
+      "delete": "Delete",
+      "deleteAria": "Delete {{name}}",
+      "confirmDelete": "Confirm delete",
+      "disconnectFail": "Failed to disconnect",
+      "empty": "No connected instances",
+      "gatewayName": "Connector gateway"
+    }
   },
   "codeIndex": {
     "loading": "Loading code semantic index…",

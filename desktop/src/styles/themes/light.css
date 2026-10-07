@@ -22,6 +22,8 @@
   --chat-followup-chip-bg-hover: #ebebec;
   --chat-followup-chip-border: rgba(0, 0, 0, 0.1);
   --surface-card: rgba(0, 0, 0, 0.03);
+  --surface-card-solid: #ffffff;
+  --surface-card-solid-hover: #f4f4f5;
   --surface-card-strong: rgba(0, 0, 0, 0.06);
   --surface-hover: rgba(0, 0, 0, 0.05);
   --surface-bubble: rgba(0, 0, 0, 0.04);

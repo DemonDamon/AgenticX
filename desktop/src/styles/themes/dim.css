@@ -20,6 +20,8 @@
   --chat-followup-chip-bg-hover: rgba(255, 255, 255, 0.12);
   --chat-followup-chip-border: var(--border-subtle);
   --surface-card: rgba(255, 255, 255, 0.035);
+  --surface-card-solid: #222222;
+  --surface-card-solid-hover: #2A2A2A;
   --surface-card-strong: rgba(255, 255, 255, 0.1);
   --surface-hover: rgba(255, 255, 255, 0.075);
   --surface-bubble: rgba(255, 255, 255, 0.1);

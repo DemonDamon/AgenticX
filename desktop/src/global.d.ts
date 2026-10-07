@@ -1222,6 +1222,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorGithubLogout: () => Promise<{
         ok: boolean;
@@ -1230,6 +1233,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorGithubCancel: () => Promise<{
         ok: boolean;

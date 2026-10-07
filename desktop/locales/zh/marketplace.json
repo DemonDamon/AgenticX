@@ -197,6 +197,160 @@
     "unwiredTitle": "「{{name}}」尚未接入",
     "unwiredBody": "Near 不会伪造「已连接」。该条目还没有官方可调用路径（原生 CLI / 远程 MCP 地址 + 密钥）。请改用已接线的连接器，或在有官方 Streamable HTTP MCP 端点后再用「自定义凭据」接入。",
     "unwiredHint": "建议握手类型：{{auth}}（需官方 MCP 地址与密钥后才能实例化）。",
-    "unwiredClose": "知道了"
+    "unwiredClose": "知道了",
+    "myConnections": "我的连接",
+    "browse": "浏览",
+    "myConnectionsEmpty": "还没有已连接的实例。在上方浏览连接器并完成授权后会出现在这里。",
+    "myConnectionsCount": "我的连接 ({{count}})",
+    "authFormHint": {
+      "name_only": "接线后创建实例时只需填写名称，无需凭据。",
+      "api_key": "接线后创建实例需填写 api_key。",
+      "token": "接线后创建实例需填写 Token。",
+      "oauth_device": "接线后通过浏览器 / 设备码授权，无需粘贴密钥。",
+      "url_token": "接线后需填写官方 MCP URL 与 Token。"
+    },
+    "create": {
+      "title": "新建连接器",
+      "subtitle": "选择模板并配置凭证，创建可运行的连接实例",
+      "selectedTemplate": "已选择模板",
+      "nameDefault": "{{name}}的连接器",
+      "credentialSection": "新建凭证",
+      "howToGetCredential": "如何获取凭证",
+      "advanced": "高级：MCP 端点",
+      "advancedHint": "写入本机 mcp.json 需要 Streamable HTTP / SSE 地址。有官方默认时可自动预填；否则请粘贴自建或供应商提供的 endpoint。",
+      "close": "关闭",
+      "submit": "创建连接器",
+      "readFailed": "读取 mcp.json 失败",
+      "writeFailed": "写入 mcp.json 失败",
+      "formInvalid": "请完善必填项后再创建",
+      "duplicate": "同名连接器已存在，请换一个名称",
+      "success": "已创建连接器「{{name}}」，可在「我的连接」中查看",
+      "fields": {
+        "name": "连接器名称",
+        "url": "MCP URL",
+        "apiKey": "API Key",
+        "token": "Token"
+      },
+      "placeholders": {
+        "name": "例如：轻流的连接器",
+        "url": "https://mcp.example.com/sse",
+        "apiKey": "输入 API Key",
+        "token": "输入 Token 值"
+      },
+      "errors": {
+        "required_name": "请填写连接器名称",
+        "invalid_name": "名称无法生成合法 server 名",
+        "required_url": "请在「高级」中填写 MCP URL",
+        "invalid_url": "URL 格式无效",
+        "required_api_key": "请填写 API Key",
+        "required_token": "请填写 Token"
+      }
+    },
+    "supply": {
+      "gildata": {
+        "name": "恒生聚源MCP",
+        "description": "恒生聚源金融数据 MCP：面向 AI 的专业金融取数服务，支持自然语言查询股票/基金等。"
+      },
+      "yingmi": {
+        "name": "盈米MCP",
+        "description": "盈米 MCP 对接基金投顾与资产配置能力，汇聚基金产品、组合、持仓与行情等财富数据。"
+      },
+      "comein": {
+        "name": "进门投研",
+        "description": "进门MCP覆盖券商研究所、上市公司、资管机构公开路演内容，整合国内外资研报等。"
+      },
+      "dichan": {
+        "name": "深度智联",
+        "description": "把深度智联提供的房地产 AI 数据服务接入助手，使用经克而瑞授权的数据能力。"
+      },
+      "kuaidi100": {
+        "name": "快递100",
+        "description": "快递100通过其网站提供快递物流信息的查询与跟踪服务，覆盖国内外多家快递公司。"
+      },
+      "lawstar": {
+        "name": "法律之星",
+        "description": "法律之星通过其MCP服务站点提供法律信息检索与数据服务能力，覆盖法规、案例等。"
+      },
+      "esign": {
+        "name": "e签宝电子签名",
+        "description": "e签宝对接电子签名与合同签署数据，汇聚合同、签署任务、签署方、印章与存证。"
+      },
+      "pkulaw": {
+        "name": "北大法宝-检索法律法规",
+        "description": "北大法宝MCP服务平台为AI应用提供专业的法律数据服务，覆盖法规与案例检索。"
+      },
+      "neocrm": {
+        "name": "销售易 CRM",
+        "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据。"
+      },
+      "dingtalk": {
+        "name": "钉钉 CLI",
+        "description": "企业通讯与待办；接线后仅需命名实例（无需凭据）。"
+      },
+      "qingflow": {
+        "name": "轻流",
+        "description": "低代码流程与数据表；接线后需填写 Token。"
+      },
+      "zsxq": {
+        "name": "知识星球",
+        "description": "星球内容检索与发布；接线后需填写 api_key。"
+      },
+      "amap": {
+        "name": "高德地图",
+        "description": "地理编码、路径规划与周边检索。"
+      },
+      "baidu-maps": {
+        "name": "百度地图",
+        "description": "地点检索、路线规划与坐标转换。"
+      },
+      "tencent-maps": {
+        "name": "腾讯地图",
+        "description": "位置服务与路线规划。"
+      },
+      "tencent-docs": {
+        "name": "腾讯文档",
+        "description": "在线文档、表格与幻灯片；可粘贴官方 MCP 端点与 Token。"
+      },
+      "wps": {
+        "name": "WPS Office",
+        "description": "文档协作与项目管理；可粘贴官方 MCP 端点与 Token。"
+      },
+      "outlook": {
+        "name": "Outlook",
+        "description": "微软推出的邮件收发、日程管理与联系人协同办公软件。"
+      },
+      "zoom": {
+        "name": "Zoom",
+        "description": "会议、聊天与白板。"
+      },
+      "gitlab": {
+        "name": "GitLab",
+        "description": "仓库、合并请求与流水线。"
+      },
+      "gitee": {
+        "name": "Gitee",
+        "description": "代码托管与协作。"
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Issue 追踪与项目管理。"
+      },
+      "asana": {
+        "name": "Asana",
+        "description": "任务与项目协作。"
+      },
+      "tianyancha": {
+        "name": "天眼查",
+        "description": "企业工商与法律风险信息。"
+      },
+      "qichacha": {
+        "name": "企查查",
+        "description": "企业与知识产权查询。"
+      },
+      "cloudflare": {
+        "name": "Cloudflare",
+        "description": "DNS 与边缘网络 API。"
+      }
+    }
   }
 }

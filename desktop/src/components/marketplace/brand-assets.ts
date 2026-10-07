@@ -32,6 +32,32 @@ import xiaohongshuIcon from "../../assets/marketplace/brands/xiaohongshu.svg";
 import zhihuIcon from "../../assets/marketplace/brands/zhihu.svg";
 import zhipuIcon from "../../assets/marketplace/brands/zhipu.svg";
 import feishuIcon from "../../assets/connectors/feishu.svg";
+import amapIcon from "../../assets/connectors/stubs/amap.png";
+import asanaIcon from "../../assets/connectors/stubs/asana.svg";
+import baiduMapsIcon from "../../assets/connectors/stubs/baidu-maps.png";
+import cloudflareStubIcon from "../../assets/connectors/stubs/cloudflare.svg";
+import comeinIcon from "../../assets/connectors/stubs/comein.png";
+import dichanIcon from "../../assets/connectors/stubs/dichan.png";
+import dingtalkIcon from "../../assets/connectors/stubs/dingtalk.png";
+import esignIcon from "../../assets/connectors/stubs/esign.png";
+import gildataIcon from "../../assets/connectors/stubs/gildata.png";
+import giteeIcon from "../../assets/connectors/stubs/gitee.svg";
+import gitlabStubIcon from "../../assets/connectors/stubs/gitlab.svg";
+import kuaidi100Icon from "../../assets/connectors/stubs/kuaidi100.png";
+import lawstarIcon from "../../assets/connectors/stubs/lawstar.png";
+import linearIcon from "../../assets/connectors/stubs/linear.svg";
+import neocrmIcon from "../../assets/connectors/stubs/neocrm.png";
+import outlookIcon from "../../assets/connectors/stubs/outlook.png";
+import pkulawIcon from "../../assets/connectors/stubs/pkulaw.png";
+import qichachaIcon from "../../assets/connectors/stubs/qichacha.png";
+import qingflowIcon from "../../assets/connectors/stubs/qingflow.png";
+import tencentDocsIcon from "../../assets/connectors/stubs/tencent-docs.png";
+import tencentMapsIcon from "../../assets/connectors/stubs/tencent-maps.png";
+import tianyanchaIcon from "../../assets/connectors/stubs/tianyancha.png";
+import wpsIcon from "../../assets/connectors/stubs/wps.png";
+import yingmiIcon from "../../assets/connectors/stubs/yingmi.png";
+import zoomIcon from "../../assets/connectors/stubs/zoom.svg";
+import zsxqIcon from "../../assets/connectors/stubs/zsxq.png";
 
 export const BRAND_ICON_SRC: Readonly<Record<string, string>> = {
   feishu: feishuIcon,
@@ -54,4 +80,30 @@ export const BRAND_ICON_SRC: Readonly<Record<string, string>> = {
   kuaishou: kuaishouIcon,
   metaso: metasoIcon,
   mineru: mineruIcon,
+  qingflow: qingflowIcon,
+  zsxq: zsxqIcon,
+  amap: amapIcon,
+  "baidu-maps": baiduMapsIcon,
+  "tencent-maps": tencentMapsIcon,
+  "tencent-docs": tencentDocsIcon,
+  wps: wpsIcon,
+  zoom: zoomIcon,
+  gitlab: gitlabStubIcon,
+  gitee: giteeIcon,
+  linear: linearIcon,
+  asana: asanaIcon,
+  outlook: outlookIcon,
+  tianyancha: tianyanchaIcon,
+  qichacha: qichachaIcon,
+  dingtalk: dingtalkIcon,
+  cloudflare: cloudflareStubIcon,
+  gildata: gildataIcon,
+  yingmi: yingmiIcon,
+  comein: comeinIcon,
+  dichan: dichanIcon,
+  kuaidi100: kuaidi100Icon,
+  lawstar: lawstarIcon,
+  esign: esignIcon,
+  pkulaw: pkulawIcon,
+  neocrm: neocrmIcon,
 };

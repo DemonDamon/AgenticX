@@ -199,6 +199,8 @@ export type MarketplaceItem = {
   supplyKind?: "native" | "mcp" | "gateway";
   /** kind=connector:握手类型。 */
   authType?: "none" | "api_key" | "custom_credential" | "oauth2";
+  /** 未接线说明：将需的表单形态。 */
+  authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
   /** kind=connector:原生目录 id（设置页定位）。 */
   connectorId?: string;
   /** kind=connector:是否已有真实接线路径；false 时仅展示说明、不走安装。 */
@@ -501,7 +503,7 @@ export function filterUnifiedItems(
 
 /**
  * 从供给表构建市场「连接器」条目。
- * wiredOnly=true（默认）时隐藏尚未接入占位，避免死点击与假「已连接」。
+ * 市场默认传入全量目录（wiredOnly=false）；未接线项 health=unwired，CTA「暂未接线」，不伪造已连接。
  */
 export function buildConnectorSupplyItems(
   entries: readonly {
@@ -513,6 +515,7 @@ export function buildConnectorSupplyItems(
     fallbackName: string;
     fallbackDescription: string;
     iconSrc?: string;
+    authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
   }[],
   opts?: {
     wiredOnly?: boolean;
@@ -546,16 +549,37 @@ export function buildConnectorSupplyItems(
         gateway: true,
         supplyKind: "gateway",
         authType: e.auth,
+        authFormHint: e.authFormHint,
         wired: e.wired,
         supplyId: e.id,
         serverId: "connector-runtime-gateway",
+        iconSrc: e.iconSrc,
         health: gwInstalled ? "connected" : "disconnected",
       });
       continue;
     }
+    // 未接线 mcp stub（无 connectorId）：目录骨架，永不标已安装。
+    if (!e.connectorId) {
+      out.push({
+        key: `connector:${e.id}`,
+        kind: "connector",
+        name: d.name ?? e.fallbackName,
+        description: d.description ?? e.fallbackDescription,
+        installed: false,
+        provider: e.kind,
+        iconSrc: e.iconSrc,
+        supplyKind: e.kind,
+        authType: e.auth,
+        authFormHint: e.authFormHint,
+        wired: false,
+        supplyId: e.id,
+        health: "unwired",
+      });
+      continue;
+    }
     const health =
-      (e.connectorId && healthMap[e.connectorId]) ||
-      (e.connectorId && connectedMap[e.connectorId] ? "connected" : e.wired ? "disconnected" : "unwired");
+      healthMap[e.connectorId] ||
+      (connectedMap[e.connectorId] ? "connected" : e.wired ? "disconnected" : "unwired");
     const installed = health === "connected";
     out.push({
       key: `connector:${e.id}`,
@@ -567,6 +591,7 @@ export function buildConnectorSupplyItems(
       iconSrc: e.iconSrc,
       supplyKind: e.kind,
       authType: e.auth,
+      authFormHint: e.authFormHint,
       connectorId: e.connectorId,
       wired: e.wired,
       supplyId: e.id,

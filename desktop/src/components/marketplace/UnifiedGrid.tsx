@@ -2,7 +2,7 @@
  * 统一条目卡片网格:「全部」「MCP」「专家」「指令」Tab 共用。
  * 卡片按 kind 出 badge,CTA 分派:
  * - mcp:未装 → 打开详情浮层安装;已装 → 「使用」回对话
- * - connector:已接线 → 「连接/管理」走设置或网关弹层(不进聊天);未接线 → 「暂未接线」说明
+ * - connector:网关 → 安装弹层;已接线原生 → 握手;可表单 stub → 新建连接器;oauth stub → 暂未接线
  * - skill:已装 → 「使用」;registry → 扫描安装;推荐位 install → Meta-Agent 安装;official_site → 外链
  * - agent/command:本机资产恒已装 → 「使用」
  */
@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { CheckCircle2, ExternalLink, Loader2, MessageSquarePlus, SquarePlus } from "lucide-react";
 import type { MarketplaceItem } from "./model";
 import { MarketIcon } from "./MarketIcon";
+import { resolveConnectorConnectAction } from "../settings/connectors/create-connector-model";
 
 type Props = {
   items: readonly MarketplaceItem[];
@@ -24,7 +25,9 @@ type Props = {
   onUse: (item: MarketplaceItem) => void;
   /** 已接线原生连接器:打开设置握手,不进聊天。 */
   onConnectNative?: (item: MarketplaceItem) => void;
-  /** 未接线条目:打开「暂未接线」说明。 */
+  /** stub + form auth:打开「新建连接器」弹层。 */
+  onCreateConnector?: (item: MarketplaceItem) => void;
+  /** oauth/无表单 stub:打开「暂未接线」说明。 */
   onUnwiredConnector?: (item: MarketplaceItem) => void;
 };
 
@@ -37,6 +40,7 @@ export function UnifiedGrid({
   onInstallSkill,
   onUse,
   onConnectNative,
+  onCreateConnector,
   onUnwiredConnector,
 }: Props) {
   const { t } = useTranslation("marketplace");
@@ -64,7 +68,7 @@ export function UnifiedGrid({
         return (
           <div
             key={item.key}
-            className="flex min-h-[148px] flex-col rounded-xl border border-border bg-surface-card px-4 py-3.5 transition-colors hover:bg-surface-hover/40"
+            className="flex min-h-[148px] flex-col rounded-xl border border-border bg-surface-cardSolid px-4 py-3.5 transition-colors hover:bg-surface-cardSolidHover"
             data-market-item={item.name}
             data-market-kind={item.kind}
           >
@@ -104,49 +108,76 @@ export function UnifiedGrid({
 
             <div className="mt-auto flex items-center justify-end gap-2 pt-2.5">
               {item.kind === "connector" ? (
-                item.wired === false ? (
-                  <button
-                    type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                    onClick={() => onUnwiredConnector?.(item)}
-                  >
-                    {t("actions.notWired")}
-                  </button>
-                ) : item.gateway ? (
-                  <button
-                    type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
-                    onClick={() => onOpenMcpDetail(item)}
-                  >
-                    {item.installed ? (
-                      <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    ) : (
-                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    )}
-                    {item.installed ? t("actions.manage") : t("actions.connect")}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className={`inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 ${
-                      item.health === "degraded" ? "bg-amber-500" : "bg-accent"
-                    }`}
-                    onClick={() => onConnectNative?.(item)}
-                  >
-                    {item.health === "degraded" ? (
-                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    ) : item.installed ? (
-                      <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    ) : (
-                      <SquarePlus className="h-3.5 w-3.5" aria-hidden />
-                    )}
-                    {item.health === "degraded"
-                      ? t("actions.reauth")
-                      : item.installed
-                        ? t("actions.manage")
-                        : t("actions.connect")}
-                  </button>
-                )
+                (() => {
+                  const action = resolveConnectorConnectAction({
+                    kind: item.kind,
+                    wired: item.wired,
+                    gateway: item.gateway,
+                    connectorId: item.connectorId,
+                    authType: item.authType,
+                  });
+                  if (action === "gateway") {
+                    return (
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+                        onClick={() => onOpenMcpDetail(item)}
+                      >
+                        {item.installed ? (
+                          <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                        ) : (
+                          <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                        )}
+                        {item.installed ? t("actions.manage") : t("actions.connect")}
+                      </button>
+                    );
+                  }
+                  if (action === "create_form") {
+                    return (
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+                        onClick={() => onCreateConnector?.(item)}
+                      >
+                        <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                        {t("actions.connect")}
+                      </button>
+                    );
+                  }
+                  if (action === "unwired_sheet") {
+                    return (
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                        onClick={() => onUnwiredConnector?.(item)}
+                      >
+                        {t("actions.notWired")}
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 ${
+                        item.health === "degraded" ? "bg-amber-500" : "bg-accent"
+                      }`}
+                      onClick={() => onConnectNative?.(item)}
+                    >
+                      {item.health === "degraded" ? (
+                        <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                      ) : item.installed ? (
+                        <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                      ) : (
+                        <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                      )}
+                      {item.health === "degraded"
+                        ? t("actions.reauth")
+                        : item.installed
+                          ? t("actions.manage")
+                          : t("actions.connect")}
+                    </button>
+                  );
+                })()
               ) : item.kind === "mcp" ? (
                 <button
                   type="button"

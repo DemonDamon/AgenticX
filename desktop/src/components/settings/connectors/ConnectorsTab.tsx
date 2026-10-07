@@ -8,6 +8,9 @@ import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
 import type { ConnectorHealth } from "./connector-health";
+import { MyConnectionsPanel } from "./MyConnectionsPanel";
+import { CONNECTOR_SUPPLY } from "./connector-supply";
+import { GATEWAY_DEFAULT_SERVER_NAME, isGatewayInstalled } from "../../marketplace/gateway-model";
 import { i18n } from "../../../i18n/i18n";
 
 function st(key: string, opts?: Record<string, unknown>): string {
@@ -189,6 +192,7 @@ export function ConnectorsTab({
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
+  const [configuredMcpNames, setConfiguredMcpNames] = useState<string[]>([]);
 
   const selected = useMemo(
     () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
@@ -262,6 +266,80 @@ export function ConnectorsTab({
     () => CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
     [connectorState],
   );
+
+
+  const reloadConfiguredMcpNames = useCallback(async () => {
+    try {
+      const res = await window.agenticxDesktop.loadMcpStatus(sessionId || "").catch(() => null);
+      if (res?.ok && Array.isArray(res.servers)) {
+        setConfiguredMcpNames(res.servers.map((s) => s.name));
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    try {
+      const raw = await window.agenticxDesktop.mcpGetRaw({}).catch(() => null);
+      if (raw?.ok && raw.text) {
+        const parsed = JSON.parse(raw.text) as { mcpServers?: Record<string, unknown> };
+        setConfiguredMcpNames(Object.keys(parsed.mcpServers ?? {}));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void reloadConfiguredMcpNames();
+  }, [reloadConfiguredMcpNames]);
+
+  const myConnectionsHealth = useMemo(() => {
+    const health: Record<string, ConnectorHealth | undefined> = {
+      "tencent-meeting": tmeetStatus.connected ? "connected" : "disconnected",
+      tapd: tapdConnected ? "connected" : "disconnected",
+      github:
+        githubStatus.health === "degraded" || githubStatus.health === "connected"
+          ? githubStatus.health
+          : githubStatus.connected
+            ? "connected"
+            : "disconnected",
+      feishu: feishuStatus.connected ? "connected" : "disconnected",
+      wecom: wecomStatus.connected ? "connected" : "disconnected",
+      qqmail: qqmailStatus.connected ? "connected" : "disconnected",
+    };
+    return health;
+  }, [
+    tmeetStatus.connected,
+    tapdConnected,
+    githubStatus.health,
+    githubStatus.connected,
+    feishuStatus.connected,
+    wecomStatus.connected,
+    qqmailStatus.connected,
+  ]);
+
+  const myConnectionsAccounts = useMemo(
+    () => ({
+      github: githubStatus.account,
+      feishu: feishuStatus.account,
+      qqmail: qqmailStatus.account,
+    }),
+    [githubStatus.account, feishuStatus.account, qqmailStatus.account],
+  );
+
+  const myConnectionsDisplayNames = useMemo(() => {
+    const display: Record<string, string> = {};
+    for (const e of CONNECTOR_SUPPLY) {
+      if (e.kind === "gateway") {
+        display[e.id] = st("connectors.myConnections.gatewayName");
+        continue;
+      }
+      if (!e.connectorId) continue;
+      display[e.id] = st(`connectors.catalog.${e.connectorId}.name`);
+    }
+    return display;
+  }, []);
+
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -899,6 +977,35 @@ export function ConnectorsTab({
             </label>
           ) : null}
         </div>
+
+        <section className="space-y-2" aria-label={st("connectors.myConnections.title")}>
+          <div>
+            <h3 className="text-sm font-semibold text-text-strong">{st("connectors.myConnections.title")}</h3>
+            <p className="mt-0.5 text-[11px] text-text-muted">{st("connectors.myConnections.subtitle")}</p>
+          </div>
+          <MyConnectionsPanel
+            sessionId={sessionId}
+            healthByConnectorId={myConnectionsHealth}
+            accountsByConnectorId={myConnectionsAccounts}
+            configuredMcpNames={configuredMcpNames}
+            gatewayInstalled={isGatewayInstalled(new Set(configuredMcpNames), GATEWAY_DEFAULT_SERVER_NAME)}
+            displayNames={myConnectionsDisplayNames}
+            onChanged={() => {
+              void refreshTmeetStatus();
+              void refreshGithubStatus();
+              void refreshFeishuStatus();
+              void refreshWecomStatus();
+              void refreshQqmailStatus();
+              void reloadConfiguredMcpNames();
+              void onRefreshMcp(sessionId);
+              onConnectionChange?.();
+            }}
+            onOpenHandshake={(id) => {
+              const item = CONNECTORS.find((c) => c.id === id);
+              if (item) openConnector(item);
+            }}
+          />
+        </section>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {visibleConnectors.map((item) => {

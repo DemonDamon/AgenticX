@@ -17,7 +17,7 @@ export function FeaturedCards({ onPick }: { onPick: (target: FeaturedTarget) => 
           <button
             key={card.id}
             type="button"
-            className="group flex items-start gap-3 rounded-xl border border-border bg-surface-card p-4 text-left transition-colors hover:border-accent/50 hover:bg-surface-hover/40"
+            className="group flex items-start gap-3 rounded-xl border border-border bg-surface-cardSolid p-4 text-left transition-colors hover:border-accent hover:bg-surface-cardSolidHover"
             onClick={() => onPick(card.target)}
           >
             <span

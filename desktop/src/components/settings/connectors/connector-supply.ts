@@ -1,9 +1,42 @@
 /**
  * 连接器供给表（Task B）：统一声明 native | mcp | gateway 条目与握手类型。
- * 市场「连接器」Tab 与设置墙共用：只把 wired=true 的条目当作可操作卡片；
- * 未接线项默认隐藏，开启「显示尚未接入」后点开只展示说明，不伪造已连接。
+ * 市场「连接器」Tab 与设置墙共用：始终展示全量目录；
+ * wired=true 可走真实握手；wired=false 仅「暂未接线」说明（含将需何种 auth），不伪造已连接。
+ *
+ * auth（对齐计划 Task A / Comate 表单差异）:
+ * - none：仅命名实例（如钉钉 CLI）
+ * - api_key：单一 API Key 字段（如知识星球 / TAPD）
+ * - custom_credential：Token 或 URL+Token（如轻流 Token）
+ * - oauth2：设备码 / 浏览器授权（GitHub Device Flow 等）
  */
 
+import gatewayIcon from "../../../assets/connectors/gateway.svg";
+import amapIcon from "../../../assets/connectors/stubs/amap.png";
+import asanaIcon from "../../../assets/connectors/stubs/asana.svg";
+import baiduMapsIcon from "../../../assets/connectors/stubs/baidu-maps.png";
+import cloudflareIcon from "../../../assets/connectors/stubs/cloudflare.svg";
+import comeinIcon from "../../../assets/connectors/stubs/comein.png";
+import dichanIcon from "../../../assets/connectors/stubs/dichan.png";
+import dingtalkIcon from "../../../assets/connectors/stubs/dingtalk.png";
+import esignIcon from "../../../assets/connectors/stubs/esign.png";
+import gildataIcon from "../../../assets/connectors/stubs/gildata.png";
+import giteeIcon from "../../../assets/connectors/stubs/gitee.svg";
+import gitlabIcon from "../../../assets/connectors/stubs/gitlab.svg";
+import kuaidi100Icon from "../../../assets/connectors/stubs/kuaidi100.png";
+import lawstarIcon from "../../../assets/connectors/stubs/lawstar.png";
+import linearIcon from "../../../assets/connectors/stubs/linear.svg";
+import neocrmIcon from "../../../assets/connectors/stubs/neocrm.png";
+import outlookIcon from "../../../assets/connectors/stubs/outlook.png";
+import pkulawIcon from "../../../assets/connectors/stubs/pkulaw.png";
+import qichachaIcon from "../../../assets/connectors/stubs/qichacha.png";
+import qingflowIcon from "../../../assets/connectors/stubs/qingflow.png";
+import tencentDocsIcon from "../../../assets/connectors/stubs/tencent-docs.png";
+import tencentMapsIcon from "../../../assets/connectors/stubs/tencent-maps.png";
+import tianyanchaIcon from "../../../assets/connectors/stubs/tianyancha.png";
+import wpsIcon from "../../../assets/connectors/stubs/wps.png";
+import yingmiIcon from "../../../assets/connectors/stubs/yingmi.png";
+import zoomIcon from "../../../assets/connectors/stubs/zoom.svg";
+import zsxqIcon from "../../../assets/connectors/stubs/zsxq.png";
 import { CONNECTORS, type ConnectorId } from "./connector-catalog";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 
@@ -11,6 +44,21 @@ import { nativeConnectorAvailability } from "../../../../electron/native-connect
 export type ConnectorAuthType = "none" | "api_key" | "custom_credential" | "oauth2";
 
 export type ConnectorSupplyKind = "native" | "mcp" | "gateway";
+
+/** 目录分类（Comate 风格骨架，仅展示用）。 */
+export type ConnectorCatalogCategory =
+  | "office"
+  | "collab"
+  | "code"
+  | "maps"
+  | "crm"
+  | "docs"
+  | "meeting"
+  | "legal"
+  | "data"
+  | "finance"
+  | "infra"
+  | "gateway";
 
 export type ConnectorSupplyEntry = {
   id: string;
@@ -26,6 +74,12 @@ export type ConnectorSupplyEntry = {
   fallbackName: string;
   fallbackDescription: string;
   iconSrc?: string;
+  category?: ConnectorCatalogCategory;
+  /**
+   * 未接线时说明层展示的凭据提示（不落库、不伪造连接）。
+   * 例：name_only / api_key / token / oauth_device
+   */
+  authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
 };
 
 /** 原生握手对照（实施时对照表，不整表伪造 SaaS）。 */
@@ -45,24 +99,354 @@ const NATIVE_AUTH: Partial<Record<ConnectorId, ConnectorAuthType>> = {
   bigquery: "oauth2",
 };
 
+const NATIVE_CATEGORY: Partial<Record<ConnectorId, ConnectorCatalogCategory>> = {
+  "tencent-meeting": "meeting",
+  tapd: "collab",
+  github: "code",
+  feishu: "collab",
+  wecom: "collab",
+  qqmail: "office",
+  gmail: "office",
+  notion: "docs",
+  slack: "collab",
+  gdrive: "docs",
+  airtable: "data",
+  supabase: "data",
+  bigquery: "data",
+};
+
+const NATIVE_AUTH_HINT: Partial<Record<ConnectorId, ConnectorSupplyEntry["authFormHint"]>> = {
+  "tencent-meeting": "oauth_device",
+  tapd: "api_key",
+  github: "oauth_device",
+  feishu: "oauth_device",
+  wecom: "name_only",
+  qqmail: "oauth_device",
+  gmail: "oauth_device",
+  notion: "oauth_device",
+  slack: "oauth_device",
+  gdrive: "oauth_device",
+  airtable: "api_key",
+  supabase: "api_key",
+  bigquery: "oauth_device",
+};
+
 /** 网关精选供给（安装走 GatewayInstallModal）。 */
 export const GATEWAY_SUPPLY_ID = "gateway:connector-runtime";
 
 function nativeEntries(): ConnectorSupplyEntry[] {
   return CONNECTORS.map((c) => {
     const wired = nativeConnectorAvailability(c.id) === "available";
+    const auth = NATIVE_AUTH[c.id] ?? "custom_credential";
     return {
       id: `native:${c.id}`,
       kind: "native" as const,
       connectorId: c.id,
-      auth: NATIVE_AUTH[c.id] ?? "custom_credential",
+      auth,
       wired,
       fallbackName: c.name,
       fallbackDescription: c.description,
       iconSrc: c.iconSrc,
+      category: NATIVE_CATEGORY[c.id] ?? "collab",
+      authFormHint: NATIVE_AUTH_HINT[c.id] ?? (auth === "none" ? "name_only" : auth === "api_key" ? "api_key" : auth === "oauth2" ? "oauth_device" : "token"),
     };
   });
 }
+
+/**
+ * Comate 风格目录骨架：未接线 stub，仅展示名/图标/auth 元数据。
+ * 禁止伪造「已连接」；接线需后续真实 MCP/原生路径。
+ */
+const CATALOG_STUBS: readonly ConnectorSupplyEntry[] = [
+  // —— Comate 金融 / 投研 MCP ——
+  {
+    id: "stub:gildata",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "恒生聚源MCP",
+    fallbackDescription: "恒生聚源金融数据 MCP：面向 AI 的专业金融取数服务，支持自然语言查询股票/基金等。",
+    iconSrc: gildataIcon,
+    category: "finance",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:yingmi",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "盈米MCP",
+    fallbackDescription: "盈米 MCP 对接基金投顾与资产配置能力，汇聚基金产品、组合、持仓与行情等财富数据。",
+    iconSrc: yingmiIcon,
+    category: "finance",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:comein",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "进门投研",
+    fallbackDescription: "进门MCP覆盖券商研究所、上市公司、资管机构公开路演内容，整合国内外资研报等。",
+    iconSrc: comeinIcon,
+    category: "finance",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:dichan",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "深度智联",
+    fallbackDescription: "把深度智联提供的房地产 AI 数据服务接入助手，使用经克而瑞授权的数据能力。",
+    iconSrc: dichanIcon,
+    category: "data",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:kuaidi100",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "快递100",
+    fallbackDescription: "快递100通过其网站提供快递物流信息的查询与跟踪服务，覆盖国内外多家快递公司。",
+    iconSrc: kuaidi100Icon,
+    category: "office",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:lawstar",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "法律之星",
+    fallbackDescription: "法律之星通过其MCP服务站点提供法律信息检索与数据服务能力，覆盖法规、案例等。",
+    iconSrc: lawstarIcon,
+    category: "legal",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:esign",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "e签宝电子签名",
+    fallbackDescription: "e签宝对接电子签名与合同签署数据，汇聚合同、签署任务、签署方、印章与存证。",
+    iconSrc: esignIcon,
+    category: "office",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:pkulaw",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "北大法宝-检索法律法规",
+    fallbackDescription: "北大法宝MCP服务平台为AI应用提供专业的法律数据服务，覆盖法规与案例检索。",
+    iconSrc: pkulawIcon,
+    category: "legal",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:neocrm",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "销售易 CRM",
+    fallbackDescription: "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据。",
+    iconSrc: neocrmIcon,
+    category: "crm",
+    authFormHint: "token",
+  },
+  // —— 办公 / 协作 / 地图等 Comate 常见项 ——
+  {
+    id: "stub:dingtalk",
+    kind: "mcp",
+    auth: "none",
+    wired: false,
+    fallbackName: "钉钉 CLI",
+    fallbackDescription: "企业通讯与待办；接线后仅需命名实例（无需凭据）。",
+    iconSrc: dingtalkIcon,
+    category: "collab",
+    authFormHint: "name_only",
+  },
+  {
+    id: "stub:qingflow",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "轻流",
+    fallbackDescription: "低代码流程与数据表；接线后需填写 Token。",
+    iconSrc: qingflowIcon,
+    category: "collab",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:zsxq",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "知识星球",
+    fallbackDescription: "星球内容检索与发布；接线后需填写 api_key。",
+    iconSrc: zsxqIcon,
+    category: "docs",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:amap",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "高德地图",
+    fallbackDescription: "地理编码、路径规划与周边检索。",
+    iconSrc: amapIcon,
+    category: "maps",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:baidu-maps",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "百度地图",
+    fallbackDescription: "地点检索、路线规划与坐标转换。",
+    iconSrc: baiduMapsIcon,
+    category: "maps",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:tencent-maps",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "腾讯地图",
+    fallbackDescription: "位置服务与路线规划。",
+    iconSrc: tencentMapsIcon,
+    category: "maps",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:tencent-docs",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "腾讯文档",
+    fallbackDescription: "在线文档、表格与幻灯片；可粘贴官方 MCP 端点与 Token。",
+    iconSrc: tencentDocsIcon,
+    category: "docs",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:wps",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "WPS Office",
+    fallbackDescription: "文档协作与项目管理；可粘贴官方 MCP 端点与 Token。",
+    iconSrc: wpsIcon,
+    category: "office",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:outlook",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "Outlook",
+    fallbackDescription: "微软推出的邮件收发、日程管理与联系人协同办公软件。",
+    iconSrc: outlookIcon,
+    category: "office",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:zoom",
+    kind: "mcp",
+    auth: "oauth2",
+    wired: false,
+    fallbackName: "Zoom",
+    fallbackDescription: "会议、聊天与白板。",
+    iconSrc: zoomIcon,
+    category: "meeting",
+    authFormHint: "oauth_device",
+  },
+  {
+    id: "stub:gitlab",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "GitLab",
+    fallbackDescription: "仓库、合并请求与流水线。",
+    iconSrc: gitlabIcon,
+    category: "code",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:gitee",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "Gitee",
+    fallbackDescription: "代码托管与协作。",
+    iconSrc: giteeIcon,
+    category: "code",
+    authFormHint: "token",
+  },
+  {
+    id: "stub:linear",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "Linear",
+    fallbackDescription: "Issue 追踪与项目管理。",
+    iconSrc: linearIcon,
+    category: "collab",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:asana",
+    kind: "mcp",
+    auth: "oauth2",
+    wired: false,
+    fallbackName: "Asana",
+    fallbackDescription: "任务与项目协作。",
+    iconSrc: asanaIcon,
+    category: "collab",
+    authFormHint: "oauth_device",
+  },
+  {
+    id: "stub:tianyancha",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "天眼查",
+    fallbackDescription: "企业工商与法律风险信息。",
+    iconSrc: tianyanchaIcon,
+    category: "crm",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:qichacha",
+    kind: "mcp",
+    auth: "api_key",
+    wired: false,
+    fallbackName: "企查查",
+    fallbackDescription: "企业与知识产权查询。",
+    iconSrc: qichachaIcon,
+    category: "crm",
+    authFormHint: "api_key",
+  },
+  {
+    id: "stub:cloudflare",
+    kind: "mcp",
+    auth: "custom_credential",
+    wired: false,
+    fallbackName: "Cloudflare",
+    fallbackDescription: "DNS 与边缘网络 API。",
+    iconSrc: cloudflareIcon,
+    category: "infra",
+    authFormHint: "token",
+  },
+];
 
 export const CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = [
   {
@@ -72,11 +456,15 @@ export const CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = [
     wired: true,
     fallbackName: "连接器网关",
     fallbackDescription: "搜索即用的动作目录；凭据留在网关侧。",
+    iconSrc: gatewayIcon,
+    category: "gateway",
+    authFormHint: "name_only",
   },
   ...nativeEntries(),
+  ...CATALOG_STUBS,
 ];
 
-/** 默认市场可见：仅已接线供给。 */
+/** 已接线供给（可握手）。 */
 export function listWiredSupply(
   supply: readonly ConnectorSupplyEntry[] = CONNECTOR_SUPPLY,
 ): ConnectorSupplyEntry[] {
@@ -90,9 +478,41 @@ export function listUnwiredSupply(
   return supply.filter((e) => !e.wired);
 }
 
+/** 市场目录：始终返回全量（wired + unwired），不再折叠。 */
+export function listCatalogSupply(
+  supply: readonly ConnectorSupplyEntry[] = CONNECTOR_SUPPLY,
+): ConnectorSupplyEntry[] {
+  return [...supply];
+}
+
 export function findSupplyById(
   id: string,
   supply: readonly ConnectorSupplyEntry[] = CONNECTOR_SUPPLY,
 ): ConnectorSupplyEntry | undefined {
   return supply.find((e) => e.id === id);
+}
+
+/**
+ * 将 auth 映射为「新建连接器」表单字段。
+ * 未接线 stub 写入 mcp.json 时需要 MCP URL：none 也带 url（无密钥）；
+ * oauth2 stub 不走此表单（仍用暂未接线说明 / 原生握手）。
+ */
+export function authFormFields(auth: ConnectorAuthType): ReadonlyArray<"name" | "api_key" | "token" | "url"> {
+  switch (auth) {
+    case "none":
+      return ["name", "url"];
+    case "api_key":
+      return ["name", "url", "api_key"];
+    case "custom_credential":
+      return ["name", "url", "token"];
+    case "oauth2":
+      return ["name"];
+    default:
+      return ["name"];
+  }
+}
+
+/** 是否可用 Comate 风格新建表单（相对 oauth2 设备流 / 暂未接线说明）。 */
+export function supportsCreateConnectorForm(auth: ConnectorAuthType | undefined): boolean {
+  return auth === "none" || auth === "api_key" || auth === "custom_credential";
 }
