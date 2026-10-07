@@ -26,6 +26,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/connectorstore"
 	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/gwerrors"
@@ -92,6 +93,7 @@ type Server struct {
 	mcpRegistry           *mcp.Registry
 	mcpLoader             *mcp.Loader
 	mcpProxy              *mcp.Handler
+	connectorStore        *connectorstore.Store
 	wasmManager           *wasmhost.Manager
 	errorStore            *gwerrors.Store
 	channelProber         *channel.Prober
@@ -233,6 +235,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.initMCPProxy()
 	srv.initChannelRelay()
 	if dbHandle != nil {
+		srv.connectorStore = connectorstore.New(dbHandle, logger)
 		if budgetReporter, err := quota.NewBudgetAlertReporter(dbHandle, logger); err != nil {
 			logger.Warn("budget alert reporter unavailable", "error", err)
 		} else {
@@ -687,6 +690,7 @@ func (s *Server) Router() http.Handler {
 	}
 	s.registerMCPRoutes(r)
 	s.registerMCPProxyRoutes(r)
+	s.registerConnectorRoutes(r)
 
 	return r
 }

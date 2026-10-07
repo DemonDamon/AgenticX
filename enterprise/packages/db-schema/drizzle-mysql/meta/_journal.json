@@ -176,6 +176,13 @@
       "when": 1786900000001,
       "tag": "0024_enterprise_scope_default_models",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1787000000001,
+      "tag": "0025_connector_gateway",
+      "breakpoints": true
     }
   ]
 }

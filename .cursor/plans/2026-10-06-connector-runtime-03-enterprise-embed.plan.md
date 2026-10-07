@@ -3,7 +3,7 @@
 日期：2026-10-06
 母计划：[2026-10-06-connector-runtime-master.plan.md](./2026-10-06-connector-runtime-master.plan.md)
 前置：subplan 01（核心运行时 Go module）
-状态：待启动（01 完成后可执行，与 02 可并行）
+状态：已落地（E1–E6 企业内嵌；2026-10-07 提交：gateway mcphost connector backend、admin connectors、drizzle 0051/0025；现场 smoke：/healthz 与 /admin/connectors HTTP 可达）
 参照基线：[enterprise/docs/gateway/governance-mcp-gateway-reference.md](../../enterprise/docs/gateway/governance-mcp-gateway-reference.md)（机制映射表为需求基线）
 
 ## 1. 目标

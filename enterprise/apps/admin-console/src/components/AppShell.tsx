@@ -62,6 +62,7 @@ import {
   Users,
   UsersRound,
   Wand2,
+  Cable,
   Database,
   Plug,
 } from "lucide-react";
@@ -123,6 +124,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/cache", labelKey: "cache", icon: Database },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
       { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: Plug },
+      { href: "/admin/connectors", labelKey: "connectors", icon: Cable },
       { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
     ],

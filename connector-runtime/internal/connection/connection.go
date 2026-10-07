@@ -2,6 +2,7 @@
 package connection
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -108,8 +109,8 @@ func (s *Store) Create(connectorID, name, authType string, grantedScopes []strin
 	return &p, nil
 }
 
-// Get 按 id 查询投影。
-func (s *Store) Get(id string) (Projection, bool) {
+// Get 按 id 查询投影。ctx 仅为接口对齐保留（本地文件形态无 IO 发起）。
+func (s *Store) Get(_ context.Context, id string) (Projection, bool) {
 	c, ok := s.conns[id]
 	if !ok {
 		return Projection{}, false
@@ -117,8 +118,8 @@ func (s *Store) Get(id string) (Projection, bool) {
 	return c.projection(), true
 }
 
-// List 全量投影（按创建时间排序）。
-func (s *Store) List() []Projection {
+// List 全量投影（按创建时间排序）。ctx 仅为接口对齐保留。
+func (s *Store) List(_ context.Context) []Projection {
 	out := make([]Projection, 0, len(s.conns))
 	for _, c := range s.conns {
 		out = append(out, c.projection())
@@ -139,8 +140,8 @@ func (s *Store) Delete(id string) bool {
 	return true
 }
 
-// Reveal 解密凭据（仅执行器调用）。
-func (s *Store) Reveal(id string) (Secret, error) {
+// Reveal 解密凭据（仅执行器调用）。ctx 仅为接口对齐保留。
+func (s *Store) Reveal(_ context.Context, id string) (Secret, error) {
 	c, ok := s.conns[id]
 	if !ok {
 		return Secret{}, os.ErrNotExist

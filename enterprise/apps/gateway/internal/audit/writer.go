@@ -66,6 +66,10 @@ type Event struct {
 	MCPToolName        string          `json:"mcp_tool_name,omitempty"`
 	MCPInputHash       string          `json:"mcp_input_hash,omitempty"`
 	MCPOutputHash      string          `json:"mcp_output_hash,omitempty"`
+	// 连接器执行维度：审计可回答「谁何时用哪个连接执行了什么动作」。
+	ConnectorExecutionID  string `json:"connector_execution_id,omitempty"`
+	ConnectorActionID     string `json:"connector_action_id,omitempty"`
+	ConnectorConnectionID string `json:"connector_connection_id,omitempty"`
 	RoutingPolicy      json.RawMessage `json:"routing_policy,omitempty"`
 	PluginsInvoked     []string        `json:"plugins_invoked,omitempty"`
 	SrcRegion          string          `json:"src_region,omitempty"`

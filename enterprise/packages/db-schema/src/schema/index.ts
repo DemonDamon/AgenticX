@@ -22,6 +22,7 @@ export * from "./gateway-channels";
 export * from "./api-tokens";
 export * from "./mcp-servers";
 export * from "./mcp-tools";
+export * from "./connector-gateway";
 export * from "./business-revenue";
 export * from "./billing-split";
 export * from "./agent-token-traces";

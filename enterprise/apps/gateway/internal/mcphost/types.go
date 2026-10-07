@@ -20,6 +20,9 @@ type Tool struct {
 type CallResult struct {
 	Content []ContentBlock `json:"content"`
 	IsError bool           `json:"isError,omitempty"`
+	// Metadata 携带 backend → 审计链路的维度信息（连接器执行 id/动作/连接），
+	// 不参与 MCP 序列化。
+	Metadata map[string]any `json:"-"`
 }
 
 type ContentBlock struct {

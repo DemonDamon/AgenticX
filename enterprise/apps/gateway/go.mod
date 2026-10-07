@@ -3,6 +3,7 @@ module github.com/agenticx/enterprise/gateway
 go 1.25.0
 
 require (
+	github.com/agenticx/connector-runtime v0.0.0
 	github.com/agenticx/enterprise/policy-engine v0.0.0
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/fsnotify/fsnotify v1.9.0
@@ -40,3 +41,5 @@ require (
 )
 
 replace github.com/agenticx/enterprise/policy-engine => ../../packages/policy-engine
+
+replace github.com/agenticx/connector-runtime => ../../../connector-runtime

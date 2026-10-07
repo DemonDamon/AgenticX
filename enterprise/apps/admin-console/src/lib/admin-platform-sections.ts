@@ -5,6 +5,7 @@ export const PLATFORM_SECTION_IDS = [
   "cache",
   "api-tokens",
   "mcp-servers",
+  "connectors",
   "capabilities",
   "plugins",
 ] as const;

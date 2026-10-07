@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func TestCreateAndReveal(t *testing.T) {
 		t.Fatalf("存储文件泄漏明文凭据")
 	}
 	// Reveal 解密一致
-	sec, err := s.Reveal(p.ID)
+	sec, err := s.Reveal(context.Background(), p.ID)
 	if err != nil || sec.APIKey != "sk-plaintext-key" {
 		t.Fatalf("Reveal 失败: %+v %v", sec, err)
 	}
@@ -64,11 +65,11 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, ok := s2.Get(p.ID)
+	got, ok := s2.Get(context.Background(), p.ID)
 	if !ok || got.Name != "conn1" {
 		t.Fatalf("重开后连接丢失: %+v", got)
 	}
-	sec, err := s2.Reveal(p.ID)
+	sec, err := s2.Reveal(context.Background(), p.ID)
 	if err != nil || sec.APIKey != "sk-plaintext-key" {
 		t.Fatalf("重开后解密失败: %+v %v", sec, err)
 	}
@@ -83,10 +84,10 @@ func TestDelete(t *testing.T) {
 	if s.Delete(p.ID) {
 		t.Fatal("删除不存在连接应返回 false")
 	}
-	if _, ok := s.Get(p.ID); ok {
+	if _, ok := s.Get(context.Background(), p.ID); ok {
 		t.Fatal("删除后仍可查询")
 	}
-	if len(s.List()) != 0 {
+	if len(s.List(context.Background())) != 0 {
 		t.Fatal("列表应为空")
 	}
 }
@@ -98,7 +99,7 @@ func TestListSortedAndProjectionOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	list := s.List()
+	list := s.List(context.Background())
 	if len(list) != 3 {
 		t.Fatalf("应有 3 条: %d", len(list))
 	}

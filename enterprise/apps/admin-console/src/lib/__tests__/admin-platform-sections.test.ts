@@ -9,6 +9,7 @@ describe("isPlatformSection", () => {
       "cache",
       "api-tokens",
       "mcp-servers",
+      "connectors",
       "capabilities",
       "plugins",
     ]);

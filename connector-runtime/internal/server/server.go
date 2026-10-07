@@ -180,7 +180,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	case path == "/admin/apps" && r.Method == http.MethodGet:
 		s.adminApps(w, r)
 	case path == "/admin/connections" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"connections": s.conns.List()})
+		writeJSON(w, http.StatusOK, map[string]any{"connections": s.conns.List(r.Context())})
 	case path == "/admin/connections" && r.Method == http.MethodPost:
 		s.adminCreateConnection(w, r)
 	case strings.HasPrefix(path, "/admin/connections/") && r.Method == http.MethodDelete:
