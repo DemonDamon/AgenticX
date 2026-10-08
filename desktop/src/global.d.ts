@@ -1616,6 +1616,17 @@ declare global {
         mime?: string;
         error?: string;
       }>;
+      installFromSkillHub: (args: { slug: string }) => Promise<{
+        ok: boolean;
+        name?: string;
+        slug?: string;
+        installed_path?: string;
+        source?: string;
+        error?: string;
+        error_code?: string;
+        fallback_to_agent?: boolean;
+        scan_summary?: unknown;
+      }>;
       installFromRegistry: (args: {
         source: string;
         name: string;

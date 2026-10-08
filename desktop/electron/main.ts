@@ -13328,6 +13328,28 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(
+    "install-from-skillhub",
+    async (
+      _event,
+      args: {
+        slug: string;
+      }
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/skillhub/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+          body: JSON.stringify({ slug: args.slug }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err), fallback_to_agent: true };
+      }
+    }
+  );
+
+  ipcMain.handle(
     "install-from-registry",
     async (
       _event,

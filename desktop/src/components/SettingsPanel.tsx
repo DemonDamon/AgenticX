@@ -2945,9 +2945,40 @@ function SkillsTab() {
   );
 
   const onSkillHubMarketInstall = (slug: string) => {
-    const prompt = buildSkillHubAgentInstallPrompt(slug);
-    if (!prompt.trim()) return;
-    void runInstallPromptInMetaAgent(prompt);
+    const name = slug.trim();
+    if (!name) return;
+    void (async () => {
+      setSkillhubMsg("");
+      setInstallPromptBusy(true);
+      try {
+        const res = await window.agenticxDesktop.installFromSkillHub({ slug: name });
+        if (res?.ok) {
+          setSkillhubMsg(`已安装 ${name} → ${res.installed_path || "registry/" + name}`);
+          try {
+            await window.agenticxDesktop.refreshSkills?.();
+          } catch {
+            /* ignore refresh errors */
+          }
+          return;
+        }
+        const err = String(res?.error || "skillhub install failed");
+        setSkillhubMsg(`确定性安装失败：${err}；改为 agent 回退安装…`);
+        if (res?.fallback_to_agent === false) {
+          return;
+        }
+        const prompt = buildSkillHubAgentInstallPrompt(name);
+        if (!prompt.trim()) return;
+        await runInstallPromptInMetaAgent(prompt);
+      } catch (e) {
+        const prompt = buildSkillHubAgentInstallPrompt(name);
+        setSkillhubMsg(`确定性安装异常：${String(e)}；改为 agent 回退安装…`);
+        if (prompt.trim()) {
+          await runInstallPromptInMetaAgent(prompt);
+        }
+      } finally {
+        setInstallPromptBusy(false);
+      }
+    })();
   };
 
   const onRecommendedSkillInstall = (skillId: string) => {

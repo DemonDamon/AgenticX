@@ -14,7 +14,9 @@ import json
 import logging
 import shutil
 import subprocess
-from typing import Any, Dict, List
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -158,3 +160,114 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
         "source": "clawhub_fallback",
         "hint": hint,
     }
+
+def _find_skill_md(root: Path) -> Optional[Path]:
+    direct = root / "SKILL.md"
+    if direct.is_file():
+        return direct
+    for path in root.rglob("SKILL.md"):
+        if path.is_file():
+            return path
+    return None
+
+
+def _install_via_skillhub_cli(slug: str, dest_dir: Path) -> tuple[bool, str]:
+    """Download a skill into ``dest_dir`` using the local SkillHub CLI when present."""
+    exe = shutil.which("skillhub")
+    cli_candidates: List[Path] = []
+    if exe:
+        cli_candidates.append(Path(exe))
+    home_cli = Path.home() / ".skillhub" / "skills_store_cli.py"
+    if home_cli.is_file():
+        cli_candidates.append(home_cli)
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    attempts: List[str] = []
+    for candidate in cli_candidates:
+        if candidate.suffix == ".py":
+            base = ["python3", str(candidate), "--skip-self-upgrade"]
+        else:
+            base = [str(candidate), "--skip-self-upgrade"]
+        argv_sets = (
+            base + ["install", slug, "--dir", str(dest_dir)],
+            base + ["install", slug, "--namespace", "global", "--dir", str(dest_dir)],
+            base + ["download", slug, "--dir", str(dest_dir)],
+        )
+        for argv in argv_sets:
+            try:
+                proc = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                attempts.append(f"{' '.join(argv)} -> {exc}")
+                continue
+            if proc.returncode == 0 and _find_skill_md(dest_dir) is not None:
+                return True, ""
+            detail = (proc.stderr or proc.stdout or "").strip()[:400]
+            attempts.append(f"{' '.join(argv)} rc={proc.returncode}: {detail}")
+    if not cli_candidates:
+        return False, "SkillHub CLI not found (skillhub / ~/.skillhub/skills_store_cli.py)"
+    return False, "; ".join(attempts) or "SkillHub CLI install failed"
+
+
+def install_skillhub_skill(slug: str) -> Dict[str, Any]:
+    """Deterministically install a SkillHub skill into ~/.agenticx/skills/registry/<slug>/.
+
+    Runs outside the agent sandbox (Studio API / Desktop IPC). Writes the full
+    skill directory when available and stamps ``source: skillhub``.
+    """
+    name = str(slug or "").strip()
+    if not name:
+        return {"ok": False, "error": "slug is required"}
+
+    from agenticx.extensions.registry_hub import RegistryHub
+    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+
+    with tempfile.TemporaryDirectory(prefix="agx-skillhub-") as tmp:
+        tmp_path = Path(tmp)
+        ok, err = _install_via_skillhub_cli(name, tmp_path)
+        if not ok:
+            return {
+                "ok": False,
+                "error": err or "skillhub install failed",
+                "error_code": "skillhub_cli_failed",
+                "fallback_to_agent": True,
+            }
+        skill_md = _find_skill_md(tmp_path)
+        if skill_md is None:
+            return {
+                "ok": False,
+                "error": "downloaded package missing SKILL.md",
+                "error_code": "missing_skill_md",
+                "fallback_to_agent": True,
+            }
+        src_dir = skill_md.parent
+        content = skill_md.read_text(encoding="utf-8")
+        sr = scan_skill_markdown_text(content)
+        summary = {
+            "overall": sr.verdict,
+            "skills": [scan_result_to_payload(sr, name)],
+        }
+        if sr.verdict == "dangerous":
+            return {
+                "ok": False,
+                "error": "high_risk_confirm_required",
+                "error_code": "high_risk_confirm_required",
+                "scan_summary": summary,
+                "fallback_to_agent": False,
+            }
+        hub = RegistryHub.from_config()
+        md_path = hub.write_registry_skill_dir(name, src_dir, source="skillhub")
+        return {
+            "ok": True,
+            "name": name,
+            "slug": name,
+            "installed_path": str(md_path),
+            "source": "skillhub",
+            "scan_summary": summary,
+        }
+

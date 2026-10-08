@@ -988,6 +988,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
   resolveLocalMediaUrl: async (path: string) => ipcRenderer.invoke("resolve-local-media-url", path),
+  installFromSkillHub: async (args: { slug: string }) =>
+    ipcRenderer.invoke("install-from-skillhub", args),
   installFromRegistry: async (args: {
     source: string;
     name: string;

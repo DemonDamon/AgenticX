@@ -554,6 +554,47 @@ class RegistryHub:
         write_skill_provenance(skill_dir, source, extra={"name": validated})
         return md_path
 
+    def write_registry_skill_dir(
+        self,
+        skill_name: str,
+        src_dir: Path,
+        *,
+        source: str = "skillhub",
+    ) -> Path:
+        """Install a whole skill directory (SKILL.md + references/ etc.) under registry/."""
+        import shutil
+
+        from agenticx.skills.frontmatter import ensure_skill_source, write_skill_provenance
+        from agenticx.skills.registry import _validate_skill_name
+
+        validated = _validate_skill_name(skill_name)
+        src = Path(src_dir)
+        skill_md = src / "SKILL.md"
+        if not skill_md.is_file():
+            raise FileNotFoundError(f"SKILL.md not found in {src}")
+        install_root = (Path.home() / ".agenticx" / "skills" / "registry").resolve()
+        skill_dir = (install_root / validated).resolve()
+        skill_dir.relative_to(install_root)
+        if skill_dir.exists():
+            shutil.rmtree(skill_dir)
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        for path in sorted(src.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(src)
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            target = skill_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if rel.name.upper() == "SKILL.MD":
+                stamped = ensure_skill_source(path.read_text(encoding="utf-8"), source)
+                target.write_text(stamped, encoding="utf-8")
+            else:
+                shutil.copy2(path, target)
+        md_path = skill_dir / "SKILL.md"
+        write_skill_provenance(skill_dir, source, extra={"name": validated})
+        return md_path
+
     def _install_agx(self, url: str, skill_name: str) -> InstallResult:
         """Install from an AGX native registry via SkillRegistryClient."""
         content, err = self._fetch_agx_markdown(url, skill_name)

@@ -8888,6 +8888,33 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install_preview error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/registry/skillhub/install")
+    async def registry_skillhub_install(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Deterministically install a SkillHub skill outside the agent sandbox."""
+        _check_token(x_agx_desktop_token)
+        slug = str(payload.get("slug") or payload.get("name") or "").strip()
+        if not slug:
+            raise HTTPException(status_code=400, detail="slug is required")
+        try:
+            from agenticx.extensions.skillhub_adapter import install_skillhub_skill
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            result = install_skillhub_skill(slug)
+            if result.get("ok"):
+                invalidate_skills_list_cache()
+            return result
+        except Exception as exc:
+            logger.warning("registry_skillhub_install error: %s", exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_code": "skillhub_install_exception",
+                "fallback_to_agent": True,
+            }
+
     @app.post("/api/registry/install")
     async def registry_install(
         payload: dict,
