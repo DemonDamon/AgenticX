@@ -13,6 +13,22 @@ from pathlib import Path
 import re
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+# Deterministic tool errors that should not be blindly retried with the same args.
+_DETERMINISTIC_ERROR_HINTS: Tuple[Tuple[str, str], ...] = (
+    (
+        "patch token outdated",
+        "请重新 preview 获取新 token，不要复用旧的 patch_token。",
+    ),
+    (
+        "skill already exists",
+        "技能已存在：请改用 action=view/patch，或先 delete 再 create，或更换 name。",
+    ),
+    (
+        "path escapes workspace",
+        "路径超出 workspace：技能目录请用 skill_manage，不要用 bash_exec/file_* 直写。",
+    ),
+)
+
 
 @dataclass
 class LoopCheckResult:
@@ -82,6 +98,9 @@ class LoopDetector:
         self._plain_repeat_content: Optional[str] = None
         self._plain_repeat_count = 0
         self._length_truncation_count = 0
+        self._same_error_key: Optional[Tuple[str, str, str]] = None
+        self._same_error_count = 0
+        self._latest_same_error: Optional[Tuple[str, str, str, int]] = None
 
     def reset(self) -> None:
         """Clear per-turn detector state without changing configured thresholds."""
@@ -95,6 +114,9 @@ class LoopDetector:
         self._plain_repeat_content = None
         self._plain_repeat_count = 0
         self._length_truncation_count = 0
+        self._same_error_key = None
+        self._same_error_count = 0
+        self._latest_same_error = None
 
     def note_assistant_round(
         self,
@@ -236,6 +258,38 @@ class LoopDetector:
             return False
         return self._last_result_digests.get((tool_name, args_signature)) == digest
 
+    @staticmethod
+    def _deterministic_error_match(result_text: Optional[str]) -> Optional[Tuple[str, str]]:
+        text = str(result_text or "")
+        lower = text.lower()
+        if not lower:
+            return None
+        for needle, hint in _DETERMINISTIC_ERROR_HINTS:
+            if needle in lower:
+                return needle, hint
+        return None
+
+    def _record_same_args_same_error(
+        self,
+        tool_name: str,
+        args_signature: str,
+        result_text: Optional[str],
+    ) -> None:
+        self._latest_same_error = None
+        matched = self._deterministic_error_match(result_text)
+        if matched is None:
+            self._same_error_key = None
+            self._same_error_count = 0
+            return
+        needle, _hint = matched
+        key = (tool_name, args_signature, needle)
+        if self._same_error_key == key:
+            self._same_error_count += 1
+        else:
+            self._same_error_key = key
+            self._same_error_count = 1
+        self._latest_same_error = (tool_name, needle, _hint, self._same_error_count)
+
     def record_call(
         self,
         tool_name: str,
@@ -249,6 +303,7 @@ class LoopDetector:
         self._calls.append((tool_name, args_signature))
         self._progress_marks.append(bool(has_progress))
         self._record_file_edit_outcome(tool_name, args_signature, result_text)
+        self._record_same_args_same_error(tool_name, args_signature, result_text)
         if result_text and self.is_guard_rejection(result_text):
             self._guard_rejections.append(tool_name)
         if result_fingerprint:
@@ -285,6 +340,7 @@ class LoopDetector:
         for detector in (
             self._detect_guard_rejection_loop,
             self._detect_file_edit_failure,
+            self._detect_same_args_same_error,
             self._detect_generic_repeat,
             self._detect_ping_pong,
             self._detect_no_progress,
@@ -323,6 +379,35 @@ class LoopDetector:
                 "不要复用旧快照或原 old_text。"
             ),
         )
+
+    def _detect_same_args_same_error(self) -> Optional[LoopCheckResult]:
+        latest = self._latest_same_error
+        if latest is None:
+            return None
+        tool_name, needle, hint, count = latest
+        if count >= 3:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="same_args_same_error",
+                message=(
+                    f"工具 {tool_name} 以相同参数连续返回确定性错误「{needle}」{count} 次。"
+                    f"{hint}"
+                ),
+                nudge=hint,
+            )
+        if count >= 2:
+            return LoopCheckResult(
+                stuck=True,
+                level="warning",
+                detector="same_args_same_error",
+                message=(
+                    f"工具 {tool_name} 以相同参数再次命中确定性错误「{needle}」。"
+                    f"{hint}"
+                ),
+                nudge=hint,
+            )
+        return None
 
     def _classify(self, count: int) -> str:
         return "critical" if count >= self.critical_threshold else "warning"

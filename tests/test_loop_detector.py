@@ -213,3 +213,33 @@ def test_steer_persist_failure_and_stop_drop() -> None:
 
 def test_overflow_retry_is_once_per_turn() -> None:
     assert min(1, max_overflow_retries()) <= 1
+
+
+def test_same_args_same_error_warns_then_halts() -> None:
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    args = '{"action":"patch","name":"x","patch_token":"old"}'
+    err = "ERROR[VALIDATION]: patch token outdated: file changed since preview. 重新 preview 获取新 token"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    assert detector.check() is None
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_args_same_error"
+    assert warn.level == "warning"
+    assert warn.nudge and "preview" in warn.nudge.lower()
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+
+
+def test_same_args_same_error_skill_already_exists() -> None:
+    detector = LoopDetector()
+    args = '{"action":"create","name":"archify"}'
+    err = "ERROR: skill already exists. Use action=view"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_args_same_error"
+    assert "exists" in result.message.lower() or "已存在" in result.message
