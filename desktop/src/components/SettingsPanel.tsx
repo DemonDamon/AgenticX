@@ -6690,11 +6690,12 @@ export function SettingsPanel({
     try {
       const keyword = mcpMarketplaceSearch.trim();
       const hasKeyword = keyword.length > 0;
-      const pageSize = hasKeyword ? 100 : 20;
+      const pageSize = 100;
       const res = await window.agenticxDesktop.mcpMarketplaceList({
         search: keyword,
         page: 1,
         pageSize,
+        isHosted: hasKeyword ? undefined : true,
       });
       if (isStale()) return;
       if (res?.ok && Array.isArray(res.items)) {
@@ -6751,19 +6752,13 @@ export function SettingsPanel({
           setMcpMarketplaceSummary(t("mcp.listedAll", { total: totalCount }));
           return;
         }
-        const filtered = enriched.filter((item) => {
-          const isVerified = Boolean(item.is_verified);
-          const isHosted = Boolean(item.is_hosted);
-          const names = extractMarketplaceMcpServerNames(item);
-          return isVerified && isHosted && names.length > 0;
-        });
+        // 列表已不再带 is_verified/server_config；托管由 isHosted 请求保证。
+        // 保留显式非托管丢弃；无 server 名的条目仍展示（安装时再拉详情）。
+        const filtered = enriched.filter((item) => item.is_hosted !== false);
         setMcpMarketplaceItems(filtered);
         setMcpMarketplaceSummary(
           t("mcp.listedFiltered", { total: totalCount, filtered: filtered.length }),
         );
-        if (totalCount > filtered.length) {
-          setMcpMessage(t("mcp.filteredOut", { count: totalCount - filtered.length }));
-        }
       } else {
         setMcpMessage(t("mcp.marketLoadFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
       }

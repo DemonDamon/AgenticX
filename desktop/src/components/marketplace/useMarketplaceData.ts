@@ -38,7 +38,7 @@ export type MarketplaceData = {
   /** 本地已装的市场技能(source=registry/bundle),目录外的装完技能靠它可见。 */
   localMarketSkills: MarketLocalSkill[];
   registryItems: MarketRegistrySkill[];
-  /** 富化后的 MCP 市场条目(仅官方认证 + 托管 + 可解析 server 名)。 */
+  /** 富化后的 MCP 市场条目(托管目录;serverNames 可后台补全)。 */
   mcpEntries: MarketMcpEntry[];
   /** 本机已配置的 MCP server 名,用于连接器「已安装」判定。 */
   configuredMcpNames: ReadonlySet<string>;
@@ -126,8 +126,15 @@ function readInitial(): MarketplaceData {
   return { ...INITIAL };
 }
 
+/**
+ * 投影上游 MCP 条目。ModelScope 列表接口已不再返回 is_verified / is_hosted /
+ * server_config，因此：
+ * - 列表项：缺省字段时不过滤（由请求侧 isHosted=true 限定托管目录）；
+ * - 详情项：显式 is_hosted===false 仍丢弃；不再因未认证或缺少 server 名而隐藏卡片
+ *   （serverNames 可后台补全，已装判定随之更新）。
+ */
 function projectMcpEntry(raw: Record<string, unknown>, names: string[]): MarketMcpEntry | null {
-  if (!Boolean(raw.is_verified) || !Boolean(raw.is_hosted) || names.length === 0) return null;
+  if (raw.is_hosted === false) return null;
   const serverId = String((raw as { id?: unknown }).id ?? "").trim();
   if (!serverId) return null;
   return {
@@ -156,38 +163,126 @@ function mcpEntriesFromList(rawItems: unknown[]): MarketMcpEntry[] {
   return out;
 }
 
+/** 单次刷新最多拉多少条详情补 serverNames（列表已无 server_config）。 */
+const MCP_DETAIL_ENRICH_LIMIT = 48;
+const MCP_DETAIL_ENRICH_CONCURRENCY = 6;
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function run() {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      results[i] = await worker(items[i], i);
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => run()));
+  return results;
+}
+
 async function enrichMcpEntries(rawItems: unknown[]): Promise<MarketMcpEntry[]> {
   const deduped = new Map<string, Record<string, unknown>>();
   for (const raw of rawItems) {
     const id = String((raw as { id?: unknown }).id ?? "").trim();
     if (id && !deduped.has(id)) deduped.set(id, raw as Record<string, unknown>);
   }
-  const enriched = await Promise.all(
-    Array.from(deduped.values()).map(async (raw) => {
-      const id = String((raw as { id?: unknown }).id ?? "").trim();
-      const listNames = extractMcpServerNames(raw);
-      // 列表已带 server_config 时跳过详情,避免 N 次远端往返。
-      if (!id || listNames.length > 0) {
-        return { raw, names: listNames };
-      }
-      try {
-        const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId: id });
-        const detailItem = (detail?.item as Record<string, unknown> | undefined) ?? undefined;
-        return {
-          raw: { ...raw, ...(detailItem ?? {}) } as Record<string, unknown>,
-          names: extractMcpServerNames(detailItem),
-        };
-      } catch {
-        return { raw, names: [] as string[] };
-      }
-    }),
-  );
+  const list = Array.from(deduped.values());
+  // 先用列表字段投影；缺 server_config 的条目按上限+并发补详情，避免一次打爆上游。
+  let detailBudget = MCP_DETAIL_ENRICH_LIMIT;
+  const enriched = await mapPool(list, MCP_DETAIL_ENRICH_CONCURRENCY, async (raw) => {
+    const id = String((raw as { id?: unknown }).id ?? "").trim();
+    const listNames = extractMcpServerNames(raw);
+    if (!id || listNames.length > 0) {
+      return { raw, names: listNames };
+    }
+    if (detailBudget <= 0) {
+      return { raw, names: [] as string[] };
+    }
+    detailBudget -= 1;
+    try {
+      const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId: id });
+      const detailItem = (detail?.item as Record<string, unknown> | undefined) ?? undefined;
+      return {
+        raw: { ...raw, ...(detailItem ?? {}) } as Record<string, unknown>,
+        names: extractMcpServerNames(detailItem),
+      };
+    } catch {
+      return { raw, names: [] as string[] };
+    }
+  });
   const mcpEntries: MarketMcpEntry[] = [];
   for (const { raw, names } of enriched) {
+    // 详情若显式非托管则丢弃；其余保留（含尚未解析出 server 名的列表项）。
     const entry = projectMcpEntry(raw, names);
     if (entry) mcpEntries.push(entry);
   }
   return mcpEntries;
+}
+
+
+/** 单页上限与上游 API le=100 对齐；再翻页直到凑够浏览量或无更多。 */
+const MCP_CATALOG_PAGE_SIZE = 100;
+/** 市场「全部」浏览页数上限，避免一次拉全量数千条。 */
+const MCP_CATALOG_MAX_PAGES = 3;
+
+type McpListResult = {
+  ok?: boolean;
+  items?: unknown[];
+  total_count?: number;
+  error?: string;
+};
+
+/**
+ * 拉取托管 MCP 目录（多页）。列表接口不再带 is_verified/server_config，
+ * 故用 isHosted 服务端过滤 + 分页，避免旧逻辑「首屏 20 条再客户端筛到 4 张」。
+ */
+async function fetchHostedMcpCatalog(): Promise<McpListResult> {
+  const first = await window.agenticxDesktop.mcpMarketplaceList({
+    page: 1,
+    pageSize: MCP_CATALOG_PAGE_SIZE,
+    isHosted: true,
+  });
+  if (!first?.ok || !Array.isArray(first.items)) {
+    return first ?? { ok: false, error: "marketplace list failed", items: [] };
+  }
+  let items = [...first.items];
+  const totalCount = Number(first.total_count ?? items.length);
+  const totalPages = Math.min(
+    MCP_CATALOG_MAX_PAGES,
+    Math.max(1, Math.ceil(totalCount / MCP_CATALOG_PAGE_SIZE)),
+  );
+  if (totalPages > 1) {
+    const pageResults = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, i) =>
+        window.agenticxDesktop.mcpMarketplaceList({
+          page: i + 2,
+          pageSize: MCP_CATALOG_PAGE_SIZE,
+          isHosted: true,
+        }),
+      ),
+    );
+    for (const pageRes of pageResults) {
+      if (pageRes?.ok && Array.isArray(pageRes.items)) {
+        items = items.concat(pageRes.items);
+      }
+    }
+  }
+  const deduped = new Map<string, unknown>();
+  for (const raw of items) {
+    const id = String((raw as { id?: unknown }).id ?? "").trim();
+    if (id && !deduped.has(id)) deduped.set(id, raw);
+  }
+  return {
+    ok: true,
+    items: Array.from(deduped.values()),
+    total_count: totalCount,
+  };
 }
 
 export function useMarketplaceData() {
@@ -206,11 +301,11 @@ export function useMarketplaceData() {
       loading: hasCatalogData(prev) ? false : true,
     }));
 
-    const [skillsRes, registryRes, mcpListRes, mcpStatusRes, avatarsRes, commandsRes, mcpRawRes] =
+    const [skillsRes, registryRes, mcpListBundle, mcpStatusRes, avatarsRes, commandsRes, mcpRawRes] =
       await Promise.all([
         window.agenticxDesktop.loadSkills().catch(() => null),
         window.agenticxDesktop.searchRegistry({ q: "" }).catch(() => null),
-        window.agenticxDesktop.mcpMarketplaceList({ page: 1, pageSize: 20 }).catch(() => null),
+        fetchHostedMcpCatalog().catch(() => null),
         window.agenticxDesktop.loadMcpStatus("").catch(() => null),
         window.agenticxDesktop.listAvatars().catch(() => null),
         apiBase
@@ -225,6 +320,7 @@ export function useMarketplaceData() {
     const localMarketSkills = toLocalSkillProjection(localSkills);
     const registryItems: MarketRegistrySkill[] = registryRes?.ok ? (registryRes.items ?? []) : [];
 
+    const mcpListRes = mcpListBundle;
     const rawItems = Array.isArray(mcpListRes?.items) ? mcpListRes.items : [];
     // 首屏:仅用列表字段投影(有 server_config 则立刻可见);详情补全放到后面。
     const mcpEntriesQuick = mcpEntriesFromList(rawItems);
@@ -295,7 +391,7 @@ export function useMarketplaceData() {
     remember(firstPaint);
     setData(firstPaint);
 
-    // 后台补全 MCP 详情(不阻塞 loading);列表已自带 config 时 enrich 几乎是 no-op。
+    // 后台补全 MCP 详情(不阻塞 loading);列表缺 server_config 时按需拉详情填 serverNames。
     if (rawItems.length === 0) {
       // 列表成功但为空时清掉陈旧 MCP;列表失败则保留会话缓存条目。
       if (mcpListRes?.ok) {

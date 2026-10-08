@@ -5501,6 +5501,10 @@ def create_studio_app() -> FastAPI:
             filter_obj["category"] = str(category).strip()
         if is_hosted is not None:
             filter_obj["is_hosted"] = bool(is_hosted)
+        # 上游列表已不再返回 is_verified；仍写入 filter 以便未来兼容，勿在客户端
+        # 对缺失字段做 bool(None) is True 过滤（会把整页筛空）。
+        if is_verified is not None:
+            filter_obj["is_verified"] = bool(is_verified)
         body = {
             "filter": filter_obj,
             "page_number": page,
@@ -5517,7 +5521,13 @@ def create_studio_app() -> FastAPI:
         if not isinstance(items, list):
             items = []
         if is_verified is not None:
-            items = [it for it in items if bool((it or {}).get("is_verified")) is bool(is_verified)]
+            # 仅当列表项显式带有该字段时才过滤；否则保留上游结果。
+            if any(isinstance(it, dict) and "is_verified" in it for it in items):
+                items = [
+                    it
+                    for it in items
+                    if bool((it or {}).get("is_verified")) is bool(is_verified)
+                ]
         result = {
             "ok": True,
             "page": page,
