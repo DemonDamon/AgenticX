@@ -112,6 +112,29 @@ agenticx/skills/
 ### 4. 防御性导入与校验
 - 仓库导入对每个技能强制安全扫描 + 路径越界校验 + 失败回滚
 
+## Skills over MCP 接入（SEP-2640）
+
+对齐 MCP `io.modelcontextprotocol/skills` 扩展（Final, 2026-09-13），AgenticX 同时具备双端能力。
+
+### 协议基座（`agenticx/skills/manifest.py` / `mcp_wire.py`）
+- `SkillManifest` 一等公民模型：URI + frontmatter + 文件清单（每文件 SHA-256 digest + size），或 `"dynamic"` 声明
+- 身份 = **服务器身份 + URI**，name 只是标签；单 skill ≤ 512 文件 / 16 MiB
+- MCPClientV2 先探测 `capabilities.extensions` 声明再调用 `skills/list` / `skills/get` / `resources/read` / `resources/directory/read`（未声明即拒发）
+
+### Host 端（消费）
+- `RemoteSkillProvider`：`retain()`（acting-on 窗口）→ `read_file()` 每次读取点校验 digest/size/frontmatter，不匹配拒绝并刷新条目；校验过的字节落 `~/.agenticx/skills/cache/`（0o444 只读）
+- 审批即指纹：`ApprovalStore` 记录 `{server_id, skill_uri, {file_uri: digest}}`，文件集增删改任何变化自动作废（`revoke_if_invalid`）
+- `UnifiedSkillIndex` 聚合本地注册表与远端 provider，`skill_id = server_id::uri` 保证同名不静默替换；`SkillTool` 把远端 skill 注入 BaseTool 视图（Origin: mcp）
+
+### Server 端（暴露）
+- `SkillMCPServer` + `RegistrySkillSource`：注册表条目映射为 `skill://<name>/<relpath>` URI；stdio（`python -m agenticx.skills.mcp_server`）与 streamable HTTP 双传输；`--include-gate` 按信任级过滤出口
+- v1 单文件条目读取时包装为单文件 manifest 视图（零迁移），v2 多文件条目 digest 从存储字节现算
+
+### 治理语义（SP3）
+- `RegistrySkillEntry` v2：`files`（清单）+ `file_contents`（文本字节）+ `origin`（local/bundle/mcp/learning）；发布键 = (name, version, origin)，已发布 version 不可变（重发拒绝并提示 bump，`publish_with_auto_bump` 自动补丁位递增）
+- GEPA 蒸馏产物 `approve()` 入库自动生成 manifest（origin="learning"）；AGX Bundle 支持 `mcp: {server, uri}` 引用（path XOR mcp），安装链 = fetch（读取点校验）→ 只读缓存 → 安全扫描 → 审批（digest 集合）→ 注册表（origin="mcp"）
+- 缓存目录与 `.proposals/` 排除出 filesystem discovery（`SKILL_DISCOVERY_EXCLUDED_DIRS` + 隐藏目录规则）
+
 ## 技术亮点
 
 1. **多维度安全扫描**：覆盖泄密/注入/破坏/持久化/提权/供应链等十余类威胁模式，并检测不可见 unicode 注入与结构异常

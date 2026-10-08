@@ -129,3 +129,103 @@ def test_approve_create_when_orphan_dir_without_skill_md(skills_home: Path) -> N
     assert result["ok"] is True
     assert (skill_dir / "SKILL.md").is_file()
     assert list_pending() == []
+
+
+# ------------------------------------------- registry manifest (SP3, SEP-2640)
+
+
+def _write_second_proposal(
+    skills_home: Path,
+    proposal_id: str,
+    *,
+    action: str = "update",
+    body: str = "Do the thing, better.\n",
+) -> None:
+    pdir = skills_home / ".agenticx" / "skills" / ".proposals" / proposal_id
+    pdir.mkdir(parents=True)
+    (pdir / "SKILL.md").write_text(
+        f"---\nname: queued-skill\ndescription: Queued\n---\n\n{body}",
+        encoding="utf-8",
+    )
+    (pdir / "proposal.json").write_text(
+        json.dumps(
+            {
+                "proposal_id": proposal_id,
+                "base_skill": "queued-skill",
+                "action": action,
+                "author_session_id": "",
+                "author_model": "",
+                "created_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "candidate_index": 1,
+                "total_candidates": 1,
+                "diff_summary": "test",
+                "scores": None,
+                "status": "pending",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_approve_publishes_registry_manifest(skills_home: Path) -> None:
+    from agenticx.skills.mcp_server import RegistrySkillSource
+    from agenticx.skills.registry import RegistryStorage
+
+    result = approve("abc123", approver="test-user")
+    assert result["ok"] is True
+    assert result["registry"]["ok"] is True
+
+    entry = RegistryStorage().get_latest("queued-skill", origin="learning")
+    assert entry is not None
+    assert entry.origin == "learning"
+    assert entry.files is not None
+    assert [f["path"] for f in entry.files] == ["SKILL.md"]
+    assert entry.file_contents is not None
+    assert "queued-skill" in entry.file_contents["SKILL.md"]
+
+    # Directly distributable via the SP2 skills-over-MCP endpoint.
+    source = RegistrySkillSource(RegistryStorage())
+    manifest = source.get_manifest("skill://queued-skill/SKILL.md")
+    assert manifest is not None
+    assert manifest.file_uris() == ["skill://queued-skill/SKILL.md"]
+
+
+def test_approve_registry_version_conflict_bumps_patch(skills_home: Path) -> None:
+    from agenticx.skills.registry import RegistryStorage
+
+    first = approve("abc123", approver="test-user")
+    assert first["ok"] is True
+    assert first["registry"]["version"] == "0.1.0"
+
+    _write_second_proposal(skills_home, "def456")
+    second = approve("def456", approver="test-user")
+    assert second["ok"] is True
+    # Same frontmatter version -> auto-bumped patch on conflict.
+    assert second["registry"]["version"] == "0.1.1"
+
+    storage = RegistryStorage()
+    versions = sorted(
+        e.version for e in storage.list_entries() if e.origin == "learning"
+    )
+    assert versions == ["0.1.0", "0.1.1"]
+
+
+def test_approve_registry_failure_does_not_block(skills_home: Path) -> None:
+    import agenticx.skills.pending_queue as pq
+
+    def _boom(skill_dir, name):
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch_fn = _boom
+    original = pq._publish_learning_skill_to_registry
+    pq._publish_learning_skill_to_registry = monkeypatch_fn
+    try:
+        result = approve("abc123", approver="test-user")
+    finally:
+        pq._publish_learning_skill_to_registry = original
+
+    assert result["ok"] is True
+    skill_dir = skills_home / ".agenticx" / "skills" / "queued-skill"
+    assert (skill_dir / "SKILL.md").is_file()

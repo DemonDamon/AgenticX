@@ -21,14 +21,21 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 import yaml  # type: ignore[import-untyped]
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from agenticx.skills.manifest import MAX_SKILL_BYTES, MAX_SKILL_FILES, compute_digest
+
 logger = logging.getLogger(__name__)
+
+# Origins recognized by the registry (SP3 governance alignment). The publish
+# conflict key is (name, version, origin): different origins may coexist under
+# one name, while within an origin a published version is immutable.
+VALID_ORIGINS: tuple = ("local", "bundle", "mcp", "learning")
 
 
 def _now_iso() -> str:
@@ -78,7 +85,15 @@ def _extract_frontmatter(skill_content: str) -> Dict[str, Any]:
 
 @dataclass
 class RegistrySkillEntry:
-    """Serializable skill entry stored in registry."""
+    """Serializable skill entry stored in registry.
+
+    v1 entries carry a single ``skill_content`` document plus its ``checksum``
+    (both fields stay populated for v2 entries too — ``checksum`` remains the
+    SHA-256 hex of SKILL.md). v2 entries (SEP-2640 governance) additionally
+    carry the full file manifest (``files``) and the text payloads
+    (``file_contents``); ``files is None`` marks a legacy entry, which the
+    serving layer wraps into a single-file manifest view.
+    """
 
     name: str
     version: str
@@ -89,9 +104,12 @@ class RegistrySkillEntry:
     created_at: str = field(default_factory=_now_iso)
     checksum: str = ""
     skill_content: str = ""
+    files: Optional[List[Dict[str, Any]]] = None
+    file_contents: Optional[Dict[str, str]] = None
+    origin: str = "local"
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "name": self.name,
             "version": self.version,
             "description": self.description,
@@ -101,10 +119,18 @@ class RegistrySkillEntry:
             "created_at": self.created_at,
             "checksum": self.checksum,
             "skill_content": self.skill_content,
+            "origin": self.origin,
         }
+        if self.files is not None:
+            payload["files"] = self.files
+        if self.file_contents is not None:
+            payload["file_contents"] = self.file_contents
+        return payload
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RegistrySkillEntry":
+        files = data.get("files")
+        file_contents = data.get("file_contents")
         return cls(
             name=str(data.get("name", "")),
             version=str(data.get("version", "0.1.0")),
@@ -115,7 +141,153 @@ class RegistrySkillEntry:
             created_at=str(data.get("created_at", _now_iso())),
             checksum=str(data.get("checksum", "")),
             skill_content=str(data.get("skill_content", "")),
+            files=[dict(f) for f in files] if isinstance(files, list) else None,
+            file_contents=(
+                dict(file_contents) if isinstance(file_contents, dict) else None
+            ),
+            origin=str(data.get("origin", "local") or "local"),
         )
+
+
+def build_registry_entry(skill_dir: Path, *, origin: str = "local") -> RegistrySkillEntry:
+    """Build a v2 registry entry from a skill directory.
+
+    Walks the whole directory and computes the full file manifest (per-file
+    SHA-256 digest + size). Hidden files and directories are excluded —
+    ``.changelog`` & friends are local governance metadata, not part of the
+    distributable skill. Text payloads are stored inline in
+    ``file_contents`` (registry skills are text-only). The main ``checksum``
+    keeps the legacy semantics: the SHA-256 hex of SKILL.md.
+
+    Raises:
+        FileNotFoundError: No SKILL.md in ``skill_dir``.
+        ValueError: Missing frontmatter name, invalid name, non-UTF-8 file,
+            or the spec limits are exceeded (512 files / 16 MiB).
+    """
+    skill_dir = Path(skill_dir)
+    md_path = skill_dir / "SKILL.md"
+    if not md_path.is_file():
+        raise FileNotFoundError(f"SKILL.md not found at {md_path}")
+
+    relative_files: List[Path] = []
+    for p in skill_dir.rglob("*"):
+        if p.is_symlink() or not p.is_file():
+            continue
+        rel = p.relative_to(skill_dir)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        relative_files.append(rel)
+    relative_files.sort(key=lambda r: r.as_posix())
+    if len(relative_files) > MAX_SKILL_FILES:
+        raise ValueError(
+            f"Skill at {skill_dir} has {len(relative_files)} files "
+            f"(> {MAX_SKILL_FILES} file limit)"
+        )
+
+    files: List[Dict[str, Any]] = []
+    file_contents: Dict[str, str] = {}
+    total = 0
+    for rel in relative_files:
+        raw = (skill_dir / rel).read_bytes()
+        total += len(raw)
+        if total > MAX_SKILL_BYTES:
+            raise ValueError(
+                f"Skill at {skill_dir} exceeds the {MAX_SKILL_BYTES}-byte limit "
+                f"({total} bytes accumulated)"
+            )
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"Registry entries are text-only; file {rel.as_posix()!r} is not UTF-8"
+            ) from exc
+        files.append(
+            {"path": rel.as_posix(), "digest": compute_digest(raw), "size": len(raw)}
+        )
+        file_contents[rel.as_posix()] = text
+
+    skill_content = file_contents["SKILL.md"]
+    frontmatter = _extract_frontmatter(skill_content)
+    name = str(frontmatter.get("name", "")).strip()
+    if not name:
+        raise ValueError("SKILL.md frontmatter requires 'name'")
+    _validate_skill_name(name)
+    return RegistrySkillEntry(
+        name=name,
+        version=str(frontmatter.get("version", "0.1.0")),
+        description=str(frontmatter.get("description", "")),
+        skill_type=str(frontmatter.get("skill_type", "flexible")),
+        gate=dict(
+            (
+                (frontmatter.get("metadata", {}) or {})
+                .get("agenticx", {})
+                .get("gate", {})
+            )
+            or {}
+        ),
+        author=str(frontmatter.get("author", "unknown")),
+        checksum=_compute_sha256(skill_content),
+        skill_content=skill_content,
+        files=files,
+        file_contents=file_contents,
+        origin=origin,
+    )
+
+
+def _check_entry_limits(entry: RegistrySkillEntry) -> None:
+    """Enforce the spec SHOULD limits (512 files / 16 MiB) on registry writes."""
+    if entry.files is None:
+        if len(entry.skill_content.encode("utf-8")) > MAX_SKILL_BYTES:
+            raise ValueError(
+                f"Skill '{entry.name}' exceeds the {MAX_SKILL_BYTES}-byte limit"
+            )
+        return
+    if len(entry.files) > MAX_SKILL_FILES:
+        raise ValueError(
+            f"Skill '{entry.name}' has {len(entry.files)} files "
+            f"(> {MAX_SKILL_FILES} file limit)"
+        )
+    total = sum(int(f.get("size", 0) or 0) for f in entry.files)
+    if total > MAX_SKILL_BYTES:
+        raise ValueError(
+            f"Skill '{entry.name}' exceeds the {MAX_SKILL_BYTES}-byte limit ({total} bytes)"
+        )
+
+
+def bump_patch_version(version: str) -> str:
+    """Bump the patch segment of a semver-ish string ('0.1.0' -> '0.1.1')."""
+    parts = version.split(".")
+    if len(parts) == 3 and all(p.isdigit() for p in parts):
+        return f"{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        return f"{parts[0]}.{parts[1]}.1"
+    return f"{version}.1"
+
+
+def publish_with_auto_bump(
+    storage: "RegistryStorage",
+    entry: RegistrySkillEntry,
+    *,
+    max_attempts: int = 100,
+) -> RegistrySkillEntry:
+    """Publish, auto-bumping the patch version on same-(name, version, origin)
+    conflicts.
+
+    Used by approval-driven ingestion paths (learning distillates, bundle MCP
+    sources) where the frontmatter version is not authoritative: a published
+    version is immutable, so a conflict bumps to the next free patch version.
+    Other ValueErrors propagate.
+    """
+    for _ in range(max_attempts):
+        try:
+            return storage.publish(entry)
+        except ValueError as exc:
+            if "already exists" not in str(exc):
+                raise
+            entry.version = bump_patch_version(entry.version)
+    raise ValueError(
+        f"Skill '{entry.name}': no free version found after {max_attempts} bumps"
+    )
 
 
 class RegistryStorage:
@@ -166,22 +338,37 @@ class RegistryStorage:
                     if q and q not in entry.name.lower() and q not in entry.description.lower():
                         continue
                     items.append(entry)
-            items.sort(key=lambda x: (x.name, x.version, x.created_at))
+            items.sort(key=lambda x: (x.name, x.version, x.created_at, x.origin))
             return items
 
-    def get_latest(self, name: str) -> Optional[RegistrySkillEntry]:
+    def get_latest(
+        self, name: str, origin: Optional[str] = None
+    ) -> Optional[RegistrySkillEntry]:
         with self._lock:
             payload = self._load()
             versions = payload.get("skills", {}).get(name, [])
             if not isinstance(versions, list) or not versions:
                 return None
-            entries = [RegistrySkillEntry.from_dict(v) for v in versions if isinstance(v, dict)]
+            entries = [
+                RegistrySkillEntry.from_dict(v)
+                for v in versions
+                if isinstance(v, dict)
+                and (origin is None or str(v.get("origin", "local") or "local") == origin)
+            ]
             if not entries:
                 return None
-            entries.sort(key=lambda x: (x.created_at, x.version))
+            entries.sort(key=lambda x: (x.created_at, x.version, x.origin))
             return entries[-1]
 
     def publish(self, entry: RegistrySkillEntry) -> RegistrySkillEntry:
+        """Store a new entry.
+
+        The conflict key is (name, version, origin): republishing the same
+        version within an origin is refused (same-version content is
+        immutable — bump the version to publish changed content), while the
+        same name/version under a different origin may coexist.
+        """
+        _check_entry_limits(entry)
         with self._lock:
             payload = self._load()
             skills_obj = payload.setdefault("skills", {})
@@ -193,15 +380,20 @@ class RegistryStorage:
                 versions = []
                 skills_obj[entry.name] = versions
             for row in versions:
-                if isinstance(row, dict) and str(row.get("version", "")) == entry.version:
+                if (
+                    isinstance(row, dict)
+                    and str(row.get("version", "")) == entry.version
+                    and str(row.get("origin", "local") or "local") == entry.origin
+                ):
                     raise ValueError(
-                        f"Skill '{entry.name}' version '{entry.version}' already exists"
+                        f"Skill '{entry.name}' version '{entry.version}' already exists "
+                        f"for origin '{entry.origin}'; bump the version to publish new content"
                     )
             versions.append(entry.to_dict())
             self._save(payload)
             return entry
 
-    def delete(self, name: str, version: str) -> bool:
+    def delete(self, name: str, version: str, origin: Optional[str] = None) -> bool:
         with self._lock:
             payload = self._load()
             skills_obj = payload.get("skills", {})
@@ -214,7 +406,14 @@ class RegistryStorage:
             filtered = [
                 v
                 for v in versions
-                if not (isinstance(v, dict) and str(v.get("version", "")) == version)
+                if not (
+                    isinstance(v, dict)
+                    and str(v.get("version", "")) == version
+                    and (
+                        origin is None
+                        or str(v.get("origin", "local") or "local") == origin
+                    )
+                )
             ]
             if len(filtered) == original_len:
                 return False
@@ -236,6 +435,9 @@ class RegistrySkillEntryModel(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
     checksum: str = Field(default="")
     skill_content: str = Field(default="")
+    files: Optional[List[Dict[str, Any]]] = Field(default=None)
+    file_contents: Optional[Dict[str, str]] = Field(default=None)
+    origin: Literal["local", "bundle", "mcp", "learning"] = Field(default="local")
 
     def to_entry(self) -> RegistrySkillEntry:
         return RegistrySkillEntry(
@@ -248,6 +450,9 @@ class RegistrySkillEntryModel(BaseModel):
             created_at=self.created_at,
             checksum=self.checksum,
             skill_content=self.skill_content,
+            files=self.files,
+            file_contents=self.file_contents,
+            origin=self.origin,
         )
 
 
@@ -285,7 +490,10 @@ class SkillRegistryServer:
             entry = payload.to_entry()
             _validate_skill_name(entry.name)
             if not entry.checksum:
-                entry.checksum = _compute_sha256(entry.skill_content)
+                fallback = entry.skill_content or (entry.file_contents or {}).get(
+                    "SKILL.md", ""
+                )
+                entry.checksum = _compute_sha256(fallback)
             try:
                 stored = storage.publish(entry)
                 return {"ok": True, "entry": stored.to_dict()}
@@ -355,33 +563,37 @@ class SkillRegistryClient:
         return {"X-Registry-Token": self.write_token}
 
     def publish(self, skill_path: Path) -> RegistrySkillEntry:
-        md_path = skill_path
+        skill_path = Path(skill_path)
         if skill_path.is_dir():
-            md_path = skill_path / "SKILL.md"
-        if not md_path.exists():
-            raise FileNotFoundError(f"SKILL.md not found at {md_path}")
-        skill_content = md_path.read_text(encoding="utf-8")
-        frontmatter = _extract_frontmatter(skill_content)
-        name = str(frontmatter.get("name", "")).strip()
-        if not name:
-            raise ValueError("SKILL.md frontmatter requires 'name'")
-        entry = RegistrySkillEntry(
-            name=name,
-            version=str(frontmatter.get("version", "0.1.0")),
-            description=str(frontmatter.get("description", "")),
-            skill_type=str(frontmatter.get("skill_type", "flexible")),
-            gate=dict(
-                (
-                    (frontmatter.get("metadata", {}) or {})
-                    .get("agenticx", {})
-                    .get("gate", {})
-                )
-                or {}
-            ),
-            author=str(frontmatter.get("author", "unknown")),
-            checksum=_compute_sha256(skill_content),
-            skill_content=skill_content,
-        )
+            # v2 publish: full multi-file manifest computed from the directory.
+            entry = build_registry_entry(skill_path, origin="local")
+        elif skill_path.exists():
+            # v1 publish: single SKILL.md document (legacy compatibility).
+            skill_content = skill_path.read_text(encoding="utf-8")
+            frontmatter = _extract_frontmatter(skill_content)
+            name = str(frontmatter.get("name", "")).strip()
+            if not name:
+                raise ValueError("SKILL.md frontmatter requires 'name'")
+            entry = RegistrySkillEntry(
+                name=name,
+                version=str(frontmatter.get("version", "0.1.0")),
+                description=str(frontmatter.get("description", "")),
+                skill_type=str(frontmatter.get("skill_type", "flexible")),
+                gate=dict(
+                    (
+                        (frontmatter.get("metadata", {}) or {})
+                        .get("agenticx", {})
+                        .get("gate", {})
+                    )
+                    or {}
+                ),
+                author=str(frontmatter.get("author", "unknown")),
+                checksum=_compute_sha256(skill_content),
+                skill_content=skill_content,
+                origin="local",
+            )
+        else:
+            raise FileNotFoundError(f"SKILL.md not found at {skill_path}")
         payload = entry.to_dict()
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
