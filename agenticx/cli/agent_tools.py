@@ -1739,9 +1739,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "skill_manage",
             "description": (
-                "Create, patch, or delete skills stored under ~/.agenticx/skills/. "
-                "For 'create': provide action + name + content, or use from_path/from_url "
-                "instead of inline content for large SKILL.md files. "
+                "Create, patch, view, or delete skills stored under ~/.agenticx/skills/. "
+                "For 'create': provide action + name + content, or use from_path/from_url/from_dir "
+                "instead of inline content for large SKILL.md files (from_dir also copies references/). "
+                "Optional create 'source' (skillhub|registry|agent_created) preserves provenance. "
+                "For 'view': return on-disk SKILL.md, directory listing, and resolved source. "
                 "For 'patch': provide action + name + old_string + new_string. "
                 "For 'delete': provide action + name. "
                 "Sub-paths are supported (e.g. name='ima/notes'). "
@@ -1753,8 +1755,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "patch", "delete", "history", "rollback"],
-                        "description": "Operation: create/patch/delete/history/rollback.",
+                        "enum": ["create", "patch", "delete", "history", "rollback", "view"],
+                        "description": "Operation: create/patch/delete/history/rollback/view.",
                     },
                     "name": {
                         "type": "string",
@@ -1775,7 +1777,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "For 'create': read SKILL.md from this local path (workspace or ~/.agenticx/). "
-                            "Mutually exclusive with content/from_url."
+                            "Mutually exclusive with content/from_url/from_dir."
                         ),
                     },
                     "from_url": {
@@ -1783,7 +1785,23 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "description": (
                             "For 'create': download SKILL.md from an allowlisted https URL "
                             "(raw.githubusercontent.com, gist, registry.clawhub.ai). "
-                            "Mutually exclusive with content/from_path."
+                            "Mutually exclusive with content/from_path/from_dir."
+                        ),
+                    },
+                    "from_dir": {
+                        "type": "string",
+                        "description": (
+                            "For 'create': import a whole skill directory (must contain SKILL.md). "
+                            "Copies companion files such as references/ into the install dir. "
+                            "Mutually exclusive with content/from_path/from_url."
+                        ),
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["skillhub", "registry", "agent_created"],
+                        "description": (
+                            "For 'create': provenance source written into frontmatter and sidecar. "
+                            "Default agent_created. Pass skillhub/registry when installing third-party skills."
                         ),
                     },
                     "old_string": {"type": "string", "description": "Required for 'patch': exact substring to find and replace in the existing SKILL.md."},
@@ -9537,6 +9555,27 @@ def _resolve_skill_content_path(path_arg: str, session: Optional[StudioSession])
     return resolved
 
 
+def _resolve_skill_dir_path(path_arg: str, session: Optional[StudioSession]) -> Path:
+    """Resolve a local skill directory (workspace or ~/.agenticx/)."""
+    agx_root = (Path.home() / ".agenticx").resolve()
+    try:
+        resolved = _resolve_workspace_path(path_arg, session, pick_existing=True)
+    except ValueError:
+        raw = _path_from_arg(path_arg)
+        if not raw.is_absolute():
+            raw = (Path.home() / raw).resolve(strict=False)
+        else:
+            raw = raw.resolve(strict=False)
+        if not _is_path_under_root(raw, agx_root) and not _desktop_unrestricted_fs_enabled():
+            raise ValueError(f"path must be under workspace or ~/.agenticx/: {raw}") from None
+        resolved = raw
+    if resolved.is_file() and resolved.name.upper() == "SKILL.MD":
+        resolved = resolved.parent
+    if not resolved.is_dir():
+        raise ValueError(f"directory not found: {resolved}")
+    return resolved
+
+
 def _fetch_skill_content_from_url(url: str) -> str:
     from urllib.parse import urlparse
     import urllib.request
@@ -9557,28 +9596,114 @@ def _fetch_skill_content_from_url(url: str) -> str:
     return data.decode("utf-8")
 
 
-def _resolve_skill_create_content(arguments: Dict[str, Any], session: Optional[StudioSession]) -> Tuple[Optional[str], Optional[str]]:
+_SKILL_MANAGE_CREATE_SOURCES = frozenset({"skillhub", "registry", "agent_created"})
+_skill_manage_last_write_path: Optional[str] = None
+
+
+def _mark_skill_manage_write(path: Path) -> None:
+    """Record a successful skill disk write for post-write crash messaging."""
+    global _skill_manage_last_write_path
+    _skill_manage_last_write_path = str(path)
+
+
+def _clear_skill_manage_write() -> None:
+    global _skill_manage_last_write_path
+    _skill_manage_last_write_path = None
+
+
+def _consume_skill_manage_write() -> Optional[str]:
+    global _skill_manage_last_write_path
+    path = _skill_manage_last_write_path
+    _skill_manage_last_write_path = None
+    return path
+
+
+def _normalize_skill_manage_source(raw: Any) -> Tuple[Optional[str], Optional[str]]:
+    """Validate optional create ``source``; empty means default agent_created."""
+    value = str(raw or "").strip().lower().replace("-", "_")
+    if not value:
+        return "agent_created", None
+    if value not in _SKILL_MANAGE_CREATE_SOURCES:
+        allowed = ", ".join(sorted(_SKILL_MANAGE_CREATE_SOURCES))
+        return None, f"ERROR: invalid source {raw!r}; allowed: {allowed}"
+    return value, None
+
+
+def _copy_skill_companion_files(src_dir: Path, dest_dir: Path) -> List[str]:
+    """Copy non-SKILL.md files (e.g. references/) from an import directory."""
+    copied: List[str] = []
+    if not src_dir.is_dir():
+        return copied
+    for path in sorted(src_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(src_dir)
+        if str(rel).replace("\\", "/").upper() == "SKILL.MD":
+            continue
+        # Skip hidden provenance/version internals from source trees.
+        parts = rel.parts
+        if any(p.startswith(".") for p in parts):
+            continue
+        target = dest_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(str(rel).replace("\\", "/"))
+    return copied
+
+
+def _resolve_skill_create_content(
+    arguments: Dict[str, Any], session: Optional[StudioSession]
+) -> Tuple[Optional[str], Optional[str], Optional[Path]]:
+    """Resolve create content.
+
+    Returns:
+        (content, error, from_dir_path). Exactly one of content/error is set.
+        from_dir_path is set when importing a whole skill directory.
+    """
     from_path = str(arguments.get("from_path", "") or "").strip()
     from_url = str(arguments.get("from_url", "") or "").strip()
+    from_dir = str(arguments.get("from_dir", "") or "").strip()
     content = str(arguments.get("content", "") or "")
+    provided = [bool(from_path), bool(from_url), bool(from_dir), bool(content.strip())]
+    if sum(1 for x in provided if x) > 1 and (from_path or from_url or from_dir):
+        # content may accompany from_* only when empty; reject overlapping sources.
+        sources = [n for n, v in (("from_path", from_path), ("from_url", from_url), ("from_dir", from_dir), ("content", content.strip())) if v]
+        if len(sources) > 1:
+            return None, f"ERROR: {'/'.join(sources)} are mutually exclusive", None
     if from_path and from_url:
-        return None, "ERROR: from_path and from_url are mutually exclusive"
+        return None, "ERROR: from_path and from_url are mutually exclusive", None
+    if from_dir and (from_path or from_url or content.strip()):
+        return None, "ERROR: from_dir is mutually exclusive with content/from_path/from_url", None
+    if from_dir:
+        try:
+            dir_path = _resolve_skill_dir_path(from_dir, session)
+        except ValueError as exc:
+            return None, f"ERROR: {exc}", None
+        except OSError as exc:
+            return None, f"ERROR: read failed: {exc}", None
+        skill_md = dir_path / "SKILL.md"
+        if not skill_md.is_file():
+            return None, f"ERROR: from_dir missing SKILL.md: {from_dir}", None
+        try:
+            return skill_md.read_text(encoding="utf-8"), None, dir_path
+        except OSError as exc:
+            return None, f"ERROR: read failed: {exc}", None
     if from_path:
         try:
             path = _resolve_skill_content_path(from_path, session)
-            return path.read_text(encoding="utf-8"), None
+            return path.read_text(encoding="utf-8"), None, None
         except ValueError as exc:
-            return None, f"ERROR: {exc}"
+            return None, f"ERROR: {exc}", None
         except OSError as exc:
-            return None, f"ERROR: read failed: {exc}"
+            return None, f"ERROR: read failed: {exc}", None
     if from_url:
         try:
-            return _fetch_skill_content_from_url(from_url), None
+            return _fetch_skill_content_from_url(from_url), None, None
         except Exception as exc:
-            return None, f"ERROR: from_url fetch failed: {exc}"
+            return None, f"ERROR: from_url fetch failed: {exc}", None
     if not content.strip():
-        return None, "ERROR: content is required for create (or provide from_path/from_url)"
-    return content, None
+        return None, "ERROR: content is required for create (or provide from_path/from_url/from_dir)", None
+    return content, None, None
 
 
 def _skill_manage_error(code: str, message: str) -> str:
@@ -9946,8 +10071,10 @@ def _skill_manage_success_payload(
         "validation_warnings": validation_warnings,
     }
     if extra:
-        payload.update(extra)
-    return json.dumps(payload, ensure_ascii=False)
+        # Strip internal keys (e.g. _session: StudioSession) — never JSON-serialize them.
+        safe_extra = {k: v for k, v in extra.items() if not str(k).startswith("_")}
+        payload.update(safe_extra)
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _write_skill_md_with_checks(
@@ -9959,6 +10086,7 @@ def _write_skill_md_with_checks(
     on_rollback: Optional[Any] = None,
     extra: Optional[Dict[str, Any]] = None,
     skip_queue: bool = False,
+    source: str = "agent_created",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Normalize, write, guard-scan, and verify discoverability.
 
@@ -9976,10 +10104,22 @@ def _write_skill_md_with_checks(
     except SkillFrontmatterError as exc:
         return None, f"ERROR: {exc}"
 
+    create_source = str(source or "agent_created").strip().lower().replace("-", "_") or "agent_created"
     if action == "create":
-        from agenticx.skills.frontmatter import ensure_skill_source, write_skill_provenance
+        from agenticx.skills.frontmatter import (
+            _extract_frontmatter_block,
+            _frontmatter_get_scalar,
+            ensure_skill_source,
+        )
 
-        normalized = ensure_skill_source(normalized, "agent_created")
+        fm_before = _extract_frontmatter_block(normalized) or ""
+        old_source = _frontmatter_get_scalar(fm_before, "source")
+        normalized = ensure_skill_source(normalized, create_source)
+        if old_source != create_source:
+            if old_source:
+                frontmatter_fixed.append(f"source: {old_source} → {create_source}")
+            else:
+                frontmatter_fixed.append(f"injected source: {create_source}")
 
     from agenticx.learning.config import get_learning_config
     from agenticx.learning.skill_quality_gate import check_size_limits
@@ -10015,34 +10155,39 @@ def _write_skill_md_with_checks(
 
     validation_warnings: List[str] = []
     skill_md = skill_dir / "SKILL.md"
+    wrote = False
+
+    def _do_rollback() -> None:
+        _clear_skill_manage_write()
+        if on_rollback:
+            on_rollback()
+        else:
+            skill_md.unlink(missing_ok=True)
+
     try:
         skill_md.write_text(normalized, encoding="utf-8")
+        wrote = True
+        _mark_skill_manage_write(skill_md)
         if action == "create":
             from agenticx.skills.frontmatter import write_skill_provenance
 
-            write_skill_provenance(skill_dir, "agent_created", extra={"name": canonical_name})
+            write_skill_provenance(skill_dir, create_source, extra={"name": canonical_name})
         result = scan_skill(skill_dir, source="agent-created")
         ok, reason = should_allow(result, "agent-created")
         if not ok:
-            if on_rollback:
-                on_rollback()
-            else:
-                skill_md.unlink(missing_ok=True)
+            _do_rollback()
             from agenticx.skills.guard import format_guard_rejection_message
 
             return None, format_guard_rejection_message(result, action=action)
 
         discoverable, skill_name, errors = verify_skill_discoverable(skill_dir)
         if not discoverable:
-            if on_rollback:
-                on_rollback()
-            else:
-                skill_md.unlink(missing_ok=True)
+            _do_rollback()
             detail = "; ".join(errors) if errors else "unknown parse failure"
             return None, f"ERROR: skill not discoverable after write ({detail})"
 
-        return (
-            _skill_manage_success_payload(
+        try:
+            success_json = _skill_manage_success_payload(
                 action=action,
                 skill_md=skill_md,
                 discoverable=discoverable,
@@ -10050,14 +10195,39 @@ def _write_skill_md_with_checks(
                 frontmatter_fixed=frontmatter_fixed,
                 validation_warnings=validation_warnings,
                 extra=extra,
-            ),
-            None,
-        )
+            )
+        except Exception as ser_exc:
+            # Write already succeeded; never report a bare crash that hides the path.
+            return (
+                json.dumps(
+                    {
+                        "ok": True,
+                        "action": action,
+                        "path": str(skill_md),
+                        "discoverable": discoverable,
+                        "skill_name": skill_name,
+                        "frontmatter_fixed": frontmatter_fixed,
+                        "validation_warnings": validation_warnings
+                        + [f"response_serialization_fallback: {ser_exc}"],
+                        "note": f"File was written: {skill_md}",
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                None,
+            )
+        _clear_skill_manage_write()
+        return success_json, None
     except OSError as exc:
-        if on_rollback:
-            on_rollback()
-        else:
-            skill_md.unlink(missing_ok=True)
+        _do_rollback()
+        return None, f"ERROR: {exc}"
+    except Exception as exc:
+        if wrote:
+            return None, (
+                f"ERROR: skill_manage failed after successful write: {exc}. "
+                f"File was written: {skill_md}"
+            )
+        _clear_skill_manage_write()
         return None, f"ERROR: {exc}"
 
 
@@ -10249,12 +10419,20 @@ async def _tool_skill_manage(
         return "ERROR: skill path outside skills root"
 
     if action == "create":
-        content, content_err = _resolve_skill_create_content(arguments, session)
+        content, content_err, from_dir_path = _resolve_skill_create_content(arguments, session)
         if content_err:
             return content_err
         assert content is not None
+        create_source, source_err = _normalize_skill_manage_source(arguments.get("source"))
+        if source_err:
+            return source_err
+        assert create_source is not None
         if skill_dir.exists():
-            return "ERROR: skill already exists"
+            return (
+                "ERROR: skill already exists. "
+                "Use action=view to inspect it, action=patch to modify it, "
+                "or action=delete then create again."
+            )
         from agenticx.skills.frontmatter import SkillFrontmatterError, normalize_skill_md
 
         try:
@@ -10278,17 +10456,33 @@ async def _tool_skill_manage(
             content=content,
             canonical_name=name,
             on_rollback=lambda: shutil.rmtree(skill_dir, ignore_errors=True),
-            extra={"_session": session},
+            extra={"_session": session, "source": create_source},
             skip_queue=_interactive,
+            source=create_source,
         )
         if err:
             if skill_dir.exists() and not (skill_dir / "SKILL.md").is_file():
                 shutil.rmtree(skill_dir, ignore_errors=True)
             return err
+        if from_dir_path is not None:
+            try:
+                copied = _copy_skill_companion_files(from_dir_path, skill_dir)
+                if success and copied:
+                    try:
+                        payload = json.loads(success)
+                        payload["copied_files"] = copied
+                        success = json.dumps(payload, ensure_ascii=False, default=str)
+                    except Exception:
+                        pass
+            except OSError as exc:
+                return (
+                    f"ERROR: skill_manage failed after successful write: {exc}. "
+                    f"File was written: {skill_dir / 'SKILL.md'}"
+                )
         try:
             from agenticx.skills.versioning import append_changelog
 
-            append_changelog(skill_dir, action="create", summary="agent-created skill")
+            append_changelog(skill_dir, action="create", summary=f"{create_source} skill")
         except Exception:
             pass
         return success or "ERROR: unknown create failure"
@@ -10417,7 +10611,11 @@ async def _tool_skill_manage(
             if str(decoded.get("name", "")) != name:
                 return _skill_manage_error("validation", "patch token skill mismatch")
             if str(decoded.get("old_hash", "")) != old_hash:
-                return _skill_manage_error("validation", "patch token outdated: file changed since preview")
+                return _skill_manage_error(
+                    "validation",
+                    "patch token outdated: file changed since preview. "
+                    "重新 preview 获取新 token（do not reuse the old patch_token）。",
+                )
             if str(decoded.get("old_string_sha256", "")) != hashlib.sha256(old_s.encode("utf-8")).hexdigest():
                 return _skill_manage_error("validation", "patch token old_string mismatch")
             if str(decoded.get("new_string_sha256", "")) != hashlib.sha256(new_s.encode("utf-8")).hexdigest():
@@ -10593,6 +10791,40 @@ async def _tool_skill_manage(
         except Exception:
             pass
         return success or _skill_manage_error("validation", "unknown rollback failure")
+
+    if action == "view":
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            return _skill_manage_error("validation", "SKILL.md not found")
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _skill_manage_error("validation", f"read failed: {exc}")
+        listing: List[str] = []
+        try:
+            for path in sorted(skill_dir.rglob("*")):
+                if path.is_file():
+                    listing.append(str(path.relative_to(skill_dir)).replace("\\", "/"))
+        except OSError:
+            listing = ["SKILL.md"]
+        resolved_source = ""
+        try:
+            from agenticx.skills.frontmatter import _extract_frontmatter_block
+            from agenticx.tools.skill_bundle import resolve_skill_source
+
+            resolved_source = resolve_skill_source(skill_dir, _extract_frontmatter_block(content))
+        except Exception:
+            resolved_source = ""
+        payload = {
+            "ok": True,
+            "action": "view",
+            "name": name,
+            "path": str(skill_md),
+            "source": resolved_source,
+            "listing": listing,
+            "content": content,
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)
 
     return "ERROR: unknown action"
 
@@ -11796,6 +12028,13 @@ async def dispatch_tool_async(
         if name.startswith("lsp_"):
             return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:
+        if name == "skill_manage":
+            written = _consume_skill_manage_write()
+            if written:
+                return (
+                    f"ERROR: {name} crashed after successful write: {exc}. "
+                    f"File was written: {written}"
+                )
         return f"ERROR: {name} crashed: {exc}"
     if name.startswith("confirm_"):
         return (
