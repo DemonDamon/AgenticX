@@ -207,6 +207,10 @@ export type MarketplaceItem = {
   wired?: boolean;
   /** kind=connector:对应 CONNECTOR_SUPPLY.id。 */
   supplyId?: string;
+  /** kind=connector(含网关精选卡):连接市场来源分桶 official|enterprise。 */
+  marketSource?: "official" | "enterprise";
+  /** kind=connector(含网关精选卡):连接市场「推荐」精选。 */
+  recommended?: boolean;
   /** kind=connector:探活健康态（connected|degraded|…）；绿标仅 connected。 */
   health?: "connected" | "degraded" | "disconnected" | "unwired";
   /** kind=skill:推荐位 id(Meta-Agent 安装提示词)。 */
@@ -516,6 +520,8 @@ export function buildConnectorSupplyItems(
     fallbackDescription: string;
     iconSrc?: string;
     authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
+    marketSource?: "official" | "enterprise";
+    recommended?: boolean;
   }[],
   opts?: {
     wiredOnly?: boolean;
@@ -527,6 +533,11 @@ export function buildConnectorSupplyItems(
     connectedByConnectorId?: Readonly<Record<string, boolean>>;
     /** 原生/MCP 合并健康态（设置页同源探活）。key=connectorId */
     healthByConnectorId?: Readonly<Record<string, "connected" | "degraded" | "disconnected" | "unwired">>;
+    /**
+     * 已有连接实例的供给 id（来自 buildMyConnectionRows 去重后的 SSOT）。
+     * 模板 stub 命中 → 标「已连接」，CTA 变「使用」而非再次新建。
+     */
+    instanceSupplyIds?: ReadonlySet<string>;
   },
 ): MarketplaceItem[] {
   const wiredOnly = opts?.wiredOnly !== false;
@@ -537,6 +548,10 @@ export function buildConnectorSupplyItems(
   for (const e of entries) {
     if (wiredOnly && !e.wired) continue;
     const d = display[e.id] ?? {};
+    const bucket = {
+      marketSource: e.marketSource ?? (e.kind === "gateway" ? "enterprise" : "official"),
+      ...(e.recommended ? { recommended: true } : {}),
+    } as const;
     if (e.kind === "gateway") {
       const gwInstalled = Boolean(opts?.gatewayInstalled);
       out.push({
@@ -555,17 +570,19 @@ export function buildConnectorSupplyItems(
         serverId: "connector-runtime-gateway",
         iconSrc: e.iconSrc,
         health: gwInstalled ? "connected" : "disconnected",
+        ...bucket,
       });
       continue;
     }
-    // 未接线 mcp stub（无 connectorId）：目录骨架，永不标已安装。
+    // 未接线 mcp stub（无 connectorId）：目录骨架；仅当「我的连接」已有该模板实例时标已连接。
     if (!e.connectorId) {
+      const hasInstance = Boolean(opts?.instanceSupplyIds?.has(e.id));
       out.push({
         key: `connector:${e.id}`,
         kind: "connector",
         name: d.name ?? e.fallbackName,
         description: d.description ?? e.fallbackDescription,
-        installed: false,
+        installed: hasInstance,
         provider: e.kind,
         iconSrc: e.iconSrc,
         supplyKind: e.kind,
@@ -573,7 +590,8 @@ export function buildConnectorSupplyItems(
         authFormHint: e.authFormHint,
         wired: false,
         supplyId: e.id,
-        health: "unwired",
+        health: hasInstance ? "connected" : "unwired",
+        ...bucket,
       });
       continue;
     }
@@ -596,6 +614,7 @@ export function buildConnectorSupplyItems(
       wired: e.wired,
       supplyId: e.id,
       health,
+      ...bucket,
     });
   }
   return out;

@@ -45,6 +45,12 @@ export type ConnectorAuthType = "none" | "api_key" | "custom_credential" | "oaut
 
 export type ConnectorSupplyKind = "native" | "mcp" | "gateway";
 
+/**
+ * 连接市场来源分桶：官方 = Near 内置原生 + 官方模板目录；企业 = 企业连接器网关 / 企业下发目录。
+ * 「推荐」不是来源，是 {@link ConnectorSupplyEntry.recommended} 精选标记。
+ */
+export type ConnectorMarketSource = "official" | "enterprise";
+
 /** 目录分类（Comate 风格骨架，仅展示用）。 */
 export type ConnectorCatalogCategory =
   | "office"
@@ -80,7 +86,35 @@ export type ConnectorSupplyEntry = {
    * 例：name_only / api_key / token / oauth_device
    */
   authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
+  /** 连接市场来源分桶；缺省按 kind 推断（gateway → enterprise，其余 → official）。 */
+  marketSource?: ConnectorMarketSource;
+  /** 连接市场「推荐」精选（见 {@link RECOMMENDED_SUPPLY_IDS}）。 */
+  recommended?: boolean;
 };
+
+/**
+ * 连接市场「推荐」精选：已接线、常用的原生连接器 + 企业网关 + 少量高频模板。
+ * 顺序即推荐位展示顺序。
+ */
+export const RECOMMENDED_SUPPLY_IDS: readonly string[] = [
+  "gateway:connector-runtime",
+  "native:feishu",
+  "native:wecom",
+  "native:github",
+  "native:tencent-meeting",
+  "native:qqmail",
+  "native:tapd",
+  "stub:dingtalk",
+  "stub:tencent-docs",
+  "stub:wps",
+  "stub:amap",
+];
+
+/** 供给条目的市场来源（显式 marketSource 优先）。 */
+export function connectorMarketSource(entry: Pick<ConnectorSupplyEntry, "kind" | "marketSource">): ConnectorMarketSource {
+  if (entry.marketSource) return entry.marketSource;
+  return entry.kind === "gateway" ? "enterprise" : "official";
+}
 
 /** 原生握手对照（实施时对照表，不整表伪造 SaaS）。 */
 const NATIVE_AUTH: Partial<Record<ConnectorId, ConnectorAuthType>> = {
@@ -448,10 +482,11 @@ const CATALOG_STUBS: readonly ConnectorSupplyEntry[] = [
   },
 ];
 
-export const CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = [
+const RAW_CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = [
   {
     id: GATEWAY_SUPPLY_ID,
     kind: "gateway",
+    marketSource: "enterprise",
     auth: "none",
     wired: true,
     fallbackName: "连接器网关",
@@ -463,6 +498,12 @@ export const CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = [
   ...nativeEntries(),
   ...CATALOG_STUBS,
 ];
+
+export const CONNECTOR_SUPPLY: readonly ConnectorSupplyEntry[] = RAW_CONNECTOR_SUPPLY.map((e) => ({
+  ...e,
+  marketSource: connectorMarketSource(e),
+  recommended: RECOMMENDED_SUPPLY_IDS.includes(e.id),
+}));
 
 /** 已接线供给（可握手）。 */
 export function listWiredSupply(

@@ -82,6 +82,12 @@ export function GatewayConnectionsModal({ open, onClose }: Props) {
 
   const handleCreate = async (connectorId: string) => {
     if (!keyName.trim() || !apiKey.trim()) return;
+    // 不重复建设：同一网关连接器下不允许同名连接。
+    const wanted = keyName.trim().toLowerCase();
+    if (connections.some((c) => c.connectorId === connectorId && c.name.trim().toLowerCase() === wanted)) {
+      setError(t("gateway.connections.duplicateName", { name: keyName.trim() }));
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

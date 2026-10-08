@@ -1229,6 +1229,18 @@ input[type="radio"] {
     0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
+/* Filter chips (marketplace skills / connectors): selected = theme tint fill + theme text (Comate-like). */
+.agx-filter-chip-active {
+  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.22);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.16);
+  color: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 72%, var(--text-strong));
+}
+:root[data-theme="light"] .agx-filter-chip-active {
+  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.10);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.10);
+  color: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 88%, #0f172a);
+}
+
 /* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */
 .agx-composer-lift-spacer {
   flex-basis: 0;

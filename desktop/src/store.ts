@@ -479,12 +479,26 @@ export type PendingConfirm = {
   context?: Record<string, unknown>;
 };
 
+/** `choice` (default) picks options; `text` / `url` render a form field; `secret` is a masked
+ * field whose value goes to the backend tool only (never into selectedOptions / chat). */
+export type ClarificationInputType = "choice" | "text" | "url" | "secret";
+
 export type ClarificationDecision = {
   id: string;
   question: string;
   options: string[];
   selectionMode: "single" | "multiple";
   exclusiveOptions: string[];
+  /** Optional form extensions (absent on legacy payloads). */
+  inputType?: ClarificationInputType;
+  /** Defaults to true; false lets the user submit without answering. */
+  required?: boolean;
+  label?: string;
+  placeholder?: string;
+  /** Option label (in `options`) that reveals a free-text input, e.g. 其他（自定义输入）. */
+  customOption?: string;
+  /** secret fields only: false = shown in clear text (e.g. Access Key ID) but still routed via secretValues. */
+  masked?: boolean;
 };
 
 export type ChoicePanelSource = {

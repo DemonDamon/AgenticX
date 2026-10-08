@@ -176,7 +176,8 @@
       "save": "保存",
       "delete": "删除连接",
       "empty": "网关目录为空。",
-      "failed": "操作失败:{{reason}}"
+      "failed": "操作失败:{{reason}}",
+      "duplicateName": "该连接器下已存在名为「{{name}}」的连接，请直接使用或换个名称"
     }
   },
   "empty": {
@@ -245,7 +246,15 @@
         "invalid_url": "URL 格式无效",
         "required_api_key": "请填写 API Key",
         "required_token": "请填写 Token"
-      }
+      },
+      "updateCredential": "更新凭证",
+      "updateConnection": "更新连接",
+      "existsTitle": "已存在连接：{{name}}",
+      "existsHint": "同一模板只保留一个连接实例。可直接使用；或填写新凭证后点「更新凭证」覆盖该连接，不会新建重复连接。",
+      "existsHintNoCredential": "同一模板只保留一个连接实例。可直接使用；或修改后点「更新连接」覆盖该连接，不会新建重复连接。",
+      "useExisting": "直接使用",
+      "reused": "连接「{{name}}」已存在且凭证未变化，已直接复用",
+      "updated": "已更新连接「{{name}}」的凭证"
     },
     "supply": {
       "gildata": {
@@ -352,6 +361,85 @@
         "name": "Cloudflare",
         "description": "Cloudflare DNS 与边缘网络 API：管理域名解析、CDN 与安全规则，把边缘基础设施运维能力接入助手自动化。"
       }
+    },
+    "newMenu": {
+      "button": "新建连接器",
+      "fromChat": "从对话新建",
+      "fromTemplate": "从模板新建",
+      "chatDraft": "请帮我创建一个连接器",
+      "searchTemplates": "搜索模板",
+      "noTemplates": "没有匹配的模板",
+      "official": "官方",
+      "cancel": "取消",
+      "next": "下一步",
+      "back": "上一步",
+      "reselect": "重选"
+    },
+    "useDraft": "请使用连接器「{{name}}」帮我完成任务。",
+    "hub": {
+      "title": "连接器",
+      "tabs": {
+        "market": "连接市场",
+        "mine": "我的连接"
+      },
+      "marketChips": {
+        "recommended": "推荐",
+        "official": "官方",
+        "enterprise": "企业"
+      },
+      "mineChips": {
+        "all": "全部",
+        "custom": "自定义连接"
+      },
+      "emptyMarket": "暂无可用连接",
+      "emptyMineAll": "还没有连接实例。在「连接市场」完成授权，或点击「新建连接器」后会出现在这里。",
+      "emptyMineCustom": "还没有自定义连接。可通过「新建连接器 → 从对话新建」接入 REST API（含 AK/SK、OAuth）或数据库；通用 MCP Server 请到「插件市场 → MCP」添加。",
+      "emptySearch": "没有匹配的连接",
+      "searchPlaceholder": "搜索连接器",
+      "source": {
+        "official": "官方",
+        "enterprise": "企业",
+        "custom": "自定义"
+      },
+      "shape": {
+        "mcp": "MCP",
+        "rest": "REST API",
+        "database": "数据库"
+      },
+      "status": {
+        "connected": "已连接",
+        "needs_credential": "待填凭证",
+        "invalid": "失效"
+      },
+      "readOnly": "只读",
+      "noDescription": "暂无描述",
+      "actions": {
+        "use": "使用",
+        "more": "更多操作",
+        "manage": "管理",
+        "delete": "删除",
+        "confirmDelete": "确认删除",
+        "reauth": "重新授权",
+        "fillCredential": "填写凭证"
+      },
+      "deleteAria": "删除 {{name}}",
+      "deleteFailed": "删除失败",
+      "deleted": "已删除「{{name}}」",
+      "manageDraft": "帮我管理连接器「{{name}}」：检查连接状态，需要时更新凭证或配置。",
+      "credentialDraft": "为连接器「{{name}}」填写凭证并验证连接。"
     }
+  },
+  "mcpNew": {
+    "button": "新建 MCP",
+    "remote": "远程 MCP（URL）",
+    "remoteHint": "URL + Headers，如 Streamable HTTP / SSE",
+    "local": "本地命令（stdio）",
+    "localHint": "在 mcp.json 中添加 command / args",
+    "savedJson": "已保存 mcp.json"
+  },
+  "mcpAdded": {
+    "title": "已添加 {{count}} 个 MCP",
+    "empty": "还没有添加 MCP Server，可点击右上角「新建 MCP」或从下方市场安装",
+    "manage": "管理"
   }
 }

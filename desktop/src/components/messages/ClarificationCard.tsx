@@ -2,7 +2,15 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Check, ChevronUp, Clock, ExternalLink, Send } from "lucide-react";
 import type { ChoicePanelOption, ClarificationDecision, PendingClarification } from "../../store";
-import { buildClarificationAnswerText, inferClarificationDecisions, toggleDecisionSelection, type ClarificationAnswer } from "../../utils/clarification-notice";
+import {
+  buildClarificationAnswerText,
+  buildDecisionFormAnswer,
+  inferClarificationDecisions,
+  isDecisionFormComplete,
+  isValidClarifyUrl,
+  toggleDecisionSelection,
+  type ClarificationAnswer,
+} from "../../utils/clarification-notice";
 import { ASSISTANT_INLINE_CARD_SHELL_CLASS, GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
 
 /** Minimal line-art glyph for clarification prompts (Near-style, stroke-only). */
@@ -71,7 +79,11 @@ export function ClarificationCard({
   );
   const decisions = useMemo(() => {
     if (isChoicePanel) return [];
-    const explicit = (prompt.decisions ?? []).filter((d) => d.question.trim() && (d.options?.length ?? 0) > 0);
+    const explicit = (prompt.decisions ?? []).filter(
+      (d) =>
+        d.question.trim() &&
+        ((d.options?.length ?? 0) > 0 || (d.inputType !== undefined && d.inputType !== "choice")),
+    );
     const source = explicit.length > 0 ? explicit : inferClarificationDecisions(prompt.context, opts);
     return source.map((d) => ({
       ...d,
@@ -81,6 +93,16 @@ export function ClarificationCard({
   }, [isChoicePanel, prompt.decisions, prompt.context, opts]);
   const groupedMode = decisions.length > 0;
   const hasMultipleDecision = decisions.some((d) => d.selectionMode === "multiple");
+  /** Form-style card (text/url/secret fields or custom-option reveal), e.g. connector assistant. */
+  const formMode = decisions.some(
+    (d) => (d.inputType !== undefined && d.inputType !== "choice") || Boolean(d.customOption),
+  );
+  const ctxLabel = (key: "submit_label" | "skip_label"): string => {
+    const raw = prompt.context?.[key];
+    return typeof raw === "string" ? raw.trim().slice(0, 16) : "";
+  };
+  const submitLabel = ctxLabel("submit_label") || t("clarify.submitDecision");
+  const skipLabel = ctxLabel("skip_label") || t("clarify.skipDefault");
   // `request_clarification` intentionally permits prompt-only, open-ended
   // questions. In that shape the text box is the primary answer surface, not
   // an optional alternative hidden behind a checkbox. Also keep malformed
@@ -116,18 +138,14 @@ export function ClarificationCard({
           k !== "panel_type" &&
           k !== "choice_options" &&
           k !== "superseded" &&
+          k !== "submit_label" &&
+          k !== "skip_label" &&
           v !== null &&
           v !== undefined &&
           String(v).trim(),
       )
       .map(([k, v]) => [k, String(v)] as [string, string]);
   }, [prompt.context]);
-
-  const decisionAnswered = (decision: ClarificationDecision) => {
-    const choices = selectedByDecision[decision.id] ?? [];
-    const custom = customByDecision[decision.id]?.trim();
-    return Boolean(choices.length > 0 || (canFree && custom));
-  };
 
   const canSubmit = useMemo(() => {
     if (answered || isSuperseded) return false;
@@ -136,7 +154,11 @@ export function ClarificationCard({
       return canFree && customText.trim().length > 0;
     }
     if (groupedMode) {
-      return decisions.every((d) => decisionAnswered(d));
+      return isDecisionFormComplete(
+        decisions,
+        { selected: selectedByDecision, custom: customByDecision },
+        canFree,
+      );
     }
     const hasCustom = canFree && (openEnded || customOpen) && customText.trim().length > 0;
     return selectedFlat.size > 0 || hasCustom;
@@ -208,18 +230,12 @@ export function ClarificationCard({
       };
     }
     if (groupedMode) {
-      const selectedOptions = decisions
-        .map((d) => {
-          const choices = (selectedByDecision[d.id] ?? []).map((c) => c.trim()).filter(Boolean);
-          const choiceText = choices.join("、");
-          const custom = canFree ? customByDecision[d.id]?.trim() : "";
-          if (choiceText && custom) return `${d.question}：${choiceText}（补充：${custom}）`;
-          if (choiceText) return `${d.question}：${choiceText}`;
-          if (custom) return `${d.question}：${custom}`;
-          return null;
-        })
-        .filter((v): v is string => Boolean(v));
-      return { answerText: "", selectedOptions };
+      return buildDecisionFormAnswer(
+        decisions,
+        { selected: selectedByDecision, custom: customByDecision },
+        canFree,
+        t("clarify.secretFilled"),
+      );
     }
     return {
       answerText: openEnded || customOpen ? customText.trim() : "",
@@ -253,7 +269,10 @@ export function ClarificationCard({
     try {
       const ok = await onSubmitAnswer!(prompt.requestId, answer);
       if (ok) {
-        setAnswered(answer);
+        // Drop masked values from component state once delivered.
+        const { secretValues: _secrets, ...publicAnswer } = answer;
+        setAnswered(publicAnswer);
+        clearSecretInputs();
       } else {
         // Clear business failure (e.g. 404 already-resolved). Don't pretend success.
         setError(t("clarify.alreadyResolved"));
@@ -269,7 +288,18 @@ export function ClarificationCard({
     }
   };
 
+  const clearSecretInputs = () => {
+    const secretIds = decisions.filter((d) => d.inputType === "secret").map((d) => d.id);
+    if (secretIds.length === 0) return;
+    setCustomByDecision((prev) => {
+      const next = { ...prev };
+      for (const id of secretIds) delete next[id];
+      return next;
+    });
+  };
+
   const handleSkip = () => {
+    clearSecretInputs();
     if (answered || submitting || isSuperseded) return;
     setError(null);
     const empty: ClarificationAnswer = { answerText: "", selectedOptions: [] };
@@ -509,6 +539,16 @@ export function ClarificationCard({
             {decisions.map((decision, idx) => {
               const isMultiple = decision.selectionMode === "multiple";
               const selected = selectedByDecision[decision.id] ?? [];
+              const inputKind = decision.inputType ?? "choice";
+              const isField = inputKind !== "choice";
+              const isRequired = decision.required !== false;
+              const typed = customByDecision[decision.id] ?? "";
+              const customSelected = Boolean(decision.customOption && selected.includes(decision.customOption));
+              const urlInvalid = inputKind === "url" && typed.trim().length > 0 && !isValidClarifyUrl(typed);
+              const fieldId = `clarify-field-${prompt.requestId}-${decision.id}`;
+              const inputClass =
+                "w-full rounded-lg border bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40 disabled:opacity-50 " +
+                (urlInvalid ? "border-red-500/50" : "border-[var(--border-muted)]");
               return (
               <div key={decision.id}>
                 <div className="flex items-baseline gap-1.5 text-[11px] font-medium text-text-muted">
@@ -516,10 +556,49 @@ export function ClarificationCard({
                     {t("clarify.decisionN", { n: idx + 1 })}
                   </span>
                   <span className="text-text-strong/90">{decision.question}</span>
-                  {isMultiple && (
+                  {isMultiple && !isField && (
                     <span className="shrink-0 text-[10px] font-normal text-text-faint">{t("clarify.multiSelect")}</span>
                   )}
                 </div>
+                {isField ? (
+                  <div className="mt-1.5">
+                    {decision.label && (
+                      <label htmlFor={fieldId} className="mb-1 block text-[11px] text-text-muted">
+                        {decision.label}
+                        {isRequired && (
+                          <span className="ml-0.5 text-red-400" aria-label={t("clarify.fieldRequired")}>
+                            *
+                          </span>
+                        )}
+                      </label>
+                    )}
+                    <input
+                      id={fieldId}
+                      type={
+                        inputKind === "secret" && decision.masked !== false
+                          ? "password"
+                          : inputKind === "url"
+                            ? "url"
+                            : "text"
+                      }
+                      value={typed}
+                      onChange={(e) => setDecisionCustom(decision.id, e.target.value)}
+                      placeholder={decision.placeholder || t("clarify.fieldPlaceholder")}
+                      disabled={submitting}
+                      required={isRequired}
+                      aria-required={isRequired}
+                      aria-invalid={urlInvalid || undefined}
+                      aria-label={decision.label || decision.question}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className={inputClass}
+                    />
+                    {urlInvalid && <div className="mt-1 text-[10px] text-red-400">{t("clarify.invalidUrl")}</div>}
+                    {inputKind === "secret" && (
+                      <div className="mt-1 text-[10px] text-text-faint">{t("clarify.secretHint")}</div>
+                    )}
+                  </div>
+                ) : (
                 <div
                   className="mt-1.5 flex flex-wrap gap-1.5"
                   role={isMultiple ? "group" : "radiogroup"}
@@ -549,7 +628,20 @@ export function ClarificationCard({
                     );
                   })}
                 </div>
-                {canFree && (
+                )}
+                {!isField && customSelected && (
+                  <input
+                    type="text"
+                    value={typed}
+                    onChange={(e) => setDecisionCustom(decision.id, e.target.value)}
+                    placeholder={decision.placeholder || t("clarify.customOptionPlaceholder")}
+                    disabled={submitting}
+                    aria-label={decision.customOption}
+                    autoComplete="off"
+                    className={`mt-2 ${inputClass}`}
+                  />
+                )}
+                {canFree && !isField && !decision.customOption && (
                   <div className="mt-2">
                     <label
                       className="mb-1 block text-[10px] text-text-faint"
@@ -683,7 +775,9 @@ export function ClarificationCard({
             ? t("clarify.supersededHint")
             : isChoicePanel
               ? t("clarify.submitHintChoice")
-              : groupedMode
+              : groupedMode && formMode
+                ? t("clarify.submitHintForm")
+                : groupedMode
                 ? hasMultipleDecision
                   ? t("clarify.submitHintGroupedMulti")
                   : t("clarify.submitHintGrouped")
@@ -699,7 +793,7 @@ export function ClarificationCard({
               disabled={submitting}
               className="rounded px-2 py-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
             >
-              {t("clarify.skipDefault")}
+              {skipLabel}
             </button>
           )}
           {!isSuperseded && (
@@ -723,7 +817,7 @@ export function ClarificationCard({
               ) : (
                 <>
                   <Send className="h-3.5 w-3.5" />
-                  {t("clarify.submitDecision")}
+                  {submitLabel}
                 </>
               )}
             </button>

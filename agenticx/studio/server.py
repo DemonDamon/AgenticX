@@ -939,6 +939,10 @@ def _studio_cors_origins() -> list[str]:
 
 
 def create_studio_app() -> FastAPI:
+    # Proxy on/off must not matter for local traffic: loopback never via proxy.
+    from agenticx.utils.proxy_policy import ensure_local_no_proxy_env
+
+    ensure_local_no_proxy_env()
     _pending_mcp_autoconnect_tasks: set[asyncio.Task[Any]] = set()
 
     @contextlib.asynccontextmanager
@@ -2795,6 +2799,17 @@ def create_studio_app() -> FastAPI:
             )
             if getattr(payload, "option_id", None):
                 answer["option_id"] = payload.option_id
+        # Persisted / displayed copy never carries secrets; only the waiting
+        # tool (connector_manage credential prompt) receives secret_values.
+        persisted_answer = dict(answer)
+        secret_values = {
+            str(k): str(v)
+            for k, v in (getattr(payload, "secret_values", None) or {}).items()
+            if str(k).strip() and str(v or "").strip()
+        }
+        if secret_values:
+            answer["secret_values"] = secret_values
+            persisted_answer["secret_fields"] = sorted(secret_values)
         ok = gate.resolve(payload.request_id, answer)
         if not ok:
             raise HTTPException(status_code=404, detail="clarification request not found")
@@ -2812,7 +2827,7 @@ def create_studio_app() -> FastAPI:
                         and str(meta.get("request_id") or meta.get("id") or "") == payload.request_id
                     ):
                         meta["clarification_answered"] = True
-                        meta["clarification_answer"] = answer
+                        meta["clarification_answer"] = persisted_answer
                         break
                 managed.session.persist_async()
         except Exception:
@@ -5729,7 +5744,7 @@ def create_studio_app() -> FastAPI:
             "file_read": "filesystem", "file_write": "filesystem", "file_edit": "filesystem", "list_files": "filesystem",
             "codegen": "code",
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
-            "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp",
+            "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp", "connector_manage": "mcp",
             "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
             "memory_append": "memory", "memory_search": "memory", "session_search": "memory", "plugin_usage": "memory",

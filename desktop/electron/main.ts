@@ -3109,6 +3109,9 @@ async function startStudioServe(): Promise<void> {
     AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
     // Override leftover shell exports so Settings → 工具 → 调查取证 wins.
     AGENTICX_OPS_TOOLS: readOpsToolsEnabled(cfg) ? "1" : "0",
+    // 连接器网关（REST 连接器登记）：Python 侧复用/按需拉起同一个 sidecar。
+    AGX_CONNECTOR_RUNTIME_BIN: getConnectorRuntimeBinaryPath(),
+    AGX_CONNECTOR_RUNTIME_DIR: connectorRuntimeDataDir(),
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
@@ -7008,6 +7011,99 @@ let connectorRuntimeRestartCount = 0;
 const CONNECTOR_RUNTIME_MAX_RESTARTS = 3;
 let connectorRuntimeHealthTimer: ReturnType<typeof setInterval> | null = null;
 let connectorRuntimeStarting: Promise<ConnectorRuntimeEnsureResult> | null = null;
+/** 复用了同机已在运行的实例（例如由 Python 后端拉起）：不持有子进程，退出时不回收。 */
+let connectorRuntimeAdopted = false;
+
+function connectorRuntimeDataDir(): string {
+  return path.join(CONFIG_DIR, "connector-runtime");
+}
+
+/** 读取 data-dir 下 0600 token 文件（与 master.key 同信任级；由网关在启动时落盘）。 */
+function readConnectorRuntimeToken(dataDir: string, name: "runtime.token" | "admin.token"): string {
+  try {
+    return fs.readFileSync(path.join(dataDir, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** sidecar.json：网关监听后写入 {pid, addr}；用于复用实例与沿用端口（mcp.json 里的 URL 保持稳定）。 */
+function readConnectorRuntimeSidecarInfo(dataDir: string): { pid: number; port: number } | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dataDir, "sidecar.json"), "utf8")) as {
+      pid?: number;
+      addr?: string;
+    };
+    const port = Number(String(raw.addr ?? "").split(":").pop());
+    if (!Number.isInteger(port) || port <= 0) return null;
+    return { pid: Number(raw.pid) || 0, port };
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isLocalPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
+  });
+}
+
+/**
+ * 网关是 Go 进程，只认环境变量代理：把系统代理（如 Clash 127.0.0.1:7897）显式传给它，
+ * 本地目标一律直连（NO_PROXY），代理不可达时网关自身回落直连——开/关代理都不受影响。
+ */
+async function connectorRuntimeProxyEnv(): Promise<NodeJS.ProcessEnv> {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const noProxy = new Set(
+    String(env.NO_PROXY ?? env.no_proxy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  for (const h of ["localhost", "127.0.0.1", "::1", ".local"]) noProxy.add(h);
+  env.NO_PROXY = Array.from(noProxy).join(",");
+  if (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy) return env;
+  try {
+    const rule = await session.defaultSession.resolveProxy("https://example.com");
+    const m = /^(?:PROXY|HTTPS)\s+([^\s;]+)/i.exec(rule.trim());
+    if (m) {
+      const proxyUrl = rule.trim().toUpperCase().startsWith("HTTPS") ? `https://${m[1]}` : `http://${m[1]}`;
+      env.HTTPS_PROXY = proxyUrl;
+      env.HTTP_PROXY = proxyUrl;
+    }
+  } catch {
+    /* no system proxy info: direct */
+  }
+  return env;
+}
+
+/** 复用已在运行的网关实例（Python 后端或上次桌面会话拉起）。 */
+async function tryAdoptConnectorRuntime(dataDir: string): Promise<ConnectorRuntimeEnsureResult | null> {
+  const info = readConnectorRuntimeSidecarInfo(dataDir);
+  if (!info || !isPidAlive(info.pid)) return null;
+  const runtimeToken = readConnectorRuntimeToken(dataDir, "runtime.token");
+  const adminToken = readConnectorRuntimeToken(dataDir, "admin.token");
+  if (!runtimeToken || !adminToken) return null;
+  if (!(await waitForConnectorRuntimeHealth(info.port, 1_500))) return null;
+  connectorRuntimePort = info.port;
+  connectorRuntimeRuntimeToken = runtimeToken;
+  connectorRuntimeAdminToken = adminToken;
+  connectorRuntimeAdopted = true;
+  console.info("[connector-runtime] adopted running instance on port", info.port);
+  return { ok: true, port: info.port, runtimeToken };
+}
 
 /** 二进制位置：打包后在 resources/sidecar/（electron-builder extraResources），开发态用 stage 目录。 */
 function getConnectorRuntimeBinaryPath(): string {
@@ -7024,6 +7120,13 @@ async function ensureConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
   if (connectorRuntimeProcess && !connectorRuntimeProcess.killed && connectorRuntimePort) {
     return { ok: true, port: connectorRuntimePort, runtimeToken: connectorRuntimeRuntimeToken };
   }
+  if (connectorRuntimeAdopted && connectorRuntimePort) {
+    if (await waitForConnectorRuntimeHealth(connectorRuntimePort, 1_500)) {
+      return { ok: true, port: connectorRuntimePort, runtimeToken: connectorRuntimeRuntimeToken };
+    }
+    connectorRuntimeAdopted = false;
+    connectorRuntimePort = 0;
+  }
   if (!connectorRuntimeStarting) {
     connectorRuntimeStarting = startConnectorRuntime().finally(() => {
       connectorRuntimeStarting = null;
@@ -7039,11 +7142,17 @@ async function startConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
     return { ok: false, error: "binary_not_found" };
   }
   try {
-    const port = await findFreePort();
-    const runtimeToken = crypto.randomBytes(24).toString("hex");
-    const adminToken = crypto.randomBytes(24).toString("hex");
-    const dataDir = path.join(CONFIG_DIR, "connector-runtime");
-    fs.mkdirSync(dataDir, { recursive: true });
+    const dataDir = connectorRuntimeDataDir();
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const adopted = await tryAdoptConnectorRuntime(dataDir);
+    if (adopted) return adopted;
+    // 沿用上次端口与 token：已写入 mcp.json 的网关条目跨重启保持可用。
+    const prev = readConnectorRuntimeSidecarInfo(dataDir);
+    const port = prev && (await isLocalPortFree(prev.port)) ? prev.port : await findFreePort();
+    const runtimeToken =
+      readConnectorRuntimeToken(dataDir, "runtime.token") || crypto.randomBytes(24).toString("hex");
+    const adminToken =
+      readConnectorRuntimeToken(dataDir, "admin.token") || crypto.randomBytes(24).toString("hex");
     const args = [
       "serve",
       "--addr", `127.0.0.1:${port}`,
@@ -7055,6 +7164,7 @@ async function startConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
     connectorRuntimeProcess = spawn(binaryPath, args, {
       cwd: os.homedir(),
       stdio: ["ignore", "pipe", "pipe"],
+      env: await connectorRuntimeProxyEnv(),
     });
     connectorRuntimePort = port;
     connectorRuntimeRuntimeToken = runtimeToken;
@@ -7141,6 +7251,7 @@ function stopConnectorRuntimeHealthCheck(): void {
 
 function stopConnectorRuntime(): void {
   stopConnectorRuntimeHealthCheck();
+  connectorRuntimeAdopted = false;
   if (!connectorRuntimeProcess) return;
   try { connectorRuntimeProcess.kill("SIGTERM"); } catch { /* noop */ }
   connectorRuntimeProcess = null;
@@ -9114,7 +9225,7 @@ function registerIpc(): void {
 
   ipcMain.handle("connector-runtime-status", async () => {
     return {
-      running: !!connectorRuntimeProcess && !connectorRuntimeProcess.killed,
+      running: (!!connectorRuntimeProcess && !connectorRuntimeProcess.killed) || connectorRuntimeAdopted,
       port: connectorRuntimePort,
     };
   });

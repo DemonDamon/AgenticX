@@ -1,0 +1,356 @@
+{
+  "_comment": "Connector template catalog mirrored from desktop/src/components/settings/connectors/connector-supply.ts (ids/auth/kind). Keep in sync; parity is asserted by desktop vitest connector-templates-parity.test.ts.",
+  "templates": [
+    {
+      "id": "native:tencent-meeting",
+      "kind": "native",
+      "name": "腾讯会议",
+      "auth": "oauth2",
+      "category": "meeting",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:tapd",
+      "kind": "native",
+      "name": "TAPD",
+      "auth": "api_key",
+      "category": "collab",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:github",
+      "kind": "native",
+      "name": "GitHub",
+      "auth": "oauth2",
+      "category": "code",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:feishu",
+      "kind": "native",
+      "name": "飞书",
+      "auth": "oauth2",
+      "category": "collab",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:wecom",
+      "kind": "native",
+      "name": "企业微信",
+      "auth": "none",
+      "category": "collab",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:qqmail",
+      "kind": "native",
+      "name": "Agent Mail",
+      "auth": "oauth2",
+      "category": "office",
+      "wired": true,
+      "create_via": "ui_native"
+    },
+    {
+      "id": "native:gmail",
+      "kind": "native",
+      "name": "Gmail",
+      "auth": "oauth2",
+      "category": "office",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:notion",
+      "kind": "native",
+      "name": "Notion",
+      "auth": "oauth2",
+      "category": "docs",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:slack",
+      "kind": "native",
+      "name": "Slack",
+      "auth": "oauth2",
+      "category": "collab",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:gdrive",
+      "kind": "native",
+      "name": "Google Drive",
+      "auth": "oauth2",
+      "category": "docs",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:airtable",
+      "kind": "native",
+      "name": "Airtable",
+      "auth": "api_key",
+      "category": "data",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:supabase",
+      "kind": "native",
+      "name": "Supabase",
+      "auth": "api_key",
+      "category": "data",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "native:bigquery",
+      "kind": "native",
+      "name": "BigQuery",
+      "auth": "oauth2",
+      "category": "data",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "stub:gildata",
+      "kind": "mcp",
+      "name": "恒生聚源MCP",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:yingmi",
+      "kind": "mcp",
+      "name": "盈米MCP",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:comein",
+      "kind": "mcp",
+      "name": "进门投研",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:dichan",
+      "kind": "mcp",
+      "name": "深度智联",
+      "auth": "api_key",
+      "category": "data",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:kuaidi100",
+      "kind": "mcp",
+      "name": "快递100",
+      "auth": "api_key",
+      "category": "office",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:lawstar",
+      "kind": "mcp",
+      "name": "法律之星",
+      "auth": "api_key",
+      "category": "legal",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:esign",
+      "kind": "mcp",
+      "name": "e签宝电子签名",
+      "auth": "custom_credential",
+      "category": "office",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:pkulaw",
+      "kind": "mcp",
+      "name": "北大法宝-检索法律法规",
+      "auth": "api_key",
+      "category": "legal",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:neocrm",
+      "kind": "mcp",
+      "name": "销售易 CRM",
+      "auth": "custom_credential",
+      "category": "crm",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:dingtalk",
+      "kind": "mcp",
+      "name": "钉钉 CLI",
+      "auth": "none",
+      "category": "collab",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:qingflow",
+      "kind": "mcp",
+      "name": "轻流",
+      "auth": "custom_credential",
+      "category": "collab",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:zsxq",
+      "kind": "mcp",
+      "name": "知识星球",
+      "auth": "api_key",
+      "category": "docs",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:amap",
+      "kind": "mcp",
+      "name": "高德地图",
+      "auth": "api_key",
+      "category": "maps",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:baidu-maps",
+      "kind": "mcp",
+      "name": "百度地图",
+      "auth": "api_key",
+      "category": "maps",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:tencent-maps",
+      "kind": "mcp",
+      "name": "腾讯地图",
+      "auth": "api_key",
+      "category": "maps",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:tencent-docs",
+      "kind": "mcp",
+      "name": "腾讯文档",
+      "auth": "custom_credential",
+      "category": "docs",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:wps",
+      "kind": "mcp",
+      "name": "WPS Office",
+      "auth": "custom_credential",
+      "category": "office",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:outlook",
+      "kind": "mcp",
+      "name": "Outlook",
+      "auth": "custom_credential",
+      "category": "office",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:zoom",
+      "kind": "mcp",
+      "name": "Zoom",
+      "auth": "oauth2",
+      "category": "meeting",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "stub:gitlab",
+      "kind": "mcp",
+      "name": "GitLab",
+      "auth": "custom_credential",
+      "category": "code",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:gitee",
+      "kind": "mcp",
+      "name": "Gitee",
+      "auth": "custom_credential",
+      "category": "code",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:linear",
+      "kind": "mcp",
+      "name": "Linear",
+      "auth": "api_key",
+      "category": "collab",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:asana",
+      "kind": "mcp",
+      "name": "Asana",
+      "auth": "oauth2",
+      "category": "collab",
+      "wired": false,
+      "create_via": "unavailable"
+    },
+    {
+      "id": "stub:tianyancha",
+      "kind": "mcp",
+      "name": "天眼查",
+      "auth": "api_key",
+      "category": "crm",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:qichacha",
+      "kind": "mcp",
+      "name": "企查查",
+      "auth": "api_key",
+      "category": "crm",
+      "wired": false,
+      "create_via": "mcp_url"
+    },
+    {
+      "id": "stub:cloudflare",
+      "kind": "mcp",
+      "name": "Cloudflare",
+      "auth": "custom_credential",
+      "category": "infra",
+      "wired": false,
+      "create_via": "mcp_url"
+    }
+  ]
+}

@@ -80,7 +80,14 @@
     "submitDecision": "Submit decision",
     "openAnswer": "Your reply",
     "openAnswerPlaceholder": "Type your reply…",
-    "submitHintOpenEnded": "Submit after typing · The agent continues in the same turn"
+    "submitHintOpenEnded": "Submit after typing · The agent continues in the same turn",
+    "fieldRequired": "Required",
+    "invalidUrl": "Enter a full address starting with http:// or https://",
+    "secretFilled": "Provided (hidden)",
+    "secretHint": "Saved to local config only — never sent to the chat or the model",
+    "customOptionPlaceholder": "Type here…",
+    "fieldPlaceholder": "Type here…",
+    "submitHintForm": "Fill the required fields, then confirm · The agent continues in the same turn"
   },
   "share": {
     "rasterNotReady": "Rasterize failed: card is not ready",

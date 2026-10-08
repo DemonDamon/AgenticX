@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATEWAY_DEFAULT_SERVER_NAME,
+  GATEWAY_LOCAL_SERVER_NAME,
   applyGatewayToMcpJson,
   buildBuiltinGatewayForm,
   buildGatewayMarketItem,
@@ -237,5 +238,19 @@ describe("buildGatewayMarketItem", () => {
       installed: true,
     });
     expect(item.installed).toBe(true);
+  });
+});
+
+describe("isGatewayInstalled local fallback", () => {
+  it("treats connector-runtime-local as the installed default gateway", () => {
+    expect(isGatewayInstalled(new Set([GATEWAY_LOCAL_SERVER_NAME]))).toBe(true);
+    expect(isGatewayInstalled(new Set(["other"]))).toBe(false);
+    expect(isGatewayInstalled(new Set([GATEWAY_LOCAL_SERVER_NAME]), "my-gateway")).toBe(false);
+  });
+
+  it("marks the gateway market card as enterprise + recommended", () => {
+    const item = buildGatewayMarketItem({ name: "连接器网关", description: "d", installed: false });
+    expect(item.marketSource).toBe("enterprise");
+    expect(item.recommended).toBe(true);
   });
 });

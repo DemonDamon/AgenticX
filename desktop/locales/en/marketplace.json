@@ -176,7 +176,8 @@
       "save": "Save",
       "delete": "Delete connection",
       "empty": "Gateway catalog is empty.",
-      "failed": "Operation failed: {{reason}}"
+      "failed": "Operation failed: {{reason}}",
+      "duplicateName": "A connection named \"{{name}}\" already exists for this connector — use it or pick another name"
     }
   },
   "empty": {
@@ -245,7 +246,15 @@
         "invalid_url": "Invalid URL",
         "required_api_key": "API Key is required",
         "required_token": "Token is required"
-      }
+      },
+      "updateCredential": "Update credential",
+      "updateConnection": "Update connection",
+      "existsTitle": "Connection already exists: {{name}}",
+      "existsHint": "Each template keeps a single connection. Use it directly, or enter a new credential and click \"Update credential\" to overwrite it — no duplicate is created.",
+      "existsHintNoCredential": "Each template keeps a single connection. Use it directly, or edit and click \"Update connection\" to overwrite it — no duplicate is created.",
+      "useExisting": "Use it",
+      "reused": "Connection \"{{name}}\" already exists with the same credential — reused as is",
+      "updated": "Updated the credential of \"{{name}}\""
     },
     "supply": {
       "gildata": {
@@ -352,6 +361,85 @@
         "name": "Cloudflare",
         "description": "Cloudflare DNS and edge network APIs—manage DNS, CDN, and security rules; automate edge infrastructure from the assistant."
       }
+    },
+    "newMenu": {
+      "button": "New connector",
+      "fromChat": "Create from chat",
+      "fromTemplate": "Create from template",
+      "chatDraft": "Please help me create a connector",
+      "searchTemplates": "Search templates",
+      "noTemplates": "No matching templates",
+      "official": "Official",
+      "cancel": "Cancel",
+      "next": "Next",
+      "back": "Back",
+      "reselect": "Change"
+    },
+    "useDraft": "Please use the \"{{name}}\" connector to help me with my task.",
+    "hub": {
+      "title": "Connectors",
+      "tabs": {
+        "market": "Marketplace",
+        "mine": "My connections"
+      },
+      "marketChips": {
+        "recommended": "Recommended",
+        "official": "Official",
+        "enterprise": "Enterprise"
+      },
+      "mineChips": {
+        "all": "All",
+        "custom": "Custom"
+      },
+      "emptyMarket": "No connectors available",
+      "emptyMineAll": "No connections yet. Authorize one in Marketplace or click “New connector”.",
+      "emptyMineCustom": "No custom connections yet. Use “New connector → From chat” to connect a REST API (incl. AK/SK, OAuth) or a database. Add generic MCP servers under Plugin market → MCP.",
+      "emptySearch": "No matching connections",
+      "searchPlaceholder": "Search connectors",
+      "source": {
+        "official": "Official",
+        "enterprise": "Enterprise",
+        "custom": "Custom"
+      },
+      "shape": {
+        "mcp": "MCP",
+        "rest": "REST API",
+        "database": "Database"
+      },
+      "status": {
+        "connected": "Connected",
+        "needs_credential": "Needs credential",
+        "invalid": "Expired"
+      },
+      "readOnly": "Read-only",
+      "noDescription": "No description",
+      "actions": {
+        "use": "Use",
+        "more": "More actions",
+        "manage": "Manage",
+        "delete": "Delete",
+        "confirmDelete": "Confirm delete",
+        "reauth": "Re-authorize",
+        "fillCredential": "Add credential"
+      },
+      "deleteAria": "Delete {{name}}",
+      "deleteFailed": "Delete failed",
+      "deleted": "Deleted “{{name}}”",
+      "manageDraft": "Help me manage the connector “{{name}}”: check its status and update credentials or config if needed.",
+      "credentialDraft": "Add credentials for the connector “{{name}}” and verify the connection."
     }
+  },
+  "mcpNew": {
+    "button": "New MCP",
+    "remote": "Remote MCP (URL)",
+    "remoteHint": "URL + headers, e.g. Streamable HTTP / SSE",
+    "local": "Local command (stdio)",
+    "localHint": "Add command / args in mcp.json",
+    "savedJson": "mcp.json saved"
+  },
+  "mcpAdded": {
+    "title": "{{count}} MCP servers added",
+    "empty": "No MCP servers yet. Use “New MCP” or install one from the market below.",
+    "manage": "Manage"
   }
 }

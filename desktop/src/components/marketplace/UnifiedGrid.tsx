@@ -7,7 +7,8 @@
  *   再显 CTA,文字列 group-hover:pr 让出按钮宽,避免叠字。「安装」「重新授权」等常显走文档流。
  * 卡片按 kind 出 badge,CTA 分派:
  * - mcp:未装 → 打开详情浮层安装;已装 → 「使用」回对话
- * - connector:网关 → 安装弹层;已接线原生 → 握手;可表单 stub → 新建连接器;oauth stub → 暂未接线
+ * - connector:网关 → 安装弹层;已接线原生 → 握手;可表单 stub → 新建连接器;oauth stub → 暂未接线;
+ *   已有实例(去重后唯一)→「使用」直达对话,不弹实例选择、不再新建
  * - skill:已装 → 「使用」;registry → 扫描安装;推荐位 install → Meta-Agent 安装;official_site → 外链
  * - agent/command:本机资产恒已装 → 「使用」
  */
@@ -35,6 +36,8 @@ type Props = {
   onCreateConnector?: (item: MarketplaceItem) => void;
   /** oauth/无表单 stub:打开「暂未接线」说明。 */
   onUnwiredConnector?: (item: MarketplaceItem) => void;
+  /** 已有连接实例(原生已连 / 模板已建):「使用」直达对话。缺省回退 onConnectNative。 */
+  onUseConnector?: (item: MarketplaceItem) => void;
 };
 
 /** 悬停 CTA:绝对定位、静态零占位;悬停/键盘聚焦再显。配合文字列 group-hover:pr 防叠字。 */
@@ -88,6 +91,7 @@ export function UnifiedGrid({
   onConnectNative,
   onCreateConnector,
   onUnwiredConnector,
+  onUseConnector,
 }: Props) {
   const { t } = useTranslation("marketplace");
 
@@ -149,6 +153,18 @@ export function UnifiedGrid({
                 </CtaButton>
               );
             }
+          } else if (item.installed && item.health !== "degraded") {
+            // 已有唯一实例(原生已连 / 模板已建):直达使用,不再走新建或握手。
+            ctaHoverOnly = true;
+            cta = (
+              <CtaButton
+                variant="ghost"
+                onClick={() => (onUseConnector ? onUseConnector(item) : onConnectNative?.(item))}
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
+                {t("actions.use")}
+              </CtaButton>
+            );
           } else if (action === "create_form") {
             ctaHoverOnly = true;
             cta = (
@@ -168,14 +184,6 @@ export function UnifiedGrid({
               <CtaButton variant="amber" onClick={() => onConnectNative?.(item)}>
                 <SquarePlus className="h-3.5 w-3.5" aria-hidden />
                 {t("actions.reauth")}
-              </CtaButton>
-            );
-          } else if (item.installed) {
-            ctaHoverOnly = true;
-            cta = (
-              <CtaButton variant="ghost" onClick={() => onConnectNative?.(item)}>
-                <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
-                {t("actions.use")}
               </CtaButton>
             );
           } else {

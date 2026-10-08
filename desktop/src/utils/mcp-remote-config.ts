@@ -72,19 +72,94 @@ export function buildRemoteMcpServerPayload(
 export const AGENTICX_MCP_META_KEY = "_agenticx" as const;
 export const AGENTICX_MCP_SOURCE_CONNECTOR = "connector" as const;
 
+/** 「新建连接器」写入 `_agenticx` 的可选元数据（不含密钥）。 */
+export type AgenticxConnectorMeta = {
+  /** 来源模板（CONNECTOR_SUPPLY.id，如 `stub:qingflow`）；用于同模板去重。 */
+  templateId?: string;
+  /** 用户可读名（server 名可能是 slug / hash）。 */
+  displayName?: string;
+  /** 连接器形态：缺省为 MCP；对话新建的数据库直连为 `database`。 */
+  kind?: string;
+  /** kind=database 时的数据库类型（mysql / postgresql / sqlite）。 */
+  dbType?: string;
+  /** 创建途径：连接器助手 connector_manage 写 `chat`。 */
+  createdVia?: string;
+};
+
 /** Stamp a remote MCP payload as created via Near「新建连接器」. */
 export function withAgenticxConnectorSource(
   config: Record<string, unknown>,
+  meta?: AgenticxConnectorMeta,
 ): Record<string, unknown> {
   const prev = config[AGENTICX_MCP_META_KEY];
   const prevObj =
     prev && typeof prev === "object" && !Array.isArray(prev)
       ? (prev as Record<string, unknown>)
       : {};
+  const extra: Record<string, string> = {};
+  const templateId = String(meta?.templateId ?? "").trim();
+  const displayName = String(meta?.displayName ?? "").trim();
+  if (templateId) extra.templateId = templateId;
+  if (displayName) extra.displayName = displayName;
   return {
     ...config,
-    [AGENTICX_MCP_META_KEY]: { ...prevObj, source: AGENTICX_MCP_SOURCE_CONNECTOR },
+    [AGENTICX_MCP_META_KEY]: { ...prevObj, ...extra, source: AGENTICX_MCP_SOURCE_CONNECTOR },
   };
+}
+
+/** 读取 `_agenticx` 中的模板 / 展示名元数据。 */
+export function readAgenticxConnectorMeta(raw: unknown): AgenticxConnectorMeta {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const meta = (raw as Record<string, unknown>)[AGENTICX_MCP_META_KEY];
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return {};
+  const m = meta as Record<string, unknown>;
+  const out: AgenticxConnectorMeta = {};
+  if (typeof m.templateId === "string" && m.templateId.trim()) out.templateId = m.templateId.trim();
+  if (typeof m.displayName === "string" && m.displayName.trim()) out.displayName = m.displayName.trim();
+  if (typeof m.kind === "string" && m.kind.trim()) out.kind = m.kind.trim();
+  if (typeof m.dbType === "string" && m.dbType.trim()) out.dbType = m.dbType.trim();
+  if (typeof m.createdVia === "string" && m.createdVia.trim()) out.createdVia = m.createdVia.trim();
+  return out;
+}
+
+/** URL 比较用归一化：小写 host、去尾斜杠、去默认协议差异。 */
+export function normalizeMcpUrlForCompare(url?: string): string {
+  const raw = String(url ?? "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`);
+    const path = u.pathname.replace(/\/+$/, "");
+    return `${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`;
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+/**
+ * 凭证指纹（不可逆短 hash，只用于「同一凭证 / 同一身份」判重，不用于鉴权）。
+ * 取 Authorization / *token* / *key* 类 header 值；无凭证返回空串。
+ */
+export function mcpCredentialFingerprint(headers?: Record<string, unknown> | null): string {
+  if (!headers || typeof headers !== "object") return "";
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(headers)) {
+    if (typeof v !== "string" || !v.trim()) continue;
+    const key = k.trim().toLowerCase();
+    if (key === "authorization" || /token|key|secret/.test(key)) {
+      parts.push(`${key}=${v.trim()}`);
+    }
+  }
+  if (parts.length === 0) return "";
+  parts.sort();
+  const input = parts.join("\n");
+  let h1 = 5381;
+  let h2 = 52711;
+  for (let i = 0; i < input.length; i++) {
+    const c = input.charCodeAt(i);
+    h1 = ((h1 << 5) + h1 + c) | 0;
+    h2 = ((h2 << 5) + h2 + c * 31) | 0;
+  }
+  return `fp-${(h1 >>> 0).toString(36)}${(h2 >>> 0).toString(36)}`;
 }
 
 export function readAgenticxMcpSource(raw: unknown): string | undefined {
@@ -96,8 +171,9 @@ export function readAgenticxMcpSource(raw: unknown): string | undefined {
 }
 
 /**
- * True for「新建连接器」tagged entries, or untagged http(s) URL remotes (migration).
- * Stdio marketplace / Cursor/`extra_search_paths` imports (command/args) return false.
+ * 去重候选：打过 `source=connector` 标的条目，或任意 http(s) 远程（含通用 MCP）。
+ * 只用于「同端点 + 同凭证 / 同名」判重（避免重复建同一连接），**不**决定是否展示为连接器——
+ * 展示口径见 {@link isConnectorMcpEntry}。Stdio（command/args）返回 false。
  */
 export function isCustomConnectorMcpConfig(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
@@ -109,20 +185,34 @@ export function isCustomConnectorMcpConfig(raw: unknown): boolean {
   return Boolean(url && /^https?:\/\//i.test(url));
 }
 
-/** Status-row / entry-shaped variant of {@link isCustomConnectorMcpConfig}. */
-export function isCustomConnectorMcpEntry(entry: {
-  url?: string;
-  command?: string;
-  transport?: string;
+/**
+ * mcp.json 条目是否算「连接器」（进「我的连接」/ 对话连接器弹层 / 市场已连接态）：
+ * - 来自连接器目录模板的实例（`_agenticx.templateId`，含模板背后的 MCP / CLI）；
+ * - 连接器助手 connector_manage 显式创建的（`source=connector` 且 `createdVia` 或 `kind=database`）。
+ * 通用 MCP Server（手动添加 / 导入 / 市场安装 / 旧「新建自定义 MCP」打过 source 标的）都不算，
+ * 只在 MCP 页展示。原生连接器与网关（含 REST）由各自的供给行处理，不经此判断。
+ */
+export function isConnectorMcpEntry(entry: {
   agenticxSource?: string;
+  templateId?: string;
+  connectorKind?: string;
+  createdVia?: string;
 }): boolean {
-  if (entry.agenticxSource === AGENTICX_MCP_SOURCE_CONNECTOR) return true;
-  const command = String(entry.command ?? "").trim();
-  if (command) return false;
-  const url = String(entry.url ?? "").trim();
-  if (url && /^https?:\/\//i.test(url)) return true;
-  const transport = String(entry.transport ?? "").trim();
-  return transport === "sse" || transport === "streamable_http";
+  if (String(entry.templateId ?? "").trim()) return true;
+  if (entry.agenticxSource !== AGENTICX_MCP_SOURCE_CONNECTOR) return false;
+  return entry.connectorKind === "database" || Boolean(String(entry.createdVia ?? "").trim());
+}
+
+/** Raw mcp.json entry variant of {@link isConnectorMcpEntry}. */
+export function isConnectorMcpConfig(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const meta = readAgenticxConnectorMeta(raw);
+  return isConnectorMcpEntry({
+    agenticxSource: readAgenticxMcpSource(raw),
+    templateId: meta.templateId,
+    connectorKind: meta.kind,
+    createdVia: meta.createdVia,
+  });
 }
 
 export function mcpTransportBadgeLabel(transport?: string): string {

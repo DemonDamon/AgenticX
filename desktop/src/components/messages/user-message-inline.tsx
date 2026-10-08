@@ -1,6 +1,7 @@
 import { useContext, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { SkillPuzzleIcon } from "../icons/SkillPuzzleIcon";
+import { skillChipLabel } from "../../utils/skill-chip-label";
 import {
   COMPOSER_INLINE_CHIP_CLASS,
   ComposerRefIcon,
@@ -94,7 +95,7 @@ export function UserSkillRefChip({ name }: { name: string }) {
   return (
     <span className={COMPOSER_INLINE_CHIP_CLASS} title={`@skill://${name}`}>
       <SkillPuzzleIcon className="agx-composer-inline-chip-icon h-[0.95em] w-[0.95em] shrink-0 opacity-90" />
-      <span className="min-w-0 truncate">{name}</span>
+      <span className="min-w-0 truncate">{skillChipLabel(name)}</span>
     </span>
   );
 }

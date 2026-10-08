@@ -1572,7 +1572,12 @@
       "confirmDelete": "确认删除",
       "disconnectFail": "断开失败",
       "empty": "暂无已连接实例",
-      "gatewayName": "连接器网关"
+      "gatewayName": "连接器网关",
+      "kindRest": "REST API",
+      "kindDatabase": "数据库",
+      "readOnly": "只读",
+      "needsCredential": "待填凭证",
+      "viaGateway": "经连接器网关调用"
     }
   },
   "codeIndex": {
@@ -1992,6 +1997,7 @@
     "unknownError": "未知错误",
     "import": "导入",
     "linkOnly": "仅链接",
-    "openFile": "打开文件"
+    "openFile": "打开文件",
+    "connectionExists": "该端点与凭证已存在连接「{{name}}」，无需重复创建"
   }
 }

@@ -101,6 +101,9 @@ class ClarifyResponse(BaseModel):
     panel_id: Optional[str] = None
     candidate_set_version: Optional[int] = None
     option_id: Optional[str] = None
+    # Masked form fields (input_type=secret, e.g. connector credentials). Passed
+    # to the waiting tool only; never persisted, logged, or shown to the model.
+    secret_values: Dict[str, str] = Field(default_factory=dict)
 
 
 class SessionState(BaseModel):

@@ -211,6 +211,7 @@ import { resolveForwardTarget as resolveForwardTargetPayload } from "../utils/re
 import { HoverTip } from "./ds/HoverTip";
 import { ConnectorsMenuButton } from "./connectors/ConnectorsMenuButton";
 import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
+import { skillChipLabel } from "../utils/skill-chip-label";
 import { filterAndRankSkills } from "../utils/skill-search";
 import {
   COMPOSER_INLINE_CHIP_CLASS,
@@ -5333,12 +5334,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     token.setAttribute("data-skill-token", "1");
     token.setAttribute("data-skill-name", name);
     token.className = COMPOSER_INLINE_CHIP_CLASS;
+    token.title = `@skill://${name}`;
     const icon = document.createElement("span");
     icon.innerHTML = skillPuzzleIconInnerHtml(13);
     token.appendChild(icon);
     const label = document.createElement("span");
     label.className = "min-w-0 truncate";
-    label.textContent = name;
+    label.textContent = skillChipLabel(name);
     token.appendChild(label);
     return token;
   }, []);

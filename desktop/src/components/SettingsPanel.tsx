@@ -144,7 +144,7 @@ import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
 import { McpRemoteServerModal } from "./settings/mcp/McpRemoteServerModal";
 import { McpRemoteServerDetail } from "./settings/mcp/McpRemoteServerDetail";
 import { McpGatewayImportPanel } from "./settings/mcp/McpGatewayImportPanel";
-import { ConnectorsTab } from "./settings/connectors/ConnectorsTab";
+import { ConnectorsSettingsPage } from "./settings/connectors/ConnectorsSettingsPage";
 import {
   MCP_PRIMARY_CONFIG_PATH,
   mcpRemoteHostLabel,
@@ -8934,13 +8934,7 @@ export function SettingsPanel({
             })()}
 
             {tab === "connectors" && (
-              <ConnectorsTab
-                sessionId={sessionId}
-                tapdConnected={mcpServers.some(
-                  (server) => server.name === "tapd" && server.connected,
-                )}
-                onRefreshMcp={onRefreshMcp}
-              />
+              <ConnectorsSettingsPage sessionId={sessionId} onRefreshMcp={onRefreshMcp} />
             )}
             <div className={tab === "tools" ? "space-y-4" : "hidden"}>
               <ToolsTab ref={toolsTabRef} />

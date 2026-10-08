@@ -1572,7 +1572,12 @@
       "confirmDelete": "Confirm delete",
       "disconnectFail": "Failed to disconnect",
       "empty": "No connected instances",
-      "gatewayName": "Connector gateway"
+      "gatewayName": "Connector gateway",
+      "kindRest": "REST API",
+      "kindDatabase": "Database",
+      "readOnly": "Read-only",
+      "needsCredential": "Needs credential",
+      "viaGateway": "Called through the connector gateway"
     }
   },
   "codeIndex": {
@@ -1992,6 +1997,7 @@
     "unknownError": "Unknown error",
     "import": "Import",
     "linkOnly": "Link only",
-    "openFile": "Open file"
+    "openFile": "Open file",
+    "connectionExists": "A connection with this endpoint and credential already exists: \"{{name}}\""
   }
 }

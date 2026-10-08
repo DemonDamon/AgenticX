@@ -323,3 +323,18 @@ describe("parseChoicePanelFields / buildClarifyRequestBody", () => {
     expect(body.candidate_set_version).toBeUndefined();
   });
 });
+
+describe("parseClarificationDecisions masked flag", () => {
+  it("keeps masked=false only for secret inputs", () => {
+    const out = parseClarificationDecisions([
+      { id: "ak", question: "AK", input_type: "secret", masked: false },
+      { id: "sk", question: "SK", input_type: "secret" },
+      { id: "u", question: "URL", input_type: "url", masked: false },
+    ]);
+    expect(out.map((d) => [d.id, d.masked])).toEqual([
+      ["ak", false],
+      ["sk", undefined],
+      ["u", undefined],
+    ]);
+  });
+});

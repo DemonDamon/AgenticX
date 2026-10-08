@@ -11,6 +11,20 @@ import { Modal } from "../ds/Modal";
 import { Toast } from "../ds/Toast";
 import { HoverTip } from "../ds/HoverTip";
 import { useAppStore } from "../../store";
+import { MarketIcon } from "../marketplace/MarketIcon";
+import { CONNECTOR_SUPPLY } from "../settings/connectors/connector-supply";
+import { connectorSupplyDisplay } from "../settings/connectors/connector-display";
+import {
+  buildMyConnectionRows,
+  configuredMcpEntriesFromDocument,
+  configuredMcpEntriesFromStatus,
+  mergeConfiguredMcpEntries,
+  type ConfiguredMcpEntry,
+  type MyConnectionRow,
+} from "../settings/connectors/my-connections-model";
+import { parseMcpJsonDocument } from "../../utils/mcp-remote-config";
+import { GATEWAY_DEFAULT_SERVER_NAME, GATEWAY_LOCAL_SERVER_NAME } from "../marketplace/gateway-model";
+import { useGatewayRestConnectors } from "../settings/connectors/gateway-rest-connectors";
 
 const DROPDOWN_WIDTH = 260;
 
@@ -48,6 +62,8 @@ type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qq
  * decorative「更多」button). Matches WorkBuddy:
  * - Popup list only shows truly connected connectors (with disconnect toggle).
  * - 「选择更多连接器」jumps to Settings → 连接器 marketplace (same as「管理」).
+ * - 列表来自 buildMyConnectionRows（与「我的连接」/ 市场卡片同一 SSOT）：
+ *   原生 + 网关（含 REST）+ 模板 / 连接器助手创建的实例按模板 / 端点+凭证折叠；通用 MCP Server 不在此列，同一连接器只出现一次。
  */
 export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const { t } = useTranslation("workspace");
@@ -72,7 +88,34 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const [tapdError, setTapdError] = useState("");
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [docEntries, setDocEntries] = useState<ConfiguredMcpEntry[]>([]);
+  const [pendingMcp, setPendingMcp] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const gatewayPresent = useMemo(
+    () =>
+      [...mcpServers.map((m) => m.name), ...docEntries.map((e) => e.name)].some(
+        (n) => n === GATEWAY_DEFAULT_SERVER_NAME || n === GATEWAY_LOCAL_SERVER_NAME,
+      ),
+    [mcpServers, docEntries],
+  );
+  // 弹层打开时刷新；网关未装不拉起 sidecar。
+  const { connectors: restConnectors } = useGatewayRestConnectors(gatewayPresent && open, docEntries.length);
+
+  /** 读 mcp.json 元数据（模板 / 展示名 / 凭证指纹）用于去重；失败保留旧值。 */
+  const refreshDocEntries = useCallback(async () => {
+    try {
+      const raw = await window.agenticxDesktop.mcpGetRaw({});
+      if (raw?.ok && typeof raw.text === "string") {
+        setDocEntries(configuredMcpEntriesFromDocument(parseMcpJsonDocument(raw.text)));
+      }
+    } catch {
+      /* best-effort */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDocEntries();
+  }, [refreshDocEntries]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -244,11 +287,51 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
     [feishuConnected, githubConnected, qqmailConnected, tapdConnected, tmeetConnected, wecomConnected],
   );
 
-  /** WorkBuddy popup: only truly connected connectors. */
-  const visibleConnectors = useMemo(
-    () => CONNECTORS.filter((item) => isConnectorConnected(item.id)),
-    [isConnectorConnected],
+  const displayNames = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const e of CONNECTOR_SUPPLY) out[e.id] = connectorSupplyDisplay(e).name;
+    return out;
+  }, []);
+
+  /** WorkBuddy popup: only truly connected connectors — 来自去重 SSOT。 */
+  const connectionRows = useMemo<MyConnectionRow[]>(() => {
+    const statusEntries = configuredMcpEntriesFromStatus(mcpServers);
+    const names = new Set<string>([
+      ...mcpServers.map((m) => m.name).filter(Boolean),
+      ...docEntries.map((e) => e.name),
+    ]);
+    const health: Record<string, "connected" | "disconnected"> = {};
+    for (const c of CONNECTORS) health[c.id] = isConnectorConnected(c.id) ? "connected" : "disconnected";
+    return buildMyConnectionRows({
+      healthByConnectorId: health,
+      configuredMcpNames: names,
+      configuredMcpEntries: mergeConfiguredMcpEntries(statusEntries, docEntries),
+      restConnectors,
+      displayNames,
+    });
+  }, [mcpServers, docEntries, isConnectorConnected, displayNames, restConnectors]);
+
+  const mcpConnected = useCallback(
+    (name?: string) => Boolean(name && mcpServers.some((m) => m.name === name && m.connected)),
+    [mcpServers],
   );
+
+  const toggleMcpRow = async (row: MyConnectionRow, next: boolean) => {
+    const name = row.mcpServerName;
+    if (!name || !effectiveSessionId || pendingMcp) return;
+    setPendingMcp(name);
+    try {
+      const res = next
+        ? await window.agenticxDesktop.connectMcp({ sessionId: effectiveSessionId, name })
+        : await window.agenticxDesktop.disconnectMcp({ sessionId: effectiveSessionId, name });
+      if (!res.ok && res.error) showToast(res.error);
+      await refreshMcp();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingMcp(null);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -279,7 +362,10 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
         setDropdownPos({ bottom: window.innerHeight - rect.top + 6, left });
       }
     }
-    setOpen((prev) => !prev);
+    setOpen((prev) => {
+      if (!prev) void refreshDocEntries();
+      return !prev;
+    });
   };
 
   const goToSettings = () => {
@@ -496,46 +582,84 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-              {visibleConnectors.length === 0 ? (
+              {connectionRows.length === 0 ? (
                 <div className="px-2 py-4 text-center text-[12px] text-text-faint">
                   {t("connectors.empty")}
                 </div>
               ) : (
-                visibleConnectors.map((item) => {
-                  const isImplemented = nativeConnectorAvailability(item.id) === "available";
-                  const connected = isConnectorConnected(item.id);
-                  const busy = pendingId === item.id;
-                  // WorkBuddy: connected → toggle; not connected →「连接」inline action.
-                  const showToggle = isImplemented && connected;
+                connectionRows.map((row) => {
+                  const item =
+                    row.kind === "native" && row.connectorId
+                      ? CONNECTORS.find((c) => c.id === row.connectorId)
+                      : undefined;
+                  if (item) {
+                    const isImplemented = nativeConnectorAvailability(item.id) === "available";
+                    const connected = isConnectorConnected(item.id);
+                    const busy = pendingId === item.id;
+                    // WorkBuddy: connected → toggle; not connected →「连接」inline action.
+                    const showToggle = isImplemented && connected;
+                    return (
+                      <div
+                        key={row.key}
+                        className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-hover"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white">
+                          <img src={item.iconSrc} alt="" className="h-4 w-4 object-contain" draggable={false} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-strong">
+                          {item.name}
+                        </span>
+                        {busy ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-faint" aria-hidden />
+                        ) : showToggle ? (
+                          <SettingsSwitch
+                            checked
+                            size="sm"
+                            aria-label={t("connectors.disconnectAria", { name: item.name })}
+                            onChange={(next) => handleToggle(item.id as NativeId, next)}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-emerald-400 transition hover:text-emerald-300"
+                            onClick={() => handleConnectClick(item.id)}
+                          >
+                            <Link2 className="h-3.5 w-3.5" aria-hidden />
+                            {t("connectors.connect")}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+                  // 网关 / 模板 / 连接器助手创建的实例（已折叠重复条目；通用 MCP 不在此列）。
+                  const live = mcpConnected(row.mcpServerName);
+                  const busy = pendingMcp === row.mcpServerName;
                   return (
                     <div
-                      key={item.id}
+                      key={row.key}
                       className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-hover"
+                      data-connection-row={row.key}
                     >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white">
-                        <img src={item.iconSrc} alt="" className="h-4 w-4 object-contain" draggable={false} />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-strong">
-                        {item.name}
+                      <MarketIcon name={row.name} iconSrc={row.iconSrc} className="h-6 w-6" />
+                      <span
+                        className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-strong"
+                        title={
+                          row.connectorKind === "rest"
+                            ? `${row.detail ?? ""} · ${String(i18n.t("connectors.myConnections.viaGateway", { ns: "settings" }))}`
+                            : row.detail
+                        }
+                      >
+                        {row.name}
                       </span>
                       {busy ? (
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-faint" aria-hidden />
-                      ) : showToggle ? (
-                        <SettingsSwitch
-                          checked
-                          size="sm"
-                          aria-label={t("connectors.disconnectAria", { name: item.name })}
-                          onChange={(next) => handleToggle(item.id as NativeId, next)}
-                        />
                       ) : (
-                        <button
-                          type="button"
-                          className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-emerald-400 transition hover:text-emerald-300"
-                          onClick={() => handleConnectClick(item.id)}
-                        >
-                          <Link2 className="h-3.5 w-3.5" aria-hidden />
-                          {t("connectors.connect")}
-                        </button>
+                        <SettingsSwitch
+                          checked={live}
+                          size="sm"
+                          aria-label={t("connectors.disconnectAria", { name: row.name })}
+                          onChange={(next) => void toggleMcpRow(row, next)}
+                        />
                       )}
                     </div>
                   );
@@ -574,8 +698,8 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
     >
       <Link2 className="h-[15px] w-[15px] shrink-0 text-text-muted" aria-hidden />
       <span className="flex-1">{t("connectors.title")}</span>
-      {connectedIds.length > 0 ? (
-        <span className="text-[11px] text-text-faint">{t("connectors.connectedCount", { count: connectedIds.length })}</span>
+      {connectionRows.length > 0 ? (
+        <span className="text-[11px] text-text-faint">{t("connectors.connectedCount", { count: connectionRows.length })}</span>
       ) : null}
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
     </button>

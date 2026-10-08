@@ -3,11 +3,15 @@
  * 标题+副标题 → 已选择模板 → 连接器名称 → 新建凭证(+如何获取) → 凭据字段；
  * MCP URL 收入可折叠「高级」以贴近 Comate（轻流表单不突出 endpoint）。
  * 写入 ~/.agenticx/mcp.json 后回调刷新「我的连接」。
+ *
+ * 不重复建设：同模板已有实例时显示「已存在连接：<name>」，主按钮改为「更新凭证」，
+ * 写回同一 server（applyCreateConnectorToMcpJson overwrite），绝不新增第二条。
+ * 作为「从模板新建」第 2 步时传 onBack：显示「重选」「上一步」。
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ExternalLink, Loader2, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Info, Loader2, X } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { MCP_PRIMARY_CONFIG_PATH } from "../../../utils/mcp-remote-config";
 import { MarketIcon } from "../../marketplace/MarketIcon";
@@ -29,12 +33,27 @@ export type CreateConnectorTarget = {
   defaultMcpUrl?: string;
 };
 
+export type CreateConnectorResultPayload = {
+  serverName: string;
+  displayName: string;
+  /** 更新了已存在实例（未新增）。 */
+  updated: boolean;
+  /** 凭证与端点均未变化，直接复用。 */
+  reused: boolean;
+};
+
 type Props = {
   open: boolean;
   target: CreateConnectorTarget | null;
   configPath?: string;
+  /** 该模板已存在的连接实例（来自 buildMyConnectionRows SSOT）。 */
+  existingConnection?: { name: string } | null;
+  /** 「从模板新建」第 2 步：返回模板列表（重选 / 上一步）。 */
+  onBack?: () => void;
+  /** 已存在实例时「直接使用」。 */
+  onUseExisting?: (name: string) => void;
   onClose: () => void;
-  onCreated: (payload: { serverName: string }) => void | Promise<void>;
+  onCreated: (payload: CreateConnectorResultPayload) => void | Promise<void>;
 };
 
 const EMPTY: CreateConnectorFormValues = { name: "", url: "", apiKey: "", token: "" };
@@ -77,6 +96,9 @@ export function CreateConnectorModal({
   open,
   target,
   configPath = MCP_PRIMARY_CONFIG_PATH,
+  existingConnection = null,
+  onBack,
+  onUseExisting,
   onClose,
   onCreated,
 }: Props) {
@@ -90,12 +112,16 @@ export function CreateConnectorModal({
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  /** 提交时才从 mcp.json 发现的同模板实例（父层 SSOT 尚未刷新时兜底）。 */
+  const [fileExistingName, setFileExistingName] = useState<string | null>(null);
+  const existingName = existingConnection?.name ?? fileExistingName;
 
   useEffect(() => {
     if (!open || !target) return;
     const defaultUrl = (target.defaultMcpUrl ?? "").trim();
+    setFileExistingName(null);
     setValues({
-      name: t("connectors.create.nameDefault", { name: target.name }),
+      name: existingConnection?.name ?? t("connectors.create.nameDefault", { name: target.name }),
       url: defaultUrl,
       apiKey: "",
       token: "",
@@ -104,6 +130,7 @@ export function CreateConnectorModal({
     setAdvancedOpen(needsUrl && !defaultUrl);
     setError("");
     setFieldErrors({});
+    // existingConnection 仅在打开时取一次默认名，避免刷新覆盖用户输入。
   }, [open, target, t, needsUrl]);
 
   const setField = (key: keyof CreateConnectorFormValues, value: string) => {
@@ -126,8 +153,17 @@ export function CreateConnectorModal({
         setError(raw?.error || t("connectors.create.readFailed"));
         return;
       }
-      const applied = applyCreateConnectorToMcpJson(raw.text, auth, values);
+      const applied = applyCreateConnectorToMcpJson(raw.text, auth, values, {
+        templateId: target.supplyId,
+        overwrite: Boolean(existingName),
+      });
       if (!applied.ok) {
+        if (applied.error === "exists" && applied.existing) {
+          // 父层未感知到的同模板实例：切换为「更新凭证」模式，不新增。
+          setFileExistingName(applied.existing.instance.displayName);
+          setError("");
+          return;
+        }
         if (applied.error === "invalid_form" && applied.errors) {
           const next: Record<string, string> = {};
           for (const [k, v] of Object.entries(applied.errors)) {
@@ -145,15 +181,22 @@ export function CreateConnectorModal({
         setError(t("connectors.create.writeFailed"));
         return;
       }
-      const save = await window.agenticxDesktop.mcpPutRaw({
-        path: configPath,
-        text: applied.text,
-      });
-      if (!save?.ok) {
-        setError(save?.error || t("connectors.create.writeFailed"));
-        return;
+      if (!applied.unchanged) {
+        const save = await window.agenticxDesktop.mcpPutRaw({
+          path: configPath,
+          text: applied.text,
+        });
+        if (!save?.ok) {
+          setError(save?.error || t("connectors.create.writeFailed"));
+          return;
+        }
       }
-      await onCreated({ serverName: applied.serverName });
+      await onCreated({
+        serverName: applied.serverName,
+        displayName: applied.displayName || applied.serverName,
+        updated: applied.existed && !applied.unchanged,
+        reused: applied.unchanged,
+      });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -176,9 +219,9 @@ export function CreateConnectorModal({
             type="button"
             className="rounded-lg border border-border bg-surface-cardSolid px-4 py-2 text-xs font-medium text-text-primary hover:bg-surface-cardSolidHover disabled:opacity-50"
             disabled={saving}
-            onClick={onClose}
+            onClick={onBack ?? onClose}
           >
-            {t("connectors.create.close")}
+            {onBack ? t("connectors.newMenu.back") : t("connectors.create.close")}
           </button>
           <button
             type="button"
@@ -187,7 +230,11 @@ export function CreateConnectorModal({
             onClick={() => void handleSubmit()}
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            {t("connectors.create.submit")}
+            {existingName
+              ? needsCredential
+                ? t("connectors.create.updateCredential")
+                : t("connectors.create.updateConnection")
+              : t("connectors.create.submit")}
           </button>
         </div>
       }
@@ -217,11 +264,52 @@ export function CreateConnectorModal({
           <div className="mb-1.5 text-[11px] text-text-faint">{t("connectors.create.selectedTemplate")}</div>
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-cardSolid px-3 py-2.5">
             <MarketIcon name={target.name} iconSrc={target.iconSrc} className="h-9 w-9" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-text-strong">{target.name}</div>
+              {target.description ? (
+                <div className="mt-0.5 line-clamp-1 text-[11px] text-text-faint">{target.description}</div>
+              ) : null}
             </div>
+            {onBack ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-2 py-1 text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                disabled={saving}
+                onClick={onBack}
+              >
+                {t("connectors.newMenu.reselect")}
+              </button>
+            ) : null}
           </div>
         </div>
+
+        {/* 不重复建设：同模板已有实例 → 直接使用 / 更新凭证 */}
+        {existingName ? (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-border-strong bg-surface-cardSolid px-3 py-2.5"
+            data-connector-existing={existingName}
+          >
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-text-strong">
+                {t("connectors.create.existsTitle", { name: existingName })}
+              </div>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+                {needsCredential ? t("connectors.create.existsHint") : t("connectors.create.existsHintNoCredential")}
+              </p>
+            </div>
+            {onUseExisting ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-text-strong transition hover:bg-surface-hover disabled:opacity-50"
+                disabled={saving}
+                onClick={() => onUseExisting(existingName)}
+              >
+                {t("connectors.create.useExisting")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* 连接器名称 * */}
         {fields.has("name") ? (

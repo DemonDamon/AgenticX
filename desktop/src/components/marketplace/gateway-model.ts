@@ -30,6 +30,12 @@ export type GatewayForm = {
 /** 默认写入 mcp.json 的 server 名(已装判定与覆盖提示都按它匹配)。 */
 export const GATEWAY_DEFAULT_SERVER_NAME = "connector-runtime";
 
+/**
+ * 默认名已被自建（非本机）网关占用时，对话新建 REST 连接器把本机网关写到这个名字下，
+ * 不覆盖用户的自建条目。「我的连接」把它视为同一网关，不单列。
+ */
+export const GATEWAY_LOCAL_SERVER_NAME = "connector-runtime-local";
+
 /** 市场精选卡的 serverId 特例标记(区别于上游市场条目,详情走网关弹层)。 */
 export const GATEWAY_MARKET_SERVER_ID = "connector-runtime-gateway";
 
@@ -125,7 +131,9 @@ export function isGatewayInstalled(
   configured: ReadonlySet<string>,
   serverName: string = GATEWAY_DEFAULT_SERVER_NAME,
 ): boolean {
-  return isMcpInstalled([serverName], configured);
+  // 自建网关占用默认名时，本机网关写在 GATEWAY_LOCAL_SERVER_NAME 下：同视为已装。
+  const names = serverName === GATEWAY_DEFAULT_SERVER_NAME ? [serverName, GATEWAY_LOCAL_SERVER_NAME] : [serverName];
+  return isMcpInstalled(names, configured);
 }
 
 /** 精选卡展示输入(文案由视图层经 i18n 传入,保持本层纯净)。 */
@@ -152,5 +160,8 @@ export function buildGatewayMarketItem(display: GatewayMarketItemDisplay): Marke
     serverId: GATEWAY_MARKET_SERVER_ID,
     gateway: true,
     iconSrc: display.iconSrc,
+    // 连接市场：网关属于「企业」来源，且在「推荐」精选位。
+    marketSource: "enterprise",
+    recommended: true,
   };
 }

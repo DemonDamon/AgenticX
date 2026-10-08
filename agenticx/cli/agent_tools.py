@@ -35,6 +35,8 @@ from agenticx.cli.studio_mcp import (
     load_available_servers,
     mcp_call_tool_async,
     mcp_connect,
+    mcp_connect_async,
+    mcp_disconnect_async,
 )
 from agenticx.cli.studio_skill import (
     get_all_skill_summaries,
@@ -808,10 +810,46 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                                         "Only used when selection_mode is multiple."
                                     ),
                                 },
+                                "input_type": {
+                                    "type": "string",
+                                    "enum": ["choice", "text", "url"],
+                                    "description": (
+                                        "choice (default): pick from options. text / url: a form field "
+                                        "(options optional); url is validated as http(s). Never use this "
+                                        "to collect secrets."
+                                    ),
+                                },
+                                "required": {
+                                    "type": "boolean",
+                                    "description": "Whether submit stays disabled until answered (default true).",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short field label for text/url inputs, e.g. 上游地址.",
+                                },
+                                "placeholder": {
+                                    "type": "string",
+                                    "description": "Input placeholder for text/url fields or the custom option.",
+                                },
+                                "custom_option": {
+                                    "type": "string",
+                                    "description": (
+                                        "Exact option label (must also be in options), e.g. 其他（自定义输入）, "
+                                        "that reveals a text input when selected; the typed text becomes the answer."
+                                    ),
+                                },
                             },
-                            "required": ["question", "options"],
+                            "required": ["question"],
                             "additionalProperties": False,
                         },
+                    },
+                    "submit_label": {
+                        "type": "string",
+                        "description": "Optional submit button text (e.g. 确认). Defaults to the UI label.",
+                    },
+                    "skip_label": {
+                        "type": "string",
+                        "description": "Optional skip button text (e.g. 忽略). Defaults to the UI label.",
                     },
                     "allow_free_text": {
                         "type": "boolean",
@@ -1577,6 +1615,88 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "source_path": {"type": "string", "description": "Source path to mcp.json."},
                 },
                 "required": ["source_path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connector_manage",
+            "description": (
+                "Manage Near 连接器 (shown in 我的连接 / market / chat picker). A connector is NOT an avatar — "
+                "never use avatar tools. Kinds: mcp (remote MCP URL), rest (HTTP API via the local connector "
+                "gateway), database (SQLite/MySQL/PostgreSQL, read-only by default). Actions: list_templates, "
+                "list_instances (always both first), create / create_rest / create_database (one instance per "
+                "template+credential; error=exists → reuse or overwrite=true), request_credential (masked card; "
+                "secrets never returned — NEVER ask the user to paste secrets in chat), authorize_oauth "
+                "(browser PKCE for OAuth authorization_code), verify (connect + health). Follow skill connector-assistant."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list_templates",
+                            "list_instances",
+                            "create",
+                            "create_rest",
+                            "create_database",
+                            "request_credential",
+                            "authorize_oauth",
+                            "verify",
+                            "delete",
+                        ],
+                    },
+                    "query": {"type": "string", "description": "list_templates: optional name/id/category filter."},
+                    "name": {"type": "string", "description": "create*: display name (e.g. abc / 我的订单 API)."},
+                    "url": {"type": "string", "description": "create (mcp): full MCP Server URL including path."},
+                    "template_id": {"type": "string", "description": "create (mcp): template id from list_templates."},
+                    "auth_style": {
+                        "type": "string",
+                        "enum": ["none", "bearer", "header", "query"],
+                        "description": "create (mcp): none / bearer / header / query.",
+                    },
+                    "header_name": {"type": "string", "description": "MCP header / REST api_key_header name."},
+                    "query_param": {"type": "string", "description": "MCP query / REST api_key_query param name."},
+                    "overwrite": {"type": "boolean", "description": "Update an existing instance instead of error=exists."},
+                    "mcp_oauth": {"type": "boolean", "description": "create (mcp): server uses standard MCP OAuth — verify opens the browser to authorize (no secret card)."},
+                    "server_name": {"type": "string", "description": "mcp/database instance id (create/list_instances)."},
+                    "instance_id": {"type": "string", "description": "REST: rest:<connector_id>; or alias of server_name."},
+                    "credential_label": {"type": "string", "description": "request_credential: single-field label (MCP)."},
+                    "kind": {"type": "string", "enum": ["mcp", "rest", "database"], "description": "request_credential/verify/delete target kind (inferred from id when omitted)."},
+                    "base_url": {"type": "string", "description": "create_rest: API base URL (http/https)."},
+                    "spec_source": {"type": "string", "description": "create_rest: OpenAPI/Swagger URL or local file path (preferred)."},
+                    "endpoints": {"type": "string", "description": "create_rest: short endpoint list when no OpenAPI (METHOD /path 描述, one per line)."},
+                    "auth_type": {
+                        "type": "string",
+                        "enum": ["none", "api_key_header", "api_key_query", "bearer", "hmac", "oauth2_client_credentials", "oauth2_authorization_code"],
+                        "description": "create_rest: REST auth (hmac = generic HMAC-SHA256 AK/SK).",
+                    },
+                    "token_url": {"type": "string"},
+                    "authorize_url": {"type": "string"},
+                    "scopes": {"type": "string", "description": "OAuth scopes, space- or comma-separated."},
+                    "client_auth": {"type": "string", "enum": ["body", "basic"]},
+                    "hmac_access_key_header": {"type": "string"},
+                    "hmac_signature_header": {"type": "string"},
+                    "hmac_timestamp_header": {"type": "string"},
+                    "hmac_string_to_sign": {"type": "string", "description": "HMAC template; placeholders {method}{path}{query}{timestamp}{body_sha256}{access_key}{host}{\\n}."},
+                    "hmac_signature_encoding": {"type": "string", "enum": ["hex", "base64"]},
+                    "hmac_timestamp_format": {"type": "string", "enum": ["unix", "unix_ms", "rfc3339"]},
+                    "include_writes": {"type": "boolean", "description": "create_rest: include write/destructive OpenAPI ops (default true)."},
+                    "description": {"type": "string"},
+                    "db_type": {"type": "string", "enum": ["sqlite", "mysql", "postgresql"]},
+                    "db_path": {"type": "string", "description": "create_database (sqlite): file path."},
+                    "db_host": {"type": "string"},
+                    "db_port": {"type": "integer"},
+                    "db_name": {"type": "string"},
+                    "db_user": {"type": "string"},
+                    "db_ssl": {"type": "boolean"},
+                    "allow_writes": {"type": "boolean", "description": "create_database: enable write tool (default false = read-only)."},
+                    "row_limit": {"type": "integer", "description": "create_database: max rows per query (default 200)."},
+                },
+                "required": ["action"],
                 "additionalProperties": False,
             },
         },
@@ -4147,25 +4267,48 @@ def build_clarification_tool_result(answer: Dict[str, Any]) -> str:
     return "；".join(parts) + "。"
 
 
-def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
+_CLARIFY_INPUT_TYPES = ("choice", "text", "url")
+
+
+def _normalize_clarification_decisions(
+    raw: Any, *, allow_secret: bool = False
+) -> List[Dict[str, Any]]:
     """Parse structured decision groups for multi-part sign-off cards.
 
     Each decision gets ``selection_mode`` (``single`` | ``multiple``, default
     ``single``) and ``exclusive_options`` (only meaningful for ``multiple``;
     filtered to labels that exist in ``options``).
+
+    Optional form extensions (emitted only when non-default, so legacy payloads
+    are unchanged):
+
+    - ``input_type``: ``text`` / ``url`` render a form field and may omit
+      ``options``. ``secret`` is internal-only (``allow_secret=True``, used by
+      ``connector_manage``) — its value bypasses the model entirely.
+    - ``required``: ``False`` lets the user submit without answering.
+    - ``label`` / ``placeholder``: field copy.
+    - ``custom_option``: an option label that reveals a free-text input.
     """
     if not isinstance(raw, list):
         return []
+    allowed_types = _CLARIFY_INPUT_TYPES + (("secret",) if allow_secret else ())
     out: List[Dict[str, Any]] = []
     for idx, item in enumerate(raw[:6]):
         if not isinstance(item, dict):
             continue
         question = str(item.get("question", "") or "").strip()
         raw_opts = item.get("options") or []
-        if not question or not isinstance(raw_opts, list):
+        if not question:
             continue
+        if not isinstance(raw_opts, list):
+            raw_opts = []
+        input_type = str(item.get("input_type", "") or "").strip().lower() or "choice"
+        if input_type not in allowed_types:
+            input_type = "choice"
         options = [str(opt).strip() for opt in raw_opts if str(opt).strip()][:8]
-        if not options:
+        if input_type == "secret":
+            options = []
+        if not options and input_type == "choice":
             continue
         decision_id = str(item.get("id", "") or "").strip() or f"decision-{idx + 1}"
         selection_mode = (
@@ -4183,16 +4326,41 @@ def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
                         continue
                     seen.add(text)
                     exclusive_options.append(text)
-        out.append(
-            {
-                "id": decision_id,
-                "question": question,
-                "options": options,
-                "selection_mode": selection_mode,
-                "exclusive_options": exclusive_options,
-            }
-        )
+        decision: Dict[str, Any] = {
+            "id": decision_id,
+            "question": question,
+            "options": options,
+            "selection_mode": selection_mode,
+            "exclusive_options": exclusive_options,
+        }
+        if input_type != "choice":
+            decision["input_type"] = input_type
+        if item.get("required") is False:
+            decision["required"] = False
+        if input_type == "secret" and item.get("masked") is False:
+            # Routed via secret_values (never reaches the model) but shown in
+            # clear text, e.g. Access Key ID / Client ID.
+            decision["masked"] = False
+        for key, limit in (("label", 40), ("placeholder", 120)):
+            val = str(item.get(key, "") or "").strip()
+            if val:
+                decision[key] = val[:limit]
+        custom = str(item.get("custom_option", "") or "").strip()
+        if custom and custom in options:
+            decision["custom_option"] = custom
+        out.append(decision)
     return out
+
+
+def _redact_clarification_answer(answer: Any) -> Any:
+    """Strip ``secret_values`` from an answer before it is logged / emitted / shown to the model."""
+    if not isinstance(answer, dict) or "secret_values" not in answer:
+        return answer
+    redacted = {k: v for k, v in answer.items() if k != "secret_values"}
+    raw = answer.get("secret_values")
+    if isinstance(raw, dict):
+        redacted["secret_fields"] = sorted(str(k) for k, v in raw.items() if str(v or "").strip())
+    return redacted
 
 
 _ACTION_CONFIRM_MIN_TTL = 30
@@ -4511,7 +4679,7 @@ async def _request_action_confirmation(
     )
 
 
-async def _request_clarification(
+async def _await_clarification_answer(
     prompt: str,
     *,
     options: Optional[List[str]] = None,
@@ -4521,12 +4689,13 @@ async def _request_clarification(
     clarify_gate: Optional[ClarifyGate] = None,
     emit_event: Optional[Any] = None,
     is_unattended: bool = False,
-) -> str:
-    """Block inside a tool call to ask the user an open-ended question.
+) -> Dict[str, Any]:
+    """Emit a clarification prompt and wait for the raw answer dict.
 
-    Emits ``clarification_required`` (or ``clarification_suspended`` for
-    unattended sessions), waits on the clarify gate, and returns a tool-result
-    string built by :func:`build_clarification_tool_result`.
+    The returned dict may carry ``secret_values`` (only for internal callers
+    that asked for ``input_type=secret`` fields); logs and the
+    ``clarification_response`` event always get the redacted form.
+    Unattended sessions return ``{"__suspended__": True}``.
     """
     options = list(options or [])
     decisions = list(decisions or [])
@@ -4561,7 +4730,7 @@ async def _request_clarification(
                     },
                 }
             )
-        return build_clarification_tool_result({"__suspended__": True})
+        return {"__suspended__": True}
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
@@ -4605,18 +4774,50 @@ async def _request_clarification(
             allow_free_text=allow_free_text,
             context=payload_context,
         )
-    _log.info("[clarify] resolved id=%s answer=%s", request_id, answer)
+    redacted = _redact_clarification_answer(answer)
+    _log.info("[clarify] resolved id=%s answer=%s", request_id, redacted)
     if emit_prompt:
         await emit_event(
             {
                 "type": "clarification_response",
                 "data": {
                     "id": request_id,
-                    "answer": answer,
+                    "answer": redacted,
                 },
             }
         )
-    return build_clarification_tool_result(answer)
+    return answer if isinstance(answer, dict) else {}
+
+
+async def _request_clarification(
+    prompt: str,
+    *,
+    options: Optional[List[str]] = None,
+    decisions: Optional[List[Dict[str, Any]]] = None,
+    allow_free_text: bool = True,
+    context: Optional[Dict[str, Any]] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Block inside a tool call to ask the user an open-ended question.
+
+    Emits ``clarification_required`` (or ``clarification_suspended`` for
+    unattended sessions), waits on the clarify gate, and returns a tool-result
+    string built by :func:`build_clarification_tool_result`.
+    """
+    answer = await _await_clarification_answer(
+        prompt,
+        options=options,
+        decisions=decisions,
+        allow_free_text=allow_free_text,
+        context=context,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    # Public tool never exposes secret fields; drop any stray secret_values.
+    return build_clarification_tool_result(_redact_clarification_answer(answer))
 
 
 async def _present_choices(
@@ -7603,6 +7804,681 @@ def _tool_mcp_import(arguments: Dict[str, Any], session: StudioSession) -> str:
     except Exception:
         pass
     return json.dumps(result, ensure_ascii=False)
+
+
+def _connector_server_secrets(doc: Dict[str, Any], server_name: str) -> List[str]:
+    """Header / query values of one server — used only to scrub error text."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    raw = (doc.get("mcpServers") or {}).get(server_name) if isinstance(doc, dict) else None
+    out: List[str] = []
+    if isinstance(raw, dict):
+        headers = raw.get("headers")
+        if isinstance(headers, dict):
+            for v in headers.values():
+                if isinstance(v, str) and v.strip():
+                    out.append(v.strip())
+                    if v.lower().startswith("bearer "):
+                        out.append(v[7:].strip())
+        try:
+            out.extend(v for _k, v in parse_qsl(urlsplit(str(raw.get("url") or "")).query) if v)
+        except ValueError:
+            pass
+    return [x for x in out if len(x) >= 4]
+
+
+def _session_uses_global_mcp(session: Any) -> bool:
+    """Real StudioSession delegates MCP state to GlobalMcpManager (read-through properties)."""
+    return isinstance(getattr(type(session), "mcp_configs", None), property)
+
+
+def _connector_reload_configs(session: StudioSession) -> None:
+    if _session_uses_global_mcp(session):
+        # GlobalMcpManager hot-reloads mcp.json on mtime change when read.
+        _ = session.mcp_configs
+        return
+    try:
+        session.mcp_configs = load_available_servers()
+    except Exception:
+        pass
+
+
+async def _connector_disconnect(session: StudioSession, server_name: str) -> None:
+    try:
+        if _session_uses_global_mcp(session):
+            from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+            await GlobalMcpManager.singleton().disconnect_one(server_name)
+        else:
+            await mcp_disconnect_async(
+                session.mcp_hub, session.mcp_configs, session.connected_servers, server_name
+            )
+    except Exception:
+        pass
+
+
+async def _connector_connect(session: StudioSession, server_name: str) -> Tuple[bool, str]:
+    if _session_uses_global_mcp(session):
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+        return await GlobalMcpManager.singleton().connect_one(server_name)
+    return await mcp_connect_async(
+        session.mcp_hub, session.mcp_configs, session.connected_servers, server_name
+    )
+
+
+async def _connector_rest_instances() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """REST connectors registered in the local gateway (only when any exist on disk)."""
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.connectors import manage as cm
+
+    user_dir = gc.data_dir() / "connectors"
+    if not user_dir.is_dir() or not any(user_dir.glob("*.json")):
+        return [], None
+    try:
+        gw = await asyncio.to_thread(gc.ensure_gateway)
+        return await asyncio.to_thread(cm.rest_instances, gw), None
+    except Exception as exc:
+        return [], str(exc)[:200]
+
+
+async def _connector_ensure_gateway_mcp(session: StudioSession) -> Tuple[Optional[str], Optional[str]]:
+    """Ensure the local gateway runs, mcp.json points at it and the session is connected.
+
+    Returns ``(gateway_server_name, error)``.
+    """
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.runtime import connectors_store as cs
+
+    try:
+        gw = await asyncio.to_thread(gc.ensure_gateway)
+    except Exception as exc:
+        return None, str(exc)[:300]
+    try:
+        doc = cs.read_mcp_doc()
+        new_doc, name = gc.ensure_gateway_mcp_entry(doc, gw)
+        if new_doc is not None:
+            cs.write_mcp_doc(new_doc)
+    except (cs.McpDocError, OSError) as exc:
+        return None, f"mcp.json update failed: {exc}"[:300]
+    _connector_reload_configs(session)
+    connected = set(getattr(session, "connected_servers", set()) or set())
+    if name in connected and new_doc is not None:
+        await _connector_disconnect(session, name)
+        connected.discard(name)
+    if name not in connected and getattr(session, "mcp_hub", None) is not None:
+        task = asyncio.ensure_future(_connector_connect(session, name))
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if task.cancelled():
+            return name, "gateway MCP connect aborted"
+        if task.exception() is not None:
+            return name, str(task.exception())[:300]
+        ok, detail = task.result()
+        if not ok:
+            return name, str(detail or "gateway MCP connect failed")[:300]
+    return name, None
+
+
+def _connector_secret_decisions(fields: List[Dict[str, Any]], display: str) -> List[Dict[str, Any]]:
+    raw = []
+    for f in fields:
+        raw.append(
+            {
+                "id": f["id"],
+                "question": f"「{display}」的 {f['label']}",
+                "input_type": "secret",
+                "label": f["label"],
+                "required": bool(f.get("required", True)),
+                "masked": bool(f.get("masked", True)),
+                "placeholder": "仅保存到本机（加密存储），不会出现在对话中",
+            }
+        )
+    return _normalize_clarification_decisions(raw, allow_secret=True)
+
+
+async def _connector_collect_secrets(
+    title: str,
+    fields: List[Dict[str, Any]],
+    display: str,
+    *,
+    clarify_gate: Optional[ClarifyGate],
+    emit_event: Optional[Any],
+    is_unattended: bool,
+) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
+    """Masked multi-field card → ``(values, error_payload)``; values never logged/returned."""
+    answer = await _await_clarification_answer(
+        title,
+        decisions=_connector_secret_decisions(fields, display),
+        allow_free_text=False,
+        context={"kind": "connector_credential", "submit_label": "保存", "skip_label": "稍后填写"},
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    if answer.get("__suspended__") or answer.get("__timeout__"):
+        return None, {"ok": False, "error": "no_answer", "hint": "用户暂未填写；可稍后在「设置 → 连接器 → 我的连接」中更新凭证。"}
+    raw = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+    values = {str(k): str(v or "").strip() for k, v in raw.items()}
+    raw.clear()
+    missing = [f["label"] for f in fields if f.get("required", True) and not values.get(f["id"])]
+    if not any(values.values()) or missing:
+        values.clear()
+        return None, {"ok": False, "error": "skipped", "missing": missing, "hint": "用户选择稍后填写或未填完整。"}
+    return values, None
+
+
+def _connector_scrub(text: str, values: Dict[str, str]) -> str:
+    from agenticx.runtime import connectors_store as cs
+
+    out = text
+    for v in values.values():
+        out = cs.scrub_secret(out, v)
+    return out
+
+
+async def _connector_manage_ext(
+    action: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    doc: Dict[str, Any],
+    connected: set,
+    *,
+    clarify_gate: Optional[ClarifyGate],
+    emit_event: Optional[Any],
+    is_unattended: bool,
+) -> Optional[str]:
+    """REST (gateway) / database / OAuth branches of connector_manage. None = not handled."""
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.connectors import manage as cm
+    from agenticx.runtime import connectors_store as cs
+
+    def _dump(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False)
+
+    instance_id = str(arguments.get("instance_id", "") or arguments.get("server_name", "") or "").strip()
+    kind = str(arguments.get("kind", "") or "").strip()
+    if not kind:
+        if instance_id.startswith(cm.REST_PREFIX):
+            kind = "rest"
+        else:
+            hit = next((i for i in cs.list_instances(doc) if i["server_name"] == instance_id), None)
+            kind = (hit or {}).get("kind") or "mcp"
+
+    if action == "create_rest":
+        auth, err = (None, None)
+        if str(arguments.get("auth_type", "") or "").strip():
+            auth, err = cm.build_rest_auth(arguments)
+            if err:
+                return _dump({"ok": False, "error": "invalid_form", "field": "auth_type", "detail": err})
+        try:
+            gw = await asyncio.to_thread(gc.ensure_gateway)
+            result = await asyncio.to_thread(
+                lambda: cm.register_rest(
+                    gw,
+                    name=str(arguments.get("name", "") or ""),
+                    base_url=str(arguments.get("base_url", "") or ""),
+                    spec_source=str(arguments.get("spec_source", "") or ""),
+                    endpoints=arguments.get("endpoints"),
+                    auth=auth,
+                    include_writes=arguments.get("include_writes", True) is not False,
+                    overwrite=bool(arguments.get("overwrite", False)),
+                    description=str(arguments.get("description", "") or ""),
+                )
+            )
+        except gc.GatewayError as exc:
+            return _dump({"ok": False, "error": "gateway_unavailable", "detail": str(exc)})
+        if result.get("ok"):
+            gw_name, gw_err = await _connector_ensure_gateway_mcp(session)
+            result["gateway_server"] = gw_name
+            if gw_err:
+                result["gateway_warning"] = gw_err
+            result["usage"] = (
+                f"Call the gateway MCP tools: search_actions(connectorId='{result['connector_id']}') → "
+                "get_action_guide → execute_action(actionId, input)."
+            )
+        return _dump(result)
+
+    if action == "create_database":
+        new_doc, result = cm.create_database(
+            doc,
+            name=str(arguments.get("name", "") or ""),
+            db_type=str(arguments.get("db_type", "") or ""),
+            path=str(arguments.get("db_path", "") or ""),
+            host=str(arguments.get("db_host", "") or ""),
+            port=arguments.get("db_port"),
+            database=str(arguments.get("db_name", "") or ""),
+            user=str(arguments.get("db_user", "") or ""),
+            ssl=bool(arguments.get("db_ssl", False)),
+            allow_writes=bool(arguments.get("allow_writes", False)),
+            row_limit=arguments.get("row_limit"),
+            overwrite=bool(arguments.get("overwrite", False)),
+        )
+        if new_doc is not None:
+            try:
+                cs.write_mcp_doc(new_doc)
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+            if result.get("server_name") in connected:
+                await _connector_disconnect(session, result["server_name"])
+        return _dump(result)
+
+    if kind == "rest" and action in ("request_credential", "authorize_oauth", "verify", "delete"):
+        cid = instance_id[len(cm.REST_PREFIX):] if instance_id.startswith(cm.REST_PREFIX) else instance_id
+        try:
+            gw = await asyncio.to_thread(gc.ensure_gateway)
+            definition = await asyncio.to_thread(cm.get_rest_definition, gw, cid)
+        except gc.GatewayError as exc:
+            return _dump({"ok": False, "error": "gateway_unavailable", "detail": str(exc)})
+        if definition is None:
+            return _dump({"ok": False, "error": "not_found", "instance_id": instance_id})
+        display = str(definition.get("displayName") or cid)
+        auth = definition.get("auth") or {"type": "none"}
+        if action == "delete":
+            return _dump(await asyncio.to_thread(cm.unregister_rest, gw, cid))
+        if action == "verify":
+            gw_name, gw_err = await _connector_ensure_gateway_mcp(session)
+            res = await asyncio.to_thread(cm.check_rest, gw, cid)
+            res["instance_id"] = cm.REST_PREFIX + cid
+            res["gateway_server"] = gw_name
+            if gw_err:
+                res["gateway_warning"] = gw_err
+            return _dump(res)
+        fields = cm.credential_fields(auth)
+        if not fields:
+            return _dump({"ok": True, "action": "no_credential_needed", "instance_id": cm.REST_PREFIX + cid})
+        oauth = auth.get("oauth2") or {}
+        is_code = auth.get("type") == "oauth2" and oauth.get("grant") == "authorization_code"
+        if action == "authorize_oauth" and not is_code:
+            return _dump({"ok": False, "error": "not_oauth_authorization_code"})
+        values, err_payload = await _connector_collect_secrets(
+            f"为连接器「{display}」填写凭证", fields, display,
+            clarify_gate=clarify_gate, emit_event=emit_event, is_unattended=is_unattended,
+        )
+        if err_payload is not None:
+            return _dump(err_payload)
+        assert values is not None
+        try:
+            if is_code:
+                from agenticx.connectors.oauth import OAuthFlowError, run_pkce_authorization
+
+                try:
+                    tokens = await run_pkce_authorization(
+                        authorize_url=str(oauth.get("authorizeUrl") or ""),
+                        token_url=str(oauth.get("tokenUrl") or ""),
+                        client_id=values.get("clientId", ""),
+                        client_secret=values.get("clientSecret", ""),
+                        scopes=list(oauth.get("scopes") or []),
+                        client_auth=str(oauth.get("clientAuth") or "body"),
+                    )
+                except OAuthFlowError as exc:
+                    return _dump({"ok": False, "error": "oauth_failed", "detail": _connector_scrub(str(exc), values)})
+                refresh = str(tokens.get("refresh_token") or "")
+                tokens.clear()
+                if not refresh:
+                    return _dump({
+                        "ok": False,
+                        "error": "no_refresh_token",
+                        "hint": "授权成功但服务端未返回 refresh_token（常需 offline_access 等 scope），无法长期自动刷新。",
+                    })
+                values["refreshToken"] = refresh
+            result = await asyncio.to_thread(cm.save_rest_credential, gw, cid, display, values)
+            if result.get("ok"):
+                result["note"] = "凭证已加密保存在本机连接器网关（未在对话中回显）。下一步调用 verify。"
+            return _connector_scrub(_dump(result), values)
+        finally:
+            values.clear()
+
+    if kind == "database" and action in ("request_credential", "verify", "delete"):
+        servers = cs.servers_map(doc)
+        raw = servers.get(instance_id)
+        if not isinstance(raw, dict):
+            return _dump({"ok": False, "error": "not_found", "server_name": instance_id})
+        meta = raw.get(cs.META_KEY) if isinstance(raw.get(cs.META_KEY), dict) else {}
+        display = str(meta.get("displayName") or instance_id)
+        if action == "delete":
+            if instance_id in connected:
+                await _connector_disconnect(session, instance_id)
+            servers.pop(instance_id, None)
+            try:
+                cs.write_mcp_doc({**doc, "mcpServers": servers})
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+            return _dump({"ok": True, "action": "deleted", "server_name": instance_id})
+        if action == "request_credential":
+            if str(meta.get("dbType") or "") == "sqlite":
+                return _dump({"ok": True, "action": "no_credential_needed", "server_name": instance_id})
+            values, err_payload = await _connector_collect_secrets(
+                f"为数据库连接器「{display}」填写密码",
+                [{"id": "password", "label": "数据库密码", "masked": True, "required": True}],
+                display,
+                clarify_gate=clarify_gate, emit_event=emit_event, is_unattended=is_unattended,
+            )
+            if err_payload is not None:
+                return _dump(err_payload)
+            assert values is not None
+            try:
+                new_doc, result = cm.set_database_password(cs.read_mcp_doc(), server_name=instance_id, password=values.get("password", ""))
+                if new_doc is not None:
+                    cs.write_mcp_doc(new_doc)
+                    _connector_reload_configs(session)
+                    if instance_id in connected:
+                        await _connector_disconnect(session, instance_id)
+                if result.get("ok"):
+                    result["note"] = "密码已写入本机 mcp.json（未在对话中回显）。下一步调用 verify。"
+                return _connector_scrub(_dump(result), values)
+            except (cs.McpDocError, OSError) as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": _connector_scrub(str(exc), values)})
+            finally:
+                values.clear()
+        # verify: direct health (connect + list tables), then MCP handshake
+        from agenticx.connectors.database import Database, DbConfig, DbError
+
+        env = raw.get("env") if isinstance(raw.get("env"), dict) else {}
+        cfg = DbConfig.from_env({str(k): str(v) for k, v in env.items()})
+        secrets_ = {"password": cfg.password} if cfg.password else {}
+        try:
+            health = await asyncio.to_thread(lambda: Database(cfg).health())
+        except DbError as exc:
+            return _dump({"ok": False, "error": "connect_failed", "server_name": instance_id, "detail": _connector_scrub(str(exc), secrets_)[:500]})
+        _connector_reload_configs(session)
+        if instance_id in connected:
+            await _connector_disconnect(session, instance_id)
+        mcp_ok, mcp_detail = True, ""
+        if getattr(session, "mcp_hub", None) is not None:
+            task = asyncio.ensure_future(_connector_connect(session, instance_id))
+            try:
+                await asyncio.wait({task})
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            if task.cancelled():
+                mcp_ok, mcp_detail = False, "MCP 握手被中止"
+            elif task.exception() is not None:
+                mcp_ok, mcp_detail = False, str(task.exception())
+            else:
+                mcp_ok, mcp_detail = task.result()
+        payload = {
+            "ok": bool(mcp_ok),
+            "server_name": instance_id,
+            "table_count": health["table_count"],
+            "tables_preview": health["tables_preview"],
+            "read_only": not cfg.allow_writes,
+        }
+        if not mcp_ok:
+            payload["error"] = "mcp_connect_failed"
+            payload["detail"] = _connector_scrub(str(mcp_detail or ""), secrets_)[:500]
+        return _dump(payload)
+
+    if action in ("authorize_oauth",):
+        return _dump({"ok": False, "error": "unsupported", "hint": "authorize_oauth 仅用于 REST OAuth authorization_code 连接器（instance_id=rest:<id>）。"})
+    if action == "delete" and kind == "mcp":
+        servers = cs.servers_map(doc)
+        raw = servers.get(instance_id)
+        meta = raw.get(cs.META_KEY) if isinstance(raw, dict) and isinstance(raw.get(cs.META_KEY), dict) else {}
+        if not isinstance(raw, dict) or meta.get("source") != cs.SOURCE_CONNECTOR:
+            return _dump({"ok": False, "error": "not_found_or_not_owned", "server_name": instance_id})
+        if instance_id in connected:
+            await _connector_disconnect(session, instance_id)
+        servers.pop(instance_id, None)
+        try:
+            cs.write_mcp_doc({**doc, "mcpServers": servers})
+        except OSError as exc:
+            return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+        _connector_reload_configs(session)
+        return _dump({"ok": True, "action": "deleted", "server_name": instance_id})
+    return None
+
+
+async def _tool_connector_manage(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Chat-side connector CRUD sharing the desktop dedupe rules (no secrets in results)."""
+    from agenticx.runtime import connectors_store as cs
+
+    action = str(arguments.get("action", "") or "").strip()
+
+    def _dump(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False)
+
+    if action == "list_templates":
+        rows = cs.filter_templates(cs.load_connector_templates(), str(arguments.get("query", "") or ""))
+        return _dump(
+            {
+                "ok": True,
+                "templates": [
+                    {k: t.get(k) for k in ("id", "name", "kind", "auth", "category", "create_via")}
+                    for t in rows
+                ],
+                "note": (
+                    "create_via=mcp_url → connector_manage create with template_id + the template's MCP URL; "
+                    "ui_native → tell the user to connect it in 市场/设置 → 连接器 (native handshake, not creatable here); "
+                    "unavailable → no ready-made template (OAuth etc.): use create with mcp_oauth=true for an "
+                    "MCP server with standard MCP OAuth, or create_rest with an oauth2_* auth_type for an HTTP API."
+                ),
+            }
+        )
+
+    try:
+        doc = cs.read_mcp_doc()
+    except cs.McpDocError as exc:
+        return _dump({"ok": False, "error": "invalid_mcp_json", "detail": str(exc)})
+
+    connected = set(getattr(session, "connected_servers", set()) or set())
+
+    if action == "list_instances":
+        native: Dict[str, bool] = {}
+        try:
+            status = json.loads(
+                (Path.home() / ".agenticx" / "connectors" / "native-status.json").read_text(encoding="utf-8")
+            )
+            for cid, row in (status.get("connectors") or {}).items():
+                if isinstance(row, dict):
+                    native[f"native:{cid}"] = bool(row.get("connected"))
+        except Exception:
+            pass
+        payload_li: Dict[str, Any] = {
+            "ok": True,
+            "instances": [cs.public_instance(i, connected) for i in cs.list_instances(doc)],
+            "native_connected": native,
+        }
+        rest_rows, rest_err = await _connector_rest_instances()
+        payload_li["rest_instances"] = rest_rows
+        if rest_err:
+            payload_li["rest_error"] = rest_err
+        return _dump(payload_li)
+
+    if action == "create":
+        template_id = str(arguments.get("template_id", "") or "").strip() or None
+        if template_id:
+            tpl = cs.find_template(template_id)
+            if tpl is None:
+                return _dump({"ok": False, "error": "unknown_template", "template_id": template_id})
+            if tpl.get("create_via") != "mcp_url":
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "template_not_creatable_here",
+                        "create_via": tpl.get("create_via"),
+                        "hint": "原生连接器请引导用户在「市场 / 设置 → 连接器」中点击连接；未接线模板请改用自定义 MCP URL。",
+                    }
+                )
+        new_doc, result = cs.upsert_connector(
+            doc,
+            name=str(arguments.get("name", "") or ""),
+            url=str(arguments.get("url", "") or ""),
+            template_id=template_id,
+            auth_style=str(arguments.get("auth_style", "") or "none"),
+            header_name=str(arguments.get("header_name", "") or ""),
+            query_param=str(arguments.get("query_param", "") or ""),
+            overwrite=bool(arguments.get("overwrite", False)),
+        )
+        if result.get("ok") and bool(arguments.get("mcp_oauth", False)):
+            base_doc = new_doc if new_doc is not None else doc
+            srv = cs.servers_map(base_doc)
+            entry = srv.get(result.get("server_name"))
+            if isinstance(entry, dict) and not entry.get("oauth"):
+                entry = dict(entry)
+                entry["oauth"] = True
+                srv[result["server_name"]] = entry
+                new_doc = {**base_doc, "mcpServers": srv}
+                if result.get("action") == "unchanged":
+                    result["action"] = "updated"
+        if new_doc is not None:
+            try:
+                cs.write_mcp_doc(new_doc)
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+        if result.get("ok"):
+            inst = next(
+                (i for i in cs.list_instances(new_doc or doc) if i["server_name"] == result.get("server_name")),
+                None,
+            )
+            if inst is not None:
+                result["instance"] = cs.public_instance(inst, connected)
+                style = inst.get("auth_style") or "none"
+                result["needs_credential"] = style != "none" and not inst.get("has_credential")
+                if bool(arguments.get("mcp_oauth", False)):
+                    result["needs_credential"] = False
+                    result["oauth"] = "mcp_standard"
+                    result["note"] = "MCP OAuth：调用 verify 时会打开系统浏览器授权，令牌保存在本机 ~/.agenticx/connectors/oauth/。"
+        return _dump(result)
+
+    ext = await _connector_manage_ext(
+        action,
+        arguments,
+        session,
+        doc,
+        connected,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    if ext is not None:
+        return ext
+
+    server_name = str(arguments.get("server_name", "") or "").strip()
+    inst = next((i for i in cs.list_instances(doc) if i["server_name"] == server_name), None)
+    if action in ("request_credential", "verify") and inst is None:
+        return _dump({"ok": False, "error": "not_found", "server_name": server_name})
+
+    if action == "request_credential":
+        label = str(arguments.get("credential_label", "") or "").strip()[:24] or "凭证"
+        decisions = _normalize_clarification_decisions(
+            [
+                {
+                    "id": "credential",
+                    "question": f"请输入「{inst['display_name']}」的 {label}",
+                    "input_type": "secret",
+                    "label": label,
+                    "placeholder": "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中",
+                }
+            ],
+            allow_secret=True,
+        )
+        answer = await _await_clarification_answer(
+            f"为连接器「{inst['display_name']}」填写{label}",
+            decisions=decisions,
+            allow_free_text=False,
+            context={
+                "kind": "connector_credential",
+                "submit_label": "保存",
+                "skip_label": "稍后填写",
+            },
+            clarify_gate=clarify_gate,
+            emit_event=emit_event,
+            is_unattended=is_unattended,
+        )
+        if answer.get("__suspended__") or answer.get("__timeout__"):
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "no_answer",
+                    "hint": "用户暂未填写；告诉用户可稍后在「设置 → 连接器 → 我的连接」中更新凭证。",
+                }
+            )
+        secret_values = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+        secret = str(secret_values.get("credential", "") or "").strip()
+        if not secret:
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "skipped",
+                    "hint": "用户选择稍后填写；提示可在「设置 → 连接器 → 我的连接」中点「更新凭证」。",
+                }
+            )
+        try:
+            doc = cs.read_mcp_doc()
+            new_doc, result = cs.set_connector_credential(doc, server_name=server_name, secret=secret)
+            if new_doc is not None:
+                cs.write_mcp_doc(new_doc)
+                _connector_reload_configs(session)
+                if server_name in connected:
+                    await _connector_disconnect(session, server_name)
+        except (cs.McpDocError, OSError) as exc:
+            return _dump({"ok": False, "error": "write_failed", "detail": cs.scrub_secret(str(exc), secret)})
+        finally:
+            secret_values.clear()
+        if result.get("ok"):
+            result["note"] = "凭证已写入本机 mcp.json（已脱敏，未在对话中回显）。下一步调用 verify 做连通性检查。"
+        return cs.scrub_secret(_dump(result), secret)
+
+    if action == "verify":
+        _connector_reload_configs(session)
+        secrets = _connector_server_secrets(doc, server_name)
+        hub = getattr(session, "mcp_hub", None)
+        if hub is None:
+            return _dump({"ok": False, "error": "mcp_hub_unavailable"})
+        if server_name in session.connected_servers:
+            await _connector_disconnect(session, server_name)
+        # Run the handshake in its own task: MCP clients surface HTTP 401/404 as an
+        # anyio cancel-scope CancelledError, which must not abort this tool call.
+        task = asyncio.ensure_future(_connector_connect(session, server_name))
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if task.cancelled():
+            ok, detail = False, "连接被中止（常见原因：401/403 凭证无效、URL path 错误或服务不可达）"
+        elif task.exception() is not None:
+            ok, detail = False, str(task.exception())
+        else:
+            ok, detail = task.result()
+        tool_count: Optional[int] = None
+        if ok:
+            try:
+                tool_count = sum(
+                    1
+                    for route in getattr(hub, "_tool_routing", {}).values()
+                    if getattr(getattr(getattr(route, "client", None), "server_config", None), "name", None)
+                    == server_name
+                )
+            except Exception:
+                tool_count = None
+        detail_text = str(detail or "")
+        for sec in secrets:
+            detail_text = detail_text.replace(sec, "***")
+        payload: Dict[str, Any] = {"ok": bool(ok), "server_name": server_name}
+        if ok:
+            payload["tool_count"] = tool_count
+        else:
+            payload["error"] = "connect_failed"
+            payload["detail"] = detail_text[:600]
+        return _dump(payload)
+
+    return _dump({"ok": False, "error": f"unknown action: {action}"})
 
 
 def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
@@ -10653,6 +11529,14 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=gate.is_service_mode())
+        if name == "connector_manage":
+            return await _tool_connector_manage(
+                arguments,
+                session,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
         if name == "request_clarification":
             prompt = str(arguments.get("prompt", "") or "").strip()
             if not prompt:
@@ -10671,6 +11555,11 @@ async def dispatch_tool_async(
             ctx = arguments.get("context")
             if not isinstance(ctx, dict):
                 ctx = None
+            for _label_key in ("submit_label", "skip_label"):
+                _label = str(arguments.get(_label_key, "") or "").strip()[:16]
+                if _label:
+                    ctx = dict(ctx or {})
+                    ctx[_label_key] = _label
             return await _request_clarification(
                 prompt,
                 options=options,

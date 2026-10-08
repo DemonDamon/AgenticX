@@ -423,3 +423,25 @@ describe("buildConnectorSupplyItems connected SSOT", () => {
     expect(we?.installed).toBe(true);
   });
 });
+
+describe("buildConnectorSupplyItems template instances", () => {
+  it("marks a template stub connected only when the deduped instance list has it", () => {
+    const stub = {
+      id: "stub:qingflow",
+      kind: "mcp" as const,
+      auth: "custom_credential" as const,
+      wired: false,
+      fallbackName: "轻流",
+      fallbackDescription: "d",
+    };
+    const [none] = buildConnectorSupplyItems([stub], { wiredOnly: false });
+    expect(none?.installed).toBe(false);
+    expect(none?.health).toBe("unwired");
+    const [live] = buildConnectorSupplyItems([stub], {
+      wiredOnly: false,
+      instanceSupplyIds: new Set(["stub:qingflow"]),
+    });
+    expect(live?.installed).toBe(true);
+    expect(live?.health).toBe("connected");
+  });
+});

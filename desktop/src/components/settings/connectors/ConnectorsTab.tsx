@@ -1,24 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
+import { Copy, ExternalLink, Loader2 } from "lucide-react";
 import QRCode from "qrcode";
 import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
-import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
 import { MarketIcon } from "../../marketplace/MarketIcon";
 import type { ConnectorHealth } from "./connector-health";
-import { MyConnectionsPanel } from "./MyConnectionsPanel";
-import {
-  configuredMcpEntriesFromDocument,
-  configuredMcpEntriesFromStatus,
-  mergeConfiguredMcpEntries,
-  type ConfiguredMcpEntry,
-} from "./my-connections-model";
-import { CONNECTOR_SUPPLY } from "./connector-supply";
-import { GATEWAY_DEFAULT_SERVER_NAME, isGatewayInstalled } from "../../marketplace/gateway-model";
-import { parseMcpJsonDocument } from "../../../utils/mcp-remote-config";
 import { i18n } from "../../../i18n/i18n";
 
 function st(key: string, opts?: Record<string, unknown>): string {
@@ -37,8 +26,11 @@ type Props = {
   autoOpenId?: ConnectorId | null;
   /** 每次递增以在同一 id 上重复触发打开。 */
   autoOpenSeq?: number;
-  /** page=设置墙；handshake-only=仅渲染握手 Modal（市场宿主）。 */
-  presentation?: "page" | "handshake-only";
+  /**
+   * 仅保留 handshake-only：只渲染原生连接器握手 Modal。
+   * 连接器页（目录 + 我的连接）统一由 ConnectorsHub 渲染（市场与设置共用）。
+   */
+  presentation?: "handshake-only";
   /** handshake-only 下弹层关闭/完成后回调（宿主卸载）。 */
   onHandshakeDismiss?: () => void;
   /** 连接状态变化后通知宿主刷新 SSOT（市场卡片已连接态）。 */
@@ -137,7 +129,7 @@ export function ConnectorsTab({
   onRefreshMcp,
   autoOpenId = null,
   autoOpenSeq = 0,
-  presentation = "page",
+  presentation = "handshake-only",
   onHandshakeDismiss,
   onConnectionChange,
 }: Props) {
@@ -145,8 +137,6 @@ export function ConnectorsTab({
   const [selectedId, setSelectedId] = useState<ConnectorId | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
-  /** WorkBuddy marketplace: hide not-yet-integrated connectors unless toggled on. */
-  const [showUnavailable, setShowUnavailable] = useState(false);
   const [tmeetStatus, setTmeetStatus] = useState<TmeetStatus>({
     available: true,
     connected: false,
@@ -194,169 +184,11 @@ export function ConnectorsTab({
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
-  const [configuredMcpNames, setConfiguredMcpNames] = useState<string[]>([]);
-  const [configuredMcpEntries, setConfiguredMcpEntries] = useState<ConfiguredMcpEntry[]>([]);
 
   const selected = useMemo(
     () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
     [selectedId],
   );
-
-  const connectorState = useCallback(
-    (item: ConnectorDefinition) => {
-      const connected =
-        item.id === "tencent-meeting"
-          ? tmeetStatus.connected
-          : item.id === "tapd"
-            ? tapdConnected
-            : item.id === "github"
-              ? githubStatus.connected
-              : item.id === "feishu"
-                ? feishuStatus.connected
-                : item.id === "wecom"
-                  ? wecomStatus.connected
-                  : item.id === "qqmail"
-                    ? qqmailStatus.connected
-                    : false;
-      const available =
-        item.id === "tencent-meeting"
-          ? tmeetStatus.available
-          : nativeConnectorAvailability(item.id) === "available";
-      const busy =
-        item.id === "tencent-meeting"
-          ? tmeetBusy
-          : item.id === "tapd"
-            ? tapdBusy
-            : item.id === "github"
-              ? githubBusy
-              : item.id === "feishu"
-                ? feishuBusy
-                : item.id === "wecom"
-                  ? wecomBusy
-                  : item.id === "qqmail"
-                    ? qqmailBusy
-                    : false;
-      return { available, connected, busy };
-    },
-    [
-      feishuBusy,
-      feishuStatus.connected,
-      githubBusy,
-      githubStatus.connected,
-      qqmailBusy,
-      qqmailStatus.connected,
-      tapdBusy,
-      tapdConnected,
-      tmeetBusy,
-      tmeetStatus.available,
-      tmeetStatus.connected,
-      wecomBusy,
-      wecomStatus.connected,
-    ],
-  );
-
-  const visibleConnectors = useMemo(
-    () =>
-      CONNECTORS.filter((item) => {
-        if (showUnavailable) return true;
-        const { available, connected } = connectorState(item);
-        return available || connected;
-      }),
-    [connectorState, showUnavailable],
-  );
-
-  const unavailableCount = useMemo(
-    () => CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
-    [connectorState],
-  );
-
-
-  const reloadConfiguredMcpNames = useCallback(async () => {
-    let statusEntries: ConfiguredMcpEntry[] = [];
-    let statusNames: string[] = [];
-    try {
-      const res = await window.agenticxDesktop.loadMcpStatus(sessionId || "").catch(() => null);
-      if (res?.ok && Array.isArray(res.servers)) {
-        statusNames = res.servers.map((s) => s.name).filter(Boolean);
-        statusEntries = configuredMcpEntriesFromStatus(res.servers);
-      }
-    } catch {
-      /* fall through */
-    }
-    let docEntries: ConfiguredMcpEntry[] = [];
-    try {
-      const raw = await window.agenticxDesktop.mcpGetRaw({}).catch(() => null);
-      if (raw?.ok && raw.text) {
-        try {
-          const doc = parseMcpJsonDocument(raw.text);
-          docEntries = configuredMcpEntriesFromDocument(doc);
-        } catch {
-          /* ignore parse */
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    const merged = mergeConfiguredMcpEntries(statusEntries, docEntries);
-    const names =
-      statusNames.length > 0
-        ? statusNames
-        : merged.map((e) => e.name);
-    setConfiguredMcpNames(names);
-    setConfiguredMcpEntries(merged.length > 0 ? merged : statusEntries);
-  }, [sessionId]);
-
-  useEffect(() => {
-    void reloadConfiguredMcpNames();
-  }, [reloadConfiguredMcpNames]);
-
-  const myConnectionsHealth = useMemo(() => {
-    const health: Record<string, ConnectorHealth | undefined> = {
-      "tencent-meeting": tmeetStatus.connected ? "connected" : "disconnected",
-      tapd: tapdConnected ? "connected" : "disconnected",
-      github:
-        githubStatus.health === "degraded" || githubStatus.health === "connected"
-          ? githubStatus.health
-          : githubStatus.connected
-            ? "connected"
-            : "disconnected",
-      feishu: feishuStatus.connected ? "connected" : "disconnected",
-      wecom: wecomStatus.connected ? "connected" : "disconnected",
-      qqmail: qqmailStatus.connected ? "connected" : "disconnected",
-    };
-    return health;
-  }, [
-    tmeetStatus.connected,
-    tapdConnected,
-    githubStatus.health,
-    githubStatus.connected,
-    feishuStatus.connected,
-    wecomStatus.connected,
-    qqmailStatus.connected,
-  ]);
-
-  const myConnectionsAccounts = useMemo(
-    () => ({
-      github: githubStatus.account,
-      feishu: feishuStatus.account,
-      qqmail: qqmailStatus.account,
-    }),
-    [githubStatus.account, feishuStatus.account, qqmailStatus.account],
-  );
-
-  const myConnectionsDisplayNames = useMemo(() => {
-    const display: Record<string, string> = {};
-    for (const e of CONNECTOR_SUPPLY) {
-      if (e.kind === "gateway") {
-        display[e.id] = st("connectors.myConnections.gatewayName");
-        continue;
-      }
-      if (!e.connectorId) continue;
-      display[e.id] = st(`connectors.catalog.${e.connectorId}.name`);
-    }
-    return display;
-  }, []);
-
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -976,115 +808,6 @@ export function ConnectorsTab({
 
   return (
     <>
-      {presentation === "page" ? (
-      <div className="space-y-4 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <p className="max-w-xl text-xs text-text-muted">
-            {st("connectors.intro")}
-          </p>
-          {unavailableCount > 0 ? (
-            <label className="flex shrink-0 items-center gap-2 text-[12px] text-text-muted">
-              <span>{st("connectors.showUnavailable")}</span>
-              <SettingsSwitch
-                checked={showUnavailable}
-                size="sm"
-                aria-label={st("connectors.showUnavailableAria")}
-                onChange={setShowUnavailable}
-              />
-            </label>
-          ) : null}
-        </div>
-
-        <section className="space-y-2" aria-label={st("connectors.myConnections.title")}>
-          <div>
-            <h3 className="text-sm font-semibold text-text-strong">{st("connectors.myConnections.title")}</h3>
-            <p className="mt-0.5 text-[11px] text-text-muted">{st("connectors.myConnections.subtitle")}</p>
-          </div>
-          <MyConnectionsPanel
-            sessionId={sessionId}
-            healthByConnectorId={myConnectionsHealth}
-            accountsByConnectorId={myConnectionsAccounts}
-            configuredMcpNames={configuredMcpNames}
-            configuredMcpEntries={configuredMcpEntries}
-            gatewayInstalled={isGatewayInstalled(new Set(configuredMcpNames), GATEWAY_DEFAULT_SERVER_NAME)}
-            displayNames={myConnectionsDisplayNames}
-            onChanged={() => {
-              void refreshTmeetStatus();
-              void refreshGithubStatus();
-              void refreshFeishuStatus();
-              void refreshWecomStatus();
-              void refreshQqmailStatus();
-              void reloadConfiguredMcpNames();
-              void onRefreshMcp(sessionId);
-              onConnectionChange?.();
-            }}
-            onOpenHandshake={(id) => {
-              const item = CONNECTORS.find((c) => c.id === id);
-              if (item) openConnector(item);
-            }}
-          />
-        </section>
-
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {visibleConnectors.map((item) => {
-            const { available, connected, busy } = connectorState(item);
-            return (
-              <div
-                key={item.id}
-                className={`agx-market-card flex min-h-[96px] items-start gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 ${
-                  available ? "" : "opacity-70 pointer-events-none"
-                }`}
-              >
-                <ConnectorIcon item={item} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-text-strong">{st(`connectors.catalog.${item.id}.name`)}</span>
-                    {/* WorkBuddy: green = connected; grey = available but not connected */}
-                    {item.id === "github" && githubStatus.health === "degraded" ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-label={st("connectors.needsReauthAria")} />
-                    ) : connected ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-label={st("connectors.connectedAria")} />
-                    ) : available ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-faint/50" aria-label={st("connectors.disconnectedAria")} />
-                    ) : null}
-                  </div>
-                  <p className="mt-1 line-clamp-3 text-[13px] leading-[1.45] text-text-muted">{st(`connectors.catalog.${item.id}.description`)}</p>
-                  {item.id === "github" && githubStatus.health === "degraded" ? (
-                    <p className="mt-1 text-[11px] text-amber-400/90">{st("connectors.needsReauthHint")}</p>
-                  ) : !available && !connected ? (
-                    <p className="mt-1 text-[11px] text-text-faint">{st("connectors.notYet")}</p>
-                  ) : null}
-                </div>
-                {available ? (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                    aria-label={
-                      item.id === "github" && githubStatus.health === "degraded"
-                        ? st("connectors.reauthAria", { name: st(`connectors.catalog.${item.id}.name`) })
-                        : connected
-                          ? st("connectors.manageAria", { name: st(`connectors.catalog.${item.id}.name`) })
-                          : st("connectors.connectAria", { name: st(`connectors.catalog.${item.id}.name`) })
-                    }
-                    disabled={busy}
-                    onClick={() => openConnector(item)}
-                  >
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : connected ? (
-                      <ChevronRight className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <Plus className="h-4 w-4" aria-hidden />
-                    )}
-                  </button>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      ) : null}
-
       <Modal
         open={selected?.id === "tencent-meeting"}
         title={st("connectors.tmeetTitle")}

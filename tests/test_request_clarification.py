@@ -320,3 +320,122 @@ def test_request_clarification_timeout_returns_sentinel() -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Form-style decisions (connector assistant): text/url fields, custom option,
+# required flag, button labels and secret redaction.
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_form_decisions_url_field_and_custom_option() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {
+                "id": "system_type",
+                "question": "abc 要接入的是什么类型的系统？",
+                "options": ["REST API", "MCP Server", "其他（自定义输入）"],
+                "custom_option": "其他（自定义输入）",
+            },
+            {
+                "id": "upstream_url",
+                "question": "请提供上游服务地址",
+                "input_type": "url",
+                "label": "上游地址",
+                "placeholder": "https://example.com/mcp",
+            },
+            {"id": "note", "question": "备注", "input_type": "text", "required": False},
+        ]
+    )
+    assert out[0]["custom_option"] == "其他（自定义输入）"
+    assert "input_type" not in out[0]
+    assert out[1] == {
+        "id": "upstream_url",
+        "question": "请提供上游服务地址",
+        "options": [],
+        "selection_mode": "single",
+        "exclusive_options": [],
+        "input_type": "url",
+        "label": "上游地址",
+        "placeholder": "https://example.com/mcp",
+    }
+    assert out[2]["required"] is False and out[2]["input_type"] == "text"
+
+
+def test_normalize_form_decisions_rejects_secret_and_bad_custom_option() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {"question": "token?", "input_type": "secret"},
+            {"question": "pick", "options": ["A"], "custom_option": "B"},
+        ]
+    )
+    # secret is internal-only → falls back to choice and, with no options, is dropped.
+    assert len(out) == 1
+    assert "custom_option" not in out[0]
+    internal = _normalize_clarification_decisions(
+        [{"id": "credential", "question": "token?", "input_type": "secret", "options": ["x"]}],
+        allow_secret=True,
+    )
+    assert internal[0]["input_type"] == "secret" and internal[0]["options"] == []
+
+
+def test_request_clarification_redacts_secret_values_from_result_and_events() -> None:
+    gate = AsyncClarifyGate(timeout_seconds=5)
+    events: List[Dict[str, Any]] = []
+
+    async def emit(evt: Dict[str, Any]) -> None:
+        events.append(evt)
+        if evt["type"] == "clarification_required":
+            gate.resolve(
+                evt["data"]["id"],
+                {"answer_text": "", "selected_options": ["地址：https://x"], "secret_values": {"k": "TOPSECRET"}},
+            )
+
+    async def run() -> str:
+        return await _request_clarification(
+            "q",
+            decisions=_normalize_clarification_decisions(
+                [{"id": "u", "question": "地址", "input_type": "url"}]
+            ),
+            clarify_gate=gate,
+            emit_event=emit,
+        )
+
+    text = asyncio.run(run())
+    assert "TOPSECRET" not in text
+    assert "TOPSECRET" not in str(events)
+    assert "地址：https://x" in text
+
+
+def test_dispatch_request_clarification_passes_button_labels() -> None:
+    from agenticx.cli.agent_tools import dispatch_tool_async
+
+    gate = AsyncClarifyGate(timeout_seconds=5)
+    seen: Dict[str, Any] = {}
+
+    async def emit(evt: Dict[str, Any]) -> None:
+        if evt["type"] == "clarification_required":
+            seen.update(evt["data"])
+            gate.resolve(evt["data"]["id"], {"answer_text": "", "selected_options": []})
+
+    class _S:
+        context_files: Dict[str, str] = {}
+
+    async def run() -> str:
+        return await dispatch_tool_async(
+            "request_clarification",
+            {
+                "prompt": "p",
+                "decisions": [{"question": "地址", "input_type": "url"}],
+                "submit_label": "确认",
+                "skip_label": "忽略",
+            },
+            _S(),  # type: ignore[arg-type]
+            clarify_gate=gate,
+            event_callback=emit,
+        )
+
+    asyncio.run(run())
+    assert seen["context"]["submit_label"] == "确认"
+    assert seen["context"]["skip_label"] == "忽略"
+    assert seen["decisions"][0]["input_type"] == "url"
