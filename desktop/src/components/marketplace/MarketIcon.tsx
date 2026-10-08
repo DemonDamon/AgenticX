@@ -4,8 +4,9 @@
  *
  * 渲染口径(自适应,避开「白垫铬」与「全出血裁切」两端):
  * - 圆角瓷砖 + object-contain + 适度内缩(~10–14% 边距),品牌完整可见、有呼吸感。
- * - 瓷砖底:随 data-theme 自适应 — 浅色 #F2F2F7、深色/dim #1C1C1E;字形/Simple Icons 可用品牌色 tint(非亮白 matte)。
- * - 近黑字形仅在深色主题反白;浅色主题保持深色字形。本地白字形(如 Notion)仅在浅色主题压黑。
+ * - 瓷砖底:随 data-theme 自适应 — 浅色 #F2F2F7、深色/dim #1C1C1E;仅深色主题下反白的近黑字形用品牌深色 tint。
+ * - 明暗口径 MarkTone(brand-assets.MARK_TONE + SVG 实际填色,含隐式默认黑):
+ *   单色近黑仅在深色主题反白;单色近白仅在浅色主题压黑;黑白双色(duo,如 Notion)与彩色标永不加滤镜。
  * - Vite 会把小 SVG 内联成 data:image/svg+xml — 必须按 SVG 字形处理,不能当 App 图标 cover。
  * - 光栅(PNG):同样 contain + 内缩;仅显式全出血 App 瓷砖才走 cover(见 FULL_BLEED_COVER)。
  */
@@ -31,7 +32,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import { pickBrandIcon, pickGradientFor, pickMarketIconGlyph, type MarketIconGlyph } from "./icon-model";
-import { BRAND_ICON_SRC, MARK_INVERT_BRANDS, MARK_TILE_BG } from "./brand-assets";
+import { BRAND_ICON_SRC, MARK_TILE_BG, MARK_TONE, type MarkTone } from "./brand-assets";
 
 const GLYPH_ICONS: Record<MarketIconGlyph, typeof Sparkles> = {
   map: Map,
@@ -176,49 +177,86 @@ export function decodeSvgDataUri(src: string): string | null {
   }
 }
 
-function extractSvgFillColors(svg: string): string[] {
-  const found = new Set<string>();
-  for (const m of svg.matchAll(/\bfill\s*=\s*["']([^"']+)["']/gi)) {
-    found.add(m[1].trim());
-  }
-  for (const m of svg.matchAll(/\bfill\s*:\s*([^;}"']+)/gi)) {
-    found.add(m[1].trim());
-  }
-  return [...found].filter((c) => {
-    const lower = c.toLowerCase();
-    return lower && lower !== "none" && lower !== "transparent" && !lower.startsWith("url(");
-  });
+function attrFill(attrs: string): string | null {
+  const style = attrs.match(/\bstyle\s*=\s*["'][^"']*\bfill\s*:\s*([^;"']+)/i);
+  if (style) return style[1].trim();
+  const fill = attrs.match(/\bfill\s*=\s*["']([^"']+)["']/i);
+  return fill ? fill[1].trim() : null;
+}
+
+function isPaintedFill(c: string): boolean {
+  const lower = c.toLowerCase();
+  return Boolean(lower) && lower !== "none" && lower !== "transparent" && !lower.startsWith("url(");
 }
 
 /**
- * data-URI SVG 是否为近黑单色字形(无彩色填色)。
- * 多色品牌标(Gmail/Feishu/Supabase 等)返回 false,避免误反白。
- * 纯白字形(本地 Notion)也返回 false — 深色瓷砖上已可读。
+ * 实际绘制用到的填色(含隐式默认黑):
+ * 形状元素无 fill 时继承最近的 <g>/<svg> fill;都没有则按 SVG 规范默认为黑色。
+ * 旧实现只收集显式 fill="…",于是 Notion(白方块 fill="#fff" + 隐式黑 N)被误判为「纯白字形」,
+ * 浅色主题再叠 brightness(0) 就压成实心黑块。
  */
+export function extractSvgFillColors(svg: string): string[] {
+  const found = new Set<string>();
+  const rootMatch = svg.match(/<svg\b([^>]*)>/i);
+  const rootFill = rootMatch ? attrFill(rootMatch[1]) : null;
+  // 简化继承:记录 <g fill> 栈(SVG 资产一般结构简单)。
+  const stack: Array<string | null> = [rootFill];
+  const tokenRe = /<(\/?)(g|path|circle|rect|ellipse|polygon|polyline|text|line|use)\b([^>]*?)(\/?)>/gi;
+  let sawShape = false;
+  for (const m of svg.matchAll(tokenRe)) {
+    const closing = m[1] === "/";
+    const tag = m[2].toLowerCase();
+    const attrs = m[3] ?? "";
+    const selfClosing = m[4] === "/" || /\/\s*$/.test(attrs);
+    if (tag === "g") {
+      if (closing) {
+        if (stack.length > 1) stack.pop();
+      } else if (!selfClosing) {
+        stack.push(attrFill(attrs) ?? stack[stack.length - 1]);
+      }
+      continue;
+    }
+    if (closing) continue;
+    sawShape = true;
+    if (tag === "line" || tag === "polyline") {
+      const own = attrFill(attrs);
+      if (own) found.add(own);
+      continue;
+    }
+    const fill = attrFill(attrs) ?? stack[stack.length - 1] ?? "#000000";
+    found.add(fill.trim());
+  }
+  if (!sawShape) {
+    for (const m of svg.matchAll(/\bfill\s*=\s*["']([^"']+)["']/gi)) found.add(m[1].trim());
+    for (const m of svg.matchAll(/\bfill\s*:\s*([^;}"']+)/gi)) found.add(m[1].trim());
+  }
+  return [...found].filter(isPaintedFill);
+}
+
+/** 由 SVG 源码判定明暗口径;彩色标返回 "color",无可判定填色返回 null。 */
+export function classifySvgTone(svg: string): MarkTone | "color" | null {
+  const colors = extractSvgFillColors(svg);
+  if (colors.length === 0) return null;
+  const chromatic = colors.some((c) => !isNearBlackColor(c) && !isNearWhiteOrLightColor(c));
+  if (chromatic) return "color";
+  const dark = colors.some(isNearBlackColor);
+  const light = colors.some(isNearWhiteOrLightColor);
+  if (dark && light) return "duo";
+  if (dark) return "dark";
+  if (light) return "light";
+  return null;
+}
+
+/** data-URI SVG 是否为近黑单色字形(无彩色、无白色对比块)。 */
 export function isNearBlackMonochromeSvgDataUri(src: string): boolean {
   const svg = decodeSvgDataUri(src);
-  if (!svg) return false;
-  const colors = extractSvgFillColors(svg);
-  if (colors.length === 0) return false;
-  const nearBlack = colors.filter(isNearBlackColor);
-  const chromatic = colors.filter((c) => !isNearBlackColor(c) && !isNearWhiteOrLightColor(c));
-  if (chromatic.length > 0) return false;
-  return nearBlack.length > 0;
+  return svg ? classifySvgTone(svg) === "dark" : false;
 }
 
-/**
- * data-URI SVG 是否为近白单色字形(无彩色填色)。
- * 本地 Notion 等为深色瓷砖准备的白标在浅色主题需压黑。
- */
+/** data-URI SVG 是否为近白单色字形(不含黑色细节;Notion 这类黑白双色标返回 false)。 */
 export function isNearWhiteMonochromeSvgDataUri(src: string): boolean {
   const svg = decodeSvgDataUri(src);
-  if (!svg) return false;
-  const colors = extractSvgFillColors(svg);
-  if (colors.length === 0) return false;
-  const nearWhite = colors.filter(isNearWhiteOrLightColor);
-  const chromatic = colors.filter((c) => !isNearBlackColor(c) && !isNearWhiteOrLightColor(c));
-  if (chromatic.length > 0) return false;
-  return nearWhite.length > 0 && colors.every((c) => isNearWhiteOrLightColor(c) || isNearBlackColor(c));
+  return svg ? classifySvgTone(svg) === "light" : false;
 }
 
 function pickMarkTileBg(name: string, brandKey?: string, fallback: string = NEUTRAL_TILE_BG_DARK): string {
@@ -231,9 +269,29 @@ function pickMarkTileBg(name: string, brandKey?: string, fallback: string = NEUT
 }
 
 /**
+ * 字形明暗口径:品牌表 → 名称关键词(近黑)→ data-URI SVG 实际填色(含隐式黑)。
+ * 开发态 SVG 是 URL 拿不到内容,故品牌表优先。
+ */
+export function resolveMarkTone(
+  name: string,
+  brandKey?: string,
+  src?: string,
+): MarkTone | "color" | null {
+  if (brandKey && MARK_TONE[brandKey]) return MARK_TONE[brandKey];
+  const n = name.toLowerCase();
+  if (INVERT_NAME_KEYWORDS.some((k) => n.includes(k))) return "dark";
+  if (src) {
+    const svg = decodeSvgDataUri(src);
+    if (svg) return classifySvgTone(svg);
+  }
+  return null;
+}
+
+/**
  * 字形是否需要滤镜翻转以贴合当前主题瓷砖。
- * - 深色/dim:近黑字形反白(品牌表 / 名称关键词 / data-URI 探测)。
- * - 浅色:近黑保持原样;仅近白单色字形(如 Notion)压黑。
+ * - 深色/dim:仅单色近黑字形反白。
+ * - 浅色:仅单色近白字形压黑。
+ * - duo(自带黑白对比,如 Notion)与彩色标:任何主题都不加滤镜。
  * 不用 Tailwind brightness/invert 类名 — 生产 CSS 未必含这些 utility。
  */
 export function shouldInvertMark(
@@ -242,17 +300,8 @@ export function shouldInvertMark(
   src?: string,
   darkLike: boolean = true,
 ): boolean {
-  if (darkLike) {
-    if (brandKey && MARK_INVERT_BRANDS.has(brandKey)) return true;
-    const n = name.toLowerCase();
-    if (INVERT_NAME_KEYWORDS.some((k) => n.includes(k))) return true;
-    if (src && isNearBlackMonochromeSvgDataUri(src)) return true;
-    return false;
-  }
-  if (src && isNearWhiteMonochromeSvgDataUri(src)) return true;
-  if (brandKey === "notion") return true;
-  if (name.toLowerCase().includes("notion")) return true;
-  return false;
+  const tone = resolveMarkTone(name, brandKey, src);
+  return darkLike ? tone === "dark" : tone === "light";
 }
 
 /** 深色瓷砖上强制白化近黑字形(等价 brightness-0 + invert)。 */
@@ -261,10 +310,10 @@ export const MARK_INVERT_FILTER = "brightness(0) invert(1)";
 export const MARK_TO_DARK_FILTER = "brightness(0)";
 
 /**
- * 多色本地 SVG(iconify logos 等)用中性底,避免品牌色与彩色字形撞色
- * (如 Supabase 绿标铺在 #3ECF8E 上几乎看不见)。
- * 单色 Simple Icons / 深色主题下需反白的近黑字形仍可用品牌/深色 tint。
- * 浅色主题永不使用近黑垫(#000 / #1C1C1E 等)。
+ * 瓷砖底口径:默认中性(浅色 #F2F2F7 / 深色 #1C1C1E)。
+ * Simple Icons CDN 默认就是品牌色字形 — 再铺同色品牌底会「同色隐身」(Docker 蓝标铺 #2496ED),故不 tint。
+ * 仅深色主题下被反白的近黑字形使用品牌深色瓷砖(如 GitHub #24292F),白字形在其上可读。
+ * 浅色主题永不使用品牌/近黑垫。
  */
 export function pickTileBackground(opts: {
   name: string;
@@ -274,20 +323,14 @@ export function pickTileBackground(opts: {
   invert: boolean;
   darkLike: boolean;
 }): string {
-  const { name, brandKey, src, mark, invert, darkLike } = opts;
+  const { name, brandKey, mark, invert, darkLike } = opts;
   const neutral = neutralTileBg(darkLike);
-  if (!darkLike) {
-    if (mark && isSimpleIconsCdn(src)) {
-      const bg = pickMarkTileBg(name, brandKey, neutral);
-      if (!isNearBlackColor(bg)) return bg;
-    }
-    return neutral;
-  }
-  if (!mark) return neutral;
-  if (isSimpleIconsCdn(src) || invert) {
-    return pickMarkTileBg(name, brandKey, neutral);
-  }
-  return neutral;
+  if (!darkLike || !mark || !invert) return neutral;
+  const bg = pickMarkTileBg(name, brandKey, neutral);
+  // 反白后是白字形:瓷砖必须足够深,否则退回中性深底。
+  const rgb = bg.startsWith("#") ? parseHexRgb(bg) : null;
+  if (rgb && 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b > 110) return neutral;
+  return bg;
 }
 
 type Props = {

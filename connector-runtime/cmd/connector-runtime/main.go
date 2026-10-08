@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -65,7 +66,8 @@ serve 常用 flags:
   --addr <host:port>          监听地址（默认 127.0.0.1:41719）
   --runtime-token <token>     运行面 token（缺省自动生成并落盘 data-dir/runtime.token）
   --admin-token <token>       管理面 token（缺省自动生成并落盘 data-dir/admin.token）
-  --connectors-dir <dir>      额外连接器定义目录（叠加在内置目录之上）
+  --connectors-dir <dir>      额外连接器定义目录（叠加在内置目录之上，启动时只读加载）
+  --user-connectors-dir <dir> 运行时登记的连接器目录（默认 data-dir/connectors，热加载）
   --allow-private-network     允许私网/环回上游（本地调试/内网；默认拒绝）
   --dev-no-auth               跳过 token 认证（仅本地调试）
 `)
@@ -80,6 +82,7 @@ func serveCmd(args []string) {
 	connectorsDir := fs.String("connectors-dir", "", "额外连接器定义目录")
 	allowPrivate := fs.Bool("allow-private-network", false, "允许私网/环回上游")
 	devNoAuth := fs.Bool("dev-no-auth", false, "跳过 token 认证（仅本地调试）")
+	userConnectorsDir := fs.String("user-connectors-dir", "", "运行时登记的连接器目录（默认 data-dir/connectors）")
 	_ = fs.Parse(args)
 
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
@@ -101,6 +104,7 @@ func serveCmd(args []string) {
 		AdminToken:          at,
 		AllowPrivateNetwork: *allowPrivate,
 		DevNoAuth:           *devNoAuth,
+		UserConnectorsDir:   *userConnectorsDir,
 	})
 	if err != nil {
 		fatal(err)
@@ -116,13 +120,22 @@ func serveCmd(args []string) {
 		cancel()
 	}()
 
-	fmt.Fprintf(os.Stderr, "connector-runtime %s 监听 %s（连接器 %d 个）\n", version, *addr, s.Catalog().Count())
-	fmt.Fprintf(os.Stderr, "MCP 端点:   http://%s/mcp\n", *addr)
-	if !*devNoAuth {
-		fmt.Fprintf(os.Stderr, "runtime token: %s\n", rt)
-		fmt.Fprintf(os.Stderr, "admin token:   %s\n", at)
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		fatal(err)
 	}
-	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	realAddr := ln.Addr().String()
+	// 发现文件：同机其他进程（桌面 Python 后端）据此复用实例；token 见同目录 0600 文件。
+	writeSidecarInfo(*dataDir, realAddr)
+	defer removeSidecarInfo(*dataDir)
+
+	fmt.Fprintf(os.Stderr, "connector-runtime %s 监听 %s（连接器 %d 个）\n", version, realAddr, s.Catalog().Count())
+	fmt.Fprintf(os.Stderr, "MCP 端点:   http://%s/mcp\n", realAddr)
+	if !*devNoAuth {
+		// 不打印 token 明文（避免进入宿主日志）；需要时读取 0600 文件。
+		fmt.Fprintf(os.Stderr, "token 文件:  %s / %s\n", filepath.Join(*dataDir, "runtime.token"), filepath.Join(*dataDir, "admin.token"))
+	}
+	if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
 	_ = s.Close()
@@ -248,11 +261,47 @@ func defaultDataDir() string {
 }
 
 // ensureToken：flag 显式值 > 已落盘 token > 新生成并落盘（0600）。
+// sidecarInfo 发现文件内容（不含 token）。
+type sidecarInfo struct {
+	PID       int    `json:"pid"`
+	Addr      string `json:"addr"`
+	Version   string `json:"version"`
+	StartedAt string `json:"startedAt"`
+}
+
+func writeSidecarInfo(dataDir, addr string) {
+	b, _ := json.MarshalIndent(sidecarInfo{PID: os.Getpid(), Addr: addr, Version: version, StartedAt: time.Now().UTC().Format(time.RFC3339)}, "", "  ")
+	path := filepath.Join(dataDir, "sidecar.json")
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, path)
+	}
+}
+
+func removeSidecarInfo(dataDir string) {
+	path := filepath.Join(dataDir, "sidecar.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var info sidecarInfo
+	if json.Unmarshal(b, &info) == nil && info.PID == os.Getpid() {
+		_ = os.Remove(path)
+	}
+}
+
 func ensureToken(dataDir, filename, val string) string {
+	path := filepath.Join(dataDir, filename)
 	if val != "" {
+		// 显式传入的 token 同步落盘（0600，与 master.key 同信任级），供同机进程发现复用。
+		if b, err := os.ReadFile(path); err != nil || strings.TrimSpace(string(b)) != val {
+			tmp := path + ".tmp"
+			if os.WriteFile(tmp, []byte(val), 0o600) == nil {
+				_ = os.Rename(tmp, path)
+			}
+		}
 		return val
 	}
-	path := filepath.Join(dataDir, filename)
 	if b, err := os.ReadFile(path); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t

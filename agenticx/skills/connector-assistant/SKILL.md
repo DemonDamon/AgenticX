@@ -41,7 +41,12 @@ metadata:
 1. 并行调用 `connector_manage {action:"list_templates"}` 与 `{action:"list_instances"}`。
 2. 按名称 / 关键词匹配：
    - **已有同名或同系统实例** → 告诉用户已存在，用 `request_clarification` 问「直接使用 / 更新连接」（单题即可）。选「更新」时 `create` 带 `overwrite:true`。
-   - **命中模板且 `create_via=mcp_url`** → 走模板实例：`template_id` 用该模板 id，问题只需问上游地址（第 2 步只保留 Q3；认证方式按模板 `auth`：`api_key`/`custom_credential` → `bearer`，`none` → `none`）。
+   - **命中模板且 `create_via=mcp_url`** → 走模板实例：`template_id` 用该模板 id。模板带 `mcp_url`（官方端点，已核实）时**不要再问地址**，`url` 可省略（自动用 `mcp_url`）；否则只问上游地址（第 2 步只保留 Q3）。认证方式按模板 `auth`：
+     - `mcp_oauth`（官方远程 MCP，OAuth 2.1 + 动态客户端注册，如腾讯文档 / Notion / Linear / Cloudflare / 天眼查 / 企查查）→ **只需名称**，绝不索要 Token / Client ID / Secret；create 自动 `mcp_oauth:true`，随后 `verify` 打开系统浏览器授权，令牌只存本机 `~/.agenticx/connectors/oauth/`（0600）。
+     - 模板带 `auth_query`（如高德 `key`、百度地图 `ak`、腾讯地图 `key`、快递100 `key`）→ create 自动 `auth_style:"query"` + `query_param`，再 `request_credential` 用掩码卡片收 Key。
+     - 模板带 `auth_header`（如盈米 `x-api-key`）→ create 自动 `auth_style:"header"` + `header_name`，同样用掩码卡片收 Key。
+     - `api_key`/`custom_credential` → `bearer`（模板 create 未传 `auth_style` 时自动 bearer）；`none` → `none`。
+     - 模板带 `credential_label` / `credential_help_url`（如恒生聚源：`Access Token` + 飞书「如何获取凭证」文档）→ 收凭证前在回复里用一句话附上该链接（Markdown 链接，如「[如何获取凭证](<credential_help_url>)」），`request_credential` 的 `credential_label` 用模板给的名称（不传也会自动取模板值）。
    - **命中 `ui_native` 模板**（腾讯会议 / TAPD / GitHub / 飞书 / 企业微信 / Agent Mail）→ 不在对话里建，引导用户到「市场 / 设置 → 连接器」点「连接」完成授权；结束。
    - **命中 `unavailable` 模板**（OAuth 类）→ 说明暂未接线，可改用该服务的 MCP Server URL 走自定义。
    - **都不匹配** → 第 2 步。
@@ -92,7 +97,7 @@ metadata:
 | Bearer Token | `auth_style:"bearer"` |
 | 自定义请求头 | `auth_style:"header"` + `header_name`（问名字，默认 `X-API-Key`） |
 | Query 参数 | `auth_style:"query"` + `query_param`（默认 `api_key`） |
-| OAuth 2.0 | `auth_style:"none"` + `mcp_oauth:true`（服务端支持标准 MCP OAuth 时；verify 打开浏览器授权） |
+| OAuth 2.0 | `auth_style:"none"` + `mcp_oauth:true`（服务端支持标准 MCP OAuth 时；verify 打开浏览器授权）。模板 `auth=mcp_oauth` 时自动设置，无需再问 |
 | AK/SK 签名 | MCP 不支持签名认证；若该系统实际是 HTTP API → 按 REST 处理 |
 
 **REST API** → `create_rest`。追问：
@@ -129,7 +134,7 @@ AK/SK 仅覆盖**通用 HMAC-SHA256 请求头签名**；AWS SigV4、阿里云/�
 - `gateway_unavailable` → 本机连接器网关未就绪（桌面端未打包网关时会出现），如实告知。
 
 ### 第 5 步：收凭证（仅当 `needs_credential=true`）
-- MCP：`{action:"request_credential", server_name, credential_label:"API Key" 或 "Token"}`
+- MCP：`{action:"request_credential", server_name, credential_label:"API Key" 或 "Token"}`（模板有 `credential_label` 时用模板值，如恒生聚源 `Access Token`；create 结果带 `credential_help_url` 时先把「如何获取凭证」链接发给用户，掩码卡片里也会显示该链接）
 - REST：`{action:"request_credential", instance_id:"rest:<id>"}`（按认证类型自动给出多字段卡片；OAuth 授权码会在提交后打开系统浏览器，用户在浏览器里同意即可）
 - 数据库：`{action:"request_credential", server_name}`（数据库密码；SQLite 无需）
 - **永远不要**让用户把 Token / Key / 密码 / Secret 发在聊天里；如果用户主动贴了，提醒其已暴露、建议到服务端轮换，并仍通过掩码卡片重新填写。

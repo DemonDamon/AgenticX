@@ -209,7 +209,8 @@
       "api_key": "接线后创建实例需填写 api_key。",
       "token": "接线后创建实例需填写 Token。",
       "oauth_device": "接线后通过浏览器 / 设备码授权，无需粘贴密钥。",
-      "url_token": "接线后需填写官方 MCP URL 与 Token。"
+      "url_token": "接线后需填写官方 MCP URL 与 Token。",
+      "oauth_dcr": "创建时只需填写名称；OAuth 2.1 客户端自动注册，浏览器一键授权，无需粘贴密钥。"
     },
     "create": {
       "title": "新建连接器",
@@ -220,6 +221,7 @@
       "howToGetCredential": "如何获取凭证",
       "advanced": "高级：MCP 端点",
       "advancedHint": "写入本机 mcp.json 需要 Streamable HTTP / SSE 地址。有官方默认时可自动预填；否则请粘贴自建或供应商提供的 endpoint。",
+      "advancedOfficialHint": "已预填官方 MCP 端点，通常无需修改；仅在使用私有化部署或代理地址时覆盖（可选）。",
       "close": "关闭",
       "submit": "创建连接器",
       "readFailed": "读取 mcp.json 失败",
@@ -234,7 +236,7 @@
         "token": "Token"
       },
       "placeholders": {
-        "name": "例如：轻流的连接器",
+        "name": "请输入连接器名称",
         "url": "https://mcp.example.com/sse",
         "apiKey": "输入 API Key",
         "token": "输入 Token 值"
@@ -245,7 +247,8 @@
         "required_url": "请在「高级」中填写 MCP URL",
         "invalid_url": "URL 格式无效",
         "required_api_key": "请填写 API Key",
-        "required_token": "请填写 Token"
+        "required_token": "请填写 Token",
+        "required_credential": "请填写此凭证"
       },
       "updateCredential": "更新凭证",
       "updateConnection": "更新连接",
@@ -254,7 +257,8 @@
       "existsHintNoCredential": "同一模板只保留一个连接实例。可直接使用；或修改后点「更新连接」覆盖该连接，不会新建重复连接。",
       "useExisting": "直接使用",
       "reused": "连接「{{name}}」已存在且凭证未变化，已直接复用",
-      "updated": "已更新连接「{{name}}」的凭证"
+      "updated": "已更新连接「{{name}}」的凭证",
+      "oauthDcrHint": "OAuth 2.1 凭证将自动注册，无需手动填写 Client ID"
     },
     "supply": {
       "gildata": {
@@ -287,14 +291,14 @@
       },
       "pkulaw": {
         "name": "北大法宝-检索法律法规",
-        "description": "北大法宝 MCP 为 AI 应用提供专业法律数据服务，覆盖法规与案例检索，便于在对话中引用权威条文与裁判文书。"
+        "description": "北大法宝MCP服务平台为AI应用提供专业的法律数据服务。通过MCP协议，您可以让AI助手具备法律检索、条文查询等专业能力。"
       },
       "neocrm": {
         "name": "销售易 CRM",
-        "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据，支持跟进记录查询与商机洞察。"
+        "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据，提供销售 AI Agent 查询与跟进所需的结构化业务信息。"
       },
       "dingtalk": {
-        "name": "钉钉 CLI",
+        "name": "钉钉CLI",
         "description": "钉钉企业通讯与待办协作：接线后可命名实例并调用消息、日程等能力；本条目免凭据，仅需完成实例命名即可使用。"
       },
       "qingflow": {
@@ -307,19 +311,19 @@
       },
       "amap": {
         "name": "高德地图",
-        "description": "高德地图位置服务：地理编码、路径规划、周边 POI 检索与路况查询，把出行与本地生活能力接到助手对话里。"
+        "description": "高德地图 MCP 服务，提供地理编码（地址转坐标）、逆地理编码（坐标转地址）、POI 关键字搜索、实时天气/天气预报查询、驾车路径规划等核心 LBS 能力。适用于位置查询、周边检索、出行路线规划、天气查询等场景。"
       },
       "baidu-maps": {
         "name": "百度地图",
-        "description": "百度地图位置服务：地点检索、路线规划、坐标转换与周边查询，便于助手完成导航类问题与地理信息检索。"
+        "description": "百度地图 MCP 服务，提供地理编码、逆地理编码、地点检索、路径规划、天气查询等功能。支持驾车、步行、骑行、公交多种出行方式的路线规划，POI搜索，IP定位等地图服务。"
       },
       "tencent-maps": {
         "name": "腾讯地图",
-        "description": "腾讯地图位置服务：地理编码、路线规划与周边检索，把地点查找与出行规划能力接入助手，支持自然语言提问。"
+        "description": "腾讯位置服务 MCP：云端地理位置能力，支持地址解析、周边/沿途搜索、多出行方式路线规划、距离矩阵、IP 定位与天气查询；结果已语义化，便于大模型理解与行程推荐。"
       },
       "tencent-docs": {
         "name": "腾讯文档",
-        "description": "腾讯文档在线文档、表格与幻灯片协作；可粘贴官方 MCP 端点与 Token，在对话中读写文档内容与协作信息。"
+        "description": "腾讯官方 MCP，支持创建/读取/编辑智能文档、表格、幻灯片等"
       },
       "wps": {
         "name": "WPS Office",
@@ -342,7 +346,7 @@
         "description": "Gitee 代码托管与团队协作：管理仓库、Pull Request、Issue 与项目看板，把国内代码协作流程接到助手对话。"
       },
       "linear": {
-        "name": "Linear",
+        "name": "官方Linear",
         "description": "Linear Issue 追踪与项目管理：查看与更新 Issue、周期与项目状态，适合工程团队在对话中推进研发任务。"
       },
       "asana": {
@@ -350,7 +354,7 @@
         "description": "Asana 任务与项目协作：管理项目、任务分配与进度跟踪，把团队待办与里程碑同步到助手，便于催办与汇总。"
       },
       "tianyancha": {
-        "name": "天眼查",
+        "name": "天眼查MCP",
         "description": "天眼查企业工商与法律风险信息：查询企业基本信息、股东、司法风险与经营状态，辅助尽职调查与客户背调。"
       },
       "qichacha": {
@@ -360,6 +364,78 @@
       "cloudflare": {
         "name": "Cloudflare",
         "description": "Cloudflare DNS 与边缘网络 API：管理域名解析、CDN 与安全规则，把边缘基础设施运维能力接入助手自动化。"
+      },
+      "wps-project": {
+        "name": "WPS 项目管理",
+        "description": "WPS 项目管理 MCP 面向 WPS 项目的方案管理、任务推进和流程协同场景。它将既有项目数据服务封装为标准 MCP 工具，让 WPS Comate 在获得用户授权后，能够围绕项目、任务、流程、业务数据表和组织成员完成查询与操作"
+      },
+      "qixin": {
+        "name": "启信慧眼",
+        "description": "面向大模型与智能体应用的企业数据 MCP Server，提供企业检索、画像、舆情、风险、产业链、招投标、股权关系等标准化工具能力，帮助模型在业务流程中稳定调用企业数据服务"
+      },
+      "mozlen": {
+        "name": "摩知轮",
+        "description": "摩知轮 MCP 提供对商标检索、以图查标、商标公告、企业商标图谱、实务判例、商标监控预警等摩知轮知识产权平台资源的访问能力，支持通过自然语言检索近似商标、排查商标注册风险、查询企业商标布局、调取商标司法实务案例以及自动化知识产权尽调工作流。"
+      },
+      "tdx": {
+        "name": "通达信MCP",
+        "description": "通达信 MCP 连接专业金融数据平台，支持实时行情、指数概况、K线分析、研报公告、行业分析等。APIkey获取地址：https://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey\nhttps://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey"
+      },
+      "moka": {
+        "name": "Moka 招聘管理",
+        "description": "Moka 招聘系统基本信息查询，覆盖组织架构、用户、职位、招聘需求、候选人、面试、Offer"
+      },
+      "yuandian": {
+        "name": "华宇元典法律数据",
+        "description": "华宇元典法律数据为智能体提供法律法规、案例文书、企业信息 MCP 工具能力"
+      },
+      "xiaoe": {
+        "name": "小鹅通",
+        "description": "小鹅通 MCP 对接知识店铺与内容交易数据，汇聚课程、商品、订单、学员与营收等经营信息，提供运营与客服 AI Agent 所需的结构化业务数据。"
+      },
+      "lexiang": {
+        "name": "腾讯乐享",
+        "description": "腾讯乐享 MCP 让 AI 助手能够直接与您的乐享知识库进行交互，支持搜索知识、阅读内容、创建和编辑文档、管理知识结构、上传下载文件，以及导入腾讯会议录制等操作。"
+      },
+      "jinshuju": {
+        "name": "金数据",
+        "description": "用自然语言在金数据创建表单、表格、问卷、考试、报名、收款等各类场景应用：一句话生成表单与表格、批量处理数据、自动统计分析，零门槛快速搭建。"
+      },
+      "wkinfo": {
+        "name": "威科先行",
+        "description": "威科先行 MCP 汇聚法律法规、司法案例、实务观点与合规参考等法律专业数据，为法务与合规 AI Agent 提供可检索的结构化法律信息。"
+      },
+      "ifind": {
+        "name": "同花顺iFinD-A股数据",
+        "description": "链接 AI 与金融，通过 MCP 标准协议为智能投研应用提供稳定、准确、可被模型直接调用的数据引擎。API密钥获取地址：https://mcp.51ifind.cn/?syncCookieTimes=1#/profile"
+      },
+      "zhihuiya": {
+        "name": "智慧芽专利&文献融合检索",
+        "description": "可以同时在智慧芽全球专利数据库和文献库中进行深度融合搜索的专业工具。它支持自然语言查询，语义搜索和关键词搜索，并提供精准前置过滤能力，助力高效准确检索科研情报和专利信息，该MCP还可以用来获取专利或文献markdown格式的基本信息"
+      },
+      "wj": {
+        "name": "腾讯问卷",
+        "description": "腾讯问卷官方 MCP。支持管理问卷、查看回收与统计分析。创建连接器时填写从腾讯问卷获取的个人访问 Token（wjpt_ 开头）。"
+      },
+      "cnb": {
+        "name": "CNB",
+        "description": "CNB 云原生构建（cnb.cool）OpenAPI，常见只读场景"
+      },
+      "gangtise": {
+        "name": "Gangtise投研",
+        "description": "Gangtise MCP汇聚机构级观点，纪要，日程等另类数据，提供投研AI Agent预生成数据及全球行情/财务/估值/宏观行业等结构化数据。"
+      },
+      "ima": {
+        "name": "IMA 知识库",
+        "description": "IMA 知识库开放平台 API，支持笔记管理和知识库操作。提供搜索/创建/编辑笔记、上传文件到知识库、添加网页链接、搜索知识库内容等能力。"
+      },
+      "edgeone": {
+        "name": "EdgeOne Makers",
+        "description": "EdgeOne Makers Deploy MCP 是一项专用服务，能够将 Web 应用快速部署到 EdgeOne Makers 并生成公开访问链接。这使您能够立即预览和分享 AI 生成的网页内容。"
+      },
+      "fayan": {
+        "name": "法研·法律法规检索",
+        "description": "法研 MCP 提供法律法规全文检索与条文定位，汇聚现行有效法规、规章与配套文件，为法务与合规 AI Agent 提供可引用的结构化法律依据。"
       }
     },
     "newMenu": {
@@ -409,7 +485,8 @@
       "status": {
         "connected": "已连接",
         "needs_credential": "待填凭证",
-        "invalid": "失效"
+        "invalid": "失效",
+        "needs_auth": "待授权"
       },
       "readOnly": "只读",
       "noDescription": "暂无描述",
@@ -420,13 +497,20 @@
         "delete": "删除",
         "confirmDelete": "确认删除",
         "reauth": "重新授权",
-        "fillCredential": "填写凭证"
+        "fillCredential": "填写凭证",
+        "authorize": "去授权"
       },
       "deleteAria": "删除 {{name}}",
       "deleteFailed": "删除失败",
       "deleted": "已删除「{{name}}」",
       "manageDraft": "帮我管理连接器「{{name}}」：检查连接状态，需要时更新凭证或配置。",
       "credentialDraft": "为连接器「{{name}}」填写凭证并验证连接。"
+    },
+    "oauth": {
+      "opening": "正在打开浏览器授权「{{name}}」，请在浏览器中完成登录…",
+      "authorized": "「{{name}}」已授权并连接",
+      "failed": "「{{name}}」授权未完成：{{error}}",
+      "needSession": "请先打开一个对话，再授权「{{name}}」"
     }
   },
   "mcpNew": {

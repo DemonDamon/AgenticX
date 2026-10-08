@@ -1,12 +1,16 @@
 /**
  * Comate 风格「新建连接器」弹层（Near 深色主题）：
  * 标题+副标题 → 已选择模板 → 连接器名称 → 新建凭证(+如何获取) → 凭据字段；
- * MCP URL 收入可折叠「高级」以贴近 Comate（轻流表单不突出 endpoint）。
+ * 目录已知官方端点时不显示 URL（与 Comate 一致）；仅无官方端点的模板在可折叠「高级」里填 MCP URL。
+ * 模板元数据（凭证标签/占位/帮助链接/端点/鉴权位置）渲染期按 supplyId 取自 CONNECTOR_SUPPLY。
  * 写入 ~/.agenticx/mcp.json 后回调刷新「我的连接」。
  *
  * 不重复建设：同模板已有实例时显示「已存在连接：<name>」，主按钮改为「更新凭证」，
  * 写回同一 server（applyCreateConnectorToMcpJson overwrite），绝不新增第二条。
  * 作为「从模板新建」第 2 步时传 onBack：显示「重选」「上一步」。
+ *
+ * mcp_oauth（官方远程 MCP + OAuth 2.1 动态客户端注册）：只填名称 + 灰色说明，官方 URL 预填进折叠的「高级」；
+ * 写盘后由宿主 onCreated(oauth=true) 触发浏览器授权，令牌不经此表单。
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -15,9 +19,11 @@ import { ChevronDown, ExternalLink, Info, Loader2, X } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { MCP_PRIMARY_CONFIG_PATH } from "../../../utils/mcp-remote-config";
 import { MarketIcon } from "../../marketplace/MarketIcon";
-import { authFormFields, type ConnectorAuthType } from "./connector-supply";
+import { authFormFields, type ConnectorAuthType, type ConnectorCredentialField } from "./connector-supply";
 import {
   applyCreateConnectorToMcpJson,
+  credentialHelpHref,
+  resolveCreateTargetWithSupply,
   type CreateConnectorFormValues,
 } from "./create-connector-model";
 
@@ -31,6 +37,16 @@ export type CreateConnectorTarget = {
   docsUrl?: string;
   /** 目录已知默认 MCP endpoint；有则预填并可保持高级区折叠。 */
   defaultMcpUrl?: string;
+  /** API Key 写入 URL 查询参数名（如高德 `key`）；缺省走 Bearer 头。 */
+  apiKeyQuery?: string;
+  /** 凭证写进自定义请求头（如盈米 `x-api-key`）；缺省 Bearer。 */
+  credentialHeader?: string;
+  /** 模板凭证字段标签 / 占位 / 帮助链接（见 ConnectorSupplyEntry）。 */
+  credentialLabel?: string;
+  credentialPlaceholder?: string;
+  credentialHelpUrl?: string;
+  /** 多字段自定义头（Comate）；有值时优先于单字段 apiKey/token。 */
+  credentialFields?: readonly ConnectorCredentialField[];
 };
 
 export type CreateConnectorResultPayload = {
@@ -40,6 +56,8 @@ export type CreateConnectorResultPayload = {
   updated: boolean;
   /** 凭证与端点均未变化，直接复用。 */
   reused: boolean;
+  /** mcp_oauth：写盘后需在浏览器完成 MCP OAuth 授权。 */
+  oauth?: boolean;
 };
 
 type Props = {
@@ -56,7 +74,7 @@ type Props = {
   onCreated: (payload: CreateConnectorResultPayload) => void | Promise<void>;
 };
 
-const EMPTY: CreateConnectorFormValues = { name: "", url: "", apiKey: "", token: "" };
+const EMPTY: CreateConnectorFormValues = { name: "", url: "", apiKey: "", token: "", credentials: {} };
 
 function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
   return (
@@ -94,7 +112,7 @@ function TextInput({
 
 export function CreateConnectorModal({
   open,
-  target,
+  target: targetProp,
   configPath = MCP_PRIMARY_CONFIG_PATH,
   existingConnection = null,
   onBack,
@@ -103,9 +121,17 @@ export function CreateConnectorModal({
   onCreated,
 }: Props) {
   const { t } = useTranslation("marketplace");
+  // 所有入口共用：渲染期按 supplyId 合并当前目录元数据（见 resolveCreateTargetWithSupply）。
+  const target = useMemo(
+    () => (targetProp ? resolveCreateTargetWithSupply(targetProp) : null),
+    [targetProp],
+  );
   const auth: ConnectorAuthType = target?.authType ?? "custom_credential";
   const fields = useMemo(() => new Set(authFormFields(auth)), [auth]);
-  const needsCredential = fields.has("api_key") || fields.has("token");
+  const credentialFields = target?.credentialFields ?? [];
+  const hasMultiCredentials = credentialFields.length > 0;
+  const needsCredential = hasMultiCredentials || fields.has("api_key") || fields.has("token");
+  const isMcpOauth = auth === "mcp_oauth";
   const needsUrl = fields.has("url");
   const [values, setValues] = useState<CreateConnectorFormValues>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -125,6 +151,7 @@ export function CreateConnectorModal({
       url: defaultUrl,
       apiKey: "",
       token: "",
+      credentials: {},
     });
     // 无默认 endpoint 时展开高级，避免用户找不到必填 URL。
     setAdvancedOpen(needsUrl && !defaultUrl);
@@ -135,6 +162,13 @@ export function CreateConnectorModal({
 
   const setField = (key: keyof CreateConnectorFormValues, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setCredentialField = (name: string, value: string) => {
+    setValues((prev) => ({
+      ...prev,
+      credentials: { ...(prev.credentials ?? {}), [name]: value },
+    }));
   };
 
   const mapError = (code: string | undefined): string => {
@@ -155,6 +189,9 @@ export function CreateConnectorModal({
       }
       const applied = applyCreateConnectorToMcpJson(raw.text, auth, values, {
         templateId: target.supplyId,
+        apiKeyQuery: target.apiKeyQuery,
+        credentialHeader: target.credentialHeader,
+        credentialFields: target.credentialFields,
         overwrite: Boolean(existingName),
       });
       if (!applied.ok) {
@@ -196,6 +233,7 @@ export function CreateConnectorModal({
         displayName: applied.displayName || applied.serverName,
         updated: applied.existed && !applied.unchanged,
         reused: applied.unchanged,
+        ...(isMcpOauth ? { oauth: true } : {}),
       });
       onClose();
     } catch (e) {
@@ -207,7 +245,19 @@ export function CreateConnectorModal({
 
   if (!target) return null;
 
-  const docsUrl = target.docsUrl?.trim();
+  const helpHref = credentialHelpHref(target);
+  const hasOfficialUrl = Boolean((target.defaultMcpUrl ?? "").trim());
+  const credentialLabel = target.credentialLabel?.trim();
+  const credentialPlaceholder = target.credentialPlaceholder?.trim();
+  const openHelp = (e: { preventDefault: () => void }) => {
+    if (!helpHref) return;
+    // <a target=_blank> 会被主进程路由进应用内浏览器；凭证帮助页走系统浏览器（open-external IPC）。
+    const api = typeof window !== "undefined" ? window.agenticxDesktop : undefined;
+    if (api?.openExternal) {
+      e.preventDefault();
+      void api.openExternal(helpHref);
+    }
+  };
 
   return (
     <Modal
@@ -259,23 +309,22 @@ export function CreateConnectorModal({
           </button>
         </div>
 
-        {/* 已选择模板 */}
+        {/* 已选择模板（Comate：浅蓝灰底，仅图标 + 名称；从模板列表进入时右侧「重选」） */}
         <div>
           <div className="mb-1.5 text-[11px] text-text-faint">{t("connectors.create.selectedTemplate")}</div>
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-cardSolid px-3 py-2.5">
-            <MarketIcon name={target.name} iconSrc={target.iconSrc} className="h-9 w-9" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-text-strong">{target.name}</div>
-              {target.description ? (
-                <div className="mt-0.5 line-clamp-1 text-[11px] text-text-faint">{target.description}</div>
-              ) : null}
-            </div>
+          <div
+            className="flex items-center gap-2.5 rounded-lg border border-[rgba(100,116,139,0.18)] bg-[rgba(100,116,139,0.08)] px-3 py-2.5"
+            data-selected-template={target.supplyId ?? target.name}
+          >
+            <MarketIcon name={target.name} iconSrc={target.iconSrc} className="h-7 w-7" />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-text-strong">{target.name}</div>
             {onBack ? (
               <button
                 type="button"
                 className="shrink-0 rounded-md px-2 py-1 text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
                 disabled={saving}
                 onClick={onBack}
+                data-template-reselect
               >
                 {t("connectors.newMenu.reselect")}
               </button>
@@ -326,6 +375,13 @@ export function CreateConnectorModal({
           </label>
         ) : null}
 
+        {/* mcp_oauth：无凭据字段，仅说明（Comate 同款灰字） */}
+        {isMcpOauth ? (
+          <p className="-mt-2 text-[12px] leading-relaxed text-text-faint" data-oauth-dcr-hint>
+            {t("connectors.create.oauthDcrHint")}
+          </p>
+        ) : null}
+
         {/* 新建凭证 */}
         {needsCredential ? (
           <div className="space-y-3">
@@ -333,12 +389,15 @@ export function CreateConnectorModal({
               <div className="text-[13px] font-semibold text-text-strong">
                 {t("connectors.create.credentialSection")}
               </div>
-              {docsUrl ? (
+              {helpHref ? (
                 <a
-                  href={docsUrl}
+                  href={helpHref}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-flex items-center gap-1 text-[12px] text-[rgb(var(--theme-color-rgb,59,130,246))] hover:underline"
+                  onClick={openHelp}
+                  data-credential-help={helpHref}
+                  // Comate 同款蓝色外链（不随主题强调色变化），深浅主题均可读。
+                  className="mt-1 inline-flex items-center gap-1 text-[12px] text-[#3B82F6] hover:underline"
                 >
                   {t("connectors.create.howToGetCredential")}
                   <ExternalLink className="h-3 w-3" aria-hidden />
@@ -346,14 +405,34 @@ export function CreateConnectorModal({
               ) : null}
             </div>
 
-            {fields.has("api_key") ? (
+            {hasMultiCredentials
+              ? credentialFields.map((f) => {
+                  const required = f.required !== false;
+                  return (
+                    <label key={f.name} className="block" data-credential-field={f.name}>
+                      <FieldLabel required={required}>{f.label}</FieldLabel>
+                      <TextInput
+                        type={f.inputType === "text" ? "text" : "password"}
+                        value={(values.credentials ?? {})[f.name] ?? ""}
+                        onChange={(v) => setCredentialField(f.name, v)}
+                        placeholder={f.placeholder || f.label}
+                      />
+                      {fieldErrors[f.name] ? (
+                        <span className="mt-1 block text-[11px] text-rose-400">{fieldErrors[f.name]}</span>
+                      ) : null}
+                    </label>
+                  );
+                })
+              : null}
+
+            {!hasMultiCredentials && fields.has("api_key") ? (
               <label className="block">
-                <FieldLabel required>{t("connectors.create.fields.apiKey")}</FieldLabel>
+                <FieldLabel required>{credentialLabel || t("connectors.create.fields.apiKey")}</FieldLabel>
                 <TextInput
                   type="password"
                   value={values.apiKey}
                   onChange={(v) => setField("apiKey", v)}
-                  placeholder={t("connectors.create.placeholders.apiKey")}
+                  placeholder={credentialPlaceholder || t("connectors.create.placeholders.apiKey")}
                 />
                 {fieldErrors.apiKey ? (
                   <span className="mt-1 block text-[11px] text-rose-400">{fieldErrors.apiKey}</span>
@@ -361,14 +440,14 @@ export function CreateConnectorModal({
               </label>
             ) : null}
 
-            {fields.has("token") ? (
+            {!hasMultiCredentials && fields.has("token") ? (
               <label className="block">
-                <FieldLabel required>{t("connectors.create.fields.token")}</FieldLabel>
+                <FieldLabel required>{credentialLabel || t("connectors.create.fields.token")}</FieldLabel>
                 <TextInput
                   type="password"
                   value={values.token}
                   onChange={(v) => setField("token", v)}
-                  placeholder={t("connectors.create.placeholders.token")}
+                  placeholder={credentialPlaceholder || t("connectors.create.placeholders.token")}
                 />
                 {fieldErrors.token ? (
                   <span className="mt-1 block text-[11px] text-rose-400">{fieldErrors.token}</span>
@@ -378,8 +457,8 @@ export function CreateConnectorModal({
           </div>
         ) : null}
 
-        {/* none：无凭据时仍可能需要 URL — 放在高级区 */}
-        {needsUrl ? (
+        {/* 无官方端点时才需要 URL（收进高级区）；目录已知官方端点 → 与 Comate 一致不显示 URL */}
+        {needsUrl && !hasOfficialUrl ? (
           <div className="rounded-lg border border-border bg-surface-cardSolid">
             <button
               type="button"
@@ -395,9 +474,7 @@ export function CreateConnectorModal({
             </button>
             {advancedOpen ? (
               <div className="space-y-2 border-t border-border/60 px-3 py-3">
-                <p className="text-[11px] leading-relaxed text-text-faint">
-                  {t("connectors.create.advancedHint")}
-                </p>
+                <p className="text-[11px] leading-relaxed text-text-faint">{t("connectors.create.advancedHint")}</p>
                 <label className="block">
                   <FieldLabel required>{t("connectors.create.fields.url")}</FieldLabel>
                   <TextInput

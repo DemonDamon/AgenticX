@@ -58,6 +58,26 @@ import wpsIcon from "../../assets/connectors/stubs/wps.png";
 import yingmiIcon from "../../assets/connectors/stubs/yingmi.png";
 import zoomIcon from "../../assets/connectors/stubs/zoom.svg";
 import zsxqIcon from "../../assets/connectors/stubs/zsxq.png";
+import cnbIcon from "../../assets/connectors/stubs/cnb.png";
+import edgeoneIcon from "../../assets/connectors/stubs/edgeone.png";
+import fayanIcon from "../../assets/connectors/stubs/fayan.png";
+import feishuCliIcon from "../../assets/connectors/stubs/feishu-cli.png";
+import gangtiseIcon from "../../assets/connectors/stubs/gangtise.png";
+import ifindIcon from "../../assets/connectors/stubs/ifind.png";
+import imaIcon from "../../assets/connectors/stubs/ima.png";
+import jinshujuIcon from "../../assets/connectors/stubs/jinshuju.png";
+import lexiangIcon from "../../assets/connectors/stubs/lexiang.png";
+import mokaIcon from "../../assets/connectors/stubs/moka.png";
+import mozlenIcon from "../../assets/connectors/stubs/mozlen.png";
+import qixinIcon from "../../assets/connectors/stubs/qixin.png";
+import tdxIcon from "../../assets/connectors/stubs/tdx.png";
+import wjIcon from "../../assets/connectors/stubs/wj.png";
+import wkinfoIcon from "../../assets/connectors/stubs/wkinfo.png";
+import wpsProjectIcon from "../../assets/connectors/stubs/wps-project.png";
+import xiaoeIcon from "../../assets/connectors/stubs/xiaoe.png";
+import yuandianIcon from "../../assets/connectors/stubs/yuandian.png";
+import zhihuiyaIcon from "../../assets/connectors/stubs/zhihuiya.png";
+
 
 import githubConnIcon from "../../assets/connectors/github.svg";
 import qqmailConnIcon from "../../assets/connectors/qqmail.svg";
@@ -107,6 +127,25 @@ export const BRAND_ICON_SRC: Readonly<Record<string, string>> = {
   qichacha: qichachaIcon,
   dingtalk: dingtalkIcon,
   cloudflare: cloudflareStubIcon,
+  cnb: cnbIcon,
+  edgeone: edgeoneIcon,
+  fayan: fayanIcon,
+  gangtise: gangtiseIcon,
+  ifind: ifindIcon,
+  ima: imaIcon,
+  jinshuju: jinshujuIcon,
+  lexiang: lexiangIcon,
+  moka: mokaIcon,
+  mozlen: mozlenIcon,
+  qixin: qixinIcon,
+  tdx: tdxIcon,
+  wj: wjIcon,
+  wkinfo: wkinfoIcon,
+  "wps-project": wpsProjectIcon,
+  xiaoe: xiaoeIcon,
+  yuandian: yuandianIcon,
+  zhihuiya: zhihuiyaIcon,
+
   gildata: gildataIcon,
   yingmi: yingmiIcon,
   comein: comeinIcon,
@@ -168,10 +207,32 @@ export const MARK_TILE_BG: Readonly<Record<string, string>> = {
   wechat: "#07C160",
 };
 
+/**
+ * 字形标的明暗口径(本地打包 SVG + Simple Icons CDN 默认品牌色),用于主题自适应:
+ * - dark:近黑/深色单色字形(深色主题反白;浅色主题原样)。
+ * - light:近白单色字形(浅色主题压黑;深色主题原样)。
+ * - duo:自带黑白对比的完整标(如 Notion 白底方块 + 黑边黑 N),任何主题都不加滤镜,
+ *   否则 brightness(0) 会把白底与黑 N 一起压成实心黑块。
+ * 品牌表优先于运行时探测:开发态 Vite 给的是 /src/...svg URL,拿不到内联 SVG 内容。
+ */
+export type MarkTone = "dark" | "light" | "duo";
+
+export const MARK_TONE: Readonly<Record<string, MarkTone>> = {
+  // 本地打包
+  github: "dark", // #161614
+  qqmail: "dark", // #111111
+  notion: "duo", // 官方标:白色方块(fill #fff)+ 黑色描边与 N(默认 fill)
+  // Simple Icons CDN(默认即品牌色):近黑 / 深色品牌
+  vercel: "dark", // #000000
+  ollama: "dark", // #000000
+  anthropic: "dark", // #191919
+  sentry: "dark", // #362D59
+  elasticsearch: "dark", // #005571
+};
+
 /** 近黑字形:仅在深色/dim 瓷砖上需 CSS brightness(0) invert(1) 反白(浅色主题保持原色)。 */
-export const MARK_INVERT_BRANDS: ReadonlySet<string> = new Set([
-  "github",
-  "qqmail",
-  "vercel",
-  "ollama",
-]);
+export const MARK_INVERT_BRANDS: ReadonlySet<string> = new Set(
+  Object.entries(MARK_TONE)
+    .filter(([, tone]) => tone === "dark")
+    .map(([brand]) => brand),
+);

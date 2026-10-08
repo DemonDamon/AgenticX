@@ -34,7 +34,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 META_KEY = "_agenticx"
 SOURCE_CONNECTOR = "connector"
 
-AUTH_STYLES = ("none", "bearer", "header", "query")
+AUTH_STYLES = ("none", "bearer", "header", "headers", "query")
 DEFAULT_AUTH_HEADER = "X-API-Key"
 DEFAULT_AUTH_QUERY = "api_key"
 
@@ -449,6 +449,7 @@ def _build_entry(
     auth_style: str,
     header_name: str,
     query_param: str,
+    auth_headers: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     entry: Dict[str, Any] = {}
     if isinstance(prev, dict):
@@ -466,8 +467,13 @@ def _build_entry(
     meta["authStyle"] = auth_style
     meta.pop("authHeader", None)
     meta.pop("authQuery", None)
+    meta.pop("authHeaders", None)
     if auth_style == "header":
         meta["authHeader"] = header_name or DEFAULT_AUTH_HEADER
+    if auth_style == "headers":
+        clean_names = [str(h).strip() for h in (auth_headers or []) if str(h).strip()]
+        if clean_names:
+            meta["authHeaders"] = clean_names
     if auth_style == "query":
         meta["authQuery"] = query_param or DEFAULT_AUTH_QUERY
     meta.setdefault("createdVia", "chat")
@@ -485,6 +491,7 @@ def upsert_connector(
     auth_style: str = "none",
     header_name: str = "",
     query_param: str = "",
+    auth_headers: Optional[List[str]] = None,
     secret: Optional[str] = None,
     overwrite: bool = False,
 ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
@@ -558,6 +565,7 @@ def upsert_connector(
             auth_style=style,
             header_name=hname,
             query_param=qname,
+            auth_headers=auth_headers,
         )
         if entry == prev:
             return None, {
@@ -595,6 +603,7 @@ def upsert_connector(
         auth_style=style,
         header_name=hname,
         query_param=qname,
+        auth_headers=auth_headers,
     )
     return {**doc, "mcpServers": servers}, {
         "ok": True,
@@ -668,3 +677,41 @@ def scrub_secret(text: str, secret: Optional[str]) -> str:
     if s and len(s) >= 4:
         out = out.replace(s, "***")
     return out
+
+def set_connector_credentials(
+    doc: Dict[str, Any], *, server_name: str, secrets: Dict[str, str]
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Write multiple custom header credentials (authStyle=headers)."""
+    servers = servers_map(doc)
+    raw = servers.get(server_name)
+    if not isinstance(raw, dict) or not is_connector_entry(raw):
+        return None, {"ok": False, "error": "not_found", "server_name": server_name}
+    if str(_meta(raw).get("kind") or "") == "database" or str(raw.get("command") or "").strip():
+        return None, {"ok": False, "error": "wrong_kind", "server_name": server_name}
+    meta = _meta(raw)
+    names = meta.get("authHeaders") if isinstance(meta.get("authHeaders"), list) else []
+    names = [str(n).strip() for n in names if str(n).strip()]
+    if not names:
+        # Fall back to keys provided by caller (UI / clarification ids).
+        names = [_clean_header_name(k) for k in secrets.keys() if _clean_header_name(k)]
+    if not names:
+        return None, {"ok": False, "error": "no_header_fields"}
+    new_headers = dict(_headers(raw))
+    for name in names:
+        val = str(secrets.get(name) or "").strip()
+        if not val:
+            return None, {"ok": False, "error": "empty_secret", "field": name}
+        new_headers[name] = val
+    entry = dict(raw)
+    entry["headers"] = {k: v for k, v in new_headers.items() if k and v}
+    meta["authStyle"] = "headers"
+    meta["authHeaders"] = names
+    meta.pop("authHeader", None)
+    meta.pop("authQuery", None)
+    meta["source"] = SOURCE_CONNECTOR
+    entry[META_KEY] = meta
+    if entry == raw:
+        return None, {"ok": True, "action": "unchanged", "server_name": server_name}
+    servers[server_name] = entry
+    return {**doc, "mcpServers": servers}, {"ok": True, "action": "credential_saved", "server_name": server_name}
+

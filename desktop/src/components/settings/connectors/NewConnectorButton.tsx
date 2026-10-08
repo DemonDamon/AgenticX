@@ -22,7 +22,7 @@ import {
 import { Modal } from "../../ds/Modal";
 import { MarketIcon } from "../../marketplace/MarketIcon";
 import { MCP_PRIMARY_CONFIG_PATH } from "../../../utils/mcp-remote-config";
-import { CONNECTOR_SUPPLY } from "./connector-supply";
+import { CONNECTOR_SUPPLY, findSupplyById } from "./connector-supply";
 import type { ConnectorId } from "./connector-catalog";
 import { connectorSupplyDisplay } from "./connector-display";
 import {
@@ -30,7 +30,11 @@ import {
   type CreateConnectorResultPayload,
   type CreateConnectorTarget,
 } from "./CreateConnectorModal";
-import { filterConnectorTemplates, listConnectorTemplates } from "./create-connector-model";
+import {
+  createTargetExtrasForSupply,
+  filterConnectorTemplates,
+  listConnectorTemplates,
+} from "./create-connector-model";
 import {
   connectedSupplyIds,
   findConnectionForSupply,
@@ -59,8 +63,8 @@ type Props = {
   onOpenHandshake?: (connectorId: ConnectorId) => void;
   /** 已存在连接「直接使用」。 */
   onUseConnection?: (name: string) => void;
-  /** 新建 / 更新 / 复用完成：宿主刷新 SSOT 并提示。 */
-  onChanged: (message: string) => void | Promise<void>;
+  /** 新建 / 更新 / 复用完成：宿主刷新 SSOT 并提示（mcp_oauth 时 created.oauth=true，宿主发起授权）。 */
+  onChanged: (message: string, created?: CreateConnectorResultPayload) => void | Promise<void>;
   configPath?: string;
   className?: string;
 };
@@ -160,6 +164,7 @@ export function NewConnectorButton({
       description: selected.description,
       iconSrc: selected.iconSrc,
       supplyId: selected.id,
+      ...createTargetExtrasForSupply(findSupplyById(selected.id)),
     });
   };
 
@@ -174,7 +179,7 @@ export function NewConnectorButton({
       : p.updated
         ? t("connectors.create.updated", { name: p.displayName })
         : t("connectors.create.success", { name: p.displayName });
-    await onChanged(msg);
+    await onChanged(msg, p);
   };
 
   const menuItem =

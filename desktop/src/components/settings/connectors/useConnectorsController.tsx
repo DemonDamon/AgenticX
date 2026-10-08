@@ -19,11 +19,22 @@ import { buildConnectorSupplyItems, type MarketplaceItem } from "../../marketpla
 import type { ConnectorId } from "./connector-catalog";
 import { connectorSupplyDisplay } from "./connector-display";
 import type { ConnectorHealth } from "./connector-health";
-import { CONNECTOR_SUPPLY, GATEWAY_SUPPLY_ID, listCatalogSupply, listWiredSupply } from "./connector-supply";
+import {
+  CONNECTOR_SUPPLY,
+  findSupplyById,
+  GATEWAY_SUPPLY_ID,
+  listCatalogSupply,
+  listWiredSupply,
+} from "./connector-supply";
 import type { ConnectorMarketBucket, MyConnectionFilter } from "./connector-buckets";
 import { DEFAULT_CONNECTOR_MARKET_BUCKET } from "./connector-buckets";
 import { ConnectorsTab } from "./ConnectorsTab";
-import { CreateConnectorModal, type CreateConnectorTarget } from "./CreateConnectorModal";
+import {
+  CreateConnectorModal,
+  type CreateConnectorResultPayload,
+  type CreateConnectorTarget,
+} from "./CreateConnectorModal";
+import { createTargetExtrasForSupply } from "./create-connector-model";
 import { useGatewayRestConnectors, type GatewayRestConnector } from "./gateway-rest-connectors";
 import {
   buildMyConnectionRows,
@@ -67,8 +78,12 @@ export type ConnectorsController = {
   status: { message: string; kind: "info" | "success" | "error" } | null;
   setStatus: (s: ConnectorsController["status"]) => void;
   refresh: () => Promise<void>;
-  /** 新建 / 更新完成：提示 + 刷新 + 切到「我的连接」。 */
-  onChanged: (message: string) => Promise<void>;
+  /** 新建 / 更新完成：提示 + 刷新 + 切到「我的连接」；mcp_oauth 新建后接着发起浏览器授权。 */
+  onChanged: (message: string, created?: CreateConnectorResultPayload) => Promise<void>;
+  /** 标准 MCP OAuth：（重新）授权 → 后端 DCR + PKCE，系统浏览器登录；令牌只落本机 0600 文件。 */
+  authorizeOauth: (serverName: string, displayName: string, opts?: { reauth?: boolean }) => Promise<void>;
+  /** 正在授权中的 server 名。 */
+  authorizingServers: ReadonlySet<string>;
   startChat: (draft: string) => void;
   openHandshake: (id: ConnectorId) => void;
   openCreate: (item: MarketplaceItem) => void;
@@ -101,6 +116,36 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
   const [createTarget, setCreateTarget] = useState<CreateConnectorTarget | null>(null);
   const [gatewayOpen, setGatewayOpen] = useState(false);
   const [unwired, setUnwired] = useState<MarketplaceItem | null>(null);
+  /** MCP OAuth 授权态（undefined = 未知 / 旧主进程，按已连接展示）。 */
+  const [oauthAuthorized, setOauthAuthorized] = useState<Record<string, boolean> | undefined>(undefined);
+  const [authorizingServers, setAuthorizingServers] = useState<ReadonlySet<string>>(() => new Set());
+
+  const oauthNamesKey = useMemo(
+    () =>
+      configuredMcpEntries
+        .filter((e) => e.oauth)
+        .map((e) => e.name)
+        .sort()
+        .join("\n"),
+    [configuredMcpEntries],
+  );
+  const refreshOauthState = useCallback(async () => {
+    const names = oauthNamesKey ? oauthNamesKey.split("\n") : [];
+    const api = window.agenticxDesktop?.mcpOauthState;
+    if (names.length === 0 || typeof api !== "function") {
+      setOauthAuthorized(undefined);
+      return;
+    }
+    try {
+      const res = await api({ names });
+      setOauthAuthorized(res?.ok ? { ...(res.authorized ?? {}) } : undefined);
+    } catch {
+      setOauthAuthorized(undefined);
+    }
+  }, [oauthNamesKey]);
+  useEffect(() => {
+    void refreshOauthState();
+  }, [refreshOauthState]);
 
   const gatewayInstalled = isGatewayInstalled(nameSet, GATEWAY_DEFAULT_SERVER_NAME);
   const gatewayPresent = gatewayInstalled || nameSet.has(GATEWAY_LOCAL_SERVER_NAME);
@@ -148,8 +193,9 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
   const refresh = useCallback(async () => {
     await reloadMcp();
     await refreshHealth();
+    await refreshOauthState();
     reloadRest();
-  }, [reloadMcp, refreshHealth, reloadRest]);
+  }, [reloadMcp, refreshHealth, refreshOauthState, reloadRest]);
 
   const displayNames = useMemo(() => {
     const out: Record<string, string> = {};
@@ -169,8 +215,18 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
         gatewayInstalled,
         restConnectors,
         displayNames,
+        oauthAuthorized,
       }),
-    [healthById, accountsById, nameSet, configuredMcpEntries, gatewayInstalled, restConnectors, displayNames],
+    [
+      healthById,
+      accountsById,
+      nameSet,
+      configuredMcpEntries,
+      gatewayInstalled,
+      restConnectors,
+      displayNames,
+      oauthAuthorized,
+    ],
   );
   const instanceSupplyIds = useMemo(() => connectedSupplyIds(rows), [rows]);
 
@@ -204,14 +260,66 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
     [startChat, t],
   );
 
+  const authorizeOauth = useCallback(
+    async (serverName: string, displayName: string, opts?: { reauth?: boolean }) => {
+      const server = serverName.trim();
+      if (!server) return;
+      const sid = (sessionId || "").trim();
+      if (!sid) {
+        setStatus({ message: t("connectors.oauth.needSession", { name: displayName }), kind: "error" });
+        return;
+      }
+      setAuthorizingServers((prev) => new Set(prev).add(server));
+      setStatus({ message: t("connectors.oauth.opening", { name: displayName }), kind: "info" });
+      try {
+        if (opts?.reauth) {
+          await window.agenticxDesktop.disconnectMcp({ sessionId: sid, name: server }).catch(() => undefined);
+          await window.agenticxDesktop.mcpOauthReset?.({ name: server });
+        }
+        // 让后端重读 mcp.json（新建条目进入会话配置），再连接触发 OAuth（DCR + PKCE + 浏览器 + 本机回调）。
+        await window.agenticxDesktop.loadMcpStatus(sid).catch(() => undefined);
+        const res = await window.agenticxDesktop.connectMcp({ sessionId: sid, name: server });
+        if (res?.ok) {
+          setStatus({ message: t("connectors.oauth.authorized", { name: displayName }), kind: "success" });
+        } else {
+          setStatus({
+            message: t("connectors.oauth.failed", { name: displayName, error: String(res?.error ?? "").slice(0, 160) }),
+            kind: "error",
+          });
+        }
+      } catch (e) {
+        setStatus({
+          message: t("connectors.oauth.failed", {
+            name: displayName,
+            error: (e instanceof Error ? e.message : String(e)).slice(0, 160),
+          }),
+          kind: "error",
+        });
+      } finally {
+        setAuthorizingServers((prev) => {
+          const next = new Set(prev);
+          next.delete(server);
+          return next;
+        });
+        await reloadMcp();
+        await refreshOauthState();
+      }
+    },
+    [sessionId, t, reloadMcp, refreshOauthState],
+  );
+
   const onChanged = useCallback(
-    async (message: string) => {
+    async (message: string, created?: CreateConnectorResultPayload) => {
       setStatus({ message, kind: "success" });
       await refresh();
       setPane("mine");
       onAfterChange?.();
+      if (created?.oauth && created.serverName) {
+        // 不阻塞弹层关闭：授权在后台进行（最长等待浏览器登录数分钟）。
+        void authorizeOauth(created.serverName, created.displayName);
+      }
     },
-    [refresh, onAfterChange],
+    [refresh, onAfterChange, authorizeOauth],
   );
 
   const openHandshake = useCallback((id: ConnectorId) => {
@@ -226,6 +334,7 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
       description: item.description,
       iconSrc: item.iconSrc,
       supplyId: item.supplyId ?? item.id,
+      ...createTargetExtrasForSupply(findSupplyById(item.supplyId ?? item.id ?? "")),
     });
   }, []);
 
@@ -266,13 +375,15 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
           chatWithConnection(name);
         }}
         onClose={() => setCreateTarget(null)}
-        onCreated={async ({ displayName, updated, reused }) => {
+        onCreated={async (payload) => {
+          const { displayName, updated, reused } = payload;
           await onChanged(
             reused
               ? t("connectors.create.reused", { name: displayName })
               : updated
                 ? t("connectors.create.updated", { name: displayName })
                 : t("connectors.create.success", { name: displayName }),
+            payload,
           );
         }}
       />
@@ -346,6 +457,8 @@ export function useConnectorsController(input: ConnectorsControllerInput): Conne
     setStatus,
     refresh,
     onChanged,
+    authorizeOauth,
+    authorizingServers,
     startChat,
     openHandshake,
     openCreate,

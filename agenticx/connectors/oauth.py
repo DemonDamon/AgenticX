@@ -263,6 +263,17 @@ class FileTokenStorage:
         return bool(self._load().get("tokens"))
 
 
+def fix_authorize_url(url: str) -> str:
+    """Repair the MCP SDK authorize URL when the server's ``authorization_endpoint`` already has
+    a query string (e.g. Tencent Docs ``…/open-claw.html?authType=2``): the SDK joins with a second
+    ``?``, which would swallow ``response_type`` into ``authType``. Encoded values never contain a
+    raw ``?``, so every raw ``?`` after the first is a separator."""
+    base, sep, rest = str(url or "").partition("?")
+    if not sep or "?" not in rest:
+        return url
+    return f"{base}?{rest.replace('?', '&')}"
+
+
 def build_mcp_oauth_provider(server_name: str, server_url: str, *, open_url: Optional[Callable[[str], Any]] = None, timeout: float = 300.0):
     """``httpx.Auth`` implementing the MCP authorization spec (discovery, dynamic
     client registration, PKCE, refresh) with browser + loopback callback."""
@@ -275,7 +286,7 @@ def build_mcp_oauth_provider(server_name: str, server_url: str, *, open_url: Opt
 
     async def _redirect(url: str) -> None:
         holder["rx"] = LoopbackReceiver(port=port)
-        await asyncio.get_running_loop().run_in_executor(None, open_url or webbrowser.open, url)
+        await asyncio.get_running_loop().run_in_executor(None, open_url or webbrowser.open, fix_authorize_url(url))
 
     async def _callback() -> Tuple[str, Optional[str]]:
         rx = holder.get("rx") or LoopbackReceiver(port=port)

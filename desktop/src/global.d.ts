@@ -1387,6 +1387,14 @@ declare global {
       }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      /** MCP OAuth：server 名 → 是否已有令牌（仅布尔，令牌不出主进程）。旧主进程可能缺失。 */
+      mcpOauthState?: (payload: { names: string[] }) => Promise<{
+        ok: boolean;
+        authorized: Record<string, boolean>;
+        error?: string;
+      }>;
+      /** MCP OAuth：清除令牌以便重新授权（保留 DCR 客户端）。 */
+      mcpOauthReset?: (payload: { name: string }) => Promise<{ ok: boolean; reset?: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
       saveRunMode: (mode: "ask" | "allowlist" | "auto") => Promise<{ ok: boolean }>;

@@ -1651,7 +1651,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                     "query": {"type": "string", "description": "list_templates: optional name/id/category filter."},
                     "name": {"type": "string", "description": "create*: display name (e.g. abc / 我的订单 API)."},
-                    "url": {"type": "string", "description": "create (mcp): full MCP Server URL including path."},
+                    "url": {"type": "string", "description": "create (mcp): full MCP Server URL including path (optional when the template has mcp_url)."},
                     "template_id": {"type": "string", "description": "create (mcp): template id from list_templates."},
                     "auth_style": {
                         "type": "string",
@@ -8257,11 +8257,35 @@ async def _tool_connector_manage(
             {
                 "ok": True,
                 "templates": [
-                    {k: t.get(k) for k in ("id", "name", "kind", "auth", "category", "create_via")}
+                    {
+                        k: t.get(k)
+                        for k in (
+                            "id",
+                            "name",
+                            "kind",
+                            "auth",
+                            "category",
+                            "create_via",
+                            "mcp_url",
+                            "auth_query",
+                            "auth_header",
+                            "credential_label",
+                            "credential_placeholder",
+                            "credential_help_url",
+                            "credential_fields",
+                        )
+                        if t.get(k) is not None
+                    }
                     for t in rows
                 ],
                 "note": (
-                    "create_via=mcp_url → connector_manage create with template_id + the template's MCP URL; "
+                    "create_via=mcp_url → connector_manage create with template_id (url defaults to the template mcp_url); "
+                    "auth=mcp_oauth → official MCP OAuth 2.1 with dynamic client registration: only a name is needed, "
+                    "never ask for a token/Client ID — verify opens the browser to authorize; "
+                    "auth_query set → the API key goes in that URL query parameter (request_credential fills it); "
+                    "credential_fields (2+) → multi custom headers (Comate dual-cred); request_credential asks for each field; "
+                    "credential_label / credential_help_url set → request_credential uses that label and the card shows "
+                    "the official 如何获取凭证 link; also give the user that link in your reply when asking for it; "
                     "ui_native → tell the user to connect it in 市场/设置 → 连接器 (native handshake, not creatable here); "
                     "unavailable → no ready-made template (OAuth etc.): use create with mcp_oauth=true for an "
                     "MCP server with standard MCP OAuth, or create_rest with an oauth2_* auth_type for an HTTP API."
@@ -8300,6 +8324,11 @@ async def _tool_connector_manage(
 
     if action == "create":
         template_id = str(arguments.get("template_id", "") or "").strip() or None
+        create_url = str(arguments.get("url", "") or "").strip()
+        create_style = str(arguments.get("auth_style", "") or "").strip()
+        create_query = str(arguments.get("query_param", "") or "").strip()
+        use_mcp_oauth = bool(arguments.get("mcp_oauth", False))
+        header_override = ""
         if template_id:
             tpl = cs.find_template(template_id)
             if tpl is None:
@@ -8313,17 +8342,42 @@ async def _tool_connector_manage(
                         "hint": "原生连接器请引导用户在「市场 / 设置 → 连接器」中点击连接；未接线模板请改用自定义 MCP URL。",
                     }
                 )
+            # Template defaults (mirrors the desktop create form): official URL, MCP OAuth, query-key style.
+            if not create_url and tpl.get("mcp_url"):
+                create_url = str(tpl["mcp_url"])
+            if tpl.get("auth") == "mcp_oauth":
+                use_mcp_oauth = True
+                create_style = "none"
+            elif tpl.get("auth_query") and create_style in ("", "none", "query"):
+                create_style = "query"
+                create_query = create_query or str(tpl["auth_query"])
+            elif isinstance(tpl.get("credential_fields"), list) and len(tpl.get("credential_fields") or []) > 1 and create_style in ("", "none", "header", "headers"):
+                create_style = "headers"
+            elif tpl.get("auth_header") and create_style in ("", "none", "header"):
+                create_style = "header"
+                header_override = str(tpl["auth_header"])
+            elif tpl.get("auth") in ("api_key", "custom_credential") and not create_style:
+                # Mirrors the desktop form: token / key → Authorization: Bearer.
+                create_style = "bearer"
+        multi_headers = []
+        if template_id:
+            tpl_for_fields = cs.find_template(template_id) or {}
+            if create_style == "headers":
+                for f in tpl_for_fields.get("credential_fields") or []:
+                    if isinstance(f, dict) and str(f.get("name") or "").strip():
+                        multi_headers.append(str(f["name"]).strip())
         new_doc, result = cs.upsert_connector(
             doc,
             name=str(arguments.get("name", "") or ""),
-            url=str(arguments.get("url", "") or ""),
+            url=create_url,
             template_id=template_id,
-            auth_style=str(arguments.get("auth_style", "") or "none"),
-            header_name=str(arguments.get("header_name", "") or ""),
-            query_param=str(arguments.get("query_param", "") or ""),
+            auth_style=create_style or "none",
+            header_name=str(arguments.get("header_name", "") or "") or header_override,
+            query_param=create_query,
+            auth_headers=multi_headers or None,
             overwrite=bool(arguments.get("overwrite", False)),
         )
-        if result.get("ok") and bool(arguments.get("mcp_oauth", False)):
+        if result.get("ok") and use_mcp_oauth:
             base_doc = new_doc if new_doc is not None else doc
             srv = cs.servers_map(base_doc)
             entry = srv.get(result.get("server_name"))
@@ -8349,7 +8403,13 @@ async def _tool_connector_manage(
                 result["instance"] = cs.public_instance(inst, connected)
                 style = inst.get("auth_style") or "none"
                 result["needs_credential"] = style != "none" and not inst.get("has_credential")
-                if bool(arguments.get("mcp_oauth", False)):
+                tpl_meta = cs.find_template(template_id) if template_id else None
+                if tpl_meta and result["needs_credential"]:
+                    if tpl_meta.get("credential_label"):
+                        result["credential_label"] = tpl_meta["credential_label"]
+                    if tpl_meta.get("credential_help_url"):
+                        result["credential_help_url"] = tpl_meta["credential_help_url"]
+                if use_mcp_oauth:
                     result["needs_credential"] = False
                     result["oauth"] = "mcp_standard"
                     result["note"] = "MCP OAuth：调用 verify 时会打开系统浏览器授权，令牌保存在本机 ~/.agenticx/connectors/oauth/。"
@@ -8374,15 +8434,105 @@ async def _tool_connector_manage(
         return _dump({"ok": False, "error": "not_found", "server_name": server_name})
 
     if action == "request_credential":
-        label = str(arguments.get("credential_label", "") or "").strip()[:24] or "凭证"
+        cred_tpl = cs.find_template(str(inst.get("template_id") or "")) if inst.get("template_id") else None
+        cred_tpl = cred_tpl or {}
+        multi_fields = [
+            f
+            for f in (cred_tpl.get("credential_fields") or [])
+            if isinstance(f, dict) and str(f.get("name") or "").strip()
+        ]
+        help_url = str(cred_tpl.get("credential_help_url") or "").strip()
+        if not help_url.lower().startswith(("https://", "http://")):
+            help_url = ""
+        if len(multi_fields) > 1:
+            decisions_raw = []
+            for f in multi_fields:
+                fname = str(f["name"]).strip()
+                flabel = str(f.get("label") or fname).strip()[:24] or fname
+                fph = str(f.get("placeholder") or "").strip() or "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中"
+                q = f"请输入「{inst['display_name']}」的 {flabel}"
+                if help_url:
+                    q += f"（如何获取凭证：{help_url}）"
+                decisions_raw.append(
+                    {
+                        "id": fname,
+                        "question": q,
+                        "input_type": "secret",
+                        "label": flabel,
+                        "placeholder": fph,
+                    }
+                )
+            decisions = _normalize_clarification_decisions(decisions_raw, allow_secret=True)
+            answer = await _await_clarification_answer(
+                f"为连接器「{inst['display_name']}」填写凭证",
+                decisions=decisions,
+                allow_free_text=False,
+                context={
+                    "kind": "connector_credential",
+                    "submit_label": "保存",
+                    "skip_label": "稍后填写",
+                },
+                clarify_gate=clarify_gate,
+                emit_event=emit_event,
+                is_unattended=is_unattended,
+            )
+            if answer.get("__suspended__") or answer.get("__timeout__"):
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "no_answer",
+                        "hint": "用户暂未填写；告诉用户可稍后在「设置 → 连接器 → 我的连接」中更新凭证。",
+                    }
+                )
+            secret_values = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+            secrets = {str(f["name"]).strip(): str(secret_values.get(str(f["name"]).strip(), "") or "").strip() for f in multi_fields}
+            if not all(secrets.values()):
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "skipped",
+                        "hint": "用户选择稍后填写；提示可在「设置 → 连接器 → 我的连接」中点「更新凭证」。",
+                    }
+                )
+            try:
+                doc = cs.read_mcp_doc()
+                new_doc, result = cs.set_connector_credentials(doc, server_name=server_name, secrets=secrets)
+                if new_doc is not None:
+                    cs.write_mcp_doc(new_doc)
+                    _connector_reload_configs(session)
+                    if server_name in connected:
+                        await _connector_disconnect(session, server_name)
+            except (cs.McpDocError, OSError) as exc:
+                detail = str(exc)
+                for s in secrets.values():
+                    detail = cs.scrub_secret(detail, s)
+                return _dump({"ok": False, "error": "write_failed", "detail": detail})
+            finally:
+                secret_values.clear()
+                secrets.clear()
+            if result.get("ok"):
+                result["note"] = "凭证已写入本机 mcp.json（已脱敏，未在对话中回显）。下一步调用 verify 做连通性检查。"
+            return _dump(result)
+
+        label = (
+            str(arguments.get("credential_label", "") or "").strip()[:24]
+            or str(cred_tpl.get("credential_label") or "").strip()[:24]
+            or "凭证"
+        )
+        question = f"请输入「{inst['display_name']}」的 {label}"
+        if help_url:
+            question += f"（如何获取凭证：{help_url}）"
+        placeholder = str(cred_tpl.get("credential_placeholder") or "").strip() or (
+            "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中"
+        )
         decisions = _normalize_clarification_decisions(
             [
                 {
                     "id": "credential",
-                    "question": f"请输入「{inst['display_name']}」的 {label}",
+                    "question": question,
                     "input_type": "secret",
                     "label": label,
-                    "placeholder": "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中",
+                    "placeholder": placeholder,
                 }
             ],
             allow_secret=True,

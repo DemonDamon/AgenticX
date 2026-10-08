@@ -29,6 +29,7 @@ const CTA_HOVER_PAD = "pr-0 group-hover:pr-[7.5rem] group-focus-within:pr-[7.5re
 const STATUS_STYLE: Record<ConnectionStatus, string> = {
   connected: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
   needs_credential: "border-amber-500/40 bg-amber-500/10 text-amber-400",
+  needs_auth: "border-amber-500/40 bg-amber-500/10 text-amber-400",
   invalid: "border-rose-500/40 bg-rose-500/10 text-rose-400",
 };
 
@@ -130,6 +131,8 @@ export function MyConnectionsGrid({ ctl, rows, emptyText }: Props) {
           const description = connectionRowDescription(row);
           const busy = busyKey === row.key;
           const menuOpen = menuKey === row.key;
+          const oauthServer = row.oauth ? row.mcpServerName : undefined;
+          const authorizing = Boolean(oauthServer && ctl.authorizingServers.has(oauthServer));
           const primary =
             status === "connected" ? (
               <button
@@ -143,19 +146,29 @@ export function MyConnectionsGrid({ ctl, rows, emptyText }: Props) {
             ) : (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+                className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+                disabled={authorizing}
+                data-connection-authorize={oauthServer}
                 onClick={() =>
-                  row.kind === "native" && row.connectorId
-                    ? ctl.openHandshake(row.connectorId)
-                    : ctl.startChat(
-                        buildNewConnectorChatDraft(t("connectors.hub.credentialDraft", { name: row.name })),
-                      )
+                  oauthServer
+                    ? void ctl.authorizeOauth(oauthServer, row.name)
+                    : row.kind === "native" && row.connectorId
+                      ? ctl.openHandshake(row.connectorId)
+                      : ctl.startChat(
+                          buildNewConnectorChatDraft(t("connectors.hub.credentialDraft", { name: row.name })),
+                        )
                 }
               >
-                <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                {authorizing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <SquarePlus className="h-3.5 w-3.5" aria-hidden />
+                )}
                 {status === "needs_credential"
                   ? t("connectors.hub.actions.fillCredential")
-                  : t("connectors.hub.actions.reauth")}
+                  : status === "needs_auth"
+                    ? t("connectors.hub.actions.authorize")
+                    : t("connectors.hub.actions.reauth")}
               </button>
             );
           return (
@@ -230,6 +243,20 @@ export function MyConnectionsGrid({ ctl, rows, emptyText }: Props) {
                       >
                         {t("connectors.hub.actions.manage")}
                       </button>
+                      {oauthServer ? (
+                        <button
+                          type="button"
+                          className="block w-full px-3 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover disabled:opacity-50"
+                          disabled={authorizing}
+                          data-connection-reauth={oauthServer}
+                          onClick={() => {
+                            setMenuKey(null);
+                            void ctl.authorizeOauth(oauthServer, row.name, { reauth: true });
+                          }}
+                        >
+                          {t("connectors.hub.actions.reauth")}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="block w-full px-3 py-1.5 text-left text-xs text-rose-400 hover:bg-surface-hover disabled:opacity-50"

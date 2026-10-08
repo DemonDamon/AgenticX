@@ -56,7 +56,12 @@ type Options struct {
 	Timeout              time.Duration // 单次执行超时，默认 30s
 	AllowPrivateNetwork  bool          // 允许私网/环回目标（本地调试/内网场景），默认拒绝
 	MaxResponseBodyBytes int64         // 响应体上限，默认 10MB
+	// SecretUpdater 凭据轮换回写（OAuth refresh_token 轮换时持久化）；可空。
+	SecretUpdater func(ctx context.Context, connectionID string, sec connection.Secret) error
 }
+
+// ctxAllowPrivate 请求级私网放行标记（连接器 allowPrivateNetwork 或全局开关）。
+type ctxAllowPrivate struct{}
 
 const (
 	defaultTimeout = 30 * time.Second
@@ -75,6 +80,7 @@ type Result struct {
 type Executor struct {
 	client *http.Client
 	opts   Options
+	tokens *tokenCache
 }
 
 // New 构造执行器。
@@ -86,11 +92,15 @@ func New(opts Options) *Executor {
 		opts.MaxResponseBodyBytes = defaultMaxBody
 	}
 	tr := &http.Transport{
+		// 代理策略：本地直连；远端走环境代理，代理不可达回落直连（见 proxy.go）。
+		Proxy: policyProxy,
 		// SSRF 守护核心：每次拨号（含重定向后的每一跳）都在连接前校验解析后的 IP。
 		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
-			Control: guardControl(opts.AllowPrivateNetwork),
+			Timeout:        10 * time.Second,
+			ControlContext: guardControlContext(opts.AllowPrivateNetwork),
 		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	client := &http.Client{
 		Transport: tr,
@@ -109,7 +119,34 @@ func New(opts Options) *Executor {
 			return nil
 		},
 	}
-	return &Executor{client: client, opts: opts}
+	return &Executor{client: client, opts: opts, tokens: &tokenCache{tokens: map[string]cachedToken{}}}
+}
+
+// guardControlContext 带请求上下文的拨号守护：连接器级 allowPrivateNetwork
+// 经 ctx 传入；当前配置的代理端点本身（常见为本机 127.0.0.1:7897）放行。
+func guardControlContext(allowPrivate bool) func(ctx context.Context, network, address string, c syscall.RawConn) error {
+	base := guardControl(allowPrivate)
+	permissive := guardControl(true)
+	return func(ctx context.Context, network, address string, c syscall.RawConn) error {
+		if allow, _ := ctx.Value(ctxAllowPrivate{}).(bool); allow {
+			return permissive(network, address, c)
+		}
+		if err := base(network, address, c); err != nil {
+			if isConfiguredProxyAddr(address) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	}
+}
+
+func asExecError(err error) *ExecError {
+	var guardErr *ExecError
+	if errors.As(err, &guardErr) {
+		return guardErr
+	}
+	return nil
 }
 
 // guardControl 返回拨号前 IP 校验函数。
@@ -141,20 +178,48 @@ func isForbiddenIP(ip net.IP) bool {
 
 var templatePattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
 
-// Execute 渲染并执行动作。
+// Execute 渲染并执行动作（无连接 id：OAuth token 按凭据指纹缓存）。
 func (e *Executor) Execute(ctx context.Context, conn *model.Connector, act model.Action, input map[string]any, sec connection.Secret) (*Result, *ExecError) {
+	return e.ExecuteConn(ctx, conn, act, input, sec, "")
+}
+
+// ExecuteConn 渲染并执行动作；connectionID 用于 OAuth token 缓存与 refresh_token 轮换回写。
+func (e *Executor) ExecuteConn(ctx context.Context, conn *model.Connector, act model.Action, input map[string]any, sec connection.Secret, connectionID string) (*Result, *ExecError) {
+	if conn.AllowPrivateNetwork || e.opts.AllowPrivateNetwork {
+		ctx = context.WithValue(ctx, ctxAllowPrivate{}, true)
+	}
+	res, xerr := e.executeOnce(ctx, conn, act, input, sec, connectionID, false)
+	if xerr != nil && xerr.retryAuth && conn.Auth.Type == model.AuthOAuth2 {
+		// access token 被上游拒绝（401）：丢弃缓存并强制重取一次。
+		e.tokens.drop(oauthCacheKey(conn, connectionID, sec))
+		res, xerr = e.executeOnce(ctx, conn, act, input, sec, connectionID, true)
+	}
+	if xerr != nil {
+		return nil, xerr.ExecError
+	}
+	return res, nil
+}
+
+type execAttemptError struct {
+	*ExecError
+	retryAuth bool
+}
+
+func wrapErr(e *ExecError) *execAttemptError { return &execAttemptError{ExecError: e} }
+
+func (e *Executor) executeOnce(ctx context.Context, conn *model.Connector, act model.Action, input map[string]any, sec connection.Secret, connectionID string, forceToken bool) (*Result, *execAttemptError) {
 	start := time.Now()
 
 	fullURL, q, hdrs, body, ierr := e.render(conn, act, input)
 	if ierr != nil {
-		return nil, ierr
+		return nil, wrapErr(ierr)
 	}
 
 	// 凭据注入（凭据只进入请求，不进入任何日志/错误消息）。
 	switch conn.Auth.Type {
 	case model.AuthAPIKey:
 		if sec.APIKey == "" {
-			return nil, inputErrorf("连接缺少 api_key 凭据")
+			return nil, wrapErr(inputErrorf("连接缺少 api_key 凭据"))
 		}
 		switch conn.Auth.APIKey.In {
 		case "header":
@@ -162,11 +227,22 @@ func (e *Executor) Execute(ctx context.Context, conn *model.Connector, act model
 		case "query":
 			q.Set(conn.Auth.APIKey.Name, sec.APIKey)
 		}
+	case model.AuthBearer:
+		if sec.APIKey == "" {
+			return nil, wrapErr(inputErrorf("连接缺少 Bearer token 凭据"))
+		}
+		hdrs.Set("Authorization", "Bearer "+sec.APIKey)
+	case model.AuthOAuth2:
+		tok, terr := e.oauthToken(ctx, conn, connectionID, sec, forceToken)
+		if terr != nil {
+			return nil, wrapErr(terr)
+		}
+		hdrs.Set("Authorization", "Bearer "+tok)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, act.HTTP.Method, fullURL.String(), bytes.NewReader(body))
 	if err != nil {
-		return nil, upstreamErrorf("构造请求失败: %v", err)
+		return nil, wrapErr(upstreamErrorf("构造请求失败: %v", err))
 	}
 	req.URL.RawQuery = q.Encode()
 	for k, vs := range hdrs {
@@ -177,32 +253,38 @@ func (e *Executor) Execute(ctx context.Context, conn *model.Connector, act model
 	if len(body) > 0 && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if conn.Auth.Type == model.AuthHMAC {
+		if serr := signHMAC(conn.Auth.HMAC, req, body, sec); serr != nil {
+			return nil, wrapErr(serr)
+		}
+	}
 
 	resp, err := e.client.Do(req)
 	if err != nil {
 		// SSRF 守护与重定向校验的拒绝以原始语义透传（错误链底层是 *ExecError）。
-		var guardErr *ExecError
-		if errors.As(err, &guardErr) {
-			return nil, guardErr
+		if ge := asExecError(err); ge != nil {
+			return nil, wrapErr(ge)
 		}
 		if isTimeout(err) {
-			return nil, &ExecError{Code: CodeTimeout, HTTPStatus: 504, Message: "上游请求超时"}
+			return nil, wrapErr(&ExecError{Code: CodeTimeout, HTTPStatus: 504, Message: "上游请求超时"})
 		}
 		// 错误消息只含方法与 host+path，剥离 query（api_key 可能注入其中）。
-		return nil, upstreamErrorf("上游请求失败: %s %s: %v", act.HTTP.Method, safeURL(req.URL), unwrapURLError(err))
+		return nil, wrapErr(upstreamErrorf("上游请求失败: %s %s: %v", act.HTTP.Method, safeURL(req.URL), unwrapURLError(err)))
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, e.opts.MaxResponseBodyBytes+1))
 	if err != nil {
-		return nil, upstreamErrorf("读取上游响应失败: %v", err)
+		return nil, wrapErr(upstreamErrorf("读取上游响应失败: %v", err))
 	}
 	if int64(len(respBody)) > e.opts.MaxResponseBodyBytes {
-		return nil, upstreamErrorf("上游响应超过 %d 字节上限", e.opts.MaxResponseBodyBytes)
+		return nil, wrapErr(upstreamErrorf("上游响应超过 %d 字节上限", e.opts.MaxResponseBodyBytes))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet := truncate(string(respBody), 512)
-		return nil, upstreamErrorf("上游返回 %d: %s", resp.StatusCode, snippet)
+		ae := wrapErr(upstreamErrorf("上游返回 %d: %s", resp.StatusCode, snippet))
+		ae.retryAuth = resp.StatusCode == http.StatusUnauthorized && !forceToken
+		return nil, ae
 	}
 
 	return &Result{
@@ -238,6 +320,12 @@ func (e *Executor) render(conn *model.Connector, act model.Action, input map[str
 	// 查询模板：值不做预转义（url.Values.Encode 统一编码，避免双重编码）
 	q := url.Values{}
 	for k, tmpl := range act.HTTP.Query {
+		// 单占位 "{name}" 且输入未提供：视为可选 query 参数，省略。
+		if m := templatePattern.FindStringSubmatch(tmpl); m != nil && m[0] == tmpl {
+			if _, ok := input[m[1]]; !ok {
+				continue
+			}
+		}
 		v, ierr := renderTemplate(tmpl, input, func(s string) string { return s })
 		if ierr != nil {
 			return nil, nil, nil, nil, ierr
@@ -259,7 +347,14 @@ func (e *Executor) render(conn *model.Connector, act model.Action, input map[str
 	var body []byte
 	switch act.HTTP.Method {
 	case "POST", "PUT", "PATCH":
-		b, err := json.Marshal(input)
+		var payload any = input
+		if act.HTTP.BodyField != "" {
+			payload = input[act.HTTP.BodyField]
+			if payload == nil {
+				break
+			}
+		}
+		b, err := json.Marshal(payload)
 		if err != nil {
 			return nil, nil, nil, nil, inputErrorf("输入序列化失败: %v", err)
 		}

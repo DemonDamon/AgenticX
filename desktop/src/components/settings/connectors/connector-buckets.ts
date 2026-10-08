@@ -62,7 +62,7 @@ export function countConnectorMarketBuckets(
 
 export type ConnectionSource = "official" | "enterprise" | "custom";
 export type ConnectionShapeLabel = "mcp" | "rest" | "database" | null;
-export type ConnectionStatus = "connected" | "needs_credential" | "invalid";
+export type ConnectionStatus = "connected" | "needs_credential" | "needs_auth" | "invalid";
 
 /**
  * 实例来源：原生 → 官方；网关本身 → 企业；模板实例 → 模板来源；
@@ -106,5 +106,7 @@ export function connectionRowShape(row: MyConnectionRow, supply?: readonly Conne
 /** 卡片状态：已连接 / 待填凭证（REST 无凭证）/ 失效（需重新授权）。 */
 export function connectionRowStatus(row: MyConnectionRow): ConnectionStatus {
   if (row.health === "connected") return "connected";
+  // 标准 MCP OAuth：未授权 → 待授权（非「失效」）。
+  if (row.oauth) return "needs_auth";
   return row.connectorKind === "rest" ? "needs_credential" : "invalid";
 }

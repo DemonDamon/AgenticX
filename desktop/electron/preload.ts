@@ -776,6 +776,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("disconnect-mcp", payload),
+  mcpOauthState: async (payload: { names: string[] }) => ipcRenderer.invoke("mcp-oauth-state", payload),
+  mcpOauthReset: async (payload: { name: string }) => ipcRenderer.invoke("mcp-oauth-reset", payload),
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),

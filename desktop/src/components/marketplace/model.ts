@@ -198,9 +198,9 @@ export type MarketplaceItem = {
   /** kind=connector:供给类型 native|mcp|gateway。 */
   supplyKind?: "native" | "mcp" | "gateway";
   /** kind=connector:握手类型。 */
-  authType?: "none" | "api_key" | "custom_credential" | "oauth2";
+  authType?: "none" | "api_key" | "custom_credential" | "oauth2" | "mcp_oauth";
   /** 未接线说明：将需的表单形态。 */
-  authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
+  authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token" | "oauth_dcr";
   /** kind=connector:原生目录 id（设置页定位）。 */
   connectorId?: string;
   /** kind=connector:是否已有真实接线路径；false 时仅展示说明、不走安装。 */
@@ -514,12 +514,12 @@ export function buildConnectorSupplyItems(
     id: string;
     kind: "native" | "mcp" | "gateway";
     connectorId?: string;
-    auth: "none" | "api_key" | "custom_credential" | "oauth2";
+    auth: "none" | "api_key" | "custom_credential" | "oauth2" | "mcp_oauth";
     wired: boolean;
     fallbackName: string;
     fallbackDescription: string;
     iconSrc?: string;
-    authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token";
+    authFormHint?: "name_only" | "api_key" | "token" | "oauth_device" | "url_token" | "oauth_dcr";
     marketSource?: "official" | "enterprise";
     recommended?: boolean;
   }[],
@@ -574,7 +574,7 @@ export function buildConnectorSupplyItems(
       });
       continue;
     }
-    // 未接线 mcp stub（无 connectorId）：目录骨架；仅当「我的连接」已有该模板实例时标已连接。
+    // mcp 模板（无 connectorId）：仅当「我的连接」已有该模板实例时标已连接。
     if (!e.connectorId) {
       const hasInstance = Boolean(opts?.instanceSupplyIds?.has(e.id));
       out.push({
@@ -588,9 +588,10 @@ export function buildConnectorSupplyItems(
         supplyKind: e.kind,
         authType: e.auth,
         authFormHint: e.authFormHint,
-        wired: false,
+        // 模板（含已核实官方端点的 wired 模板）走新建表单；未接线仍标 unwired。
+        wired: e.wired,
         supplyId: e.id,
-        health: hasInstance ? "connected" : "unwired",
+        health: hasInstance ? "connected" : e.wired ? "disconnected" : "unwired",
         ...bucket,
       });
       continue;

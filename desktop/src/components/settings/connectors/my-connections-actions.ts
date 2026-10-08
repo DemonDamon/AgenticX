@@ -86,7 +86,14 @@ export async function deleteConnectionRow(row: MyConnectionRow, sessionId: strin
       // 仅主条目断开失败才阻断；折叠的历史重复条目可能本就未连接。
       if (!disc.ok && name === row.mcpServerName) return { ok: false, error: disc.error };
     }
-    return removeMcpServers(rowServerNames(row));
+    const removed = await removeMcpServers(rowServerNames(row));
+    if (removed.ok && row.oauth) {
+      // 标准 MCP OAuth：删除连接时一并清掉本机令牌（保留 DCR 客户端，便于以后重建）。
+      for (const name of rowServerNames(row)) {
+        await window.agenticxDesktop.mcpOauthReset?.({ name }).catch(() => undefined);
+      }
+    }
+    return removed;
   }
   if (row.action === "gateway_remove" && row.mcpServerName) {
     return removeMcpServer(row.mcpServerName);

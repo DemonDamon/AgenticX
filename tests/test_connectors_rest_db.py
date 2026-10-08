@@ -253,3 +253,127 @@ def test_secret_decision_masked_flag_passthrough():
     assert out[0]["masked"] is False and "masked" not in out[1]
     # model-provided decisions can never request secret inputs
     assert _normalize_clarification_decisions([{"id": "x", "question": "q", "input_type": "secret", "options": ["a"]}])[0].get("input_type") is None
+
+
+def test_connector_manage_template_defaults_mcp_oauth_and_query(home: Path):
+    """Templates with a verified official endpoint: url defaults to mcp_url; auth=mcp_oauth sets
+    oauth=true with no secret; auth_query templates store the key style as query."""
+    from agenticx.cli.agent_tools import _tool_connector_manage
+    from agenticx.runtime import connectors_store as cs
+
+    tpl = cs.find_template("stub:tencent-docs")
+    assert tpl["auth"] == "mcp_oauth" and tpl["mcp_url"] == "https://docs.qq.com/openapi/mcp"
+
+    s = _session()
+    out = json.loads(_run(_tool_connector_manage({"action": "create", "name": "腾讯文档的连接器", "template_id": "stub:tencent-docs"}, s)))
+    assert out["ok"], out
+    assert out["needs_credential"] is False and out["oauth"] == "mcp_standard"
+    doc = json.loads((home / ".agenticx" / "mcp.json").read_text())
+    entry = doc["mcpServers"][out["server_name"]]
+    assert entry["url"] == "https://docs.qq.com/openapi/mcp"
+    assert entry["oauth"] is True and "headers" not in entry
+    assert entry["_agenticx"]["templateId"] == "stub:tencent-docs"
+
+    again = json.loads(_run(_tool_connector_manage({"action": "create", "name": "腾讯文档2", "template_id": "stub:tencent-docs"}, s)))
+    assert again["ok"] is False and again["error"] == "exists"
+
+    amap = json.loads(_run(_tool_connector_manage({"action": "create", "name": "高德", "template_id": "stub:amap"}, s)))
+    assert amap["ok"], amap
+    assert amap["needs_credential"] is True
+    entry = json.loads((home / ".agenticx" / "mcp.json").read_text())["mcpServers"][amap["server_name"]]
+    assert entry["url"] == "https://mcp.amap.com/mcp"
+    assert entry["_agenticx"]["authStyle"] == "query" and entry["_agenticx"]["authQuery"] == "key"
+    assert "oauth" not in entry
+
+    listed = json.loads(_run(_tool_connector_manage({"action": "list_templates", "query": "notion"}, s)))
+    notion = next(t for t in listed["templates"] if t["id"] == "native:notion")
+    assert notion["create_via"] == "mcp_url" and notion["auth"] == "mcp_oauth"
+
+
+def test_mcp_oauth_authorize_url_with_query_endpoint_is_repaired():
+    """Tencent Docs' authorization_endpoint carries ?authType=2; the MCP SDK appends a second '?'."""
+    from urllib.parse import parse_qs, urlsplit
+
+    from agenticx.connectors.oauth import fix_authorize_url
+
+    broken = (
+        "https://docs.qq.com/scenario/open-claw.html?authType=2?response_type=code&client_id=abc"
+        "&redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback&state=s%3Fx&code_challenge_method=S256"
+    )
+    fixed = fix_authorize_url(broken)
+    q = parse_qs(urlsplit(fixed).query)
+    assert q["authType"] == ["2"] and q["response_type"] == ["code"] and q["state"] == ["s?x"]
+    plain = "https://mcp.notion.com/authorize?response_type=code&client_id=x"
+    assert fix_authorize_url(plain) == plain
+    assert fix_authorize_url("https://a.example/authorize") == "https://a.example/authorize"
+
+
+def test_mcp_oauth_token_storage_is_owner_only(home: Path):
+    from agenticx.connectors.oauth import FileTokenStorage
+
+    st = FileTokenStorage("tencent-docs")
+    port = st.redirect_port()
+    assert port > 0 and st.redirect_port() == port
+    assert st.path == home / ".agenticx" / "connectors" / "oauth" / "tencent-docs.json"
+    assert (st.path.stat().st_mode & 0o777) == 0o600
+
+
+def test_connector_manage_gildata_template_query_token_and_help_link(home: Path, monkeypatch: pytest.MonkeyPatch):
+    """恒生聚源 (Comate query_param token): official Streamable HTTP + ?token=, label/placeholder/help link."""
+    from agenticx.cli.agent_tools import _tool_connector_manage
+
+    help_url = "https://vcn7e7nesi3s.feishu.cn/docx/MeCmd4q0Yo7nmkx9D8IcMYbknob"
+    s = _session()
+    listed = json.loads(_run(_tool_connector_manage({"action": "list_templates", "query": "恒生聚源"}, s)))
+    tpl = next(t for t in listed["templates"] if t["id"] == "stub:gildata")
+    assert tpl["mcp_url"] == "https://api.gildata.com/mcp-servers/aidata-assistant-srv-tool"
+    assert tpl.get("auth_query") == "token"
+    assert tpl["credential_label"] == "Access Token" and tpl["credential_help_url"] == help_url
+
+    out = json.loads(_run(_tool_connector_manage({"action": "create", "name": "恒生聚源MCP的连接器", "template_id": "stub:gildata"}, s)))
+    assert out["ok"], out
+    assert out["needs_credential"] is True
+    assert out["credential_label"] == "Access Token" and out["credential_help_url"] == help_url
+    name = out["server_name"]
+    entry = json.loads((home / ".agenticx" / "mcp.json").read_text())["mcpServers"][name]
+    assert entry["url"] == tpl["mcp_url"] and entry["_agenticx"].get("authStyle") in ("query", "bearer", None)
+
+    import agenticx.cli.agent_tools as at
+
+    seen: List[Any] = []
+    real_await = at._await_clarification_answer
+
+    async def spy(prompt, **kwargs):
+        seen.append({"prompt": prompt, "decisions": kwargs.get("decisions")})
+        return await real_await(prompt, **kwargs)
+
+    monkeypatch.setattr(at, "_await_clarification_answer", spy)
+    gate = _Gate({"credential": SECRET})
+    saved = _run(_tool_connector_manage({"action": "request_credential", "server_name": name}, s, clarify_gate=gate))
+    assert SECRET not in saved and json.loads(saved)["action"] == "credential_saved"
+    card = json.dumps(seen, ensure_ascii=False)
+    assert help_url in card and "Access Token" in card and "请填写恒生聚源下发的Access Token" in card
+    assert SECRET not in card
+    entry = json.loads((home / ".agenticx" / "mcp.json").read_text())["mcpServers"][name]
+    # Comate: query_param name=token
+    assert f"token={SECRET}" in entry["url"]
+    assert "Authorization" not in (entry.get("headers") or {})
+
+
+def test_connector_manage_template_custom_header_and_query_defaults(home: Path):
+    """盈米 → raw x-api-key header; 快递100 → ?key= query; 法律之星 → Bearer (all from template defaults)."""
+    from agenticx.cli.agent_tools import _tool_connector_manage
+
+    s = _session()
+    expect = {
+        "stub:yingmi": ("header", {"authHeader": "x-api-key"}),
+        "stub:kuaidi100": ("query", {"authQuery": "key"}),
+        "stub:lawstar": ("bearer", {}),
+    }
+    for tid, (style, extra) in expect.items():
+        out = json.loads(_run(_tool_connector_manage({"action": "create", "name": f"{tid}-conn", "template_id": tid}, s)))
+        assert out["ok"] and out["needs_credential"] is True, out
+        meta = json.loads((home / ".agenticx" / "mcp.json").read_text())["mcpServers"][out["server_name"]]["_agenticx"]
+        assert meta["authStyle"] == style, (tid, meta)
+        for k, v in extra.items():
+            assert meta[k] == v

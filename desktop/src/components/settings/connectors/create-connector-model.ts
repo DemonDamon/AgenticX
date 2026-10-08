@@ -10,8 +10,8 @@
  * - 连接器展示名 / server 名全局唯一（`duplicate`）。
  */
 
-import type { ConnectorAuthType, ConnectorSupplyEntry } from "./connector-supply";
-import { authFormFields, supportsCreateConnectorForm } from "./connector-supply";
+import type { ConnectorAuthType, ConnectorCredentialField, ConnectorSupplyEntry } from "./connector-supply";
+import { CONNECTOR_SUPPLY, authFormFields, findSupplyById, supportsCreateConnectorForm } from "./connector-supply";
 import {
   buildRemoteMcpServerPayload,
   extractRemoteMcpServerConfig,
@@ -33,9 +33,11 @@ export type CreateConnectorFormValues = {
   url: string;
   apiKey: string;
   token: string;
+  /** 多字段自定义头凭证（key = ConnectorCredentialField.name）。 */
+  credentials?: Record<string, string>;
 };
 
-export type CreateConnectorFormErrors = Partial<Record<keyof CreateConnectorFormValues | "form", string>>;
+export type CreateConnectorFormErrors = Partial<Record<string, string>>;
 
 /** 市场卡片 → Connect CTA 行为。 */
 export function resolveConnectorConnectAction(item: {
@@ -52,6 +54,65 @@ export function resolveConnectorConnectAction(item: {
   // wired 无 connectorId（罕见）：仍尝试表单
   if (supportsCreateConnectorForm(item.authType)) return "create_form";
   return "unwired_sheet";
+}
+
+/** 供给条目 → 新建表单的模板级预填（官方 URL / 文档 / 查询参数式 Key）。 */
+export function createTargetExtrasForSupply(
+  entry:
+    | Pick<
+        ConnectorSupplyEntry,
+        | "mcpUrl"
+        | "docsUrl"
+        | "apiKeyQuery"
+        | "credentialHeader"
+        | "credentialLabel"
+        | "credentialPlaceholder"
+        | "credentialHelpUrl"
+        | "credentialFields"
+      >
+    | undefined,
+): {
+  defaultMcpUrl?: string;
+  docsUrl?: string;
+  apiKeyQuery?: string;
+  credentialHeader?: string;
+  credentialLabel?: string;
+  credentialPlaceholder?: string;
+  credentialHelpUrl?: string;
+  credentialFields?: readonly ConnectorCredentialField[];
+} {
+  if (!entry) return {};
+  return {
+    ...(entry.mcpUrl ? { defaultMcpUrl: entry.mcpUrl } : {}),
+    ...(entry.docsUrl ? { docsUrl: entry.docsUrl } : {}),
+    ...(entry.apiKeyQuery ? { apiKeyQuery: entry.apiKeyQuery } : {}),
+    ...(entry.credentialHeader ? { credentialHeader: entry.credentialHeader } : {}),
+    ...(entry.credentialLabel ? { credentialLabel: entry.credentialLabel } : {}),
+    ...(entry.credentialPlaceholder ? { credentialPlaceholder: entry.credentialPlaceholder } : {}),
+    ...(entry.credentialHelpUrl ? { credentialHelpUrl: entry.credentialHelpUrl } : {}),
+    ...(entry.credentialFields?.length ? { credentialFields: entry.credentialFields } : {}),
+  };
+}
+
+/**
+ * 渲染期按 supplyId 重新合并目录元数据（SSOT）：市场卡片「连接」、「从模板新建」、
+ * 聊天等任意入口只需给出 supplyId，凭证标签 / 占位 / 帮助链接 / 官方端点 / 鉴权位置
+ * 一律取当前 CONNECTOR_SUPPLY，不依赖打开弹层那一刻的快照（Fast Refresh 保留 state 时
+ * 旧快照会让表单停留在「API Key + 必填 MCP URL」旧版）。目录缺该字段时保留入口传入值。
+ */
+export function resolveCreateTargetWithSupply<T extends { supplyId?: string }>(
+  target: T,
+  supply: readonly ConnectorSupplyEntry[] = CONNECTOR_SUPPLY,
+): T & ReturnType<typeof createTargetExtrasForSupply> {
+  const id = (target.supplyId ?? "").trim();
+  const entry = id ? findSupplyById(id, supply) : undefined;
+  return { ...target, ...createTargetExtrasForSupply(entry) };
+}
+
+/** 「如何获取凭证」链接：模板专用帮助页优先，其次官方接入文档；仅放行 http(s)。 */
+export function credentialHelpHref(target: { credentialHelpUrl?: string; docsUrl?: string }): string | undefined {
+  const href = (target.credentialHelpUrl ?? "").trim() || (target.docsUrl ?? "").trim();
+  return /^https?:\/\//i.test(href) ? href : undefined;
 }
 
 /** 「从模板新建」列表项：目录供给（不含网关）+ 走表单还是原生握手。 */
@@ -111,6 +172,7 @@ export function sanitizeConnectorServerName(raw: string): string {
 export function validateCreateConnectorForm(
   auth: ConnectorAuthType,
   values: CreateConnectorFormValues,
+  opts?: { credentialFields?: readonly ConnectorCredentialField[] },
 ): CreateConnectorFormErrors {
   const fields = new Set(authFormFields(auth));
   const errors: CreateConnectorFormErrors = {};
@@ -130,8 +192,17 @@ export function validateCreateConnectorForm(
       }
     }
   }
-  if (fields.has("api_key") && !values.apiKey.trim()) errors.apiKey = "required_api_key";
-  if (fields.has("token") && !values.token.trim()) errors.token = "required_token";
+  const multi = (opts?.credentialFields ?? []).filter((f) => f.name.trim());
+  if (multi.length > 0) {
+    const creds = values.credentials ?? {};
+    for (const f of multi) {
+      if (f.required === false) continue;
+      if (!String(creds[f.name] ?? "").trim()) errors[f.name] = "required_credential";
+    }
+  } else {
+    if (fields.has("api_key") && !values.apiKey.trim()) errors.apiKey = "required_api_key";
+    if (fields.has("token") && !values.token.trim()) errors.token = "required_token";
+  }
   return errors;
 }
 
@@ -233,29 +304,90 @@ export function isConnectorNameTaken(
   );
 }
 
-/** 按 auth 组装远程 MCP server 配置（headers 含密钥，勿日志）。 */
+/** 新建表单的模板级选项（来自供给表）。 */
+export type CreateConnectorTemplateOpts = {
+  templateId?: string;
+  /** API Key 放进 URL 查询参数（如高德 `key`、百度 `ak`）；缺省走 Authorization: Bearer。 */
+  apiKeyQuery?: string;
+  /** 凭证写进自定义请求头（如盈米 `x-api-key`，原值）；缺省 Authorization: Bearer。 */
+  credentialHeader?: string;
+  /** 多字段自定义头；优先于单字段 credentialHeader / apiKey / token。 */
+  credentialFields?: readonly ConnectorCredentialField[];
+};
+
+/** 自定义凭证头名：仅允许 RFC 7230 token 字符，避免注入。 */
+function safeHeaderName(raw: string | undefined): string {
+  const h = String(raw ?? "").trim();
+  return /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(h) ? h : "";
+}
+
+/** 把密钥写进 URL 查询参数（同名参数覆盖，其余参数保留）。 */
+export function withQuerySecret(url: string, param: string, secret: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set(param, secret);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 按 auth 组装远程 MCP server 配置（headers / URL 可能含密钥，勿日志）。
+ * mcp_oauth：仅官方 URL + `oauth: true`，由本机后端做 MCP OAuth 2.1（发现 + DCR + PKCE），
+ * 令牌落 ~/.agenticx/connectors/oauth/（0600），不进 mcp.json。
+ */
 export function buildCreateConnectorServerConfig(
   auth: ConnectorAuthType,
   values: CreateConnectorFormValues,
-  opts?: { templateId?: string; serverName?: string },
+  opts?: CreateConnectorTemplateOpts & { serverName?: string },
 ): { serverName: string; config: Record<string, unknown> } {
   const serverName =
     opts?.serverName || connectorTemplateSlug(opts?.templateId) || sanitizeConnectorServerName(values.name);
-  const url = normalizeUrl(values.url);
+  let url = normalizeUrl(values.url);
   const headers: Record<string, string> = {};
-  if (auth === "api_key" && values.apiKey.trim()) {
-    headers.Authorization = `Bearer ${values.apiKey.trim()}`;
+  const multi = (opts?.credentialFields ?? [])
+    .map((f) => ({ ...f, name: safeHeaderName(f.name) }))
+    .filter((f) => f.name);
+  let queryParam = "";
+  let headerName = "";
+  if (multi.length > 0 && auth !== "mcp_oauth") {
+    const creds = values.credentials ?? {};
+    for (const f of multi) {
+      const v = String(creds[f.name] ?? "").trim();
+      if (v) headers[f.name] = v;
+    }
+  } else {
+    queryParam = auth === "api_key" ? String(opts?.apiKeyQuery ?? "").trim() : "";
+    headerName =
+      !queryParam && (auth === "api_key" || auth === "custom_credential") ? safeHeaderName(opts?.credentialHeader) : "";
+    const secret = auth === "api_key" ? values.apiKey.trim() : auth === "custom_credential" ? values.token.trim() : "";
+    if (secret) {
+      if (queryParam) url = withQuerySecret(url, queryParam, secret);
+      else if (headerName) headers[headerName] = secret;
+      else headers.Authorization = `Bearer ${secret}`;
+    }
   }
-  if (auth === "custom_credential" && values.token.trim()) {
-    headers.Authorization = `Bearer ${values.token.trim()}`;
-  }
+  const payload = buildRemoteMcpServerPayload(url, auth === "mcp_oauth" ? {} : headers);
+  if (auth === "mcp_oauth") payload.oauth = true;
   return {
     serverName,
-    config: withAgenticxConnectorSource(buildRemoteMcpServerPayload(url, headers), {
+    config: withAgenticxConnectorSource(payload, {
       templateId: opts?.templateId,
       displayName: values.name,
+      ...(queryParam ? { authStyle: "query", authQuery: queryParam } : {}),
+      ...(headerName ? { authStyle: "header", authHeader: headerName } : {}),
+      ...(multi.length > 0 ? { authStyle: "headers", authHeaders: multi.map((f) => f.name) } : {}),
+      ...(auth === "mcp_oauth" ? { authStyle: "none" } : {}),
     }),
   };
+}
+
+/** mcp.json 条目是否走标准 MCP OAuth（`oauth: true` + 远程 URL）。 */
+export function isMcpOauthServerConfig(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const r = raw as Record<string, unknown>;
+  return r.oauth === true && typeof r.url === "string" && r.url.trim() !== "";
 }
 
 export type ApplyCreateConnectorResult =
@@ -286,9 +418,9 @@ export function applyCreateConnectorToMcpJson(
   text: string,
   auth: ConnectorAuthType,
   values: CreateConnectorFormValues,
-  opts?: { overwrite?: boolean; templateId?: string },
+  opts?: { overwrite?: boolean } & CreateConnectorTemplateOpts,
 ): ApplyCreateConnectorResult {
-  const errors = validateCreateConnectorForm(auth, values);
+  const errors = validateCreateConnectorForm(auth, values, { credentialFields: opts?.credentialFields });
   if (Object.keys(errors).length > 0) return { ok: false, error: "invalid_form", errors };
   let doc: McpJsonDocument;
   try {
@@ -299,7 +431,13 @@ export function applyCreateConnectorToMcpJson(
   const templateId = String(opts?.templateId ?? "").trim() || undefined;
   const servers = getMcpServersMap(doc);
   const instances = listConnectorInstances(doc);
-  const draft = buildCreateConnectorServerConfig(auth, values, { templateId });
+  const tplOpts: CreateConnectorTemplateOpts = {
+    templateId,
+    apiKeyQuery: opts?.apiKeyQuery,
+    credentialHeader: opts?.credentialHeader,
+    credentialFields: opts?.credentialFields,
+  };
+  const draft = buildCreateConnectorServerConfig(auth, values, tplOpts);
   const draftRemote = extractRemoteMcpServerConfig(draft.config);
   const draftFp = mcpCredentialFingerprint(draftRemote?.headers);
   const displayName = values.name.trim();
@@ -318,6 +456,7 @@ export function applyCreateConnectorToMcpJson(
     }
     const unchanged =
       target.credentialFingerprint === draftFp &&
+      isMcpOauthServerConfig(servers[target.serverName]) === isMcpOauthServerConfig(draft.config) &&
       normalizeMcpUrlForCompare(target.url) === normalizeMcpUrlForCompare(draftRemote?.url) &&
       target.displayName === (displayName || target.displayName) &&
       Boolean(target.templateId) === Boolean(templateId);
@@ -332,7 +471,7 @@ export function applyCreateConnectorToMcpJson(
       };
     }
     const { config } = buildCreateConnectorServerConfig(auth, values, {
-      templateId,
+      ...tplOpts,
       serverName: target.serverName,
     });
     servers[target.serverName] = config;
@@ -361,7 +500,7 @@ export function applyCreateConnectorToMcpJson(
       serverName = candidate;
     }
   }
-  const { config } = buildCreateConnectorServerConfig(auth, values, { templateId, serverName });
+  const { config } = buildCreateConnectorServerConfig(auth, values, { ...tplOpts, serverName });
   const existed = Object.prototype.hasOwnProperty.call(servers, serverName);
   servers[serverName] = config;
   return {

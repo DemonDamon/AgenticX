@@ -9,13 +9,45 @@ import (
 	"strings"
 )
 
-// AuthType 连接器认证类型。01 阶段支持 none / api_key；oauth2 归后续供给阶段。
+// AuthType 连接器认证类型：none / api_key / bearer / hmac（AK/SK 签名）/ oauth2。
 type AuthType string
 
 const (
 	AuthNone   AuthType = "none"
 	AuthAPIKey AuthType = "api_key"
+	AuthBearer AuthType = "bearer" // Authorization: Bearer <apiKey>
+	AuthHMAC   AuthType = "hmac"   // 通用 HMAC-SHA256 请求签名（AK/SK）
+	AuthOAuth2 AuthType = "oauth2" // client_credentials / authorization_code（refresh_token）
 )
+
+// HMACAuth 通用 header 式 HMAC 签名规格。
+//
+// 签名串 StringToSign 为模板，可用占位：{method} {path} {query}（按 key 排序的
+// 已编码 query）{timestamp} {nonce} {body_sha256}（hex）{access_key} {host}，
+// 以及 "\n" 字面换行。默认模板：
+// "{method}\n{path}\n{query}\n{timestamp}\n{body_sha256}"。
+type HMACAuth struct {
+	Algorithm         string `json:"algorithm,omitempty"`         // 仅 hmac-sha256（默认）
+	AccessKeyHeader   string `json:"accessKeyHeader"`             // 如 X-Access-Key
+	SignatureHeader   string `json:"signatureHeader"`             // 如 X-Signature
+	TimestampHeader   string `json:"timestampHeader,omitempty"`   // 如 X-Timestamp（空则不发送，但 {timestamp} 仍可用）
+	TimestampFormat   string `json:"timestampFormat,omitempty"`   // unix（默认）| unix_ms | rfc3339
+	NonceHeader       string `json:"nonceHeader,omitempty"`       // 可选
+	StringToSign      string `json:"stringToSign,omitempty"`      // 模板，见上
+	SignatureEncoding string `json:"signatureEncoding,omitempty"` // hex（默认）| base64
+	SignaturePrefix   string `json:"signaturePrefix,omitempty"`   // 签名值前缀，如 "HMAC-SHA256 "
+}
+
+// OAuth2Auth OAuth 2.0 规格。client_credentials 由网关按 tokenUrl 换取并缓存
+// access token（过期/401 自动重取）；authorization_code 的授权由宿主（桌面端
+// 系统浏览器 + 环回回调 + PKCE）完成，网关仅持有 refresh_token 并负责刷新。
+type OAuth2Auth struct {
+	Grant        string   `json:"grant"`                  // client_credentials | authorization_code
+	TokenURL     string   `json:"tokenUrl"`               // 必填
+	AuthorizeURL string   `json:"authorizeUrl,omitempty"` // authorization_code 必填（宿主授权用）
+	Scopes       []string `json:"scopes,omitempty"`
+	ClientAuth   string   `json:"clientAuth,omitempty"` // body（默认）| basic
+}
 
 // APIKeyAuth 描述 api_key 的注入位置。
 type APIKeyAuth struct {
@@ -25,8 +57,10 @@ type APIKeyAuth struct {
 
 // AuthSpec 认证规格。
 type AuthSpec struct {
-	Type   AuthType     `json:"type"`
-	APIKey *APIKeyAuth  `json:"apiKey,omitempty"`
+	Type   AuthType    `json:"type"`
+	APIKey *APIKeyAuth `json:"apiKey,omitempty"`
+	HMAC   *HMACAuth   `json:"hmac,omitempty"`
+	OAuth2 *OAuth2Auth `json:"oauth2,omitempty"`
 }
 
 // HTTPAction 动作的 HTTP 执行规格。Path/Query/Header 值可含 {param} 占位符，
@@ -36,6 +70,9 @@ type HTTPAction struct {
 	Path    string            `json:"path"`
 	Query   map[string]string `json:"query,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// BodyField 非空时请求体取 input[BodyField]（而非整个输入），
+	// 便于 OpenAPI 导入时把 path/query 参数与请求体分开。
+	BodyField string `json:"bodyField,omitempty"`
 }
 
 // Action 动作声明。ID 规则为 "<connectorID>.<name>"。
@@ -60,13 +97,16 @@ type Connector struct {
 	BaseURL     string   `json:"baseUrl"`
 	Auth        AuthSpec `json:"auth"`
 	Actions     []Action `json:"actions"`
+	// AllowPrivateNetwork 该连接器允许访问私网/环回上游（用户显式登记的内网/本机 API）。
+	// 仅对该连接器生效；其余连接器仍受出网守护约束。
+	AllowPrivateNetwork bool `json:"allowPrivateNetwork,omitempty"`
 }
 
 var (
-	idPattern      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
-	methodPattern  = regexp.MustCompile(`^[A-Z]+$`)
-	validOps       = map[string]bool{"read": true, "write": true, "destructive": true}
-	validAPIKeyIn  = map[string]bool{"header": true, "query": true}
+	idPattern     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
+	methodPattern = regexp.MustCompile(`^[A-Z]+$`)
+	validOps      = map[string]bool{"read": true, "write": true, "destructive": true}
+	validAPIKeyIn = map[string]bool{"header": true, "query": true}
 )
 
 // Parse 从 JSON 解析连接器定义并校验。
@@ -126,9 +166,65 @@ func (a *AuthSpec) validate() error {
 			return fmt.Errorf("apiKey.name 不能为空")
 		}
 		return nil
+	case AuthBearer:
+		return nil
+	case AuthHMAC:
+		h := a.HMAC
+		if h == nil {
+			return fmt.Errorf("hmac 认证缺少 hmac 规格")
+		}
+		if h.Algorithm != "" && strings.ToLower(h.Algorithm) != "hmac-sha256" {
+			return fmt.Errorf("hmac.algorithm 仅支持 hmac-sha256，得到 %q", h.Algorithm)
+		}
+		if strings.TrimSpace(h.AccessKeyHeader) == "" || strings.TrimSpace(h.SignatureHeader) == "" {
+			return fmt.Errorf("hmac.accessKeyHeader 与 hmac.signatureHeader 不能为空")
+		}
+		switch h.TimestampFormat {
+		case "", "unix", "unix_ms", "rfc3339":
+		default:
+			return fmt.Errorf("hmac.timestampFormat 仅支持 unix/unix_ms/rfc3339，得到 %q", h.TimestampFormat)
+		}
+		switch h.SignatureEncoding {
+		case "", "hex", "base64":
+		default:
+			return fmt.Errorf("hmac.signatureEncoding 仅支持 hex/base64，得到 %q", h.SignatureEncoding)
+		}
+		return nil
+	case AuthOAuth2:
+		o := a.OAuth2
+		if o == nil {
+			return fmt.Errorf("oauth2 认证缺少 oauth2 规格")
+		}
+		if o.Grant != "client_credentials" && o.Grant != "authorization_code" {
+			return fmt.Errorf("oauth2.grant 仅支持 client_credentials/authorization_code，得到 %q", o.Grant)
+		}
+		if err := validateEndpointURL(o.TokenURL); err != nil {
+			return fmt.Errorf("oauth2.tokenUrl: %w", err)
+		}
+		if o.Grant == "authorization_code" {
+			if err := validateEndpointURL(o.AuthorizeURL); err != nil {
+				return fmt.Errorf("oauth2.authorizeUrl: %w", err)
+			}
+		}
+		if o.ClientAuth != "" && o.ClientAuth != "body" && o.ClientAuth != "basic" {
+			return fmt.Errorf("oauth2.clientAuth 仅支持 body/basic，得到 %q", o.ClientAuth)
+		}
+		return nil
 	default:
-		return fmt.Errorf("不支持的认证类型 %q（当前支持 none / api_key）", a.Type)
+		return fmt.Errorf("不支持的认证类型 %q（支持 none / api_key / bearer / hmac / oauth2）", a.Type)
 	}
+}
+
+// validateEndpointURL 校验 OAuth 端点：http(s)、有 host、无 userinfo（允许 query）。
+func validateEndpointURL(raw string) error {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("须为 http(s) 绝对地址")
+	}
+	if u.User != nil {
+		return fmt.Errorf("不允许携带 userinfo")
+	}
+	return nil
 }
 
 func (a *Action) validate(connectorID string) error {

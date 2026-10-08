@@ -89,7 +89,7 @@ func Definitions() []ToolDef {
 			InputSchema: objSchema(map[string]any{
 				"actionId": map[string]any{"type": "string", "description": "动作 id，如 httpbin.get"},
 			}, []string{"actionId"})},
-		{Name: "execute_action", Description: "执行动作。api_key 类连接器须传 connectionId",
+		{Name: "execute_action", Description: "执行动作。需凭据的连接器传 connectionId（该连接器仅一个连接时可省略）",
 			InputSchema: objSchema(map[string]any{
 				"actionId":     map[string]any{"type": "string"},
 				"input":        map[string]any{"type": "object", "description": "动作输入，按 get_action_guide 的 schema 构造"},
@@ -197,6 +197,18 @@ func (t *Tools) executeAction(ctx context.Context, args map[string]any) (CallRes
 			}
 		}
 	} else {
+		if connectionID == "" && t.conns != nil {
+			// 未传 connectionId 且该连接器恰有一个连接：自动选用（单实例去重后的常见形态）。
+			var only []string
+			for _, p := range t.conns.List(ctx) {
+				if p.ConnectorID == conn.ID {
+					only = append(only, p.ID)
+				}
+			}
+			if len(only) == 1 {
+				connectionID = only[0]
+			}
+		}
 		if connectionID == "" || t.conns == nil {
 			rec := &ExecutionRecord{ExecutionID: executionID, ActionID: actionID, ConnectorID: conn.ID,
 				Status: audit.StatusDenied, ErrorCode: "connection_not_found"}
@@ -240,7 +252,7 @@ func (t *Tools) executeAction(ctx context.Context, args map[string]any) (CallRes
 		t.auditRecord(rec)
 		return withExec(errResult("internal", "执行器不可用"), rec), nil
 	}
-	res, execErr := t.exec.Execute(ctx, conn, act, input, sec)
+	res, execErr := t.exec.ExecuteConn(ctx, conn, act, input, sec, connectionID)
 	connIDForAudit := ""
 	if connProj != nil {
 		connIDForAudit = connProj.ID

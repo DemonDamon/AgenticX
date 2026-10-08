@@ -84,6 +84,13 @@ export type AgenticxConnectorMeta = {
   dbType?: string;
   /** 创建途径：连接器助手 connector_manage 写 `chat`。 */
   createdVia?: string;
+  /** 凭证位置（与 Python connectors_store 对齐）：query 时密钥在 URL 查询参数 `authQuery`。 */
+  authStyle?: string;
+  authQuery?: string;
+  /** authStyle=header 时的自定义请求头名（如 `x-api-key`）。 */
+  authHeader?: string;
+  /** authStyle=headers 时的多自定义头名（Comate 双字段凭证）。 */
+  authHeaders?: string[];
 };
 
 /** Stamp a remote MCP payload as created via Near「新建连接器」. */
@@ -96,11 +103,19 @@ export function withAgenticxConnectorSource(
     prev && typeof prev === "object" && !Array.isArray(prev)
       ? (prev as Record<string, unknown>)
       : {};
-  const extra: Record<string, string> = {};
+  const extra: Record<string, unknown> = {};
   const templateId = String(meta?.templateId ?? "").trim();
   const displayName = String(meta?.displayName ?? "").trim();
   if (templateId) extra.templateId = templateId;
   if (displayName) extra.displayName = displayName;
+  const authStyle = String(meta?.authStyle ?? "").trim();
+  const authQuery = String(meta?.authQuery ?? "").trim();
+  if (authStyle) extra.authStyle = authStyle;
+  if (authStyle === "query" && authQuery) extra.authQuery = authQuery;
+  const authHeader = String(meta?.authHeader ?? "").trim();
+  if (authStyle === "header" && authHeader) extra.authHeader = authHeader;
+  const authHeaders = (meta?.authHeaders ?? []).map((h) => String(h ?? "").trim()).filter(Boolean);
+  if (authStyle === "headers" && authHeaders.length > 0) extra.authHeaders = authHeaders;
   return {
     ...config,
     [AGENTICX_MCP_META_KEY]: { ...prevObj, ...extra, source: AGENTICX_MCP_SOURCE_CONNECTOR },

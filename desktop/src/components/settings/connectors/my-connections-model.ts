@@ -77,6 +77,8 @@ export type MyConnectionRow = {
   restConnectorId?: string;
   /** 已知的描述（如 REST 连接器登记时的说明）；缺省由视图层按供给目录取。 */
   description?: string;
+  /** mcp.json `oauth: true`：标准 MCP OAuth（未授权时 health=degraded → 待授权）。 */
+  oauth?: boolean;
 };
 
 /** 本机已配置 MCP 的精简元数据，用于「我的连接」自定义远程过滤。 */
@@ -101,6 +103,8 @@ export type ConfiguredMcpEntry = {
   createdVia?: string;
   /** 数据库连接器：未开启写操作即只读。 */
   readOnly?: boolean;
+  /** mcp.json `oauth: true`：走标准 MCP OAuth 2.1（令牌在本机 oauth 目录，不在 mcp.json）。 */
+  oauth?: boolean;
 };
 
 export type BuildMyConnectionsInput = {
@@ -120,6 +124,11 @@ export type BuildMyConnectionsInput = {
   supply?: readonly ConnectorSupplyEntry[];
   /** supplyId → 展示名覆盖。 */
   displayNames?: Readonly<Record<string, string>>;
+  /**
+   * MCP OAuth 授权态（server 名 → 是否已有令牌，来自主进程 mcpOauthState）。
+   * 缺省（未知 / 旧主进程）时 OAuth 条目按已连接展示，不误报待授权。
+   */
+  oauthAuthorized?: Readonly<Record<string, boolean>>;
   query?: string;
 };
 
@@ -198,6 +207,7 @@ export function configuredMcpEntriesFromDocument(doc: McpJsonDocument): Configur
       ...(meta.kind ? { connectorKind: meta.kind } : {}),
       ...(meta.dbType ? { dbType: meta.dbType } : {}),
       ...(meta.createdVia ? { createdVia: meta.createdVia } : {}),
+      ...(row.oauth === true ? { oauth: true } : {}),
       ...(isDb ? { readOnly: !["1", "true", "yes"].includes(String(env.AGX_DB_ALLOW_WRITES ?? "").toLowerCase()) } : {}),
     });
   }
@@ -232,6 +242,7 @@ export function mergeConfiguredMcpEntries(
         dbType: e.dbType || prev.dbType,
         createdVia: e.createdVia || prev.createdVia,
         readOnly: e.readOnly ?? prev.readOnly,
+        ...(e.oauth || prev.oauth ? { oauth: true } : {}),
       });
     }
   }
@@ -371,7 +382,8 @@ export function buildMyConnectionRows(input: BuildMyConnectionsInput): MyConnect
       kind: "mcp",
       name: meta.displayName || tplName || name,
       detail: isDb ? dbTypeLabel(meta.dbType) || name : host || name,
-      health: "connected",
+      health: meta.oauth && input.oauthAuthorized && !input.oauthAuthorized[name] ? "degraded" : "connected",
+      ...(meta.oauth ? { oauth: true } : {}),
       action: "mcp_remove",
       mcpServerName: name,
       mcpServerNames: [name],

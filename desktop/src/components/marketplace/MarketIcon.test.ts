@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifySvgTone,
+  decodeSvgDataUri,
+  extractSvgFillColors,
+  resolveMarkTone,
   isDarkLikeTheme,
   isMarkStyleAsset,
   isNearBlackColor,
@@ -13,8 +17,18 @@ import {
   pickTileBackground,
   shouldInvertMark,
 } from "./MarketIcon";
-import { MARK_INVERT_BRANDS } from "./brand-assets";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { BRAND_ICON_SRC, MARK_INVERT_BRANDS, MARK_TONE } from "./brand-assets";
 import { pickBrandIcon } from "./icon-model";
+
+const ASSETS_DIR = resolve(process.cwd(), "src/assets/connectors");
+function readAsset(rel: string): string {
+  return readFileSync(resolve(ASSETS_DIR, rel), "utf8");
+}
+function svgUri(svg: string): string {
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
 
 describe("isMarkStyleAsset", () => {
   it("treats Vite-inlined SVG data URIs as logo marks (not cover tiles)", () => {
@@ -163,13 +177,21 @@ describe("theme-adaptive MarketIcon tiles", () => {
     expect(shouldInvertMark("Agent Mail", "qqmail", undefined, true)).toBe(true);
   });
 
-  it("inverts white Notion mark only in light theme", () => {
+  it("darkens a white-only monochrome mark only in light theme", () => {
     const src =
       "data:image/svg+xml," +
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M0"/></svg>');
-    expect(shouldInvertMark("Notion", "notion", src, false)).toBe(true);
-    expect(shouldInvertMark("Notion", "notion", src, true)).toBe(false);
-    expect(shouldInvertMark("Notion", "notion", undefined, false)).toBe(true);
+    expect(shouldInvertMark("Some White Mark", undefined, src, false)).toBe(true);
+    expect(shouldInvertMark("Some White Mark", undefined, src, true)).toBe(false);
+  });
+
+  it("never filters the two-tone Notion mark (regression: solid black blob in light theme)", () => {
+    expect(MARK_TONE.notion).toBe("duo");
+    for (const darkLike of [false, true]) {
+      expect(shouldInvertMark("Notion", "notion", undefined, darkLike)).toBe(false);
+      expect(shouldInvertMark("Notion", "notion", "/src/assets/connectors/notion.svg", darkLike)).toBe(false);
+      expect(shouldInvertMark("Notion 笔记", undefined, svgUri(readAsset("notion.svg")), darkLike)).toBe(false);
+    }
   });
 
   it("uses light neutral tile for multicolor / raster logos in light theme", () => {
@@ -225,16 +247,19 @@ describe("theme-adaptive MarketIcon tiles", () => {
     expect(vercel).toBe(NEUTRAL_TILE_BG_LIGHT);
   });
 
-  it("allows chromatic Simple Icons brand tint in light theme", () => {
-    const docker = pickTileBackground({
-      name: "Docker",
-      brandKey: "docker",
-      src: "https://cdn.simpleicons.org/docker",
-      mark: true,
-      invert: false,
-      darkLike: false,
-    });
-    expect(docker).toBe("#2496ED");
+  it("keeps Simple Icons (brand-coloured glyph) on a neutral tile in both themes", () => {
+    for (const darkLike of [false, true]) {
+      const docker = pickTileBackground({
+        name: "Docker",
+        brandKey: "docker",
+        src: "https://cdn.simpleicons.org/docker",
+        mark: true,
+        invert: false,
+        darkLike,
+      });
+      // 旧口径铺 #2496ED → 蓝标在蓝底上隐身。
+      expect(docker).toBe(neutralTileBg(darkLike));
+    }
   });
 
   it("uses brand/dark tint for inverted marks in dark theme", () => {
@@ -252,5 +277,73 @@ describe("theme-adaptive MarketIcon tiles", () => {
   it("exports opposite mark filters for dark vs light", () => {
     expect(MARK_INVERT_FILTER).toContain("invert");
     expect(MARK_TO_DARK_FILTER).toBe("brightness(0)");
+  });
+});
+
+describe("SVG tone classification (implicit fills)", () => {
+  it("counts shapes without a fill attribute as default black", () => {
+    expect(extractSvgFillColors('<svg><path d="M0"/></svg>')).toEqual(["#000000"]);
+    expect(classifySvgTone('<svg><path fill="#fff" d="M0"/><path d="M1"/></svg>')).toBe("duo");
+  });
+
+  it("inherits root / group fill and honours fill=none", () => {
+    expect(classifySvgTone('<svg fill="#FFFFFF"><path d="M0"/></svg>')).toBe("light");
+    expect(classifySvgTone('<svg fill="none"><path fill="#111111" d="M0"/></svg>')).toBe("dark");
+    expect(classifySvgTone('<svg><g fill="#5E6AD2"><path d="M0"/></g></svg>')).toBe("color");
+    expect(classifySvgTone('<svg><g fill="#fff"><path d="M0"/></g><path d="M1"/></svg>')).toBe("duo");
+  });
+
+  it("does not report the official Notion SVG as white-only", () => {
+    const uri = svgUri(readAsset("notion.svg"));
+    expect(isNearWhiteMonochromeSvgDataUri(uri)).toBe(false);
+    expect(isNearBlackMonochromeSvgDataUri(uri)).toBe(false);
+    expect(resolveMarkTone("Notion", undefined, uri)).toBe("duo");
+  });
+});
+
+describe("bundled monochrome assets stay readable in both themes", () => {
+  // 资产 → 期望口径;dark 只在深色主题反白,light 只在浅色主题压黑,其余不加滤镜。
+  const cases: Array<[string, string, string | undefined, "dark" | "light" | "duo" | "color"]> = [
+    ["GitHub", "github.svg", "github", "dark"],
+    ["Agent Mail", "qqmail.svg", "qqmail", "dark"],
+    ["Notion", "notion.svg", "notion", "duo"],
+    ["Linear", "stubs/linear.svg", undefined, "color"],
+    ["Cloudflare", "stubs/cloudflare.svg", undefined, "color"],
+    ["GitLab", "stubs/gitlab.svg", undefined, "color"],
+  ];
+  for (const [name, file, brand, tone] of cases) {
+    it(`${name} (${file}) → ${tone}`, () => {
+      const uri = svgUri(readAsset(file));
+      expect(resolveMarkTone("x-" + file, undefined, uri)).toBe(tone);
+      expect(shouldInvertMark(name, brand, uri, true)).toBe(tone === "dark");
+      expect(shouldInvertMark(name, brand, uri, false)).toBe(tone === "light");
+    });
+  }
+
+  it("brand tone table agrees with the bundled SVGs", () => {
+    let checked = 0;
+    for (const [brand, tone] of Object.entries(MARK_TONE)) {
+      const src = BRAND_ICON_SRC[brand];
+      if (!src) continue;
+      const svg = src.startsWith("data:") ? decodeSvgDataUri(src) : readAsset(src.split("/assets/connectors/")[1] ?? "");
+      expect(svg, brand).toBeTruthy();
+      expect(classifySvgTone(svg ?? ""), brand).toBe(tone);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThanOrEqual(3); // github / qqmail / notion
+  });
+
+  it("near-black CDN brands (Vercel/X-like) invert only in dark theme and sit on a dark tile", () => {
+    expect(shouldInvertMark("Vercel", "vercel", "https://cdn.simpleicons.org/vercel", true)).toBe(true);
+    expect(shouldInvertMark("Vercel", "vercel", "https://cdn.simpleicons.org/vercel", false)).toBe(false);
+    const tile = pickTileBackground({
+      name: "Vercel",
+      brandKey: "vercel",
+      src: "https://cdn.simpleicons.org/vercel",
+      mark: true,
+      invert: true,
+      darkLike: true,
+    });
+    expect(tile).toBe("#000000");
   });
 });

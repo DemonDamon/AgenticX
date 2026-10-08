@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/agenticx/connector-runtime/internal/model"
 )
@@ -22,7 +23,17 @@ type AppSummary struct {
 	Categories  []string `json:"categories,omitempty"`
 	AuthType    string   `json:"authType"`
 	ActionCount int      `json:"actionCount"`
+	// Origin 定义来源：builtin（内置/启动目录）| user（运行时登记，可更新/注销）。
+	Origin string `json:"origin,omitempty"`
+	// BaseURL 仅 user 来源投影（便于管理面展示/去重）；内置连接器不输出。
+	BaseURL string `json:"baseUrl,omitempty"`
 }
+
+// 定义来源。
+const (
+	OriginBuiltin = "builtin"
+	OriginUser    = "user"
+)
 
 // ActionSummary 动作目录投影（无 schema）。
 type ActionSummary struct {
@@ -35,16 +46,72 @@ type ActionSummary struct {
 	RequiredScopes []string `json:"requiredScopes,omitempty"`
 }
 
-// Store 目录存储（只读内存视图）。
-type Store struct {
+// snapshot 目录的一个不可变版本（Replace 时整体替换，读侧无锁拷贝指针）。
+type snapshot struct {
 	connectors  []*model.Connector
 	actionsByID map[string]*model.Action
+	origins     map[string]string
 	etag        string
 }
 
-// New 构建目录；连接器 id 重复视为错误（防漂移）。
+// Store 目录存储：内存视图，支持运行时整体替换（用户登记的连接器热加载）。
+// 同一 *Store 指针被 MCP/工具层持有，Replace 后立即对新请求生效。
+type Store struct {
+	mu   sync.RWMutex
+	snap *snapshot
+}
+
+// New 构建目录；连接器 id 重复视为错误（防漂移）。来源默认 builtin。
 func New(connectors []*model.Connector) (*Store, error) {
-	s := &Store{connectors: make([]*model.Connector, 0, len(connectors)), actionsByID: map[string]*model.Action{}}
+	snap, err := build(connectors, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{snap: snap}, nil
+}
+
+// Replace 以新的连接器全集替换目录（origins: id→来源，缺省 builtin）。
+// 校验失败时保持原目录不变。
+func (s *Store) Replace(connectors []*model.Connector, origins map[string]string) error {
+	snap, err := build(connectors, origins)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.snap = snap
+	s.mu.Unlock()
+	return nil
+}
+
+// Origin 返回连接器来源（不存在返回空串）。
+func (s *Store) Origin(id string) string {
+	sn := s.cur()
+	for _, c := range sn.connectors {
+		if c.ID == id {
+			return originOf(sn, id)
+		}
+	}
+	return ""
+}
+
+func (s *Store) cur() *snapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snap
+}
+
+func originOf(sn *snapshot, id string) string {
+	if o := sn.origins[id]; o != "" {
+		return o
+	}
+	return OriginBuiltin
+}
+
+func build(connectors []*model.Connector, origins map[string]string) (*snapshot, error) {
+	s := &snapshot{connectors: make([]*model.Connector, 0, len(connectors)), actionsByID: map[string]*model.Action{}, origins: map[string]string{}}
+	for k, v := range origins {
+		s.origins[k] = v
+	}
 	seen := map[string]bool{}
 	for _, c := range connectors {
 		if seen[c.ID] {
@@ -66,10 +133,13 @@ func New(connectors []*model.Connector) (*Store, error) {
 }
 
 // Apps 全量连接器投影（按 id 排序，输出稳定）。
-func (s *Store) Apps() []AppSummary {
-	out := make([]AppSummary, 0, len(s.connectors))
-	for _, c := range s.connectors {
-		out = append(out, AppSummary{
+func (s *Store) Apps() []AppSummary { return appsOf(s.cur()) }
+
+func appsOf(sn *snapshot) []AppSummary {
+	out := make([]AppSummary, 0, len(sn.connectors))
+	for _, c := range sn.connectors {
+		origin := originOf(sn, c.ID)
+		sum := AppSummary{
 			ID:          c.ID,
 			DisplayName: c.DisplayName,
 			Description: c.Description,
@@ -77,7 +147,12 @@ func (s *Store) Apps() []AppSummary {
 			Categories:  c.Categories,
 			AuthType:    string(c.Auth.Type),
 			ActionCount: len(c.Actions),
-		})
+			Origin:      origin,
+		}
+		if origin == OriginUser {
+			sum.BaseURL = c.BaseURL
+		}
+		out = append(out, sum)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -86,9 +161,13 @@ func (s *Store) Apps() []AppSummary {
 // Actions 动作投影，可按连接器过滤；query 为空返回全部，否则子串匹配
 // id / title / description / categories（大小写不敏感）。
 func (s *Store) Actions(query, connectorID string) []ActionSummary {
+	return actionsOf(s.cur(), query, connectorID)
+}
+
+func actionsOf(sn *snapshot, query, connectorID string) []ActionSummary {
 	q := strings.ToLower(strings.TrimSpace(query))
 	out := []ActionSummary{}
-	for _, c := range s.connectors {
+	for _, c := range sn.connectors {
 		if connectorID != "" && c.ID != connectorID {
 			continue
 		}
@@ -114,11 +193,12 @@ func (s *Store) Actions(query, connectorID string) []ActionSummary {
 
 // Action 精确查找动作，返回动作与所属连接器。
 func (s *Store) Action(id string) (model.Action, *model.Connector, bool) {
-	a, ok := s.actionsByID[id]
+	sn := s.cur()
+	a, ok := sn.actionsByID[id]
 	if !ok {
 		return model.Action{}, nil, false
 	}
-	for _, c := range s.connectors {
+	for _, c := range sn.connectors {
 		if strings.HasPrefix(a.ID, c.ID+".") {
 			return *a, c, true
 		}
@@ -128,7 +208,7 @@ func (s *Store) Action(id string) (model.Action, *model.Connector, bool) {
 
 // Connector 按 id 查找连接器。
 func (s *Store) Connector(id string) (*model.Connector, bool) {
-	for _, c := range s.connectors {
+	for _, c := range s.cur().connectors {
 		if c.ID == id {
 			return c, true
 		}
@@ -137,21 +217,29 @@ func (s *Store) Connector(id string) (*model.Connector, bool) {
 }
 
 // ETag 目录内容指纹（排序后哈希，内容不变则稳定）。
-func (s *Store) ETag() string { return s.etag }
+func (s *Store) ETag() string { return s.cur().etag }
 
 // Count 连接器数量。
-func (s *Store) Count() int { return len(s.connectors) }
+func (s *Store) Count() int { return len(s.cur().connectors) }
+
+// All 当前全部连接器（只读，调用方不得修改）。
+func (s *Store) All() []*model.Connector {
+	sn := s.cur()
+	out := make([]*model.Connector, len(sn.connectors))
+	copy(out, sn.connectors)
+	return out
+}
 
 func actionMatches(a *model.Action, c *model.Connector, q string) bool {
 	hay := strings.ToLower(a.ID + " " + a.Title + " " + a.Description + " " + strings.Join(c.Categories, " "))
 	return strings.Contains(hay, q)
 }
 
-func computeETag(s *Store) string {
+func computeETag(s *snapshot) string {
 	payload := struct {
-		Apps    []AppSummary      `json:"apps"`
-		Actions []ActionSummary   `json:"actions"`
-	}{Apps: s.Apps(), Actions: s.Actions("", "")}
+		Apps    []AppSummary    `json:"apps"`
+		Actions []ActionSummary `json:"actions"`
+	}{Apps: appsOf(s), Actions: actionsOf(s, "", "")}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return ""

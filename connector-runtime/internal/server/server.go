@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/agenticx/connector-runtime/internal/audit"
 	"github.com/agenticx/connector-runtime/internal/catalog"
@@ -26,24 +27,33 @@ import (
 
 // Config 服务配置。
 type Config struct {
-	DataDir             string   // 数据目录（密钥/连接/策略/审计）
+	DataDir             string // 数据目录（密钥/连接/策略/审计）
 	Connectors          []*model.Connector
-	RuntimeToken        string   // 运行面 token；DevNoAuth 时可空
-	AdminToken          string   // 管理面 token
-	AllowPrivateNetwork bool     // 允许私网/环回上游（本地调试/内网）
-	DevNoAuth           bool     // 本地调试：跳过 token 认证（不安全）
+	RuntimeToken        string // 运行面 token；DevNoAuth 时可空
+	AdminToken          string // 管理面 token
+	AllowPrivateNetwork bool   // 允许私网/环回上游（本地调试/内网）
+	DevNoAuth           bool   // 本地调试：跳过 token 认证（不安全）
+	// UserConnectorsDir 运行时登记的连接器定义目录（默认 DataDir/connectors）。
+	// 启动时加载；文件变化（含外部写入）在下一次请求时热加载，无需重启。
+	UserConnectorsDir string
 }
 
 // Server 装配后的服务。
 type Server struct {
-	cfg        Config
-	cat        *catalog.Store
-	conns      *connection.Store
-	pol        *policy.Policy
-	mcp        *mcp.Server
-	auditLog   *audit.Logger
-	auditFile  *os.File
-	handler    http.Handler
+	cfg       Config
+	cat       *catalog.Store
+	conns     *connection.Store
+	pol       *policy.Policy
+	mcp       *mcp.Server
+	auditLog  *audit.Logger
+	auditFile *os.File
+	handler   http.Handler
+	exec      *executor.Executor
+
+	reloadMu   sync.Mutex
+	userSig    string          // 用户目录指纹（文件名+mtime+size）
+	builtinIDs map[string]bool // 内置/启动目录 id（不可被用户登记覆盖或注销）
+	loadErrors []string        // 最近一次用户目录加载中被跳过的文件
 }
 
 // New 装配服务（打开数据目录下的各类存储）。
@@ -52,6 +62,9 @@ func New(cfg Config) (*Server, error) {
 		if err := c.Validate(); err != nil {
 			return nil, err
 		}
+	}
+	if cfg.UserConnectorsDir == "" && cfg.DataDir != "" {
+		cfg.UserConnectorsDir = filepath.Join(cfg.DataDir, "connectors")
 	}
 	cat, err := catalog.New(cfg.Connectors)
 	if err != nil {
@@ -77,13 +90,22 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	exec := executor.New(executor.Options{AllowPrivateNetwork: cfg.AllowPrivateNetwork})
+	exec := executor.New(executor.Options{
+		AllowPrivateNetwork: cfg.AllowPrivateNetwork,
+		SecretUpdater:       conns.UpdateSecret,
+	})
 
 	s := &Server{
 		cfg: cfg, cat: cat, conns: conns, pol: pol,
 		auditLog: auditLog, auditFile: auditFile,
-		mcp: mcp.New(cat, conns, pol, exec, auditLog),
+		mcp:        mcp.New(cat, conns, pol, exec, auditLog),
+		exec:       exec,
+		builtinIDs: map[string]bool{},
 	}
+	for _, c := range cfg.Connectors {
+		s.builtinIDs[c.ID] = true
+	}
+	s.reloadUserConnectors(true)
 	s.handler = s.buildRoutes()
 	return s, nil
 }
@@ -157,6 +179,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, token string)
 // ---- MCP ----
 
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
+	s.reloadUserConnectors(false)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "读取请求体失败"})
@@ -175,7 +198,11 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 // ---- 管理面 ----
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	s.reloadUserConnectors(false)
 	path := r.URL.Path
+	if s.handleRegistry(w, r) {
+		return
+	}
 	switch {
 	case path == "/admin/apps" && r.Method == http.MethodGet:
 		s.adminApps(w, r)
@@ -183,6 +210,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"connections": s.conns.List(r.Context())})
 	case path == "/admin/connections" && r.Method == http.MethodPost:
 		s.adminCreateConnection(w, r)
+	case strings.HasPrefix(path, "/admin/connections/") && strings.HasSuffix(path, "/secret") && r.Method == http.MethodPut:
+		s.adminUpdateSecret(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/admin/connections/"), "/secret"))
 	case strings.HasPrefix(path, "/admin/connections/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "/admin/connections/")
 		if id == "" || s.conns.Delete(id) == false {
@@ -217,13 +246,59 @@ func (s *Server) adminApps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"apps": s.cat.Apps()})
 }
 
-func (s *Server) adminCreateConnection(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ConnectorID   string   `json:"connectorId"`
-		Name          string   `json:"name"`
-		GrantedScopes []string `json:"grantedScopes"`
-		APIKey        string   `json:"apiKey"`
+// connectionRequest 新建/更新连接的凭据载荷（明文仅在本进程内短暂存在）。
+type connectionRequest struct {
+	ConnectorID   string   `json:"connectorId"`
+	Name          string   `json:"name"`
+	GrantedScopes []string `json:"grantedScopes"`
+	APIKey        string   `json:"apiKey"`
+	AccessKeyID   string   `json:"accessKeyId"`
+	SecretKey     string   `json:"secretKey"`
+	ClientID      string   `json:"clientId"`
+	ClientSecret  string   `json:"clientSecret"`
+	RefreshToken  string   `json:"refreshToken"`
+}
+
+func (r connectionRequest) secret() connection.Secret {
+	return connection.Secret{
+		APIKey: r.APIKey, AccessKeyID: r.AccessKeyID, SecretKey: r.SecretKey,
+		ClientID: r.ClientID, ClientSecret: r.ClientSecret, RefreshToken: r.RefreshToken,
 	}
+}
+
+// validateSecretFor 按认证类型校验凭据字段（不回显任何值）。
+func validateSecretFor(auth model.AuthSpec, sec connection.Secret, partial bool) string {
+	switch auth.Type {
+	case model.AuthAPIKey, model.AuthBearer:
+		if !partial && sec.APIKey == "" {
+			return "apiKey 不能为空"
+		}
+		if sec.AccessKeyID != "" || sec.ClientID != "" {
+			return "该连接器只接受 apiKey"
+		}
+	case model.AuthHMAC:
+		if !partial && (sec.AccessKeyID == "" || sec.SecretKey == "") {
+			return "accessKeyId 与 secretKey 不能为空"
+		}
+	case model.AuthOAuth2:
+		if !partial && sec.ClientID == "" {
+			return "clientId 不能为空"
+		}
+		if !partial && auth.OAuth2 != nil && auth.OAuth2.Grant == "client_credentials" && sec.ClientSecret == "" {
+			return "client_credentials 需要 clientSecret"
+		}
+	case model.AuthNone:
+		if !sec.IsZero() {
+			return "none 认证连接器不接受凭据（可创建仅授权 scope 的连接）"
+		}
+	default:
+		return "暂不支持的认证类型: " + string(auth.Type)
+	}
+	return ""
+}
+
+func (s *Server) adminCreateConnection(w http.ResponseWriter, r *http.Request) {
+	var req connectionRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体须为 JSON"})
 		return
@@ -233,28 +308,68 @@ func (s *Server) adminCreateConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "连接器不存在: " + req.ConnectorID})
 		return
 	}
-	switch conn.Auth.Type {
-	case model.AuthAPIKey:
-		if req.APIKey == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apiKey 不能为空"})
-			return
-		}
-	case model.AuthNone:
-		// 允许创建「仅授权 scope」的连接（无凭据），用于连接级授权
-		if req.APIKey != "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "none 认证连接器不接受 apiKey（可创建仅授权 scope 的连接）"})
-			return
-		}
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "暂不支持的认证类型: " + string(conn.Auth.Type)})
+	sec := req.secret()
+	if msg := validateSecretFor(conn.Auth, sec, false); msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
-	p, err := s.conns.Create(req.ConnectorID, req.Name, string(conn.Auth.Type), req.GrantedScopes, connection.Secret{APIKey: req.APIKey})
+	// 去重：同连接器下同凭据身份或同名 → 409，返回已有连接投影（无凭据）。
+	if existing, reason, dup := s.conns.FindDuplicate(req.ConnectorID, req.Name, sec); dup {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "连接已存在", "reason": reason, "existing": existing})
+		return
+	}
+	p, err := s.conns.Create(req.ConnectorID, req.Name, string(conn.Auth.Type), req.GrantedScopes, sec)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// adminUpdateSecret 合并更新连接凭据（非空字段覆盖），如 OAuth 授权完成后写入 refresh_token。
+func (s *Server) adminUpdateSecret(w http.ResponseWriter, r *http.Request, id string) {
+	proj, ok := s.conns.Get(r.Context(), id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "连接不存在"})
+		return
+	}
+	conn, ok := s.cat.Connector(proj.ConnectorID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "连接器不存在: " + proj.ConnectorID})
+		return
+	}
+	var req connectionRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体须为 JSON"})
+		return
+	}
+	cur, err := s.conns.Reveal(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "连接凭据不可用"})
+		return
+	}
+	upd := req.secret()
+	merge := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	merge(&cur.APIKey, upd.APIKey)
+	merge(&cur.AccessKeyID, upd.AccessKeyID)
+	merge(&cur.SecretKey, upd.SecretKey)
+	merge(&cur.ClientID, upd.ClientID)
+	merge(&cur.ClientSecret, upd.ClientSecret)
+	merge(&cur.RefreshToken, upd.RefreshToken)
+	if msg := validateSecretFor(conn.Auth, cur, false); msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	if err := s.conns.UpdateSecret(r.Context(), id, cur); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "凭据更新失败"})
+		return
+	}
+	p, _ := s.conns.Get(r.Context(), id)
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) adminPutPolicy(w http.ResponseWriter, r *http.Request) {

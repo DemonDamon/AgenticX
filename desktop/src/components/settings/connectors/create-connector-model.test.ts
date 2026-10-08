@@ -71,6 +71,22 @@ describe("validateCreateConnectorForm", () => {
   });
 });
 
+describe("validateCreateConnectorForm multi-field", () => {
+  it("requires each credentialFields entry (required_credential)", () => {
+    const fields = [
+      { name: "accessKey", label: "AK" },
+      { name: "secretKey", label: "SK" },
+    ];
+    const err = validateCreateConnectorForm(
+      "custom_credential",
+      { name: "g", url: "https://example.com/mcp", apiKey: "", token: "", credentials: { accessKey: "ak" } },
+      { credentialFields: fields },
+    );
+    expect(err.secretKey).toBe("required_credential");
+    expect(err.accessKey).toBeUndefined();
+  });
+});
+
 describe("buildCreateConnectorServerConfig", () => {
   it("writes bearer from api_key or token", () => {
     const a = buildCreateConnectorServerConfig("api_key", {

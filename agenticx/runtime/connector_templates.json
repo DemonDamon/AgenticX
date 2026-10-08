@@ -1,5 +1,5 @@
 {
-  "_comment": "Connector template catalog mirrored from desktop/src/components/settings/connectors/connector-supply.ts (ids/auth/kind). Keep in sync; parity is asserted by desktop vitest connector-templates-parity.test.ts.",
+  "_comment": "Connector template catalog mirrored from desktop/src/components/settings/connectors/connector-supply.ts (ids/auth/kind/wired/mcp_url/auth_query). Keep in sync; parity is asserted by desktop vitest connector-templates-parity.test.ts. auth=mcp_oauth → official remote MCP with MCP OAuth 2.1 (discovery + dynamic client registration + PKCE): create with the template mcp_url and oauth=true, no secret. auth_query → the API key goes in that URL query parameter. auth_header → the secret goes raw in that request header (e.g. x-api-key) instead of Authorization: Bearer. credential_label / credential_placeholder / credential_help_url → the vendor's own name for the secret, its input hint, and the official \"how to get the credential\" page (mention the link when asking for the credential). credential_fields → multi custom headers (Comate dual-cred); each {name,label,placeholder?} writes headers[name].",
   "templates": [
     {
       "id": "native:tencent-meeting",
@@ -66,12 +66,13 @@
     },
     {
       "id": "native:notion",
-      "kind": "native",
+      "kind": "mcp",
       "name": "Notion",
-      "auth": "oauth2",
+      "auth": "mcp_oauth",
       "category": "docs",
-      "wired": false,
-      "create_via": "unavailable"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.notion.com/mcp"
     },
     {
       "id": "native:slack",
@@ -122,10 +123,15 @@
       "id": "stub:gildata",
       "kind": "mcp",
       "name": "恒生聚源MCP",
-      "auth": "custom_credential",
+      "auth": "api_key",
       "category": "finance",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://api.gildata.com/mcp-servers/aidata-assistant-srv-tool",
+      "credential_label": "Access Token",
+      "credential_placeholder": "请填写恒生聚源下发的Access Token",
+      "credential_help_url": "https://vcn7e7nesi3s.feishu.cn/docx/MeCmd4q0Yo7nmkx9D8IcMYbknob",
+      "auth_query": "token"
     },
     {
       "id": "stub:yingmi",
@@ -133,17 +139,24 @@
       "name": "盈米MCP",
       "auth": "custom_credential",
       "category": "finance",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://stargate.yingmi.com/mcp/v2",
+      "auth_header": "x-api-key",
+      "credential_label": "APIKey",
+      "credential_placeholder": "登录盈米 MCP 开通服务后复制个人 API Key，粘贴到此处",
+      "credential_help_url": "https://ai.yingmi.com/mcp/account",
+      "docs_url": "https://ai.yingmi.com/mcp/account"
     },
     {
       "id": "stub:comein",
       "kind": "mcp",
       "name": "进门投研",
-      "auth": "custom_credential",
+      "auth": "mcp_oauth",
       "category": "finance",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp-server-global.comein.cn/mcp"
     },
     {
       "id": "stub:dichan",
@@ -151,8 +164,13 @@
       "name": "深度智联",
       "auth": "api_key",
       "category": "data",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "credential_label": "API Key",
+      "credential_placeholder": "请输入API Key",
+      "credential_help_url": "https://mcp.dichanai.com/profile/api-keys",
+      "docs_url": "https://mcp.dichanai.com/profile/api-keys",
+      "mcp_url": "https://mcp.dichanai.com/api/v1/mcp"
     },
     {
       "id": "stub:kuaidi100",
@@ -160,8 +178,13 @@
       "name": "快递100",
       "auth": "api_key",
       "category": "office",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://api.kuaidi100.com/mcp/streamable",
+      "auth_query": "key",
+      "credential_label": "快递 100 授权 key",
+      "credential_placeholder": "请输入快递 100 授权 key",
+      "credential_help_url": "https://api.kuaidi100.com/document/how-to-use-mcp-service"
     },
     {
       "id": "stub:lawstar",
@@ -169,8 +192,13 @@
       "name": "法律之星",
       "auth": "api_key",
       "category": "legal",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://api.law-star.com/mcp/point",
+      "credential_label": "Token",
+      "credential_placeholder": "输入 Token 值即可，无需填写 Bearer 前缀",
+      "credential_help_url": "https://open.law-star.com/products/mcp",
+      "docs_url": "https://open.law-star.com/products/mcp"
     },
     {
       "id": "stub:esign",
@@ -185,24 +213,28 @@
       "id": "stub:pkulaw",
       "kind": "mcp",
       "name": "北大法宝-检索法律法规",
-      "auth": "api_key",
+      "auth": "mcp_oauth",
       "category": "legal",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://apim-gateway.pkulaw.com/mcp-law-search-service",
+      "description": "北大法宝MCP服务平台为AI应用提供专业的法律数据服务。通过MCP协议，您可以让AI助手具备法律检索、条文查询等专业能力。"
     },
     {
       "id": "stub:neocrm",
       "kind": "mcp",
       "name": "销售易 CRM",
-      "auth": "custom_credential",
+      "auth": "mcp_oauth",
       "category": "crm",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.xiaoshouyi.com/mcp",
+      "description": "销售易 MCP 对接销售易 CRM，汇聚客户、线索、商机、联系人等销售数据，提供销售 AI Agent 查询与跟进所需的结构化业务信息。"
     },
     {
       "id": "stub:dingtalk",
       "kind": "mcp",
-      "name": "钉钉 CLI",
+      "name": "钉钉CLI",
       "auth": "none",
       "category": "collab",
       "wired": false,
@@ -214,8 +246,13 @@
       "name": "轻流",
       "auth": "custom_credential",
       "category": "collab",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.qingflow.com/mcp",
+      "credential_label": "Token",
+      "credential_placeholder": "输入 Token 值",
+      "credential_help_url": "https://qingflow.com/index/user?tab=baseInfo",
+      "docs_url": "https://qingflow.com/index/user?tab=baseInfo"
     },
     {
       "id": "stub:zsxq",
@@ -223,8 +260,14 @@
       "name": "知识星球",
       "auth": "api_key",
       "category": "docs",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://api.zsxq.com/mcp",
+      "auth_query": "api_key",
+      "credential_label": "api_key",
+      "credential_placeholder": "请输入你的api_key",
+      "credential_help_url": "https://garden.zsxq.com/jasmine/index.html",
+      "docs_url": "https://garden.zsxq.com/jasmine/index.html"
     },
     {
       "id": "stub:amap",
@@ -232,8 +275,14 @@
       "name": "高德地图",
       "auth": "api_key",
       "category": "maps",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.amap.com/mcp",
+      "auth_query": "key",
+      "credential_label": "高德地图密钥",
+      "credential_placeholder": "请输入高德地图密钥",
+      "credential_help_url": "https://lbs.amap.com/api/mcp-server/create-project-and-key",
+      "docs_url": "https://lbs.amap.com/api/mcp-server/create-project-and-key"
     },
     {
       "id": "stub:baidu-maps",
@@ -241,8 +290,14 @@
       "name": "百度地图",
       "auth": "api_key",
       "category": "maps",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.map.baidu.com/mcp",
+      "auth_query": "ak",
+      "credential_label": "百度地图密钥",
+      "credential_placeholder": "请输入百度地图密钥",
+      "credential_help_url": "https://lbsyun.baidu.com/apiconsole/key",
+      "docs_url": "https://lbsyun.baidu.com/apiconsole/key"
     },
     {
       "id": "stub:tencent-maps",
@@ -250,17 +305,25 @@
       "name": "腾讯地图",
       "auth": "api_key",
       "category": "maps",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.map.qq.com/mcp?format=0",
+      "auth_query": "key",
+      "credential_label": "key",
+      "credential_placeholder": "开发者调用WebServiceAPI的身份标识",
+      "credential_help_url": "https://lbs.qq.com/dev/console/quick-register",
+      "docs_url": "https://lbs.qq.com/dev/console/quick-register"
     },
     {
       "id": "stub:tencent-docs",
       "kind": "mcp",
       "name": "腾讯文档",
-      "auth": "custom_credential",
+      "auth": "mcp_oauth",
       "category": "docs",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://docs.qq.com/openapi/mcp",
+      "description": "腾讯官方 MCP，支持创建/读取/编辑智能文档、表格、幻灯片等"
     },
     {
       "id": "stub:wps",
@@ -310,11 +373,12 @@
     {
       "id": "stub:linear",
       "kind": "mcp",
-      "name": "Linear",
-      "auth": "api_key",
+      "name": "官方Linear",
+      "auth": "mcp_oauth",
       "category": "collab",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.linear.app/mcp"
     },
     {
       "id": "stub:asana",
@@ -328,29 +392,292 @@
     {
       "id": "stub:tianyancha",
       "kind": "mcp",
-      "name": "天眼查",
-      "auth": "api_key",
+      "name": "天眼查MCP",
+      "auth": "mcp_oauth",
       "category": "crm",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.tianyancha.com/mcp"
     },
     {
       "id": "stub:qichacha",
       "kind": "mcp",
       "name": "企查查",
-      "auth": "api_key",
+      "auth": "mcp_oauth",
       "category": "crm",
-      "wired": false,
-      "create_via": "mcp_url"
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://agent.qcc.com/mcp/company/stream"
     },
     {
       "id": "stub:cloudflare",
       "kind": "mcp",
       "name": "Cloudflare",
-      "auth": "custom_credential",
+      "auth": "mcp_oauth",
       "category": "infra",
+      "wired": true,
+      "create_via": "mcp_url",
+      "mcp_url": "https://mcp.cloudflare.com/mcp"
+    },
+    {
+      "id": "stub:wps-project",
+      "kind": "mcp",
+      "name": "WPS 项目管理",
+      "auth": "api_key",
+      "category": "office",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "WPS 项目管理 MCP 面向 WPS 项目的方案管理、任务推进和流程协同场景。它将既有项目数据服务封装为标准 MCP 工具，让 WPS Comate 在获得用户授权后，能够围绕项目、任务、流程、业务数据表和组织成员完成查询与操作",
+      "mcp_url": "https://mcp.rishiqing.com/mcp",
+      "credential_label": "Token",
+      "credential_placeholder": "输入 Token 值即可，无需填写 Bearer 前缀"
+    },
+    {
+      "id": "stub:qixin",
+      "kind": "mcp",
+      "name": "启信慧眼",
+      "auth": "api_key",
+      "category": "crm",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "面向大模型与智能体应用的企业数据 MCP Server，提供企业检索、画像、舆情、风险、产业链、招投标、股权关系等标准化工具能力，帮助模型在业务流程中稳定调用企业数据服务",
+      "mcp_url": "https://mcp.qixin.com/mcp",
+      "docs_url": "https://ai.qixin.com/mcp",
+      "credential_help_url": "https://ai.qixin.com/mcp",
+      "credential_label": "Token",
+      "credential_placeholder": "输入 Token 值即可，无需填写 Bearer 前缀"
+    },
+    {
+      "id": "stub:mozlen",
+      "kind": "mcp",
+      "name": "摩知轮",
+      "auth": "api_key",
+      "category": "legal",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "摩知轮 MCP 提供对商标检索、以图查标、商标公告、企业商标图谱、实务判例、商标监控预警等摩知轮知识产权平台资源的访问能力，支持通过自然语言检索近似商标、排查商标注册风险、查询企业商标布局、调取商标司法实务案例以及自动化知识产权尽调工作流。",
+      "mcp_url": "https://www.mozlen.com/mcp",
+      "credential_label": "Token",
+      "credential_placeholder": "输入 Token 值即可，无需填写 Bearer 前缀"
+    },
+    {
+      "id": "stub:tdx",
+      "kind": "mcp",
+      "name": "通达信MCP",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "通达信 MCP 连接专业金融数据平台，支持实时行情、指数概况、K线分析、研报公告、行业分析等。APIkey获取地址：https://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey\nhttps://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey",
+      "mcp_url": "https://mcp.tdx.com.cn:3001/mcp",
+      "auth_header": "tdx-api-key",
+      "docs_url": "https://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey",
+      "credential_help_url": "https://vip.tdx.com.cn/site/app/pc-mall/main.html#/aiKey",
+      "credential_label": "您的API密钥",
+      "credential_placeholder": "请输入您的API密钥"
+    },
+    {
+      "id": "stub:moka",
+      "kind": "mcp",
+      "name": "Moka 招聘管理",
+      "auth": "custom_credential",
+      "category": "crm",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "Moka 招聘系统基本信息查询，覆盖组织架构、用户、职位、招聘需求、候选人、面试、Offer",
+      "mcp_url": "https://mcp.mokahr.com/mcp",
+      "auth_header": "Authorization",
+      "credential_label": "Moka API Token",
+      "credential_placeholder": "输入你的 Moka API Token"
+    },
+    {
+      "id": "stub:yuandian",
+      "kind": "mcp",
+      "name": "华宇元典法律数据",
+      "auth": "mcp_oauth",
+      "category": "legal",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "华宇元典法律数据为智能体提供法律法规、案例文书、企业信息 MCP 工具能力",
+      "mcp_url": "https://open.chineselaw.com/mcp"
+    },
+    {
+      "id": "stub:xiaoe",
+      "kind": "mcp",
+      "name": "小鹅通",
+      "auth": "mcp_oauth",
+      "category": "docs",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "小鹅通 MCP 对接知识店铺与内容交易数据，汇聚课程、商品、订单、学员与营收等经营信息，提供运营与客服 AI Agent 所需的结构化业务数据。",
+      "mcp_url": "https://agent.xiaoe-tech.com/mcp"
+    },
+    {
+      "id": "stub:lexiang",
+      "kind": "mcp",
+      "name": "腾讯乐享",
+      "auth": "mcp_oauth",
+      "category": "docs",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "腾讯乐享 MCP 让 AI 助手能够直接与您的乐享知识库进行交互，支持搜索知识、阅读内容、创建和编辑文档、管理知识结构、上传下载文件，以及导入腾讯会议录制等操作。",
+      "mcp_url": "https://mcp.lexiang-app.com/mcp"
+    },
+    {
+      "id": "stub:jinshuju",
+      "kind": "mcp",
+      "name": "金数据",
+      "auth": "mcp_oauth",
+      "category": "docs",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "用自然语言在金数据创建表单、表格、问卷、考试、报名、收款等各类场景应用：一句话生成表单与表格、批量处理数据、自动统计分析，零门槛快速搭建。",
+      "mcp_url": "https://jinshuju.net/mcp"
+    },
+    {
+      "id": "stub:wkinfo",
+      "kind": "mcp",
+      "name": "威科先行",
+      "auth": "mcp_oauth",
+      "category": "legal",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "威科先行 MCP 汇聚法律法规、司法案例、实务观点与合规参考等法律专业数据，为法务与合规 AI Agent 提供可检索的结构化法律信息。",
+      "mcp_url": "https://mcp.wkinfo.com.cn/mcp"
+    },
+    {
+      "id": "stub:ifind",
+      "kind": "mcp",
+      "name": "同花顺iFinD-A股数据",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "链接 AI 与金融，通过 MCP 标准协议为智能投研应用提供稳定、准确、可被模型直接调用的数据引擎。API密钥获取地址：https://mcp.51ifind.cn/?syncCookieTimes=1#/profile",
+      "auth_header": "Authorization",
+      "docs_url": "https://mcp.51ifind.com/?syncCookieTimes=1#/profile",
+      "credential_help_url": "https://mcp.51ifind.com/?syncCookieTimes=1#/profile",
+      "credential_label": "API密钥",
+      "credential_placeholder": "Bearer <你的API密钥>",
+      "mcp_url": "https://api-mcp.51ifind.com:8643/ds-mcp-servers/hexin-ifind-ds-stock-mcp"
+    },
+    {
+      "id": "stub:zhihuiya",
+      "kind": "mcp",
+      "name": "智慧芽专利&文献融合检索",
+      "auth": "api_key",
+      "category": "legal",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "可以同时在智慧芽全球专利数据库和文献库中进行深度融合搜索的专业工具。它支持自然语言查询，语义搜索和关键词搜索，并提供精准前置过滤能力，助力高效准确检索科研情报和专利信息，该MCP还可以用来获取专利或文献markdown格式的基本信息",
+      "auth_query": "apikey",
+      "docs_url": "https://open.zhihuiya.com/dashboard/api-keys",
+      "credential_help_url": "https://open.zhihuiya.com/dashboard/api-keys",
+      "credential_label": "apikey",
+      "credential_placeholder": "apikey",
+      "mcp_url": "https://connect.zhihuiya.com/api/mcp"
+    },
+    {
+      "id": "stub:wj",
+      "kind": "mcp",
+      "name": "腾讯问卷",
+      "auth": "api_key",
+      "category": "docs",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "腾讯问卷官方 MCP。支持管理问卷、查看回收与统计分析。创建连接器时填写从腾讯问卷获取的个人访问 Token（wjpt_ 开头）。",
+      "docs_url": "https://wj.qq.com/claw",
+      "credential_help_url": "https://wj.qq.com/claw",
+      "credential_label": "访问 Token",
+      "credential_placeholder": "以 wjpt_ 开头，可在 https://wj.qq.com/claw 获取",
+      "mcp_url": "https://wj.qq.com/api/v2/mcp"
+    },
+    {
+      "id": "stub:cnb",
+      "kind": "mcp",
+      "name": "CNB",
+      "auth": "api_key",
+      "category": "code",
       "wired": false,
-      "create_via": "mcp_url"
+      "create_via": "unwired",
+      "description": "CNB 云原生构建（cnb.cool）OpenAPI，常见只读场景",
+      "docs_url": "https://cnb.cool/profile/token",
+      "credential_help_url": "https://cnb.cool/profile/token",
+      "credential_label": "Access Token",
+      "credential_placeholder": "在 CNB 个人设置-访问令牌中生成"
+    },
+    {
+      "id": "stub:gangtise",
+      "kind": "mcp",
+      "name": "Gangtise投研",
+      "auth": "custom_credential",
+      "category": "finance",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "Gangtise MCP汇聚机构级观点，纪要，日程等另类数据，提供投研AI Agent预生成数据及全球行情/财务/估值/宏观行业等结构化数据。",
+      "docs_url": "https://www.gangtise.com/download#/",
+      "credential_help_url": "https://www.gangtise.com/download#/",
+      "mcp_url": "https://openapi.gangtise.com/application/open-mcp/",
+      "credential_fields": [
+        {
+          "name": "accessKey",
+          "label": "AK 密钥",
+          "placeholder": "请输入你的 AK 密钥"
+        },
+        {
+          "name": "secretKey",
+          "label": "SK 密钥",
+          "placeholder": "请输入你的 SK 密钥"
+        }
+      ]
+    },
+    {
+      "id": "stub:ima",
+      "kind": "mcp",
+      "name": "IMA 知识库",
+      "auth": "custom_credential",
+      "category": "docs",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "IMA 知识库开放平台 API，支持笔记管理和知识库操作。提供搜索/创建/编辑笔记、上传文件到知识库、添加网页链接、搜索知识库内容等能力。",
+      "docs_url": "https://ima.qq.com/agent-interface",
+      "credential_help_url": "https://ima.qq.com/agent-interface",
+      "mcp_url": "https://ima.qq.com/mcp",
+      "credential_fields": [
+        {
+          "name": "ima-openapi-apikey",
+          "label": "API Key",
+          "placeholder": "输入你的 IMA API Key（从 ima.qq.com/agent-interface 获取）"
+        },
+        {
+          "name": "ima-openapi-clientid",
+          "label": "Client ID",
+          "placeholder": "输入你的 IMA Client ID（从 ima.qq.com/agent-interface 获取）"
+        }
+      ]
+    },
+    {
+      "id": "stub:edgeone",
+      "kind": "mcp",
+      "name": "EdgeOne Makers",
+      "auth": "none",
+      "category": "infra",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "EdgeOne Makers Deploy MCP 是一项专用服务，能够将 Web 应用快速部署到 EdgeOne Makers 并生成公开访问链接。这使您能够立即预览和分享 AI 生成的网页内容。",
+      "mcp_url": "https://mcp-on-edge.edgeone.site/mcp-server",
+      "docs_url": "https://mcp-on-edge.edgeone.site/mcp-server"
+    },
+    {
+      "id": "stub:fayan",
+      "kind": "mcp",
+      "name": "法研·法律法规检索",
+      "auth": "mcp_oauth",
+      "category": "legal",
+      "wired": true,
+      "create_via": "mcp_url",
+      "description": "法研 MCP 提供法律法规全文检索与条文定位，汇聚现行有效法规、规章与配套文件，为法务与合规 AI Agent 提供可引用的结构化法律依据。",
+      "mcp_url": "https://api.cjbdi.com:8443/354347/mcp_law_service"
     }
   ]
 }

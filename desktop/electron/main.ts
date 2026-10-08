@@ -177,6 +177,7 @@ import {
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
+import { readMcpOauthAuthorized, resetMcpOauthTokens } from "./mcp-oauth-store";
 
 protocol.registerSchemesAsPrivileged([...LOCAL_MEDIA_SCHEME_PRIVILEGES]);
 
@@ -11355,6 +11356,28 @@ function registerIpc(): void {
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
       }
       return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // MCP OAuth（官方远程 MCP + DCR）：只回传「是否已授权」布尔值，令牌不出主进程。
+  ipcMain.handle("mcp-oauth-state", async (_event, payload: { names?: unknown }) => {
+    try {
+      const names = Array.isArray(payload?.names)
+        ? payload.names.map((n) => String(n ?? "").trim()).filter(Boolean).slice(0, 200)
+        : [];
+      return { ok: true, authorized: readMcpOauthAuthorized(names) };
+    } catch (err) {
+      return { ok: false, error: String(err), authorized: {} };
+    }
+  });
+
+  ipcMain.handle("mcp-oauth-reset", async (_event, payload: { name?: unknown }) => {
+    const name = String(payload?.name ?? "").trim();
+    if (!name) return { ok: false, error: "name is required" };
+    try {
+      return { ok: true, reset: resetMcpOauthTokens(name) };
     } catch (err) {
       return { ok: false, error: String(err) };
     }

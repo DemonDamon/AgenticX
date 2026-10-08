@@ -16,16 +16,18 @@ export function connectorSupplyDisplay(
       ),
     };
   }
-  if (entry.connectorId) {
+  // 原生目录条目（含改走官方远程 MCP、已去掉 connectorId 的 native:notion）共用 settings 目录文案。
+  const catalogId = entry.connectorId ?? (entry.id.startsWith("native:") ? entry.id.slice("native:".length) : "");
+  if (catalogId) {
     return {
       name: String(
-        i18n.t(`connectors.catalog.${entry.connectorId}.name`, {
+        i18n.t(`connectors.catalog.${catalogId}.name`, {
           ns: "settings",
           defaultValue: entry.fallbackName,
         }),
       ),
       description: String(
-        i18n.t(`connectors.catalog.${entry.connectorId}.description`, {
+        i18n.t(`connectors.catalog.${catalogId}.description`, {
           ns: "settings",
           defaultValue: entry.fallbackDescription,
         }),
