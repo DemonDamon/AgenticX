@@ -19,16 +19,16 @@ describe("MarketplaceView", () => {
     __resetMarketplaceSessionCacheForTests();
   });
 
-  it("renders header, kind tabs, featured cards and connector grid without blocking spinner", () => {
+  it("renders header, kind tabs, scenario categories and connector grid without blocking spinner", () => {
     const html = renderView();
     expect(html).toContain(i18n.t("title", { ns: "marketplace" }));
     expect(html).toContain(i18n.t("manage", { ns: "marketplace" }));
     for (const tab of ["all", "connectors", "mcp", "skills", "agents", "commands"] as const) {
       expect(html).toContain(i18n.t(`tabs.${tab}`, { ns: "marketplace" }));
     }
-    for (const id of ["office", "connectors", "toolkit"] as const) {
-      expect(html).toContain(i18n.t(`featured.${id}.title`, { ns: "marketplace" }));
-    }
+    // 精选推荐三卡已下线；按场景分类仍保留。
+    expect(html).not.toContain(i18n.t("featured.sectionTitle", { ns: "marketplace" }));
+    expect(html).toContain(i18n.t("featured.categories", { ns: "marketplace" }));
     // 全部 tab 有本地连接器供给,首屏不应被「加载中」挡住。
     expect(html).not.toContain(i18n.t("loading", { ns: "marketplace" }));
   });
@@ -43,7 +43,8 @@ describe("MarketplaceView", () => {
     try {
       const html = renderView();
       expect(html).toContain(i18n.t("title", { ns: "marketplace" }));
-      expect(html).toContain(i18n.t("featured.connectors.title", { ns: "marketplace" }));
+      expect(html).toContain(i18n.t("featured.categories", { ns: "marketplace" }));
+      expect(html).not.toContain(i18n.t("featured.sectionTitle", { ns: "marketplace" }));
       expect(html).not.toContain("插件市场");
     } finally {
       await i18n.changeLanguage("zh");

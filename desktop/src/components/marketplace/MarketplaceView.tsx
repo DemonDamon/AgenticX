@@ -4,7 +4,6 @@ import { ChevronRight, Loader2, RefreshCw, Search, Server, Settings2 } from "luc
 import { useAppStore } from "../../store";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { MainViewShell } from "../ds/MainViewShell";
-import { FeaturedCards } from "./FeaturedCards";
 import { FeaturedCategoryCards } from "./FeaturedCategoryCards";
 import { FilterChips } from "./FilterChips";
 import { SkillGrid } from "./SkillGrid";
@@ -150,11 +149,6 @@ export function MarketplaceView() {
     () => filterUnifiedItems(unifiedItems, tabToKindFilter(activeTab), query, categoryFilter),
     [unifiedItems, activeTab, query, categoryFilter],
   );
-
-  const onFeaturedPick = useCallback((target: { tab: MarketTab; tag: string }) => {
-    setActiveTab(target.tab);
-    if (target.tab === "skills") setSkillTag(target.tag);
-  }, []);
 
   /** 点击精选分类大卡:切到全部 tab 并预选该场景分类。 */
   const onPickCategory = useCallback((category: MarketCategory) => {
@@ -424,8 +418,6 @@ export function MarketplaceView() {
             </button>
           </div>
         ) : null}
-
-        {activeTab !== "connectors" ? <FeaturedCards onPick={onFeaturedPick} /> : null}
 
         {(activeTab === "all" || activeTab === "mcp" || activeTab === "skills") ? (
           <FeaturedCategoryCards items={unifiedItems} onPickCategory={onPickCategory} />
