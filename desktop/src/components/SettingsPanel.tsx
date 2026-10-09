@@ -3919,7 +3919,7 @@ function SkillsTab() {
               {skillhubMsg && (
                 <div
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
-                    settingsMsgLooksFail(skillhubMsg) ? "text-amber-400" : "text-rose-400"
+                    settingsMsgLooksFail(skillhubMsg) ? "text-amber-400" : "text-emerald-400"
                   }`}
                 >
                   {skillhubMsg}
