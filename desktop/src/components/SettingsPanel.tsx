@@ -2943,9 +2943,14 @@ function SkillsTab() {
                   }
                   return;
                 }
-                setSkillhubMsg(
-                  `已拦截旧版安装提示词；确定性安装失败：${String(res?.error || "failed")}。请重试 Settings → SkillHub 安装。`,
-                );
+                {
+                  const cause = [res?.error_code, res?.error]
+                    .filter((x) => Boolean(x && String(x).trim()))
+                    .join(": ");
+                  setSkillhubMsg(
+                    `已拦截旧版安装提示词；确定性安装失败：${cause || "failed"}。请重试 Settings → SkillHub 安装。`,
+                  );
+                }
                 return;
               } catch (e) {
                 setSkillhubMsg(
@@ -3039,7 +3044,9 @@ function SkillsTab() {
           }
           return;
         }
-        const err = String(res?.error || "skillhub install failed");
+        const err = [res?.error_code, res?.error]
+          .filter((x) => Boolean(x && String(x).trim()))
+          .join(": ") || "skillhub install failed";
         if (res?.fallback_to_agent === false) {
           setSkillhubMsg(`确定性安装失败：${err}（已禁用 agent 回退）`);
           return;

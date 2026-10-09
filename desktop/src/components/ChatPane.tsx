@@ -10068,9 +10068,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 );
                 return;
               }
-              setStallHintToast(
-                `已拦截旧版 SkillHub 安装指令；确定性安装失败：${String(res?.error || "failed").slice(0, 120)}`,
-              );
+              {
+                const cause = [res?.error_code, res?.error]
+                  .filter((x) => Boolean(x && String(x).trim()))
+                  .join(": ");
+                setStallHintToast(
+                  `已拦截旧版 SkillHub 安装指令；确定性安装失败：${(cause || "failed").slice(0, 120)}`,
+                );
+              }
               return;
             } catch (e) {
               setStallHintToast(
