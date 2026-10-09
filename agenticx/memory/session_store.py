@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -15,6 +16,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_log = logging.getLogger(__name__)
+
 
 def default_session_db_path() -> Path:
     """会话库位置，按**调用时**的 HOME 解析。
@@ -602,14 +606,33 @@ class SessionStore:
             ts = self._message_timestamp(msg)
             rows.append((sid, role, text, ts, now))
         with self._connect() as conn:
-            conn.execute("DELETE FROM session_messages WHERE session_id = ?", (sid,))
-            if rows:
+            # Persist runs every few seconds while a turn is live and chat_history
+            # only grows at the tail. Rewriting the whole session re-tokenized every
+            # message through the FTS triggers and left tombstones (fts_data grew to
+            # ~46x the message text). Only rewrite rows after the unchanged prefix.
+            existing = conn.execute(
+                "SELECT id, role, content, timestamp FROM session_messages "
+                "WHERE session_id = ? ORDER BY id",
+                (sid,),
+            ).fetchall()
+            keep = 0
+            limit = min(len(existing), len(rows))
+            while keep < limit:
+                old = existing[keep]
+                new = rows[keep]
+                if (old["role"], old["content"], old["timestamp"]) != (new[1], new[2], new[3]):
+                    break
+                keep += 1
+            stale_ids = [(old["id"],) for old in existing[keep:]]
+            if stale_ids:
+                conn.executemany("DELETE FROM session_messages WHERE id = ?", stale_ids)
+            if rows[keep:]:
                 conn.executemany(
                     """
                     INSERT INTO session_messages (session_id, role, content, timestamp, indexed_at)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    rows,
+                    rows[keep:],
                 )
             conn.commit()
         return len(rows)
@@ -801,7 +824,36 @@ class SessionStore:
                 indexed += 1
             except Exception:
                 errors += 1
-        return {"indexed": indexed, "skipped": skipped, "errors": errors}
+        result: Dict[str, Any] = {"indexed": indexed, "skipped": skipped, "errors": errors}
+        if not overwrite and self._repair_fts_index_if_inconsistent_sync():
+            result["fts_rebuilt"] = True
+        return result
+
+    def _repair_fts_index_if_inconsistent_sync(self) -> bool:
+        """Rebuild the FTS index from session_messages when it no longer matches.
+
+        Orphaned index entries never get purged by later deletes, so the index
+        silently grows (a ~20 MB message table carried a 922 MB index).
+        """
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO session_messages_fts(session_messages_fts, rank) "
+                    "VALUES('integrity-check', 1)"
+                )
+            return False
+        except sqlite3.DatabaseError:
+            pass
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO session_messages_fts(session_messages_fts) VALUES('rebuild')"
+                )
+            _log.warning("[session_fts] index was inconsistent with session_messages; rebuilt")
+            return True
+        except sqlite3.DatabaseError as exc:
+            _log.warning("[session_fts] index rebuild failed: %s", exc)
+            return False
 
     def _mark_backfilled_sync(self, session_id: str, when: str) -> None:
         sid = str(session_id or "").strip()
