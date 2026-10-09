@@ -234,6 +234,48 @@ def assign_split(records: list[DecisionRecord], *, seed: str = "dec-v1",
         rec.split = bucket[rec.rollout_id]
 
 
+def merge_decision_records(existing: list[DecisionRecord],
+                           new: list[DecisionRecord],
+                           ) -> tuple[list[DecisionRecord], int]:
+    """数据资产扩容合并（SP29a）：按 (rollout_id, turn) 键合并。
+
+    既有记录整条保留（标签/outcome/split 不丢、不覆盖），新记录仅当
+    键不存在时追加——重跑同源数据 = 新增 0 条（幂等证明基础）。
+    返回 (合并列表, 新增条数)；顺序稳定（既有在前、新记录按传入序）。
+    """
+    merged: dict[tuple[str, int], DecisionRecord] = {}
+    for r in existing:
+        merged.setdefault((r.rollout_id, r.turn), r)
+    n_new = 0
+    for r in new:
+        if (r.rollout_id, r.turn) not in merged:
+            merged[(r.rollout_id, r.turn)] = r
+            n_new += 1
+    return list(merged.values()), n_new
+
+
+def backfill_outcomes_missing(
+        records: list[DecisionRecord],
+        outcomes: "dict[str, dict]",
+) -> int:
+    """execution 真值批量回填·幂等版（SP29a）。
+
+    outcomes: rollout_id -> {ok, task_status, note}；只补该 rollout 下
+    outcome 为 None 的记录（既有真值不覆盖），返回回填条数。
+    与 backfill_teacher 的"只追加不覆盖"纪律同源。
+    """
+    n = 0
+    for rec in records:
+        o = outcomes.get(rec.rollout_id)
+        if o is None or rec.outcome is not None:
+            continue
+        rec.outcome = DecisionOutcome(
+            ok=o.get("ok"), task_status=o.get("task_status", ""),
+            note=o.get("note", ""), backfilled_at=_now())
+        n += 1
+    return n
+
+
 def assert_trainable_decision(rec: DecisionRecord,
                               split: dict | None = None) -> None:
     """held-out 红线扩展（SP25）：考试任务的决策点严禁进决策头训练。"""

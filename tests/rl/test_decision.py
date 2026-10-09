@@ -15,8 +15,10 @@ from agenticx.rl.decision import (
     DecisionQuestion,
     assign_split,
     assert_trainable_decisions,
+    backfill_outcomes_missing,
     backfill_teacher,
     load_trainable_decisions,
+    merge_decision_records,
 )
 from agenticx.rl.rollout import TokenRollout, TokenStamp
 from agenticx.trainer.heldout import HeldoutViolation
@@ -273,3 +275,77 @@ class TestJsonlRoundtrip:
         """v1 决策清单：tool_selection/judge_prescreen 在列。"""
         assert "tool_selection" in DECISION_TYPES
         assert "judge_prescreen" in DECISION_TYPES
+
+
+class TestDatasetBuild:
+    """SP29a 数据资产构建：幂等合并 + execution 真值回填 + split 冻结。"""
+
+    def _labeled_log(self, rollout_id="tb/x#0", n=2) -> DecisionLog:
+        log = DecisionLog()
+        for turn in range(n):
+            _add_record(log, rollout_id=rollout_id, turn=turn)
+        rec = log.records[0]
+        rec.add_label(DecisionLabel(qid="q_tool", source="teacher",
+                                    probs=(0.2, 0.5, 0.3),
+                                    teacher_model="mock-v1"))
+        return log
+
+    def test_merge_keeps_existing_and_appends_new(self):
+        old = self._labeled_log("tb/x#0", n=2).records
+        fresh = DecisionLog()
+        _add_record(fresh, rollout_id="tb/y#0", turn=0)
+        _add_record(fresh, rollout_id="tb/x#0", turn=0)   # 键冲突 → 丢弃
+        merged, n_new = merge_decision_records(old, fresh.records)
+        assert n_new == 1
+        assert len(merged) == 3
+        # 既有记录整条保留：teacher 标签仍在（新记录不覆盖）
+        x0 = [r for r in merged if r.rollout_id == "tb/x#0" and r.turn == 0][0]
+        assert x0.label_for("q_tool").teacher_model == "mock-v1"
+
+    def test_merge_rerun_same_source_adds_zero(self):
+        """幂等证明：重跑同源数据 → 新增 0 条。"""
+        old = self._labeled_log("tb/x#0", n=2).records
+        rerun = DecisionLog()
+        for turn in range(2):
+            _add_record(rerun, rollout_id="tb/x#0", turn=turn)
+        merged, n_new = merge_decision_records(old, rerun.records)
+        assert n_new == 0 and len(merged) == 2
+
+    def test_backfill_outcomes_missing_only_fills_none(self):
+        log = self._labeled_log("tb/x#0", n=2)
+        log.records[0].outcome = None
+        log.records[1].outcome = None
+        outcomes = {"tb/x#0": {"ok": True, "task_status": "pass",
+                               "note": "attempt-0 terminal"}}
+        n = backfill_outcomes_missing(log.records, outcomes)
+        assert n == 2
+        assert log.records[0].outcome.ok is True
+        assert log.records[0].outcome.task_status == "pass"
+        # 幂等：重跑补 0
+        assert backfill_outcomes_missing(log.records, outcomes) == 0
+
+    def test_backfill_outcomes_missing_no_clobber(self):
+        log = self._labeled_log("tb/x#0", n=1)
+        log.backfill_outcome("tb/x#0", ok=False, task_status="fail",
+                             note="原始真值")
+        outcomes = {"tb/x#0": {"ok": True, "task_status": "pass"}}
+        assert backfill_outcomes_missing(log.records, outcomes) == 0
+        assert log.records[0].outcome.ok is False      # 既有真值不覆盖
+
+    def test_split_freeze_deterministic_across_merge(self):
+        """split 冻结：assign_split 确定性，merge 扩容后重算不漂移。"""
+        old = self._labeled_log("tb/x#0", n=2).records
+        assign_split(old)
+        frozen = {r.decision_id: r.split for r in old}
+        fresh = DecisionLog()
+        _add_record(fresh, rollout_id="tb/y#0", turn=0)
+        merged, _ = merge_decision_records(old, fresh.records)
+        assign_split(merged)
+        # 既有记录 split 不变；rollout 粒度隔离（同 rollout 同 split）
+        for r in merged:
+            if r.decision_id in frozen:
+                assert r.split == frozen[r.decision_id]
+        by_rollout = {}
+        for r in merged:
+            by_rollout.setdefault(r.rollout_id, set()).add(r.split)
+        assert all(len(s) == 1 for s in by_rollout.values())

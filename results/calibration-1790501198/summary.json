@@ -1,0 +1,80 @@
+{
+ "model": "deepseek-v4.1-flash",
+ "n_tasks": 10,
+ "rounds": 1,
+ "pass_rate": 0.4,
+ "passed": 4,
+ "total": 10,
+ "rows": [
+  {
+   "task": "code-format-code-task-000189",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 2086.6,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-000189__dLuMmmf"
+  },
+  {
+   "task": "code-format-code-task-000484",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 1999.3,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-000484__agEdX6B"
+  },
+  {
+   "task": "code-format-code-task-000718",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 2111.0,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-000718__Y4Jo43d"
+  },
+  {
+   "task": "code-format-code-task-000720",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 1396.3,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-000720__6Y8N3Re"
+  },
+  {
+   "task": "code-format-code-task-000723",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 500.8,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-000723__9azzP3S"
+  },
+  {
+   "task": "code-format-code-task-001240",
+   "round": 0,
+   "reward": 1.0,
+   "duration_sec": 2095.0,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-001240__iX36t7Q"
+  },
+  {
+   "task": "code-format-code-task-001499",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 923.3,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-001499__5yH2SBJ"
+  },
+  {
+   "task": "code-format-code-task-001661",
+   "round": 0,
+   "reward": 1.0,
+   "duration_sec": 438.7,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-001661__r2KtcHf"
+  },
+  {
+   "task": "code-format-code-task-001933",
+   "round": 0,
+   "reward": 1.0,
+   "duration_sec": 1195.5,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-001933__3D4bGzt"
+  },
+  {
+   "task": "code-format-code-task-002366",
+   "round": 0,
+   "reward": 1.0,
+   "duration_sec": 683.7,
+   "trial_dir": "results/calibration-1790501198/trials/code-format-code-task-002366__EEzjcHc"
+  }
+ ]
+}

@@ -1,5 +1,5 @@
 # agenticx/learning/trajectory/decision_mining.py
-"""决策点挖掘（SP25）：从 trial 轨迹提取 tool_selection 决策点。
+"""决策点挖掘（SP25 + SP29d）：轨迹 → 决策点 sidecar。
 
 插桩层级说明：harbor trial 的 agent 运行在容器内（镜像自有代码），本层
 选择在 driver 侧 post-trial 挖掘——轨迹 messages 完整保存了策略所见
@@ -10,6 +10,11 @@
 outcome 由调用方按 trial 终局回填（DecisionLog.backfill_outcome）。
 候选集 = 本轨迹观测到的全部工具（trace-observed）∪ extra_options，
 干扰项来源经 distractor_source 溯源。
+
+error_classification（SP29d）：每个 error tool result 一个决策点，
+选项 (retry | backoff | abort)；规则真值与 SP22 classify_error 同源
+（_ALGO_ERROR_RE → abort，_INFRA_ERROR_RE → retry，其余 error →
+backoff）——attempt 级三分类与步级处置标签用同一组正则，互证。
 """
 from __future__ import annotations
 
@@ -19,6 +24,9 @@ from agenticx.rl.decision import DecisionLog, DecisionLabel, DecisionQuestion
 
 # 单条消息内容纳入 state 的截断上限（防超长 tool 输出淹没尾部语义）
 _MSG_SNIPPET_CHARS = 200
+
+# SP29d error 处置选项与真值映射（与 forest.classify_error 正则同源）
+ERROR_OPTIONS: tuple[str, ...] = ("retry", "backoff", "abort")
 
 
 def _tc_name(tc: dict[str, Any]) -> str | None:
@@ -93,5 +101,57 @@ def mine_tool_decisions(log: DecisionLog, messages: list[dict[str, Any]], *,
             qid = "q_tool" if len(calls) == 1 else f"q_tool_{j}"
             rec.add_label(DecisionLabel(qid=qid, source="execution",
                                         hard=_tc_name(tc)))
+        n += 1
+    return n
+
+
+def error_action(content: str) -> str:
+    """error tool result → 处置动作规则真值（SP29d，与 SP22 正则同源）。
+
+    _ALGO_ERROR_RE 命中 → abort（方向失败，重试无益）；
+    _INFRA_ERROR_RE 命中 → retry（环境瞬时，立刻重试）；
+    _is_error_result 为真但两正则均不中 → backoff（未知形态，保守退避）。
+    """
+    from .forest import _ALGO_ERROR_RE, _INFRA_ERROR_RE, _is_error_result
+    c = str(content)
+    if not _is_error_result(c):
+        return ""
+    if _ALGO_ERROR_RE.search(c):
+        return "abort"
+    if _INFRA_ERROR_RE.search(c):
+        return "retry"
+    return "backoff"
+
+
+def mine_error_decisions(log: DecisionLog, messages: list[dict[str, Any]], *,
+                         rollout_id: str, task_id: str,
+                         state_chars: int = 1200) -> int:
+    """从轨迹挖 error_classification 决策点（SP29d），返回条数。
+
+    每条 error tool result 一个决策点：q_err choice(retry|backoff|abort)，
+    规则真值即 execution 硬标签（error_action）；outcome 由调用方按
+    trial 终局回填。state 与 tool_selection 同 msg-tail 压缩（纯函数）。
+    """
+    if not messages:
+        return 0
+    q = DecisionQuestion(qid="q_err", type="choice",
+                         question="该工具错误应如何处置",
+                         options=ERROR_OPTIONS,
+                         distractor_source="rule-v1")
+    n = 0
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict) or m.get("role") != "tool":
+            continue
+        action = error_action(m.get("content") or "")
+        if not action:
+            continue
+        rec = log.add(
+            rollout_id=rollout_id, turn=i, task_id=task_id,
+            decision_type="error_classification",
+            state=compress_state(messages, i, state_chars=state_chars),
+            state_compressor=state_compressor_version(state_chars),
+            questions=[q])
+        rec.add_label(DecisionLabel(qid="q_err", source="execution",
+                                    hard=action))
         n += 1
     return n
