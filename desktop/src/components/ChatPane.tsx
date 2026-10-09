@@ -10064,7 +10064,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   /* ignore refresh errors */
                 }
                 setStallHintToast(
-                  `已拦截旧版 SkillHub 安装指令，并确定性安装 ${slug}`,
+                  `已拦截 SkillHub 安装意图，并确定性安装 ${slug}`,
                 );
                 return;
               }
@@ -10073,20 +10073,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   .filter((x) => Boolean(x && String(x).trim()))
                   .join(": ");
                 setStallHintToast(
-                  `已拦截旧版 SkillHub 安装指令；确定性安装失败：${(cause || "failed").slice(0, 120)}`,
+                  `已拦截 SkillHub 安装意图；确定性安装失败：${(cause || "failed").slice(0, 120)}`,
                 );
               }
               return;
             } catch (e) {
               setStallHintToast(
-                `已拦截旧版 SkillHub 安装指令；安装异常：${String(e).slice(0, 120)}`,
+                `已拦截 SkillHub 安装意图；安装异常：${String(e).slice(0, 120)}`,
               );
               return;
             }
           }
           setStallHintToast(
             inbound.reason.slice(0, 160) ||
-              "已拦截旧版 SkillHub 安装指令；请改用 Settings → SkillHub 市场安装",
+              "已拦截 SkillHub 安装意图；请改用 Settings → SkillHub 市场安装",
           );
         })();
         return;

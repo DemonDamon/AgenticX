@@ -59,6 +59,18 @@ _SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
     ),
 )
 
+_HTTP_405_SKILLHUB_TIP = (
+    "禁止 curl/wget 公共 skillhub.cn 假 registry/install（会返回 Method Not Allowed / code:405）。"
+    f"{_DESKTOP_SKILLHUB_TIP}"
+)
+
+_URL_HOST_PATH_RE = re.compile(
+    r"https?://([^/\s\"'<>]+)(/[^\s\"'<>]*)?",
+    re.I,
+)
+_CODE_405_RE = re.compile(r"[\"']?code[\"']?\s*[:=]\s*405\b", re.I)
+_HTTP_405_RE = re.compile(r"\bHTTP(?:/\d(?:\.\d)?)?\s*405\b|\bstatus(?:\s*code)?\s*[:=]?\s*405\b", re.I)
+
 # Same-class ids that must group across differing malformed tool-name strings.
 _COLLAPSE_TOOL_NAME_CLASS_IDS = frozenset(
     {"allowlist_rejection", "malformed_tool_name"}
@@ -381,6 +393,32 @@ class LoopDetector:
             )
             if tmp_hit:
                 return _SAME_CLASS_SANDBOX_HINTS[2]
+        # Consecutive Method Not Allowed / body code:405 (same host+path or same-class).
+        is_405 = (
+            "method not allowed" in lower
+            or bool(_CODE_405_RE.search(text))
+            or bool(_HTTP_405_RE.search(text))
+        )
+        if is_405:
+            host_path = ""
+            m = _URL_HOST_PATH_RE.search(text)
+            if m:
+                host = (m.group(1) or "").strip().lower()
+                raw_path = (m.group(2) or "/").split("?", 1)[0].rstrip("/") or "/"
+                host_path = f"{host}{raw_path}"
+            class_id = f"http_405:{host_path}" if host_path else "http_405"
+            skillhubish = (not host_path) or ("skillhub" in host_path) or (
+                "registry" in host_path and "install" in host_path
+            )
+            tip = (
+                _HTTP_405_SKILLHUB_TIP
+                if skillhubish
+                else (
+                    f"同一 URL 连续 Method Not Allowed (405)。请停止重复 bash_exec；"
+                    f"SkillHub 安装请用确定性路径。{_DESKTOP_SKILLHUB_TIP}"
+                )
+            )
+            return class_id, tip
         return None
 
     def _record_same_class_sandbox_error(
@@ -398,9 +436,10 @@ class LoopDetector:
         class_id, hint = matched
         # Collapse varying malformed names (bash_exec(<arg_key>…) vs next blob)
         # so ≤3 allowlist rejects still trip the same-class halt.
-        if class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS:
+        if class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS or str(class_id).startswith("http_405"):
             base_match = re.match(r"^([A-Za-z_][\w.-]*)", str(tool_name or ""))
             effective_tool = base_match.group(1) if base_match else "malformed_tool"
+            # Same host+path 405 groups across differing curl args / methods.
             key = ("*", class_id)
             display_tool = effective_tool
         else:

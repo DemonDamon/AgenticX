@@ -2927,7 +2927,7 @@ def create_studio_app() -> FastAPI:
                             install_ok = True
                             path = result.get("installed_path") or f"registry/{_slug}"
                             msg = (
-                                f"已拦截旧版 SkillHub Meta 安装提示词，并改为确定性安装「{_slug}」成功 → {path}。"
+                                f"已拦截 SkillHub 安装意图，并改为确定性安装「{_slug}」成功 → {path}。"
                                 "未启动 Meta 死路安装。"
                             )
                         else:
@@ -2937,13 +2937,13 @@ def create_studio_app() -> FastAPI:
                                 else "skillhub install failed"
                             )
                             msg = (
-                                f"已拦截旧版 SkillHub Meta 安装提示词。确定性安装「{_slug}」失败：{err}。"
+                                f"已拦截 SkillHub 安装意图。确定性安装「{_slug}」失败：{err}。"
                                 "请改用 Settings → SkillHub 市场（installFromSkillHub / "
                                 "POST /api/registry/skillhub/install），不要粘贴旧指令到 Meta。"
                             )
                     except Exception as exc:
                         msg = (
-                            f"已拦截旧版 SkillHub Meta 安装提示词。确定性安装「{_slug}」异常：{exc}。"
+                            f"已拦截 SkillHub 安装意图。确定性安装「{_slug}」异常：{exc}。"
                             "请改用 Settings → SkillHub 市场确定性安装。"
                         )
                 else:

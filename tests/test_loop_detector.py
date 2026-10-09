@@ -331,3 +331,51 @@ def test_is_guard_rejection_recognizes_allowlist_and_arg_key() -> None:
         "ERROR: name has <arg_key>fragment</arg_value>"
     )
     assert not LoopDetector.is_guard_rejection("ok: listed files")
+
+
+def test_http_405_same_host_path_halts() -> None:
+    """Consecutive Method Not Allowed / body code:405 on same host+path halt ≥2."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    err1 = (
+        "HTTP 200 body={\"code\":405,\"message\":\"Method Not Allowed\"} "
+        "url=https://skillhub.cn/api/registry/skillhub/install"
+    )
+    err2 = (
+        "curl -X PUT https://skillhub.cn/api/registry/skillhub/install "
+        "-> Method Not Allowed"
+    )
+    err3 = (
+        "GET https://skillhub.cn/api/registry/skillhub/install "
+        "status=405 Method Not Allowed"
+    )
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X GET ..."}', has_progress=False, result_text=err1
+    )
+    assert detector.check() is None
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X PUT ..."}', has_progress=False, result_text=err2
+    )
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_class_sandbox_error"
+    assert warn.level == "warning"
+    assert "http_405" in warn.message
+    assert warn.nudge and ("Desktop" in warn.nudge or "installFromSkillHub" in warn.nudge)
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X POST ..."}', has_progress=False, result_text=err3
+    )
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+    assert "skillhub.cn" in crit.message or "http_405" in crit.message
+
+
+def test_http_405_body_code_without_url_still_halts() -> None:
+    detector = LoopDetector()
+    err = '{"code":405,"message":"Method Not Allowed"}'
+    detector.record_call("bash_exec", '{"cmd":"a"}', has_progress=False, result_text=err)
+    detector.record_call("bash_exec", '{"cmd":"b"}', has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert result.nudge and "Desktop" in result.nudge

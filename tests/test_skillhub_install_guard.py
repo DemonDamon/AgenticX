@@ -52,8 +52,38 @@ def test_classify_hit_forces_deterministic_path() -> None:
     hit = classify_skillhub_inbound_install_prompt(OLD_COPY)
     assert hit["hit"] is True
     assert hit["slug"] == "archify"
+    assert hit.get("kind") == "forbidden_meta"
     assert "installFromSkillHub" in hit["reason"] or "skillhub/install" in hit["reason"]
 
 
 def test_classify_miss_ordinary_chat() -> None:
     assert classify_skillhub_inbound_install_prompt("写个 hello")["hit"] is False
+    assert classify_skillhub_inbound_install_prompt("安装依赖")["hit"] is False
+
+
+def test_at_ns_slug_forces_adapter_path_not_curl() -> None:
+    """@ns/slug chat shorthand must hit install_intent (Desktop IPC / adapter)."""
+    hit = classify_skillhub_inbound_install_prompt("@indiv-ebandao/tiangong-skill")
+    assert hit["hit"] is True
+    assert hit["kind"] == "install_intent"
+    assert hit["slug"] == "@indiv-ebandao/tiangong-skill"
+    assert "curl" in hit["reason"].lower() or "skillhub_adapter" in hit["reason"] or "installFromSkillHub" in hit["reason"]
+    assert "bash" in hit["reason"].lower() or "假 registry" in hit["reason"] or "确定性" in hit["reason"]
+
+
+def test_install_at_ref_intent() -> None:
+    hit = classify_skillhub_inbound_install_prompt("安装 @indiv-ebandao/tiangong-skill")
+    assert hit["hit"] is True
+    assert hit["slug"] == "@indiv-ebandao/tiangong-skill"
+
+
+def test_install_xxx_skill_intent() -> None:
+    hit = classify_skillhub_inbound_install_prompt("请安装 tiangong-skill skill")
+    assert hit["hit"] is True
+    assert "tiangong-skill" in str(hit["slug"])
+
+
+def test_skillhub_cli_install_intent() -> None:
+    hit = classify_skillhub_inbound_install_prompt("skillhub install @indiv-seafish/archify")
+    assert hit["hit"] is True
+    assert "archify" in str(hit["slug"])

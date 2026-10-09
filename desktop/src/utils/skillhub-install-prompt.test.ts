@@ -117,3 +117,26 @@ describe("buildSkillHubDetailUrl", () => {
   });
 });
 
+describe("install intent intercept (@ns/slug)", () => {
+  it("at-ns/slug forces install_intent for Desktop IPC", () => {
+    const hit = classifySkillHubInboundInstallPrompt("@indiv-ebandao/tiangong-skill");
+    expect(hit.hit).toBe(true);
+    if (hit.hit) {
+      expect(hit.kind).toBe("install_intent");
+      expect(hit.slug).toBe("@indiv-ebandao/tiangong-skill");
+      expect(hit.reason).toMatch(/确定性|installFromSkillHub|adapter/i);
+    }
+  });
+
+  it("安装 @ns/slug hits install intent", () => {
+    const hit = classifySkillHubInboundInstallPrompt("安装 @indiv-ebandao/tiangong-skill");
+    expect(hit.hit).toBe(true);
+    if (hit.hit) {
+      expect(hit.slug).toBe("@indiv-ebandao/tiangong-skill");
+    }
+  });
+
+  it("does not flag ordinary 安装依赖 chat", () => {
+    expect(classifySkillHubInboundInstallPrompt("安装依赖").hit).toBe(false);
+  });
+});

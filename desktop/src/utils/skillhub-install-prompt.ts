@@ -54,27 +54,62 @@ export function isForbiddenSkillHubAgentInstallPrompt(text: string): boolean {
   }
 }
 
+/** Entire-message @ns/slug (or ns/slug) — chat install shorthand. */
+const AT_REF_ONLY =
+  /^\s*@?([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)(?:@[\w.-]+)?\s*$/;
+
+const INSTALL_VERB =
+  /(?:请)?安装|\binstall\b|skillhub\s+install|installFromSkillHub|skills_store_cli\.py|SkillHub\s*第三方技能|第三方技能/i;
+
 /**
  * Best-effort slug extraction from old/new SkillHub install copy
- * (e.g. 「archify」 or skills_store_cli … install archify).
+ * (e.g. 「archify」, @ns/slug, or skills_store_cli … install archify).
  */
 export function extractSkillHubInstallSlugFromPrompt(text: string): string | null {
   const body = String(text || "");
+  const atOnly = body.match(AT_REF_ONLY);
+  if (atOnly) {
+    return `@${atOnly[1]}/${atOnly[2]}`;
+  }
   const patterns: RegExp[] = [
     /SkillHub\s*第三方技能[「「"']([^」」"']+)[」」"']/,
     /请安装\s*SkillHub[^「「"'\n]{0,40}[「「"']([^」」"']+)[」」"']/,
     /skills_store_cli\.py[^\n]*\binstall\s+(@?[\w./-]+)/i,
     /installFromSkillHub[^\n]{0,40}\b([A-Za-z0-9@_/.-]+)/i,
     /skillhub\/install[^\n]{0,80}["']slug["']\s*:\s*["']([^"']+)["']/i,
+    /\bskillhub\s+install\s+(@?[\w./-]+)/i,
+    /(?:请)?安装\s*(@[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/,
+    /\binstall\s+(@[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/i,
+    /@([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/,
+    /(?:请)?安装\s*(?:SkillHub\s*)?(?:第三方技能\s*)?[「「"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」"']?\s+(?:skill|技能)\b/i,
+    /(?:请)?安装\s*(?:技能|skill)\s*[「「"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」"']?/i,
+    /\binstall\s+(?:the\s+)?skill\s+(@?[\w./-]+)/i,
   ];
   for (const re of patterns) {
     const m = body.match(re);
     const slug = (m?.[1] || "").trim();
-    if (slug && slug.toLowerCase() !== "skillhub") {
+    if (slug && !["skillhub", "skill", "the", "a", "an", "registry"].includes(slug.toLowerCase())) {
+      if (
+        slug.includes("/") &&
+        !slug.startsWith("@") &&
+        !slug.startsWith("registry/") &&
+        !slug.startsWith("http")
+      ) {
+        return `@${slug}`;
+      }
       return slug;
     }
   }
   return null;
+}
+
+function isClearSkillHubInstallIntent(text: string): boolean {
+  const body = String(text || "").trim();
+  if (!body) return false;
+  if (AT_REF_ONLY.test(body)) return true;
+  const slug = extractSkillHubInstallSlugFromPrompt(body);
+  if (!slug) return false;
+  return INSTALL_VERB.test(body);
 }
 
 export type SkillHubInboundIntercept =
@@ -83,23 +118,37 @@ export type SkillHubInboundIntercept =
       hit: true;
       slug: string | null;
       reason: string;
+      kind: "forbidden_meta" | "install_intent";
     };
 
 /**
  * Classify inbound user/agent-start text. On hit, caller must NOT open/continue
  * Meta with that prompt; force Desktop IPC / skillhub/install instead.
+ *
+ * Covers: old Meta dead-path copy, bare @ns/slug, and clear 「安装 xxx skill」 intent.
  */
 export function classifySkillHubInboundInstallPrompt(text: string): SkillHubInboundIntercept {
   const body = String(text || "");
   if (!body.trim()) return { hit: false };
-  if (!isForbiddenSkillHubAgentInstallPrompt(body)) return { hit: false };
-  const slug = extractSkillHubInstallSlugFromPrompt(body);
-  return {
-    hit: true,
-    slug,
-    reason:
-      "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install 或先装商店文案）。请改用 Desktop 确定性安装。",
-  };
+  if (isForbiddenSkillHubAgentInstallPrompt(body)) {
+    return {
+      hit: true,
+      slug: extractSkillHubInstallSlugFromPrompt(body),
+      kind: "forbidden_meta",
+      reason:
+        "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install 或先装商店文案）。请改用 Desktop 确定性安装。",
+    };
+  }
+  if (isClearSkillHubInstallIntent(body)) {
+    return {
+      hit: true,
+      slug: extractSkillHubInstallSlugFromPrompt(body),
+      kind: "install_intent",
+      reason:
+        "拦截 SkillHub 安装意图（@ns/slug 或「安装 … skill」）。请改用 Desktop 确定性安装 (installFromSkillHub / skillhub_adapter)，禁止 bash-curl skillhub.cn 假 registry/install。",
+    };
+  }
+  return { hit: false };
 }
 
 /**

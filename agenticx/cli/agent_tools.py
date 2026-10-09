@@ -9515,6 +9515,24 @@ def _skill_manage_bare_name(name: str) -> str:
     return n.split("/")[-1]
 
 
+
+def _skill_manage_registry_qualified_name(name: str, source: str) -> str:
+    """Force SkillHub/registry creates under ``registry/<bare>``.
+
+    Third-party SkillHub skills must land at ``~/.agenticx/skills/registry/<slug>/``
+    so Settings third-party bucket picks them up. Agents often pass bare ``name``
+    with ``source=skillhub``; silently rewriting avoids top-level false installs.
+    """
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    src = str(source or "").strip().lower().replace("-", "_")
+    if not n or src not in {"skillhub", "registry"}:
+        return n
+    if n.startswith("registry/"):
+        return n
+    bare = n.split("/")[-1]
+    return f"registry/{bare}" if bare else n
+
+
 def _skill_manage_delete_candidates(root: Path, name: str) -> List[Path]:
     """Resolve delete targets for short or ``registry/<name>`` skill names.
 
@@ -10517,6 +10535,15 @@ async def _tool_skill_manage(
         if source_err:
             return source_err
         assert create_source is not None
+        # SkillHub / registry market skills must land under skills/registry/<slug>/.
+        qualified = _skill_manage_registry_qualified_name(name, create_source)
+        if qualified != name:
+            name = qualified
+            skill_dir = (root / name).resolve(strict=False)
+            try:
+                skill_dir.relative_to(root)
+            except ValueError:
+                return "ERROR: skill path outside skills root"
         if skill_dir.exists():
             return (
                 "ERROR: skill already exists. "
@@ -10976,6 +11003,17 @@ async def _tool_skill_manage(
 
     if action == "view":
         skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file() and "/" not in name:
+            alt_dir = (root / "registry" / name).resolve(strict=False)
+            try:
+                alt_dir.relative_to(root)
+            except ValueError:
+                alt_dir = skill_dir
+            alt_md = alt_dir / "SKILL.md"
+            if alt_md.is_file():
+                skill_dir = alt_dir
+                skill_md = alt_md
+                name = f"registry/{name}"
         if not skill_md.is_file():
             return _skill_manage_error("validation", "SKILL.md not found")
         try:

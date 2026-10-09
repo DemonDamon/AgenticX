@@ -2936,7 +2936,7 @@ function SkillsTab() {
                 const res = await installFn.call(window.agenticxDesktop, { slug });
                 if (res?.ok) {
                   setSkillhubMsg(
-                    `已拦截旧版安装提示词，并确定性安装 ${slug} → ${res.installed_path || "registry/" + slug}`,
+                    `已拦截 SkillHub 安装意图，并确定性安装 ${slug} → ${res.installed_path || "registry/" + slug}`,
                   );
                   try {
                     await reloadSkillsAfterMarketInstall(slug);
@@ -2954,13 +2954,13 @@ function SkillsTab() {
                     .filter((x) => Boolean(x && String(x).trim()))
                     .join(": ");
                   setSkillhubMsg(
-                    `已拦截旧版安装提示词；确定性安装失败：${cause || "failed"}。请重试 Settings → SkillHub 安装。`,
+                    `已拦截 SkillHub 安装意图；确定性安装失败：${cause || "failed"}。请重试 Settings → SkillHub 安装。`,
                   );
                 }
                 return;
               } catch (e) {
                 setSkillhubMsg(
-                  `已拦截旧版安装提示词；确定性安装异常：${String(e)}。请重试 Settings → SkillHub 安装。`,
+                  `已拦截 SkillHub 安装意图；确定性安装异常：${String(e)}。请重试 Settings → SkillHub 安装。`,
                 );
                 return;
               }

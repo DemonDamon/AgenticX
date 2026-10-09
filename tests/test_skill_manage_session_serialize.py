@@ -85,6 +85,8 @@ def test_create_with_studio_session_serializes(skill_home: Path) -> None:
     assert payload["ok"] is True
     assert "_session" not in payload
     assert Path(payload["path"]).is_file()
+    # source=skillhub must land under registry/<slug>/ (Settings third-party bucket)
+    assert "/registry/sess-create/" in payload["path"].replace("\\", "/") or payload["path"].replace("\\", "/").endswith("registry/sess-create/SKILL.md")
     text = Path(payload["path"]).read_text(encoding="utf-8")
     assert text.count("source:") == 1
     assert "source: skillhub" in text
@@ -125,11 +127,13 @@ def test_view_returns_content_and_source(skill_home: Path) -> None:
             None,
         )
     )
+    # Short name view must resolve registry/view-me after skillhub create rewrite.
     out = json.loads(_run(_tool_skill_manage({"action": "view", "name": "view-me"}, None)))
     assert out["ok"] is True
     assert "Body." in out["content"]
     assert "SKILL.md" in out["listing"]
     assert out["source"] in {"skillhub", "agent_created", "registry", "custom"}
+    assert "registry" in str(out.get("name") or "") or "/registry/" in str(out.get("path") or "").replace("\\", "/")
 
 
 def test_from_dir_copies_references(skill_home: Path) -> None:
@@ -231,3 +235,31 @@ def test_patch_token_outdated_mentions_repreview(skill_home: Path) -> None:
     )
     assert "outdated" in out.lower()
     assert "preview" in out.lower()
+
+
+def test_skillhub_create_lands_under_registry(skill_home: Path) -> None:
+    """Bare name + source=skillhub must write ~/.agenticx/skills/registry/<slug>/."""
+    body = "---\nname: tiangong-skill\ndescription: demo\n---\n\nTiangong.\n"
+    out = json.loads(
+        _run(
+            _tool_skill_manage(
+                {
+                    "action": "create",
+                    "name": "tiangong-skill",
+                    "content": body,
+                    "source": "skillhub",
+                },
+                None,
+            )
+        )
+    )
+    assert out["ok"] is True
+    path = Path(out["path"])
+    assert path.is_file()
+    parts = path.resolve().parts
+    assert "registry" in parts
+    assert parts[parts.index("registry") + 1] == "tiangong-skill"
+    # Must NOT be only top-level skills/tiangong-skill
+    top = skill_home / ".agenticx" / "skills" / "tiangong-skill" / "SKILL.md"
+    assert not top.exists()
+    assert "source: skillhub" in path.read_text(encoding="utf-8")
