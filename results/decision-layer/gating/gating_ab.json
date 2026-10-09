@@ -1,0 +1,483 @@
+{
+  "meta": {
+    "jobs_dir": "harness-lab/jobs",
+    "job_pattern": "agenticx-*",
+    "scorer_id": "startlux:StartLux-Decision-4B-Q4_K_M:systemone",
+    "degraded": false,
+    "seeds": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "taus": [
+      0.6
+    ],
+    "max_attempts": 3,
+    "ratio": 0.2,
+    "forest": {
+      "n_tasks": 12,
+      "n_attempts": 30,
+      "tasks_with_pass": 10,
+      "avg_attempts": 2.5
+    },
+    "cache": {
+      "hits": 4551,
+      "misses": 1670
+    },
+    "n_degraded": 0
+  },
+  "per_seed": {
+    "v1": [
+      {
+        "name": "never_abort",
+        "split": "train",
+        "n_tasks": 9,
+        "pass_rate": 0.7777777777777778,
+        "total_cost": 359120,
+        "avg_cost": 39902.22222222222,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "never_abort",
+        "split": "heldout",
+        "n_tasks": 3,
+        "pass_rate": 1.0,
+        "total_cost": 75439,
+        "avg_cost": 25146.333333333332,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "train",
+        "n_tasks": 9,
+        "pass_rate": 0.0,
+        "total_cost": 61183,
+        "avg_cost": 6798.111111111111,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "heldout",
+        "n_tasks": 3,
+        "pass_rate": 0.0,
+        "total_cost": 6366,
+        "avg_cost": 2122.0,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "train",
+        "n_tasks": 9,
+        "pass_rate": 0.7777777777777778,
+        "total_cost": 341254,
+        "avg_cost": 37917.11111111111,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "heldout",
+        "n_tasks": 3,
+        "pass_rate": 0.6666666666666666,
+        "total_cost": 73952,
+        "avg_cost": 24650.666666666668,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "train",
+        "n_tasks": 9,
+        "pass_rate": 0.7777777777777778,
+        "total_cost": 353337,
+        "avg_cost": 39259.666666666664,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "heldout",
+        "n_tasks": 3,
+        "pass_rate": 1.0,
+        "total_cost": 75439,
+        "avg_cost": 25146.333333333332,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "train",
+        "n_tasks": 9,
+        "pass_rate": 0.6666666666666666,
+        "total_cost": 334765,
+        "avg_cost": 37196.11111111111,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "heldout",
+        "n_tasks": 3,
+        "pass_rate": 0.6666666666666666,
+        "total_cost": 33809,
+        "avg_cost": 11269.666666666666,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      }
+    ],
+    "v2": [
+      {
+        "name": "never_abort",
+        "split": "train",
+        "n_tasks": 11,
+        "pass_rate": 0.9090909090909091,
+        "total_cost": 407489,
+        "avg_cost": 37044.454545454544,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "never_abort",
+        "split": "heldout",
+        "n_tasks": 1,
+        "pass_rate": 0.0,
+        "total_cost": 27070,
+        "avg_cost": 27070.0,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "train",
+        "n_tasks": 11,
+        "pass_rate": 0.0,
+        "total_cost": 66077,
+        "avg_cost": 6007.0,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "heldout",
+        "n_tasks": 1,
+        "pass_rate": 0.0,
+        "total_cost": 1472,
+        "avg_cost": 1472.0,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "train",
+        "n_tasks": 11,
+        "pass_rate": 0.8181818181818182,
+        "total_cost": 388136,
+        "avg_cost": 35285.09090909091,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "heldout",
+        "n_tasks": 1,
+        "pass_rate": 0.0,
+        "total_cost": 27070,
+        "avg_cost": 27070.0,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "train",
+        "n_tasks": 11,
+        "pass_rate": 0.9090909090909091,
+        "total_cost": 401706,
+        "avg_cost": 36518.72727272727,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "heldout",
+        "n_tasks": 1,
+        "pass_rate": 0.0,
+        "total_cost": 27070,
+        "avg_cost": 27070.0,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "train",
+        "n_tasks": 11,
+        "pass_rate": 0.7272727272727273,
+        "total_cost": 341504,
+        "avg_cost": 31045.81818181818,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "heldout",
+        "n_tasks": 1,
+        "pass_rate": 0.0,
+        "total_cost": 27070,
+        "avg_cost": 27070.0,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      }
+    ],
+    "v3": [
+      {
+        "name": "never_abort",
+        "split": "train",
+        "n_tasks": 10,
+        "pass_rate": 0.8,
+        "total_cost": 422514,
+        "avg_cost": 42251.4,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "never_abort",
+        "split": "heldout",
+        "n_tasks": 2,
+        "pass_rate": 1.0,
+        "total_cost": 12045,
+        "avg_cost": 6022.5,
+        "abort_rate": 0.0,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "train",
+        "n_tasks": 10,
+        "pass_rate": 0.0,
+        "total_cost": 62671,
+        "avg_cost": 6267.1,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "fixed_horizon_10",
+        "split": "heldout",
+        "n_tasks": 2,
+        "pass_rate": 0.0,
+        "total_cost": 4878,
+        "avg_cost": 2439.0,
+        "abort_rate": 0.09090909090909091,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "train",
+        "n_tasks": 10,
+        "pass_rate": 0.7,
+        "total_cost": 403161,
+        "avg_cost": 40316.1,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "error_streak_3",
+        "split": "heldout",
+        "n_tasks": 2,
+        "pass_rate": 1.0,
+        "total_cost": 12045,
+        "avg_cost": 6022.5,
+        "abort_rate": 0.002758620689655172,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "train",
+        "n_tasks": 10,
+        "pass_rate": 0.8,
+        "total_cost": 416731,
+        "avg_cost": 41673.1,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "progress_stall_8",
+        "split": "heldout",
+        "n_tasks": 2,
+        "pass_rate": 1.0,
+        "total_cost": 12045,
+        "avg_cost": 6022.5,
+        "abort_rate": 0.0006476683937823834,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "train",
+        "n_tasks": 10,
+        "pass_rate": 0.6,
+        "total_cost": 356529,
+        "avg_cost": 35652.9,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      },
+      {
+        "name": "decision_head_tau0.6",
+        "split": "heldout",
+        "n_tasks": 2,
+        "pass_rate": 1.0,
+        "total_cost": 12045,
+        "avg_cost": 6022.5,
+        "abort_rate": 0.002398081534772182,
+        "n_degraded": 0
+      }
+    ]
+  },
+  "summary": {
+    "train": {
+      "never_abort": {
+        "pass_rate": [
+          0.8289562289562289,
+          0.13131313131313127
+        ],
+        "avg_cost": [
+          39732.69225589226,
+          5206.945454545457
+        ],
+        "abort_rate": [
+          0.0,
+          0.0
+        ]
+      },
+      "fixed_horizon_10": {
+        "pass_rate": [
+          0.0,
+          0.0
+        ],
+        "avg_cost": [
+          6357.403703703704,
+          791.1111111111113
+        ],
+        "abort_rate": [
+          0.0909090909090909,
+          0.0
+        ]
+      },
+      "error_streak_3": {
+        "pass_rate": [
+          0.7653198653198654,
+          0.11818181818181828
+        ],
+        "avg_cost": [
+          37839.434006734,
+          5031.009090909087
+        ],
+        "abort_rate": [
+          0.0027586206896551718,
+          0.0
+        ]
+      },
+      "progress_stall_8": {
+        "pass_rate": [
+          0.8289562289562289,
+          0.13131313131313127
+        ],
+        "avg_cost": [
+          39150.497979797976,
+          5154.3727272727265
+        ],
+        "abort_rate": [
+          0.0006476683937823834,
+          0.0
+        ]
+      },
+      "decision_head_tau0.6": {
+        "pass_rate": [
+          0.6646464646464646,
+          0.12727272727272732
+        ],
+        "avg_cost": [
+          34631.60976430977,
+          6150.292929292929
+        ],
+        "abort_rate": [
+          0.002398081534772182,
+          0.0
+        ]
+      }
+    },
+    "heldout": {
+      "never_abort": {
+        "pass_rate": [
+          0.6666666666666666,
+          1.0
+        ],
+        "avg_cost": [
+          19412.94444444444,
+          21047.5
+        ],
+        "abort_rate": [
+          0.0,
+          0.0
+        ]
+      },
+      "fixed_horizon_10": {
+        "pass_rate": [
+          0.0,
+          0.0
+        ],
+        "avg_cost": [
+          2011.0,
+          967.0
+        ],
+        "abort_rate": [
+          0.0909090909090909,
+          0.0
+        ]
+      },
+      "error_streak_3": {
+        "pass_rate": [
+          0.5555555555555555,
+          1.0
+        ],
+        "avg_cost": [
+          19247.722222222223,
+          21047.5
+        ],
+        "abort_rate": [
+          0.0027586206896551718,
+          0.0
+        ]
+      },
+      "progress_stall_8": {
+        "pass_rate": [
+          0.6666666666666666,
+          1.0
+        ],
+        "avg_cost": [
+          19412.94444444444,
+          21047.5
+        ],
+        "abort_rate": [
+          0.0006476683937823834,
+          0.0
+        ]
+      },
+      "decision_head_tau0.6": {
+        "pass_rate": [
+          0.5555555555555555,
+          1.0
+        ],
+        "avg_cost": [
+          14787.388888888889,
+          21047.5
+        ],
+        "abort_rate": [
+          0.002398081534772182,
+          0.0
+        ]
+      }
+    }
+  }
+}
