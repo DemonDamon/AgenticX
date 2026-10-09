@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import ast
 import json
 import asyncio
 import hashlib
@@ -47,6 +48,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.extensions.skillhub_install_guard import market_install_tool_for_intent
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.context_file_budget import serialize_context_files
@@ -2304,8 +2306,7 @@ def _normalize_stuck_args_in_tool_name(
                     f"ERROR: 畸形工具调用：工具名含 XML 参数碎片（以 {base} 开头）。"
                     "请重新调用：name 只写工具名，arguments 使用 JSON，"
                     f'例如 {{"name":"{base}","arguments":{{"command":"ls"}}}}。'
-                    "SkillHub 安装请改用 Desktop IPC installFromSkillHub / "
-                    "POST /api/registry/skillhub/install。"
+                    "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具。"
                 ),
             )
     elif remainder.startswith("("):
@@ -2350,6 +2351,29 @@ def _normalize_stuck_args_in_tool_name(
     merged = _normalize_file_tool_arg_aliases(base, merged)
     return base, merged, None
 
+
+
+def _parse_python_kwargs_call_args(raw_args: str) -> Optional[Dict[str, Any]]:
+    """Parse ``name='x', source='y'`` (GLM writes tool calls as Python calls).
+
+    Only keyword arguments with literal values are accepted, so prose inside
+    parentheses never becomes a fake tool call.
+    """
+    try:
+        node = ast.parse(f"_f({raw_args})", mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(node, ast.Call) or node.args or not node.keywords:
+        return None
+    out: Dict[str, Any] = {}
+    for kw in node.keywords:
+        if kw.arg is None:
+            return None
+        try:
+            out[kw.arg] = ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError):
+            return None
+    return out
 
 
 def _extract_inline_tool_call(
@@ -2464,7 +2488,7 @@ def _extract_inline_tool_call(
         try:
             parsed = json.loads(raw_args)
         except Exception:
-            return None
+            parsed = _parse_python_kwargs_call_args(raw_args)
         if not isinstance(parsed, dict):
             return None
         args_obj = parsed
@@ -3109,6 +3133,10 @@ _KB_FORCED_TOOL_CHOICE: Dict[str, Any] = {
     "type": "function",
     "function": {"name": "knowledge_search"},
 }
+
+
+def _forced_tool_choice(tool_name: str) -> Dict[str, Any]:
+    return {"type": "function", "function": {"name": tool_name}}
 
 
 def _kb_retrieval_always_mode(session: Any) -> bool:
@@ -4213,6 +4241,9 @@ class AgentRuntime:
         _kb_force_always = (
             "knowledge_search" in allowed_tool_names and _kb_retrieval_always_mode(session)
         )
+        _market_install_tool = market_install_tool_for_intent(user_input)
+        if _market_install_tool not in allowed_tool_names:
+            _market_install_tool = ""
         history = _sanitize_context_messages(session.agent_messages)
         # Enrich plain user entries in agent_messages history from chat_history attachments
         # (covers resumes of sessions that had images persisted only to chat_history, and
@@ -4973,6 +5004,13 @@ class AgentRuntime:
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
+                                elif (
+                                    _market_install_tool
+                                    and round_idx <= 2
+                                    and not executed_tool_names
+                                    and provider_name.strip().lower() != "minimax"
+                                ):
+                                    _round_tool_choice = _forced_tool_choice(_market_install_tool)
                                 _max_tokens = _session_round_max_tokens(
                                     session,
                                     executed_tool_names,
@@ -5276,6 +5314,13 @@ class AgentRuntime:
                             and provider_name.strip().lower() != "minimax"
                         ):
                             _fallback_tool_choice = _KB_FORCED_TOOL_CHOICE
+                        elif (
+                            _market_install_tool
+                            and round_idx <= 2
+                            and not executed_tool_names
+                            and provider_name.strip().lower() != "minimax"
+                        ):
+                            _fallback_tool_choice = _forced_tool_choice(_market_install_tool)
                         try:
                             return self.llm.invoke(
                                 messages_for_llm,
@@ -6469,6 +6514,27 @@ class AgentRuntime:
                         str(streamed_text or "").strip(),
                         allowed_tool_names,
                     )
+                    # The fallback stream carries no tool schema, so a model that still
+                    # wants a tool writes it as text; send it back for a native call.
+                    if (
+                        raw_tail
+                        and not _is_system_trigger
+                        and not getattr(session, "_inline_markup_retry_used", False)
+                        and _extract_inline_tool_call(raw_tail, allowed_tool_names) is not None
+                    ):
+                        setattr(session, "_inline_markup_retry_used", True)
+                        hint = (
+                            "[系统通知] 上一轮把工具调用写成了正文（如 name(...)），运行时无法执行。"
+                            "请立即用原生 function calling 发出同一个工具调用，补全 required 参数。"
+                        )
+                        messages.append({"role": "system", "content": hint})
+                        session.agent_messages.append({"role": "system", "content": hint})
+                        logger.info(
+                            "sync_fallback_inline_tool_call session=%s round=%s",
+                            getattr(session, "session_id", ""),
+                            round_idx,
+                        )
+                        continue
                     if raw_tail:
                         authoritative_source_kind = "sync_fallback"
                         authoritative_raw = raw_tail
@@ -6820,8 +6886,8 @@ class AgentRuntime:
                     if loop_issue is not None and loop_issue.level == "critical":
                         terminal_text = (
                             f"{loop_issue.message} "
-                            "请改用 Desktop IPC installFromSkillHub / "
-                            "POST /api/registry/skillhub/install，不要继续提交畸形工具名。"
+                            "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具，"
+                            "不要继续提交畸形工具名。"
                         )
                         yield await self._finish_terminal_reply(
                             session,
@@ -7055,8 +7121,8 @@ class AgentRuntime:
                     if loop_issue is not None and loop_issue.level == "critical":
                         terminal_text = (
                             f"{loop_issue.message} "
-                            "请改用 Desktop IPC installFromSkillHub / "
-                            "POST /api/registry/skillhub/install，不要继续提交被允许列表拒绝的调用。"
+                            "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具，"
+                            "不要继续提交被允许列表拒绝的调用。"
                         )
                         yield await self._finish_terminal_reply(
                             session,

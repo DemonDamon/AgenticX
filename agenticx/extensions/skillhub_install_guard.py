@@ -125,6 +125,33 @@ def is_clear_skillhub_install_intent(text: str) -> bool:
     return _is_clear_skillhub_install_intent(text)
 
 
+_CLAWHUB_INSTALL_RE = re.compile(
+    r"ClawHub[^\n「\"']{0,24}?(?:安装|install)(?:技能|\s+skill)?\s*[「\"']?"
+    r"@?[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?",
+    re.I,
+)
+
+
+def market_install_tool_for_intent(text: str) -> str:
+    """Install tool a clear SkillHub / ClawHub install request maps to, else ``""``.
+
+    The runtime forces this tool on the first round via ``tool_choice``: the
+    agent still runs the turn, but weak models cannot detour into curl / bash
+    or write the call as prose.
+    """
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    if _CLAWHUB_INSTALL_RE.search(body):
+        return "clawhub_install"
+    if not _is_clear_skillhub_install_intent(body):
+        return ""
+    slug = extract_skillhub_install_slug(body)
+    if slug and (slug.startswith("@") or "skillhub" in body.lower()):
+        return "skillhub_install"
+    return ""
+
+
 def classify_skillhub_inbound_install_prompt(text: str) -> dict:
     """Return {hit, slug, reason, kind} for Settings Meta-seeding refuse only.
 

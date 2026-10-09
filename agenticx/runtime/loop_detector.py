@@ -30,15 +30,15 @@ _DETERMINISTIC_ERROR_HINTS: Tuple[Tuple[str, str], ...] = (
 )
 
 # Same-CLASS sandbox failures: halt even when args change slightly between tries.
-# tip always steers toward Desktop IPC / deterministic SkillHub install.
+# tip always steers toward the deterministic skillhub_install tool.
 _DESKTOP_SKILLHUB_TIP = (
-    "请改用 Desktop IPC / 确定性 SkillHub 安装（Settings → installFromSkillHub / "
-    "POST /api/registry/skillhub/install），不要在沙箱里重装 SkillHub CLI。"
+    "请直接调用 skillhub_install(ref='@ns/slug') 工具完成安装，"
+    "不要在沙箱里重装 SkillHub CLI，也不要探测本机 HTTP 端口。"
 )
 _SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
     (
         "path_escapes_workspace",
-        "路径超出 workspace：技能目录请用 skill_manage 或 Desktop 确定性安装，不要用 bash 直写。",
+        "路径超出 workspace：技能目录请用 skill_manage 或 skillhub_install，不要用 bash 直写。",
     ),
     (
         "skillhub_home_eperm",
@@ -55,13 +55,22 @@ _SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
     (
         "malformed_tool_name",
         f"工具名含畸形 XML/参数碎片（如 <arg_key>）。请把 name 与 arguments 分开；"
-        f"SkillHub 安装请用 Desktop 确定性路径。{_DESKTOP_SKILLHUB_TIP}",
+        f"{_DESKTOP_SKILLHUB_TIP}",
     ),
 )
 
 _HTTP_405_SKILLHUB_TIP = (
     "禁止 curl/wget 公共 skillhub.cn 假 registry/install（会返回 Method Not Allowed / code:405）。"
     f"{_DESKTOP_SKILLHUB_TIP}"
+)
+
+# Guessing endpoints: one bash_exec output full of 404 / not_found lines.
+_NOT_FOUND_PROBE_RE = re.compile(r"not[_ ]found|\b404\b", re.I)
+_NOT_FOUND_PROBE_MIN_HITS = 3
+_ENDPOINT_PROBE_CLASS_ID = "endpoint_probe_404"
+_ENDPOINT_PROBE_TIP = (
+    "连续多次请求返回 404 / not_found，说明在猜测并不存在的接口。立即停止探测端口或路径；"
+    "改用已有的专用工具（如 SkillHub 安装用 skillhub_install），否则把卡点直接告诉用户。"
 )
 
 _URL_HOST_PATH_RE = re.compile(
@@ -415,10 +424,12 @@ class LoopDetector:
                 if skillhubish
                 else (
                     f"同一 URL 连续 Method Not Allowed (405)。请停止重复 bash_exec；"
-                    f"SkillHub 安装请用确定性路径。{_DESKTOP_SKILLHUB_TIP}"
+                    f"{_DESKTOP_SKILLHUB_TIP}"
                 )
             )
             return class_id, tip
+        if len(_NOT_FOUND_PROBE_RE.findall(text)) >= _NOT_FOUND_PROBE_MIN_HITS:
+            return _ENDPOINT_PROBE_CLASS_ID, _ENDPOINT_PROBE_TIP
         return None
 
     def _record_same_class_sandbox_error(
@@ -429,6 +440,12 @@ class LoopDetector:
         """Track same-class sandbox errors even when args differ between tries."""
         self._latest_same_class = None
         matched = self._same_class_sandbox_match(result_text)
+        if (
+            matched is not None
+            and matched[0] == _ENDPOINT_PROBE_CLASS_ID
+            and not str(tool_name or "").startswith("bash_")
+        ):
+            matched = None
         if matched is None:
             self._same_class_key = None
             self._same_class_count = 0
@@ -436,7 +453,11 @@ class LoopDetector:
         class_id, hint = matched
         # Collapse varying malformed names (bash_exec(<arg_key>…) vs next blob)
         # so ≤3 allowlist rejects still trip the same-class halt.
-        if class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS or str(class_id).startswith("http_405"):
+        if (
+            class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS
+            or class_id == _ENDPOINT_PROBE_CLASS_ID
+            or str(class_id).startswith("http_405")
+        ):
             base_match = re.match(r"^([A-Za-z_][\w.-]*)", str(tool_name or ""))
             effective_tool = base_match.group(1) if base_match else "malformed_tool"
             # Same host+path 405 groups across differing curl args / methods.

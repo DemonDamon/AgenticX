@@ -245,3 +245,190 @@ def test_normalize_stuck_args_leaves_clean_name_alone() -> None:
     assert err is None
     assert name == "bash_exec"
     assert args == {"command": "echo hi"}
+
+
+def test_extract_inline_tool_call_from_python_kwargs_unclosed_tool_call() -> None:
+    """GLM wrote a Python-style call inside an unclosed <tool_call> (live Settings install)."""
+    text = "<tool_call>clawhub_install(name='@pskoett/self-improving-agent', source='clawhub')"
+    parsed = _extract_inline_tool_call(text, {"clawhub_install", "skillhub_install"})
+    assert parsed == {
+        "name": "clawhub_install",
+        "arguments": {"name": "@pskoett/self-improving-agent", "source": "clawhub"},
+    }
+
+
+def test_python_kwargs_fallback_rejects_prose_and_positional() -> None:
+    assert _extract_inline_tool_call("skip todo_write (it's a simple Q&A)", {"todo_write"}) is None
+    assert _extract_inline_tool_call("clawhub_install('archify')", {"clawhub_install"}) is None
+    assert _extract_inline_tool_call("clawhub_install(name=os.environ)", {"clawhub_install"}) is None
+
+
+def test_sync_fallback_inline_tool_text_is_sent_back_for_native_call(monkeypatch) -> None:
+    """Empty tool-enabled rounds → schema-less fallback writes name(...) as text.
+
+    The runtime must not finalize that text; it retries so the model can emit a
+    native tool call, which then executes.
+    """
+    import asyncio
+    import json as _json
+
+    from agenticx.cli import agent_tools
+    from agenticx.cli.studio import StudioSession
+    from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
+
+    class _Resp:
+        def __init__(self, content, tool_calls):
+            self.content = content
+            self.tool_calls = tool_calls
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.invokes = 0
+
+        def invoke(self, *_a, **_k):
+            self.invokes += 1
+            if self.invokes <= 2:
+                return _Resp("", [])
+            if self.invokes == 3:
+                return _Resp(
+                    "",
+                    [
+                        {
+                            "id": "call-claw",
+                            "type": "function",
+                            "function": {
+                                "name": "clawhub_install",
+                                "arguments": _json.dumps({"name": "@steipete/gog"}),
+                            },
+                        }
+                    ],
+                )
+            return _Resp("已安装 gog。", [])
+
+        def stream(self, *_a, **_k):
+            yield "<tool_call>clawhub_install(name='@steipete/gog', source='clawhub')"
+
+    class _Gate(ConfirmGate):
+        async def request_confirm(self, question, context=None):  # noqa: ARG002
+            return True
+
+    calls = []
+    monkeypatch.setattr(
+        agent_tools,
+        "_tool_clawhub_install",
+        lambda args, session: calls.append(args) or '{"ok": true, "name": "gog"}',
+    )
+    session = StudioSession()
+    runtime = AgentRuntime(_LLM(), _Gate(), max_tool_rounds=8)
+
+    async def _run():
+        return [e async for e in runtime.run_turn("请从 ClawHub 安装技能「@steipete/gog」", session)]
+
+    events = asyncio.run(_run())
+    finals = [e for e in events if e.type == EventType.FINAL.value]
+    assert calls and calls[0]["name"] == "@steipete/gog"
+    assert finals and "<tool_call>" not in str(finals[-1].data.get("text", ""))
+
+
+def test_market_install_request_forces_install_tool_on_first_round_only(monkeypatch) -> None:
+    import asyncio
+    import json as _json
+
+    from agenticx.cli import agent_tools
+    from agenticx.cli.studio import StudioSession
+    from agenticx.runtime import AgentRuntime, ConfirmGate
+
+    class _Resp:
+        def __init__(self, content, tool_calls):
+            self.content = content
+            self.tool_calls = tool_calls
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.choices = []
+
+        def invoke(self, *_a, tool_choice=None, **_k):
+            self.choices.append(tool_choice)
+            if len(self.choices) == 1:
+                call = {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "skillhub_install",
+                        "arguments": _json.dumps({"ref": "@indiv-ebandao/tiangong-skill"}),
+                    },
+                }
+                return _Resp("", [call])
+            return _Resp("已安装。", [])
+
+        def stream(self, *_a, **_k):
+            yield ""
+
+    class _Gate(ConfirmGate):
+        async def request_confirm(self, question, context=None):  # noqa: ARG002
+            return True
+
+    monkeypatch.setattr(agent_tools, "_tool_skillhub_install", lambda args, session: '{"ok": true}')
+    llm = _LLM()
+    runtime = AgentRuntime(llm, _Gate(), max_tool_rounds=5)
+    session = StudioSession()
+
+    async def _run():
+        prompt = "请根据 https://skillhub.cn/install/skillhub.md，安装 @indiv-ebandao/tiangong-skill。"
+        return [e async for e in runtime.run_turn(prompt, session)]
+
+    asyncio.run(_run())
+    assert llm.choices[0] == {"type": "function", "function": {"name": "skillhub_install"}}
+    assert llm.choices[1] == "auto"
+
+
+def test_market_install_force_survives_one_empty_round(monkeypatch) -> None:
+    """Forced first round came back empty → the retry round is forced again."""
+    import asyncio
+    import json as _json
+
+    from agenticx.cli import agent_tools
+    from agenticx.cli.studio import StudioSession
+    from agenticx.runtime import AgentRuntime, ConfirmGate
+
+    class _Resp:
+        def __init__(self, content, tool_calls):
+            self.content = content
+            self.tool_calls = tool_calls
+
+    forced = {"type": "function", "function": {"name": "clawhub_install"}}
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.choices = []
+
+        def invoke(self, *_a, tool_choice=None, **_k):
+            self.choices.append(tool_choice)
+            if len(self.choices) == 1:
+                return _Resp("", [])
+            if len(self.choices) == 2:
+                call = {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {"name": "clawhub_install", "arguments": _json.dumps({"name": "@steipete/gog"})},
+                }
+                return _Resp("", [call])
+            return _Resp("已安装。", [])
+
+        def stream(self, *_a, **_k):
+            yield ""
+
+    class _Gate(ConfirmGate):
+        async def request_confirm(self, question, context=None):  # noqa: ARG002
+            return True
+
+    monkeypatch.setattr(agent_tools, "_tool_clawhub_install", lambda args, session: '{"ok": true}')
+    llm = _LLM()
+    runtime = AgentRuntime(llm, _Gate(), max_tool_rounds=6)
+
+    async def _run():
+        return [e async for e in runtime.run_turn("请从 ClawHub 安装技能「@steipete/gog」（市场来源：clawhub）。", StudioSession())]
+
+    asyncio.run(_run())
+    assert llm.choices[:2] == [forced, forced]
+    assert llm.choices[2] == "auto"

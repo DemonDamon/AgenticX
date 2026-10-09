@@ -257,7 +257,7 @@ def test_same_class_sandbox_eperm_skillhub_halts_with_different_args() -> None:
     assert warn is not None
     assert warn.detector == "same_class_sandbox_error"
     assert warn.level == "warning"
-    assert warn.nudge and "Desktop" in warn.nudge
+    assert warn.nudge and "skillhub_install" in warn.nudge
     detector.record_call("bash_exec", '{"cmd":"cat ~/.skillhub/config.json"}', has_progress=False, result_text=err3)
     crit = detector.check()
     assert crit is not None
@@ -274,7 +274,7 @@ def test_same_class_sandbox_tmp_eperm_with_different_args() -> None:
     result = detector.check()
     assert result is not None
     assert result.detector == "same_class_sandbox_error"
-    assert result.nudge and "Desktop" in result.nudge
+    assert result.nudge and "skillhub_install" in result.nudge
 
 
 def test_same_class_path_escapes_with_different_args() -> None:
@@ -315,12 +315,12 @@ def test_allowlist_rejection_recorded_and_halts() -> None:
             assert result is not None
             assert result.detector == "same_class_sandbox_error"
             assert result.level == "warning"
-            assert result.nudge and "Desktop" in result.nudge
+            assert result.nudge and "skillhub_install" in result.nudge
         else:
             assert result is not None
             assert result.level == "critical"
             assert "allowlist_rejection" in result.message
-            assert result.nudge and "installFromSkillHub" in result.nudge
+            assert result.nudge and "skillhub_install" in result.nudge
 
 
 def test_is_guard_rejection_recognizes_allowlist_and_arg_key() -> None:
@@ -360,7 +360,7 @@ def test_http_405_same_host_path_halts() -> None:
     assert warn.detector == "same_class_sandbox_error"
     assert warn.level == "warning"
     assert "http_405" in warn.message
-    assert warn.nudge and ("Desktop" in warn.nudge or "installFromSkillHub" in warn.nudge)
+    assert warn.nudge and "skillhub_install" in warn.nudge
     detector.record_call(
         "bash_exec", '{"cmd":"curl -X POST ..."}', has_progress=False, result_text=err3
     )
@@ -378,4 +378,35 @@ def test_http_405_body_code_without_url_still_halts() -> None:
     result = detector.check()
     assert result is not None
     assert result.detector == "same_class_sandbox_error"
-    assert result.nudge and "Desktop" in result.nudge
+    assert result.nudge and "skillhub_install" in result.nudge
+
+
+def test_endpoint_probe_404_spiral_halts_across_varied_commands() -> None:
+    """Guessing localhost endpoints: varied curl args, every output is 404/not_found."""
+    detector = LoopDetector()
+    outputs = [
+        '== 18488 {"ok":false,"error":"Not Found"}\n== 52224 {"error":"not_found"}\n== 64132 404 not found',
+        '/api/skills {"error":"not_found"}\n/api/install {"error":"not_found"}\n/api/x 404',
+        'POST /api/skillhub/install {"ok":false,"error":"Not Found"} x3 not_found not_found',
+    ]
+    levels = []
+    for i, out in enumerate(outputs):
+        detector.record_call("bash_exec", f'{{"cmd":"probe {i}"}}', has_progress=False, result_text=out)
+        result = detector.check()
+        levels.append(result.level if result else None)
+    assert levels[0] is None
+    assert levels[1] == "warning"
+    assert levels[2] == "critical"
+    final = detector.check()
+    assert final is not None and "endpoint_probe_404" in final.message
+    assert final.nudge and "skillhub_install" in final.nudge
+
+
+def test_endpoint_probe_ignores_non_shell_tools() -> None:
+    """Reading source that mentions not_found must not look like endpoint guessing."""
+    detector = LoopDetector()
+    text = "not_found not_found 404 not found"
+    for i in range(3):
+        detector.record_call("file_read", f'{{"path":"f{i}"}}', has_progress=True, result_text=text)
+    result = detector.check()
+    assert result is None or result.detector != "same_class_sandbox_error"

@@ -86,3 +86,13 @@ def test_skillhub_cli_install_not_intercepted() -> None:
     hit = classify_skillhub_inbound_install_prompt("skillhub install @indiv-seafish/archify")
     assert hit["hit"] is False
     assert is_clear_skillhub_install_intent("skillhub install @indiv-seafish/archify") is True
+
+
+def test_market_install_tool_for_intent() -> None:
+    from agenticx.extensions.skillhub_install_guard import market_install_tool_for_intent as f
+
+    assert f("请根据 https://skillhub.cn/install/skillhub.md，安装 @indiv-ebandao/tiangong-skill。") == "skillhub_install"
+    assert f("请从 ClawHub 安装技能「@pskoett/self-improving-agent」（市场来源：clawhub）。") == "clawhub_install"
+    assert f("从 ClawHub 安装 weather") == "clawhub_install"
+    assert f("帮我写一份周报") == ""
+    assert f("@ns/slug 这个技能怎么样") == ""
