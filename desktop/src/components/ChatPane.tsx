@@ -99,6 +99,7 @@ import {
   registerBrowserAgentOpenFallback,
 } from "./work-panel/browser-agent-registry";
 import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
+import { listSessionsCoalesced } from "../utils/list-sessions-coalesce";
 import { buildHtmlElementContextSnippet } from "../utils/html-preview-inspect";
 import {
   artifactBaseName,
@@ -7964,7 +7965,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const sseActive = Boolean(sessionStreamStateRef.current[sid]?.active);
       if (sseActive) return;
       try {
-        const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
+        const r = await listSessionsCoalesced(pane.avatarId ?? undefined);
         if (cancelled || !r.ok) return;
         const row = (r.sessions ?? []).find((s) => s.session_id === sid);
         const execState = (row?.execution_state ?? "idle") as SessionExecutionState;
@@ -8399,7 +8400,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
       let execState: SessionExecutionState = sessionExecutionState;
       try {
-        const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
+        const r = await listSessionsCoalesced(pane.avatarId ?? undefined);
         if (cancelled || !r.ok) return;
         const row = (r.sessions ?? []).find((s) => s.session_id === sid);
         if (row?.execution_state) {
