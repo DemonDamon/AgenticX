@@ -1925,6 +1925,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "skill_import_repo",
             "description": (
                 "Bulk install skills from a GitHub repository into ~/.agenticx/skills/. "
+                "Pass skill=<name> to install ONE skill's full directory (SKILL.md + "
+                "references/ + scripts/ + assets/) from the repo tarball into "
+                "~/.agenticx/skills/registry/<name>/ — required for multi-file skills "
+                "like cathrynlavery/diagram-design. "
                 "Use dry_run=true first to list pending skills without writing. "
                 "Preferred for installing many skills (e.g. mattpocock/skills)."
             ),
@@ -1934,6 +1938,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "repo": {
                         "type": "string",
                         "description": "GitHub repo as owner/name (e.g. mattpocock/skills).",
+                    },
+                    "skill": {
+                        "type": "string",
+                        "description": (
+                            "Optional single skill directory name (e.g. diagram-design). "
+                            "When set, installs that skill's FULL directory from the repo "
+                            "tarball instead of SKILL.md-only bulk import."
+                        ),
                     },
                     "branch": {"type": "string", "description": "Branch name (default main)."},
                     "path_glob": {
@@ -11151,6 +11163,7 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
     if not repo:
         return "ERROR: repo is required (owner/name)"
     branch = str(arguments.get("branch", "main") or "main").strip() or "main"
+    skill = str(arguments.get("skill", "") or "").strip()
     path_glob = str(arguments.get("path_glob", "skills/**/SKILL.md") or "skills/**/SKILL.md").strip()
     exclude_raw = arguments.get("exclude")
     exclude: Optional[List[str]] = None
@@ -11158,16 +11171,35 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
         exclude = [str(x) for x in exclude_raw if str(x).strip()]
     dry_run = bool(arguments.get("dry_run", False))
     overwrite = bool(arguments.get("overwrite", False))
-    from agenticx.skills.import_repo import import_skills_from_repo, result_to_json
-
-    result = import_skills_from_repo(
-        repo=repo,
-        branch=branch,
-        path_glob=path_glob,
-        exclude=exclude,
-        dry_run=dry_run,
-        overwrite=overwrite,
+    acknowledge_high_risk = bool(arguments.get("acknowledge_high_risk", False))
+    from agenticx.skills.import_repo import (
+        import_skills_from_repo,
+        install_skill_full_from_repo,
+        result_to_json,
     )
+
+    if skill:
+        # Full-directory install of a single named skill (SKILL.md + references/
+        # + scripts/ + assets/) via the repo tarball.
+        result = install_skill_full_from_repo(
+            repo=repo,
+            skill=skill,
+            branch=branch,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            acknowledge_high_risk=acknowledge_high_risk,
+        )
+    else:
+        result = import_skills_from_repo(
+            repo=repo,
+            branch=branch,
+            path_glob=path_glob,
+            exclude=exclude,
+            dry_run=dry_run,
+            overwrite=overwrite,
+        )
+    if result.installed:
+        _refresh_skill_catalog_after_install()
     return result_to_json(result)
 
 
@@ -12192,7 +12224,8 @@ async def dispatch_tool_async(
                 "以及 content / from_path / from_url（create）或 old_string / new_string（patch）"
             ),
             "skill_import_repo": (
-                "repo（owner/name）, 可选 branch/path_glob/exclude/dry_run/overwrite"
+                "repo（owner/name）, skill（指定时安装该技能的完整目录 SKILL.md+references+scripts+assets）, "
+                "可选 branch/path_glob/exclude/dry_run/overwrite"
             ),
             "schedule_task": (
                 "name（任务名）、frequency / time / date 至少一项、instruction（具体指令）、workspace（执行目录）"

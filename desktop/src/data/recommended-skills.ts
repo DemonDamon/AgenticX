@@ -8,6 +8,7 @@ import tencentImaIcon from "../assets/recommended/tencent-ima.svg";
 import tencentMeetingIcon from "../assets/recommended/tencent-meeting.svg";
 import officecliIcon from "../assets/recommended/officecli.svg";
 import archscribeIcon from "../assets/recommended/archscribe.svg";
+import diagramDesignIcon from "../assets/recommended/diagram-design.svg";
 
 /** 推荐位来源档：企业官方（Near 背书）vs 第三方（外部厂商/开源）。 */
 export type RecommendedSkillTier = "enterprise" | "third_party";
@@ -26,6 +27,12 @@ export type RecommendedSkill = {
   tier: RecommendedSkillTier;
   /** 主 CTA：外链指引 vs Meta-Agent 一键安装。 */
   cta: RecommendedSkillCta;
+  /** 确定性直装配置：给定 repo + skill 时走 installSkillFromRepo 全目录安装。 */
+  repo_install?: {
+    repo: string;
+    skill: string;
+    branch?: string;
+  };
 };
 
 export const RECOMMENDED_TIER_LABEL: Record<RecommendedSkillTier, string> = {
@@ -34,6 +41,19 @@ export const RECOMMENDED_TIER_LABEL: Record<RecommendedSkillTier, string> = {
 };
 
 export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
+  {
+    id: "diagram-design",
+    name: "Diagram Design",
+    provider: "cathrynlavery",
+    description:
+      "编辑级 HTML+SVG 图表（架构图、时序图、飞轮、象限等 40+ 类型），自包含无依赖；支持从 draw.io / Mermaid / Excalidraw 重绘。点安装后从 GitHub 拉取完整技能目录并做安全扫描。",
+    icon_src: diagramDesignIcon,
+    official_url: "https://github.com/cathrynlavery/diagram-design",
+    category: "架构可视化",
+    tier: "third_party",
+    cta: "install",
+    repo_install: { repo: "cathrynlavery/diagram-design", skill: "diagram-design" },
+  },
   {
     id: "officecli",
     name: "OfficeCLI",

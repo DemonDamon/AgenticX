@@ -524,6 +524,22 @@ type RegistryInstallPreviewResult = {
   scan?: SkillScanPayload;
   error?: string;
 };
+type RepoSkillInstallResult = {
+  ok: boolean;
+  name?: string;
+  installed?: string[];
+  skipped_existing?: string[];
+  errors?: string[];
+  rejected_by_guard?: Array<{ name: string; reason?: string }>;
+  scan_summary?: SkillScanPayload;
+  error?: string;
+  error_code?: string;
+};
+type SkillUninstallResult = {
+  ok: boolean;
+  name?: string;
+  error?: string;
+};
 
 declare global {
   interface Window {
@@ -1635,6 +1651,16 @@ declare global {
         confirmNonHighRisk?: boolean;
       }) => Promise<RegistryInstallResult>;
       installFromRegistryPreview: (args: { source: string; name: string }) => Promise<RegistryInstallPreviewResult>;
+      /** Deterministic full-directory skill install from a GitHub repo tarball. */
+      installSkillFromRepo: (args: {
+        repo: string;
+        skill: string;
+        branch?: string;
+        overwrite?: boolean;
+        acknowledgeHighRisk?: boolean;
+      }) => Promise<RepoSkillInstallResult>;
+      /** One-click skill uninstall (only under ~/.agenticx/skills). */
+      uninstallSkill: (args: { name: string; source?: string }) => Promise<SkillUninstallResult>;
 
       terminalSpawn: (payload: {
         id: string;

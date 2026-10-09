@@ -570,6 +570,7 @@ function SkillRowButton({
   globalSkillEnabled,
   skillScanBusy,
   onToggleGlobalSkill,
+  onUninstallSkill,
 }: {
   skill: SkillItem;
   isActive: boolean;
@@ -586,6 +587,7 @@ function SkillRowButton({
   globalSkillEnabled: boolean;
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const src = skillSourceBadge(effectiveSkillSource(skill), t);
@@ -601,6 +603,11 @@ function SkillRowButton({
   const selectedSource = preferredSource && uniqueSources.includes(preferredSource)
     ? preferredSource
     : effectiveSkillSource(skill);
+  // 一键卸载仅对 ~/.agenticx/skills 下的用户安装来源开放;builtin/bundle/第三方根(cursor/claude 等)不显示。
+  const uninstallSkillRowVisible =
+    locationLabel === "全局" &&
+    onUninstallSkill != null &&
+    ["registry", "agent_created", "agenticx", "custom"].includes(selectedSource);
   const locClass =
     locationLabel === "项目"
       ? "shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400"
@@ -659,6 +666,21 @@ function SkillRowButton({
             aria-label={t("skills.enableSkill", { name: skill.name })}
             onChange={(next) => onToggleGlobalSkill(skill.name, next)}
           />
+          {uninstallSkillRowVisible ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-text-faint transition hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400"
+              aria-label={t("skills.uninstallAria", { name: skill.name })}
+              title={t("skills.uninstall")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onUninstallSkill?.(skill.name, selectedSource);
+              }}
+            >
+              <Trash2 className="h-3 w-3" aria-hidden />
+              {t("skills.uninstall")}
+            </button>
+          ) : null}
         </div>
       </div>
       {conflictCount > 1 ? (
@@ -729,6 +751,7 @@ function SkillList({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const PREVIEW_COUNT = 15;
   const [showAll, setShowAll] = useState(false);
@@ -787,6 +810,7 @@ function SkillGroup({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (skills.length === 0) return null;
@@ -842,6 +866,7 @@ function SkillsLocationSection({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const isGlobal = locationLabel === "全局";
@@ -2809,6 +2834,41 @@ function SkillsTab() {
     ],
   );
 
+  /** 一键卸载:仅对 ~/.agenticx/skills 下的全局技能生效(端点侧再做路径安全校验)。 */
+  const uninstallSkillRow = useCallback(
+    async (name: string, source?: string) => {
+      const dlg = await window.agenticxDesktop.confirmDialog({
+        title: t("skills.uninstallConfirmTitle"),
+        message: t("skills.uninstallConfirmBody", { name }),
+        confirmText: t("skills.uninstallConfirmOk"),
+        cancelText: t("skills.uninstallConfirmCancel"),
+        destructive: true,
+      });
+      if (!dlg.confirmed) return;
+      setSkillScanMsg(t("skills.uninstalling", { name }));
+      try {
+        const res = await window.agenticxDesktop.uninstallSkill({ name, source });
+        if (res.ok) {
+          setSkillScanMsg(t("skills.uninstalledNamed", { name }));
+          try {
+            await window.agenticxDesktop.refreshSkills();
+          } catch {
+            /* still try load */
+          }
+          const skillsRes = await window.agenticxDesktop.loadSkills();
+          if (skillsRes.ok) setItems(skillsRes.items ?? []);
+          setDetail(null);
+          setExpandedSkillName(null);
+        } else {
+          setSkillScanMsg(t("skills.uninstallFailed", { reason: res.error ?? "unknown" }));
+        }
+      } catch (e) {
+        setSkillScanMsg(t("skills.uninstallFailed", { reason: String(e) }));
+      }
+    },
+    [t],
+  );
+
   const onAddCustomSkillPath = useCallback(() => {
     if (skillScanBusy) return;
     if (skillScanDraftPath !== null) {
@@ -3434,6 +3494,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
             <SkillsLocationSection
               skills={projectSkills}
@@ -3452,6 +3513,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
           </>
         ) : (
@@ -3473,6 +3535,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
             <SkillsLocationSection
               skills={globalSkills}
@@ -3496,6 +3559,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
           </>
         )}

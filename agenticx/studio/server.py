@@ -9076,6 +9076,117 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/registry/install-repo-skill")
+    async def registry_install_repo_skill(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Deterministically install one skill's FULL directory from a GitHub repo tarball."""
+        _check_token(x_agx_desktop_token)
+        repo = str(payload.get("repo", "")).strip()
+        skill = str(payload.get("skill", "")).strip()
+        branch = str(payload.get("branch", "main") or "main").strip() or "main"
+        if not repo or not skill:
+            raise HTTPException(status_code=400, detail="repo and skill are required")
+        try:
+            import asyncio
+
+            from agenticx.skills.import_repo import install_skill_full_from_repo
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            result = await asyncio.to_thread(
+                install_skill_full_from_repo,
+                repo=repo,
+                skill=skill,
+                branch=branch,
+                overwrite=bool(payload.get("overwrite")),
+                acknowledge_high_risk=bool(payload.get("acknowledge_high_risk")),
+            )
+            if result.installed:
+                invalidate_skills_list_cache()
+            body: dict = {
+                "ok": bool(result.installed),
+                "name": skill,
+                "installed": result.installed,
+                "skipped_existing": result.skipped_existing,
+                "errors": result.errors,
+                "rejected_by_guard": result.rejected_by_guard,
+            }
+            if result.scan_summary is not None:
+                body["scan_summary"] = result.scan_summary
+            if result.high_risk_confirm_required:
+                body["error_code"] = "high_risk_confirm_required"
+                body["error"] = "high_risk_confirm_required"
+            elif result.rejected_by_guard:
+                reasons = "; ".join(
+                    str(r.get("reason") or "guard rejected") for r in result.rejected_by_guard
+                )
+                body["error_code"] = "guard_rejected"
+                body["error"] = reasons
+            elif result.errors:
+                body["error_code"] = "install_failed"
+                body["error"] = "; ".join(result.errors)
+            return body
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("registry_install_repo_skill error: %s", exc)
+            return {"ok": False, "name": skill, "error": str(exc), "error_code": "install_exception"}
+
+    @app.post("/api/skills/uninstall")
+    async def skills_uninstall(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Uninstall a locally installed skill directory (one-click remove).
+
+        Safety boundary: only directories under ~/.agenticx/skills/ can be
+        removed — builtin (package) skills, project skills and third-party
+        roots (cursor/claude/...) are never touched.
+        """
+        _check_token(x_agx_desktop_token)
+        name = str(payload.get("name", "")).strip()
+        source = str(payload.get("source", "") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        try:
+            import shutil as _shutil
+
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            candidates = [
+                m for m in SkillBundleLoader().scan() if m.name == name
+            ]
+            if source:
+                candidates = [m for m in candidates if m.source == source]
+            home_skills_root = (Path.home() / ".agenticx" / "skills").resolve()
+            target = None
+            for meta in candidates:
+                try:
+                    resolved = meta.base_dir.resolve()
+                    resolved.relative_to(home_skills_root)
+                except (ValueError, OSError):
+                    continue
+                target = resolved
+                break
+            if target is None:
+                return {
+                    "ok": False,
+                    "name": name,
+                    "error": "skill not found under ~/.agenticx/skills (builtin/project skills cannot be uninstalled here)",
+                }
+            if not (target / "SKILL.md").is_file():
+                return {"ok": False, "name": name, "error": "not a skill directory"}
+            _shutil.rmtree(target)
+            invalidate_skills_list_cache()
+            return {"ok": True, "name": name}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("skills_uninstall error: %s", exc)
+            return {"ok": False, "name": name, "error": str(exc)}
+
     # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
     register_kb_routes(app)
     register_brain_routes(app)

@@ -186,8 +186,72 @@ export function MarketplaceView() {
     }
   };
 
+  /** 推荐位确定性直装:从 GitHub tarball 拉完整技能目录 + guard 扫描,不经过 Meta-Agent。 */
+  const installRecommendedFromRepo = useCallback(
+    async (itemId: string) => {
+      const rec = RECOMMENDED_SKILLS.find((s) => s.id === itemId);
+      const repoInstall = rec?.repo_install;
+      if (!rec || !repoInstall) return;
+      setPromptMsg("");
+      setPromptBusy(true);
+      try {
+        setPromptMsg(ts("skills.repoInstalling", { name: rec.name }));
+        let res = await window.agenticxDesktop.installSkillFromRepo({
+          repo: repoInstall.repo,
+          skill: repoInstall.skill,
+          branch: repoInstall.branch,
+        });
+        if (!res.ok && res.error_code === "high_risk_confirm_required") {
+          // 高危确认:展示扫描发现,用户确认后带 acknowledge 重试(与 registry 安装链路同构)。
+          const findings = (res.scan_summary?.skills ?? [])
+            .flatMap((s) => (s.findings ?? []).map((f) => `${f.pattern_name}: ${f.matched_text?.slice(0, 60) ?? ""}`))
+            .slice(0, 8)
+            .join("\n");
+          const dlg = await window.agenticxDesktop.confirmDialog({
+            title: ts("skills.repoHighRiskTitle"),
+            message: ts("skills.repoHighRiskBody", { name: rec.name }),
+            detail: findings,
+            confirmText: ts("skills.repoHighRiskConfirm"),
+            cancelText: ts("skills.repoHighRiskCancel"),
+            destructive: true,
+          });
+          if (!dlg.confirmed) {
+            setPromptMsg(ts("skills.repoInstallRejected", { name: rec.name, reason: "" }).trim());
+            return;
+          }
+          res = await window.agenticxDesktop.installSkillFromRepo({
+            repo: repoInstall.repo,
+            skill: repoInstall.skill,
+            branch: repoInstall.branch,
+            acknowledgeHighRisk: true,
+          });
+        }
+        if (res.ok) {
+          setPromptMsg(ts("skills.installedNamed", { name: rec.name }));
+          await reloadSkills();
+        } else if ((res.skipped_existing ?? []).length > 0) {
+          setPromptMsg(ts("skills.repoInstallSkipped", { name: rec.name }));
+        } else if (res.error_code === "guard_rejected") {
+          setPromptMsg(ts("skills.repoInstallRejected", { name: rec.name, reason: res.error ?? "" }));
+        } else {
+          setPromptMsg(ts("skills.installFailedReason", { reason: res.error ?? "unknown" }));
+        }
+      } catch (e) {
+        setPromptMsg(ts("skills.installFailedReason", { reason: String(e) }));
+      } finally {
+        setPromptBusy(false);
+      }
+    },
+    [reloadSkills, ts],
+  );
+
   const onInstallRecommended = useCallback(
     (itemId: string | undefined) => {
+      if (!itemId) return;
+      if (RECOMMENDED_SKILLS.some((s) => s.id === itemId && s.repo_install)) {
+        void installRecommendedFromRepo(itemId);
+        return;
+      }
       const prompt =
         itemId === "officecli"
           ? buildOfficeCliInstallPrompt()
@@ -198,7 +262,7 @@ export function MarketplaceView() {
       void runInstallPromptInMetaAgent(prompt);
     },
     // runInstallPromptInMetaAgent 每渲染重建,此处仅读 store action 与纯函数,安全。
-    [addPane, setForwardAutoReply, setMainView, ts],
+    [addPane, setForwardAutoReply, setMainView, ts, installRecommendedFromRepo],
   );
 
   /** 统一卡片安装分派:registry 技能走扫描安装链路,推荐位走 Meta-Agent 提示词。 */

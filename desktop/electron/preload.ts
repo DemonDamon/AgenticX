@@ -998,6 +998,15 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("install-from-registry", args),
   installFromRegistryPreview: async (args: { source: string; name: string }) =>
     ipcRenderer.invoke("install-from-registry-preview", args),
+  installSkillFromRepo: async (args: {
+    repo: string;
+    skill: string;
+    branch?: string;
+    overwrite?: boolean;
+    acknowledgeHighRisk?: boolean;
+  }) => ipcRenderer.invoke("install-repo-skill", args),
+  uninstallSkill: async (args: { name: string; source?: string }) =>
+    ipcRenderer.invoke("uninstall-skill", args),
 
   terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,

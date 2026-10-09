@@ -193,3 +193,18 @@ def test_registry_uninstall_rejects_path_escape(tmp_path: Path):
     client = SkillRegistryClient(registry_url="http://localhost:8321")
     with pytest.raises(ValueError):
         client.uninstall("../../outside", target_dir=tmp_path / "installed")
+
+
+def test_registry_uninstall_removes_multi_file_skill_dir(tmp_path: Path):
+    """Multi-file skills (SKILL.md + references/ + assets) must uninstall cleanly."""
+    client = SkillRegistryClient(registry_url="http://localhost:8321")
+    skill_dir = tmp_path / "installed" / "multi-file-skill"
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: multi-file-skill\n---\n", encoding="utf-8")
+    (skill_dir / "references" / "type-architecture.md").write_text("# Architecture\n", encoding="utf-8")
+    (skill_dir / "assets").mkdir()
+    (skill_dir / "assets" / "example.html").write_text("<html></html>", encoding="utf-8")
+
+    removed = client.uninstall("multi-file-skill", target_dir=tmp_path / "installed")
+    assert removed is True
+    assert not skill_dir.exists()

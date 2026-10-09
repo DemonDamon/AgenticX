@@ -12632,6 +12632,52 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle(
+    "install-repo-skill",
+    async (
+      _event,
+      args: { repo: string; skill: string; branch?: string; overwrite?: boolean; acknowledgeHighRisk?: boolean },
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/install-repo-skill`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify({
+            repo: args.repo,
+            skill: args.skill,
+            branch: args.branch,
+            overwrite: args.overwrite,
+            acknowledge_high_risk: args.acknowledgeHighRisk,
+          }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("uninstall-skill", async (_event, args: { name: string; source?: string }) => {
+    const studioUrl = getStudioUrl();
+    try {
+      const resp = await fetch(`${studioUrl}/api/skills/uninstall`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ name: args.name, source: args.source }),
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("search-registry", async (_event, args: { q: string }) => {
     const studioUrl = getStudioUrl();
     try {

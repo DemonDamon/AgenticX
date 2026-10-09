@@ -154,6 +154,39 @@ def serve_registry(
     server.run()
 
 
+@skills_app.command("install-from-repo")
+def install_from_repo(
+    repo: str = typer.Argument(..., help="GitHub repo as owner/name"),
+    skill: str = typer.Option(..., "--skill", help="Skill directory name under skills/"),
+    branch: str = typer.Option("main", "--branch", help="Repo branch (or tag)"),
+    repo_subdir: str = typer.Option(
+        "skills", "--repo-subdir", help="Repo subdirectory holding skills"
+    ),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing install"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Check without installing"),
+    acknowledge_high_risk: bool = typer.Option(
+        False,
+        "--acknowledge-high-risk",
+        help="Proceed despite a dangerous guard verdict (after reviewing findings)",
+    ),
+) -> None:
+    """Install one skill's full directory from a GitHub repo tarball."""
+    from agenticx.skills.import_repo import install_skill_full_from_repo, result_to_json
+
+    result = install_skill_full_from_repo(
+        repo=repo,
+        skill=skill,
+        branch=branch,
+        repo_subdir=repo_subdir,
+        overwrite=overwrite,
+        dry_run=dry_run,
+        acknowledge_high_risk=acknowledge_high_risk,
+    )
+    console.print(result_to_json(result))
+    if result.errors or result.rejected_by_guard:
+        raise typer.Exit(1)
+
+
 @skills_app.command("uninstall")
 def uninstall_skill(
     name: str = typer.Argument(..., help="Skill name"),
@@ -171,4 +204,4 @@ def uninstall_skill(
     if removed:
         console.print(f"Removed local skill: {name}")
         return
-    console.print(f"Skill not removed (not found or directory not empty): {name}")
+    console.print(f"Skill not removed (not found): {name}")
