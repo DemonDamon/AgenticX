@@ -233,4 +233,10 @@ def make_scorer(name: str, *, model: str = "",
         return (SystemOneScorer(
             base_url=base_url or _DEFAULT_SYSTEMONE_URL, transport=transport),
                 f"startlux:{m}:systemone")
-    raise ValueError(f"未知 scorer '{name}'（mock | openai | startlux）")
+    if name == "trained":
+        if not model:
+            raise ValueError("trained scorer 需要 head 文件路径（--model）")
+        from .decision_head import TrainedHead
+        head = TrainedHead.load(model)   # 加载失败 raise（fail-open 在上层）
+        return head, head.head_id
+    raise ValueError(f"未知 scorer '{name}'（mock | openai | startlux | trained）")

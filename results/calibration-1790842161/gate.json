@@ -1,0 +1,9 @@
+{
+ "accepted": false,
+ "statistic": 6.0,
+ "p_value": 1.0,
+ "mean_baseline": 0.4,
+ "mean_candidate": 0.5,
+ "n_pairs": 5,
+ "reason": "not_significant"
+}

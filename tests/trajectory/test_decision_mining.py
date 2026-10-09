@@ -101,3 +101,61 @@ def test_join_key_convention():
     log = DecisionLog()
     mine_tool_decisions(log, _MSGS, rollout_id="taskA__dry1_42", task_id="taskA")
     assert log.records[0].rollout_id == "taskA__dry1_42"
+
+
+# ---------- SP29d: error_classification ----------
+
+from agenticx.learning.trajectory.decision_mining import (  # noqa: E402
+    ERROR_OPTIONS, error_action, mine_error_decisions)
+
+_ERR_MSGS = [
+    {"role": "user", "content": "fix the build"},
+    {"role": "assistant", "content": "", "tool_calls": [_tc("bash", "1")]},
+    {"role": "tool", "content": "error: AssertionError: expected 1 got 2"},
+    {"role": "assistant", "content": "", "tool_calls": [_tc("bash", "2")]},
+    {"role": "tool", "content": "error: ConnectionTimeout to registry"},
+    {"role": "assistant", "content": "", "tool_calls": [_tc("bash", "3")]},
+    {"role": "tool", "content": "error: something odd happened here"},
+    {"role": "tool", "content": "ok: normal result"},          # 非 error
+    {"role": "assistant", "content": "done"},
+]
+
+
+def test_error_action_rule_mapping():
+    assert error_action("error: AssertionError: expected 1") == "abort"
+    assert error_action("error: ConnectionTimeout to host") == "retry"
+    assert error_action("error: something odd") == "backoff"
+    assert error_action("ok: fine") == ""            # 非 error → 空串
+
+
+def test_mine_error_decisions_points_and_labels():
+    log = DecisionLog()
+    n = mine_error_decisions(log, _ERR_MSGS, rollout_id="r-1", task_id="t-1")
+    assert n == 3                                   # 3 条 error tool result
+    recs = log.records
+    assert [r.turn for r in recs] == [2, 4, 6]      # error 消息索引
+    assert all(r.decision_type == "error_classification" for r in recs)
+    assert all(r.questions[0].options == ERROR_OPTIONS for r in recs)
+    # 规则真值（execution 硬标签）
+    assert [r.label_for("q_err").hard for r in recs] == \
+        ["abort", "retry", "backoff"]
+    # state 压缩与 tool_selection 同版本（纯函数，msg-tail）
+    assert recs[0].state_compressor == state_compressor_version()
+
+
+def test_mine_error_decisions_zero_on_clean():
+    log = DecisionLog()
+    clean = [m for m in _ERR_MSGS if "error" not in str(m.get("content"))[:5]]
+    assert mine_error_decisions(log, clean, rollout_id="r", task_id="t") == 0
+    assert mine_error_decisions(log, [], rollout_id="r", task_id="t") == 0
+
+
+def test_error_and_tool_selection_coexist():
+    """两种决策类型同一 log 共存（各自 decision_type/join 语义独立）。"""
+    log = DecisionLog()
+    mine_tool_decisions(log, _ERR_MSGS, rollout_id="r-1", task_id="t-1")
+    mine_error_decisions(log, _ERR_MSGS, rollout_id="r-1", task_id="t-1")
+    types = {r.decision_type for r in log.records}
+    assert types == {"tool_selection", "error_classification"}
+    # 同 turn 允许共存（不同决策点的视角不同）
+    assert sum(1 for r in log.records if r.turn == 2) == 1

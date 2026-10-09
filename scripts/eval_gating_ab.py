@@ -170,7 +170,8 @@ def main() -> None:
     ap.add_argument("--jobs-dir", default="harness-lab/jobs")
     ap.add_argument("--job-pattern", default="*tb21mix*",
                     help="job 目录 glob（真实 TB 数据是 agenticx-broken-tb21mix-rN）")
-    ap.add_argument("--scorer", choices=("mock", "openai", "startlux"),
+    ap.add_argument("--scorer", choices=("mock", "openai", "startlux",
+                                         "trained"),
                     default="mock")
     ap.add_argument("--base-url", default="")
     ap.add_argument("--model", default="")
@@ -238,16 +239,43 @@ def main() -> None:
                 pass
         print(f"prewarm 完成，缓存 {cached.misses} 条", flush=True)
 
-    # 数据资产：attempt-0 的 continue_stop teacher 标签（backfill_teacher
-    # 走生产路径，标签幂等带 teacher_model 标识）
+    # 数据资产（SP29a 升级）：attempt-0 的 continue_stop 决策点——
+    # teacher 软标签 + execution 真值（attempt 终局）+ rollout 粒度三分
     if args.dump_decisions:
-        from agenticx.rl.decision import DecisionLog, backfill_teacher
+        from agenticx.rl.decision import (DecisionLog, assign_split,
+                                          backfill_outcomes_missing,
+                                          backfill_teacher,
+                                          merge_decision_records)
         n = backfill_teacher(prewarm_records, cached,
                              teacher_model=scorer_id)
-        DecisionLog(records=prewarm_records).save(Path(args.dump_decisions))
-        print(f"teacher 标签数据资产: {args.dump_decisions}"
-              f"（{len(prewarm_records)} 条 continue_stop 决策点，{n} 个标签）",
-              flush=True)
+        dpath = Path(args.dump_decisions)
+        # 幂等扩容：目标已存在则按 (rollout_id, turn) 合并——既有标签/
+        # outcome/split 保留，只追加新 rollout（重跑同源 = 新增 0）
+        existing = (DecisionLog.load(dpath).records if dpath.exists()
+                    else [])
+        records, n_new = merge_decision_records(existing, prewarm_records)
+        # execution 真值：forest attempt-0 终局（passed = reward≥1.0）
+        outcomes = {}
+        for t in forest.trees.values():
+            if t.attempts:
+                a0 = t.attempts[0]
+                outcomes[f"{t.task_id}#0"] = {
+                    "ok": a0.passed,
+                    "task_status": "pass" if a0.passed else "fail",
+                    "note": f"attempt-0 terminal; status={a0.status}; "
+                            f"reward={a0.reward_label}"}
+        n_out = backfill_outcomes_missing(records, outcomes)
+        assign_split(records)          # 确定性三分（重算幂等，split 冻结）
+        DecisionLog(records=records).save(dpath)
+        n_split = {"train": 0, "calib": 0, "test": 0, "": 0}
+        for r in records:
+            n_split[r.split or ""] = n_split.get(r.split or "", 0) + 1
+        print(f"数据资产: {dpath}（{len(records)} 条 continue_stop，"
+              f"新增 {n_new}，teacher 标签 {n}，真值回填 {n_out}，"
+              f"split train/calib/test="
+              f"{n_split['train']}/{n_split['calib']}/{n_split['test']}"
+              + (f"（{n_split['']} 条未分桶）" if n_split[""] else "")
+              + "）", flush=True)
     if args.dump_only:
         print("dump-only 模式：跳过策略评测")
         return
