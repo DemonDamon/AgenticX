@@ -31,6 +31,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 
 from agenticx.cli.agent_tools import (
@@ -2232,6 +2233,123 @@ def _parse_glm_arg_key_value_body(body: str) -> Dict[str, Any]:
             args[key] = value
         pos = value_end + len(_GLM_ARG_VALUE_CLOSE)
     return args
+
+
+def _normalize_stuck_args_in_tool_name(
+    tool_name: str, arguments: Dict[str, Any]
+) -> Tuple[str, Dict[str, Any], Optional[str]]:
+    """Recover name+args when GLM sticks XML/paren fragments into tool name.
+
+    Examples of broken names seen in session 1b7fd6f0:
+      ``bash_exec(command</arg_key><arg_value>ls …</arg_value>``
+
+    Returns ``(name, args, error_message)``. ``error_message`` is set when the
+    name looks malformed but cannot be recovered into a real tool call; callers
+    should surface that as a single recoverable correction instead of looping
+    allowlist rejects.
+    """
+    name = str(tool_name or "").strip()
+    args: Dict[str, Any] = dict(arguments) if isinstance(arguments, dict) else {}
+    if not name:
+        return name, args, None
+    lower = name.lower()
+    has_xml = any(
+        marker in lower
+        for marker in ("<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>")
+    )
+    has_paren_blob = "(" in name
+    if not has_xml and not has_paren_blob:
+        return name, args, None
+    # Exact allowlisted names never need repair.
+    if not has_xml and name.isidentifier():
+        return name, args, None
+
+    base_match = re.match(r"^([A-Za-z_][\w.-]*)", name)
+    if not base_match:
+        return (
+            name,
+            args,
+            (
+                "ERROR: 畸形工具调用：无法解析工具名。"
+                "请把工具名与参数分开：name 仅为工具名（如 bash_exec / skill_manage），"
+                "arguments 为 JSON 对象；不要把 <arg_key>/<arg_value> 或括号参数写进 name。"
+            ),
+        )
+    base = base_match.group(1)
+    remainder = name[len(base) :]
+    # No junk after a clean name → nothing to normalize.
+    if not remainder.strip():
+        return base, args, None
+    # Clean name with only a trailing "(" unfinished — treat as malformed.
+    if not has_xml and remainder.strip() in {"(", "()"}:
+        return base, args, None
+
+    parsed_args: Dict[str, Any] = {}
+    if has_xml or "<" in remainder:
+        body = remainder
+        if body.startswith("("):
+            body = body[1:]
+        if body.endswith(")"):
+            body = body[:-1]
+        body_l = body.lower()
+        if body and not body_l.startswith("<arg_key>"):
+            # sticky key: command</arg_key><arg_value>…
+            body = f"<arg_key>{body}"
+        parsed_args = _parse_glm_arg_key_value_body(body)
+        if not parsed_args:
+            return (
+                base,
+                args,
+                (
+                    f"ERROR: 畸形工具调用：工具名含 XML 参数碎片（以 {base} 开头）。"
+                    "请重新调用：name 只写工具名，arguments 使用 JSON，"
+                    f'例如 {{"name":"{base}","arguments":{{"command":"ls"}}}}。'
+                    "SkillHub 安装请改用 Desktop IPC installFromSkillHub / "
+                    "POST /api/registry/skillhub/install。"
+                ),
+            )
+    elif remainder.startswith("("):
+        inner = remainder[1:]
+        if inner.endswith(")"):
+            inner = inner[:-1]
+        inner = inner.strip()
+        if inner:
+            try:
+                obj = json.loads(inner)
+                if isinstance(obj, dict):
+                    parsed_args = obj
+            except Exception:
+                if base in {"bash_exec", "bash_bg_start"}:
+                    parsed_args = {"command": inner}
+                else:
+                    return (
+                        base,
+                        args,
+                        (
+                            f"ERROR: 畸形工具调用：参数被写进了工具名（{base}(…)）。"
+                            "请把 name 与 arguments 分开，arguments 必须是 JSON 对象。"
+                        ),
+                    )
+    else:
+        # Unrecognized junk after a valid-looking base name.
+        if has_xml or "<" in name or "</" in name:
+            return (
+                base,
+                args,
+                (
+                    f"ERROR: 畸形工具调用：工具名含不可解析碎片（以 {base} 开头）。"
+                    "请只把工具名放在 name，参数放在 arguments JSON。"
+                ),
+            )
+        return name, args, None
+
+    merged = dict(args)
+    for key, value in parsed_args.items():
+        if key not in merged or merged[key] in (None, "", {}, []):
+            merged[key] = value
+    merged = _normalize_file_tool_arg_aliases(base, merged)
+    return base, merged, None
+
 
 
 def _extract_inline_tool_call(
@@ -6624,9 +6742,102 @@ class AgentRuntime:
                     tool_name = ""
                 tool_call_id = str(call.get("id", "")) if isinstance(call, dict) else ""
                 arguments = _parse_tool_arguments(function_obj.get("arguments"))
+                # GLM sometimes sticks <arg_key>/<arg_value> (or paren args) into name.
+                tool_name, arguments, _malformed_tool_err = _normalize_stuck_args_in_tool_name(
+                    tool_name, arguments
+                )
                 dispatch_arguments = dict(arguments)
                 dispatch_arguments["__tool_call_id"] = tool_call_id
                 dispatch_arguments["__agent_id"] = agent_id
+                if _malformed_tool_err:
+                    invalid_message = _malformed_tool_err
+                    emit_name = tool_name or "unknown_tool"
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={
+                            "name": emit_name,
+                            "arguments": arguments,
+                            "tool_call_id": tool_call_id,
+                        },
+                        agent_id=agent_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": emit_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": emit_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": invalid_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": emit_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "name": emit_name,
+                            "result": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    self.loop_detector.record_call(
+                        emit_name,
+                        LoopDetector.args_signature(arguments) or str(raw_tool_name)[:200],
+                        has_progress=False,
+                        result_text=invalid_message,
+                    )
+                    loop_issue = self.loop_detector.check()
+                    if loop_issue is not None and loop_issue.nudge:
+                        self._pending_loop_nudge = loop_issue.nudge
+                    if loop_issue is not None and loop_issue.level == "critical":
+                        terminal_text = (
+                            f"{loop_issue.message} "
+                            "请改用 Desktop IPC installFromSkillHub / "
+                            "POST /api/registry/skillhub/install，不要继续提交畸形工具名。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="loop_halt",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                            extra_final={
+                                "loop_halt": True,
+                                "detector": loop_issue.detector,
+                            },
+                        )
+                        return
+                    _record_tool_turn_outcome("failed")
+                    continue
                 if not tool_name:
                     invalid_message = "模型返回了无效工具调用（缺少 tool name），已忽略本次调用。"
                     tool_name = "unknown_tool"
@@ -6828,6 +7039,36 @@ class AgentRuntime:
                             terminal_reason="plan_mode_tool_violation",
                             agent_id=agent_id,
                             is_system_trigger=_is_system_trigger,
+                        )
+                        return
+                    # Feed allowlist rejects into loop_detector so same-class
+                    # 「不在当前允许列表中」 / malformed-name spam halts ≤3.
+                    self.loop_detector.record_call(
+                        tool_name,
+                        LoopDetector.args_signature(arguments) or str(tool_name)[:200],
+                        has_progress=False,
+                        result_text=denied_message,
+                    )
+                    loop_issue = self.loop_detector.check()
+                    if loop_issue is not None and loop_issue.nudge:
+                        self._pending_loop_nudge = loop_issue.nudge
+                    if loop_issue is not None and loop_issue.level == "critical":
+                        terminal_text = (
+                            f"{loop_issue.message} "
+                            "请改用 Desktop IPC installFromSkillHub / "
+                            "POST /api/registry/skillhub/install，不要继续提交被允许列表拒绝的调用。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="loop_halt",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                            extra_final={
+                                "loop_halt": True,
+                                "detector": loop_issue.detector,
+                            },
                         )
                         return
                     continue

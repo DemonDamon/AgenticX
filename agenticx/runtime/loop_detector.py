@@ -48,6 +48,20 @@ _SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
         "sandbox_tmp_eperm",
         f"沙箱禁止写 /tmp 或系统 mktemp。{_DESKTOP_SKILLHUB_TIP}",
     ),
+    (
+        "allowlist_rejection",
+        f"工具不在当前允许列表（含畸形工具名）。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+    (
+        "malformed_tool_name",
+        f"工具名含畸形 XML/参数碎片（如 <arg_key>）。请把 name 与 arguments 分开；"
+        f"SkillHub 安装请用 Desktop 确定性路径。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+)
+
+# Same-class ids that must group across differing malformed tool-name strings.
+_COLLAPSE_TOOL_NAME_CLASS_IDS = frozenset(
+    {"allowlist_rejection", "malformed_tool_name"}
 )
 
 
@@ -218,7 +232,13 @@ class LoopDetector:
 
     @staticmethod
     def is_guard_rejection(result: str) -> bool:
-        text = str(result or "").strip().lower()
+        raw = str(result or "").strip()
+        text = raw.lower()
+        # Allowlist / malformed-name rejects (may not start with "error").
+        if "不在当前允许列表中" in raw:
+            return True
+        if "<arg_key>" in text or "</arg_value>" in text or "</arg_key>" in text:
+            return True
         if not text.startswith("error"):
             return False
         return "guard rejected" in text or "安全策略拦截" in text
@@ -319,11 +339,16 @@ class LoopDetector:
 
     @staticmethod
     def _same_class_sandbox_match(result_text: Optional[str]) -> Optional[Tuple[str, str]]:
-        """Classify sandbox SkillHub-install failures independent of exact args."""
+        """Classify sandbox / allowlist SkillHub-install failures independent of exact args."""
         text = str(result_text or "")
         lower = text.lower()
-        if not lower:
+        if not lower and not text:
             return None
+        # Prefer allowlist / malformed-name (38× glm stuck-args-in-name case).
+        if "不在当前允许列表中" in text:
+            return _SAME_CLASS_SANDBOX_HINTS[3]
+        if "<arg_key>" in lower or "</arg_value>" in lower or "</arg_key>" in lower:
+            return _SAME_CLASS_SANDBOX_HINTS[4]
         if "path escapes workspace" in lower:
             return _SAME_CLASS_SANDBOX_HINTS[0]
         eperm = (
@@ -371,13 +396,22 @@ class LoopDetector:
             self._same_class_count = 0
             return
         class_id, hint = matched
-        key = (tool_name, class_id)
+        # Collapse varying malformed names (bash_exec(<arg_key>…) vs next blob)
+        # so ≤3 allowlist rejects still trip the same-class halt.
+        if class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS:
+            base_match = re.match(r"^([A-Za-z_][\w.-]*)", str(tool_name or ""))
+            effective_tool = base_match.group(1) if base_match else "malformed_tool"
+            key = ("*", class_id)
+            display_tool = effective_tool
+        else:
+            key = (tool_name, class_id)
+            display_tool = tool_name
         if self._same_class_key == key:
             self._same_class_count += 1
         else:
             self._same_class_key = key
             self._same_class_count = 1
-        self._latest_same_class = (tool_name, class_id, hint, self._same_class_count)
+        self._latest_same_class = (display_tool, class_id, hint, self._same_class_count)
 
     def record_call(
         self,

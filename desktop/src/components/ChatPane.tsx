@@ -214,6 +214,10 @@ import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIc
 import { skillChipLabel } from "../utils/skill-chip-label";
 import { filterAndRankSkills } from "../utils/skill-search";
 import {
+  classifySkillHubInboundInstallPrompt,
+  extractSkillHubInstallSlugFromPrompt,
+} from "../utils/skillhub-install-prompt";
+import {
   COMPOSER_INLINE_CHIP_CLASS,
   composerRefIconInnerHtml,
   resolveComposerRefIconKind,
@@ -10029,6 +10033,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         deliverExpertInstruction(route.avatarId, route.avatarName, route.instruction, {
           autoSend: true,
         });
+        return;
+      }
+    }
+    // Inbound intercept: old SkillHub Meta install copy (paste/history/reuse).
+    // Force Desktop IPC installFromSkillHub; do not open/continue Meta with dead-path text.
+    if (
+      !isContinuation &&
+      !options?.retryAttachments &&
+      attachmentEntries.length === 0 &&
+      text
+    ) {
+      const inbound = classifySkillHubInboundInstallPrompt(text);
+      if (inbound.hit) {
+        lastComposerDraftTextRef.current = "";
+        setComposerText("");
+        setComposerHasText(false);
+        prepareFreshComposerPaneDraft(pane.id);
+        const slug =
+          inbound.slug || extractSkillHubInstallSlugFromPrompt(text) || "";
+        void (async () => {
+          const installFn = window.agenticxDesktop?.installFromSkillHub;
+          if (slug && typeof installFn === "function") {
+            try {
+              const res = await installFn.call(window.agenticxDesktop, { slug });
+              if (res?.ok) {
+                try {
+                  await window.agenticxDesktop.refreshSkills?.();
+                } catch {
+                  /* ignore refresh errors */
+                }
+                setStallHintToast(
+                  `已拦截旧版 SkillHub 安装指令，并确定性安装 ${slug}`,
+                );
+                return;
+              }
+              setStallHintToast(
+                `已拦截旧版 SkillHub 安装指令；确定性安装失败：${String(res?.error || "failed").slice(0, 120)}`,
+              );
+              return;
+            } catch (e) {
+              setStallHintToast(
+                `已拦截旧版 SkillHub 安装指令；安装异常：${String(e).slice(0, 120)}`,
+              );
+              return;
+            }
+          }
+          setStallHintToast(
+            inbound.reason.slice(0, 160) ||
+              "已拦截旧版 SkillHub 安装指令；请改用 Settings → SkillHub 市场安装",
+          );
+        })();
         return;
       }
     }

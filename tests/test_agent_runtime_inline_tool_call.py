@@ -7,6 +7,7 @@ Author: Damon Li
 from agenticx.runtime.agent_runtime import (
     _extract_inline_tool_call,
     _has_unexecuted_inline_tool_markup,
+    _normalize_stuck_args_in_tool_name,
     _sanitize_structured_assistant_text,
     _strip_inline_tool_markup,
 )
@@ -213,3 +214,34 @@ def test_extract_inline_tool_call_keeps_real_todo_write_json() -> None:
 def test_extract_inline_tool_call_keeps_empty_check_resources() -> None:
     parsed = _extract_inline_tool_call("print(check_resources())", {"check_resources"})
     assert parsed == {"name": "check_resources", "arguments": {}}
+
+
+
+def test_normalize_stuck_args_in_tool_name_glm_xml() -> None:
+    """GLM stuck XML args into name → real bash_exec + arguments dict."""
+    raw = (
+        "bash_exec(command</arg_key><arg_value>"
+        "ls /Users/damon/.agenticx/skills</arg_value>"
+    )
+    name, args, err = _normalize_stuck_args_in_tool_name(raw, {})
+    assert err is None
+    assert name == "bash_exec"
+    assert args.get("command") == "ls /Users/damon/.agenticx/skills"
+
+
+def test_normalize_stuck_args_recoverable_reject_when_unparseable() -> None:
+    raw = "bash_exec(command</arg_key><arg_value>"
+    name, args, err = _normalize_stuck_args_in_tool_name(raw, {})
+    assert name == "bash_exec"
+    assert err is not None
+    assert "畸形工具调用" in err
+    assert "arguments" in err.lower() or "JSON" in err
+
+
+def test_normalize_stuck_args_leaves_clean_name_alone() -> None:
+    name, args, err = _normalize_stuck_args_in_tool_name(
+        "bash_exec", {"command": "echo hi"}
+    )
+    assert err is None
+    assert name == "bash_exec"
+    assert args == {"command": "echo hi"}

@@ -2890,6 +2890,93 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_automation_session = active_avatar_id.startswith("automation:")
+        # Inbound intercept: refuse old SkillHub Meta install copy (paste/history reuse)
+        # and force deterministic skillhub/install instead of dead-path Meta loops.
+        try:
+            from agenticx.extensions.skillhub_install_guard import (
+                classify_skillhub_inbound_install_prompt,
+            )
+
+            _inbound = classify_skillhub_inbound_install_prompt(
+                str(getattr(payload, "user_input", "") or "")
+            )
+        except Exception:
+            _inbound = {"hit": False}
+        if _inbound.get("hit"):
+            _slug = str(_inbound.get("slug") or "").strip()
+            _reason = str(_inbound.get("reason") or "").strip()
+
+            async def _skillhub_intercept_stream() -> AsyncGenerator[str, None]:
+                msg = _reason
+                install_ok = False
+                if _slug:
+                    try:
+                        from agenticx.extensions.skillhub_adapter import (
+                            install_skillhub_skill,
+                        )
+                        from agenticx.studio.skills_list_api import (
+                            invalidate_skills_list_cache,
+                        )
+
+                        result = await asyncio.to_thread(install_skillhub_skill, _slug)
+                        if isinstance(result, dict) and result.get("ok"):
+                            try:
+                                invalidate_skills_list_cache()
+                            except Exception:
+                                pass
+                            install_ok = True
+                            path = result.get("installed_path") or f"registry/{_slug}"
+                            msg = (
+                                f"已拦截旧版 SkillHub Meta 安装提示词，并改为确定性安装「{_slug}」成功 → {path}。"
+                                "未启动 Meta 死路安装。"
+                            )
+                        else:
+                            err = (
+                                (result or {}).get("error")
+                                if isinstance(result, dict)
+                                else "skillhub install failed"
+                            )
+                            msg = (
+                                f"已拦截旧版 SkillHub Meta 安装提示词。确定性安装「{_slug}」失败：{err}。"
+                                "请改用 Settings → SkillHub 市场（installFromSkillHub / "
+                                "POST /api/registry/skillhub/install），不要粘贴旧指令到 Meta。"
+                            )
+                    except Exception as exc:
+                        msg = (
+                            f"已拦截旧版 SkillHub Meta 安装提示词。确定性安装「{_slug}」异常：{exc}。"
+                            "请改用 Settings → SkillHub 市场确定性安装。"
+                        )
+                else:
+                    msg = (
+                        f"{_reason} "
+                        "未能从提示词解析技能 slug；请打开 Settings → SkillHub 市场直接安装。"
+                    )
+                final = SseEvent(
+                    type="final",
+                    data={
+                        "text": msg,
+                        "skillhub_inbound_intercept": True,
+                        "install_ok": install_ok,
+                        "slug": _slug or None,
+                        "terminal_reason": "skillhub_inbound_intercept",
+                    },
+                )
+                yield f"data: {json.dumps(final.model_dump(), ensure_ascii=False)}\n\n"
+                done_payload = {
+                    "type": "done",
+                    "data": {
+                        "reason": "skillhub_inbound_intercept",
+                        "install_ok": install_ok,
+                        "slug": _slug or None,
+                    },
+                }
+                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(
+                _skillhub_intercept_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
         from agenticx.runtime.plan_mode import apply_turn_intent_to_session, filter_tools_for_turn_intent
 
         setattr(session, "session_id", payload.session_id)

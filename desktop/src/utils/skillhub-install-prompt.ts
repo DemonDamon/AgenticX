@@ -5,6 +5,7 @@ const SKILLHUB_INSTALL_DOC =
 /**
  * Substrings that must never appear in the Meta-agent fallback prompt.
  * Matches the old Settings→Meta dead path (Studio registry install + store-first).
+ * Also used to intercept paste/history reuse of the same copy on any inbound path.
  */
 export const SKILLHUB_AGENT_PROMPT_FORBIDDEN: readonly string[] = [
   "POST /api/registry/install",
@@ -12,6 +13,9 @@ export const SKILLHUB_AGENT_PROMPT_FORBIDDEN: readonly string[] = [
   "请先检查是否已安装 SkillHub 商店",
   "优先调用本机 Studio API",
   "根据 https://skillhub-", // old: fetch install doc then install the store
+  "请先装商店",
+  "安装 SkillHub 商店",
+  "先检查是否已安装 SkillHub",
 ];
 
 /**
@@ -38,6 +42,64 @@ export function assertSafeSkillHubAgentInstallPrompt(text: string): void {
       );
     }
   }
+}
+
+/** True when text matches old SkillHub Meta dead-path fingerprints. */
+export function isForbiddenSkillHubAgentInstallPrompt(text: string): boolean {
+  try {
+    assertSafeSkillHubAgentInstallPrompt(text);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Best-effort slug extraction from old/new SkillHub install copy
+ * (e.g. 「archify」 or skills_store_cli … install archify).
+ */
+export function extractSkillHubInstallSlugFromPrompt(text: string): string | null {
+  const body = String(text || "");
+  const patterns: RegExp[] = [
+    /SkillHub\s*第三方技能[「「"']([^」」"']+)[」」"']/,
+    /请安装\s*SkillHub[^「「"'\n]{0,40}[「「"']([^」」"']+)[」」"']/,
+    /skills_store_cli\.py[^\n]*\binstall\s+(@?[\w./-]+)/i,
+    /installFromSkillHub[^\n]{0,40}\b([A-Za-z0-9@_/.-]+)/i,
+    /skillhub\/install[^\n]{0,80}["']slug["']\s*:\s*["']([^"']+)["']/i,
+  ];
+  for (const re of patterns) {
+    const m = body.match(re);
+    const slug = (m?.[1] || "").trim();
+    if (slug && slug.toLowerCase() !== "skillhub") {
+      return slug;
+    }
+  }
+  return null;
+}
+
+export type SkillHubInboundIntercept =
+  | { hit: false }
+  | {
+      hit: true;
+      slug: string | null;
+      reason: string;
+    };
+
+/**
+ * Classify inbound user/agent-start text. On hit, caller must NOT open/continue
+ * Meta with that prompt; force Desktop IPC / skillhub/install instead.
+ */
+export function classifySkillHubInboundInstallPrompt(text: string): SkillHubInboundIntercept {
+  const body = String(text || "");
+  if (!body.trim()) return { hit: false };
+  if (!isForbiddenSkillHubAgentInstallPrompt(body)) return { hit: false };
+  const slug = extractSkillHubInstallSlugFromPrompt(body);
+  return {
+    hit: true,
+    slug,
+    reason:
+      "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install 或先装商店文案）。请改用 Desktop 确定性安装。",
+  };
 }
 
 /**

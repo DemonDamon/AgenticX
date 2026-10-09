@@ -79,7 +79,12 @@ import {
 } from "../data/recommended-skills";
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
-import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import {
+  assertSafeSkillHubAgentInstallPrompt,
+  buildSkillHubAgentInstallPrompt,
+  classifySkillHubInboundInstallPrompt,
+  extractSkillHubInstallSlugFromPrompt,
+} from "../utils/skillhub-install-prompt";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
@@ -2914,6 +2919,53 @@ function SkillsTab() {
       setSkillhubMsg("");
       setInstallPromptBusy(true);
       try {
+        // Refuse old dead-path copy on any Meta seeding path (not only builder).
+        const inbound = classifySkillHubInboundInstallPrompt(text);
+        if (inbound.hit) {
+          const slug = inbound.slug || extractSkillHubInstallSlugFromPrompt(text);
+          if (slug) {
+            const installFn = window.agenticxDesktop?.installFromSkillHub;
+            if (typeof installFn === "function") {
+              try {
+                const res = await installFn.call(window.agenticxDesktop, { slug });
+                if (res?.ok) {
+                  setSkillhubMsg(
+                    `已拦截旧版安装提示词，并确定性安装 ${slug} → ${res.installed_path || "registry/" + slug}`,
+                  );
+                  try {
+                    await reloadSkillsAfterMarketInstall(slug);
+                  } catch {
+                    try {
+                      await window.agenticxDesktop.refreshSkills?.();
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                  return;
+                }
+                setSkillhubMsg(
+                  `已拦截旧版安装提示词；确定性安装失败：${String(res?.error || "failed")}。请重试 Settings → SkillHub 安装。`,
+                );
+                return;
+              } catch (e) {
+                setSkillhubMsg(
+                  `已拦截旧版安装提示词；确定性安装异常：${String(e)}。请重试 Settings → SkillHub 安装。`,
+                );
+                return;
+              }
+            }
+          }
+          setSkillhubMsg(inbound.reason);
+          return;
+        }
+        try {
+          assertSafeSkillHubAgentInstallPrompt(text);
+        } catch (assertErr) {
+          setSkillhubMsg(
+            `已拒绝不安全的 agent 安装提示词（${String(assertErr)}）。请使用 Desktop 确定性安装。`,
+          );
+          return;
+        }
         const created = await window.agenticxDesktop.createSession({});
         if (!created.ok || !created.session_id) {
           const err = created.error ?? t("skills.createMetaFailed");

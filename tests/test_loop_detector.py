@@ -299,3 +299,35 @@ def test_same_args_same_error_still_works_alongside_same_class() -> None:
     result = detector.check()
     assert result is not None
     assert result.detector == "same_args_same_error"
+
+
+def test_allowlist_rejection_recorded_and_halts() -> None:
+    """Allowlist rejects (incl. malformed names) must feed loop_detector and halt ≤3."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    for i in range(3):
+        name = f"bash_exec(command</arg_key><arg_value>ls {i}</arg_value>"
+        msg = f"工具 '{name}' 不在当前允许列表中，已拒绝执行。"
+        detector.record_call(name, f'{{"i":{i}}}', has_progress=False, result_text=msg)
+        result = detector.check()
+        if i == 0:
+            assert result is None
+        elif i == 1:
+            assert result is not None
+            assert result.detector == "same_class_sandbox_error"
+            assert result.level == "warning"
+            assert result.nudge and "Desktop" in result.nudge
+        else:
+            assert result is not None
+            assert result.level == "critical"
+            assert "allowlist_rejection" in result.message
+            assert result.nudge and "installFromSkillHub" in result.nudge
+
+
+def test_is_guard_rejection_recognizes_allowlist_and_arg_key() -> None:
+    assert LoopDetector.is_guard_rejection(
+        "工具 'bash_exec' 不在当前允许列表中，已拒绝执行。"
+    )
+    assert LoopDetector.is_guard_rejection(
+        "ERROR: name has <arg_key>fragment</arg_value>"
+    )
+    assert not LoopDetector.is_guard_rejection("ok: listed files")
