@@ -13281,6 +13281,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!forwardAutoReply) return;
     if (forwardAutoReply.paneId !== paneId) return;
     if ((pane.sessionId || "").trim() !== forwardAutoReply.sessionId.trim()) return;
+    // StrictMode re-runs this effect with the same closure; only the first run may send.
+    if (useAppStore.getState().forwardAutoReply !== forwardAutoReply) return;
     useAppStore.getState().setForwardAutoReply(null);
     void sendChatRef.current(forwardAutoReply.text, {
       lockedSessionId: forwardAutoReply.sessionId,

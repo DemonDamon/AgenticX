@@ -81,7 +81,8 @@ import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import {
   assertSafeSkillHubAgentInstallPrompt,
-  buildSkillHubAgentInstallPrompt,
+  buildClawHubChatInstallPrompt,
+  buildSkillHubChatInstallPrompt,
   buildSkillHubDetailUrl,
   classifySkillHubInboundInstallPrompt,
   extractSkillHubInstallSlugFromPrompt,
@@ -898,6 +899,8 @@ type RegistrySearchItem = {
   author: string;
   source: string;
   source_type: string;
+  /** ClawHub publisher handle; required to install slugs shared by several publishers. */
+  owner?: string;
 };
 
 /** Matches SkillHubSearchResult.items from preload / agx serve. */
@@ -3007,63 +3010,10 @@ function SkillsTab() {
     [addPane, setForwardAutoReply, closeSettings],
   );
 
-  const onSkillHubMarketInstall = (slug: string) => {
-    const name = slug.trim();
-    if (!name) return;
-    void (async () => {
-      setSkillhubMsg("");
-      setInstallPromptBusy(true);
-      const runAgentFallback = async (reason: string) => {
-        let prompt = "";
-        try {
-          prompt = buildSkillHubAgentInstallPrompt(name);
-        } catch (assertErr) {
-          setSkillhubMsg(
-            `已拒绝不安全的 agent 安装提示词（${String(assertErr)}）。请使用 Desktop 确定性安装。`,
-          );
-          return;
-        }
-        if (!prompt.trim()) return;
-        setSkillhubMsg(reason);
-        await runInstallPromptInMetaAgent(prompt);
-      };
-      try {
-        const installFn = window.agenticxDesktop?.installFromSkillHub;
-        if (typeof installFn !== "function") {
-          await runAgentFallback(
-            "本机缺少 installFromSkillHub IPC；改为 agent 回退安装（最短 CLI 路径）…",
-          );
-          return;
-        }
-        // Prefer deterministic Desktop IPC / Studio skillhub install; agent only on explicit failure.
-        const res = await installFn.call(window.agenticxDesktop, { slug: name });
-        if (res?.ok) {
-          setSkillhubMsg(`已安装 ${name} → ${res.installed_path || "registry/" + name}`);
-          try {
-            await reloadSkillsAfterMarketInstall(name);
-          } catch {
-            try {
-              await window.agenticxDesktop.refreshSkills?.();
-            } catch {
-              /* ignore refresh errors */
-            }
-          }
-          return;
-        }
-        const err = [res?.error_code, res?.error]
-          .filter((x) => Boolean(x && String(x).trim()))
-          .join(": ") || "skillhub install failed";
-        if (res?.fallback_to_agent === false) {
-          setSkillhubMsg(`确定性安装失败：${err}（已禁用 agent 回退）`);
-          return;
-        }
-        await runAgentFallback(`确定性安装失败：${err}；改为 agent 回退安装…`);
-      } catch (e) {
-        await runAgentFallback(`确定性安装异常：${String(e)}；改为 agent 回退安装…`);
-      } finally {
-        setInstallPromptBusy(false);
-      }
-    })();
+  const onSkillHubMarketInstall = (ref: string) => {
+    const prompt = buildSkillHubChatInstallPrompt(ref);
+    if (!prompt) return;
+    void runInstallPromptInMetaAgent(prompt);
   };
 
   const onRecommendedSkillInstall = (skillId: string) => {
@@ -3153,113 +3103,10 @@ function SkillsTab() {
   };
 
   const onMarketInstall = async (item: RegistrySearchItem) => {
-    const key = `${item.source}:${item.name}`;
-    if (registryInstallBusy && marketInstallingKey && marketInstallingKey !== key) {
-      const exists = marketInstallQueueRef.current.some(
-        (q) => q.source === item.source && q.name === item.name
-      );
-      if (!exists) {
-        marketInstallQueueRef.current.push(item);
-        setMarketQueuedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
-      }
-      setMarketMsg(t("skills.installQueued", { current: marketInstallingKey.split(":")[1], queued: item.name }));
-      return;
-    }
-    setMarketQueuedKeys((prev) => prev.filter((k) => k !== key));
-    marketInstallQueueRef.current = marketInstallQueueRef.current.filter(
-      (q) => !(q.source === item.source && q.name === item.name)
-    );
-    setMarketInstallingKey(key);
-    setRegistryInstallBusy(true);
-    setMarketNeedsConfirmNonHigh(false);
-    setMarketNeedsConfirmHigh(false);
-    setMarketPending(null);
-    setMarketMsg(t("skills.pulling", { name: item.name }));
-    let pauseQueue = false;
-    try {
-      const prev = await window.agenticxDesktop.installFromRegistryPreview({
-        source: item.source,
-        name: item.name,
-      });
-      if (!prev.ok) {
-        const rawErr = String(prev.error ?? t("commonSettings.unknownError"));
-        const is429 = rawErr.includes("rate limited (429)") || rawErr.includes("Too Many Requests");
-        if (is429) {
-          const secMatch = rawErr.match(/about (\d+)s/);
-          const waitSec = secMatch ? Math.min(Number(secMatch[1]), 30) : 10;
-          setMarketMsg(t("skills.rateLimited", { seconds: waitSec }));
-          await new Promise((r) => setTimeout(r, waitSec * 1000));
-          setMarketMsg(t("skills.repulling", { name: item.name }));
-          const retry = await window.agenticxDesktop.installFromRegistryPreview({
-            source: item.source,
-            name: item.name,
-          });
-          if (!retry.ok) {
-            const retryErr = String(retry.error ?? t("commonSettings.unknownError"));
-            setMarketMsg(t("skills.pullFailed", { reason: retryErr }));
-            return;
-          }
-          Object.assign(prev, retry);
-        } else if (rawErr.includes("fetch failed") || rawErr.includes("Failed to fetch skill")) {
-          setMarketMsg(t("skills.pullFailed", { reason: rawErr }));
-          return;
-        } else {
-          setMarketMsg(t("skills.scanFailed", { reason: rawErr }));
-          return;
-        }
-      }
-      if (prev.scan) {
-        setMarketMsg(formatSkillScanSummary(prev.scan, t));
-      }
-
-      const res = await window.agenticxDesktop.installFromRegistry({
-        source: item.source,
-        name: item.name,
-      });
-      if (res.ok) {
-        setMarketMsg(
-          formatInstallDoneMsg(t("skills.installedNamed", { name: item.name }), res.scan_summary ?? prev.scan, t),
-        );
-        await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
-        return;
-      }
-      if (res.error_code === "non_high_risk_confirm_required") {
-        setMarketPending(item);
-        setMarketNeedsConfirmNonHigh(true);
-        pauseQueue = true;
-        if (res.scan_summary) {
-          setMarketMsg(t("skills.confirmThenWriteWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
-        } else {
-          setMarketMsg(t("skills.confirmThenWrite"));
-        }
-        return;
-      }
-      if (res.error_code === "high_risk_confirm_required") {
-        setMarketPending(item);
-        setMarketNeedsConfirmHigh(true);
-        pauseQueue = true;
-        if (res.scan_summary) {
-          setMarketMsg(t("skills.highRiskConfirmWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
-        } else {
-          setMarketMsg(t("skills.highRiskConfirm"));
-        }
-        return;
-      }
-      setMarketMsg(t("skills.installFailedReason", { reason: res.error ?? t("commonSettings.unknownError") }));
-    } catch (e) {
-      setMarketMsg(String(e));
-    } finally {
-      setRegistryInstallBusy(false);
-      setMarketInstallingKey(null);
-      if (!pauseQueue && marketInstallQueueRef.current.length > 0) {
-        const next = marketInstallQueueRef.current.shift()!;
-        const nextKey = `${next.source}:${next.name}`;
-        setMarketQueuedKeys((prev) => prev.filter((k) => k !== nextKey));
-        setTimeout(() => {
-          void onMarketInstall(next);
-        }, 0);
-      }
-    }
+    const owner = (item.owner || "").trim();
+    const prompt = buildClawHubChatInstallPrompt(owner ? `@${owner}/${item.name}` : item.name, item.source);
+    if (!prompt) return;
+    await runInstallPromptInMetaAgent(prompt);
   };
 
   const onConfirmMarketInstall = async (kind: "non_high" | "high") => {
@@ -3994,7 +3841,7 @@ function SkillsTab() {
                           type="button"
                           className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
                           disabled={installPromptBusy}
-                          onClick={() => onSkillHubMarketInstall(item.slug)}
+                          onClick={() => onSkillHubMarketInstall(item.canonical || item.slug)}
                         >
                           {t("tools.install")}
                         </button>

@@ -179,6 +179,24 @@ export function buildSkillHubAgentInstallPrompt(skillSlug: string): string {
   return prompt;
 }
 
+/** SkillHub's own "copy prompt" wording; the conversation agent answers it with skillhub_install. */
+export function buildSkillHubChatInstallPrompt(ref: string): string {
+  const raw = String(ref || "").trim();
+  if (!raw) return "";
+  const canonical = raw.startsWith("@") || !raw.includes("/") ? raw : `@${raw}`;
+  return `请根据 https://skillhub.cn/install/skillhub.md，安装 ${canonical}。`;
+}
+
+/** Settings ClawHub market → conversational install (agent answers with clawhub_install). */
+export function buildClawHubChatInstallPrompt(name: string, source?: string | null): string {
+  const skill = String(name || "").trim();
+  if (!skill) return "";
+  const src = String(source || "").trim();
+  return src
+    ? `请从 ClawHub 安装技能「${skill}」（市场来源：${src}）。`
+    : `请从 ClawHub 安装技能「${skill}」。`;
+}
+
 /**
  * SkillHub public detail page URL.
  *

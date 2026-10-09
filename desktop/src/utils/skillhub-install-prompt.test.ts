@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   assertSafeSkillHubAgentInstallPrompt,
+  buildClawHubChatInstallPrompt,
   buildSkillHubAgentInstallPrompt,
+  buildSkillHubChatInstallPrompt,
   buildSkillHubDetailUrl,
   classifySkillHubInboundInstallPrompt,
   extractSkillHubInstallSlugFromPrompt,
@@ -147,5 +149,25 @@ describe("chat @ns/slug does NOT force IPC install", () => {
       expect(hit.kind).toBe("forbidden_meta");
       expect(hit.slug).toBe("archify");
     }
+  });
+});
+
+describe("chat install prompts (Settings market → conversation)", () => {
+  it("uses SkillHub copy-prompt wording with canonical @ns/slug", () => {
+    const p = buildSkillHubChatInstallPrompt("@user_cb5e2841/openclaw-v3");
+    expect(p).toBe("请根据 https://skillhub.cn/install/skillhub.md，安装 @user_cb5e2841/openclaw-v3。");
+    expect(buildSkillHubChatInstallPrompt("indiv-seafish/archify")).toContain("@indiv-seafish/archify");
+    expect(buildSkillHubChatInstallPrompt("archify")).toContain("安装 archify。");
+    expect(buildSkillHubChatInstallPrompt("  ")).toBe("");
+    expect(() => assertSafeSkillHubAgentInstallPrompt(p)).not.toThrow();
+    expect(classifySkillHubInboundInstallPrompt(p).hit).toBe(false);
+  });
+
+  it("names the ClawHub skill and source", () => {
+    expect(buildClawHubChatInstallPrompt("paintforge", "clawhub")).toBe(
+      "请从 ClawHub 安装技能「paintforge」（市场来源：clawhub）。",
+    );
+    expect(buildClawHubChatInstallPrompt("archify")).toBe("请从 ClawHub 安装技能「archify」。");
+    expect(buildClawHubChatInstallPrompt("")).toBe("");
   });
 });

@@ -478,6 +478,7 @@ type RegistrySearchItem = {
   source: string;
   source_type: string;
   install_hint: string;
+  owner?: string;
 };
 type RegistrySearchResult = {
   ok: boolean;
