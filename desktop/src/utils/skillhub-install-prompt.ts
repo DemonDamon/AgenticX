@@ -133,3 +133,38 @@ export function buildSkillHubAgentInstallPrompt(skillSlug: string): string {
   assertSafeSkillHubAgentInstallPrompt(prompt);
   return prompt;
 }
+
+/**
+ * SkillHub public detail page URL.
+ *
+ * Rule (confirmed against live skillhub.cn SPA):
+ *   https://skillhub.tencent.com/skills/{namespace}/{slug}
+ * skillhub.tencent.com redirects to skillhub.cn with the same path.
+ * Namespace-less fallback (generic hub page, not a skill detail):
+ *   https://skillhub.tencent.com/skills/{slug}
+ *
+ * Example: namespace=indiv-seafish, slug=archify
+ *   → https://skillhub.tencent.com/skills/indiv-seafish/archify
+ */
+export function buildSkillHubDetailUrl(input: {
+  slug: string;
+  namespace?: string | null;
+}): string {
+  const slug = String(input?.slug ?? "").trim().replace(/^@/, "");
+  if (!slug) return "https://skillhub.tencent.com/";
+  // Allow callers to pass canonical "@ns/slug" or "ns/slug" as slug alone.
+  const slash = slug.indexOf("/");
+  let ns = String(input?.namespace ?? "").trim().replace(/^@/, "");
+  let bare = slug;
+  if (!ns && slash > 0) {
+    ns = slug.slice(0, slash).trim();
+    bare = slug.slice(slash + 1).trim();
+  }
+  if (!bare) return "https://skillhub.tencent.com/";
+  const encNs = ns ? encodeURIComponent(ns) : "";
+  const encSlug = encodeURIComponent(bare);
+  if (encNs) {
+    return `https://skillhub.tencent.com/skills/${encNs}/${encSlug}`;
+  }
+  return `https://skillhub.tencent.com/skills/${encSlug}`;
+}

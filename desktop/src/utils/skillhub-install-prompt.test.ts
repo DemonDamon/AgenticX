@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertSafeSkillHubAgentInstallPrompt,
   buildSkillHubAgentInstallPrompt,
+  buildSkillHubDetailUrl,
   classifySkillHubInboundInstallPrompt,
   extractSkillHubInstallSlugFromPrompt,
   isForbiddenSkillHubAgentInstallPrompt,
@@ -91,3 +92,28 @@ describe("inbound intercept of old SkillHub install copy", () => {
     expect(classifySkillHubInboundInstallPrompt("帮我写个 hello world").hit).toBe(false);
   });
 });
+
+describe("buildSkillHubDetailUrl", () => {
+  it("builds namespaced detail URL for archify / indiv-seafish", () => {
+    expect(
+      buildSkillHubDetailUrl({ slug: "archify", namespace: "indiv-seafish" }),
+    ).toBe("https://skillhub.tencent.com/skills/indiv-seafish/archify");
+  });
+
+  it("falls back to slug-only path when namespace missing", () => {
+    expect(buildSkillHubDetailUrl({ slug: "archify" })).toBe(
+      "https://skillhub.tencent.com/skills/archify",
+    );
+  });
+
+  it("parses ns/slug when namespace omitted", () => {
+    expect(buildSkillHubDetailUrl({ slug: "indiv-seafish/archify" })).toBe(
+      "https://skillhub.tencent.com/skills/indiv-seafish/archify",
+    );
+  });
+
+  it("returns hub root for empty slug", () => {
+    expect(buildSkillHubDetailUrl({ slug: "  " })).toBe("https://skillhub.tencent.com/");
+  });
+});
+

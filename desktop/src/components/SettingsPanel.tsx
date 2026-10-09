@@ -82,9 +82,11 @@ import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import {
   assertSafeSkillHubAgentInstallPrompt,
   buildSkillHubAgentInstallPrompt,
+  buildSkillHubDetailUrl,
   classifySkillHubInboundInstallPrompt,
   extractSkillHubInstallSlugFromPrompt,
 } from "../utils/skillhub-install-prompt";
+import { openExternalUrl } from "../utils/open-external";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
@@ -906,6 +908,10 @@ type SkillHubRow = {
   version: string;
   author: string;
   downloads?: string | number;
+  /** Community handle (e.g. indiv-seafish); required for correct detail URL. */
+  namespace?: string;
+  /** Canonical @ns/slug when present. */
+  canonical?: string;
 };
 
 type Props = {
@@ -3093,6 +3099,8 @@ function SkillsTab() {
         const r = row as SkillHubRow;
         const slug = String(r.slug || r.name || "").trim();
         if (!slug) continue;
+        const namespace = String((r as { namespace?: string }).namespace || "").trim();
+        const canonical = String((r as { canonical?: string }).canonical || "").trim();
         rows.push({
           slug,
           name: String(r.name || slug).trim() || slug,
@@ -3100,6 +3108,8 @@ function SkillsTab() {
           version: String(r.version || "latest"),
           author: String(r.author || "unknown"),
           downloads: r.downloads,
+          ...(namespace ? { namespace } : {}),
+          ...(canonical ? { canonical } : {}),
         });
       }
       setSkillhubResults(rows);
@@ -3892,7 +3902,7 @@ function SkillsTab() {
                 <button
                   type="button"
                   className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
-                  onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
+                  onClick={() => openExternalUrl("https://skillhub.tencent.com/")}
                 >
                   skillhub.tencent.com ↗
                 </button>
@@ -3992,10 +4002,11 @@ function SkillsTab() {
                           type="button"
                           className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
                           onClick={() =>
-                            window.open(
-                              `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
-                              "_blank",
-                              "noopener,noreferrer",
+                            openExternalUrl(
+                              buildSkillHubDetailUrl({
+                                slug: item.slug,
+                                namespace: item.namespace,
+                              }),
                             )
                           }
                         >
