@@ -904,3 +904,5 @@ git commit -m "feat(rl): M4 smoke — replay-shaped GRPO end-to-end on real harb
 | 真回放分数 | 用 SP6 evaluate_policy 在 TrialForest 上算 per-task 分数替换占位 | 数据源：harness-lab jobs 轨迹 → forest |
 | 多 episode 训练 | n_episodes>1 per task（组归一化生效）+ 数十步 | 学习曲线实验（论文 pilot） |
 | GPU 机 | vLLM serve 替代 stdlib server / 多卡 | M5 |
+| **轨迹纯净度门** | hints 注入段/经验回放段样本打标 → loss mask 或降权；每轮统计污染率（干预段 token 占比）tracked metric | RSR (arXiv:2610.02826) 警示：29.6% harness 私有命令直接训练 → TB2 倒退 7.9pp。随 SP24 TokenRollout 的 response_mask + generation_spans 一起实现 |
+| **经验库泄漏审计** | 回放条目晋升前跑"公开接口可复现"检查（critic 式审查或新沙箱重解） | RSR critic 的飞轮版；接在 SP22 hints 门控同一挂载点 |

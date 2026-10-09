@@ -60,6 +60,17 @@ GRPO 训练，TB 2.0 pass@1 仅 40%→43%）。我们研究**权重层 RSI**：
 - **AIDE²**（arXiv:2609.26457）：harness 层 RSI 的标杆。其 (a) public/private
   信号分离、(b) 固定预算评估、(c) 统计性接受判据，全部移植进本工作的管线。
   其 related work 明确将权重层自适应列为 open direction。
+- **RSR**（Recursive Self-Rewrite, arXiv:2610.02826, 腾讯混元）：与本工作最近的
+  邻居——同样主张"经验→权重"，但为**一次性离线翻译管道**：多 harness 采集
+  成功轨迹 → planner 提炼 runbook → critic 泄漏审计 → 通用 harness 新沙箱
+  重解 → 干净轨迹 SFT（2,001→11,094 条，TB2 pass@3 57%→74.2%）。其核心
+  警示：源轨迹中 29.6% 的状态管理命令等 harness 私有行为若直接训练，
+  TB2 **倒退 7.9pp**（dead-end 打转行为）。**与本工作三点差异**：
+  (a) RSR 是开环翻译（无轮次递归），我们是闭环飞轮（权重改进→更强
+  rollout→更多经验→再改进）；(b) RSR 用离线 SFT，我们用 on-policy GRPO
+  （模型采样时即在训练 harness 内，分布错位天然更小，但 hints 注入段与
+  经验回放段仍需纯净度控制，见 §5.5）；(c) RSR 无晋升纪律，我们的轮次
+  晋升统一过统计门控（§5.4）。
 - **MiMo-V2.6-RL-oss**（XiaomiMiMo）：本工作任务池来源。其 ARVO 惩罚体系
   （工具错误惩罚、分组长度惩罚）已移植进我们的 GRPO 实现（κ=2 默认参数）。
 - **Dream-RSI / RRSI**：经验层注入会压制长程探索多样性（对应我们 SP22 的
@@ -176,6 +187,21 @@ reward hacking 的最小可执行检测）。校准脚本逐行记录并汇总 h
 `wilcoxon_gate` / `mannwhitney_gate`（配对/非配对）：接受准则 =
 均值提升 ≥ min_improve 且 p < alpha（默认 0.1）。全库晋升决策
 （checkpoint/hints/策略改写/飞轮轮次）统一过门，判定落盘 gate.json。
+
+### 5.5 轨迹纯净度（RSR 启示，训练期前置控制）
+
+RSR 证明：源轨迹中 29.6% 的 harness 私有命令直接 SFT 会导致 TB2 倒退
+7.9pp。我们的 on-policy GRPO 天然规避了"源 harness ≠ 训练 harness"的
+分布错位，但两类样本段仍携带 harness 干预信号：
+
+- **hints 注入段**（SP22 三态门控激活时注入的经验摘要）；
+- **经验回放段**（M4 replay shaping 引入的历史轨迹片段）。
+
+控制方案（随 TokenRollout 的 `response_mask` + `generation_spans` 一起
+实现）：干预段样本打标 → loss mask 或降权，且每轮训练统计**污染率**
+（干预段 token 占比）作为 tracked metric——与 hacking 率（§5.2）并列为
+训练数据质量的两个观测维度。经验库条目晋升回放前增加泄漏审计门
+（公开接口可复现性检查），对应 RSR critic 的飞轮版。
 
 ## 6. 训练设置（占位，等训练环境）
 
