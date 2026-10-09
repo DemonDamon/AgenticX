@@ -9507,6 +9507,96 @@ def _agent_created_skill_root() -> Path:
     return Path.home() / ".agenticx" / "skills"
 
 
+def _skill_manage_bare_name(name: str) -> str:
+    """Return the final path segment (``archify`` from ``registry/archify``)."""
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    if not n:
+        return ""
+    return n.split("/")[-1]
+
+
+def _skill_manage_delete_candidates(root: Path, name: str) -> List[Path]:
+    """Resolve delete targets for short or ``registry/<name>`` skill names.
+
+    Always considers ``skills/{name}``. When ``name`` has no slash, also
+    considers ``skills/registry/{name}`` so SkillHub installs are found.
+    """
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    if not n:
+        return []
+    root = root.expanduser().resolve(strict=False)
+    ordered: List[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        try:
+            resolved = p.resolve(strict=False)
+            resolved.relative_to(root)
+        except ValueError:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        ordered.append(resolved)
+
+    _add(root / n)
+    if "/" not in n:
+        _add(root / "registry" / n)
+    elif n.startswith("registry/"):
+        # Explicit registry path already covered by root/n; keep bare fallback off.
+        pass
+    return ordered
+
+
+def _skill_manage_is_market_skill(skill_dir: Path, root: Path) -> bool:
+    """True when dir lives under skills/registry or provenance is skillhub/registry."""
+    try:
+        rel = skill_dir.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    parts = rel.parts
+    if parts and parts[0] == "registry":
+        return True
+    try:
+        from agenticx.skills.frontmatter import read_skill_provenance_source
+
+        source = (read_skill_provenance_source(skill_dir) or "").strip().lower().replace("-", "_")
+    except Exception:
+        source = ""
+    if source in {"skillhub", "registry"}:
+        return True
+    # Frontmatter source=skillhub also counts when sidecar is missing.
+    try:
+        md = skill_dir / "SKILL.md"
+        if md.is_file():
+            from agenticx.skills.frontmatter import (
+                _extract_frontmatter_block,
+                _frontmatter_get_scalar,
+            )
+
+            fm = _extract_frontmatter_block(md.read_text(encoding="utf-8")) or ""
+            fm_src = (_frontmatter_get_scalar(fm, "source") or "").strip().lower().replace("-", "_")
+            if fm_src in {"skillhub", "registry"}:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _invalidate_skills_list_after_manage() -> bool:
+    """Drop /api/skills list cache so Settings refresh sees deletes/installs."""
+    try:
+        from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+        invalidate_skills_list_cache()
+        return True
+    except Exception:
+        return False
+
+
+
+
 def _skill_url_allowlist() -> List[str]:
     defaults = [
         "raw.githubusercontent.com",
@@ -10689,27 +10779,119 @@ async def _tool_skill_manage(
         return success or _skill_manage_error("validation", "unknown patch failure")
 
     if action == "delete":
-        if not skill_dir.exists():
-            return json.dumps({"ok": True, "action": "delete", "removed": False}, ensure_ascii=False)
+        candidates = _skill_manage_delete_candidates(root, name)
+        existing = [p for p in candidates if p.exists()]
+        if not existing:
+            # Nothing to delete at top-level or registry — honest empty result.
+            return json.dumps(
+                {
+                    "ok": True,
+                    "action": "delete",
+                    "name": name,
+                    "removed": False,
+                    "removed_paths": [],
+                    "remaining": [],
+                },
+                ensure_ascii=False,
+            )
+        path_preview = ", ".join(f"`{p}`" for p in existing)
         if _interactive:
             approved = await _confirm(
-                f"skill_manage 请求**删除**技能「{name}」\n\n路径：`~/.agenticx/skills/{name}/`\n\n此操作不可撤销（除非系统有版本快照），确认删除？",
+                f"skill_manage 请求**删除**技能「{name}」\n\n路径：{path_preview}\n\n此操作不可撤销（除非系统有版本快照），确认删除？",
                 confirm_gate=confirm_gate,  # type: ignore[arg-type]
                 context={"tool": "skill_manage", "action": "delete", "skill": name, "risk": "destructive"},
                 emit_event=emit_event,
             )
             if not approved:
                 return "CANCELLED: 用户拒绝了 skill_manage delete 操作"
-        try:
-            from agenticx.skills.versioning import append_changelog
-            append_changelog(skill_dir, action="delete", summary="skill deleted by agent")
-        except Exception:
-            pass
-        try:
-            shutil.rmtree(skill_dir)
-        except OSError as exc:
-            return f"ERROR: delete failed: {exc}"
-        return json.dumps({"ok": True, "action": "delete", "removed": True}, ensure_ascii=False)
+
+        removed_paths: List[str] = []
+        errors: List[str] = []
+        used_market = False
+        bare = _skill_manage_bare_name(name)
+        market_targets_done: set[str] = set()
+
+        for target in existing:
+            is_market = _skill_manage_is_market_skill(target, root)
+            if is_market:
+                market_key = str((root / "registry" / (bare or target.name)).resolve(strict=False))
+                if market_key in market_targets_done:
+                    continue
+                used_market = True
+                try:
+                    from agenticx.extensions.skillhub_adapter import uninstall_market_skill
+
+                    market = uninstall_market_skill(bare or name, skills_root=root)
+                    market_targets_done.add(market_key)
+                    for rp in market.get("removed") or []:
+                        if rp not in removed_paths:
+                            removed_paths.append(str(rp))
+                    if not market.get("ok"):
+                        for rem in market.get("remaining") or []:
+                            errors.append(f"remaining: {rem}")
+                        if market.get("error"):
+                            errors.append(str(market["error"]))
+                    continue
+                except Exception as exc:
+                    errors.append(f"uninstall_market_skill failed: {exc}")
+                    # fall through to local rmtree
+
+            try:
+                from agenticx.skills.versioning import append_changelog
+
+                append_changelog(target, action="delete", summary="skill deleted by agent")
+            except Exception:
+                pass
+            try:
+                if target.exists():
+                    shutil.rmtree(target)
+                    removed_paths.append(str(target))
+            except OSError as exc:
+                errors.append(f"delete failed for {target}: {exc}")
+                continue
+
+            # Clean version snapshots for non-market paths too.
+            try:
+                rel = target.relative_to(root)
+                ver_root = (root / ".versions").resolve(strict=False)
+                ver_dir = (root / ".versions" / rel).resolve(strict=False)
+                ver_dir.relative_to(ver_root)
+                if ver_dir.exists():
+                    shutil.rmtree(ver_dir, ignore_errors=True)
+                    if str(ver_dir) not in removed_paths:
+                        removed_paths.append(str(ver_dir))
+            except Exception:
+                pass
+
+        # Re-check all candidates (and registry/{bare}) so ghost skills cannot report success.
+        remaining_paths = [str(p) for p in _skill_manage_delete_candidates(root, name) if p.exists()]
+        if bare and "/" not in str(name):
+            reg = (root / "registry" / bare).resolve(strict=False)
+            if reg.exists() and str(reg) not in remaining_paths:
+                remaining_paths.append(str(reg))
+
+        refreshed = _invalidate_skills_list_after_manage()
+        ok = not remaining_paths and not errors
+        payload: Dict[str, Any] = {
+            "ok": ok,
+            "action": "delete",
+            "name": name,
+            "bare_name": bare,
+            # Bool for back-compat with older parsers / smoke tests.
+            "removed": bool(removed_paths) and ok,
+            "removed_paths": removed_paths,
+            "remaining": remaining_paths,
+            "market_uninstall": used_market,
+            "skills_cache_invalidated": refreshed,
+        }
+        if errors:
+            payload["errors"] = errors
+            payload["error"] = "; ".join(errors)
+        elif remaining_paths:
+            payload["error"] = (
+                "skill still present after delete: " + ", ".join(remaining_paths)
+            )
+        return json.dumps(payload, ensure_ascii=False)
 
     if action == "history":
         limit = int(arguments.get("limit", 50) or 50)

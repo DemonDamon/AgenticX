@@ -228,3 +228,89 @@ def test_skill_manage_patch_old_string_missing(skill_home: Path) -> None:
     ))
     assert "ERROR" in out
     assert "old_string" in out.lower()
+
+
+def test_skill_manage_delete_registry_skillhub_by_short_name(skill_home: Path) -> None:
+    """SkillHub installs live under skills/registry/<name>; short-name delete must remove them."""
+    from agenticx.skills.frontmatter import write_skill_provenance
+
+    root = skill_home / ".agenticx" / "skills"
+    reg = root / "registry" / "archify"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "SKILL.md").write_text(
+        "---\nname: archify\ndescription: demo\nsource: skillhub\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    write_skill_provenance(reg, "skillhub", extra={"name": "archify"})
+    versions = root / ".versions" / "registry" / "archify"
+    versions.mkdir(parents=True, exist_ok=True)
+    (versions / "snap.md").write_text("old", encoding="utf-8")
+
+    # Top-level skills/archify must NOT exist — this is the bug scenario.
+    assert not (root / "archify").exists()
+
+    out = json.loads(_run(_tool_skill_manage({"action": "delete", "name": "archify"}, None)))
+    assert out.get("ok") is True, out
+    assert out.get("removed") is True, out
+    assert out.get("market_uninstall") is True, out
+    assert out.get("remaining") == [], out
+    assert any("registry/archify" in p or p.endswith("archify") for p in (out.get("removed_paths") or [])), out
+    assert not reg.exists(), "registry/archify must be gone"
+    assert not versions.exists(), ".versions/registry/archify should be cleaned"
+    assert out.get("skills_cache_invalidated") is True
+
+
+def test_skill_manage_delete_registry_qualified_name(skill_home: Path) -> None:
+    root = skill_home / ".agenticx" / "skills"
+    reg = root / "registry" / "archify"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "SKILL.md").write_text(
+        "---\nname: archify\ndescription: demo\nsource: skillhub\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    out = json.loads(
+        _run(_tool_skill_manage({"action": "delete", "name": "registry/archify"}, None))
+    )
+    assert out.get("ok") is True, out
+    assert out.get("removed") is True, out
+    assert out.get("remaining") == [], out
+    assert not reg.exists()
+
+
+def test_skill_manage_delete_must_not_succeed_if_registry_remains(
+    skill_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If registry/{name} survives, delete must report ok=False (no false success)."""
+    root = skill_home / ".agenticx" / "skills"
+    reg = root / "registry" / "archify"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "SKILL.md").write_text(
+        "---\nname: archify\ndescription: demo\nsource: skillhub\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    def _boom(*_a, **_k):
+        raise OSError("simulated delete failure")
+
+    monkeypatch.setattr("shutil.rmtree", _boom)
+    # Also force market uninstall to fall back / fail similarly via adapter.
+    import agenticx.extensions.skillhub_adapter as sh
+
+    def _fail_market(name, *, skills_root=None):
+        return {
+            "ok": False,
+            "removed": [],
+            "remaining": [str(reg)],
+            "error": "simulated",
+            "name": name,
+            "bare_name": "archify",
+        }
+
+    monkeypatch.setattr(sh, "uninstall_market_skill", _fail_market)
+
+    out = json.loads(_run(_tool_skill_manage({"action": "delete", "name": "archify"}, None)))
+    assert out.get("ok") is False, out
+    assert out.get("removed") is False, out
+    assert out.get("remaining"), out
+    assert reg.exists()

@@ -544,3 +544,92 @@ def install_skillhub_skill(slug: str) -> Dict[str, Any]:
             "source": "skillhub",
             "scan_summary": summary,
         }
+
+
+def uninstall_market_skill(
+    name: str,
+    *,
+    skills_root: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Uninstall a SkillHub / registry market skill by short or qualified name.
+
+    Accepts ``archify`` or ``registry/archify``. Removes
+    ``~/.agenticx/skills/registry/<bare>/`` (full tree) and reasonably cleans
+    ``~/.agenticx/skills/.versions/registry/<bare>/``.
+
+    Returns a payload with ``ok``, ``removed`` paths, ``remaining`` paths, and
+    ``name`` / ``bare_name``. ``ok`` is True only when no registry target remains.
+    """
+    raw = str(name or "").strip().replace("\\", "/").strip("/")
+    if not raw:
+        return {
+            "ok": False,
+            "error": "empty skill name",
+            "removed": [],
+            "remaining": [],
+            "name": "",
+            "bare_name": "",
+        }
+
+    bare = raw.split("/")[-1]
+    if raw.startswith("registry/"):
+        bare = raw[len("registry/") :].split("/")[0] or bare
+
+    root = (skills_root or (Path.home() / ".agenticx" / "skills")).expanduser()
+    root = root.resolve(strict=False)
+    registry_root = (root / "registry").resolve(strict=False)
+    skill_dir = (registry_root / bare).resolve(strict=False)
+    try:
+        skill_dir.relative_to(registry_root)
+    except ValueError:
+        return {
+            "ok": False,
+            "error": "skill path outside registry root",
+            "removed": [],
+            "remaining": [str(skill_dir)],
+            "name": raw,
+            "bare_name": bare,
+        }
+
+    removed: List[str] = []
+    errors: List[str] = []
+
+    if skill_dir.exists():
+        try:
+            shutil.rmtree(skill_dir)
+            removed.append(str(skill_dir))
+        except OSError as exc:
+            errors.append(f"rmtree {skill_dir}: {exc}")
+
+    versions_dir = (root / ".versions" / "registry" / bare).resolve(strict=False)
+    try:
+        versions_dir.relative_to((root / ".versions").resolve(strict=False))
+    except ValueError:
+        versions_dir = None  # type: ignore[assignment]
+    if versions_dir is not None and versions_dir.exists():
+        try:
+            shutil.rmtree(versions_dir)
+            removed.append(str(versions_dir))
+        except OSError as exc:
+            errors.append(f"rmtree versions {versions_dir}: {exc}")
+
+    remaining: List[str] = []
+    if skill_dir.exists():
+        remaining.append(str(skill_dir))
+
+    ok = not remaining and not errors
+    payload: Dict[str, Any] = {
+        "ok": ok,
+        "action": "uninstall_market_skill",
+        "name": raw,
+        "bare_name": bare,
+        "removed": removed,
+        "remaining": remaining,
+        "source": "skillhub",
+    }
+    if errors:
+        payload["errors"] = errors
+        payload["error"] = "; ".join(errors)
+    elif remaining:
+        payload["error"] = f"registry skill still present: {remaining[0]}"
+    return payload
