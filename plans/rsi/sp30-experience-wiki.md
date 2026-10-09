@@ -19,16 +19,33 @@
 3. **无适用条件一等公民**：`source` dict 有 provenance 但检索时不做条件过滤，经验不区分环境版本/任务类型/模型，跨域注入有污染风险（与 SP26 多域任务池扩展后的风险直接叠加）。
 4. **无增量结构化产物**：episode 结束后沉淀的是原始轨迹和 flat card，没有"编译成结构化知识（method/analysis 页 + 来源 + 矛盾标记）"的环节；SP16 的 freeze 生命周期、SP13 的泄漏审计门都作用在 flat card 上，缺少可审计的知识层。
 
+### AGX/Near 全局图景：统一上下文层（北极星）
+
+对照 OpenViking 五层架构盘点 AGX/Near 现状（已代码核实）：
+
+| 层 | AGX/Near 现状 | 差距 |
+| --- | --- | --- |
+| 资源接入 | Near connectors + ingest jobs（`desktop/src/components/settings/knowledge/`） | 基本齐 |
+| 语义层（分级） | 无 L0/L1 分级预算纪律 | **缺**（统一语义层未建） |
+| 编译层 | `agenticx/brain/wiki_compiler.py` 已有（two-step LLM ingest，产出 entities/concepts/sources/synthesis + compile 队列） | 缺增量更新（freshness）、矛盾标记、claim 级溯源、适用条件 |
+| 产物层 | `wiki/` 目录 + 桌面端 WikiBrowseView（树+图谱双视图） | 基本齐 |
+| 底座统一 | **memory（`agenticx/memory/`）/ brain-kb / 实验 reasoning_bank 是三个孤岛** | 缺统一寻址 + 分级语义 |
+
+**北极星叙事**：OpenViking 的本质不是"更好的记忆"，而是统一上下文底座——memory 与 KB 共用同一套寻址和分级语义（其 memory 目录走同一个 SemanticProcessor 生成 L0/L1，已代码证实），灵魂是编译层（"用过即校准"：新证据更新同一套知识而非再生成一份新答案）。AGX 的终局是三个孤岛并一个底座。
+
+**本计划是第一块拼图**：在 reasoning_bank 上验证机制（有实验验收、能出论文数据），产物格式直接对齐 Near 已有 wiki 约定（零 UI 成本进 WikiBrowseView），增量编译机制设计成可回馈 `wiki_compiler` 的形式。后续扩展（不在本计划内）：brain/kb 侧接入分级语义与增量编译 → memory 与 kb 并底座。
+
 ### 目标（一句话）
 
-把经验库从"向量检索的扁平卡片堆"升级为"分级（L0/L1/L2）+ 结构化（wiki 页面类型）+ 带适用条件与矛盾标记 + 增量编译"的知识层，人和 Agent（训练注入、自探索、消融实验）共用同一套产物。
+把经验库从"向量检索的扁平卡片堆"升级为"分级（L0/L1/L2）+ 结构化（wiki 页面类型）+ 带适用条件与矛盾标记 + 增量编译"的知识层，人和 Agent（训练注入、自探索、消融实验）共用同一套产物；产物格式对齐 Near wiki 约定，桌面端零 UI 改动可读。
 
 ### 非目标（明确不做）
 
 - 不引入 OpenViking 服务/容器/Rust 依赖；机制内化为纯 Python 标准库 + 现有 embed 依赖。
 - 不做多源 Connector（飞书/Git/网页接入）——AGX 的"源"就是轨迹、实验产出和结论目录。
 - 不动 RSI 主线（3-seeds 复跑、A2/A5 训练）的关键路径；本计划可并行推进，实验消费点复用现有 eval harness。
-- 不做 UI/可视化。
+- 不做新 UI/可视化组件（复用桌面端已有 WikiBrowseView，见 E2E-6）。
+- 不做 brain/wiki_compiler 的直接改造（本计划只保证机制可回馈，回馈另立项）。
 
 ## 二、端到端验收标准（master 级）
 
@@ -53,6 +70,8 @@
 
 **E2E-5 审计**：编译产物带 `freshness` 元数据（未消化条目计数），且与 SP13 泄漏审计门衔接：进入 wiki 的 claim 必须通过"公共接口可复现"检查（复用既有 gate 挂载点）。
 
+**E2E-6 桌面端可见性（零 UI 改动）**：SP30b 编译产物落盘遵循 Near 既有 wiki 约定（`wiki/` 目录 + `entities/concepts/synthesis` 子目录 + frontmatter `type/title` + `sources` 字段，见 `agenticx/brain/wiki_compiler.py` 的 `_wiki_root`/`_safe_wiki_path`），桌面端 WikiBrowseView（`desktop/src/components/wiki/WikiBrowseView.tsx`）无需任何改动即可树形/图谱双视图渲染 SP30 产物，`listWikiPages/listWikiGraph` API 返回 SP30 页面。新增页面类型（`method`/`analysis`）在 TYPE_COLOR 缺省色系内降级显示即可（不要求前端改色）。
+
 ## 三、子规划拆解
 
 ### SP30a：分级存储与检索（改 bank.py，无 LLM 依赖）
@@ -64,11 +83,12 @@
 
 ### SP30b：经验编译层（episode → wiki，LLM 依赖）
 
-- 页面类型学对齐 llm-wiki 模板：`method`（调试 playbook/操作程序）、`analysis`（跨任务结论）、`entity`（环境/工具/数据集）、`concept`（机制教训）；`index.md` 导航页。
+- 页面类型学：以 Near 既有 wiki 约定为基（`entities/concepts/synthesis/sources` 目录 + frontmatter），扩展 `method`（调试 playbook/操作程序）与 `analysis`（跨任务结论）两个新类型（对齐 llm-wiki 模板）；`index.md` 导航页。
 - 编译器管线（对齐 OpenViking Contract 思想）：extract（从轨迹/笔记抽事实，规则式起步沿用 SP16 决策）→ reduce（同主题合并）→ synthesize（成页）→ finalize（index 同步 + 链接校验 + freshness 更新）。
 - 增量更新：以 trace_id + 输入指纹判定变更，未变页面不重写；同主题已有页面走 integrate-merge（保留仍有效的旧 claim，标记被推翻的），绝不整页覆盖。
 - 矛盾与适用条件：`distinguish` 语义进 `scope` 字段；冲突双方保留 + 各自 provenance。
-- 验收：编译冒烟（固定小轨迹集），golden-file 对比页面结构；无来源 claim 写入被拒（负例测试）。
+- **可回馈性约束**：增量更新引擎（freshness 判定 + integrate-merge）实现为独立模块（不 import reasoning_bank），接口设计兼容 `brain/wiki_compiler.py` 的 `WikiCompileResult`/`_safe_wiki_path` 约定，使后续回馈 brain 侧零重写。
+- 验收：编译冒烟（固定小轨迹集），golden-file 对比页面结构；无来源 claim 写入被拒（负例测试）；E2E-6 桌面端渲染验证。
 
 ### SP30c：消费侧与实验验证（接 eval harness，出论文数据）
 
@@ -99,6 +119,7 @@ SP30a ⟂ SP30b（可并行）；SP30c 依赖两者。SP30b 的泄漏审计挂�
 3. **llm-wiki 模板**（`examples/compile/ov-compile-skills/llm-wiki/SKILL.md`）：六种页面类型（entity/concept/method/comparison/analysis/summary）+ index 导航页；核心纪律：来源就近标注、禁止捏造、矛盾保留 provenance、integrate-rather-overwrite、更新前先读全文、质量门检查清单。
 4. **OpenWiki**（`research/openwiki/src/`）：claim 级 evidence grounding（`okf/claim-sources.ts`：source 稳定 ID `openwiki-source-*`，版本化判定失效 claim）；生成计划 `ProposedPlanPage/ProposedPageClaim`（`generation/page-jobs.ts`）；MCP 工具面 `openwiki_search/read/begin/submit_plan/next_page/finish`（`integrations/mcp/server.ts`）。
 5. **AGX 现状**（`envharness/envharness/reasoning_bank/bank.py` L44-151）：flat MemoryItem + cosine/MMR top-k + 整卡拼 prompt（`reasoning_bank_eval.py` L176-217 的 soft/strikt gate 为注入语义雏形）。
+6. **Near 已有 wiki 产物链**（本次调研新发现，均代码核实）：`agenticx/brain/wiki_compiler.py`（two-step LLM ingest 编译器，产出 `wiki/{entities,concepts,sources,synthesis}` + compile 队列 `wiki_compile_queue.py`）；桌面端 `desktop/src/components/wiki/WikiBrowseView.tsx`（树+ReactFlow 图谱双视图、页面类型着色 summary/entity/concept/synthesis/comparison、来源引用）与 `settings/knowledge/KnowledgeWikiPanel.tsx`（编译状态面板，`listWikiCompiles` API）。这证明 Near 已具备 OpenViking 五层架构的产品级雏形，SP30 的产物与机制可直接挂载。
 
 ## 附录 B：推文未讲清、靠代码澄清的点
 
