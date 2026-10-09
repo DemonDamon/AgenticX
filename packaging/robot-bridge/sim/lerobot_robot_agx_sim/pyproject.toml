@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+# Install into the bridge environment that already has the lerobot extra; lerobot is
+# deliberately not declared here so this plugin never replaces the pinned revision.
+[project]
+name = "lerobot_robot_agx_sim"
+version = "0.1.0"
+description = "Simulated SO-101 follower for running robot policy rollouts without hardware"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+[tool.setuptools]
+packages = ["lerobot_robot_agx_sim"]
