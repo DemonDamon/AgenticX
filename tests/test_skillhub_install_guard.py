@@ -9,6 +9,7 @@ from __future__ import annotations
 from agenticx.extensions.skillhub_install_guard import (
     classify_skillhub_inbound_install_prompt,
     extract_skillhub_install_slug,
+    is_clear_skillhub_install_intent,
     is_forbidden_skillhub_agent_install_prompt,
 )
 
@@ -61,29 +62,27 @@ def test_classify_miss_ordinary_chat() -> None:
     assert classify_skillhub_inbound_install_prompt("安装依赖")["hit"] is False
 
 
-def test_at_ns_slug_forces_adapter_path_not_curl() -> None:
-    """@ns/slug chat shorthand must hit install_intent (Desktop IPC / adapter)."""
+def test_at_ns_slug_does_not_force_ipc_install() -> None:
+    """Chat @ns/slug must NOT hit classify — conversation agent handles install."""
     hit = classify_skillhub_inbound_install_prompt("@indiv-ebandao/tiangong-skill")
-    assert hit["hit"] is True
-    assert hit["kind"] == "install_intent"
-    assert hit["slug"] == "@indiv-ebandao/tiangong-skill"
-    assert "curl" in hit["reason"].lower() or "skillhub_adapter" in hit["reason"] or "installFromSkillHub" in hit["reason"]
-    assert "bash" in hit["reason"].lower() or "假 registry" in hit["reason"] or "确定性" in hit["reason"]
+    assert hit["hit"] is False
+    # Still detectable as install phrasing for diagnostics / Settings UX.
+    assert is_clear_skillhub_install_intent("@indiv-ebandao/tiangong-skill") is True
 
 
-def test_install_at_ref_intent() -> None:
+def test_install_at_ref_not_intercepted() -> None:
     hit = classify_skillhub_inbound_install_prompt("安装 @indiv-ebandao/tiangong-skill")
-    assert hit["hit"] is True
-    assert hit["slug"] == "@indiv-ebandao/tiangong-skill"
+    assert hit["hit"] is False
+    assert is_clear_skillhub_install_intent("安装 @indiv-ebandao/tiangong-skill") is True
 
 
-def test_install_xxx_skill_intent() -> None:
+def test_install_xxx_skill_not_intercepted() -> None:
     hit = classify_skillhub_inbound_install_prompt("请安装 tiangong-skill skill")
-    assert hit["hit"] is True
-    assert "tiangong-skill" in str(hit["slug"])
+    assert hit["hit"] is False
+    assert is_clear_skillhub_install_intent("请安装 tiangong-skill skill") is True
 
 
-def test_skillhub_cli_install_intent() -> None:
+def test_skillhub_cli_install_not_intercepted() -> None:
     hit = classify_skillhub_inbound_install_prompt("skillhub install @indiv-seafish/archify")
-    assert hit["hit"] is True
-    assert "archify" in str(hit["slug"])
+    assert hit["hit"] is False
+    assert is_clear_skillhub_install_intent("skillhub install @indiv-seafish/archify") is True

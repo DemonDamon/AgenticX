@@ -5,6 +5,7 @@ import {
   buildSkillHubDetailUrl,
   classifySkillHubInboundInstallPrompt,
   extractSkillHubInstallSlugFromPrompt,
+  isClearSkillHubInstallIntent,
   isForbiddenSkillHubAgentInstallPrompt,
   SKILLHUB_AGENT_PROMPT_FORBIDDEN,
 } from "./skillhub-install-prompt";
@@ -117,26 +118,34 @@ describe("buildSkillHubDetailUrl", () => {
   });
 });
 
-describe("install intent intercept (@ns/slug)", () => {
-  it("at-ns/slug forces install_intent for Desktop IPC", () => {
+describe("chat @ns/slug does NOT force IPC install", () => {
+  it("at-ns/slug classify miss — conversation agent handles install", () => {
     const hit = classifySkillHubInboundInstallPrompt("@indiv-ebandao/tiangong-skill");
-    expect(hit.hit).toBe(true);
-    if (hit.hit) {
-      expect(hit.kind).toBe("install_intent");
-      expect(hit.slug).toBe("@indiv-ebandao/tiangong-skill");
-      expect(hit.reason).toMatch(/确定性|installFromSkillHub|adapter/i);
-    }
+    expect(hit.hit).toBe(false);
+    expect(isClearSkillHubInstallIntent("@indiv-ebandao/tiangong-skill")).toBe(true);
   });
 
-  it("安装 @ns/slug hits install intent", () => {
+  it("安装 @ns/slug is not intercepted", () => {
     const hit = classifySkillHubInboundInstallPrompt("安装 @indiv-ebandao/tiangong-skill");
-    expect(hit.hit).toBe(true);
-    if (hit.hit) {
-      expect(hit.slug).toBe("@indiv-ebandao/tiangong-skill");
-    }
+    expect(hit.hit).toBe(false);
+    expect(isClearSkillHubInstallIntent("安装 @indiv-ebandao/tiangong-skill")).toBe(true);
   });
 
   it("does not flag ordinary 安装依赖 chat", () => {
     expect(classifySkillHubInboundInstallPrompt("安装依赖").hit).toBe(false);
+  });
+
+  it("old Meta dead-path still hits forbidden_meta (Settings seeding refuse)", () => {
+    const old = [
+      "请安装 SkillHub 第三方技能「archify」。",
+      "1. 优先调用本机 Studio API：POST /api/registry/install，body 含 source 与 name。",
+      "请先检查是否已安装 SkillHub 商店；若未安装，请根据 https://skillhub-xxx 安装 SkillHub 商店",
+    ].join("\n");
+    const hit = classifySkillHubInboundInstallPrompt(old);
+    expect(hit.hit).toBe(true);
+    if (hit.hit) {
+      expect(hit.kind).toBe("forbidden_meta");
+      expect(hit.slug).toBe("archify");
+    }
   });
 });

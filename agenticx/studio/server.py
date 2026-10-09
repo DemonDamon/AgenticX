@@ -2890,8 +2890,9 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_automation_session = active_avatar_id.startswith("automation:")
-        # Inbound intercept: refuse old SkillHub Meta install copy (paste/history reuse)
-        # and force deterministic skillhub/install instead of dead-path Meta loops.
+        # Inbound intercept: refuse old SkillHub Meta dead-path copy only
+        # (POST /api/registry/install / store-first). Ordinary chat @ns/slug /
+        # 「安装 … skill」 go to the conversation agent — no silent install.
         try:
             from agenticx.extensions.skillhub_install_guard import (
                 classify_skillhub_inbound_install_prompt,
@@ -2902,7 +2903,8 @@ def create_studio_app() -> FastAPI:
             )
         except Exception:
             _inbound = {"hit": False}
-        if _inbound.get("hit"):
+        # Only forbidden_meta (classify no longer hits install_intent).
+        if _inbound.get("hit") and str(_inbound.get("kind") or "") == "forbidden_meta":
             _slug = str(_inbound.get("slug") or "").strip()
             _reason = str(_inbound.get("reason") or "").strip()
 

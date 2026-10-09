@@ -103,7 +103,8 @@ export function extractSkillHubInstallSlugFromPrompt(text: string): string | nul
   return null;
 }
 
-function isClearSkillHubInstallIntent(text: string): boolean {
+/** Detect clear @ns/slug / install phrasing (informational; classify does NOT hit). */
+export function isClearSkillHubInstallIntent(text: string): boolean {
   const body = String(text || "").trim();
   if (!body) return false;
   if (AT_REF_ONLY.test(body)) return true;
@@ -118,14 +119,16 @@ export type SkillHubInboundIntercept =
       hit: true;
       slug: string | null;
       reason: string;
-      kind: "forbidden_meta" | "install_intent";
+      kind: "forbidden_meta";
     };
 
 /**
- * Classify inbound user/agent-start text. On hit, caller must NOT open/continue
- * Meta with that prompt; force Desktop IPC / skillhub/install instead.
+ * Classify inbound text for Settings Meta-seeding / dead-path refuse only.
  *
- * Covers: old Meta dead-path copy, bare @ns/slug, and clear 「安装 xxx skill」 intent.
+ * Hits ONLY old Meta SkillHub dead-path copy (POST /api/registry/install /
+ * store-first). Ordinary chat ``@ns/slug`` / 「安装 … skill」 must NOT hit —
+ * those go through the conversation agent (no silent installFromSkillHub).
+ * Settings market 「安装」 still calls installFromSkillHub directly.
  */
 export function classifySkillHubInboundInstallPrompt(text: string): SkillHubInboundIntercept {
   const body = String(text || "");
@@ -139,15 +142,8 @@ export function classifySkillHubInboundInstallPrompt(text: string): SkillHubInbo
         "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install 或先装商店文案）。请改用 Desktop 确定性安装。",
     };
   }
-  if (isClearSkillHubInstallIntent(body)) {
-    return {
-      hit: true,
-      slug: extractSkillHubInstallSlugFromPrompt(body),
-      kind: "install_intent",
-      reason:
-        "拦截 SkillHub 安装意图（@ns/slug 或「安装 … skill」）。请改用 Desktop 确定性安装 (installFromSkillHub / skillhub_adapter)，禁止 bash-curl skillhub.cn 假 registry/install。",
-    };
-  }
+  // Deliberately do NOT treat @ns/slug / 「安装 … skill」 as intercept hits.
+  // Chat installs belong to the conversation agent; Settings market uses IPC.
   return { hit: false };
 }
 

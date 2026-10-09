@@ -214,10 +214,6 @@ import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIc
 import { skillChipLabel } from "../utils/skill-chip-label";
 import { filterAndRankSkills } from "../utils/skill-search";
 import {
-  classifySkillHubInboundInstallPrompt,
-  extractSkillHubInstallSlugFromPrompt,
-} from "../utils/skillhub-install-prompt";
-import {
   COMPOSER_INLINE_CHIP_CLASS,
   composerRefIconInnerHtml,
   resolveComposerRefIconKind,
@@ -10033,62 +10029,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         deliverExpertInstruction(route.avatarId, route.avatarName, route.instruction, {
           autoSend: true,
         });
-        return;
-      }
-    }
-    // Inbound intercept: old SkillHub Meta install copy (paste/history/reuse).
-    // Force Desktop IPC installFromSkillHub; do not open/continue Meta with dead-path text.
-    if (
-      !isContinuation &&
-      !options?.retryAttachments &&
-      attachmentEntries.length === 0 &&
-      text
-    ) {
-      const inbound = classifySkillHubInboundInstallPrompt(text);
-      if (inbound.hit) {
-        lastComposerDraftTextRef.current = "";
-        setComposerText("");
-        setComposerHasText(false);
-        prepareFreshComposerPaneDraft(pane.id);
-        const slug =
-          inbound.slug || extractSkillHubInstallSlugFromPrompt(text) || "";
-        void (async () => {
-          const installFn = window.agenticxDesktop?.installFromSkillHub;
-          if (slug && typeof installFn === "function") {
-            try {
-              const res = await installFn.call(window.agenticxDesktop, { slug });
-              if (res?.ok) {
-                try {
-                  await window.agenticxDesktop.refreshSkills?.();
-                } catch {
-                  /* ignore refresh errors */
-                }
-                setStallHintToast(
-                  `已拦截 SkillHub 安装意图，并确定性安装 ${slug}`,
-                );
-                return;
-              }
-              {
-                const cause = [res?.error_code, res?.error]
-                  .filter((x) => Boolean(x && String(x).trim()))
-                  .join(": ");
-                setStallHintToast(
-                  `已拦截 SkillHub 安装意图；确定性安装失败：${(cause || "failed").slice(0, 120)}`,
-                );
-              }
-              return;
-            } catch (e) {
-              setStallHintToast(
-                `已拦截 SkillHub 安装意图；安装异常：${String(e).slice(0, 120)}`,
-              );
-              return;
-            }
-          }
-          setStallHintToast(
-            inbound.reason.slice(0, 160) ||
-              "已拦截 SkillHub 安装意图；请改用 Settings → SkillHub 市场安装",
-          );
-        })();
         return;
       }
     }

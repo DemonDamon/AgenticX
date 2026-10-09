@@ -2925,9 +2925,9 @@ function SkillsTab() {
       setSkillhubMsg("");
       setInstallPromptBusy(true);
       try {
-        // Refuse old dead-path copy on any Meta seeding path (not only builder).
+        // Refuse old Meta dead-path copy on Settings seeding only (not chat @ns/slug).
         const inbound = classifySkillHubInboundInstallPrompt(text);
-        if (inbound.hit) {
+        if (inbound.hit && inbound.kind === "forbidden_meta") {
           const slug = inbound.slug || extractSkillHubInstallSlugFromPrompt(text);
           if (slug) {
             const installFn = window.agenticxDesktop?.installFromSkillHub;

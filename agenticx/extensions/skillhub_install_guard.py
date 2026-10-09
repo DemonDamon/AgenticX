@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Inbound guard for SkillHub install prompts (stale Meta + clear install intent).
+"""Inbound guard for SkillHub install prompts (stale Meta dead-path only).
 
-Mirrors desktop/src/utils/skillhub-install-prompt.ts so Studio / Chat can refuse
-paste/history reuse of the old POST /api/registry/install dead path, and force
-deterministic skillhub/install for ``@ns/slug`` / 「安装 xxx skill」 intents.
+Mirrors desktop/src/utils/skillhub-install-prompt.ts so Settings Meta-seeding
+can refuse paste/history reuse of the old POST /api/registry/install dead path.
+Ordinary chat ``@ns/slug`` / 「安装 xxx skill」 are NOT intercepted — those go
+through the conversation agent. Settings market 「安装」 uses installFromSkillHub.
 
 Author: Damon Li
 """
@@ -119,13 +120,17 @@ def _is_clear_skillhub_install_intent(text: str) -> bool:
     return bool(_INSTALL_VERB.search(body))
 
 
-def classify_skillhub_inbound_install_prompt(text: str) -> dict:
-    """Return {hit, slug, reason, kind} for inbound intercept decisions.
+def is_clear_skillhub_install_intent(text: str) -> bool:
+    """Public alias: detect @ns/slug / install phrasing (classify does NOT hit)."""
+    return _is_clear_skillhub_install_intent(text)
 
-    kind is ``forbidden_meta`` (old dead-path copy) or ``install_intent``
-    (``@ns/slug`` / clear SkillHub install phrasing). Callers must force
-    Desktop IPC / skillhub_adapter deterministic install — never Meta bash-curl
-    of public skillhub.cn fake registry/install.
+
+def classify_skillhub_inbound_install_prompt(text: str) -> dict:
+    """Return {hit, slug, reason, kind} for Settings Meta-seeding refuse only.
+
+    Hits ONLY ``forbidden_meta`` (old dead-path copy). Ordinary chat
+    ``@ns/slug`` / 「安装 … skill」 must NOT hit — conversation agent handles
+    those. Settings market 「安装」 calls installFromSkillHub directly.
     """
     body = str(text or "")
     if not body.strip():
@@ -144,19 +149,5 @@ def classify_skillhub_inbound_install_prompt(text: str) -> dict:
             ),
         }
 
-    if _is_clear_skillhub_install_intent(body):
-        slug = extract_skillhub_install_slug(body)
-        return {
-            "hit": True,
-            "slug": slug,
-            "kind": "install_intent",
-            "reason": (
-                "拦截 SkillHub 安装意图（@ns/slug 或「安装 … skill」）。"
-                "请改用 Desktop 确定性安装 "
-                "(installFromSkillHub / skillhub_adapter / "
-                "POST /api/registry/skillhub/install)，禁止 bash-curl skillhub.cn "
-                "假 registry/install。"
-            ),
-        }
-
+    # Deliberately do NOT treat @ns/slug / 「安装 … skill」 as intercept hits.
     return {"hit": False, "slug": None, "reason": "", "kind": ""}
