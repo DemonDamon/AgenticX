@@ -38,6 +38,7 @@
   "policyUseAllowlist": "按需确认（只问有风险的操作）",
   "policyRunEverything": "全部允许（之后不再询问）",
   "chatPanes": "聊天窗格",
+  "closePane": "关闭窗格",
   "protectedReasonHigh": "这条操作被标记为高风险",
   "protectedReasonDestructive": "这条操作会删除或覆盖已有内容",
   "protectedReasonComputerUse": "这条操作会读取或控制本机桌面",

@@ -11,6 +11,7 @@ import {
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { listSessionsCoalesced } from "../utils/list-sessions-coalesce";
 import { shouldUsePaneTabs } from "../utils/pane-tab-mode";
 import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
@@ -56,6 +57,35 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+/** session_id → session_name for the panes' sessions; refetched only when that id set changes. */
+function usePaneSessionTitles(panes: ChatPaneState[]): Record<string, string> {
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const idsKey = panes
+    .map((p) => (p.sessionId || "").trim())
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!idsKey) return;
+    let cancelled = false;
+    void listSessionsCoalesced(undefined)
+      .then((r) => {
+        if (cancelled || !r?.ok) return;
+        const next: Record<string, string> = {};
+        for (const row of r.sessions ?? []) {
+          const name = String(row.session_name ?? "").trim();
+          if (row.session_id && name) next[row.session_id] = name;
+        }
+        setTitles(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [idsKey]);
+  return titles;
+}
+
 function PaneTabStrip({
   panes,
   activePaneId,
@@ -67,6 +97,8 @@ function PaneTabStrip({
 }) {
   const { t } = useTranslation("common");
   const avatars = useAppStore((s) => s.avatars);
+  const removePane = useAppStore((s) => s.removePane);
+  const titles = usePaneSessionTitles(panes);
   return (
     <div
       className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface-base/80 px-2 backdrop-blur-sm"
@@ -75,23 +107,42 @@ function PaneTabStrip({
     >
       {panes.map((pane) => {
         const active = pane.id === activePaneId;
-        const label = resolvePaneTabName(pane, avatars);
+        const avatarLabel = resolvePaneTabName(pane, avatars);
+        const title = titles[(pane.sessionId || "").trim()] || "";
+        const label = title || avatarLabel;
         return (
-          <button
+          <div
             key={pane.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            className={`max-w-[11rem] shrink-0 truncate rounded-md px-2.5 py-1 text-xs transition ${
+            className={`group flex max-w-[12rem] shrink-0 items-center rounded-md text-xs transition ${
               active
                 ? "bg-surface-hover font-medium text-text-strong"
                 : "text-text-muted hover:bg-surface-hover/60 hover:text-text-strong"
             }`}
-            title={label}
-            onClick={() => onSelect(pane.id)}
           >
-            {label}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className="min-w-0 truncate py-1 pl-2.5 pr-1"
+              title={title ? `${avatarLabel} · ${title}` : avatarLabel}
+              onClick={() => onSelect(pane.id)}
+            >
+              {label}
+            </button>
+            <button
+              type="button"
+              aria-label={t("closePane", { defaultValue: "Close pane" })}
+              className={`mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-text-faint hover:bg-surface-card hover:text-text-strong ${
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                removePane(pane.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
         );
       })}
     </div>

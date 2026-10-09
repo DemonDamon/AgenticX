@@ -2987,7 +2987,18 @@ function SkillsTab() {
           return;
         }
         const sid = created.session_id;
-        const paneId = addPane(null, "Near", sid);
+        // Reuse a Near pane instead of opening one per install (installs used to pile up dozens of tabs).
+        const { panes, activePaneId, setPaneSessionId, setActivePaneId } = useAppStore.getState();
+        const metaPanes = panes.filter((p) => !p.avatarId && !p.composePreview);
+        const reuse = metaPanes.find((p) => p.id === activePaneId) ?? metaPanes[0];
+        let paneId: string;
+        if (reuse) {
+          paneId = reuse.id;
+          setPaneSessionId(paneId, sid);
+          setActivePaneId(paneId);
+        } else {
+          paneId = addPane(null, "Near", sid);
+        }
         // Skill-market install is a real user-initiated turn. Do not inherit
         // forwardAutoReply's merge-forward defaults (suppressUserEcho /
         // skipUserHistory = true), or the pane looks like it started with no
