@@ -6,7 +6,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![PyPI version](https://img.shields.io/pypi/v/agenticx)](https://pypi.org/project/agenticx/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1e88e5?logo=readthedocs&logoColor=white)](https://deepwiki.com/DemonDamon/AgenticX)
 
 **A unified agent technology stack spanning the Python Agent Runtime, Near Desktop, and Enterprise**
 
