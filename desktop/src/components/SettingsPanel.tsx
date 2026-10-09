@@ -2950,31 +2950,51 @@ function SkillsTab() {
     void (async () => {
       setSkillhubMsg("");
       setInstallPromptBusy(true);
+      const runAgentFallback = async (reason: string) => {
+        let prompt = "";
+        try {
+          prompt = buildSkillHubAgentInstallPrompt(name);
+        } catch (assertErr) {
+          setSkillhubMsg(
+            `已拒绝不安全的 agent 安装提示词（${String(assertErr)}）。请使用 Desktop 确定性安装。`,
+          );
+          return;
+        }
+        if (!prompt.trim()) return;
+        setSkillhubMsg(reason);
+        await runInstallPromptInMetaAgent(prompt);
+      };
       try {
-        const res = await window.agenticxDesktop.installFromSkillHub({ slug: name });
+        const installFn = window.agenticxDesktop?.installFromSkillHub;
+        if (typeof installFn !== "function") {
+          await runAgentFallback(
+            "本机缺少 installFromSkillHub IPC；改为 agent 回退安装（最短 CLI 路径）…",
+          );
+          return;
+        }
+        // Prefer deterministic Desktop IPC / Studio skillhub install; agent only on explicit failure.
+        const res = await installFn.call(window.agenticxDesktop, { slug: name });
         if (res?.ok) {
           setSkillhubMsg(`已安装 ${name} → ${res.installed_path || "registry/" + name}`);
           try {
-            await window.agenticxDesktop.refreshSkills?.();
+            await reloadSkillsAfterMarketInstall(name);
           } catch {
-            /* ignore refresh errors */
+            try {
+              await window.agenticxDesktop.refreshSkills?.();
+            } catch {
+              /* ignore refresh errors */
+            }
           }
           return;
         }
         const err = String(res?.error || "skillhub install failed");
-        setSkillhubMsg(`确定性安装失败：${err}；改为 agent 回退安装…`);
         if (res?.fallback_to_agent === false) {
+          setSkillhubMsg(`确定性安装失败：${err}（已禁用 agent 回退）`);
           return;
         }
-        const prompt = buildSkillHubAgentInstallPrompt(name);
-        if (!prompt.trim()) return;
-        await runInstallPromptInMetaAgent(prompt);
+        await runAgentFallback(`确定性安装失败：${err}；改为 agent 回退安装…`);
       } catch (e) {
-        const prompt = buildSkillHubAgentInstallPrompt(name);
-        setSkillhubMsg(`确定性安装异常：${String(e)}；改为 agent 回退安装…`);
-        if (prompt.trim()) {
-          await runInstallPromptInMetaAgent(prompt);
-        }
+        await runAgentFallback(`确定性安装异常：${String(e)}；改为 agent 回退安装…`);
       } finally {
         setInstallPromptBusy(false);
       }
