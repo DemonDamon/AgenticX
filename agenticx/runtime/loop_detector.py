@@ -29,6 +29,27 @@ _DETERMINISTIC_ERROR_HINTS: Tuple[Tuple[str, str], ...] = (
     ),
 )
 
+# Same-CLASS sandbox failures: halt even when args change slightly between tries.
+# tip always steers toward Desktop IPC / deterministic SkillHub install.
+_DESKTOP_SKILLHUB_TIP = (
+    "请改用 Desktop IPC / 确定性 SkillHub 安装（Settings → installFromSkillHub / "
+    "POST /api/registry/skillhub/install），不要在沙箱里重装 SkillHub CLI。"
+)
+_SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
+    (
+        "path_escapes_workspace",
+        "路径超出 workspace：技能目录请用 skill_manage 或 Desktop 确定性安装，不要用 bash 直写。",
+    ),
+    (
+        "skillhub_home_eperm",
+        f"沙箱禁止访问 ~/.skillhub。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+    (
+        "sandbox_tmp_eperm",
+        f"沙箱禁止写 /tmp 或系统 mktemp。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+)
+
 
 @dataclass
 class LoopCheckResult:
@@ -101,6 +122,9 @@ class LoopDetector:
         self._same_error_key: Optional[Tuple[str, str, str]] = None
         self._same_error_count = 0
         self._latest_same_error: Optional[Tuple[str, str, str, int]] = None
+        self._same_class_key: Optional[Tuple[str, str]] = None
+        self._same_class_count = 0
+        self._latest_same_class: Optional[Tuple[str, str, str, int]] = None
 
     def reset(self) -> None:
         """Clear per-turn detector state without changing configured thresholds."""
@@ -117,6 +141,9 @@ class LoopDetector:
         self._same_error_key = None
         self._same_error_count = 0
         self._latest_same_error = None
+        self._same_class_key = None
+        self._same_class_count = 0
+        self._latest_same_class = None
 
     def note_assistant_round(
         self,
@@ -290,6 +317,68 @@ class LoopDetector:
             self._same_error_count = 1
         self._latest_same_error = (tool_name, needle, _hint, self._same_error_count)
 
+    @staticmethod
+    def _same_class_sandbox_match(result_text: Optional[str]) -> Optional[Tuple[str, str]]:
+        """Classify sandbox SkillHub-install failures independent of exact args."""
+        text = str(result_text or "")
+        lower = text.lower()
+        if not lower:
+            return None
+        if "path escapes workspace" in lower:
+            return _SAME_CLASS_SANDBOX_HINTS[0]
+        eperm = (
+            "operation not permitted" in lower
+            or "eperm" in lower
+            or "errno 1" in lower
+        )
+        if eperm:
+            skillhub_home = any(
+                marker in lower
+                for marker in (
+                    ".skillhub",
+                    "skillhub/",
+                    "skills_store_cli",
+                    "skillhub_home",
+                )
+            )
+            if skillhub_home:
+                return _SAME_CLASS_SANDBOX_HINTS[1]
+            tmp_hit = any(
+                marker in lower
+                for marker in (
+                    "/tmp",
+                    "mktemp",
+                    "tmpdir",
+                    "tempfile",
+                    "temp dir",
+                    "temporary directory",
+                )
+            )
+            if tmp_hit:
+                return _SAME_CLASS_SANDBOX_HINTS[2]
+        return None
+
+    def _record_same_class_sandbox_error(
+        self,
+        tool_name: str,
+        result_text: Optional[str],
+    ) -> None:
+        """Track same-class sandbox errors even when args differ between tries."""
+        self._latest_same_class = None
+        matched = self._same_class_sandbox_match(result_text)
+        if matched is None:
+            self._same_class_key = None
+            self._same_class_count = 0
+            return
+        class_id, hint = matched
+        key = (tool_name, class_id)
+        if self._same_class_key == key:
+            self._same_class_count += 1
+        else:
+            self._same_class_key = key
+            self._same_class_count = 1
+        self._latest_same_class = (tool_name, class_id, hint, self._same_class_count)
+
     def record_call(
         self,
         tool_name: str,
@@ -304,6 +393,7 @@ class LoopDetector:
         self._progress_marks.append(bool(has_progress))
         self._record_file_edit_outcome(tool_name, args_signature, result_text)
         self._record_same_args_same_error(tool_name, args_signature, result_text)
+        self._record_same_class_sandbox_error(tool_name, result_text)
         if result_text and self.is_guard_rejection(result_text):
             self._guard_rejections.append(tool_name)
         if result_fingerprint:
@@ -341,6 +431,7 @@ class LoopDetector:
             self._detect_guard_rejection_loop,
             self._detect_file_edit_failure,
             self._detect_same_args_same_error,
+            self._detect_same_class_sandbox_error,
             self._detect_generic_repeat,
             self._detect_ping_pong,
             self._detect_no_progress,
@@ -404,6 +495,35 @@ class LoopDetector:
                 message=(
                     f"工具 {tool_name} 以相同参数再次命中确定性错误「{needle}」。"
                     f"{hint}"
+                ),
+                nudge=hint,
+            )
+        return None
+
+    def _detect_same_class_sandbox_error(self) -> Optional[LoopCheckResult]:
+        latest = self._latest_same_class
+        if latest is None:
+            return None
+        tool_name, class_id, hint, count = latest
+        if count >= 3:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="same_class_sandbox_error",
+                message=(
+                    f"工具 {tool_name} 连续命中同类沙箱错误「{class_id}」{count} 次"
+                    f"（参数可能不同）。{hint}"
+                ),
+                nudge=hint,
+            )
+        if count >= 2:
+            return LoopCheckResult(
+                stuck=True,
+                level="warning",
+                detector="same_class_sandbox_error",
+                message=(
+                    f"工具 {tool_name} 再次命中同类沙箱错误「{class_id}」"
+                    f"（即使参数已变化）。{hint}"
                 ),
                 nudge=hint,
             )

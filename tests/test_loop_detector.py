@@ -243,3 +243,59 @@ def test_same_args_same_error_skill_already_exists() -> None:
     assert result is not None
     assert result.detector == "same_args_same_error"
     assert "exists" in result.message.lower() or "已存在" in result.message
+
+def test_same_class_sandbox_eperm_skillhub_halts_with_different_args() -> None:
+    """Same-class ~/.skillhub EPERM should halt even when bash args change."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    err1 = "bash: /Users/damon/.skillhub/skills_store_cli.py: Operation not permitted"
+    err2 = "ERROR: cannot read ~/.skillhub/config.json: Operation not permitted"
+    err3 = "PermissionError: [Errno 1] Operation not permitted: '/Users/x/.skillhub/bin'"
+    detector.record_call("bash_exec", '{"cmd":"skillhub --version"}', has_progress=False, result_text=err1)
+    assert detector.check() is None
+    detector.record_call("bash_exec", '{"cmd":"skillhub search archify"}', has_progress=False, result_text=err2)
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_class_sandbox_error"
+    assert warn.level == "warning"
+    assert warn.nudge and "Desktop" in warn.nudge
+    detector.record_call("bash_exec", '{"cmd":"cat ~/.skillhub/config.json"}', has_progress=False, result_text=err3)
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+    assert crit.detector == "same_class_sandbox_error"
+
+
+def test_same_class_sandbox_tmp_eperm_with_different_args() -> None:
+    detector = LoopDetector()
+    err1 = "mkdir: /tmp/skillhub_dl: Operation not permitted"
+    err2 = "mktemp: failed to create file via template in /tmp: Operation not permitted"
+    detector.record_call("bash_exec", '{"cmd":"mkdir /tmp/skillhub_dl"}', has_progress=False, result_text=err1)
+    detector.record_call("bash_exec", '{"cmd":"mktemp /tmp/foo.XXXX"}', has_progress=False, result_text=err2)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert result.nudge and "Desktop" in result.nudge
+
+
+def test_same_class_path_escapes_with_different_args() -> None:
+    detector = LoopDetector()
+    err1 = "ERROR: path escapes workspace: ~/.agenticx/skills"
+    err2 = "ERROR: path escapes workspace: /Users/damon/.agenticx/skills/registry"
+    detector.record_call("bash_exec", '{"cmd":"ls ~/.agenticx/skills"}', has_progress=False, result_text=err1)
+    detector.record_call("bash_exec", '{"cmd":"ls /Users/damon/.agenticx/skills/registry"}', has_progress=False, result_text=err2)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert "path_escapes" in result.message or "workspace" in result.message.lower()
+
+
+def test_same_args_same_error_still_works_alongside_same_class() -> None:
+    """Existing same-args deterministic skill_manage tips must keep working."""
+    detector = LoopDetector()
+    args = '{"action":"create","name":"archify"}'
+    err = "ERROR: skill already exists. Use action=view"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_args_same_error"
