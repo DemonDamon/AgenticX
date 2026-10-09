@@ -27,6 +27,23 @@ describe("ip mascot portrait", () => {
     expect(set.size).toBeGreaterThanOrEqual(3);
   });
 
+  it("uses a square viewBox so tiles from 20px to 56px stay sharp", () => {
+    const svg = buildIpMascotPortraitSvg("Felix");
+    expect(svg).toContain('viewBox="0 0 64 64"');
+    expect(svg).toContain('width="64"');
+    expect(svg).toContain('height="64"');
+  });
+
+  it("spreads background colors across nearby seeds", () => {
+    const backgrounds = new Set(
+      Array.from({ length: 16 }, (_, index) => {
+        const svg = buildIpMascotPortraitSvg(`expert-${index}`);
+        return svg.match(/<rect[^>]*fill="([^"]+)"/)?.[1];
+      }),
+    );
+    expect(backgrounds.size).toBeGreaterThanOrEqual(4);
+  });
+
   it("builds a data uri that encodes the marker", () => {
     const uri = buildIpMascotPortraitDataUri("飞坦:abc");
     expect(uri.startsWith("data:image/svg+xml;utf8,")).toBe(true);
