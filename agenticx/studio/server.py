@@ -5845,6 +5845,7 @@ def create_studio_app() -> FastAPI:
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
             "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp", "connector_manage": "mcp",
             "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
+            "skillhub_install": "skill", "skillhub_search": "skill", "clawhub_install": "skill",
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
             "memory_append": "memory", "memory_search": "memory", "session_search": "memory", "plugin_usage": "memory",
             "liteparse": "document",

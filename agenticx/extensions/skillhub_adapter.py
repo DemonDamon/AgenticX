@@ -454,7 +454,7 @@ def _install_via_skillhub_cli(
     return False, last_error, last_code
 
 
-def install_skillhub_skill(slug: str) -> Dict[str, Any]:
+def install_skillhub_skill(slug: str, *, acknowledge_high_risk: bool = False) -> Dict[str, Any]:
     """Deterministically install a SkillHub skill into ~/.agenticx/skills/registry/<slug>/.
 
     Runs outside the agent sandbox (Studio API / Desktop IPC). Writes the full
@@ -522,7 +522,7 @@ def install_skillhub_skill(slug: str) -> Dict[str, Any]:
             "overall": sr.verdict,
             "skills": [scan_result_to_payload(sr, bare)],
         }
-        if sr.verdict == "dangerous":
+        if sr.verdict == "dangerous" and not acknowledge_high_risk:
             return {
                 "ok": False,
                 "error": "high_risk_confirm_required",

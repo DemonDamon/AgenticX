@@ -65,6 +65,39 @@ def _ensure_clawhub_registry(
     return items + [dict(DEFAULT_CLAWHUB_REGISTRY)], True
 
 
+def split_clawhub_ref(raw: str) -> Tuple[Optional[str], str]:
+    """Parse ``@owner/slug`` / ``owner/slug`` / ``slug`` → ``(owner|None, slug)``.
+
+    ClawHub returns HTTP 409 AMBIGUOUS_SKILL_SLUG when several publishers share a
+    slug, so installs must carry the owner handle whenever it is known.
+    """
+    ref = str(raw or "").strip().lstrip("@")
+    if "/" in ref:
+        owner, slug = ref.split("/", 1)
+        if owner.strip() and slug.strip():
+            return owner.strip(), slug.strip()
+    return None, ref
+
+
+def _clawhub_owner_and_author(item: Dict[str, Any]) -> Tuple[str, str]:
+    """Owner handle (install key) and a readable author label from a ClawHub record."""
+    owner = ""
+    install = item.get("install")
+    if isinstance(install, dict):
+        owner, _ = split_clawhub_ref(str(install.get("reference") or ""))
+        owner = owner or ""
+    native = item.get("native") if isinstance(item.get("native"), dict) else {}
+    candidates = [native.get("owner"), item.get("owner"), item.get("publisher"), item.get("author")]
+    label = ""
+    for cand in candidates:
+        if isinstance(cand, dict):
+            owner = owner or str(cand.get("handle") or "").strip()
+            label = label or str(cand.get("displayName") or cand.get("handle") or "").strip()
+        elif isinstance(cand, str) and cand.strip():
+            label = label or cand.strip()
+    return owner, (label or owner or "unknown")
+
+
 @dataclass
 class SearchResult:
     """A single search result from any registry source."""
@@ -77,6 +110,7 @@ class SearchResult:
     source_type: str = "agx"
     install_hint: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
+    owner: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -87,6 +121,7 @@ class SearchResult:
             "source": self.source,
             "source_type": self.source_type,
             "install_hint": self.install_hint,
+            "owner": self.owner,
         }
 
 
@@ -317,16 +352,18 @@ class RegistryHub:
             description = summary
             if display_name and display_name.lower() != name.lower():
                 description = f"{display_name} — {summary}" if summary else display_name
+            owner, author = _clawhub_owner_and_author(item)
             results.append(
                 SearchResult(
                     name=name,
                     description=description,
                     version=str(item.get("version") or "latest"),
-                    author=str(item.get("author") or item.get("publisher") or "unknown"),
+                    author=author,
                     source=source_name,
                     source_type="clawhub",
                     install_hint=f"Download SKILL.md from ClawHub: {url}/skills/{name}",
                     extra=item,
+                    owner=owner,
                 )
             )
         return results
@@ -460,12 +497,16 @@ class RegistryHub:
             assert last_resp is not None
             return None, _rate_limited_err(last_resp)
 
+        owner, skill_name = split_clawhub_ref(skill_name)
+        owner_params: Dict[str, Any] = {"ownerHandle": owner} if owner else {}
+
         # Step 1: Fetch version list to get the latest version tag.
         # The /v1/skills/{slug} detail endpoint only returns metadata (no SKILL.md content),
         # so we skip that request and go straight to the versions endpoint.
         try:
             versions_resp, limited_err = _get_with_retry(
                 f"{url}/v1/packages/{skill_name}/versions",
+                params=owner_params or None,
                 timeout=15.0,
             )
             if limited_err:
@@ -483,6 +524,7 @@ class RegistryHub:
             # Step 2: Fetch the specific version detail to get the SKILL.md file hash.
             version_resp, limited_err = _get_with_retry(
                 f"{url}/v1/packages/{skill_name}/versions/{latest_version}",
+                params=owner_params or None,
                 timeout=15.0,
             )
             if limited_err:
@@ -507,7 +549,7 @@ class RegistryHub:
             # Step 3: Download the SKILL.md (ClawHub returns a zip archive).
             download_resp, limited_err = _get_with_retry(
                 f"{url}/v1/download",
-                params={"slug": skill_name, "hash": skill_file_hash, "file": "SKILL.md"},
+                params={"slug": skill_name, "hash": skill_file_hash, "file": "SKILL.md", **owner_params},
                 timeout=20.0,
             )
             if limited_err:

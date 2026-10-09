@@ -1962,6 +1962,97 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "skillhub_install",
+            "description": (
+                "Install one SkillHub (skillhub.cn) skill into ~/.agenticx/skills/registry/<slug>/ "
+                "in a single call. Use this whenever the user asks to install a SkillHub skill, "
+                "including prompts like 「请根据 https://skillhub.cn/install/skillhub.md，安装 @ns/slug」. "
+                "The namespace is resolved automatically when only a slug is given; download, "
+                "security scan and registration all run outside the sandbox. "
+                "Do NOT web_fetch skillhub.md, run curl install.sh, or call the skillhub CLI via bash_exec."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Skill reference: '@namespace/slug', 'namespace/slug', or bare 'slug'.",
+                    },
+                    "acknowledge_high_risk": {
+                        "type": "boolean",
+                        "description": (
+                            "Only after a previous call in this chat was refused as high risk AND the user "
+                            "has explicitly replied that they still want it installed."
+                        ),
+                    },
+                },
+                "required": ["ref"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clawhub_install",
+            "description": (
+                "Install one ClawHub skill into ~/.agenticx/skills/registry/<name>/ in a single call "
+                "(fetch SKILL.md from the configured ClawHub registry, security scan, register). "
+                "Use this whenever the user asks to install a ClawHub skill. "
+                "Do NOT curl ClawHub APIs or write skill files via bash_exec."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "ClawHub skill as '@owner/slug' (preferred; required when several publishers "
+                            "share a slug) or bare 'slug'."
+                        ),
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Registry source name from the market list (default: first ClawHub registry).",
+                    },
+                    "acknowledge_high_risk": {
+                        "type": "boolean",
+                        "description": (
+                            "Only after a previous call in this chat was refused as high risk AND the user "
+                            "has explicitly replied that they still want it installed."
+                        ),
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skillhub_search",
+            "description": (
+                "Search the SkillHub (skillhub.cn) market. Returns slug, namespace, canonical "
+                "'@namespace/slug', downloads and description; pass canonical to skillhub_install."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search keywords."},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 10, max 30).",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "plan_create",
             "description": (
                 "Create the approved implementation plan as a durable Markdown artifact under "
@@ -11080,6 +11171,189 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
     return result_to_json(result)
 
 
+def _refresh_skill_catalog_after_install() -> None:
+    try:
+        from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+        from agenticx.tools.skill_bundle import SkillBundleLoader
+
+        invalidate_skills_list_cache()
+        SkillBundleLoader().refresh()
+    except Exception as exc:  # noqa: BLE001 - install already succeeded on disk
+        logging.getLogger(__name__).warning("skill catalog refresh after install failed: %s", exc)
+
+
+_MARKET_HIGH_RISK_REFUSALS_KEY = "__market_install_high_risk_refusals__"
+_HIGH_RISK_ASK_USER_NEXT = (
+    "安全扫描判定高风险，已拒绝安装。把命中原因告诉用户，询问是否仍要安装；"
+    "用户明确回复同意后，再以 acknowledge_high_risk=true 调用一次。不要绕过或自行决定。"
+)
+
+
+def _user_turn_count(session: Optional[StudioSession]) -> int:
+    history = getattr(session, "agent_messages", None) or []
+    return sum(1 for m in history if isinstance(m, dict) and m.get("role") == "user")
+
+
+def _market_refusals(session: Optional[StudioSession]) -> Dict[str, int]:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        return {}
+    refusals = scratchpad.setdefault(_MARKET_HIGH_RISK_REFUSALS_KEY, {})
+    return refusals if isinstance(refusals, dict) else {}
+
+
+def _note_high_risk_refusal(session: Optional[StudioSession], key: str) -> None:
+    _market_refusals(session)[key] = _user_turn_count(session)
+
+
+def _high_risk_ack_allowed(session: Optional[StudioSession], key: str) -> bool:
+    """Honor acknowledge_high_risk only after a refusal followed by a new user turn."""
+    refused_at = _market_refusals(session).get(key)
+    return isinstance(refused_at, int) and _user_turn_count(session) > refused_at
+
+
+def _tool_skillhub_install(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    ref = str(arguments.get("ref") or arguments.get("slug") or "").strip()
+    if not ref:
+        return "ERROR: ref is required, e.g. '@indiv-ebandao/tiangong-skill'"
+    from agenticx.extensions.skillhub_adapter import install_skillhub_skill, parse_skillhub_ref
+
+    risk_key = "skillhub:" + parse_skillhub_ref(ref)[1]
+    ack = bool(arguments.get("acknowledge_high_risk")) and _high_risk_ack_allowed(session, risk_key)
+    result = install_skillhub_skill(ref, acknowledge_high_risk=ack)
+    if result.get("ok"):
+        _refresh_skill_catalog_after_install()
+        payload = {
+            "ok": True,
+            "name": result.get("name"),
+            "canonical": result.get("canonical"),
+            "installed_path": result.get("installed_path"),
+            "scan_verdict": (result.get("scan_summary") or {}).get("overall"),
+            "next": "安装完成，技能已在 设置 → Skills 可见；直接向用户汇报，无需再验证或重装。",
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    payload = {
+        "ok": False,
+        "ref": ref,
+        "error": result.get("error"),
+        "error_code": result.get("error_code"),
+        "namespace": result.get("namespace"),
+        "next": (
+            "不要改用 bash_exec / curl / 探测本机端口重试。"
+            "若是命名空间或 slug 不对，可先 skillhub_search 确认 canonical 后再调用一次；"
+            "否则直接把 error 原样告诉用户。"
+        ),
+    }
+    if result.get("error_code") == "high_risk_confirm_required":
+        _note_high_risk_refusal(session, risk_key)
+        payload["scan_summary"] = result.get("scan_summary")
+        payload["next"] = _HIGH_RISK_ASK_USER_NEXT
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    name = str(arguments.get("name") or "").strip()
+    if not name:
+        return "ERROR: name is required, e.g. 'archify'"
+    from agenticx.extensions.registry_hub import RegistryHub, split_clawhub_ref
+    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+
+    _, bare_name = split_clawhub_ref(name)
+    hub = RegistryHub.from_config()
+    source = str(arguments.get("source") or "").strip()
+    if not source:
+        source = next(
+            (
+                str(r.get("name") or "")
+                for r in getattr(hub, "_registries", [])
+                if str(r.get("type", "")).lower() == "clawhub" and str(r.get("name") or "").strip()
+            ),
+            "",
+        )
+    if not source:
+        return json.dumps(
+            {"ok": False, "name": name, "error": "no ClawHub registry configured"},
+            ensure_ascii=False,
+        )
+    content, err = hub.fetch_skill_markdown(source, name)
+    if err or content is None:
+        return json.dumps(
+            {
+                "ok": False,
+                "name": name,
+                "source": source,
+                "error": err or "fetch failed",
+                "next": (
+                    "不要改用 bash_exec / curl 重试。若 error 含 409 / AMBIGUOUS，"
+                    "改用 '@owner/slug' 形式再调用一次；否则把 error 原样告诉用户。"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    scan = scan_skill_markdown_text(content)
+    risk_key = "clawhub:" + bare_name
+    ack = bool(arguments.get("acknowledge_high_risk")) and _high_risk_ack_allowed(session, risk_key)
+    if scan.verdict == "dangerous" and not ack:
+        _note_high_risk_refusal(session, risk_key)
+        return json.dumps(
+            {
+                "ok": False,
+                "name": name,
+                "source": source,
+                "error_code": "high_risk_confirm_required",
+                "scan": scan_result_to_payload(scan, bare_name),
+                "next": _HIGH_RISK_ASK_USER_NEXT,
+            },
+            ensure_ascii=False,
+        )
+    md_path = hub.write_registry_skill(bare_name, content)
+    _refresh_skill_catalog_after_install()
+    return json.dumps(
+        {
+            "ok": True,
+            "name": name,
+            "source": source,
+            "installed_path": str(md_path),
+            "scan_verdict": scan.verdict,
+            "next": "安装完成，技能已在 设置 → Skills 可见；直接向用户汇报，无需再验证或重装。",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_skillhub_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    _ = session
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return "ERROR: query is required"
+    try:
+        limit = int(arguments.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 30))
+    from agenticx.extensions.skillhub_adapter import search_skillhub_market
+
+    result = search_skillhub_market(query)
+    items = []
+    for item in (result.get("items") or [])[:limit]:
+        desc = str(item.get("description") or "").strip().splitlines()
+        items.append(
+            {
+                "slug": item.get("slug"),
+                "name": item.get("name"),
+                "canonical": item.get("canonical"),
+                "downloads": item.get("downloads"),
+                "description": (desc[0] if desc else "")[:160],
+            }
+        )
+    payload: Dict[str, Any] = {"ok": bool(result.get("ok")), "count": len(items), "items": items}
+    if result.get("error"):
+        payload["error"] = result.get("error")
+    if result.get("hint"):
+        payload["hint"] = result.get("hint")
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
     if service_mode:
         return (
@@ -12040,6 +12314,12 @@ async def dispatch_tool_async(
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":
             return _tool_skill_import_repo(arguments, session)
+        if name == "skillhub_install":
+            return await asyncio.to_thread(_tool_skillhub_install, arguments, session)
+        if name == "skillhub_search":
+            return await asyncio.to_thread(_tool_skillhub_search, arguments, session)
+        if name == "clawhub_install":
+            return await asyncio.to_thread(_tool_clawhub_install, arguments, session)
         if name == "plan_create":
             return create_plan_artifact(session, arguments)
         if name == "plan_update":
