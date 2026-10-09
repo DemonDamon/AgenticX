@@ -759,6 +759,16 @@ class SessionManager:
 
         return scratchpad_truthy(data.get(key))
 
+    def sessions_with_scratchpad_flag(self, key: str) -> set[str]:
+        """Persisted session ids whose scratchpad ``key`` is truthy, in one SQLite read."""
+        try:
+            rows = self._session_store._session_ids_with_scratchpad_key_sync(key)
+        except Exception:
+            return set()
+        from agenticx.runtime.scratchpad_utils import scratchpad_truthy
+
+        return {sid for sid, value in rows.items() if scratchpad_truthy(value)}
+
     def touch(self, session_id: str) -> bool:
         managed = self._sessions.get(session_id)
         if managed is None:
@@ -3424,6 +3434,15 @@ class SessionManager:
             rows.append(listed)
         known = {str(row.get("session_id", "")) for row in rows}
         skip_dirs = known | sqlite_skip
+        # Dirs without any summary row would only get {} from the per-session
+        # metadata query; skip that connection (100s of empty dirs per listing).
+        if wanted is None:
+            try:
+                summarized_ids = self._session_store._list_all_session_ids_sync()
+            except Exception:
+                summarized_ids = None
+        else:
+            summarized_ids = sqlite_skip
         root = Path(self._sessions_root)
         if root.exists():
             for child in root.iterdir():
@@ -3434,12 +3453,13 @@ class SessionManager:
                     continue
                 messages_path = child / "messages.json"
                 fs_meta: dict[str, Any] = {}
-                try:
-                    loaded = self._session_store._load_latest_session_metadata_sync(sid)
-                    if isinstance(loaded, dict):
-                        fs_meta = loaded
-                except Exception:
-                    fs_meta = {}
+                if summarized_ids is None or sid in summarized_ids:
+                    try:
+                        loaded = self._session_store._load_latest_session_metadata_sync(sid)
+                        if isinstance(loaded, dict):
+                            fs_meta = loaded
+                    except Exception:
+                        fs_meta = {}
                 raw_av = fs_meta.get("avatar_id")
                 av_norm = (
                     None

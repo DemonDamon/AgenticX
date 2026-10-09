@@ -341,3 +341,33 @@ def test_supervisor_uses_recent_continue_as_interrupted_silence_anchor() -> None
     assert _last_continue_attempt_ts(managed.studio_session) == recent_continue
     assert _supervisor_silence_anchor(managed, messages) == recent_continue
 
+
+
+def test_session_store_with_block_closes_connection(tmp_path) -> None:
+    import sqlite3
+
+    from agenticx.memory.session_store import SessionStore
+
+    store = SessionStore(db_path=tmp_path / "s.sqlite")
+    with store._connect() as conn:
+        conn.execute("SELECT 1")
+    try:
+        conn.execute("SELECT 1")
+        closed = False
+    except sqlite3.ProgrammingError:
+        closed = True
+    assert closed
+
+
+def test_sessions_with_scratchpad_flag_single_query(tmp_path) -> None:
+    import asyncio
+
+    from agenticx.memory.session_store import SessionStore
+
+    store = SessionStore(db_path=tmp_path / "s.sqlite")
+    asyncio.run(store.save_scratchpad("a", {"unattended_enabled": True, "x": 1}))
+    asyncio.run(store.save_scratchpad("b", {"unattended_enabled": False}))
+    asyncio.run(store.save_scratchpad("c", {"other": True}))
+    rows = store._session_ids_with_scratchpad_key_sync("unattended_enabled")
+    assert set(rows) == {"a", "b"}
+    assert rows["a"] is True and rows["b"] is False

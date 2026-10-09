@@ -48,6 +48,20 @@ def _encode_scratchpad_value(value: Any) -> str:
     return f"{_SCRATCHPAD_JSON_PREFIX}{payload}"
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """``with conn:`` commits/rolls back AND closes.
+
+    The stock context manager only ends the transaction, so every
+    ``with self._connect()`` used to leak an open handle until GC.
+    """
+
+    def __exit__(self, exc_type, exc, tb):  # type: ignore[override]
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def _decode_scratchpad_value(raw: str) -> Any:
     """Decode typed values while preserving legacy unprefixed strings."""
     if not raw.startswith(_SCRATCHPAD_JSON_PREFIX):
@@ -111,7 +125,7 @@ class SessionStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, factory=_ClosingConnection)
         conn.row_factory = sqlite3.Row
         # busy_timeout is connection-scoped and must be set on every connection.
         # Under WAL this lets a reader briefly wait out a concurrent writer's
@@ -335,6 +349,18 @@ class SessionStore:
             ).fetchall()
             return {
                 str(row["key"]): _decode_scratchpad_value(str(row["value"]))
+                for row in rows
+            }
+
+    def _session_ids_with_scratchpad_key_sync(self, key: str) -> Dict[str, Any]:
+        """``{session_id: decoded value}`` for every session holding ``key`` (one query)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id, value FROM scratchpad WHERE key = ?",
+                (key,),
+            ).fetchall()
+            return {
+                str(row["session_id"]): _decode_scratchpad_value(str(row["value"]))
                 for row in rows
             }
 
