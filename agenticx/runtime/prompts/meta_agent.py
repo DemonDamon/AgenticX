@@ -680,6 +680,23 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
         pass
 
     if not enabled:
+        # Multi-brain alignment (same rule as _tool_knowledge_search): KBManager
+        # only delegates to default_docs, so a disabled default library does not
+        # mean the whole KB is off — a user-created GLOBAL docs brain that is
+        # enabled still entitles the model to search. Without this the prompt
+        # tells the model "KB disabled" and it never even calls the tool.
+        try:
+            from agenticx.brain.mount import list_visible_brains
+            from agenticx.brain.types import BrainType
+
+            enabled = any(
+                b.enabled
+                for b in list_visible_brains(avatar_id=None, brain_type=BrainType.DOCS)
+            )
+        except Exception:
+            pass
+
+    if not enabled:
         return (
             "## 知识库检索（Stage-1 MVP）\n"
             "- 本地知识库当前处于禁用状态：不要主动调用 `knowledge_search`，除非用户先要求启用知识库。\n"
