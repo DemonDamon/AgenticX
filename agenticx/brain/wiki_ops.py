@@ -198,12 +198,21 @@ def compile_document_wiki(
     if not result.ok:
         logger.warning("wiki compile failed for %s: %s", doc_id, result.error)
         return {"ok": False, "error": result.error or "编译失败", "written": []}
+    if result.skipped_reason:
+        # SP31: unchanged source document — zero LLM calls were made. The
+        # compile queue renders this as a terminal "skipped" status.
+        return {"ok": True, "skipped": True, "message": result.skipped_reason,
+                "written": []}
     logger.info("wiki compile wrote %d pages for %s", len(result.written), doc_id)
     try:
         docs_rt.refresh_brain_stats()
     except Exception:
         pass
-    return {"ok": True, "written": list(result.written)}
+    out = {"ok": True, "written": list(result.written)}
+    if result.skipped:
+        # Pages preserved (legacy cross-document pages) — informational.
+        out["preserved"] = list(result.skipped)
+    return out
 
 
 def maybe_compile_wiki_after_ingest(docs_rt, job) -> None:
