@@ -74,7 +74,7 @@ export function RidgeChart({ title, description, hours, models, series, emptyLab
                 labelStyle={{ ...chartLabelStyle, marginBottom: 4, fontWeight: 600, color: "var(--foreground)" }}
                 itemStyle={chartLabelStyle}
                 cursor={{ stroke: "var(--border)", strokeWidth: 1, strokeDasharray: "4 4" }}
-                formatter={(value: number, name: string) => [value.toLocaleString(), name]}
+                formatter={(value, name) => [Number(value ?? 0).toLocaleString(), String(name ?? "")]}
               />
               <Legend iconType="circle" wrapperStyle={chartLegendWrapperStyle} />
               {models.map((m, i) => {

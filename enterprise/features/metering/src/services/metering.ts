@@ -43,13 +43,13 @@ const ALIAS: Record<MeteringGroupKey, string> = {
 function percentile(sorted: number[], p: number): number {
   const n = sorted.length;
   if (n === 0) return 0;
-  if (n === 1) return sorted[0];
+  if (n === 1) return sorted[0] ?? 0;
   const pos = p * (n - 1);
   const lo = Math.floor(pos);
   const hi = Math.ceil(pos);
-  if (lo === hi) return sorted[lo];
+  if (lo === hi) return sorted[lo] ?? 0;
   const frac = pos - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+  return (sorted[lo] ?? 0) * (1 - frac) + (sorted[hi] ?? 0) * frac;
 }
 
 const HEATMAP_DIM_COLUMN: Record<HeatmapDimension, string> = {
@@ -600,7 +600,8 @@ export class MeteringService {
         const m = String(row.model ?? "(unknown)");
         const tokens = Number(row.total_tokens ?? 0);
         if (topModels.has(m) && h >= 0 && h < 24) {
-          series[m][h] += tokens;
+          const arr = series[m];
+          if (arr) arr[h] = (arr[h] ?? 0) + tokens;
         }
       }
 
