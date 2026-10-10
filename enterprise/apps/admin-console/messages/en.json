@@ -1521,6 +1521,33 @@
             "deleteSuccess": "Deleted",
             "deleteFailed": "Delete failed"
           }
+        },
+        "diagnostics": {
+          "dailyAvg": "Daily avg",
+          "sessions": "Sessions",
+          "ioRatio": "In:Out ratio",
+          "cacheHit": "Cache hit rate",
+          "hourlyRidgeTitle": "0–24h model ridge",
+          "hourlyRidgeDescription": "Token consumption by hour × model (top N by volume)",
+          "distributionTitle": "Request size distribution",
+          "distributionDescription": "Per-model p50 / p90 / p99 token size",
+          "colModel": "Model",
+          "colRequests": "Requests",
+          "colAvg": "Avg",
+          "colP50": "p50",
+          "colP90": "p90",
+          "colP99": "p99",
+          "tracesButton": "View related traces",
+          "tracesTitle": "Top traces by token",
+          "tracesDescription": "Click a trace to inspect step-level usage in the agent-traces view",
+          "tracesEmpty": "No trace data in current filters",
+          "tracesEmptyDescription": "Usage records in current filters have no trace_id, or adjust filters and retry",
+          "colTraceId": "Trace ID",
+          "colTraceTokens": "Tokens",
+          "colTraceCost": "Cost",
+          "colTraceSteps": "Steps",
+          "colTraceFirstSeen": "First seen",
+          "colTraceModels": "Models"
         }
       },
       "billingSplit": {

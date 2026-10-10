@@ -6,10 +6,15 @@ import type {
   HeatmapQueryInput,
   HeatmapQueryResult,
   HeatmapTimeGranularity,
+  HourlyRidgeResult,
   MeteringGroupKey,
   MeteringPivotRow,
   MeteringQueryInput,
   MeteringQueryResult,
+  OverviewQueryInput,
+  OverviewStatsResult,
+  RequestSizeDistResult,
+  TraceListResult,
   UsageRecordInput,
   UsageRecordWriteResult,
 } from "../types";
@@ -33,6 +38,19 @@ const ALIAS: Record<MeteringGroupKey, string> = {
   day: "day",
   pat: "pat",
 };
+
+/** Linear-interpolated percentile on a pre-sorted ascending array. */
+function percentile(sorted: number[], p: number): number {
+  const n = sorted.length;
+  if (n === 0) return 0;
+  if (n === 1) return sorted[0];
+  const pos = p * (n - 1);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  const frac = pos - lo;
+  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+}
 
 const HEATMAP_DIM_COLUMN: Record<HeatmapDimension, string> = {
   dept: "dept_id",
@@ -408,6 +426,253 @@ export class MeteringService {
       };
     } catch {
       return null;
+    }
+  }
+
+  // ===================== Overview Stats =====================
+
+  public async queryOverviewStats(input: OverviewQueryInput): Promise<OverviewStatsResult> {
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
+
+    const sql = `
+      select
+        coalesce(sum(total_tokens), 0)              as total_tokens,
+        coalesce(sum(input_tokens), 0)              as input_tokens,
+        coalesce(sum(output_tokens), 0)             as output_tokens,
+        coalesce(sum(cached_tokens), 0)             as cached_tokens,
+        coalesce(sum(cache_read_input_tokens), 0)   as cache_read_input_tokens,
+        coalesce(sum(cost_usd), 0)                  as total_cost,
+        count(*)                                     as record_count,
+        count(distinct trace_id)                     as session_count,
+        count(distinct ${this.sql.dateBucket("day", "time_bucket")}) as day_count
+      from usage_records
+      where ${where.join(" and ")}
+    `;
+
+    try {
+      const result = await this.database.query(sql, params);
+      const row = result.rows[0] ?? {};
+      const totalTokens = Number(row.total_tokens ?? 0);
+      const inputTokens = Number(row.input_tokens ?? 0);
+      const outputTokens = Number(row.output_tokens ?? 0);
+      const cachedTokens = Number(row.cached_tokens ?? 0);
+      const cacheReadInput = Number(row.cache_read_input_tokens ?? 0);
+      const totalCost = Number(row.total_cost ?? 0);
+      const recordCount = Number(row.record_count ?? 0);
+      const sessionCount = Number(row.session_count ?? 0);
+      const dayCount = Math.max(Number(row.day_count ?? 1), 1);
+
+      const dailyAvg = totalTokens / dayCount;
+      const ioRatio = outputTokens > 0 ? inputTokens / outputTokens : 0;
+      const cacheHitRate = inputTokens > 0 ? cacheReadInput / inputTokens : 0;
+
+      return {
+        total_tokens: totalTokens,
+        daily_avg_tokens: Math.round(dailyAvg),
+        session_count: sessionCount,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        io_ratio: Math.round(ioRatio * 100) / 100,
+        cached_tokens: cachedTokens,
+        cache_hit_rate: Math.round(cacheHitRate * 10000) / 10000, // 0..1 ratio, 4 decimals
+        total_cost: totalCost,
+        record_count: recordCount,
+        day_count: dayCount,
+      };
+    } catch {
+      return {
+        total_tokens: 0,
+        daily_avg_tokens: 0,
+        session_count: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        io_ratio: 0,
+        cached_tokens: 0,
+        cache_hit_rate: 0,
+        total_cost: 0,
+        record_count: 0,
+        day_count: 0,
+      };
+    }
+  }
+
+  // ===================== Trace List (下钻) =====================
+
+  public async queryTraceList(input: OverviewQueryInput & { limit?: number }): Promise<TraceListResult> {
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
+    where.push("trace_id is not null");
+
+    const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000);
+
+    // 用 string_agg 收集 model（pg）/ GROUP_CONCAT（mysql）
+    const modelAgg = this.sql.dialect === "mysql"
+      ? "GROUP_CONCAT(DISTINCT model ORDER BY model SEPARATOR ',')"
+      : "STRING_AGG(DISTINCT model, ',' ORDER BY model)";
+
+    const sql = `
+      select
+        trace_id,
+        coalesce(sum(total_tokens), 0)              as total_tokens,
+        coalesce(sum(input_tokens), 0)              as input_tokens,
+        coalesce(sum(output_tokens), 0)             as output_tokens,
+        coalesce(sum(cached_tokens), 0)             as cached_tokens,
+        coalesce(sum(cost_usd), 0)                  as cost_usd,
+        count(*)                                     as step_count,
+        min(time_bucket)                             as first_seen,
+        ${modelAgg}                                  as models_csv
+      from usage_records
+      where ${where.join(" and ")}
+      group by trace_id
+      order by total_tokens desc
+      limit ${limit}
+    `;
+
+    try {
+      const result = await this.database.query(sql, params);
+      const rows = result.rows.map((row: Record<string, unknown>) => ({
+        trace_id: String(row.trace_id ?? ""),
+        total_tokens: Number(row.total_tokens ?? 0),
+        input_tokens: Number(row.input_tokens ?? 0),
+        output_tokens: Number(row.output_tokens ?? 0),
+        cached_tokens: Number(row.cached_tokens ?? 0),
+        cost_usd: Number(row.cost_usd ?? 0),
+        step_count: Number(row.step_count ?? 0),
+        first_seen: row.first_seen instanceof Date
+          ? row.first_seen.toISOString()
+          : row.first_seen != null
+            ? String(row.first_seen)
+            : null,
+        models: String(row.models_csv ?? "").split(",").filter(Boolean),
+      })).filter((r) => r.trace_id.length > 0);
+      return { rows };
+    } catch {
+      return { rows: [] };
+    }
+  }
+
+  // ===================== Hourly Ridge (0-24 时模型堆叠) =====================
+
+  public async queryHourlyModelRidge(input: OverviewQueryInput & { top_n?: number }): Promise<HourlyRidgeResult> {
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
+
+    const topN = Math.min(Math.max(input.top_n ?? 10, 1), 30);
+
+    const hourExpr = this.sql.dialect === "mysql"
+      ? "EXTRACT(HOUR FROM time_bucket)"
+      : "EXTRACT(HOUR FROM time_bucket)::int";
+
+    const sql = `
+      select
+        ${hourExpr} as hour,
+        model,
+        coalesce(sum(total_tokens), 0) as total_tokens
+      from usage_records
+      where ${where.join(" and ")}
+      group by 1, 2
+      order by 1, 3 desc
+    `;
+
+    try {
+      const result = await this.database.query(sql, params);
+      const topModels = new Set<string>();
+      // 先算每个 model 的总量，取 top N
+      const modelTotals = new Map<string, number>();
+      for (const row of result.rows as Array<Record<string, unknown>>) {
+        const m = String(row.model ?? "(unknown)");
+        modelTotals.set(m, (modelTotals.get(m) ?? 0) + Number(row.total_tokens ?? 0));
+      }
+      const sorted = Array.from(modelTotals.entries()).sort((a, b) => b[1] - a[1]).slice(0, topN);
+      for (const [m] of sorted) topModels.add(m);
+
+      const series: Record<string, number[]> = {};
+      const hours: number[] = Array.from({ length: 24 }, (_, i) => i);
+      const models: string[] = Array.from(topModels);
+      for (const m of models) series[m] = Array(24).fill(0);
+
+      for (const row of result.rows as Array<Record<string, unknown>>) {
+        const h = Number(row.hour ?? 0);
+        const m = String(row.model ?? "(unknown)");
+        const tokens = Number(row.total_tokens ?? 0);
+        if (topModels.has(m) && h >= 0 && h < 24) {
+          series[m][h] += tokens;
+        }
+      }
+
+      return { hours, models, series };
+    } catch {
+      return { hours: Array.from({ length: 24 }, (_, i) => i), models: [], series: {} };
+    }
+  }
+
+  // ===================== Request Size Distribution =====================
+
+  public async queryRequestSizeDistribution(input: OverviewQueryInput & { top_n?: number }): Promise<RequestSizeDistResult> {
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
+
+    const topN = Math.min(Math.max(input.top_n ?? 15, 1), 50);
+
+    // 先取 top N models（按 total_tokens），然后每个 model 取 total_tokens 排序算分位数
+    const topModelSql = `
+      select model, count(*) as cnt, sum(total_tokens) as total
+      from usage_records
+      where ${where.join(" and ")}
+      group by model
+      order by total desc
+      limit ${topN}
+    `;
+
+    try {
+      const topResult = await this.database.query(topModelSql, params);
+      const topModels: string[] = topResult.rows.map((r) => String(r.model ?? "")).filter(Boolean);
+      if (topModels.length === 0) return { rows: [] };
+
+      // 取每个 top model 的所有 total_tokens 排序值（JS 端算分位数，跨库兼容）
+      const rows: Array<{ model: string; request_count: number; avg_tokens: number; p50: number; p90: number; p99: number }> = [];
+
+      for (const model of topModels) {
+        const modelWhere = [...where, `model = ${this.sql.placeholder(params.length + 1)}`];
+        const modelParams = [...params, model];
+
+        const valsSql = `
+          select total_tokens
+          from usage_records
+          where ${modelWhere.join(" and ")}
+          order by total_tokens asc
+        `;
+        const valResult = await this.database.query(valsSql, modelParams);
+        const values = valResult.rows.map((r) => Number(r.total_tokens ?? 0)).sort((a, b) => a - b);
+
+        if (values.length === 0) continue;
+
+        const count = values.length;
+        const sum = values.reduce((s, v) => s + v, 0);
+        const avg = sum / count;
+
+        const p50 = percentile(values, 0.5);
+        const p90 = percentile(values, 0.9);
+        const p99 = percentile(values, 0.99);
+
+        rows.push({
+          model,
+          request_count: count,
+          avg_tokens: Math.round(avg),
+          p50: Math.round(p50),
+          p90: Math.round(p90),
+          p99: Math.round(p99),
+        });
+      }
+
+      return { rows };
+    } catch {
+      return { rows: [] };
     }
   }
 }

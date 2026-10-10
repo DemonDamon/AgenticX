@@ -1,4 +1,4 @@
-import type { MeteringQueryInput } from "../types";
+import type { HourlyRidgeResult, OverviewQueryInput, OverviewStatsResult, MeteringQueryInput, MeteringQueryResult, RequestSizeDistResult, TraceListResult } from "../types";
 import { MeteringService } from "../services/metering";
 
 export class MeteringApi {
@@ -15,6 +15,26 @@ export class MeteringApi {
       message: "ok",
       data,
     };
+  }
+
+  public async overview(input: OverviewQueryInput): Promise<{ code: string; message: string; data: OverviewStatsResult }> {
+    const data = await this.service.queryOverviewStats(input);
+    return { code: "00000", message: "ok", data };
+  }
+
+  public async traceList(input: OverviewQueryInput & { limit?: number }): Promise<{ code: string; message: string; data: TraceListResult }> {
+    const data = await this.service.queryTraceList(input);
+    return { code: "00000", message: "ok", data };
+  }
+
+  public async hourlyRidge(input: OverviewQueryInput & { top_n?: number }): Promise<{ code: string; message: string; data: HourlyRidgeResult }> {
+    const data = await this.service.queryHourlyModelRidge(input);
+    return { code: "00000", message: "ok", data };
+  }
+
+  public async requestDistribution(input: OverviewQueryInput & { top_n?: number }): Promise<{ code: string; message: string; data: RequestSizeDistResult }> {
+    const data = await this.service.queryRequestSizeDistribution(input);
+    return { code: "00000", message: "ok", data };
   }
 }
 

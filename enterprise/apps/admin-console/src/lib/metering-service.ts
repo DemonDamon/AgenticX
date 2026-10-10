@@ -123,3 +123,68 @@ export async function updateBusinessRevenue(
 export async function deleteBusinessRevenue(id: string) {
   return roiApi.deleteRevenue(resolveTenantId(), id);
 }
+
+// ---------- Diagnostics (new) ----------
+
+export async function queryOverviewStats(input: {
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+}) {
+  return meteringApi.overview({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function queryTraceList(input: {
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+  limit?: number;
+}) {
+  return meteringApi.traceList({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function queryHourlyModelRidge(input: {
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+  top_n?: number;
+}) {
+  return meteringApi.hourlyRidge({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function queryRequestSizeDistribution(input: {
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+  top_n?: number;
+}) {
+  return meteringApi.requestDistribution({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}

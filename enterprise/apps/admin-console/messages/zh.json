@@ -1521,6 +1521,33 @@
             "deleteSuccess": "已删除",
             "deleteFailed": "删除失败"
           }
+        },
+        "diagnostics": {
+          "dailyAvg": "日均 Token",
+          "sessions": "会话数",
+          "ioRatio": "输入:输出比",
+          "cacheHit": "缓存命中率",
+          "hourlyRidgeTitle": "0–24 时模型分布图",
+          "hourlyRidgeDescription": "按小时 × 模型叠加（取总量 Top N）",
+          "distributionTitle": "单次请求大小分布",
+          "distributionDescription": "每个模型的 p50 / p90 / p99 Token 量",
+          "colModel": "模型",
+          "colRequests": "请求数",
+          "colAvg": "平均",
+          "colP50": "p50",
+          "colP90": "p90",
+          "colP99": "p99",
+          "tracesButton": "查看关联 Traces",
+          "tracesTitle": "Token 消耗 Top Traces",
+          "tracesDescription": "点击 Trace 跳转到 agent-traces 查看逐步消耗明细",
+          "tracesEmpty": "当前筛选条件下无 trace 数据",
+          "tracesEmptyDescription": "当前筛选条件下的用量记录没有 trace_id，可调整筛选后重试",
+          "colTraceId": "Trace ID",
+          "colTraceTokens": "Tokens",
+          "colTraceCost": "成本",
+          "colTraceSteps": "步数",
+          "colTraceFirstSeen": "首次出现",
+          "colTraceModels": "模型"
         }
       },
       "billingSplit": {
