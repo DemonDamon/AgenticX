@@ -204,6 +204,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "wb_bridge_describe",
         "bash_bg_poll",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
+        "knowledge_read",  # SP32 tiered reading — L1 full-text fetch for a single search hit.
         "knowledge_synthesize",
         "web_search",
         "get_current_datetime",
@@ -2810,9 +2811,12 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "knowledge_search",
             "description": (
                 "Search mounted document brains (知识库 / docs brain) for the current session. "
-                "Returns {hits, by_brain, used_top_k, brains} — hits are merged top-k; "
-                "by_brain groups results per brain. Respects avatar brain mount settings. "
-                "Optional brain_id searches a single brain. If nothing is mounted, returns a hint."
+                "Returns {hits, used_top_k, brains} — hits are merged top-k. Respects avatar brain mount settings. "
+                "By default returns a COMPACT view (detail=\"compact\"): each hit carries only a query-relevant "
+                "snippet plus its id — use this to judge relevance and cite sources cheaply. "
+                "When you need the complete passage of a hit, call knowledge_read(hit_id=...) on that specific hit. "
+                "Pass detail=\"full\" to retrieve full texts of all hits in one call (costs far more context tokens). "
+                "If nothing is mounted, returns a hint."
             ),
             "parameters": {
                 "type": "object",
@@ -2826,8 +2830,43 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": "Optional: search only this docs brain id (must be visible to the session avatar).",
                     },
+                    "detail": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "description": (
+                            "compact (default): snippets only, then knowledge_read for the hits you need. "
+                            "full: every hit with its complete text."
+                        ),
+                    },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "knowledge_read",
+            "description": (
+                "Fetch the FULL text of a single knowledge_search hit by its hit id (L1 read). "
+                "Use after a compact knowledge_search: first pick relevant hits from the snippets, "
+                "then call this tool only for the hits you actually need, to keep context small. "
+                "The hit id must come from a recent knowledge_search result in this session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hit_id": {
+                        "type": "string",
+                        "description": "The hit `id` value from a knowledge_search result.",
+                    },
+                    "brain_id": {
+                        "type": "string",
+                        "description": "Optional: docs brain id the hit came from (disambiguates same-id hits across brains).",
+                    },
+                },
+                "required": ["hit_id"],
                 "additionalProperties": False,
             },
         },
@@ -8977,6 +9016,14 @@ def _tool_knowledge_search(
         )
 
     cfg = KBManager.instance().read_config()
+    if not cfg.enabled:
+        # Same semantics as /api/kb/search (kb/routes.py): a disabled KB is not
+        # an error — the model gets a typed "disabled" marker instead of a
+        # confusing mount-level hint.
+        return json.dumps(
+            {"ok": True, "disabled": True, "hits": []},
+            ensure_ascii=False,
+        )
     default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
     raw_top_k = arguments.get("top_k")
     try:
@@ -8984,6 +9031,12 @@ def _tool_knowledge_search(
     except (TypeError, ValueError):
         top_k = default_top_k
     top_k = max(1, min(20, top_k))
+
+    # SP32 tiered reading: default L0 compact view (query-relevant snippets)
+    # keeps chat context small; detail="full" restores the legacy full-text
+    # payload for callers that want everything in one shot.
+    detail_raw = str(arguments.get("detail") or "compact").strip().lower()
+    detail = detail_raw if detail_raw in {"compact", "full"} else "compact"
 
     avatar_id = None
     if session is not None:
@@ -8996,12 +9049,35 @@ def _tool_knowledge_search(
             top_k=top_k,
             avatar_id=avatar_id,
             brain_id=brain_id,
+            detail=detail,
         )
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"search failed: {exc}", "hits": []},
             ensure_ascii=False,
         )
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _tool_knowledge_read(
+    arguments: Dict[str, Any], session: Optional["StudioSession"] = None
+) -> str:
+    """L1 read: fetch the full text of one hit returned by a prior knowledge_search."""
+    hit_id = str(arguments.get("hit_id", "")).strip()
+    if not hit_id:
+        return json.dumps(
+            {"ok": False, "error": "hit_id is required", "hits": []},
+            ensure_ascii=False,
+        )
+    brain_id = str(arguments.get("brain_id") or "").strip() or None
+    try:
+        from agenticx.brain.search import read_kb_hit
+    except Exception as exc:
+        return json.dumps(
+            {"ok": False, "error": f"KB subsystem unavailable: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+    payload = read_kb_hit(hit_id, brain_id=brain_id)
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -12398,6 +12474,8 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(dispatch_ops_tool, name, arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
+        if name == "knowledge_read":
+            return await asyncio.to_thread(_tool_knowledge_read, arguments, session)
         if name == "knowledge_synthesize":
             return await asyncio.to_thread(_tool_knowledge_synthesize, arguments, session)
         if name == "web_search":
