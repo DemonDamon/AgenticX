@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from agenticx.brain.wiki import integrate_merge
-from agenticx.brain.wiki.page import WikiPage
+from agenticx.brain.wiki.page import TYPE_DIR, WikiPage, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,9 @@ def build_generation_prompt(
         "基于分析结果生成 wiki Markdown 文件。每个文件用块格式输出：\n"
         "===FILE: wiki/相对路径.md ===\n<markdown with YAML frontmatter>\n\n"
         "必须包含：wiki/sources 下源摘要页；必要时更新 wiki/index.md、wiki/overview.md。\n"
-        "使用 [[wikilink]] 交叉引用。\n\n"
+        "使用 [[wikilink]] 交叉引用。\n"
+        "页面必须放在对应类型子目录下：实体→wiki/entities/、概念→wiki/concepts/、"
+        "综合→wiki/synthesis/、源摘要→wiki/sources/；禁止把类型页放在 wiki 根目录。\n\n"
         "页面结构契约（SP31，编译器按此结构合并页面，不合规的页面无法增量合并）：\n"
         "1. YAML frontmatter：title / type（entity|concept|method|analysis|synthesis|source）/"
         " description / sources[]（本文档名必须列入 sources）。\n"
@@ -209,12 +211,57 @@ class WikiCompiler:
         except OSError:
             logger.warning("wiki compile state save failed", exc_info=True)
 
+    def _resolve_target(
+        self,
+        *,
+        block_path: str,
+        incoming: Optional[WikiPage],
+    ) -> Optional[tuple]:
+        """Resolve the actual write target for one generated block.
+
+        Two deterministic corrections keep cross-document compiles colliding
+        on the SAME page instead of scattering duplicates (observed live: the
+        model emitted root-level paths for a concept that already existed
+        under wiki/concepts/):
+
+        1. Path normalization: a structured page whose block path sits at the
+           wiki ROOT is moved into its type directory.
+        2. Slug-collision resolution: when the (normalized) target does not
+           exist but a page with the same stem exists elsewhere in the wiki,
+           that existing page becomes the merge target.
+
+        Returns (target_path, storage_rel_path) or None when unsafe."""
+        target = _safe_wiki_path(self._storage, block_path)
+        if target is None:
+            return None
+        rel = str(target.relative_to(self._storage))
+        wiki_root = self._storage / "wiki"
+        if incoming is not None and not target.exists():
+            type_dir = TYPE_DIR.get(incoming.page_type, "")
+            # 1. root-level -> type directory
+            if type_dir and target.parent == wiki_root:
+                slug = slugify(incoming.title) or target.stem
+                norm_rel = f"wiki/{type_dir}/{slug}.md"
+                norm_target = _safe_wiki_path(self._storage, norm_rel)
+                if norm_target is not None:
+                    target, rel = norm_target, norm_rel
+            # 2. same-stem page elsewhere in the tree wins as merge target
+            if not target.exists():
+                stem = Path(rel).stem
+                for existing in sorted(wiki_root.rglob(f"{stem}.md")):
+                    ex_rel = str(existing.relative_to(self._storage))
+                    if ex_rel != rel:
+                        target, rel = existing, ex_rel
+                        break
+        return target, rel
+
     def _write_block(
         self,
         *,
         rel: str,
         target: Path,
         body: str,
+        incoming: Optional[WikiPage],
         source_name: str,
         owned_pages: List[str],
         preserved: List[str],
@@ -225,12 +272,7 @@ class WikiCompiler:
         be freely rewritten; structured pages from OTHER documents are
         merge-appended (their claims survive); legacy pages from other
         documents are preserved untouched (recorded, never clobbered)."""
-        try:
-            incoming = WikiPage.parse(body, source_path=rel)
-            structured_in = True
-        except ValueError:
-            incoming = None
-            structured_in = False
+        structured_in = incoming is not None
 
         if target.exists():
             existing_text = target.read_text(encoding="utf-8")
@@ -350,14 +392,20 @@ class WikiCompiler:
         written: List[str] = []
         preserved: List[str] = []
         for block in parse_file_blocks(generation):
-            target = _safe_wiki_path(self._storage, block["path"])
-            if target is None:
+            try:
+                incoming = WikiPage.parse(block["body"],
+                                          source_path=block["path"])
+            except ValueError:
+                incoming = None
+            resolved = self._resolve_target(block_path=block["path"],
+                                            incoming=incoming)
+            if resolved is None:
                 continue
-            rel = str(target.relative_to(self._storage))
+            target, rel = resolved
             if self._write_block(
                     rel=rel, target=target, body=block["body"],
-                    source_name=source_name, owned_pages=owned_pages,
-                    preserved=preserved):
+                    incoming=incoming, source_name=source_name,
+                    owned_pages=owned_pages, preserved=preserved):
                 written.append(rel)
 
         if not written and not preserved:

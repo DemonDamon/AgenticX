@@ -265,3 +265,38 @@ def test_near_regexes_still_parse_rendered_frontmatter():
     assert type_m.search(md).group(1).strip() == "concept"
     block = sources_m.search(md)
     assert block and "doc.pdf" in block.group(1)
+
+
+# ---------------------------------------------------------------------------
+# SP31 hardening: path normalization + slug-collision merge
+# (observed live: the model emitted root-level paths for a concept that
+#  already existed under wiki/concepts/ — no collision, no merge)
+# ---------------------------------------------------------------------------
+
+def test_root_level_block_normalizes_into_type_dir(storage):
+    calls = []
+    # Model writes the page at the wiki ROOT despite the type being concept.
+    gen = _page_block("wiki/rule.md", "Rule",
+                      ["Rule applies.（来源: a.pdf）"], ["a.pdf"], ptype="concept")
+    r = _compile(storage, "/docs/a.pdf", gen, calls, source_text="A")
+    assert r.written == ["wiki/concepts/rule.md"]
+
+
+def test_same_stem_elsewhere_becomes_merge_target(storage):
+    """Doc A puts the concept under wiki/concepts/. Doc B's model emits the
+    SAME topic at a root path with a DIFFERENT slug form — the engine must
+    resolve it onto A's page and merge, not create a duplicate."""
+    calls = []
+    gen_a = _page_block("wiki/concepts/rule.md", "Rule",
+                        ["Rule from A.（来源: a.pdf）"], ["a.pdf"])
+    _compile(storage, "/docs/a.pdf", gen_a, calls, source_text="A")
+
+    # B's block: same title, type concept, but root path "wiki/Rule.md".
+    gen_b = _page_block("wiki/Rule.md", "Rule",
+                        ["Rule from B.（来源: b.pdf）"], ["b.pdf"])
+    r2 = _compile(storage, "/docs/b.pdf", gen_b, calls, source_text="B")
+    assert r2.written == ["wiki/concepts/rule.md"]
+    page = (storage / "wiki" / "concepts" / "rule.md").read_text(encoding="utf-8")
+    assert "Rule from A" in page and "Rule from B" in page
+    assert not (storage / "wiki" / "Rule.md").exists()  # no root duplicate
+    assert "  - a.pdf" in page and "  - b.pdf" in page
