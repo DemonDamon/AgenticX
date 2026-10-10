@@ -9016,14 +9016,6 @@ def _tool_knowledge_search(
         )
 
     cfg = KBManager.instance().read_config()
-    if not cfg.enabled:
-        # Same semantics as /api/kb/search (kb/routes.py): a disabled KB is not
-        # an error — the model gets a typed "disabled" marker instead of a
-        # confusing mount-level hint.
-        return json.dumps(
-            {"ok": True, "disabled": True, "hits": []},
-            ensure_ascii=False,
-        )
     default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
     raw_top_k = arguments.get("top_k")
     try:
@@ -9042,6 +9034,22 @@ def _tool_knowledge_search(
     if session is not None:
         avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     brain_id = str(arguments.get("brain_id") or "").strip() or None
+
+    # KB disabled 短路（与 /api/kb/search 语义一致）。注意多 brain 架构：
+    # KBManager 委托的是 default_docs，它 disabled 不等于知识库整体禁用——
+    # 真机上有用户关掉默认库、只用自建 GLOBAL brain（SP31 验证库即此形态）。
+    # 判定依据因此是「会话可见的 docs brain 里一个 enabled 的都没有」。
+    if not cfg.enabled and not brain_id:
+        from agenticx.brain.mount import list_visible_brains
+        from agenticx.brain.types import BrainType
+
+        if not any(
+            b.enabled for b in list_visible_brains(avatar_id=avatar_id, brain_type=BrainType.DOCS)
+        ):
+            return json.dumps(
+                {"ok": True, "disabled": True, "hits": []},
+                ensure_ascii=False,
+            )
 
     try:
         payload = search_docs_brains(
