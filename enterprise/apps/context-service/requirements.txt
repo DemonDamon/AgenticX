@@ -1,0 +1,10 @@
+# 窄服务依赖。检索与 wiki 编译是这个服务的本职，chromadb / litellm 躲不开；
+# 但不写 agenticx 的其余依赖（openai/tiktoken/tokenizers 等），镜像尺寸靠
+# Dockerfile 的子包拷贝（--no-deps 效果）控制。
+fastapi>=0.100.0,<1
+uvicorn>=0.23.0,<1
+httpx>=0.25.0,<1
+PyYAML>=6.0,<7
+pydantic>=2.0.0,<3
+chromadb>=0.4.0,<1
+litellm>=1.0.0,<2
