@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "skill-registry",
+  "generation": "f4a01b8163a44eeca367c725b72c6f3a",
+  "mapping_revision": 1,
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:2dd9fd4099d866bfd30a8d00b0f3986232007545325283aee335dfce0bc22a4e",
+  "summary_path": "enterprise/conclusions/apps/skill-registry_conclusion.md",
+  "summary_sha256": "sha256:b4802d8b53fa8270919a01079d1523c9b3853c81730347ac35c8346dfb2f16a8",
+  "updated_at": "2026-09-17T23:54:07.995125+00:00"
+}

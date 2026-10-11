@@ -39,12 +39,17 @@ class GroupChatConfig:
     id: str
     name: str
     avatar_ids: List[str] = field(default_factory=list)
+    human_members: List[Dict[str, str]] = field(default_factory=list)
     routing: str = "intelligent"  # intelligent | user-directed | meta-routed | round-robin | team
     created_at: str = ""
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in asdict(self).items() if v or k in {"id", "name", "avatar_ids", "routing"}}
+        return {
+            k: v
+            for k, v in asdict(self).items()
+            if v or k in {"id", "name", "avatar_ids", "routing", "human_members"}
+        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> GroupChatConfig:
@@ -135,6 +140,26 @@ class GroupChatRegistry:
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)
+        config.updated_at = datetime.now(timezone.utc).isoformat()
+        self._write_config(config)
+        return config
+
+    def add_human_member(self, group_id: str, raw: Dict[str, Any]) -> Optional[GroupChatConfig]:
+        from agenticx.avatar.group_members import normalize_human_member
+
+        config = self._read_config(group_id)
+        if config is None:
+            return None
+        member = normalize_human_member(raw, avatar_ids=config.avatar_ids)
+        if not member.get("joined_at"):
+            member["joined_at"] = datetime.now(timezone.utc).isoformat()
+        existing = [
+            m
+            for m in (config.human_members or [])
+            if isinstance(m, dict) and str(m.get("id") or "") != member["id"]
+        ]
+        existing.append(member)
+        config.human_members = existing
         config.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_config(config)
         return config

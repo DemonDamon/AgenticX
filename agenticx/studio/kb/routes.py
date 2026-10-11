@@ -354,6 +354,9 @@ def register_kb_routes(app: FastAPI) -> None:
             strategy=str(chunking_payload.get("strategy", "recursive")),
             chunk_size=int(chunking_payload.get("chunk_size", 800)),
             chunk_overlap=int(chunking_payload.get("chunk_overlap", 80)),
+            parent_child=bool(chunking_payload.get("parent_child", False)),
+            parent_chunk_size=int(chunking_payload.get("parent_chunk_size", 4096)),
+            child_chunk_size=int(chunking_payload.get("child_chunk_size", 384)),
         )
         manager = KBManager.instance()
         try:

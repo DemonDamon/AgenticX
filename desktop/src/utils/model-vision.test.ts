@@ -24,6 +24,15 @@ describe("isKnownNonVisionChatModel — zhipu GLM text vs vision", () => {
     expect(isKnownNonVisionChatModel("custom_openai_x", "glm-4.6v")).toBe(false);
   });
 
+  it("blocks MiMo speech and text-only v2.5-pro, keeps v2.6 vision", () => {
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.5-pro")).toBe(true);
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.5-asr")).toBe(true);
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.5-tts")).toBe(true);
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.6-pro")).toBe(false);
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.6-flash")).toBe(false);
+    expect(isKnownNonVisionChatModel("mimo", "mimo-v2.5")).toBe(false);
+  });
+
   it("allows GLM vision SKUs (digit+v / vision / vl)", () => {
     expect(isKnownNonVisionChatModel("zhipu", "glm-4v")).toBe(false);
     expect(isKnownNonVisionChatModel("zhipu", "glm-4v-flash")).toBe(false);

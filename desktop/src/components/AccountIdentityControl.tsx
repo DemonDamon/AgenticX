@@ -2,7 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { LogIn, LogOut, User } from "lucide-react";
-import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
+  isBundledMetaAvatarUrl,
+  resolveBundledMetaAvatarUrl,
+} from "../constants/meta-avatar";
+import { isNearCubePortraitUrl } from "../utils/theme-portrait";
 import { useAppStore } from "../store";
 
 type Props = {
@@ -145,12 +151,34 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
     setUserMenuOpen((v) => !v);
   };
 
-  const avatar = (
-    <img
-      src={userAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
-      alt=""
-      className="h-5 w-5 shrink-0 rounded-full object-cover"
-    />
+  const rawAvatarSrc = userAvatarUrl.trim();
+  const cubeMark = rawAvatarSrc ? isNearCubePortraitUrl(rawAvatarSrc) : false;
+  const bundledLogo = Boolean(rawAvatarSrc) && !cubeMark && isBundledMetaAvatarUrl(rawAvatarSrc);
+  const avatarSrc = bundledLogo ? resolveBundledMetaAvatarUrl(rawAvatarSrc) : rawAvatarSrc;
+  const avatar = rawAvatarSrc ? (
+    <span
+      className={`relative inline-flex h-5 w-5 shrink-0 ${
+        cubeMark ? "overflow-visible" : "overflow-hidden rounded-full"
+      }`}
+      data-avatar-fit={cubeMark ? "cube" : bundledLogo ? "logo" : "user"}
+    >
+      <img
+        src={avatarSrc}
+        alt=""
+        className={`h-full w-full ${
+          cubeMark
+            ? NEAR_CUBE_AVATAR_FIT_CLASS
+            : `origin-center object-cover${bundledLogo ? ` ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}` : ""}`
+        }`}
+      />
+    </span>
+  ) : (
+    <span
+      className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-text-muted"
+      data-avatar-fit="user"
+    >
+      <User className="h-3 w-3" strokeWidth={2} />
+    </span>
   );
 
   const triggerClass =

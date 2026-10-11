@@ -201,3 +201,11 @@ packages/auth/
 | `apps/web-portal` | 主消费者 | 全部 SSO 路由 + session 中间件 |
 | `apps/admin-console` | 主消费者 | 同上 + IAM bulk-import + SSO provider 管理 |
 | `apps/gateway`（Go） | 验证 JWT | 用本包签发的 access token 公钥 (`AUTH_JWT_PUBLIC_KEY`) 校验入站 JWT |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `AuthService` / `types`：`mustChangePassword` 贯穿登录上下文；强制改密完成前不发正常会话。
+- `services/secret-from-env.ts`：`NAME` / `NAME_FILE` 读密钥（与 JWT、gateway internal token 一致）。
+- 测试：`auth-password-change.test.ts`、`secret-from-env.test.ts`。
+- Portal 侧改密页/API 在 `web-portal`，不在本包。

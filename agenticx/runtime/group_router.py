@@ -12,6 +12,7 @@ import json
 import logging
 import mimetypes
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable, Dict, List, Mapping, Sequence
@@ -46,9 +47,24 @@ from agenticx.runtime.prompts.meta_agent import (
     _build_web_search_capability_block,
 )
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
+from agenticx.llms.typesafe_client import TypesafeHttpError, TypesafeTimeout, system_one
+from agenticx.llms.typesafe_config import (
+    clamp_soft_timeout_sec,
+    load_typesafe_settings,
+    resolve_typesafe_api_key,
+)
+from agenticx.runtime.jev_intent import (
+    build_group_routing_questions,
+    build_group_routing_state,
+    ensure_meta_member,
+    format_jev_content_line,
+    map_jev_to_intent,
+)
 
 META_LEADER_AGENT_ID = "__meta__"
 META_LEADER_NAME = "组长"
+JEV_AGENT_ID = "__jev__"
+JEV_AGENT_NAME = "Jev"
 # Shown when the meta PM completion comes back with no visible content.
 # Must NOT read like a progress report: an empty completion is a model/runtime
 # condition, not a statement about project status.
@@ -731,6 +747,15 @@ class IntentDecision:
     target_ids: List[str]
     reason: str
     requires_execution: bool = False
+    source: str = "llm"
+    model: str = ""
+    confidence: float | None = None
+    probabilities: dict | None = None
+    gate: str = ""
+    fallback_reason: str = ""
+    noul_execution: float | None = None
+    requested_model: str = ""
+    latency_ms: int = 0
 
 
 class GroupChatRouter:
@@ -1498,6 +1523,231 @@ class GroupChatRouter:
             )
         return members
 
+    def _jev_member_rows(self, group_avatar_ids: Sequence[str]) -> List[dict[str, str]]:
+        rows: List[dict[str, str]] = []
+        for avatar_id in [str(x).strip() for x in group_avatar_ids if str(x).strip()]:
+            avatar = self.avatar_registry.get_avatar(avatar_id)
+            if avatar is None:
+                continue
+            role = str(getattr(avatar, "role", "") or "").strip()
+            if not role:
+                role = str(getattr(avatar, "description", "") or "").strip()
+            rows.append(
+                {
+                    "id": avatar_id,
+                    "name": str(getattr(avatar, "name", "") or avatar_id),
+                    "role": role,
+                }
+            )
+        return ensure_meta_member(rows, meta_name=self._meta_leader_label)
+
+    @staticmethod
+    def _should_emit_jev_events(explicit_targets: Sequence[str], settings: Any) -> bool:
+        return (not explicit_targets) and bool(getattr(settings, "enabled", False)) and bool(
+            getattr(settings, "group_routing", False)
+        )
+
+    def _jev_pending_reply(self) -> GroupReply:
+        return GroupReply(
+            agent_id=JEV_AGENT_ID,
+            avatar_name=JEV_AGENT_NAME,
+            avatar_url="",
+            content="Jev 正在判断谁来回复…",
+            skipped=True,
+            event_type="group_jev_pending",
+            tool_name="jev",
+            confirm_context={"phase": "pending", "purpose": "group_routing"},
+        )
+
+    def _jev_decision_reply(
+        self,
+        decision: IntentDecision,
+        member_labels: Mapping[str, str],
+    ) -> GroupReply:
+        labels = [str(member_labels.get(tid) or tid) for tid in decision.target_ids]
+        if decision.action == "meta_direct" or not labels:
+            target_label = self._meta_leader_label
+        else:
+            target_label = "、".join(labels)
+        source = "jev" if decision.source == "jev" else "fallback"
+        if decision.source == "llm":
+            source = "fallback"
+        model = decision.model or decision.requested_model
+        content = format_jev_content_line(
+            source=source,
+            model=model,
+            action=decision.action,
+            target_label=target_label,
+            confidence=decision.confidence,
+            gate=decision.gate,
+            fallback_reason=decision.fallback_reason,
+        )
+        payload = {
+            "kind": "jev_decision",
+            "phase": "done",
+            "purpose": "group_routing",
+            "source": source,
+            "model": model,
+            "requested_model": decision.requested_model or model,
+            "action": decision.action,
+            "target_ids": list(decision.target_ids),
+            "target_labels": labels,
+            "requires_execution": bool(decision.requires_execution),
+            "confidence": decision.confidence,
+            "gate": decision.gate,
+            "probabilities": dict(decision.probabilities or {}),
+            "noul_execution": decision.noul_execution,
+            "latency_ms": int(decision.latency_ms or 0),
+            "fallback_reason": decision.fallback_reason,
+        }
+        return GroupReply(
+            agent_id=JEV_AGENT_ID,
+            avatar_name=JEV_AGENT_NAME,
+            avatar_url="",
+            content=content,
+            skipped=True,
+            event_type="group_jev_decision",
+            tool_name="jev",
+            confirm_context=payload,
+        )
+
+    def _intent_from_jev_map(
+        self,
+        mapped: Any,
+        *,
+        requested_model: str,
+        latency_ms: int,
+        member_ids: set[str],
+        active_thread: Any,
+    ) -> IntentDecision:
+        action = str(mapped.action)
+        target_ids = list(mapped.target_ids)
+        if action == "open_floor" and not group_open_floor_enabled():
+            action = "route_to" if target_ids else "meta_direct"
+        if action == "continue_thread":
+            if active_thread is None or active_thread.partner_id not in member_ids:
+                action = "route_to" if target_ids else "meta_direct"
+            else:
+                target_ids = [active_thread.partner_id]
+        if action == "open_floor":
+            target_ids = target_ids[: group_open_floor_max_speakers()]
+        return IntentDecision(
+            action=action,
+            target_ids=target_ids,
+            reason=str(mapped.reason or "jev"),
+            requires_execution=bool(mapped.requires_execution),
+            source="jev",
+            model=str(mapped.model or requested_model),
+            confidence=mapped.confidence,
+            probabilities=mapped.probabilities,
+            gate=str(mapped.gate or ""),
+            fallback_reason="",
+            noul_execution=mapped.noul_execution,
+            requested_model=requested_model,
+            latency_ms=int(latency_ms or 0),
+        )
+
+    def _stamp_jev_fallback(
+        self,
+        decision: IntentDecision,
+        *,
+        fallback_reason: str,
+        requested_model: str,
+        latency_ms: int = 0,
+        model: str = "",
+        confidence: float | None = None,
+        probabilities: dict | None = None,
+        noul_execution: float | None = None,
+    ) -> IntentDecision:
+        decision.source = "fallback"
+        decision.fallback_reason = fallback_reason
+        decision.reason = fallback_reason
+        decision.requested_model = requested_model or decision.requested_model
+        if model:
+            decision.model = model
+        elif not decision.model:
+            decision.model = requested_model
+        if latency_ms:
+            decision.latency_ms = latency_ms
+        if confidence is not None:
+            decision.confidence = confidence
+        if probabilities is not None:
+            decision.probabilities = probabilities
+        if noul_execution is not None:
+            decision.noul_execution = noul_execution
+        return decision
+
+    async def _try_jev_intent(
+        self,
+        *,
+        context: GroupChatContext,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        user_input: str,
+        member_ids: set[str],
+        settings: Any,
+    ) -> tuple[Any | None, str, dict[str, Any]]:
+        api_key = resolve_typesafe_api_key()
+        extra: dict[str, Any] = {
+            "requested_model": str(getattr(settings, "model", "") or "jev-latest"),
+            "latency_ms": 0,
+        }
+        if not api_key:
+            return None, "jev_no_key", extra
+        members = self._jev_member_rows(group_avatar_ids)
+        active_thread = context.get_active_thread()
+        thread_line = (
+            f"{active_thread.partner_name}({active_thread.partner_id}), "
+            f"turn_count={active_thread.turn_count}, last_topic={active_thread.last_topic or '(none)'}"
+            if active_thread is not None
+            else "none"
+        )
+        state = build_group_routing_state(
+            group_name=group_name,
+            members=members,
+            active_thread=thread_line,
+            recent_dialogue=context.render_recent_dialogue(),
+            user_message=user_input,
+        )
+        questions = build_group_routing_questions(members)
+        started = time.perf_counter()
+        try:
+            response = await system_one(
+                state=state,
+                questions=questions,
+                model=extra["requested_model"],
+                api_key=api_key,
+                timeout_sec=float(getattr(settings, "timeout_sec", 8) or 8),
+                base_url=str(getattr(settings, "base_url", "") or ""),
+            )
+        except TypesafeTimeout:
+            extra["latency_ms"] = int((time.perf_counter() - started) * 1000)
+            return None, "jev_timeout", extra
+        except TypesafeHttpError:
+            extra["latency_ms"] = int((time.perf_counter() - started) * 1000)
+            return None, "jev_http", extra
+        except Exception:
+            extra["latency_ms"] = int((time.perf_counter() - started) * 1000)
+            return None, "jev_http", extra
+        extra["latency_ms"] = int((time.perf_counter() - started) * 1000)
+        mapped = map_jev_to_intent(
+            response,
+            member_ids=member_ids,
+            user_input=user_input,
+            act_above=float(getattr(settings, "act_above", 0.8)),
+            review_above=float(getattr(settings, "review_above", 0.5)),
+        )
+        extra["model"] = mapped.model
+        extra["confidence"] = mapped.confidence
+        extra["probabilities"] = mapped.probabilities
+        extra["noul_execution"] = mapped.noul_execution
+        extra["gate"] = mapped.gate
+        if not mapped.ok:
+            return None, mapped.fallback_reason or "jev_http", extra
+        if not mapped.adopted():
+            return mapped, "jev_fallback_llm", extra
+        return mapped, "", extra
+
     def _collect_group_execution_facts(self, base_session: StudioSession) -> GroupExecutionFacts:
         history = getattr(base_session, "chat_history", None)
         if not isinstance(history, list):
@@ -1513,26 +1763,45 @@ class GroupChatRouter:
             session_id=resolve_studio_session_id(base_session),
         )
 
-    async def _analyze_intent(
+    async def _cancel_aio_task(self, task: asyncio.Task[Any] | None) -> None:
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    def _apply_jev_fallback(
+        self,
+        decision: IntentDecision,
+        *,
+        fallback_reason: str,
+        settings: Any,
+        jev_extra: Mapping[str, Any],
+    ) -> IntentDecision:
+        return self._stamp_jev_fallback(
+            decision,
+            fallback_reason=fallback_reason,
+            requested_model=str(jev_extra.get("requested_model") or getattr(settings, "model", "")),
+            latency_ms=int(jev_extra.get("latency_ms") or 0),
+            model=str(jev_extra.get("model") or ""),
+            confidence=jev_extra.get("confidence"),
+            probabilities=jev_extra.get("probabilities"),
+            noul_execution=jev_extra.get("noul_execution"),
+        )
+
+    async def _llm_intent_decision(
         self,
         *,
         base_session: StudioSession,
         context: GroupChatContext,
         group_name: str,
-        group_avatar_ids: Sequence[str],
         user_input: str,
-        explicit_targets: Sequence[str],
+        members: Sequence[Mapping[str, str]],
+        member_ids: set[str],
+        active_thread: Any,
     ) -> IntentDecision:
-        if explicit_targets:
-            return IntentDecision(
-                action="route_to",
-                target_ids=[str(x).strip() for x in explicit_targets if str(x).strip()],
-                reason="explicit_mention",
-                requires_execution=_looks_like_execution_request(user_input),
-            )
-        members = self._avatar_member_summary(group_avatar_ids)
-        member_ids = {item["id"] for item in members}
-        active_thread = context.get_active_thread()
         provider = getattr(base_session, "provider_name", None)
         model = getattr(base_session, "model_name", None)
         thread_line = (
@@ -1571,36 +1840,13 @@ class GroupChatRouter:
             "- requires_execution=false：解释概念、打招呼、观点讨论、读取已有上下文即可回答。\n"
             "- 用户问「进度如何」本身不是新执行请求 => requires_execution=false。"
         )
-        try:
-            text = await self._call_llm_text(
-                provider=provider,
-                model=model,
-                prompt=prompt,
-                temperature=0.1,
-                max_tokens=group_intent_max_tokens(),
-            )
-        except Exception:
-            fallback_exec = _looks_like_execution_request(user_input)
-            if active_thread is not None and active_thread.partner_id in member_ids:
-                return IntentDecision(
-                    action="continue_thread",
-                    target_ids=[active_thread.partner_id],
-                    reason="intent_fallback_active_thread",
-                    requires_execution=fallback_exec,
-                )
-            if members:
-                return IntentDecision(
-                    action="route_to",
-                    target_ids=[members[0]["id"]],
-                    reason="intent_fallback_first_member",
-                    requires_execution=fallback_exec,
-                )
-            return IntentDecision(
-                action="meta_direct",
-                target_ids=[],
-                reason="intent_fallback_meta_direct",
-                requires_execution=fallback_exec,
-            )
+        text = await self._call_llm_text(
+            provider=provider,
+            model=model,
+            prompt=prompt,
+            temperature=0.1,
+            max_tokens=group_intent_max_tokens(),
+        )
         payload = self._extract_json_object(text)
         if not payload:
             _log.warning(
@@ -1628,9 +1874,9 @@ class GroupChatRouter:
                 target_ids = [active_thread.partner_id]
         if action == "open_floor":
             target_ids = target_ids[: group_open_floor_max_speakers()]
-        if action == "route_to" and not target_ids and members:
-            target_ids = [members[0]["id"]]
-            reason = f"{reason}|fallback_first_member"
+        if action == "route_to" and not target_ids:
+            action = "meta_direct"
+            reason = f"{reason}|fallback_meta"
         requires_execution = _parse_requires_execution(payload, user_input)
         return IntentDecision(
             action=action,
@@ -1638,6 +1884,173 @@ class GroupChatRouter:
             reason=reason,
             requires_execution=requires_execution,
         )
+
+    def _intent_unavailable_decision(
+        self,
+        *,
+        user_input: str,
+        member_ids: set[str],
+        active_thread: Any,
+    ) -> IntentDecision:
+        fallback_exec = _looks_like_execution_request(user_input)
+        if active_thread is not None and active_thread.partner_id in member_ids:
+            return IntentDecision(
+                action="continue_thread",
+                target_ids=[active_thread.partner_id],
+                reason="intent_fallback_active_thread",
+                requires_execution=fallback_exec,
+            )
+        return IntentDecision(
+            action="meta_direct",
+            target_ids=[],
+            reason="intent_fallback_meta_direct",
+            requires_execution=fallback_exec,
+        )
+
+    async def _await_llm_intent(
+        self,
+        llm_task: asyncio.Task[IntentDecision] | None,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_name: str,
+        user_input: str,
+        members: Sequence[Mapping[str, str]],
+        member_ids: set[str],
+        active_thread: Any,
+    ) -> tuple[IntentDecision, bool]:
+        try:
+            if llm_task is not None:
+                return await llm_task, False
+            return (
+                await self._llm_intent_decision(
+                    base_session=base_session,
+                    context=context,
+                    group_name=group_name,
+                    user_input=user_input,
+                    members=members,
+                    member_ids=member_ids,
+                    active_thread=active_thread,
+                ),
+                False,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return (
+                self._intent_unavailable_decision(
+                    user_input=user_input,
+                    member_ids=member_ids,
+                    active_thread=active_thread,
+                ),
+                True,
+            )
+
+    async def _analyze_intent(
+        self,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        user_input: str,
+        explicit_targets: Sequence[str],
+    ) -> IntentDecision:
+        if explicit_targets:
+            return IntentDecision(
+                action="route_to",
+                target_ids=[str(x).strip() for x in explicit_targets if str(x).strip()],
+                reason="explicit_mention",
+                requires_execution=_looks_like_execution_request(user_input),
+            )
+        members = self._avatar_member_summary(group_avatar_ids)
+        member_ids = {item["id"] for item in members}
+        active_thread = context.get_active_thread()
+        settings = load_typesafe_settings()
+        jev_fallback = ""
+        jev_extra: dict[str, Any] = {
+            "requested_model": str(getattr(settings, "model", "") or "jev-latest"),
+            "latency_ms": 0,
+        }
+        llm_task: asyncio.Task[IntentDecision] | None = None
+        if settings.enabled and settings.group_routing and not settings.has_key:
+            jev_fallback = "jev_no_key"
+        elif settings.enabled and settings.group_routing and settings.has_key:
+            jev_task = asyncio.create_task(
+                self._try_jev_intent(
+                    context=context,
+                    group_name=group_name,
+                    group_avatar_ids=group_avatar_ids,
+                    user_input=user_input,
+                    member_ids=member_ids,
+                    settings=settings,
+                )
+            )
+            soft = clamp_soft_timeout_sec(
+                float(getattr(settings, "soft_timeout_sec", 2) or 2),
+                float(getattr(settings, "timeout_sec", 8) or 8),
+            )
+            done, _pending = await asyncio.wait({jev_task}, timeout=soft)
+            if jev_task in done:
+                mapped, jev_err, jev_extra = jev_task.result()
+                if mapped is not None and mapped.adopted():
+                    return self._intent_from_jev_map(
+                        mapped,
+                        requested_model=str(jev_extra.get("requested_model") or settings.model),
+                        latency_ms=int(jev_extra.get("latency_ms") or 0),
+                        member_ids=member_ids,
+                        active_thread=active_thread,
+                    )
+                jev_fallback = jev_err or "jev_fallback_llm"
+            else:
+                llm_task = asyncio.create_task(
+                    self._llm_intent_decision(
+                        base_session=base_session,
+                        context=context,
+                        group_name=group_name,
+                        user_input=user_input,
+                        members=members,
+                        member_ids=member_ids,
+                        active_thread=active_thread,
+                    )
+                )
+                done, _pending = await asyncio.wait(
+                    {jev_task, llm_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if jev_task.done() and not jev_task.cancelled():
+                    mapped, jev_err, jev_extra = jev_task.result()
+                    if mapped is not None and mapped.adopted():
+                        await self._cancel_aio_task(llm_task)
+                        return self._intent_from_jev_map(
+                            mapped,
+                            requested_model=str(jev_extra.get("requested_model") or settings.model),
+                            latency_ms=int(jev_extra.get("latency_ms") or 0),
+                            member_ids=member_ids,
+                            active_thread=active_thread,
+                        )
+                    jev_fallback = jev_err or "jev_fallback_llm"
+                else:
+                    await self._cancel_aio_task(jev_task)
+                    jev_fallback = "jev_soft_timeout"
+        decision, llm_failed = await self._await_llm_intent(
+            llm_task,
+            base_session=base_session,
+            context=context,
+            group_name=group_name,
+            user_input=user_input,
+            members=members,
+            member_ids=member_ids,
+            active_thread=active_thread,
+        )
+        if jev_fallback:
+            return self._apply_jev_fallback(
+                decision,
+                fallback_reason="jev_fallback_meta" if llm_failed else jev_fallback,
+                settings=settings,
+                jev_extra=jev_extra,
+            )
+        return decision
 
     async def _run_meta_project_manager_reply(
         self,
@@ -2436,6 +2849,10 @@ class GroupChatRouter:
                 yield fu
             return
         explicit = [x for x in valid_members if x in mention_set]
+        settings = load_typesafe_settings()
+        emit_jev = self._should_emit_jev_events(explicit, settings)
+        if emit_jev and settings.has_key:
+            yield self._jev_pending_reply()
         decision = await self._analyze_intent(
             base_session=base_session,
             context=context,
@@ -2444,12 +2861,23 @@ class GroupChatRouter:
             user_input=user_input,
             explicit_targets=explicit,
         )
+        if emit_jev:
+            yield self._jev_decision_reply(decision, self._graph_member_labels(valid_members))
         if explicit and decision.action == "meta_direct":
             decision = IntentDecision(
                 action="route_to",
                 target_ids=list(explicit),
                 reason=f"{decision.reason}|explicit_member_override",
                 requires_execution=decision.requires_execution,
+                source=decision.source,
+                model=decision.model,
+                confidence=decision.confidence,
+                probabilities=decision.probabilities,
+                gate=decision.gate,
+                fallback_reason=decision.fallback_reason,
+                noul_execution=decision.noul_execution,
+                requested_model=decision.requested_model,
+                latency_ms=decision.latency_ms,
             )
         if decision.action == "meta_direct":
             context.clear_active_thread()
@@ -3199,6 +3627,7 @@ class GroupChatRouter:
         quoted_message_id: str = "",
         should_stop: Callable[[], Any],
         user_display_name: str | None = None,
+        speaker_user_id: str | None = None,
         image_inputs: Sequence[Mapping[str, Any]] | None = None,
         history_image_attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> AsyncGenerator[GroupReply, None]:
@@ -3228,6 +3657,7 @@ class GroupChatRouter:
                 quoted_message_id=quoted_message_id,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
+                speaker_user_id=speaker_user_id,
                 turn_history=turn_history,
             ):
                 yield reply
@@ -3250,14 +3680,17 @@ class GroupChatRouter:
         quoted_message_id: str,
         should_stop: Callable[[], Any],
         user_display_name: str | None,
+        speaker_user_id: str | None,
         turn_history: list[dict[str, Any]],
     ) -> AsyncGenerator[GroupReply, None]:
         setattr(base_session, "__group_avatar_ids", list(group_avatar_ids))
         context = GroupChatContext(base_session, max_items=24)
         udn = str(user_display_name or "").strip() or "我"
+        speaker = str(speaker_user_id or "").strip() or "user"
         context.append_user(
             user_input,
             sender_name=udn,
+            sender_id=speaker,
             quoted_message_id=quoted_message_id,
             quoted_content=quoted_content,
             attachments=turn_history or None,

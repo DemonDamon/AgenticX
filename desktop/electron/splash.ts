@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, ipcMain, screen, type BrowserWindowConstructorOptions } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -21,7 +21,6 @@ let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;
 let rendererReadyReceived = false;
 let splashForceShowTimer: NodeJS.Timeout | null = null;
-let splashAlwaysOnTopTimer: NodeJS.Timeout | null = null;
 
 type LayoutThemeReader = () => "light" | "dark";
 
@@ -56,8 +55,78 @@ function resolveSplashTheme(): "light" | "dark" {
   return theme === "light" ? "light" : "dark";
 }
 
-function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#f4f6fb" : "#05060c";
+/** Splash is a regular window — do not pin it above other apps during cold start. */
+export function buildSplashWindowLayerOptions(): Pick<
+  BrowserWindowConstructorOptions,
+  "alwaysOnTop"
+> {
+  return { alwaysOnTop: false };
+}
+
+export type SplashMouseIgnoreState = {
+  fading?: boolean;
+  captureClicks?: boolean;
+};
+
+/** Glass splash is visual-only: forward clicks so the app underneath can come forward. */
+export function buildSplashMouseIgnoreOptions(
+  state: SplashMouseIgnoreState = {},
+): { ignore: boolean; forward?: boolean } {
+  if (state.captureClicks) {
+    return { ignore: false };
+  }
+  return { ignore: true, forward: true };
+}
+
+function applySplashMouseIgnore(
+  win: BrowserWindow,
+  state: SplashMouseIgnoreState = {},
+): void {
+  const options = buildSplashMouseIgnoreOptions(state);
+  try {
+    if (options.ignore) {
+      win.setIgnoreMouseEvents(true, options.forward ? { forward: true } : undefined);
+    } else {
+      win.setIgnoreMouseEvents(false);
+    }
+  } catch {
+    try {
+      win.setIgnoreMouseEvents(options.ignore);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function focusSplashIfOpen(): boolean {
+  if (!splashWindow || splashWindow.isDestroyed()) return false;
+  if (splashWindow.isMinimized()) splashWindow.restore();
+  splashWindow.show();
+  splashWindow.focus();
+  return true;
+}
+
+function splashGlassOptions(theme: "light" | "dark"): BrowserWindowConstructorOptions {
+  const glass: BrowserWindowConstructorOptions = {
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: true,
+    roundedCorners: true,
+  };
+  if (process.platform === "darwin") {
+    return {
+      ...glass,
+      vibrancy: theme === "light" ? "popover" : "under-window",
+      visualEffectState: "active",
+    };
+  }
+  if (process.platform === "win32") {
+    return {
+      ...glass,
+      backgroundMaterial: "acrylic",
+    };
+  }
+  return glass;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -66,11 +135,12 @@ function clamp(value: number, min: number, max: number): number {
 
 function centerSplashBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
-  const availableWidth = Math.max(360, workArea.width - 48);
-  const availableHeight = Math.max(280, workArea.height - 48);
-  const targetWidth = clamp(Math.round(workArea.width * 0.38), 520, 620);
+  // Pixel Drift wordmark needs a wider stage than the old 620x360 card.
+  const availableWidth = Math.max(480, workArea.width - 48);
+  const availableHeight = Math.max(360, workArea.height - 48);
+  const targetWidth = clamp(Math.round(workArea.width * 0.48), 800, 960);
   const width = Math.min(targetWidth, availableWidth);
-  const targetHeight = clamp(Math.round(width * 0.58), 300, 360);
+  const targetHeight = clamp(Math.round(width * 0.58), 500, 600);
   const height = Math.min(targetHeight, availableHeight);
   return {
     width,
@@ -84,10 +154,6 @@ function clearSplashTimers(): void {
   if (splashForceShowTimer) {
     clearTimeout(splashForceShowTimer);
     splashForceShowTimer = null;
-  }
-  if (splashAlwaysOnTopTimer) {
-    clearTimeout(splashAlwaysOnTopTimer);
-    splashAlwaysOnTopTimer = null;
   }
 }
 
@@ -118,6 +184,7 @@ export async function closeSplash(options?: { fade?: boolean }): Promise<void> {
     } catch {
       // ignore
     }
+    applySplashMouseIgnore(win, { fading: true });
     await new Promise((resolve) => setTimeout(resolve, SPLASH_FADE_MS));
   }
   destroySplashWindow();
@@ -131,8 +198,8 @@ export function registerSplashIpcHandlers(deps: {
     if (rendererReadyReceived) return { ok: true, duplicate: true };
     rendererReadyReceived = true;
     updateSplashStage("ready");
-    await closeSplash({ fade: true });
     deps.showMainWindow();
+    await closeSplash({ fade: true });
     return { ok: true };
   });
 
@@ -157,8 +224,8 @@ export function scheduleSplashForceShowFallback(showMainWindow: () => void): voi
     splashForceShowTimer = null;
     if (rendererReadyReceived) return;
     void (async () => {
-      await closeSplash({ fade: false });
       showMainWindow();
+      await closeSplash({ fade: false });
     })();
   }, SPLASH_FORCE_SHOW_MS);
 }
@@ -172,17 +239,17 @@ export function createSplashWindow(): BrowserWindow | null {
 
   splashWindow = new BrowserWindow({
     ...centerSplashBounds(),
+    ...splashGlassOptions(theme),
+    ...buildSplashWindowLayerOptions(),
     frame: false,
     resizable: false,
-    movable: false,
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
     show: false,
-    alwaysOnTop: true,
+    focusable: true,
     skipTaskbar: true,
-    transparent: false,
-    backgroundColor: splashBackgroundColor(theme),
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolveSplashPreloadPath(),
@@ -193,16 +260,13 @@ export function createSplashWindow(): BrowserWindow | null {
   });
 
   splashWindow.once("ready-to-show", () => {
+    splashWindow?.setAlwaysOnTop(false);
     splashWindow?.show();
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      applySplashMouseIgnore(splashWindow);
+    }
     updateSplashStage("initializing");
   });
-
-  splashAlwaysOnTopTimer = setTimeout(() => {
-    splashAlwaysOnTopTimer = null;
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.setAlwaysOnTop(false);
-    }
-  }, 5000);
 
   const htmlPath = resolveSplashHtmlPath();
   const query: Record<string, string> = {

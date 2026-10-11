@@ -23,6 +23,7 @@ export type SubAgentRunRecord = {
   provider?: string | null;
   model?: string | null;
   avatar_id?: string | null;
+  avatar_session_id?: string | null;
   result_summary?: string | null;
   result_file?: string | null;
   output_files?: string[];

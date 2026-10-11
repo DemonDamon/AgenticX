@@ -58,3 +58,12 @@ packages/core-api/
 | `packages/sdk-ts` | 部分覆盖 | SDK 的 `ChatMessage` 是更窄子集 |
 | `apps/gateway`（Go） | **结构对齐** | Go 端 `audit.Event` 字段与本包 `AuditEvent` 对齐（含哈希链、跨境、MCP 字段） |
 | `apps/gateway` → `packages/policy-engine` | 间接 | `POLICY_ERROR_CODES` 90001/90002 对应 policy-engine 的 block 命中 |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `src/chat.ts`：会话/附件/产物/深度研究相关类型扩展（约 +168）。
+- `src/trace.ts`：**新增** trace-id 契约，供 portal / sdk-ts / gateway 对齐。
+- `src/errors.ts`：错误码表增量（配额/合规类）。
+- `src/audit.ts`：审计事件补 trace 字段。
+- barrel `index.ts` 增加 `export * from "./trace"`。

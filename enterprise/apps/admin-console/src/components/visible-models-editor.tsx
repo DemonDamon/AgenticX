@@ -33,6 +33,7 @@ type ModelsPayload = {
   parentLabel: string;
   parentSourceLabel?: string;
   prunedModelIds?: string[];
+  defaultModelId?: string | null;
 };
 
 type Props = {
@@ -63,6 +64,7 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
   const [parentAllowedIds, setParentAllowedIds] = useState<string[]>([]);
   const [parentLabel, setParentLabel] = useState("");
   const [prunedModelIds, setPrunedModelIds] = useState<string[]>([]);
+  const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [inlineExpanded, setInlineExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -122,6 +124,7 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
         setParentAllowedIds(modelsJson.data.parentAllowedIds ?? []);
         setParentLabel(modelsJson.data.parentLabel ?? modelsJson.data.parentSourceLabel ?? "");
         setPrunedModelIds(modelsJson.data.prunedModelIds ?? []);
+        setDefaultModelId(modelsJson.data.defaultModelId ?? null);
       }
 
       const allProviders = new Set(opts.map((o) => o.provider));
@@ -136,16 +139,18 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
   }, [loadData]);
 
   const persist = useCallback(
-    async (next: string[]) => {
+    async (next: string[], nextDefault: string | null) => {
       setSaving(true);
       try {
+        const body: { modelIds: string[]; defaultModelId?: string } = { modelIds: next };
+        if (target.kind === "dept") body.defaultModelId = nextDefault ?? "";
         const res = await adminFetch(modelsApiPath(target), {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ modelIds: next }),
+          body: JSON.stringify(body),
         });
         const json = (await res.json()) as {
-          data?: { modelIds: string[]; prunedModelIds?: string[] };
+          data?: { modelIds: string[]; prunedModelIds?: string[]; defaultModelId?: string | null };
           message?: string;
         };
         if (!res.ok || !json.data) {
@@ -155,6 +160,7 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
         setSelectedIds(json.data.modelIds);
         setDraftIds(json.data.modelIds);
         setPrunedModelIds(json.data.prunedModelIds ?? []);
+        setDefaultModelId(json.data.defaultModelId ?? null);
         onSaved?.();
         return true;
       } finally {
@@ -170,16 +176,20 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
       setDraftIds((prev) =>
         prev.includes(modelId) ? prev.filter((m) => m !== modelId) : [...prev, modelId],
       );
+      if (draftIds.includes(modelId) && defaultModelId === modelId) setDefaultModelId(null);
       return;
     }
     const next = selectedIds.includes(modelId)
       ? selectedIds.filter((m) => m !== modelId)
       : [...selectedIds, modelId];
-    void persist(next);
+    const nextDefault = next.includes(defaultModelId ?? "") ? defaultModelId : null;
+    if (!next.includes(modelId) && defaultModelId === modelId) setDefaultModelId(null);
+    void persist(next, nextDefault);
   };
 
   const handleSaveSheet = async () => {
-    const ok = await persist(draftIds);
+    const nextDefault = draftIds.includes(defaultModelId ?? "") ? defaultModelId : null;
+    const ok = await persist(draftIds, nextDefault);
     if (ok) {
       toast.success(tDept("toast.saved"));
       onClose?.();
@@ -202,7 +212,7 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
       setDraftIds((prev) => [...new Set([...prev, ...allowed])]);
       return;
     }
-    void persist([...new Set([...selectedIds, ...allowed])]);
+    void persist([...new Set([...selectedIds, ...allowed])], defaultModelId);
   };
 
   const clearProvider = (providerId: string) => {
@@ -211,7 +221,8 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
       setDraftIds((prev) => prev.filter((id) => !ids.has(id)));
       return;
     }
-    void persist(selectedIds.filter((id) => !ids.has(id)));
+    const next = selectedIds.filter((id) => !ids.has(id));
+    void persist(next, next.includes(defaultModelId ?? "") ? defaultModelId : null);
   };
 
   const activeIds = variant === "sheet" ? draftIds : selectedIds;
@@ -331,6 +342,23 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
                             <div className="truncate font-medium">{opt.label}</div>
                             <div className="truncate font-mono text-[10px] text-muted-foreground">{opt.model}</div>
                           </div>
+                          {target.kind === "dept" && checked && !outOfParent ? (
+                            <span
+                              role="radio"
+                              aria-checked={defaultModelId === opt.id}
+                              className={[
+                                "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
+                                defaultModelId === opt.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                              ].join(" ")}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setDefaultModelId(opt.id);
+                                if (variant !== "sheet") void persist(activeIds, opt.id);
+                              }}
+                            >
+                              {tDept("visibleModels.defaultModel")}
+                            </span>
+                          ) : null}
                         </button>
                       );
                       if (!outOfParent) return btn;

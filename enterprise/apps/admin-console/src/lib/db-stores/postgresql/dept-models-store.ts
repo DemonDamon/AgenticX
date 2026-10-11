@@ -4,7 +4,10 @@
  */
 
 import { getDepartment, getIamDb, listDepartmentAncestorIds } from "@agenticx/iam-core";
-import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
+import {
+  enterpriseRuntimeScopeDefaultModels as defaultTable,
+  enterpriseRuntimeUserVisibleModels as uvmTable,
+} from "@agenticx/db-schema";
 import { and, eq } from "drizzle-orm";
 
 import {
@@ -39,6 +42,7 @@ export type DeptModelsEditPayload = {
   parentAllowedIds: string[];
   parentLabel: string;
   prunedModelIds: string[];
+  defaultModelId: string | null;
 };
 
 export type SetDeptModelsResult = {
@@ -56,16 +60,17 @@ async function resolveParentLabel(tenantId: string, ancestorChain: readonly stri
 
 export async function readDeptEditPayload(deptId: string): Promise<DeptModelsEditPayload> {
   const tid = requiredTenant();
-  const [chain, allEnabled, userVisibleMap, modelIds] = await Promise.all([
+  const [chain, allEnabled, userVisibleMap, modelIds, defaultModelId] = await Promise.all([
     listDepartmentAncestorIds(tid, deptId),
     listAllEnabledModelIds(),
     listAllAssignments(),
     getDeptModels(deptId),
+    getDeptDefaultModel(deptId),
   ]);
   const parentAllowedIds = computeParentAllowedIds(allEnabled, userVisibleMap, chain);
   const parentLabel = await resolveParentLabel(tid, chain);
   const prunedModelIds = computePrunedModelIds(modelIds, new Set(parentAllowedIds));
-  return { deptId, modelIds, parentAllowedIds, parentLabel, prunedModelIds };
+  return { deptId, modelIds, parentAllowedIds, parentLabel, prunedModelIds, defaultModelId };
 }
 
 export async function getDeptModels(deptId: string): Promise<string[]> {
@@ -99,10 +104,70 @@ export async function setDeptModels(deptId: string, modelIds: string[]): Promise
   return { modelIds: saved, prunedModelIds };
 }
 
+export async function getDeptDefaultModel(deptId: string): Promise<string | null> {
+  const tid = requiredTenant();
+  const db = getIamDb();
+  const rows = await db
+    .select({ modelId: defaultTable.modelId })
+    .from(defaultTable)
+    .where(and(eq(defaultTable.tenantId, tid), eq(defaultTable.assignmentKey, deptKey(deptId))));
+  return rows[0]?.modelId ?? null;
+}
+
+const DEFAULT_NOT_ALLOWED = "default model is not in the department allow-list";
+
+/**
+ * defaultModelId undefined：保留已存默认值，若不在本次可见集合则删除。
+ * "" 或 null：删除。非空且不在可见集合：抛错且不写库。
+ */
+export async function applyDeptModelSave(
+  deptId: string,
+  modelIds: string[],
+  defaultModelId: string | null | undefined,
+): Promise<SetDeptModelsResult & { defaultModelId: string | null }> {
+  const tid = requiredTenant();
+  const db = getIamDb();
+  const [chain, allEnabled, userVisibleMap] = await Promise.all([
+    listDepartmentAncestorIds(tid, deptId),
+    listAllEnabledModelIds(),
+    listAllAssignments(),
+  ]);
+  const parentAllowed = new Set(computeParentAllowedIds(allEnabled, userVisibleMap, chain));
+  const { saved, prunedModelIds } = clipToAllowed(modelIds, parentAllowed);
+  const requested = typeof defaultModelId === "string" ? defaultModelId.trim() : defaultModelId;
+  if (typeof requested === "string" && requested.length > 0 && !saved.includes(requested)) {
+    throw new Error(DEFAULT_NOT_ALLOWED);
+  }
+
+  const savedSet = await setDeptModels(deptId, saved);
+  const key = deptKey(deptId);
+  let nextDefault: string | null = null;
+  if (requested === undefined) {
+    const current = await getDeptDefaultModel(deptId);
+    nextDefault = current && savedSet.modelIds.includes(current) ? current : null;
+  } else if (typeof requested === "string" && requested.length > 0) {
+    nextDefault = requested;
+  }
+
+  if (!nextDefault) {
+    await db.delete(defaultTable).where(and(eq(defaultTable.tenantId, tid), eq(defaultTable.assignmentKey, key)));
+  } else {
+    await db
+      .insert(defaultTable)
+      .values({ tenantId: tid, assignmentKey: key, modelId: nextDefault })
+      .onConflictDoUpdate({
+        target: [defaultTable.tenantId, defaultTable.assignmentKey],
+        set: { modelId: nextDefault },
+      });
+  }
+  return { ...savedSet, prunedModelIds, defaultModelId: nextDefault };
+}
+
 export async function deleteDeptAssignment(deptId: string): Promise<void> {
   const tid = requiredTenant();
   const db = getIamDb();
   await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, deptKey(deptId))));
+  await db.delete(defaultTable).where(and(eq(defaultTable.tenantId, tid), eq(defaultTable.assignmentKey, deptKey(deptId))));
 }
 
 export { DEPT_PREFIX, deptKey };

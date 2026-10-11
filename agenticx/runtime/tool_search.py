@@ -36,6 +36,7 @@ _VALID_STRATEGIES = frozenset({"adaptive", "manual"})
 CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
     {
         "request_clarification",
+        "present_choices",
         "request_action_confirmation",
         "bash_exec",
         "bash_bg_start",
@@ -53,6 +54,8 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
         "mcp_call",
         "list_mcps",
         "skill_use",
+        "skillhub_install",
+        "clawhub_install",
         "memory_search",
         "knowledge_search",
         "spawn_subagent",
@@ -115,6 +118,7 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "skill_import_repo",
         "skill_list",
         "skill_manage",
+        "skillhub_search",
         "task_experience_clear",
         "task_experience_learn",
         "task_experience_retrieve",

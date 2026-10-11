@@ -57,6 +57,11 @@
     "suspendedHint": "无人值守已将提问挂起，可稍后回复。",
     "reply": "回复",
     "needsInput": "需要你的输入",
+    "choicePanelTitle": "选择面板",
+    "comparisonTitle": "对比选项",
+    "supersededHint": "已有更新的选择面板，此卡不可再选。",
+    "sourcesLabel": "来源",
+    "singleSelect": "单选",
     "dialogReply": "在对话中回复",
     "later": "稍后再说",
     "collapse": "收起",
@@ -69,9 +74,20 @@
     "submitHintGroupedMulti": "将按分组提交所选选项",
     "submitHintGrouped": "将按分组提交你的选择",
     "submitHintFlat": "将提交你勾选的选项",
+    "submitHintChoice": "将提交你选中的一项",
     "skipDefault": "跳过（按默认推进）",
     "submitting": "提交中…",
-    "submitDecision": "提交决定"
+    "submitDecision": "提交决定",
+    "openAnswer": "你的回复",
+    "openAnswerPlaceholder": "请输入你的回复…",
+    "submitHintOpenEnded": "输入回复后提交 · 智能体将在同一回合继续",
+    "fieldRequired": "必填",
+    "invalidUrl": "请输入以 http:// 或 https:// 开头的完整地址",
+    "secretFilled": "已填写（已隐藏）",
+    "secretHint": "仅保存到本机配置，不会发送到对话或模型",
+    "customOptionPlaceholder": "请输入…",
+    "fieldPlaceholder": "请输入…",
+    "submitHintForm": "完成必填项后确认 · 智能体将在同一回合继续"
   },
   "share": {
     "rasterNotReady": "栅格化失败：卡片未就绪",
@@ -88,7 +104,7 @@
     "rasterFailed": "栅格化失败：{{detail}}",
     "previewTitle": "分享图片预览",
     "shareConversation": "分享对话",
-    "aiDisclaimer": "内容由 AI 生成，不能完全保障真实",
+    "aiDisclaimer": "内容由 AI 生成，请注意核实",
     "renderingCharts": "正在渲染图表…",
     "copying": "复制中…",
     "copyImage": "复制图片",
@@ -137,18 +153,28 @@
     "selectAll": "全选",
     "webSearch": "网页搜索",
     "quoteToNew": "引用到新对话",
+    "openScratch": "开临时对话",
+    "scratchAbout": "关于 {{snippet}}",
     "continueFrom": "在新任务继续",
     "reanswer": "换模型回答",
     "reanswerAt": "@换模型",
     "pickReanswerModel": "选择模型重新回答",
     "unselectBlock": "取消选择回复块",
-    "selectBlock": "选择回复块"
+    "selectBlock": "选择回复块",
+    "expandQuery": "展开全部",
+    "collapseQuery": "收起",
+    "executionContract": "执行约束"
   },
   "reasoning": {
     "thinking": "思考中 · …",
     "thinkingElapsed": "思考中 · {{elapsed}}",
     "thought": "思考过程",
     "thoughtSeconds": "思考了 {{seconds}} 秒"
+  },
+  "groupReport": {
+    "title": "完整说明",
+    "expand": "展开",
+    "collapse": "收起"
   },
   "tool": {
     "confirmed": "已确认执行",
@@ -181,6 +207,7 @@
     "copyLink": "复制链接",
     "authHint": "在终端完成授权后即可继续",
     "openInTerminal": "在终端中打开",
+    "commandFailed": "命令失败（退出码 {{code}}）",
     "unselect": "取消选择工具卡",
     "selectTool": "选择工具卡",
     "calledCount": "调用 {{count}} 次",
@@ -195,6 +222,7 @@
     "expired": "已过期",
     "resolving": "提交中",
     "uncertain": "结果未确认",
+    "rememberSession": "本会话不再询问",
     "pending": "等待确认",
     "remaining": "剩余 {{countdown}}",
     "uncertainHint": "请求可能已送达，请对照后续执行结果。",
@@ -264,6 +292,8 @@
     "copyHeaderPath": "落盘路径: {{path}}",
     "expandCard": "展开整卡",
     "collapseCard": "折叠整卡",
+    "delegationBadge": "委派",
+    "delegationBadgeHint": "委派给数字分身执行的运行，归属发起方会话",
     "waitingConfirmPopup": "等待确认中… 请查看弹窗或稍候",
     "waitingInputNamed": "等待你的输入：{{prompt}}",
     "waitingInputPopup": "等待你的输入… 请查看弹窗",
@@ -393,7 +423,38 @@
     "allowAllBody": "智能体将不再逐条询问，可自行执行命令、改文件和访问网络。",
     "allowAllRisks": "主要风险",
     "allowAllFooter": "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
+    "allowAllAck": "我已了解风险，并对自己的数据安全负责",
     "placeholder": "发消息...",
+    "placeholderEmpty": "描述你的任务…",
+    "commands": {
+      "menuTitle": "指令 ({{count}})",
+      "empty": "没有匹配的指令",
+      "pin": "钉在此会话",
+      "button": "指令",
+      "placeholderPerf": "留空诊断当前对话，或贴上 session id，可补一句问题",
+      "placeholderPerfRoom": "贴上 session id，可补一句问题",
+      "placeholderPrompt": "补充说明，可留空",
+      "invalidSession": "session id 无效",
+      "missing": "缺失",
+      "perfTitle": "查看这次对话的耗时",
+      "close": "关闭",
+      "model": "模型",
+      "wall": "墙钟",
+      "ttft": "首 token",
+      "waits": "最长模型等待",
+      "tools": "工具合计",
+      "slowest": "最慢工具",
+      "noRuns": "这次会话还没有运行记录",
+      "instructions": "指令说明",
+      "scope": {
+        "builtin": "内置",
+        "session": "此会话",
+        "avatar": "分身",
+        "group": "群聊",
+        "room": "房间",
+        "global": "全局"
+      }
+    },
     "placeholderLite": "问我任何问题...",
     "placeholderStreaming": "生成中：Enter 排队，连按两次 Enter 立即发送",
     "placeholderPlan": "计划模式：描述目标，我只返回可执行计划",
@@ -433,7 +494,31 @@
     "loadOlderAria": "加载更早消息",
     "liteHint": "问我任何问题，或使用下方推荐操作",
     "proHint": "输入你的需求开始对话",
-    "automationFailed": "上次定时执行失败"
+    "automationFailed": "上次定时执行失败",
+    "needDone": "你想完成什么？",
+    "needDoneHint": "用平常的话说出来",
+    "suggestions": [
+      {
+        "title": "总结这周",
+        "description": "从邮件和日历里抽出重点。",
+        "prompt": "总结我这一周：从已连接的邮件和日历里抽出重点，给我一份短摘要，说明发生了什么、哪些需要我处理。"
+      },
+      {
+        "title": "整理一份表格",
+        "description": "丢进 CSV，说你想要的结果。",
+        "prompt": "我稍后会给你一份表格。先告诉我你需要哪些列，然后按我说的结果整理数据并给出摘要。"
+      },
+      {
+        "title": "起草一份文档",
+        "description": "用几条要点写成报告、邮件或简报。",
+        "prompt": "起草一份一页纸的项目简报。先问我需要的要点，再写成清楚、有结构的文档。"
+      },
+      {
+        "title": "自动完成网页任务",
+        "description": "用内置浏览器做重复步骤。",
+        "prompt": "用内置浏览器打开一个网页，按我接下来的步骤点击和摘录，最后把结果列出来。"
+      }
+    ]
   },
   "toolbar": {
     "reorderPane": "拖拽以调整窗格顺序",
@@ -524,6 +609,8 @@
     "unattendedOn": "本会话无人值守：开",
     "unattendedOff": "本会话无人值守：关",
     "backgroundRunning": "后台运行中",
+    "wechatAnswering": "微信正在回答",
+    "feishuAnswering": "飞书正在回答",
     "retryNow": "立即重试",
     "switchModel": "换模型",
     "stop": "停止",
@@ -815,7 +902,8 @@
     "searchTitle": "搜索：{{query}}",
     "resizeWorkbench": "拖拽调整工作台面板宽度",
     "resizeMemoryGraph": "拖拽调整记忆图谱面板宽度",
-    "webPage": "网页"
+    "webPage": "网页",
+    "terminal": "终端"
   },
   "table": {
     "label": "表格",
@@ -850,7 +938,9 @@
     "doubleEnterHint": "Enter 再按一次立即发送",
     "attachments": "{{count}} 个附件",
     "next": "下一个",
-    "sendNowInterrupt": "立即发送（中断当前生成）"
+    "sendNowInterrupt": "立即发送（中断当前生成）",
+    "otherSession": "另有 {{count}} 条待发送消息保存在其他对话。切回原对话后可继续发送；这些消息不会发到当前对话。",
+    "persistenceFailed": "此设备未能保存待发送队列。退出应用前请先发送或复制消息。"
   },
   "skillPatch": {
     "strategy": "策略",
@@ -892,7 +982,18 @@
   "groupActivity": {
     "viewRecentSteps": "查看最近工具步骤",
     "statusRunning": "进行中",
-    "statusDone": "已完成"
+    "statusDone": "已完成",
+    "statusWaiting": "等待确认",
+    "approve": "同意",
+    "reject": "拒绝"
+  },
+  "externalLink": {
+    "title": "要打开这个外部网页吗？",
+    "open": "打开",
+    "copy": "复制",
+    "copied": "已复制",
+    "alwaysAllow": "始终允许此域名",
+    "cancel": "取消"
   },
   "loopReview": {
     "title": "会话体检",
@@ -913,5 +1014,44 @@
       "outcome_supported": "结果可证",
       "not_applicable": "不适用"
     }
+  },
+  "quickStart": {
+    "summarize": {
+      "title": "总结文档",
+      "desc": "粘贴文章或报告，提炼要点",
+      "prompt": "请总结我接下来贴的文档，列出核心要点、结论和待办。"
+    },
+    "weekly": {
+      "title": "写周报",
+      "desc": "说说本周做了什么，帮你成稿",
+      "prompt": "请根据我接下来描述的本周工作，写一份结构清晰的周报，突出成果与下周计划。"
+    },
+    "minutes": {
+      "title": "整理会议纪要",
+      "desc": "贴上记录，整理成纪要",
+      "prompt": "请把我接下来贴的会议记录整理成纪要：议题、结论、行动项（负责人和时间）。"
+    },
+    "explainCode": {
+      "title": "解释代码",
+      "desc": "贴一段代码，讲清楚逻辑",
+      "prompt": "请逐步解释我接下来贴的代码：整体作用、关键逻辑、潜在问题。"
+    },
+    "plan": {
+      "title": "做计划",
+      "desc": "说出目标，拆成可执行步骤",
+      "prompt": "请为我接下来说的目标制定分步骤计划，包含里程碑和风险。"
+    },
+    "translate": {
+      "title": "翻译润色",
+      "desc": "翻译并保持自然流畅",
+      "prompt": "请把我接下来发的内容翻译成目标语言，保留术语并润色得自然流畅。"
+    }
+  },
+  "activity": {
+    "running": "{{count}} 个子智能体运行中",
+    "awaiting": "{{count}} 个待你确认",
+    "input": "{{count}} 个等待你的输入",
+    "open": "查看",
+    "summarizing": "正在汇总子智能体的结果…"
   }
 }

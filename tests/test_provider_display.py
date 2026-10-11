@@ -43,6 +43,7 @@ def test_get_provider_display_name_hides_raw_custom_ids() -> None:
     assert get_provider_display_name("custom_openai_legacy") == "历史厂商"
     assert get_provider_display_name("custom_openai_moma", {"display_name": "MOMA"}) == "MOMA"
     assert get_provider_display_name("deepseek") == "DeepSeek"
+    assert get_provider_display_name("mimo") == "小米 MiMo"
 
 
 def test_provider_breakdown_label_reads_config(monkeypatch) -> None:

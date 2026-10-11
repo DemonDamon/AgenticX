@@ -13,6 +13,7 @@
     "docs",
     "enterprise",
     "examples",
+    "harness-lab",
     "packaging",
     "research",
     "scripts",
@@ -187,6 +188,14 @@
       "mapping_revision": 1
     },
     {
+      "id": "ops",
+      "name": "Ops",
+      "roots": ["agenticx/ops"],
+      "shared_paths": [],
+      "summary_path": "conclusions/ops_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
       "id": "planner",
       "name": "Planner",
       "roots": ["agenticx/planner"],
@@ -208,6 +217,14 @@
       "roots": ["agenticx/protocols"],
       "shared_paths": [],
       "summary_path": "conclusions/protocols_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "reliability",
+      "name": "Reliability",
+      "roots": ["agenticx/reliability"],
+      "shared_paths": [],
+      "summary_path": "conclusions/reliability_module_conclusion.md",
       "mapping_revision": 1
     },
     {
@@ -363,6 +380,14 @@
       "mapping_revision": 1
     },
     {
+      "id": "wb-bridge",
+      "name": "WB Bridge",
+      "roots": ["agenticx/wb_bridge"],
+      "shared_paths": [],
+      "summary_path": "conclusions/wb_bridge_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
       "id": "workspace",
       "name": "Workspace",
       "roots": ["agenticx/workspace"],
@@ -376,7 +401,7 @@
       "roots": ["agenticx"],
       "shared_paths": ["pyproject.toml", "requirements.txt"],
       "summary_path": "conclusions/package_root_conclusion.md",
-      "mapping_revision": 1
+      "mapping_revision": 2
     }
   ],
   "retired_modules": []

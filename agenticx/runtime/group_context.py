@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, List, Mapping, Sequence
 
+from agenticx.studio.avatar_url_compact import compact_stored_avatar_url
+
 
 @dataclass
 class GroupMessage:
@@ -52,23 +54,38 @@ class GroupChatContext:
         text: str,
         *,
         sender_name: str = "我",
+        sender_id: str = "user",
         quoted_message_id: str = "",
         quoted_content: str = "",
         attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         label = str(sender_name or "").strip() or "我"
+        sid = str(sender_id or "").strip() or "user"
         row: dict[str, Any] = {
             "role": "user",
             "content": str(text or ""),
-            "sender_id": "user",
+            "sender_id": sid,
             "sender_name": label,
-            "agent_id": "user",
+            "agent_id": sid,
             "quoted_message_id": str(quoted_message_id or ""),
             "quoted_content": str(quoted_content or ""),
         }
         if attachments:
             row["attachments"] = [dict(item) for item in attachments]
-        self._history().append(row)
+        history = self._history()
+        if history:
+            last = history[-1]
+            if (
+                isinstance(last, dict)
+                and str(last.get("role") or "") == "user"
+                and str(last.get("content") or "") == row["content"]
+                and str(last.get("sender_id") or "") == row["sender_id"]
+                and str(last.get("quoted_message_id") or "") == row["quoted_message_id"]
+                and str(last.get("quoted_content") or "") == row["quoted_content"]
+                and list(last.get("attachments") or []) == list(row.get("attachments") or [])
+            ):
+                return
+        history.append(row)
 
     def append_agent(
         self,
@@ -86,7 +103,7 @@ class GroupChatContext:
             "sender_name": str(agent_name or "") or str(agent_id or ""),
             "agent_id": str(agent_id or ""),
             "avatar_name": str(agent_name or "") or str(agent_id or ""),
-            "avatar_url": str(avatar_url or ""),
+            "avatar_url": compact_stored_avatar_url(str(avatar_url or "")),
         }
         if attachments:
             row["attachments"] = [dict(item) for item in attachments]

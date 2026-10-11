@@ -62,9 +62,29 @@ export type KBApi = {
   testEmbedding: (embedding: EmbeddingSpec) => Promise<EmbeddingTestResult>;
   getParserStatus: () => Promise<ParserStatus>;
   listWikiPages: () => Promise<{ path: string; title: string; type: string }[]>;
+  getWikiGraph: () => Promise<{
+    nodes: { id: string; title: string; type: string; path: string; sources: string[] }[];
+    edges: { source: string; target: string }[];
+  }>;
   getWikiPage: (path: string) => Promise<string>;
   getPurpose: () => Promise<string>;
   savePurpose: (content: string) => Promise<void>;
+  draftPurpose: (content: string) => Promise<string>;
+  createSampleWiki: () => Promise<string[]>;
+  clearSampleWiki: () => Promise<string[]>;
+  listWikiCompiles: () => Promise<WikiCompileStatus[]>;
+  backfillWiki: () => Promise<string[]>;
+  cancelWikiCompile: (documentId?: string) => Promise<string[]>;
+};
+
+export type WikiCompileStatus = {
+  document_id: string;
+  source_name: string;
+  status: string;
+  message: string;
+  stage?: string;
+  progress?: number;
+  model?: string;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -191,6 +211,13 @@ export function createKbApi(
       );
       return body.pages ?? [];
     },
+    async getWikiGraph() {
+      const body = await doJson<{
+        nodes?: { id: string; title: string; type: string; path: string; sources: string[] }[];
+        edges?: { source: string; target: string }[];
+      }>(p("/wiki/graph"));
+      return { nodes: body.nodes ?? [], edges: body.edges ?? [] };
+    },
     async getWikiPage(path: string) {
       const qs = new URLSearchParams({ path });
       const body = await doJson<{ content: string }>(`${p("/wiki/page")}?${qs.toString()}`);
@@ -205,6 +232,36 @@ export function createKbApi(
         method: "PUT",
         body: JSON.stringify({ content }),
       });
+    },
+    async draftPurpose(content: string) {
+      const body = await doJson<{ content?: string }>(p("/wiki/purpose/draft"), {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      return body.content ?? "";
+    },
+    async createSampleWiki() {
+      const body = await doJson<{ written?: string[] }>(p("/wiki/sample"), { method: "POST" });
+      return body.written ?? [];
+    },
+    async clearSampleWiki() {
+      const body = await doJson<{ removed?: string[] }>(p("/wiki/sample"), { method: "DELETE" });
+      return body.removed ?? [];
+    },
+    async listWikiCompiles() {
+      const body = await doJson<{ compiles?: WikiCompileStatus[] }>(p("/wiki/compiles"));
+      return body.compiles ?? [];
+    },
+    async backfillWiki() {
+      const body = await doJson<{ queued?: string[] }>(p("/wiki/backfill"), { method: "POST" });
+      return body.queued ?? [];
+    },
+    async cancelWikiCompile(documentId?: string) {
+      const body = await doJson<{ cancelled?: string[] }>(p("/wiki/compiles/cancel"), {
+        method: "POST",
+        body: JSON.stringify(documentId ? { document_id: documentId } : {}),
+      });
+      return body.cancelled ?? [];
     },
   };
 }

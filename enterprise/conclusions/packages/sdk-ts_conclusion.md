@@ -59,3 +59,11 @@ ChatClient {
 | `apps/gateway` | 被调用方 | HttpChatClient POST 到 gateway 的 `/v1/chat/completions`（web-portal 经 next 代理） |
 | `packages/core-api` | 类型契约源 | 错误码 / chat 类型源头；本 SDK 是其窄化客户端视图 |
 | Machi 桌面（主仓） | 目标消费者 | description 标注"给 Machi 接"，预留桌面端接 enterprise gateway |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- `src/deep-research.ts`：深度研究客户端（创建/恢复/订阅 run）。
+- `src/trace/trace-id.ts`：请求 `trace-id` 生成与 header 注入；`http.trace-header.test.ts`。
+- `HttpChatClient`：透传 trace、扩展 completions 选项；`http.test.ts` 大幅加覆盖。
+- barrel 导出 `deep-research` 与 `trace/trace-id`。

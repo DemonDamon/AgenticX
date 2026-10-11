@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "embodiment",
-  "generation": "27a668963617462b9e573d51a419049b",
+  "generation": "a3d295a9f2c6430da11946ac603032af",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
   "source_fingerprint": "sha256:eda76b61a87717d44f9bd9cba75bef5c0df32f92bb5e32c07a1a8154e6310f71",
   "summary_path": "conclusions/embodiment_conclusion.md",
   "summary_sha256": "sha256:b283fa8e8f670adeb0df1a9dce444ce60f4c326f7ff8fa0e43582109f31d05ad",
-  "updated_at": "2026-09-01T05:50:19.009710+00:00"
+  "updated_at": "2026-09-30T00:54:07.344746+00:00"
 }

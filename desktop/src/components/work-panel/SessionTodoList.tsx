@@ -5,17 +5,20 @@
  * Author: Damon Li
  */
 
-import { Circle, CircleCheck, Loader2 } from "lucide-react";
+import { Circle, CircleCheck, Loader2, MessageSquare } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { ParsedTodo } from "../TodoUpdateCard";
 
 type Props = {
   todo: ParsedTodo;
+  onOpenScratch?: (item: { content: string; index: number }) => void;
 };
 
 /** Soft sage green matching Trae Work completed check (shared with StickyTaskBar). */
 export const TRAE_TODO_CHECK_CLASS = "text-[#5B9A6F]";
 
-export function SessionTodoList({ todo }: Props) {
+export function SessionTodoList({ todo, onOpenScratch }: Props) {
+  const { t } = useTranslation("workspace");
   return (
     <ul className="space-y-0.5">
       {todo.items.map((item, idx) => (
@@ -52,6 +55,16 @@ export function SessionTodoList({ todo }: Props) {
               </div>
             ) : null}
           </div>
+          {onOpenScratch ? (
+            <button
+              type="button"
+              className="mt-0.5 shrink-0 rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => onOpenScratch({ content: item.content, index: idx })}
+              aria-label={t("work.openScratch")}
+            >
+              <MessageSquare className="h-3 w-3" strokeWidth={1.7} />
+            </button>
+          ) : null}
         </li>
       ))}
     </ul>

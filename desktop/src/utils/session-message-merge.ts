@@ -37,7 +37,20 @@ const clientTurnId = (message: Message) =>
 const assistantBodyKey = (content: unknown) =>
   assistantVisibleBodyForUi(String(content ?? "")).trim();
 
+/** Fingerprint for reasoning-only mid-turn rows (empty body + reasoning text). */
+const assistantReasoningKey = (message: Pick<Message, "reasoning">) =>
+  norm(message.reasoning).slice(0, 2048);
+
 const toolCallIdOf = (message: Message) => String(message.toolCallId ?? "").trim();
+
+/**
+ * Group-workflow narration is intentionally UI-only: it explains who is being
+ * assigned/reviewed without polluting the agents' durable conversation context.
+ * These rows therefore have no disk counterpart, but their live position among
+ * persisted member replies is still authoritative.
+ */
+const isTransientTimelineRow = (message: Message) =>
+  String(message.metadata?.kind ?? "").trim() === "group_workflow_event";
 
 const TERMINAL_TOOL_STATUSES = new Set<NonNullable<Message["toolStatus"]>>([
   "done",
@@ -139,6 +152,25 @@ export function mergeSessionMessagesTail(
     }
     const diskBody =
       diskRow.role === "assistant" ? assistantBodyKey(diskRow.content) : "";
+    const diskReasoning =
+      diskRow.role === "assistant" ? assistantReasoningKey(diskRow) : "";
+    // Live preserveStreamReasoning rows are content "" + reasoning. Disk mid-turn
+    // rows look the same after our persist fix — body equality never hits, so
+    // without a reasoning match they were appended after the final answer as a
+    // duplicate "思考了 N 秒" stack.
+    if (diskRow.role === "assistant" && !diskBody && diskReasoning) {
+      const byReasoning = existing.find(
+        (memory) =>
+          !consumedMemory.has(memory) &&
+          memory.role === "assistant" &&
+          !assistantBodyKey(memory.content) &&
+          assistantReasoningKey(memory) === diskReasoning,
+      );
+      if (byReasoning) {
+        consumedMemory.add(byReasoning);
+        return byReasoning;
+      }
+    }
     for (const memory of existing) {
       if (consumedMemory.has(memory)) continue;
       if (memory.role !== diskRow.role) continue;
@@ -168,15 +200,20 @@ export function mergeSessionMessagesTail(
   };
 
   const out: Message[] = [];
+  const outputRowByMemory = new Map<Message, Message>();
   const placedAssistantBodies = new Set<string>();
+  const placedReasoningKeys = new Set<string>();
   const placedToolCallIds = new Set<string>();
   for (const diskRow of mapped) {
     const memory = findMemoryMatch(diskRow);
     const row = memory ? overlayMemoryEnrichment(diskRow, memory) : diskRow;
     out.push(row);
+    if (memory) outputRowByMemory.set(memory, row);
     if (row.role === "assistant") {
       const body = assistantBodyKey(row.content);
       if (body) placedAssistantBodies.add(body);
+      const reasoningKey = assistantReasoningKey(row);
+      if (reasoningKey) placedReasoningKeys.add(reasoningKey);
     }
     if (row.role === "tool") {
       const callId = toolCallIdOf(row);
@@ -184,11 +221,18 @@ export function mergeSessionMessagesTail(
     }
   }
 
+  const transientTimelineRows: Message[] = [];
+
   // Append in-memory rows that disk hasn't persisted yet (缺失自愈), but never
   // re-append an assistant row whose body already appears above — those are the
   // accumulated duplicate "思考了 N 秒" copies left by earlier failed merges.
+  // Same for reasoning-only mid-turn rows (empty body + reasoning fingerprint).
   // Also never re-append a live tool card whose toolCallId already landed from
   // disk (stale running args-only rows used to appear after the final answer).
+  //
+  // UI-only group workflow rows are handled separately below. Appending those
+  // as a tail made a correctly streamed timeline flip into "final answer first,
+  // assignment/decomposition afterwards" every time disk reconciliation ran.
   for (const memory of existing) {
     if (consumedMemory.has(memory)) continue;
     if (isOrphanFormattedToolResultMessage(memory)) continue;
@@ -196,13 +240,44 @@ export function mergeSessionMessagesTail(
     if (memory.role === "assistant") {
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;
+      const reasoningKey = assistantReasoningKey(memory);
+      if (reasoningKey && placedReasoningKeys.has(reasoningKey)) continue;
       if (body) placedAssistantBodies.add(body);
+      if (reasoningKey) placedReasoningKeys.add(reasoningKey);
     }
     if (memory.role === "tool") {
       const callId = toolCallIdOf(memory);
       if (callId && placedToolCallIds.has(callId)) continue;
     }
+    if (isTransientTimelineRow(memory)) {
+      transientTimelineRows.push(memory);
+      continue;
+    }
     out.push(memory);
+    outputRowByMemory.set(memory, memory);
+  }
+
+  // Reinsert each transient row immediately before the next durable row that
+  // followed it in the live array. This preserves causal SSE order without
+  // weakening the general rule that disk chronology is authoritative. When a
+  // transient row has no later durable anchor it genuinely belongs at the tail.
+  for (const transient of transientTimelineRows) {
+    const memoryIndex = existing.indexOf(transient);
+    let nextOutput: Message | undefined;
+    for (let idx = memoryIndex + 1; idx < existing.length; idx += 1) {
+      const candidate = outputRowByMemory.get(existing[idx]);
+      if (candidate) {
+        nextOutput = candidate;
+        break;
+      }
+    }
+    if (!nextOutput) {
+      out.push(transient);
+      continue;
+    }
+    const insertAt = out.indexOf(nextOutput);
+    if (insertAt < 0) out.push(transient);
+    else out.splice(insertAt, 0, transient);
   }
 
   return retainUnpersistedLiveUserTurns(existing, out);

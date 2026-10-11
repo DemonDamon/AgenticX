@@ -3,7 +3,13 @@ import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { PreviewFallback } from "./PreviewFallback";
 import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl } from "./preview-data";
-import { pdfNavDeltaFromKey } from "./pdf-preview-keys";
+import {
+  cancelPdfRenderTasks,
+  MAX_PDF_RENDER_PAGES,
+  pdfNavDeltaFromKey,
+  pdfPageNumbers,
+  type PdfRenderTask,
+} from "./pdf-preview-keys";
 
 type PdfPreviewProps = {
   absolutePath: string;
@@ -25,8 +31,6 @@ type PdfJsDoc = {
   getPage: (n: number) => Promise<PdfJsPage>;
   numPages: number;
 };
-
-const MAX_RENDER_PAGES = 10;
 
 export function PdfPreview({
   absolutePath,
@@ -75,10 +79,10 @@ export function PdfPreview({
         const workerMod = await import("pdfjs-dist/legacy/build/pdf.worker.mjs?url");
         pdfjsLib.GlobalWorkerOptions.workerSrc = workerMod.default;
         const buffer = await dataUrlToArrayBuffer(loaded.dataUrl);
-        const pdf = (await pdfjsLib.getDocument({ data: buffer }).promise) as PdfJsDoc;
+        const pdf = (await pdfjsLib.getDocument({ data: buffer }).promise) as unknown as PdfJsDoc;
         if (cancelled) return;
         pdfDocRef.current = pdf;
-        setPageCount(Math.min(pdf.numPages, MAX_RENDER_PAGES));
+        setPageCount(pdfPageNumbers(pdf.numPages).length);
         setLoading(false);
         rootRef.current?.focus({ preventScroll: true });
       } catch (err) {
@@ -99,11 +103,10 @@ export function PdfPreview({
     if (!pdf || loading || pageCount < 1) return;
 
     let cancelled = false;
-    const tasks: Array<{ cancel?: () => void }> = [];
-
+    const tasks: PdfRenderTask[] = [];
     void (async () => {
       try {
-        for (let n = 1; n <= pageCount; n += 1) {
+        for (const n of pdfPageNumbers(pageCount, MAX_PDF_RENDER_PAGES)) {
           if (cancelled) return;
           const canvas = canvasRefs.current[n - 1];
           if (!canvas) continue;
@@ -125,15 +128,13 @@ export function PdfPreview({
 
     return () => {
       cancelled = true;
-      for (const task of tasks) {
-        task.cancel?.();
-      }
+      cancelPdfRenderTasks(tasks);
     };
   }, [pageCount, scale, loading]);
 
   useEffect(() => {
     const root = scrollRef.current;
-    if (!root || loading || pageCount < 1) return;
+    if (!root || loading || pageCount < 1 || typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -152,7 +153,6 @@ export function PdfPreview({
     for (const el of pageWrapRefs.current) {
       if (el) observer.observe(el);
     }
-
     return () => observer.disconnect();
   }, [loading, pageCount]);
 

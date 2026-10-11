@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -19,6 +19,7 @@ import {
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
 import { SkillPatchPreviewCard } from "./SkillPatchPreviewCard";
+import { ShowWidgetDrawingPlaceholder } from "./ShowWidgetDrawingPlaceholder";
 import { WidgetBlock } from "./WidgetBlock";
 import {
   parseSkillManageError,
@@ -28,7 +29,9 @@ import {
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { extractPartialShowWidgetArgs, finalizePartialSvg, type PartialShowWidget } from "./show-widget-partial";
 import { parseBashBgStart } from "./bash-bg-preview";
+import { resolveBashExecCardText } from "./bash-exec-result";
 import { openExternalUrl } from "../../utils/open-external";
+import { MarkdownContext } from "./markdown-components";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 import {
   formatToolElapsedSeconds,
@@ -143,7 +146,7 @@ export function buildToolCardTitle(message: Message, t?: ChatTranslate): string 
   if (name === "todo_write") return "todo_write";
   // 澄清 / 确认行记的是用户自己的回答。标题直接给答案，而不是 "request_clarification"：
   // 关掉工具详情时这张卡默认是收起的，标题就是用户唯一能看到的一行。
-  if (name === "request_clarification" || name === "request_action_confirmation") {
+  if (name === "request_clarification" || name === "present_choices" || name === "request_action_confirmation") {
     const decided = summarizeUserDecision(name, String(message.content ?? ""), t);
     if (decided) return decided;
     return name === "request_action_confirmation"
@@ -186,7 +189,7 @@ function pickToolIcon(name: string) {
 
 function iconTone(st: Message["toolStatus"]): string {
   if (st === "done") return "text-emerald-400";
-  if (st === "error") return "text-rose-400";
+  if (st === "error") return "text-text-muted";
   if (st === "cancelled") return "text-text-faint";
   if (st === "running" || st === "pending") return "text-cyan-400";
   return "text-text-subtle";
@@ -233,7 +236,29 @@ function highlightTextSegment(text: string, terms: string[]): ReactNode {
   });
 }
 
-// URL 整体保持完整可点击，不被关键词高亮拆散；点击走系统默认浏览器。
+function ToolResultLink({ url }: { url: string }) {
+  const { onHttpLinkClick } = useContext(MarkdownContext);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+      onClick={(event) => {
+        event.preventDefault();
+        if (onHttpLinkClick) {
+          onHttpLinkClick(url);
+          return;
+        }
+        openExternalUrl(url);
+      }}
+    >
+      {url}
+    </a>
+  );
+}
+
+// URL 整体保持完整可点击，不被关键词高亮拆散。
 function renderHighlightedText(content: string, terms: string[]): ReactNode {
   if (!content) return null;
   const segments: Array<{ type: "text" | "url"; value: string }> = [];
@@ -257,21 +282,7 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
 
   return segments.map((seg, i) => {
     if (seg.type === "url") {
-      return (
-        <a
-          key={`tool-link-${i}`}
-          href={seg.value}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
-          onClick={(e) => {
-            e.preventDefault();
-            openExternalUrl(seg.value);
-          }}
-        >
-          {seg.value}
-        </a>
-      );
+      return <ToolResultLink key={`tool-link-${i}`} url={seg.value} />;
     }
     return <span key={`tool-text-${i}`}>{highlightTextSegment(seg.value, terms)}</span>;
   });
@@ -375,6 +386,12 @@ export function ToolCallCard({
     return best;
   }, [message.toolArgs, message.toolArgsPartial, message.toolStatus, toolName]);
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
+  const bashCard = useMemo(() => {
+    if (toolName !== "bash_exec") {
+      return { matched: false as const, text: message.content };
+    }
+    return resolveBashExecCardText(message.content, (code) => t("tool.commandFailed", { code }));
+  }, [message.content, t, toolName]);
   const skillPreviewPayload = useMemo(() => {
     if ((message.toolName ?? "").trim() !== "skill_manage") return null;
     return parseSkillPatchPreviewPayload(message.content);
@@ -428,9 +445,10 @@ export function ToolCallCard({
     const statusLabel =
       showWidgetPartial.widgetFormat === "mermaid" ? t("tool.composingChart") : t("tool.drawing");
     return (
-      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}{statusLabel}
-      </div>
+      <ShowWidgetDrawingPlaceholder
+        title={showWidgetPartial.title}
+        statusLabel={statusLabel}
+      />
     );
   }
   if (
@@ -438,17 +456,13 @@ export function ToolCallCard({
     && (message.toolStatus === "running" || message.toolStatus === "pending")
     && !showWidgetPartial
   ) {
-    return (
-      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        {t("tool.drawing")}
-      </div>
-    );
+    return <ShowWidgetDrawingPlaceholder statusLabel={t("tool.drawing")} />;
   }
 
   // show_widget with truncated/broken content → amber warning inline
   if (toolName === "show_widget" && /\[micro-compact tool=show_widget/i.test(message.content)) {
     return (
-      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {t("tool.chartTruncated")}
       </div>
     );
@@ -456,7 +470,7 @@ export function ToolCallCard({
 
   if (toolName === "show_widget" && isBrokenStockChartAttempt(message.content) && !widgetPayload) {
     return (
-      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {stockChartDegradedMessage()}
       </div>
     );
@@ -464,7 +478,7 @@ export function ToolCallCard({
   const Icon = isHookBlocked
     ? ShieldAlert
     : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
-  const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
+  const hasDetail = !isHookBlocked && (bashCard.text.length > 0 || hasStream);
 
   const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
 
@@ -596,9 +610,9 @@ export function ToolCallCard({
           </button>
         </div>
       ) : null}
-      {message.content && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
+      {bashCard.text && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
         <span className="break-all whitespace-pre-wrap">
-          {renderHighlightedText(message.content, normalizedTerms)}
+          {renderHighlightedText(bashCard.text, normalizedTerms)}
         </span>
       ) : null}
       {action}
@@ -649,7 +663,7 @@ export function ToolCallCard({
             ) : null}
           </button>
 
-          {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+          {expanded && (hasDetail || action) && <div className={expandedDetailClass}>{detailBody}</div>}
           {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
         </div>
       </div>
@@ -675,7 +689,7 @@ export function ToolCallCard({
           ) : null}
         </button>
 
-        {expanded && (
+        {expanded && (hasDetail || action) && (
           <div className={expandedDetailClass}>
             <div className="pl-[28px]">{detailBody}</div>
           </div>
@@ -704,7 +718,7 @@ export function ToolCallCard({
           </button>
         </div>
 
-        {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+        {expanded && (hasDetail || action) && <div className={expandedDetailClass}>{detailBody}</div>}
 
         {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
       </div>

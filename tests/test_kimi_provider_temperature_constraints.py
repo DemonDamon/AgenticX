@@ -80,3 +80,34 @@ def test_kimi_k3_prefixed_model_id_also_enforces_temperature_one():
     provider.invoke("hello")
 
     assert captured["params"]["temperature"] == 1.0
+
+
+def test_kimi_k2_7_code_enforces_temperature_one_by_default():
+    captured: dict = {}
+    provider = KimiProvider(model="kimi-k2.7-code", api_key="k", temperature=0.6)
+    provider.client = _make_fake_client(captured)
+
+    provider.invoke("hello", temperature=0.2)
+
+    assert captured["params"]["temperature"] == 1.0
+
+
+def test_kimi_k2_7_code_enforces_temperature_one_even_when_thinking_disabled():
+    """K2.7 API rejects any value other than 1; do not fall back to K2.5/2.6's 0.6."""
+    captured: dict = {}
+    provider = KimiProvider(model="kimi-k2.7-code", api_key="k", temperature=0.6)
+    provider.client = _make_fake_client(captured)
+
+    provider.invoke("hello", thinking={"type": "disabled"}, temperature=0.3)
+
+    assert captured["params"]["temperature"] == 1.0
+
+
+def test_kimi_k2_7_prefixed_model_id_also_enforces_temperature_one():
+    captured: dict = {}
+    provider = KimiProvider(model="kimi/kimi-k2.7-code", api_key="k", temperature=0.6)
+    provider.client = _make_fake_client(captured)
+
+    provider.invoke("hello")
+
+    assert captured["params"]["temperature"] == 1.0

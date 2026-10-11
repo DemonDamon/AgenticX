@@ -1,5 +1,30 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
+type NearBrowserActPayload = {
+  request_id: string;
+  session_id: string;
+  action: string;
+  url?: unknown;
+  index?: unknown;
+  text?: unknown;
+  key?: unknown;
+  submit?: unknown;
+  query?: unknown;
+};
+
+type NearBrowserActResult = {
+  ok: boolean;
+  request_id?: string;
+  session_id?: string;
+  error?: string;
+  hint?: string;
+  url?: string;
+  title?: string;
+  elements?: unknown;
+  path?: string;
+  text?: string;
+};
+
 function parseArgvFlag(prefix: string, fallback: string): string {
   for (const arg of process.argv) {
     if (arg.startsWith(prefix)) {
@@ -60,7 +85,7 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
-  version: "0.5.0",
+  version: "0.6.0",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
@@ -102,6 +127,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("focus-mode-enter"),
   focusModeExit: async (): Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-exit"),
+  toggleWindowZoom: async (): Promise<{ ok: boolean; maximized?: boolean }> =>
+    ipcRenderer.invoke("window-toggle-zoom"),
+  windowDragStart: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("window-drag-start"),
+  windowDragEnd: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("window-drag-end"),
   loadRemoteServer: async () =>
     ipcRenderer.invoke("load-remote-server") as Promise<{ enabled: boolean; url: string; token: string }>,
   saveRemoteServer: async (payload: { enabled: boolean; url: string; token: string }) =>
@@ -134,6 +163,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     appId: string;
     appSecret: string;
   }) => ipcRenderer.invoke("save-feishu-config", payload),
+  loadGatewayAdapters: async () =>
+    ipcRenderer.invoke("load-gateway-adapters") as Promise<import("./gateway-adapter-config").GatewayAdapterForm>,
+  saveGatewayAdapters: async (payload: import("./gateway-adapter-config").GatewayAdapterForm) =>
+    ipcRenderer.invoke("save-gateway-adapters", payload),
   loadFeishuBinding: async () =>
     ipcRenderer.invoke("load-feishu-binding") as Promise<{ ok: boolean; bindings: Record<string, unknown> }>,
   saveFeishuDesktopBinding: async (payload: {
@@ -162,6 +195,22 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("wechat-sidecar-port") as Promise<{ port: number; running: boolean }>,
   wechatClearCredentials: async () =>
     ipcRenderer.invoke("wechat-clear-credentials") as Promise<{ ok: boolean }>,
+
+  /** 连接器网关（内置 sidecar）：确保已启动并返回端口与 runtime token（写入 mcp.json 用）。 */
+  connectorRuntimeEnsure: async () =>
+    ipcRenderer.invoke("connector-runtime-ensure") as Promise<
+      { ok: true; port: number; runtimeToken: string } | { ok: false; error: string }
+    >,
+  connectorRuntimeStatus: async () =>
+    ipcRenderer.invoke("connector-runtime-status") as Promise<{ running: boolean; port: number }>,
+  /** 管理面代理（admin token 只留主进程）。 */
+  connectorRuntimeAdmin: async (payload: { method: string; path: string; body?: unknown }) =>
+    ipcRenderer.invoke("connector-runtime-admin", payload) as Promise<{
+      ok: boolean;
+      status: number;
+      body?: unknown;
+      error?: string;
+    }>,
 
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
@@ -225,6 +274,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     default_provider?: string;
     default_model?: string;
     workspace_dir?: string;
+    portrait_style?: string;
   }) =>
     ipcRenderer.invoke("create-avatar", payload),
   updateAvatar: async (payload: {
@@ -242,6 +292,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     default_provider?: string;
     default_model?: string;
     color?: string;
+    portrait_style?: string;
   }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
@@ -427,6 +478,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
+  loadBrowserControlConfig: async () => ipcRenderer.invoke("load-browser-control-config"),
+  saveBrowserControlConfig: async (payload: { enabled: boolean }) =>
+    ipcRenderer.invoke("save-browser-control-config", payload),
   loadCodeIndexConfig: async () => ipcRenderer.invoke("load-code-index-config"),
   saveCodeIndexConfig: async (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("save-code-index-config", payload),
@@ -449,8 +503,28 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     halflife_days: number;
   }) => ipcRenderer.invoke("save-turn-archive-config", payload),
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
-  saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
-    ipcRenderer.invoke("save-automation-config", payload),
+  saveAutomationConfig: async (payload: {
+    prevent_sleep?: boolean;
+    open_at_login?: boolean;
+    desktop_notify?: boolean;
+    desktop_sound?: boolean;
+    notify_bootstrapped?: boolean;
+  }) => ipcRenderer.invoke("save-automation-config", payload),
+  notifyTaskComplete: async (payload: {
+    title: string;
+    body: string;
+    paneId?: string;
+    sessionId?: string;
+    showBanner: boolean;
+    playSound: boolean;
+  }) => ipcRenderer.invoke("notify-task-complete", payload),
+  onDesktopNotifyActivate: (cb: (payload: { paneId?: string; sessionId?: string }) => void) => {
+    const listener = (_e: unknown, payload: { paneId?: string; sessionId?: string }) => cb(payload);
+    ipcRenderer.on("desktop-notify:activate", listener);
+    return () => ipcRenderer.removeListener("desktop-notify:activate", listener);
+  },
+  writeWorkspacePerfLog: async (payload: unknown) =>
+    ipcRenderer.invoke("workspace-perf-log", payload) as Promise<{ ok: boolean; path?: string }>,
   confirmDialog: async (payload: {
     title?: string;
     message: string;
@@ -554,8 +628,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-feishu-logout"),
   nativeConnectorFeishuCancel: async () =>
     ipcRenderer.invoke("native-connector-feishu-cancel"),
-  nativeConnectorWecomLogin: async (payload: { botId: string; botSecret: string }) =>
-    ipcRenderer.invoke("native-connector-wecom-login", payload),
+  nativeConnectorWecomLogin: async (payload: {
+    mode?: "qrcode" | "manual";
+    botId?: string;
+    botSecret?: string;
+  }) => ipcRenderer.invoke("native-connector-wecom-login", payload),
   nativeConnectorWecomLogout: async () =>
     ipcRenderer.invoke("native-connector-wecom-logout"),
   nativeConnectorWecomCancel: async () =>
@@ -646,13 +723,29 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
   onNativeConnectorWecomProgress: (
     callback: (payload: {
-      phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+      phase:
+        | "installing"
+        | "initializing"
+        | "waiting_scan"
+        | "probing"
+        | "success"
+        | "disconnected"
+        | "error";
+      loginUrl?: string;
     }) => void,
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       payload: {
-        phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+        phase:
+          | "installing"
+          | "initializing"
+          | "waiting_scan"
+          | "probing"
+          | "success"
+          | "disconnected"
+          | "error";
+        loginUrl?: string;
       },
     ) => callback(payload);
     ipcRenderer.on("native-connector-wecom-progress", handler);
@@ -683,6 +776,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("disconnect-mcp", payload),
+  mcpOauthState: async (payload: { names: string[] }) => ipcRenderer.invoke("mcp-oauth-state", payload),
+  mcpOauthReset: async (payload: { name: string }) => ipcRenderer.invoke("mcp-oauth-reset", payload),
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),
@@ -893,6 +988,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
   resolveLocalMediaUrl: async (path: string) => ipcRenderer.invoke("resolve-local-media-url", path),
+  installFromSkillHub: async (args: { slug: string }) =>
+    ipcRenderer.invoke("install-from-skillhub", args),
   installFromRegistry: async (args: {
     source: string;
     name: string;
@@ -901,6 +998,15 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("install-from-registry", args),
   installFromRegistryPreview: async (args: { source: string; name: string }) =>
     ipcRenderer.invoke("install-from-registry-preview", args),
+  installSkillFromRepo: async (args: {
+    repo: string;
+    skill: string;
+    branch?: string;
+    overwrite?: boolean;
+    acknowledgeHighRisk?: boolean;
+  }) => ipcRenderer.invoke("install-repo-skill", args),
+  uninstallSkill: async (args: { name: string; source?: string }) =>
+    ipcRenderer.invoke("uninstall-skill", args),
 
   terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,
@@ -1066,6 +1172,20 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("in-app-browser-open", handler);
     return () => ipcRenderer.removeListener("in-app-browser-open", handler);
   },
+  onNearBrowserAct: (cb: (payload: NearBrowserActPayload) => void): (() => void) => {
+    const handler = (_event: unknown, payload: NearBrowserActPayload) => cb(payload);
+    ipcRenderer.on("near-browser-act", handler);
+    return () => ipcRenderer.removeListener("near-browser-act", handler);
+  },
+  replyNearBrowserAct: async (payload: NearBrowserActResult) =>
+    ipcRenderer.invoke("near-browser-act-result", payload),
+  saveNearBrowserScreenshot: async (payload: { dataUrl: string }) =>
+    ipcRenderer.invoke("save-near-browser-screenshot", payload),
+  extractNearBrowserFrames: async (payload: { webContentsId: number; query?: string }) =>
+    ipcRenderer.invoke("extract-near-browser-frames", payload),
+  listChromeCookieProfiles: async () => ipcRenderer.invoke("list-chrome-cookie-profiles"),
+  importChromeCookies: async (payload: { profileId: string }) =>
+    ipcRenderer.invoke("import-chrome-cookies", payload),
   copyPngToClipboard: async (buffer: ArrayBuffer) =>
     ipcRenderer.invoke("clipboard-write-png", buffer) as Promise<{ ok: boolean; error?: string }>,
   downloadPngToDownloads: async (payload: { buffer: ArrayBuffer; defaultFileName?: string }) =>

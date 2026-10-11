@@ -74,6 +74,26 @@ export function shouldAutoResumeTruncationInterruption(message: NoticePick): boo
   return parsed.text.includes("工具参数流式截断") || parsed.text.includes("模型流式响应超时");
 }
 
+/**
+ * Only the latest turn_interrupted in the current user turn may auto-resume.
+ * Older truncation notices (previous turns / earlier interrupts in this turn)
+ * must not fire again on remount / HMR / session reload.
+ */
+export function findCurrentTurnTruncationAutoResume<T extends NoticePick>(
+  messages: T[],
+): T | null {
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") lastUserIdx = i;
+  }
+  for (let i = messages.length - 1; i > lastUserIdx; i -= 1) {
+    const m = messages[i];
+    if (!m || !isTurnInterruptionNoticeMessage(m)) continue;
+    return shouldAutoResumeTruncationInterruption(m) ? m : null;
+  }
+  return null;
+}
+
 export function turnInterruptionToastForCause(cause: TurnInterruptionCause | null): string {
   if (cause === "user_interrupt") {
     return "已按你的请求中断当前生成。";

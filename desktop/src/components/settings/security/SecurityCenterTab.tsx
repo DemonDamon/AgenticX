@@ -15,6 +15,7 @@ import {
 } from "./PermissionsAdvancedPanel";
 import { WorkspaceIsolationPanel } from "./WorkspaceIsolationPanel";
 import { ComputerUsePanel } from "./ComputerUsePanel";
+import { BrowserControlPanel } from "./BrowserControlPanel";
 import { SkillGuardPanel } from "./SkillGuardPanel";
 import { HooksSection } from "./HooksSection";
 
@@ -127,6 +128,7 @@ export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(func
         highlightKey={focusSeq}
       />
       <ComputerUsePanel />
+      <BrowserControlPanel />
       <SkillGuardPanel />
       <Panel title={t("security.hooksGuardTitle")} collapsible defaultCollapsed>
         <HooksSection />

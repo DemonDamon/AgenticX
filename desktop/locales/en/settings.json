@@ -9,6 +9,7 @@
     "connectors": "Connectors",
     "tools": "Built-in tools",
     "skills": "Skills",
+    "commands": "Commands",
     "knowledge": "Knowledge base",
     "data_sources": "Data sources",
     "memory": "Memory",
@@ -17,6 +18,37 @@
     "favorites": "Favorites",
     "server": "Remote connection",
     "security": "Security"
+  },
+  "commands": {
+    "title": "Commands",
+    "hint": "Save a prompt, then type / in the composer to run it.",
+    "create": "Create",
+    "createTitle": "Create command",
+    "emptyTitle": "No commands yet",
+    "emptyHint": "Save a prompt, then type / in the composer to run it.",
+    "builtinTitle": "Built-in commands",
+    "builtinHint": "Turn one off to hide it from the / menu.",
+    "available": "{{name}} available",
+    "unavailable": "{{name}} unavailable",
+    "name": "Name",
+    "description": "Description",
+    "instructions": "Instructions",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "subject": "Subject",
+    "invalidName": "Use lowercase letters, numbers, and hyphens",
+    "reservedName": "This name is reserved",
+    "instructionsRequired": "Instructions are required",
+    "subjectRequired": "Choose a subject",
+    "loadFailed": "Could not load",
+    "roomLogin": "Sign in to an enterprise account to manage room commands",
+    "scope": {
+      "global": "Global",
+      "avatar": "Avatar",
+      "group": "Group",
+      "room": "Room"
+    }
   },
   "display": {
     "title": "Display",
@@ -39,7 +71,7 @@
     "accentBlue": "Blue",
     "accentGreen": "Green",
     "accentPink": "Pink",
-    "accentYellow": "Yellow",
+    "accentYellow": "Orange",
     "accentMono": "Mono"
   },
   "commonSettings": {
@@ -103,6 +135,16 @@
     "me": "Me",
     "prefUnset": "No reply style or preference yet",
     "changeAvatar": "Change avatar",
+    "avatarHint": "Shown next to your messages in group chats. Click the portrait to change it.",
+    "costumeTitle": "Cube colorway",
+    "costumeHint": "Same cube, a new colorway for Near",
+    "costumeShuffle": "Random set",
+    "costumeBrand": "Brand orange",
+    "costumeGachaLabel": "Gacha prompt",
+    "costumeGachaPrompt": "Clean color blocks, dark lid, light body",
+    "costumeGachaDraw": "Draw",
+    "costumeGachaDone": "New skin drawn.",
+    "costumeGachaInvalid": "That draw was not a usable colorway. Try again.",
     "resetDefault": "Reset to default",
     "resetDefaultDone": "Reset to default.",
     "nickname": "How to address me",
@@ -142,7 +184,7 @@
   },
   "meta": {
     "title": "Meta-agent",
-    "intro": "Manage the meta-agent identity and principles",
+    "intro": "Manage the meta-agent look, identity, and principles",
     "identity": "Identity",
     "identityHint": "Who Near is and its role in conversation",
     "soul": "Persona and principles",
@@ -249,6 +291,7 @@
       "minimax": "MiniMax",
       "kimi": "Moonshot AI",
       "deepseek": "DeepSeek",
+      "mimo": "Xiaomi MiMo",
       "ollama": "Ollama"
     },
     "ollamaHint": "Direct Ollama (e.g. LAN 11434); do not put /v1 on the API URL. Use the built-in Ollama row for the first instance; this is for a second instance or a custom name.",
@@ -353,6 +396,7 @@
       "memory_append": "Memory Append",
       "memory_search": "Memory Search",
       "session_search": "Session Search",
+      "plugin_usage": "Plugin usage",
       "code_search": "Code search",
       "code_index_create": "Build code index",
       "code_index_status": "Code index status",
@@ -396,6 +440,7 @@
       "memory_append": "Append a memory to the workspace journal or long-term MEMORY.md.",
       "memory_search": "Search indexed workspace memory with full-text, vector, or hybrid mode.",
       "session_search": "Search past session messages. An empty query returns recent sessions.",
+      "plugin_usage": "Look up any model/plugin usage by name, date range, or session: call counts, timeouts, retries, and consecutive failure reasons. Read-only.",
       "code_search": "Semantic/hybrid search on an indexed codebase. Prefer this while exploring; use grep for exact strings.",
       "code_index_create": "Build a semantic index for a codebase in the background.",
       "code_index_status": "Check code-index progress and stats.",
@@ -504,6 +549,22 @@
     "pullFailed": "Fetch failed: {{reason}}",
     "scanFailed": "Scan did not pass: {{reason}}",
     "installedNamed": "Installed \"{{name}}\"",
+    "repoInstalling": "Fetching the full skill directory for “{{name}}” from GitHub and running a security scan…",
+    "repoInstallSkipped": "“{{name}}” is already installed (reinstall with --overwrite in the terminal to update)",
+    "repoInstallRejected": "Security scan rejected “{{name}}”: {{reason}}",
+    "repoHighRiskTitle": "High-risk scan confirmation",
+    "repoHighRiskBody": "The security scan flagged “{{name}}” with high-risk rules. Review the findings below and only continue if you trust this skill's source.",
+    "repoHighRiskConfirm": "Install anyway",
+    "repoHighRiskCancel": "Cancel install",
+    "uninstall": "Uninstall",
+    "uninstallAria": "Uninstall skill {{name}}",
+    "uninstallConfirmTitle": "Uninstall skill",
+    "uninstallConfirmBody": "This deletes the local skill directory for “{{name}}” (under ~/.agenticx/skills). This cannot be undone.",
+    "uninstallConfirmOk": "Uninstall",
+    "uninstallConfirmCancel": "Cancel",
+    "uninstalling": "Uninstalling “{{name}}”…",
+    "uninstalledNamed": "Uninstalled \"{{name}}\"",
+    "uninstallFailed": "Uninstall failed: {{reason}}",
     "confirmThenWrite": "Policy requires Confirm install before writing.",
     "confirmThenWriteWithScan": "{{summary}}\n\nPolicy requires Confirm install before writing.",
     "highRiskConfirm": "High-risk rules matched. Read the note, then confirm below.",
@@ -681,6 +742,15 @@
     "connOk": "Connected",
     "connFail": "Connection failed",
     "feishu": "Lark / Feishu",
+    "channelBots": "Channel bots",
+    "restartGateway": "Restart the gateway to apply",
+    "dingtalkEnable": "Enable DingTalk bot",
+    "appSecret": "App Secret",
+    "signingSecret": "Signing secret",
+    "webhookSecret": "Webhook secret",
+    "qqBot": "QQ bot",
+    "qqReceiveOnly": "Inbound only for now. Outbound replies are not connected.",
+    "saveChannels": "Save",
     "feishuLong": "Feishu long connection (recommended)",
     "webhook": "Webhook mode",
     "feishuLongHint": "No public server needed. Uses Feishu’s official WebSocket to receive messages. Near runs it in the background after launch.",
@@ -1070,6 +1140,13 @@
     "computerUseIntro": "Writes computer_use.enabled in ~/.agenticx/config.yaml. When on, the assistant Near starts with the app tries to load desktop capabilities. If you still do not see those tools, install a Near build that includes them. Fully quit and reopen after changing (see the save note for remote mode).",
     "enableComputerUse": "Enable computer use (desktop screenshot / input; needs permissions and deps)",
     "enableComputerUseAria": "Enable computer use",
+    "browserControlTitle": "In-app browser control",
+    "browserControlLoadFailed": "Failed to load in-app browser control settings.",
+    "browserControlSaveFailed": "Save failed.",
+    "browserControlSaved": "Saved to local config. New chats pick up whether near_browser_* tools are injected.",
+    "browserControlIntro": "Writes browser_control.enabled in ~/.agenticx/config.yaml. When on, the agent can drive the WorkPanel browser (visible, with one-click takeover). Turning it off removes those tools only; manual browsing is unchanged.",
+    "enableBrowserControl": "Let the agent drive the in-app browser",
+    "enableBrowserControlAria": "Enable in-app browser control",
     "skillGuardTitle": "Skill security",
     "policyLoadFailed": "Failed to load skill install policy.",
     "saveFailed": "Save failed.",
@@ -1177,6 +1254,19 @@
     "stFailed": "Failed",
     "cancelTitle": "Cancel ingest",
     "stCancelled": "Cancelled",
+    "skippedReindex": "Unchanged, skipped recompute",
+    "wikiBackfill": "Write wiki for indexed files",
+    "wikiBackfillBusy": "Queuing wiki writes",
+    "wikiQueued": "Wiki queued",
+    "wikiRunning": "Writing wiki",
+    "wikiDone": "Wiki written",
+    "wikiFailed": "Wiki failed",
+    "wikiSkipped": "Wiki skipped",
+    "wikiCancel": "Stop writing",
+    "wikiModelProvider": "Page-writing provider",
+    "wikiModelName": "Page-writing model",
+    "wikiModelPick": "Choose",
+    "wikiModelHint": "Used only to write wiki pages. Save, then backfill or reindex.",
     "depsDetectFailed": "Backend dependency check failed",
     "debugIntro": "Check retrieval quality and chunking here. This does not change ingested materials. Save Config first after changing settings.",
     "recallTitle": "Recall debug",
@@ -1292,6 +1382,7 @@
     "saved": "Saved",
     "saveFailed": "Save failed: {{reason}}",
     "wikiTitle": "Wiki pages (read-only)",
+    "wikiEmpty": "No document brains yet. Create one in Knowledge base and turn on Wiki compile.",
     "loadingWiki": "Loading wiki…",
     "noWiki": "No compiled pages yet. Enable Wiki compile in Config and finish ingest.",
     "readingPage": "Reading page…",
@@ -1354,7 +1445,11 @@
     "wecomTitle": "WeCom connector",
     "wecomConnect": "Connect",
     "wecomName": "WeCom",
-    "wecomHint": "Uses the official WeCom CLI (wecom-cli). Create an API-mode bot in the WeCom admin console, then paste Bot ID and Secret. Near writes a hosted skill for messages, docs, sheets, contacts, todos, and meetings. Credentials are encrypted by the CLI.",
+    "wecomHint": "Uses the official WeCom CLI. Scan in this dialog by default (expired QR codes refresh here, not in chat). You can also paste a Bot ID and Secret. Near then writes a hosted skill for messages, docs, sheets, contacts, todos, and meetings.",
+    "wecomModeQr": "Scan QR",
+    "wecomModeManual": "Enter credentials",
+    "wecomQrHint": "Click Connect, then scan in this window. Do not paste login links into chat — they expire quickly.",
+    "wecomOpenLogin": "Open login page in browser",
     "botIdPh": "WeCom bot ID",
     "botSecretPh": "WeCom bot secret",
     "howBotCreds": "How to get Bot ID / Secret",
@@ -1418,6 +1513,7 @@
     "phaseConnError": "Connection did not finish",
     "phaseWecomInstall": "First use: downloading WeCom CLI…",
     "phaseWecomInit": "Configuring bot credentials…",
+    "phaseWecomScan": "Scan the QR code in this window with WeCom…",
     "phaseWecomProbe": "Checking credentials…",
     "phaseConnOk": "Connected",
     "phaseQqmailInstall": "First use: downloading Agent Mail CLI…",
@@ -1426,56 +1522,78 @@
     "catalog": {
       "tencent-meeting": {
         "name": "Tencent Meeting",
-        "description": "Meetings, recordings, notes, and attendance reports"
+        "description": "Manage Tencent Meeting schedules, recordings, notes, and attendance—create meetings, find recordings, and summarize outcomes in chat."
       },
       "tapd": {
         "name": "TAPD",
-        "description": "Stories, bugs, tasks, and iterations"
+        "description": "Manage TAPD stories, bugs, tasks, and iterations—track delivery, update status, and summarize sprint progress in conversation."
       },
       "github": {
         "name": "GitHub",
-        "description": "Repos, issues, and pull requests"
+        "description": "Browse GitHub repos, issues, and pull requests—search changes, review discussions, and follow open-source collaboration in chat."
       },
       "feishu": {
         "name": "Feishu",
-        "description": "Messages, docs, bitable, calendar, and tasks"
+        "description": "Feishu messages, docs, bitable, calendar, and tasks—bring team collaboration and knowledge into the assistant for follow-ups and scheduling."
       },
       "wecom": {
         "name": "WeCom",
-        "description": "Messages, docs, sheets, contacts, todos, and meetings"
+        "description": "WeCom messages, docs, sheets, contacts, todos, and meetings—connect internal enterprise communication to assistant workflows."
       },
       "qqmail": {
         "name": "Agent Mail",
-        "description": "Agent inbox: send, search, reply, and forward"
+        "description": "Agent inbox for send, search, reply, and forward—let the assistant handle notifications and outreach in an isolated mailbox."
       },
       "gmail": {
         "name": "Gmail",
-        "description": "Send, search, and organize mail"
+        "description": "Send, search, and organize Gmail—find threads, draft replies, and manage labels so mail workflows stay in chat."
       },
       "notion": {
         "name": "Notion",
-        "description": "Browse pages and databases"
+        "description": "Browse Notion pages and databases—connect knowledge bases, project notes, and structured records to Q&A and summaries."
       },
       "slack": {
         "name": "Slack",
-        "description": "Read channels and send messages"
+        "description": "Read Slack channels and send messages—summarize discussions, search history, and post updates from the assistant."
       },
       "gdrive": {
         "name": "Google Drive",
-        "description": "Find and manage cloud files"
+        "description": "Find and manage Google Drive files—search docs, organize folders, and summarize content for research and collaboration."
       },
       "airtable": {
         "name": "Airtable",
-        "description": "Read and update records"
+        "description": "Read and update Airtable records—query views, write fields, and sync light database rows from conversation."
       },
       "supabase": {
         "name": "Supabase",
-        "description": "Access project data and services"
+        "description": "Access Supabase project data and services—query tables, call edge functions, and manage backend resources in chat."
       },
       "bigquery": {
         "name": "BigQuery",
-        "description": "Query and analyze datasets"
+        "description": "Query and analyze BigQuery datasets—explore schemas, run analyses, and summarize metrics from your warehouse in chat."
       }
+    },
+    "needsReauth": "Re-auth needed",
+    "needsReauthHint": "Chat GitHub MCP credentials are invalid; re-authorize or update the Personal Access Token.",
+    "needsReauthAria": "Re-authorize {{name}}",
+    "reauthAria": "Re-authorize {{name}}",
+    "githubNativeOkMcpDegraded": "GitHub CLI is signed in; chat MCP still needs a valid token. Sync was attempted — check status.",
+    "githubMcpSynced": "Synced GitHub CLI token into MCP",
+    "githubReauth": "Re-authorize",
+    "myConnections": {
+      "title": "My connections",
+      "subtitle": "Authorized connector instances. Delete disconnects login or removes local MCP config.",
+      "delete": "Delete",
+      "deleteAria": "Delete {{name}}",
+      "confirmDelete": "Confirm delete",
+      "disconnectFail": "Failed to disconnect",
+      "empty": "No connected instances",
+      "gatewayName": "Connector gateway",
+      "kindRest": "REST API",
+      "kindDatabase": "Database",
+      "readOnly": "Read-only",
+      "needsCredential": "Needs credential",
+      "viaGateway": "Called through the connector gateway"
     }
   },
   "codeIndex": {
@@ -1895,6 +2013,7 @@
     "unknownError": "Unknown error",
     "import": "Import",
     "linkOnly": "Link only",
-    "openFile": "Open file"
+    "openFile": "Open file",
+    "connectionExists": "A connection with this endpoint and credential already exists: \"{{name}}\""
   }
 }

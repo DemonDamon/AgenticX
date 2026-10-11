@@ -32,6 +32,12 @@ from agenticx.gateway.im_confirm import (
     format_pending_hint,
     parse_confirm_command,
 )
+from agenticx.gateway.im_group_speaker import (
+    format_im_group_reply,
+    merge_im_group_chat_fields,
+    merge_im_sse_reply_text,
+    register_human_member_best_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -793,6 +799,39 @@ async def _handle_im_confirm_command(
     return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
 
 
+def build_feishu_chat_body(
+    *,
+    session_id: str,
+    text: str,
+    sender_name: str,
+    sender_key: str,
+    avatar_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "session_id": session_id,
+        "user_input": text,
+        "user_display_name": sender_name,
+        "keep_runtime_after_disconnect": True,
+    }
+    if provider:
+        body["provider"] = provider
+    if model:
+        body["model"] = model
+    external_id = sender_key.rsplit(":", 1)[-1] if sender_key else ""
+    try:
+        return merge_im_group_chat_fields(
+            body,
+            platform="feishu",
+            external_id=external_id,
+            display_name=sender_name,
+            session_avatar_id=avatar_id,
+        )
+    except ValueError:
+        return body
+
+
 async def _chat_turn(
     studio_base: str,
     session_id: str,
@@ -812,18 +851,26 @@ async def _chat_turn(
         req_provider: Optional[str],
         req_model: Optional[str],
     ) -> str:
-        body: Dict[str, Any] = {
-            "session_id": target_sid,
-            "user_input": text,
-            "user_display_name": sender_name,
-            # Keep runtime alive for IM confirm flows even when this SSE stream returns early.
-            "keep_runtime_after_disconnect": True,
-        }
-        if req_provider:
-            body["provider"] = req_provider
-        if req_model:
-            body["model"] = req_model
+        body = build_feishu_chat_body(
+            session_id=target_sid,
+            text=text,
+            sender_name=sender_name,
+            sender_key=sender_key,
+            avatar_id=avatar_id,
+            provider=req_provider,
+            model=req_model,
+        )
+        await register_human_member_best_effort(
+            client=client,
+            studio_base=studio_base,
+            headers=headers,
+            session_avatar_id=avatar_id,
+            platform="feishu",
+            external_id=sender_key.rsplit(":", 1)[-1] if sender_key else "",
+            display_name=sender_name,
+        )
         final_text = ""
+        group_chunks: List[str] = []
         progress_lines: List[str] = []
         saw_final = False
         async with client.stream(
@@ -856,6 +903,10 @@ async def _chat_turn(
                             if t:
                                 final_text = t
                             saw_final = True
+                        elif et in {"group_reply", "group_clarification"}:
+                            chunk = format_im_group_reply(data)
+                            if chunk:
+                                group_chunks.append(chunk)
                         elif et == "tool_call":
                             tname = str(data.get("tool_name") or data.get("name") or "tool")
                             progress_lines.append(f"开始：{tname}")
@@ -902,7 +953,7 @@ async def _chat_turn(
                             return ((status_prefix + "\n\n") if status_prefix else "") + hint
                         elif et == "error":
                             raise RuntimeError(str(data.get("text") or "chat error"))
-        out = final_text.strip()
+        out = merge_im_sse_reply_text(final_text, group_chunks)
         if progress_lines:
             unique_progress = list(dict.fromkeys(progress_lines))
             progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])

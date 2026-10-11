@@ -9,13 +9,14 @@ import {
   isViewImageInjectMetadata,
   VIEW_IMAGE_INJECT_LEGACY_PREFIX,
 } from "./view-image-inject";
-import { parseClarificationDecisions } from "./clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions } from "./clarification-notice";
 import { parseActionConfirmationContext } from "./action-confirmation";
 import {
   parseAssistantOutputForUi,
   sanitizeSuggestedQuestions,
 } from "./assistant-output";
 import { sanitizeLoadedBlocks } from "./content-blocks";
+import { compactStoredAvatarUrl } from "./compact-stored-avatar-url";
 
 export type BranchLineage = {
   parentSessionId: string;
@@ -271,6 +272,8 @@ export type LoadedSessionMessage = {
   role: MsgRole | "system";
   content: string;
   agent_id?: string;
+  sender_id?: string;
+  sender_name?: string;
   avatar_name?: string;
   avatar_url?: string;
   provider?: string;
@@ -296,6 +299,7 @@ export type LoadedSessionMessage = {
   attachments?: unknown;
   visual_attachments?: unknown;
   metadata?: Record<string, unknown>;
+  command_name?: string;
   system_notice?: boolean;
   tool_call_id?: string;
   tool_name?: string;
@@ -338,7 +342,7 @@ export function mapLoadedSessionMessage(
           sender: String(entry.sender || "").trim() || "unknown",
           role: String(entry.role || "").trim() || "assistant",
           content: String(entry.content || ""),
-          avatarUrl: String(entry.avatar_url || "").trim() || undefined,
+          avatarUrl: compactStoredAvatarUrl(entry.avatar_url) || undefined,
           timestamp: typeof entry.timestamp === "number" ? entry.timestamp : undefined,
         }))
     : [];
@@ -365,8 +369,10 @@ export function mapLoadedSessionMessage(
     content: injectRow && !rawContent.trim() ? "" : rawContent,
     ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
+    speakerUserId: item.sender_id != null ? String(item.sender_id).trim() || undefined : undefined,
+    speakerName: item.sender_name != null ? String(item.sender_name).trim() || undefined : undefined,
     avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
-    avatarUrl: item.avatar_url,
+    avatarUrl: compactStoredAvatarUrl(item.avatar_url) || undefined,
     provider: item.provider,
     model: item.model,
     usage: parseMessageUsage(item.usage),
@@ -385,6 +391,7 @@ export function mapLoadedSessionMessage(
         : undefined,
     attachments: normalizeReferenceAttachments(mergedAttachments),
     metadata,
+    command_name: String(metadata?.command_name ?? item.command_name ?? "").trim() || undefined,
     systemNotice: item.system_notice === true,
     subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };
@@ -485,6 +492,7 @@ export function mapLoadedSessionMessage(
         } else {
           const rawOptions = Array.isArray(m.options) ? m.options : [];
           const decisions = parseClarificationDecisions(m.decisions);
+          const choiceFields = parseChoicePanelFields(rawContext);
           mapped.clarificationPrompt = {
             requestId,
             prompt: String(m.prompt ?? item.content ?? ""),
@@ -494,6 +502,7 @@ export function mapLoadedSessionMessage(
             agentId,
             sessionId,
             context: rawContext,
+            ...choiceFields,
           };
           if (m.suspended === true) mapped.clarificationSuspended = true;
         }
@@ -505,6 +514,11 @@ export function mapLoadedSessionMessage(
       const kind = String((meta as Record<string, unknown>).kind ?? "").trim();
       if (kind === "compaction_proactive" || kind === "compaction_reactive") {
         mapped.noticeKind = kind;
+      }
+      if (kind === "jev_decision" || kind === "jev_kb_gate") {
+        mapped.toolName = mapped.toolName || "jev";
+        mapped.agentId = mapped.agentId || "__jev__";
+        mapped.avatarName = mapped.avatarName || "Jev";
       }
     }
   }

@@ -11,7 +11,7 @@ type Props = {
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
   onModelChange?: (agentId: string, provider: string, model: string) => void;
-  onConfirmResolve?: (agentId: string, approved: boolean) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean, remember?: "session") => void;
 };
 
 export function SubAgentPanel({

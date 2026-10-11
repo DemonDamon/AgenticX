@@ -243,7 +243,7 @@ function CanvasInner({
   };
 
   return (
-    <div className="relative h-full w-full min-h-0 bg-surface-base">
+    <div className="relative h-full w-full min-h-0 bg-[var(--shell-panel)]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -258,13 +258,13 @@ function CanvasInner({
         fitView
         proOptions={{ hideAttribution: true }}
         colorMode={colorMode}
-        style={{ backgroundColor: "var(--surface-base)" }}
+        style={{ backgroundColor: "var(--shell-panel)" }}
       >
         <Background
           gap={18}
           size={1}
           color="var(--border)"
-          bgColor="var(--surface-base)"
+          bgColor="var(--shell-panel)"
         />
         <Controls showInteractive={false} />
         <MiniMap

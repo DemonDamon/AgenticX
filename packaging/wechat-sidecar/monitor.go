@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -241,6 +243,87 @@ func getMonitorClient() *ilink.Client {
 	return monitorClient
 }
 
+func pickCDNMedia(primary, fallback *ilink.CDNMedia) *ilink.CDNMedia {
+	usable := func(m *ilink.CDNMedia) bool {
+		return m != nil && (m.EncryptQueryParam != "" || m.FullURL != "")
+	}
+	if usable(primary) {
+		return primary
+	}
+	if usable(fallback) {
+		return fallback
+	}
+	if primary != nil {
+		return primary
+	}
+	return fallback
+}
+
+func applyCDNMedia(mi *MessageItem, media *ilink.CDNMedia) {
+	if mi == nil || media == nil {
+		return
+	}
+	if media.EncryptQueryParam != "" {
+		mi.EQP = media.EncryptQueryParam
+	}
+	if media.AESKey != "" {
+		mi.AESKey = media.AESKey
+	}
+	if media.FullURL != "" {
+		mi.URL = media.FullURL
+	}
+}
+
+func fillImageFields(mi *MessageItem, img *ilink.ImageItem) {
+	if mi == nil || img == nil {
+		return
+	}
+	if mi.Type == 0 {
+		mi.Type = int(ilink.ItemImage)
+	}
+	if img.URL != "" && mi.URL == "" {
+		mi.URL = img.URL
+	}
+	applyCDNMedia(mi, pickCDNMedia(img.Media, img.ThumbMedia))
+	if mi.AESKey == "" {
+		mi.AESKey = img.AESKey
+	}
+}
+
+func convertItem(item ilink.MessageItem) MessageItem {
+	mi := MessageItem{Type: int(item.Type)}
+	if item.TextItem != nil {
+		mi.Text = item.TextItem.Text
+		if mi.Type == 0 {
+			mi.Type = int(ilink.ItemText)
+		}
+	}
+	if item.ImageItem != nil {
+		fillImageFields(&mi, item.ImageItem)
+	}
+	if item.VoiceItem != nil {
+		mi.Text = item.VoiceItem.Text
+		if mi.Type == 0 {
+			mi.Type = int(ilink.ItemVoice)
+		}
+		applyCDNMedia(&mi, item.VoiceItem.Media)
+	}
+	if item.FileItem != nil {
+		mi.Name = item.FileItem.FileName
+		if mi.Type == 0 {
+			mi.Type = int(ilink.ItemFile)
+		}
+		applyCDNMedia(&mi, item.FileItem.Media)
+	}
+	if item.VideoItem != nil {
+		if mi.Type == 0 {
+			mi.Type = int(ilink.ItemVideo)
+		}
+		applyCDNMedia(&mi, pickCDNMedia(item.VideoItem.Media, item.VideoItem.ThumbMedia))
+	}
+	return mi
+}
+
 func convertMessage(msg ilink.WeixinMessage) SSEEvent {
 	evt := SSEEvent{
 		Type:         "message",
@@ -251,68 +334,68 @@ func convertMessage(msg ilink.WeixinMessage) SSEEvent {
 		MessageID:    fmt.Sprintf("%d", msg.MessageID),
 	}
 
-	items := make([]MessageItem, 0, len(msg.ItemList))
+	items := make([]MessageItem, 0, len(msg.ItemList)+1)
 	for _, item := range msg.ItemList {
-		mi := MessageItem{Type: int(item.Type)}
-		switch item.Type {
-		case ilink.ItemText:
-			if item.TextItem != nil {
-				mi.Text = item.TextItem.Text
-				if evt.Text == "" {
-					evt.Text = item.TextItem.Text
-				}
-			}
-		case ilink.ItemImage:
-			if item.ImageItem != nil {
-				mi.URL = item.ImageItem.URL
-				if item.ImageItem.Media != nil {
-					mi.EQP = item.ImageItem.Media.EncryptQueryParam
-					mi.AESKey = item.ImageItem.Media.AESKey
-				}
-			}
-		case ilink.ItemVoice:
-			if item.VoiceItem != nil {
-				mi.Text = item.VoiceItem.Text
-				if item.VoiceItem.Media != nil {
-					mi.EQP = item.VoiceItem.Media.EncryptQueryParam
-					mi.AESKey = item.VoiceItem.Media.AESKey
-				}
-			}
-		case ilink.ItemFile:
-			if item.FileItem != nil {
-				mi.Name = item.FileItem.FileName
-				if item.FileItem.Media != nil {
-					mi.EQP = item.FileItem.Media.EncryptQueryParam
-					mi.AESKey = item.FileItem.Media.AESKey
-				}
-			}
-		case ilink.ItemVideo:
-			if item.VideoItem != nil && item.VideoItem.Media != nil {
-				mi.EQP = item.VideoItem.Media.EncryptQueryParam
-				mi.AESKey = item.VideoItem.Media.AESKey
-			}
+		mi := convertItem(item)
+		if mi.Text != "" && evt.Text == "" {
+			evt.Text = mi.Text
 		}
 		items = append(items, mi)
+		if item.RefMsg != nil && item.RefMsg.MessageItem != nil {
+			ref := convertItem(*item.RefMsg.MessageItem)
+			if ref.Type != int(ilink.ItemText) && (ref.EQP != "" || ref.URL != "") {
+				items = append(items, ref)
+			}
+		}
 	}
 	evt.Items = items
-
+	dumpLastInbound(msg, evt)
 	return evt
+}
+
+func dumpLastInbound(msg ilink.WeixinMessage, evt SSEEvent) {
+	if globalDataDir == "" {
+		return
+	}
+	payload, err := json.MarshalIndent(map[string]any{
+		"raw": msg,
+		"sse": evt,
+	}, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(globalDataDir, "wechat_last_inbound.json")
+	_ = os.WriteFile(path, payload, 0600)
+	slog.Info(
+		"inbound weixin message",
+		"sender", msg.FromUserID,
+		"text_len", len(evt.Text),
+		"items", len(evt.Items),
+		"message_id", evt.MessageID,
+	)
 }
 
 func broadcastSSE(evt SSEEvent) {
 	sseMu.Lock()
-	defer sseMu.Unlock()
-	for _, ch := range sseClients {
+	clients := append([]chan SSEEvent(nil), sseClients...)
+	sseMu.Unlock()
+	for _, ch := range clients {
 		select {
 		case ch <- evt:
 		default:
-			// slow client, drop event
+			slog.Warn(
+				"sse client buffer full, dropping inbound event",
+				"type", evt.Type,
+				"text_len", len(evt.Text),
+				"items", len(evt.Items),
+				"message_id", evt.MessageID,
+			)
 		}
 	}
 }
 
 func registerSSEClient() chan SSEEvent {
-	ch := make(chan SSEEvent, 64)
+	ch := make(chan SSEEvent, 256)
 	sseMu.Lock()
 	sseClients = append(sseClients, ch)
 	sseMu.Unlock()

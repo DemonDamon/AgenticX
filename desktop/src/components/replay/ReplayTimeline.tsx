@@ -140,7 +140,7 @@ export function ReplayTimeline({
 
   return (
     <div
-      className="min-h-0 flex-1 overflow-auto bg-surface-panel outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
+      className="min-h-0 flex-1 overflow-auto bg-[var(--shell-panel)] outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
       tabIndex={0}
       onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => handleReplayKeyDown(event, {
         toggle: onTogglePlay,
@@ -149,7 +149,7 @@ export function ReplayTimeline({
         seekLast: () => onSeek(lastSeq),
       })}
     >
-      <div className="sticky top-0 z-10 border-b border-border bg-surface-panel px-3 py-2">
+      <div className="sticky top-0 z-10 border-b border-border bg-[var(--shell-panel)] px-3 py-2">
         <input
           type="range"
           min={firstSeq}

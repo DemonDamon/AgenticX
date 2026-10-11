@@ -24,6 +24,7 @@ from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
     _build_avatars_context,
     _build_computer_use_capabilities_block,
+    _build_near_browser_capabilities_block,
     _build_context_files_block,
     _build_kb_retrieval_policy_block,
     _build_mcps_context,
@@ -403,6 +404,7 @@ def estimate_session_context_usage(
         + _text_tokens(identity)
         + _text_tokens(_safe_block(build_current_time_rules_block))
         + _text_tokens(_safe_block(_build_computer_use_capabilities_block))
+        + _text_tokens(_safe_block(_build_near_browser_capabilities_block))
         + _text_tokens(_safe_block(_build_kb_retrieval_policy_block, kb_mode))
         + _text_tokens(str(user_nickname or ""))
         + _text_tokens(str(user_preference or ""))

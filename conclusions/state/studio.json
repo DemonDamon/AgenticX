@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "studio",
-  "generation": "48bdf03bef9c41598ecfddb8266177e9",
+  "generation": "2c8536300ee54f479661395575f6f609",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
-  "source_fingerprint": "sha256:806a628f1860de7173a8653d235ea8aefc5cc3e9d8895475aba71425fc6fe9b1",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "source_fingerprint": "sha256:a6de6470d937af2d7be4b525154be652aa481d556c822607a177220f3791efb0",
   "summary_path": "conclusions/studio_module_conclusion.md",
-  "summary_sha256": "sha256:040ef6adf8964e06baf4a844331e2cedae69d3f95928004a0b4c30a9648c8970",
-  "updated_at": "2026-09-01T06:08:41.529877+00:00"
+  "summary_sha256": "sha256:e785ce742088c984592cf226b7c0ebf787296c63c23e2d29a776b5f0c1ca0096",
+  "updated_at": "2026-09-30T00:55:39.115018+00:00"
 }

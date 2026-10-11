@@ -1,0 +1,12 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 文档底板(折角) -->
+  <path d="M6 4.25C6 3.28 6.78 2.5 7.75 2.5h5.9c.5 0 .98.2 1.33.55l3.35 3.35c.35.35.55.83.55 1.33v11.02c0 .97-.78 1.75-1.75 1.75H7.75C6.78 20.5 6 19.72 6 18.75V4.25Z" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- 折角线 -->
+  <path d="M13.4 2.9v3.85c0 .83.67 1.5 1.5 1.5h3.85" stroke="#2563EB" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 内容行 -->
+  <path d="M9 12.75h5.4M9 15.75h3" stroke="#60A5FA" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- 铅笔(右下角,笔尖指向文档内) -->
+  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" fill="#2563EB" transform="translate(10.4 10.4) scale(.6)"/>
+  <!-- 星形点缀(左上) -->
+  <path d="M4.6 3l.5 1.1 1.1.5-1.1.5-.5 1.1-.5-1.1L3 4.6l1.1-.5.5-1.1Z" fill="#93C5FD"/>
+</svg>

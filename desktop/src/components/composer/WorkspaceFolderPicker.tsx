@@ -479,7 +479,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
       {singleFolder ? (
         <div
           ref={anchorRef}
-          className="inline-flex h-7 max-w-[240px] items-center gap-1 rounded-lg bg-surface-hover px-1.5 text-[12px] text-text-primary"
+          className="inline-flex h-7 max-w-[240px] items-center gap-1 rounded-lg bg-surface-hover px-1.5 text-[13px] text-text-primary"
         >
           <button
             type="button"
@@ -509,7 +509,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
         <button
           ref={anchorRef}
           type="button"
-          className={`inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[12px] text-text-subtle transition-colors ${
+          className={`inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[13px] text-text-subtle transition-colors ${
             open ? "bg-surface-hover text-text-strong" : "hover:bg-surface-hover hover:text-text-primary"
           }`}
           onClick={() => setOpen((v) => !v)}

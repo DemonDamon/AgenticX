@@ -135,6 +135,70 @@ def test_empty_tool_calls_retry_budget_is_one() -> None:
     assert "未能生成完整的可见回复" in final or "没有给出总结" in final
 
 
+class _PreambleToolFinishThenReply:
+    """A lead-in plus finish_reason=tool_calls must not close the turn."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "收到。先检查工作区是否有残留产物。",
+                [],
+                finish_reason="tool_calls",
+            )
+        return _FakeResponse("文件已写好", [], finish_reason="stop")
+
+    def stream(self, *_args, **_kwargs):
+        if False:
+            yield ""
+
+
+class _PreambleStopFinish:
+    """A normal finished sentence with finish_reason=stop stays terminal."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        return _FakeResponse("这是完整说明。", [], finish_reason="stop")
+
+    def stream(self, *_args, **_kwargs):
+        if False:
+            yield ""
+
+
+def test_preamble_with_tool_finish_retries_once_then_replies() -> None:
+    llm = _PreambleToolFinishThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "写一个 html"))
+    assert llm.calls == 2
+    assert _final_text(events) == "文件已写好"
+    assert any(
+        e["type"] == EventType.ROUND_END.value
+        and (e.get("data") or {}).get("reason") == "empty_tool_calls_with_tool_finish"
+        for e in events
+    )
+
+
+def test_preamble_with_stop_finish_does_not_force_retry() -> None:
+    llm = _PreambleStopFinish()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "写一个 html"))
+    assert llm.calls == 1
+    assert _final_text(events) == "这是完整说明。"
+    assert not any(
+        e["type"] == EventType.ROUND_END.value
+        and (e.get("data") or {}).get("reason") == "empty_tool_calls_with_tool_finish"
+        for e in events
+    )
+
+
 def test_empty_stop_finish_does_not_use_empty_tool_calls_force_retry() -> None:
     llm = _EmptyStopFinish()
     runtime = AgentRuntime(llm, _ApproveGate())

@@ -40,11 +40,20 @@ class UserManager:
 
         Args:
             db_path: SQLite 数据库文件路径；缺省走 :func:`default_user_db_path`
-            jwt_secret: JWT 签名密钥（默认从 AGENTICX_JWT_SECRET 环境变量读取）
+            jwt_secret: JWT 签名密钥；缺省从 AGENTICX_JWT_SECRET 解析（见 jwt_secret.resolve_jwt_secret）
         """
         self.db_path = db_path or default_user_db_path()
-        self._jwt_secret = jwt_secret or os.environ.get("AGENTICX_JWT_SECRET", "agenticx-dev-secret-change-in-production")
+        self._jwt_secret_explicit = jwt_secret
+        self._jwt_secret: Optional[str] = None
         self._init_database()
+
+    def _require_jwt_secret(self) -> str:
+        """Resolve and cache JWT signing secret (fail closed when unset)."""
+        if self._jwt_secret is None:
+            from agenticx.server.jwt_secret import resolve_jwt_secret
+
+            self._jwt_secret = resolve_jwt_secret(self._jwt_secret_explicit)
+        return self._jwt_secret
     
     def _init_database(self) -> None:
         """初始化数据库表结构"""
@@ -472,6 +481,7 @@ class UserManager:
         if not JWT_AVAILABLE:
             logger.warning("PyJWT not installed. Install with: pip install agenticx[server]")
             return None
+        secret = self._require_jwt_secret()
         payload = {
             "user_id": user_id,
             "sub": str(user_id),
@@ -482,7 +492,7 @@ class UserManager:
             "iat": datetime.now(timezone.utc),
             "exp": datetime.now(timezone.utc) + timedelta(hours=expires_hours),
         }
-        return jwt.encode(payload, self._jwt_secret, algorithm="HS256")
+        return jwt.encode(payload, secret, algorithm="HS256")
 
     def verify_jwt(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify JWT and return payload.
@@ -491,12 +501,17 @@ class UserManager:
             token: JWT string
 
         Returns:
-            Decoded payload dict, or None if invalid/expired
+            Decoded payload dict, or None if invalid/expired/misconfigured
         """
         if not JWT_AVAILABLE:
             return None
         try:
-            return jwt.decode(token, self._jwt_secret, algorithms=["HS256"])
+            secret = self._require_jwt_secret()
+        except RuntimeError as e:
+            logger.warning("JWT verify skipped: %s", e)
+            return None
+        try:
+            return jwt.decode(token, secret, algorithms=["HS256"])
         except Exception as e:
             logger.debug("JWT verify failed: %s", e)
             return None

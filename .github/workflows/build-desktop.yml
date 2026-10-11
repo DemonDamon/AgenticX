@@ -375,6 +375,8 @@ jobs:
       - name: Attach installers to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No checkout in this job; gh needs an explicit repo or it shells out to git and fails.
+          GH_REPO: ${{ github.repository }}
         run: |
           shopt -s globstar nullglob
           files=(release-assets/**/*.dmg release-assets/**/*.exe)

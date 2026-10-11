@@ -135,3 +135,77 @@ export type UsageRecordWriteResult = {
   provider: string;
   model: string;
 };
+
+// ---------- Overview / KPI ----------
+
+export type OverviewQueryInput = {
+  tenant_id: string;
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+};
+
+export type OverviewStatsResult = {
+  total_tokens: number;
+  daily_avg_tokens: number;
+  session_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  io_ratio: number;
+  cached_tokens: number;
+  cache_hit_rate: number;
+  total_cost: number;
+  record_count: number;
+  day_count: number;
+};
+
+// ---------- Trace List (下钻) ----------
+
+export type TraceListRow = {
+  trace_id: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  cost_usd: number;
+  step_count: number;
+  first_seen: string | null;
+  models: string[];
+};
+
+export type TraceListResult = {
+  rows: TraceListRow[];
+};
+
+// ---------- Hourly Ridge (0-24 时模型堆叠) ----------
+
+export type HourlyRidgeRow = {
+  hour: number; // 0-23
+  model: string;
+  total_tokens: number;
+};
+
+export type HourlyRidgeResult = {
+  hours: number[];
+  models: string[];
+  series: Record<string, number[]>; // model -> [tokens_per_hour_0..23]
+};
+
+// ---------- Request Size Distribution ----------
+
+export type RequestSizeDistRow = {
+  model: string;
+  request_count: number;
+  avg_tokens: number;
+  p50: number;
+  p90: number;
+  p99: number;
+};
+
+export type RequestSizeDistResult = {
+  rows: RequestSizeDistRow[];
+};

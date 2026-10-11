@@ -48,6 +48,23 @@ export const enterpriseRuntimeUserVisibleModels = mysqlTable(
   })
 );
 
+/** 部门默认模型。assignment_key 仅允许 `dept:<id>`。 */
+export const enterpriseRuntimeScopeDefaultModels = mysqlTable(
+  "enterprise_runtime_scope_default_models",
+  {
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    assignmentKey: varchar("assignment_key", { length: 320 }).notNull(),
+    modelId: varchar("model_id", { length: 256 }).notNull(),
+    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.tenantId, table.assignmentKey],
+      name: "enterprise_runtime_scope_default_pk",
+    }),
+  })
+);
+
 /** 租户 token 配额整包 JSON（等价原 quotas.json）。 */
 export const enterpriseRuntimeTokenQuotas = mysqlTable("enterprise_runtime_token_quotas", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),

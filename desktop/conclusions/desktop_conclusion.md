@@ -82,7 +82,7 @@ summary_path: desktop/conclusions/desktop_conclusion.md
 
 ### 设置
 
-- `SettingsPanel.tsx` + `settings-tab.ts` 的 `SETTINGS_TAB_IDS`：`account` / `general` / `provider` / `mcp` / `connectors` / `tools` / `skills` / `knowledge` / `data_sources` / `memory` / `hooks` / `automation` / `voice` / `email` / `workspace` / `favorites` / `server`。
+- `SettingsPanel.tsx` + `settings-tab.ts` 的 `SETTINGS_TAB_IDS`：`account` / `general` / `security` / `provider` / `mcp` / `connectors` / `tools` / `skills` / `knowledge` / `data_sources` / `memory` / `hooks` / `automation` / `voice` / `email` / `workspace` / `favorites` / `server`。`SETTINGS_FOCUS_IDS` 含 `security-rules`（运行模式「自定义」锚到安全中心规则）。
 - 子目录示例：`components/settings/mcp/*`、`knowledge/*`、`connectors/*`、`voice/*`；自动化另有 `components/automation/*`。
 - **Tool Search（工具按需加载）**：`components/automation/ToolSearchConfigSection.tsx` 挂在 Automation/Runtime 区；模式 `off` / `auto` / `always`，`auto` 时阈值默认 6000（范围 1000–50000）。切换即写 Studio runtime（`tool_search_mode`、`tool_search_auto_schema_token_threshold`），失败就近展示错误，不依赖底部「保存」。
 - 设置开关统一 `components/settings/SettingsSwitch.tsx`（主题色轨道 + `--theme-color-text` 滑钮）；单色主题下分身首字母等走 `avatar-color.ts` 的 `--theme-color-text`，避免白底白字。
@@ -124,8 +124,40 @@ summary_path: desktop/conclusions/desktop_conclusion.md
 - **Playwright e2e**：`desktop/e2e/app.spec.ts`、`mcp-*.spec.ts`（偏打包产物 smoke）。
 - **运维**：改 `electron/main.ts` / 新 IPC（含 `fetch-favicon`）后须完全退出再启（主进程不热重载）；Electron 升级后 `npx @electron/rebuild -f -w node-pty`；Windows 默认禁 GPU；`checkAgxCli` 超时约 30s。
 
+## 增量（8ebec3b5 → 30e57496）
+
+相对上次 checkpoint，渲染与主进程都有大块新增（约 636 路径；`--head-only`，不含工作区未提交文件）。
+
+### 主进程
+
+- `enterprise-device-login.ts` / `enterprise-capabilities.ts` / `enterprise-capabilities-sync.ts`：企业设备码登录与能力包同步。
+- `collab-room-client.ts`：协作房间 HTTP/事件。
+- `browser-bridge.ts` + `chrome-cookie-crypto.ts` / `chrome-cookie-import.ts`：浏览器桥与 Chrome Cookie 导入。
+- `workspace-mounts.ts`、`local-fs-path.ts`、`local-media-protocol.ts`、`path-guard.ts`、`write-local-text-file.ts`、`preview-file-limit.ts`：工作区挂载与本地预览安全边界。
+- `session-messages-disk.ts`：会话消息磁盘读写辅助。
+- `local-backend-startup.ts`、`model-health.ts`、`app-locale.ts`。
+- `main.ts` / `preload.ts` 大幅加 IPC；`splash.html` 视觉重做。
+
+### 渲染
+
+- **Run Replay**：`src/components/replay/*`（时间线、因果链、从某步开分支）。
+- **运行图**：`src/components/graph/*`（`RunGraphPanel` / `ExecutionTimeline`）。
+- **安全中心 Tab**：`components/settings/security/*`（Computer Use / Browser / Hooks / Skill Guard / Workspace Isolation）。
+- **Composer**：`RunModePicker` / `RunLocationPicker` / `WorkspaceFolderPicker` / `AllowAllConfirmDialog` / `ComposerModeMenu`。
+- **工作区预览**：代码源、PPTX、视频；`work-panel` 浏览器 Agent overlay、Cookie 导入、群工作项。
+- **消息**：群专家进度卡、Plan/Turn 产物卡、外链确认、WebSearchSources。
+- **i18n**：`src/i18n/*` + `desktop/locales/{en,zh}/*`。
+- **品牌**：`components/brand/NearBoxHero` / `NearBuddy` / 空态 Lottie。
+- **协作 / 账号**：`CollabRoomPanel`、`SidebarAccountBar`、`AccountIdentityControl`、`quick-compose/*`。
+- 设置 Tab 新增 `security`；`store.ts` 扩会话/能力/回放状态。
+
+### 测试
+
+新增 `desktop/tests/*` 覆盖 cookie 导入、enterprise login/capabilities、workspace mounts、path-guard、session-messages-disk、proxy-fetch 等（不启 Electron）。
+
 ## Unverified or ambiguous
 
 - e2e 期望的 `.app` 产物名与当前 `productName: Near` 是否始终一致（需本地/CI 打包后核对）。
 - 远程 `remote_server` 路径下飞书/微信 sidecar 是否与本地路径同样自动拉起（本地 `whenReady` 分支显式调用；远程分支需对照运行时）。
 - Tool Search 的实际检索/加载行为在 Python Studio runtime；Desktop 只负责配置 UI 与持久化字段，运行时效果需对照 `agx serve` 侧实现。
+- 工作区未提交的 `ProviderIcon` / `ChatPane` / `near-box-logo-mark.png` **未**写入本结论（`--head-only`）。

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "package-root",
-  "generation": "ae45073d5e434199b3453703f867a09e",
-  "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
-  "source_fingerprint": "sha256:9133dd953d122f62168b52221352ce62a1908dcb2ef937b709d18eaa74d3fee5",
+  "generation": "d07f789dd9454ddbb747bd181b428a80",
+  "mapping_revision": 2,
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "source_fingerprint": "sha256:e3a4ecff01f2a2291c5ff8303b5d087cb09c8b82c68d030064273dccd28a55c9",
   "summary_path": "conclusions/package_root_conclusion.md",
-  "summary_sha256": "sha256:1cd35edf4c201b5e438c2c8de80e7b49701621280e2a7fc7a9f8965b96c4f098",
-  "updated_at": "2026-09-01T06:08:45.585515+00:00"
+  "summary_sha256": "sha256:bccbab964410939e15eacb373d2f9c2b5fc0925c3f0002a65daf9c32bed2001b",
+  "updated_at": "2026-09-30T00:54:15.843117+00:00"
 }

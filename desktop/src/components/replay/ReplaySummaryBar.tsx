@@ -48,7 +48,7 @@ export function ReplaySummaryBar({
   ];
 
   return (
-    <div className="shrink-0 border-b border-border bg-surface-panel px-3 py-2">
+    <div className="shrink-0 border-b border-border bg-[var(--shell-panel)] px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
         {runs.length > 1 ? (
           <label className="relative min-w-0">

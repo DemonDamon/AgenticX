@@ -23,10 +23,17 @@ _THINK_CLOSE = chr(60) + "/think" + chr(62)
 
 
 class _FakeResponse:
-    def __init__(self, content: str, tool_calls, reasoning_content: str = ""):
+    def __init__(
+        self,
+        content: str,
+        tool_calls,
+        reasoning_content: str = "",
+        finish_reason: str = "",
+    ):
         self.content = content
         self.tool_calls = tool_calls
         self.reasoning_content = reasoning_content
+        self.finish_reason = finish_reason
 
 
 class _ApproveGate(ConfirmGate):
@@ -298,6 +305,41 @@ def test_reasoning_only_exhausts_nudge_emits_visible_retry_fallback() -> None:
     assert _THINK_OPEN not in last["content"]
 
 
+class _LengthCutReasoningOnly:
+    """Every invoke is reasoning-only and stops on the completion cap."""
+
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse(
+            _THINK_OPEN + "设计到一半" + _THINK_CLOSE,
+            [],
+            finish_reason="length",
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield _THINK_OPEN + "设计到一半" + _THINK_CLOSE
+
+
+def test_length_cut_reasoning_only_asks_to_continue() -> None:
+    """A max_tokens cut inside thinking must not look like a blank refusal."""
+    runtime = AgentRuntime(_LengthCutReasoningOnly(), _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "写一个 html"))
+    final = _final_text(events)
+    last = session.chat_history[-1]
+    hints = [
+        str(message.get("content") or "")
+        for message in session.agent_messages
+        if message.get("role") == "system"
+    ]
+
+    assert "输出长度上限截断" in final
+    assert "继续" in final
+    assert last["metadata"]["terminal_reason"] == "output_length_fallback"
+    assert last["metadata"]["model_finish_reason"] == "length"
+    assert any("[runtime-output-cut]" in hint for hint in hints)
+    assert last["reasoning"] == "设计到一半"
+
+
 def test_sync_fallback_empty_turn_persists_provider_reasoning() -> None:
     """A sync-fallback terminal response preserves provider reasoning."""
     runtime = AgentRuntime(_SeparateReasoningOnlyWithEmptyStream(), _ApproveGate())
@@ -311,6 +353,55 @@ def test_sync_fallback_empty_turn_persists_provider_reasoning() -> None:
     assert last["reasoning"] == "我在想"
     assert last["metadata"]["terminal_reason"] == "empty_response_fallback"
     assert last["metadata"]["model_finish_reason"] == "unknown"
+
+
+class _ReasoningThenMalformedTags:
+    """First turn is reasoning-only. Retry echoes broken reserved tags."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.prompts: List[Any] = []
+
+    def invoke(self, messages, *_args, **_kwargs):
+        self.calls += 1
+        self.prompts.append(messages)
+        if self.calls == 1:
+            return _FakeResponse(
+                "",
+                [],
+                reasoning_content="第一轮思考",
+                finish_reason="stop",
+            )
+        return _FakeResponse(
+            _THINK_OPEN + "内层" + _THINK_OPEN + "又在想" + _THINK_CLOSE,
+            [],
+            finish_reason="stop",
+        )
+
+    def stream(self, *_args, **_kwargs):
+        if self.calls == 1:
+            yield ""
+
+
+def test_reasoning_only_nudge_keeps_draft_and_omits_think_tag() -> None:
+    """Retry must see the draft, and the nudge must not contain a think tag."""
+    llm = _ReasoningThenMalformedTags()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "legacy系统是啥意思"))
+    final = _final_text(events)
+    last = session.chat_history[-1]
+    assert llm.calls == 2
+    assert "未能生成完整的可见回复" in final
+    assert last["reasoning"] == "第一轮思考"
+    second = llm.prompts[1]
+    assert any(
+        message.get("role") == "assistant"
+        and message.get("reasoning_content") == "第一轮思考"
+        for message in second
+    )
+    blob = "\n".join(str(message.get("content") or "") for message in second)
+    assert _THINK_OPEN not in blob
 
 
 def test_empty_nudge_response_preserves_prior_reasoning() -> None:

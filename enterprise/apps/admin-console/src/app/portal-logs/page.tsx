@@ -1,8 +1,8 @@
 "use client";
 
 import { adminFetch } from "../../lib/admin-client-auth";
-import { TraceTimelineInline } from "../../components/trace-timeline-tree";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -39,6 +39,12 @@ import { Copy, ExternalLink, FileText, Inbox, RefreshCcw, Search } from "lucide-
 import { useTranslations } from "next-intl";
 import type { PortalLogItem } from "../../lib/portal-logs-query";
 import type { PortalSessionRollup } from "../../lib/portal-logs-session-query";
+
+const TraceTimelineInline = dynamic(
+  () =>
+    import("../../components/trace-timeline-tree").then((mod) => mod.TraceTimelineInline),
+  { ssr: false },
+);
 
 type QueryResult = {
   total: number;
@@ -778,12 +784,18 @@ function PortalLogsPageContent() {
                         {t("detail.copyRequestId")}
                       </Button>
                       <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                        <Link href={`/audit?trace_id=${encodeURIComponent(selected.trace_id)}`}>
+                        <Link
+                          href={`/audit?trace_id=${encodeURIComponent(selected.trace_id)}`}
+                          prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                        >
                           {t("detail.viewAudit")}
                         </Link>
                       </Button>
                       <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                        <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
+                        <Link
+                          href={`/traces/${encodeURIComponent(selected.trace_id)}`}
+                          prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                        >
                           <ExternalLink className="mr-1 h-3.5 w-3.5" />
                           {t("detail.openRuntimePage")}
                         </Link>

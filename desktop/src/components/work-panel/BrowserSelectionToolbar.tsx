@@ -8,13 +8,22 @@ type Props = {
   onQuote: () => void;
   onCopy: () => void;
   onSearch: () => void;
+  onOpenScratch?: () => void;
+  onOpenInNewTab?: () => void;
 };
 
 /**
  * Host-side floating actions for remote webview text selection.
  * mousedown preventDefault keeps guest selection alive until click handlers run.
  */
-export function BrowserSelectionToolbar({ anchor, onQuote, onCopy, onSearch }: Props) {
+export function BrowserSelectionToolbar({
+  anchor,
+  onQuote,
+  onCopy,
+  onSearch,
+  onOpenScratch,
+  onOpenInNewTab,
+}: Props) {
   const { t } = useTranslation("workspace");
   return createPortal(
     <div
@@ -22,6 +31,15 @@ export function BrowserSelectionToolbar({ anchor, onQuote, onCopy, onSearch }: P
       style={{ top: anchor.top, left: anchor.left }}
       onMouseDown={(event) => event.preventDefault()}
     >
+      {onOpenInNewTab ? (
+        <button
+          type="button"
+          className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[11px] leading-none text-text-strong transition hover:bg-surface-hover"
+          onClick={onOpenInNewTab}
+        >
+          {t("work.openLinkInNewTab")}
+        </button>
+      ) : null}
       <button
         type="button"
         className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[11px] leading-none text-text-strong transition hover:bg-surface-hover"
@@ -46,6 +64,16 @@ export function BrowserSelectionToolbar({ anchor, onQuote, onCopy, onSearch }: P
         <Quote size={12} className="shrink-0 text-text-faint" strokeWidth={1.8} />
         {t("work.quoteToChat")}
       </button>
+      {onOpenScratch ? (
+        <button
+          type="button"
+          className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none text-text-strong transition hover:bg-surface-hover"
+          onClick={onOpenScratch}
+          aria-label={t("work.openScratch")}
+        >
+          {t("work.openScratch")}
+        </button>
+      ) : null}
     </div>,
     document.body
   );

@@ -223,6 +223,19 @@ _SKILL_SOURCE_FRAGMENTS: List[tuple[str, str]] = [
 ]
 
 
+def _strip_matched_quotes(value: str) -> str:
+    """去掉成对的单/双引号。
+
+    YAML 标量加引号的写法(``name: "foo"``)在 clawhub 等上游技能包里很常见;
+    正则提取出的原始文本会把引号带进 name/description,导致安装后按名字匹配
+    (已装判定 / preferred_sources)失效。
+    """
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        return v[1:-1].strip()
+    return v
+
+
 def infer_skill_source(base_dir: Path, builtin_root: Optional[Path] = None) -> str:
     """Derive a stable ``source`` label from the skill package directory.
 
@@ -921,8 +934,8 @@ class SkillBundleLoader:
             return None
         
         fm_text = self._extract_frontmatter(content)
-        name = name_match.group(1).strip()
-        description = desc_match.group(1).strip() if desc_match else ""
+        name = _strip_matched_quotes(name_match.group(1))
+        description = _strip_matched_quotes(desc_match.group(1)) if desc_match else ""
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         tag = self._parse_frontmatter_scalar(fm_text, "tag") or None
         icon = self._parse_frontmatter_scalar(fm_text, "icon") or None

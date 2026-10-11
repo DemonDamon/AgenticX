@@ -38,16 +38,32 @@ def _frontmatter_get_scalar(fm_text: str, key: str) -> Optional[str]:
 
 
 def _set_or_insert_frontmatter_field(fm_text: str, key: str, value: str) -> Tuple[str, bool]:
-    """Return updated frontmatter body and whether a change was made."""
-    pattern = re.compile(rf"^{re.escape(key)}:\s*.+?\s*$", re.MULTILINE)
+    """Return updated frontmatter body and whether a change was made.
+
+    Replaces the first ``key:`` line and removes any duplicate ``key:`` lines so
+    callers never leave two ``source:`` (or similar) entries in frontmatter.
+    """
     replacement = f"{key}: {value}"
-    if pattern.search(fm_text):
-        new_text = pattern.sub(replacement, fm_text, count=1)
-        changed = new_text != fm_text
-        return new_text, changed
-    if fm_text.strip():
-        return f"{key}: {value}\n{fm_text}", True
-    return f"{key}: {value}", True
+    key_re = re.compile(rf"^{re.escape(key)}:\s*.*$")
+    lines = fm_text.splitlines()
+    out: List[str] = []
+    seen = False
+    changed = False
+    for line in lines:
+        if key_re.match(line):
+            if not seen:
+                if line != replacement:
+                    changed = True
+                out.append(replacement)
+                seen = True
+            else:
+                changed = True  # drop duplicate key line
+            continue
+        out.append(line)
+    if not seen:
+        out.insert(0, replacement)
+        changed = True
+    return "\n".join(out), changed
 
 
 def normalize_skill_md(content: str, canonical_name: str) -> Tuple[str, List[str]]:

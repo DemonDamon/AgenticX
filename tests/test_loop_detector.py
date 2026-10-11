@@ -7,7 +7,9 @@ Author: Damon Li
 from __future__ import annotations
 
 from agenticx.runtime.agent_runtime import _confirmation_spam_score_for_path
-from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.agent_runtime import _persist_steer_text, _tool_args_complete
+from agenticx.runtime.harden_flags import max_overflow_retries
+from agenticx.runtime.loop_detector import LoopDetector, TurnSteerQueue
 
 
 def test_loop_detector_generic_repeat_warning() -> None:
@@ -160,3 +162,251 @@ def test_loop_detector_reset_clears_file_edit_failures() -> None:
     detector.reset()
 
     assert detector.check() is None
+
+
+def test_empty_plain_repeat_requests_full_answer() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    issue = None
+    for _ in range(4):
+        issue = detector.note_assistant_round("", had_tool_calls=False)
+    assert issue is not None
+    assert issue.detector == "plain_repeat"
+    assert issue.nudge == "请给出完整正文。"
+
+
+def test_tool_round_clears_plain_repeat() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    detector.note_assistant_round("", had_tool_calls=False)
+    detector.note_assistant_round("let me look", had_tool_calls=True)
+    issue = detector.note_assistant_round("", had_tool_calls=False)
+    assert issue is None
+
+
+def test_length_truncated_tools_are_not_a_final_answer() -> None:
+    detector = LoopDetector(warning_threshold=3, critical_threshold=4)
+    issue = None
+    for _ in range(4):
+        issue = detector.note_assistant_round(
+            "let me look that up",
+            had_tool_calls=True,
+            length_truncated=True,
+            tool_args_complete=False,
+        )
+    assert issue is not None
+    assert issue.detector == "length_truncated_tools"
+    assert _tool_args_complete([{"function": {"arguments": ""}}]) is False
+
+
+def test_steer_persist_failure_and_stop_drop() -> None:
+    queue = TurnSteerQueue()
+    queue.enqueue("follow up")
+    assert queue.drain(lambda _text: False) == []
+    session = type("S", (), {"chat_history": []})()
+    injected = queue.drain(lambda text: _persist_steer_text(session, text))
+    assert injected == ["follow up"]
+    assert session.chat_history[0]["content"] == "follow up"
+    queue.enqueue("late")
+    queue.discard()
+    assert queue.drain(lambda text: _persist_steer_text(session, text)) == []
+    assert len(session.chat_history) == 1
+
+
+def test_overflow_retry_is_once_per_turn() -> None:
+    assert min(1, max_overflow_retries()) <= 1
+
+
+def test_same_args_same_error_warns_then_halts() -> None:
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    args = '{"action":"patch","name":"x","patch_token":"old"}'
+    err = "ERROR[VALIDATION]: patch token outdated: file changed since preview. 重新 preview 获取新 token"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    assert detector.check() is None
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_args_same_error"
+    assert warn.level == "warning"
+    assert warn.nudge and "preview" in warn.nudge.lower()
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+
+
+def test_same_args_same_error_skill_already_exists() -> None:
+    detector = LoopDetector()
+    args = '{"action":"create","name":"archify"}'
+    err = "ERROR: skill already exists. Use action=view"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_args_same_error"
+    assert "exists" in result.message.lower() or "已存在" in result.message
+
+def test_same_class_sandbox_eperm_skillhub_halts_with_different_args() -> None:
+    """Same-class ~/.skillhub EPERM should halt even when bash args change."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    err1 = "bash: /Users/damon/.skillhub/skills_store_cli.py: Operation not permitted"
+    err2 = "ERROR: cannot read ~/.skillhub/config.json: Operation not permitted"
+    err3 = "PermissionError: [Errno 1] Operation not permitted: '/Users/x/.skillhub/bin'"
+    detector.record_call("bash_exec", '{"cmd":"skillhub --version"}', has_progress=False, result_text=err1)
+    assert detector.check() is None
+    detector.record_call("bash_exec", '{"cmd":"skillhub search archify"}', has_progress=False, result_text=err2)
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_class_sandbox_error"
+    assert warn.level == "warning"
+    assert warn.nudge and "skillhub_install" in warn.nudge
+    detector.record_call("bash_exec", '{"cmd":"cat ~/.skillhub/config.json"}', has_progress=False, result_text=err3)
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+    assert crit.detector == "same_class_sandbox_error"
+
+
+def test_same_class_sandbox_tmp_eperm_with_different_args() -> None:
+    detector = LoopDetector()
+    err1 = "mkdir: /tmp/skillhub_dl: Operation not permitted"
+    err2 = "mktemp: failed to create file via template in /tmp: Operation not permitted"
+    detector.record_call("bash_exec", '{"cmd":"mkdir /tmp/skillhub_dl"}', has_progress=False, result_text=err1)
+    detector.record_call("bash_exec", '{"cmd":"mktemp /tmp/foo.XXXX"}', has_progress=False, result_text=err2)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert result.nudge and "skillhub_install" in result.nudge
+
+
+def test_same_class_path_escapes_with_different_args() -> None:
+    detector = LoopDetector()
+    err1 = "ERROR: path escapes workspace: ~/.agenticx/skills"
+    err2 = "ERROR: path escapes workspace: /Users/damon/.agenticx/skills/registry"
+    detector.record_call("bash_exec", '{"cmd":"ls ~/.agenticx/skills"}', has_progress=False, result_text=err1)
+    detector.record_call("bash_exec", '{"cmd":"ls /Users/damon/.agenticx/skills/registry"}', has_progress=False, result_text=err2)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert "path_escapes" in result.message or "workspace" in result.message.lower()
+
+
+def test_same_args_same_error_still_works_alongside_same_class() -> None:
+    """Existing same-args deterministic skill_manage tips must keep working."""
+    detector = LoopDetector()
+    args = '{"action":"create","name":"archify"}'
+    err = "ERROR: skill already exists. Use action=view"
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    detector.record_call("skill_manage", args, has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_args_same_error"
+
+
+def test_allowlist_rejection_recorded_and_halts() -> None:
+    """Allowlist rejects (incl. malformed names) must feed loop_detector and halt ≤3."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    for i in range(3):
+        name = f"bash_exec(command</arg_key><arg_value>ls {i}</arg_value>"
+        msg = f"工具 '{name}' 不在当前允许列表中，已拒绝执行。"
+        detector.record_call(name, f'{{"i":{i}}}', has_progress=False, result_text=msg)
+        result = detector.check()
+        if i == 0:
+            assert result is None
+        elif i == 1:
+            assert result is not None
+            assert result.detector == "same_class_sandbox_error"
+            assert result.level == "warning"
+            assert result.nudge and "skillhub_install" in result.nudge
+        else:
+            assert result is not None
+            assert result.level == "critical"
+            assert "allowlist_rejection" in result.message
+            assert result.nudge and "skillhub_install" in result.nudge
+
+
+def test_is_guard_rejection_recognizes_allowlist_and_arg_key() -> None:
+    assert LoopDetector.is_guard_rejection(
+        "工具 'bash_exec' 不在当前允许列表中，已拒绝执行。"
+    )
+    assert LoopDetector.is_guard_rejection(
+        "ERROR: name has <arg_key>fragment</arg_value>"
+    )
+    assert not LoopDetector.is_guard_rejection("ok: listed files")
+
+
+def test_http_405_same_host_path_halts() -> None:
+    """Consecutive Method Not Allowed / body code:405 on same host+path halt ≥2."""
+    detector = LoopDetector(warning_threshold=8, critical_threshold=15)
+    err1 = (
+        "HTTP 200 body={\"code\":405,\"message\":\"Method Not Allowed\"} "
+        "url=https://skillhub.cn/api/registry/skillhub/install"
+    )
+    err2 = (
+        "curl -X PUT https://skillhub.cn/api/registry/skillhub/install "
+        "-> Method Not Allowed"
+    )
+    err3 = (
+        "GET https://skillhub.cn/api/registry/skillhub/install "
+        "status=405 Method Not Allowed"
+    )
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X GET ..."}', has_progress=False, result_text=err1
+    )
+    assert detector.check() is None
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X PUT ..."}', has_progress=False, result_text=err2
+    )
+    warn = detector.check()
+    assert warn is not None
+    assert warn.detector == "same_class_sandbox_error"
+    assert warn.level == "warning"
+    assert "http_405" in warn.message
+    assert warn.nudge and "skillhub_install" in warn.nudge
+    detector.record_call(
+        "bash_exec", '{"cmd":"curl -X POST ..."}', has_progress=False, result_text=err3
+    )
+    crit = detector.check()
+    assert crit is not None
+    assert crit.level == "critical"
+    assert "skillhub.cn" in crit.message or "http_405" in crit.message
+
+
+def test_http_405_body_code_without_url_still_halts() -> None:
+    detector = LoopDetector()
+    err = '{"code":405,"message":"Method Not Allowed"}'
+    detector.record_call("bash_exec", '{"cmd":"a"}', has_progress=False, result_text=err)
+    detector.record_call("bash_exec", '{"cmd":"b"}', has_progress=False, result_text=err)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "same_class_sandbox_error"
+    assert result.nudge and "skillhub_install" in result.nudge
+
+
+def test_endpoint_probe_404_spiral_halts_across_varied_commands() -> None:
+    """Guessing localhost endpoints: varied curl args, every output is 404/not_found."""
+    detector = LoopDetector()
+    outputs = [
+        '== 18488 {"ok":false,"error":"Not Found"}\n== 52224 {"error":"not_found"}\n== 64132 404 not found',
+        '/api/skills {"error":"not_found"}\n/api/install {"error":"not_found"}\n/api/x 404',
+        'POST /api/skillhub/install {"ok":false,"error":"Not Found"} x3 not_found not_found',
+    ]
+    levels = []
+    for i, out in enumerate(outputs):
+        detector.record_call("bash_exec", f'{{"cmd":"probe {i}"}}', has_progress=False, result_text=out)
+        result = detector.check()
+        levels.append(result.level if result else None)
+    assert levels[0] is None
+    assert levels[1] == "warning"
+    assert levels[2] == "critical"
+    final = detector.check()
+    assert final is not None and "endpoint_probe_404" in final.message
+    assert final.nudge and "skillhub_install" in final.nudge
+
+
+def test_endpoint_probe_ignores_non_shell_tools() -> None:
+    """Reading source that mentions not_found must not look like endpoint guessing."""
+    detector = LoopDetector()
+    text = "not_found not_found 404 not found"
+    for i in range(3):
+        detector.record_call("file_read", f'{{"path":"f{i}"}}', has_progress=True, result_text=text)
+    result = detector.check()
+    assert result is None or result.detector != "same_class_sandbox_error"
