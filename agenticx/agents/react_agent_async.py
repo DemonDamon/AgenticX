@@ -114,6 +114,7 @@ class ReActAgent:
         run_store: RunStateStore | None = None,
         call_ledger: CallLedger | None = None,
         run_id: str | None = None,
+        decision_gate: Dict[str, Any] | None = None,
     ) -> None:
         self.llm = llm
         self.system_prompt = system_prompt
@@ -136,6 +137,39 @@ class ReActAgent:
             self.add_tool(tool)
 
         self._stop_requested = False
+        # SP27 决策门（None=off，现状逐字节等价）：{"mode": observe|nudge,
+        # "scorer": mock|startlux|openai, "model": ..., "tau_high": 0.8,
+        # "out": telemetry.jsonl}
+        self._decision_gate = decision_gate
+        self._decision_router = None
+
+    def _run_decision_gate(self, messages: List[Dict[str, Any]],
+                           normalized: List[tuple]) -> Optional[str]:
+        """tool_selection validator（SP27）：对 LLM 本轮首个工具选择做独立
+        打分。observe 只记录；nudge 在错配且高置信时返回提示文本（由
+        _loop 在工具结果落盘后注入，对齐 loop_detector 先例）。fail-open。
+        """
+        cfg = self._decision_gate or {}
+        if self._decision_router is None:
+            from agenticx.agents.decision_router import DecisionRouter
+            from agenticx.rl.decision_scorers import make_scorer
+            scorer, _ = make_scorer(cfg.get("scorer", "mock"),
+                                    model=cfg.get("model", ""),
+                                    base_url=cfg.get("base_url", ""))
+            self._decision_router = DecisionRouter(
+                scorer, tau_high=float(cfg.get("tau_high", 0.8)))
+        from agenticx.learning.trajectory.decision_mining import compress_state
+        symbols = tuple(dict.fromkeys(
+            t.name for t in self._tools if getattr(t, "name", None)))
+        expected = normalized[0][1]
+        if expected not in symbols:
+            return None                       # 工具不在注册表：跳过不误报
+        # state 与挖掘侧同构：决策点前缀（不含刚追加的 assistant 消息）
+        state = compress_state(messages, max(len(messages) - 1, 0))
+        verdict = self._decision_router.check(state, expected, symbols)
+        if cfg.get("mode", "observe") == "nudge" and verdict.action == "nudge":
+            return self._decision_router.nudge_message(verdict)
+        return None
 
     @property
     def tools(self) -> List[BaseTool]:
@@ -470,6 +504,9 @@ class ReActAgent:
                     return
 
                 executable = self._enforce_call_identity(normalized)
+                gate_nudge: Optional[str] = None
+                if self._decision_gate is not None and executable:
+                    gate_nudge = self._run_decision_gate(messages, normalized)
                 pending_models = [
                     PendingCall(
                         call_id,
@@ -561,6 +598,9 @@ class ReActAgent:
                         message=loop_check.message,
                         recoverable=True,
                     )
+                # SP27 决策门 nudge：工具结果落盘后注入，只影响下一轮
+                if gate_nudge:
+                    messages.append({"role": "system", "content": gate_nudge})
 
             yield self._finish_final(
                 messages,
@@ -577,6 +617,12 @@ class ReActAgent:
                     raise
             yield self._interrupted_event("cancelled", messages, iterations)
             raise
+        finally:
+            # SP27 决策门遥测落盘（覆盖式；resume 场景以最终一次为准）
+            if (self._decision_gate is not None and self._decision_router
+                    and self._decision_router.telemetry
+                    and self._decision_gate.get("out")):
+                self._decision_router.dump(self._decision_gate["out"])
 
     async def astream(
         self,

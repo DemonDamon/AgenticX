@@ -1,0 +1,17 @@
+{
+ "model": "deepseek-v4.1-flash",
+ "n_tasks": 1,
+ "rounds": 1,
+ "pass_rate": 0.0,
+ "passed": 0,
+ "total": 1,
+ "rows": [
+  {
+   "task": "code-format-code-task-001457",
+   "round": 0,
+   "reward": 0.0,
+   "duration_sec": 656.5,
+   "trial_dir": "results/calibration-1790500503/trials/code-format-code-task-001457__jAvpZEo"
+  }
+ ]
+}

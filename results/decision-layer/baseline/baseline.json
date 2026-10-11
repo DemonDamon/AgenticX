@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "note": "SP26 报告誊录（test 划分只读一次纪律：数字来自 2026-10-03 首次评测，不重跑）",
+    "data": "results/decision-layer/baseline/real-tb-first12jobs-decisions.jsonl",
+    "scorer": "startlux",
+    "scorer_id": "startlux:StartLux-Decision-4B-Q4_K_M:systemone",
+    "split": "test",
+    "degraded": false
+  },
+  "n_records": 53,
+  "n_questions": 62,
+  "n_evaluated": 62,
+  "temperature": 0.05,
+  "by_type": {
+    "tool_selection": {
+      "n": 62,
+      "top1": 1.0,
+      "ece": 0.0,
+      "ece_temp": 0.0,
+      "caveat": "100% 单候选（bash-only）——top1=1.0 为受限 softmax 单元素短路，零信息量，非模型能力"
+    }
+  },
+  "overall": {"top1": 1.0, "ece": 0.0, "ece_temp": 0.0},
+  "skipped": {"no_probs": 0, "bad_len": 0, "no_gold": 0, "gold_off_vocab": 0},
+  "synth_multitool_reference": {
+    "note": "合成多工具数据（管线验证，无语义信号）",
+    "startlux-0.8B-Q8_0": {"top1": 0.45, "ece": 0.295},
+    "startlux-4B-Q4_K_M": {"top1": 0.45, "ece": 0.317}
+  }
+}
