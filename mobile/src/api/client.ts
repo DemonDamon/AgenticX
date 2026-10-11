@@ -194,6 +194,62 @@ export class GatewayClient {
     return await this.request<UnbindResponse>("DELETE", "/api/mobile/bindings");
   }
 
+  /**
+   * 订阅回合 token 流（真流式）：WS `/ws/mobile` → subscribe(session_id)
+   * → turn_delta 增量 / turn_done 收尾。
+   *
+   * 流式是增强体验：连接/订阅失败静默返回 null，调用方退化为轮询伪流式。
+   * 回合结束（sendMessage 返回）后由调用方 close。
+   */
+  openTurnStream(
+    sessionId: string,
+    handlers: { onDelta: (delta: string) => void; onDone?: () => void },
+  ): { close: () => void } | null {
+    if (this.mobileToken === undefined) return null;
+    const wsBase = this.gatewayBase.replace(/^http/, "ws");
+    const url = `${wsBase}/ws/mobile?install_id=${encodeURIComponent(
+      this.installId,
+    )}&token=${encodeURIComponent(this.mobileToken)}`;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      return null;
+    }
+    ws.onopen = () => {
+      try {
+        ws.send(JSON.stringify({ type: "subscribe", session_id: sessionId }));
+      } catch {
+        /* 发送失败静默：流式降级 */
+      }
+    };
+    ws.onmessage = (ev: WebSocketMessageEvent) => {
+      let msg: unknown;
+      try {
+        msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+      } catch {
+        return;
+      }
+      if (msg === null || typeof msg !== "object") return;
+      const m = msg as { type?: unknown; session_id?: unknown; delta?: unknown };
+      if (m.type === "turn_delta" && m.session_id === sessionId) {
+        if (typeof m.delta === "string" && m.delta !== "") handlers.onDelta(m.delta);
+      } else if (m.type === "turn_done" && m.session_id === sessionId) {
+        handlers.onDone?.();
+      }
+    };
+    // onerror/onclose 静默：流式失败不影响回合本身（send RPC 才是真相通道）
+    return {
+      close: () => {
+        try {
+          ws.close();
+        } catch {
+          /* 已断开 */
+        }
+      },
+    };
+  }
+
   /** 创建会话（懒创建链路：new-task 页首条消息发出时调用）。 */
   async createSession(
     body: Record<string, unknown> = {},

@@ -17,7 +17,9 @@ export type ChatEntry =
   | { kind: "system"; key: string; text: string }
   | { kind: "toolGroup"; key: string; steps: ToolStep[] }
   /** 本地发送中占位（仅页面内使用，不进 buildChatEntries） */
-  | { kind: "pending"; key: string };
+  | { kind: "pending"; key: string }
+  /** 真流式：回合进行中的 token 增量气泡（WS turn_delta 累积） */
+  | { kind: "streaming"; key: string; text: string };
 
 const RESULT_PREVIEW_MAX = 120;
 
@@ -101,4 +103,35 @@ export function buildChatEntries(messages: MobileMessage[]): ChatEntry[] {
   });
   flush();
   return entries;
+}
+
+/**
+ * 应用一帧流式增量：首个 delta 把 pending 占位原位替换为 streaming
+ * 气泡，后续 delta 追加文本。pending 已被移除（如轮询快照重建过）时
+ * 尾部追加。返回新数组（输入不变）。
+ */
+export function applyStreamDelta(
+  entries: ChatEntry[] | null,
+  pendingKey: string,
+  delta: string,
+): ChatEntry[] {
+  const list = entries ?? [];
+  if (delta === "") return list;
+  const streamKey = `stream-${pendingKey}`;
+  const streamIdx = list.findIndex((e) => e.key === streamKey);
+  if (streamIdx >= 0) {
+    const cur = list[streamIdx];
+    if (cur.kind === "streaming") {
+      const next = [...list];
+      next[streamIdx] = { ...cur, text: cur.text + delta };
+      return next;
+    }
+  }
+  const pendingIdx = list.findIndex((e) => e.key === pendingKey);
+  if (pendingIdx >= 0) {
+    const next = [...list];
+    next[pendingIdx] = { kind: "streaming", key: streamKey, text: delta };
+    return next;
+  }
+  return [...list, { kind: "streaming", key: streamKey, text: delta }];
 }

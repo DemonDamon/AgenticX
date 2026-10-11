@@ -35,6 +35,7 @@ from agenticx.gateway.config import (
 from agenticx.gateway.connect_page import render_connect_page
 from agenticx.gateway.connect_session import ConnectSessionManager
 from agenticx.gateway.device_manager import DeviceManager
+from agenticx.gateway.mobile_stream import MobileStreamHub
 from agenticx.gateway.mobile_tokens import MobileTokenStore, resolve_mobile_tokens_path
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.router import MessageRouter
@@ -71,6 +72,7 @@ def create_gateway_app(
         user_map.register_binding_code(code, did)
 
     connect_sessions = ConnectSessionManager()
+    mobile_stream_hub = MobileStreamHub()
     router = MessageRouter(
         device_manager,
         user_map,
@@ -614,6 +616,47 @@ def create_gateway_app(
         mobile_tokens.revoke(install_id)
         return JSONResponse({"ok": True})
 
+    @app.websocket("/ws/mobile")
+    async def ws_mobile(websocket: WebSocket) -> None:
+        """手机真流式订阅端点：install_id + mobile_token 鉴权 → subscribe(session_id)。
+
+        桌面回合的 token 增量（turn_progress）经 MobileStreamHub 广播到
+        订阅该会话的手机连接；鉴权口径与 _require_mobile_auth 一致。
+        """
+        await websocket.accept()
+        install_id = (websocket.query_params.get("install_id") or "").strip()
+        token_q = (websocket.query_params.get("token") or "").strip()
+        did = user_map.get_device("mobile", install_id) if install_id else None
+        if (
+            not install_id
+            or not token_q
+            or not did
+            or not mobile_tokens.verify(install_id, did, token_q)
+        ):
+            await websocket.close(code=4401)
+            return
+        subscribed: set[str] = set()
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if str(data.get("type") or "") == "subscribe":
+                    sid = str(data.get("session_id") or "").strip()
+                    if sid:
+                        mobile_stream_hub.subscribe(sid, websocket)
+                        subscribed.add(sid)
+                        await websocket.send_text(
+                            json.dumps({"type": "subscribed", "session_id": sid})
+                        )
+        except WebSocketDisconnect:
+            pass
+        finally:
+            for sid in subscribed:
+                mobile_stream_hub.unsubscribe(sid, websocket)
+
     @app.websocket("/ws/device/{device_id}")
     async def ws_device(websocket: WebSocket, device_id: str) -> None:
         await websocket.accept()
@@ -660,6 +703,22 @@ def create_gateway_app(
                             k: v for k, v in data.items() if k not in ("type", "correlation_id")
                         }
                         dm.resolve_rpc_reply(cid, payload)
+                elif msg_type == "turn_progress":
+                    # 桌面回合 token 增量 → 订阅该会话的手机（真流式）
+                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    sid = str(payload.get("session_id") or "").strip()
+                    delta = str(payload.get("delta") or "")
+                    if sid and delta:
+                        await mobile_stream_hub.broadcast(
+                            sid, {"type": "turn_delta", "session_id": sid, "delta": delta}
+                        )
+                elif msg_type == "turn_progress_end":
+                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    sid = str(payload.get("session_id") or "").strip()
+                    if sid:
+                        await mobile_stream_hub.broadcast(
+                            sid, {"type": "turn_done", "session_id": sid}
+                        )
                 elif msg_type == "im_progress":
                     pass
         except WebSocketDisconnect:

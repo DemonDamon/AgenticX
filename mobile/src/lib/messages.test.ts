@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MobileMessage } from "../api/types";
-import { buildChatEntries } from "./messages";
+import { applyStreamDelta, buildChatEntries } from "./messages";
 
 function toolMsg(over: Partial<MobileMessage>): MobileMessage {
   return {
@@ -77,5 +77,48 @@ describe("buildChatEntries", () => {
     if (g.kind !== "toolGroup") throw new Error("not group");
     expect(g.steps[0].toolName).toBe("tool");
     expect(g.steps[0].detail).toBe("");
+  });
+});
+
+describe("applyStreamDelta", () => {
+  const pending = { kind: "pending" as const, key: "local-pending-1" };
+
+  it("首个增量把 pending 原位替换为 streaming 气泡", () => {
+    const next = applyStreamDelta(
+      [{ kind: "user", key: "u1", text: "hi" }, pending],
+      "local-pending-1",
+      "你好",
+    );
+    expect(next.map((e) => e.kind)).toEqual(["user", "streaming"]);
+    const s = next[1];
+    expect(s.kind === "streaming" && s.text).toBe("你好");
+  });
+
+  it("后续增量累积追加文本", () => {
+    const first = applyStreamDelta([pending], "local-pending-1", "A");
+    const second = applyStreamDelta(first, "local-pending-1", "B");
+    const third = applyStreamDelta(second, "local-pending-1", "C");
+    const s = third[0];
+    expect(s.kind === "streaming" && s.text).toBe("ABC");
+  });
+
+  it("pending 已被移除（快照重建过）时尾部追加", () => {
+    const base = [{ kind: "user", key: "u1", text: "hi" }];
+    const next = applyStreamDelta(base, "k", "x");
+    expect(next).toHaveLength(2);
+    expect(next[1].kind).toBe("streaming");
+  });
+
+  it("空增量原样返回", () => {
+    const list = [pending];
+    expect(applyStreamDelta(list, "k", "")).toBe(list);
+    expect(applyStreamDelta(null, "k", "")).toEqual([]);
+  });
+
+  it("不改动输入数组", () => {
+    const list = [pending];
+    applyStreamDelta(list, "local-pending-1", "text");
+    expect(list).toHaveLength(1);
+    expect(list[0].kind).toBe("pending");
   });
 });

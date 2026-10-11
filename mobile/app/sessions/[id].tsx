@@ -19,7 +19,7 @@ import { ToolGroupCard } from "../../src/components/ToolGroupCard";
 import { useGateway } from "../../src/hooks/useGateway";
 import { notifyConfirmsChanged, onConfirmsChanged } from "../../src/lib/events";
 import { describeError } from "../../src/lib/errors";
-import { buildChatEntries, type ChatEntry } from "../../src/lib/messages";
+import { buildChatEntries, applyStreamDelta, type ChatEntry } from "../../src/lib/messages";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
 
 function PendingBubble() {
@@ -79,6 +79,14 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
       );
     case "pending":
       return <PendingBubble />;
+    case "streaming":
+      // 回合进行中的 token 增量：纯 Text 轻量渲染（避免 Markdown 高频重解析），
+      // 回合结束由 fetchMessages 的结构化终态替换
+      return (
+        <View style={[styles.bubble, styles.bubbleAssistant]}>
+          <Text style={styles.bubbleAssistantText}>{entry.text}</Text>
+        </View>
+      );
   }
 });
 
@@ -201,6 +209,13 @@ export default function SessionMessagesScreen() {
       const pendingKey = `local-pending-${Date.now()}`;
       const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
       setEntries((prev) => [...(prev ?? []), pendingEntry]);
+      // 真流式：订阅回合 token 流（WS turn_delta），收到增量即打字机上屏；
+      // 连接失败静默降级为下面的轮询伪流式，不影响回合本身
+      const streamHandle = client.openTurnStream(id, {
+        onDelta: (delta) => {
+          setEntries((prev) => applyStreamDelta(prev, pendingKey, delta));
+        },
+      });
       // 伪流式：回合进行中每 2s 拉一次消息。桌面端在工具调用之间会增量落盘
       // （incremental_persist），工具步骤得以逐步上屏；服务端尚未写入本条
       // 用户消息前不应用快照，避免本地乐观 user 消息被旧快照顶掉。
@@ -220,7 +235,13 @@ export default function SessionMessagesScreen() {
                 m.content.trim() === text,
             );
             if (!caughtUp) return;
-            setEntries([...buildChatEntries(resp.messages), pendingEntry]);
+            // 快照重建历史/工具步骤，尾部 live 条目（pending / streaming 气泡）保留
+            setEntries((prev) => {
+              const live = (prev ?? []).filter(
+                (e) => e.key === pendingKey || e.kind === "streaming",
+              );
+              return [...buildChatEntries(resp.messages), ...live];
+            });
           })
           .catch(() => {
             // 轮询失败静默：回合结束后的 fetchMessages 才是最终真相
@@ -236,7 +257,8 @@ export default function SessionMessagesScreen() {
         if (resp.pending_confirm !== null) {
           notifyConfirmsChanged();
         }
-        // 完成态结构化：从后端拉真实消息线（tool 分组 + reasoning + Markdown）
+        // 完成态结构化：从后端拉真实消息线（tool 分组 + reasoning + Markdown），
+        // 整体替换本地 pending / streaming 条目
         try {
           await fetchMessages();
           // 延迟补拉 ×2：长回合的收尾消息可能在 send 返回后才落盘
@@ -249,13 +271,15 @@ export default function SessionMessagesScreen() {
           }, 15_000);
         } catch {
           setEntries((prev) => [
-            ...(prev ?? []).filter((e) => e.key !== pendingKey),
+            ...(prev ?? []).filter((e) => e.key !== pendingKey && e.kind !== "streaming"),
             { kind: "assistant", key: `local-reply-${Date.now()}`, text: resp.reply },
           ]);
         }
         return true;
       } catch (err) {
-        setEntries((prev) => (prev ?? []).filter((e) => e.key !== pendingKey));
+        setEntries((prev) =>
+          (prev ?? []).filter((e) => e.key !== pendingKey && e.kind !== "streaming"),
+        );
         if (!(err instanceof ApiError && err.status === 401)) {
           // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
           showToast(`发送失败：${describeError(err)}`);
@@ -264,6 +288,7 @@ export default function SessionMessagesScreen() {
       } finally {
         polling = false;
         clearInterval(pollTimer);
+        streamHandle?.close();
         setSending(false);
       }
     },

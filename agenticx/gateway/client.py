@@ -65,6 +65,89 @@ class TurnResult:
     pending_confirm: Optional[PendingConfirm] = None
 
 
+class TurnProgressForwarder:
+    """SSE token → 节流聚合 → device WS `turn_progress` 帧（手机真流式）。
+
+    token 逐帧转发会在 WS 上产生洪泛，这里按 ``min_interval`` 聚合批量下发；
+    转发失败静默（best-effort 增强，绝不影响回合本身）。
+    """
+
+    def __init__(
+        self,
+        ws: "WebSocketClientProtocol",
+        session_id: str,
+        *,
+        min_interval: float = 0.12,
+    ) -> None:
+        self._ws = ws
+        self._session_id = session_id
+        self._min_interval = min_interval
+        self._buf: list[str] = []
+        self._last_flush = 0.0
+        self._flush_handle: Optional[asyncio.TimerHandle] = None
+
+    async def add(self, text: str) -> None:
+        if not text:
+            return
+        self._buf.append(text)
+        loop = asyncio.get_event_loop()
+        now = loop.time()
+        if now - self._last_flush >= self._min_interval:
+            await self.flush()
+        elif self._flush_handle is None:
+            # 攒批期间安排一次兜底 flush，保证最后一段文字不滞留
+            self._flush_handle = loop.call_later(
+                self._min_interval, lambda: asyncio.create_task(self._guarded_flush())
+            )
+
+    async def _guarded_flush(self) -> None:
+        try:
+            await self.flush()
+        except Exception:  # pragma: no cover - 防御性兜底
+            pass
+
+    async def flush(self) -> None:
+        self._cancel_pending_flush()
+        if not self._buf:
+            return
+        delta = "".join(self._buf)
+        self._buf.clear()
+        self._last_flush = asyncio.get_event_loop().time()
+        try:
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "turn_progress",
+                        "payload": {"session_id": self._session_id, "delta": delta},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
+
+    async def close(self) -> None:
+        """回合结束：flush 余量 + 发 turn_progress_end（手机据此收尾流式态）。"""
+        await self.flush()
+        try:
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "turn_progress_end",
+                        "payload": {"session_id": self._session_id},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
+
+    def _cancel_pending_flush(self) -> None:
+        if self._flush_handle is not None:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+
+
 def _merged_raw_config() -> Dict[str, Any]:
     global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
     project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
@@ -340,6 +423,7 @@ class GatewayClient:
         session_id: str,
         *,
         sender_key: str = "",
+        token_sink: Optional[object] = None,
     ) -> TurnResult:
         """POST /api/chat（stream）→ SSE 采集 → TurnResult。
 
@@ -347,6 +431,9 @@ class GatewayClient:
         confirm_required 事件到达即提前结束（与原 _execute_turn 行为一致），
         PendingConfirm 以 sender_key 写入 store（IM 用 "{source}:{sender_id}"，
         mobile 用 "mobile:{install_id}"）。
+
+        token_sink：``await token_sink.add(text)``（TurnProgressForwarder）——
+        供手机真流式把 token 增量实时转发到网关。
         """
         headers = {"x-agx-desktop-token": self._settings.desktop_token}
         final_text = ""
@@ -377,7 +464,10 @@ class GatewayClient:
                         et = str(evt.get("type") or "")
                         data = evt.get("data") if isinstance(evt.get("data"), dict) else {}
                         if et == "token":
-                            final_text += str(data.get("text") or "")
+                            piece = str(data.get("text") or "")
+                            final_text += piece
+                            if token_sink is not None and piece:
+                                await token_sink.add(piece)
                         elif et == "final":
                             t = str(data.get("text") or "")
                             if t:
@@ -498,7 +588,7 @@ class GatewayClient:
     ) -> None:
         """设备 RPC 分发：任何异常/未知 method 都回 ok:false，绝不让异常炸掉 WS 连接。"""
         try:
-            data = await self._dispatch_device_rpc(method, params)
+            data = await self._dispatch_device_rpc(method, params, ws=ws)
             reply = {
                 "type": "rpc_reply",
                 "correlation_id": correlation_id,
@@ -518,13 +608,19 @@ class GatewayClient:
         except Exception as exc:
             logger.warning("rpc_reply send failed (cid=%s): %s", correlation_id, exc)
 
-    async def _dispatch_device_rpc(self, method: str, params: Dict[str, Any]) -> Any:
+    async def _dispatch_device_rpc(
+        self,
+        method: str,
+        params: Dict[str, Any],
+        *,
+        ws: Optional["WebSocketClientProtocol"] = None,
+    ) -> Any:
         if method == "sessions.list":
             return await self._rpc_sessions_list()
         if method == "session.messages":
             return await self._rpc_session_messages(params)
         if method == "session.send":
-            return await self._rpc_session_send(params)
+            return await self._rpc_session_send(params, ws=ws)
         if method == "confirm.pending":
             return await self._rpc_confirm_pending(params)
         if method == "confirm.respond":
@@ -630,7 +726,9 @@ class GatewayClient:
                 raise RuntimeError("session messages reply missing 'messages' array")
             return rows
 
-    async def _rpc_session_send(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _rpc_session_send(
+        self, params: Dict[str, Any], ws: Optional["WebSocketClientProtocol"] = None
+    ) -> Dict[str, Any]:
         session_id = str(params.get("session_id") or "").strip()
         text = str(params.get("text") or "")
         sender_name = str(params.get("sender_name") or "").strip()
@@ -647,10 +745,20 @@ class GatewayClient:
             "user_display_name": sender_name or install_id,
         }
         timeout = httpx.Timeout(600.0, connect=30.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            result = await self._execute_chat_turn_core(
-                client, body, session_id, sender_key=f"mobile:{install_id}"
-            )
+        # 手机真流式：token 增量经 WS 实时转发到网关 → 订阅该会话的手机端
+        forwarder = TurnProgressForwarder(ws, session_id) if ws is not None else None
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                result = await self._execute_chat_turn_core(
+                    client,
+                    body,
+                    session_id,
+                    sender_key=f"mobile:{install_id}",
+                    token_sink=forwarder,
+                )
+        finally:
+            if forwarder is not None:
+                await forwarder.close()
         return {
             "reply": result.text,
             "progress": list(dict.fromkeys(result.progress_lines)),
