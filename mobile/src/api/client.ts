@@ -3,6 +3,8 @@ import type {
   ConfirmsResponse,
   ConfirmDecision,
   ConfirmResponse,
+  CreateSessionResponse,
+  McpServersResponse,
   MessagesResponse,
   MobileMessage,
   MobileSession,
@@ -10,6 +12,7 @@ import type {
   SendRequest,
   SendResponse,
   SessionsResponse,
+  ToolsResponse,
   UnbindResponse,
 } from "./types";
 
@@ -189,6 +192,23 @@ export class GatewayClient {
 
   async unbind(): Promise<UnbindResponse> {
     return await this.request<UnbindResponse>("DELETE", "/api/mobile/bindings");
+  }
+
+  /** 创建会话（懒创建链路：new-task 页首条消息发出时调用）。 */
+  async createSession(
+    body: Record<string, unknown> = {},
+  ): Promise<CreateSessionResponse> {
+    return await this.request<CreateSessionResponse>("POST", "/api/mobile/sessions", body);
+  }
+
+  /** 工具注册表（「Near 会什么」只读展示）。 */
+  async getToolsRegistry(): Promise<ToolsResponse> {
+    return await this.request<ToolsResponse>("GET", "/api/mobile/tools");
+  }
+
+  /** MCP server 连接状态（只读）。 */
+  async getMcpServers(): Promise<McpServersResponse> {
+    return await this.request<McpServersResponse>("GET", "/api/mobile/mcp");
   }
 
   private async request<T>(

@@ -34,9 +34,16 @@ export interface MobileSession {
 }
 
 export interface MobileMessage {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   text: string;
   ts?: number;
+  /** batch2：tool 消息结构化字段（老消息缺省 → 纯文本回退） */
+  tool_call_id?: string;
+  tool_name?: string;
+  tool_args?: Record<string, unknown>;
+  tool_status?: "done" | "error" | string;
+  /** batch2：assistant 思考过程 */
+  reasoning?: string;
   [key: string]: unknown;
 }
 
@@ -89,4 +96,35 @@ export interface ConfirmsResponse {
 
 export interface UnbindResponse {
   ok: boolean;
+}
+
+export interface CreateSessionResponse {
+  ok: boolean;
+  session_id: string;
+  session_name: string | null;
+  [key: string]: unknown;
+}
+
+export interface ToolRegistryItem {
+  name: string;
+  description: string;
+  category: string;
+  is_meta: boolean;
+  [key: string]: unknown;
+}
+
+export interface McpServerInfo {
+  name: string;
+  connected: boolean;
+  connection_state: string;
+  tool_count: number;
+  [key: string]: unknown;
+}
+
+export interface ToolsResponse {
+  tools: ToolRegistryItem[];
+}
+
+export interface McpServersResponse {
+  servers: McpServerInfo[];
 }
