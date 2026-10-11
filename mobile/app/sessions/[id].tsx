@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -52,7 +52,8 @@ function AssistantBlock({ text, reasoning }: { text: string; reasoning?: string 
   );
 }
 
-function MessageItem({ entry }: { entry: ChatEntry }) {
+// memo：打字/发送等页面级 state 变化时，未变化的消息项（尤其 Markdown）跳过重渲染
+const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
   switch (entry.kind) {
     case "user":
       return (
@@ -79,6 +80,59 @@ function MessageItem({ entry }: { entry: ChatEntry }) {
     case "pending":
       return <PendingBubble />;
   }
+});
+
+/**
+ * 底部输入条：draft 状态隔离在组件内部，敲字只重渲染本组件，
+ * 不再触发整页（消息列表 / Markdown 重解析）重渲染。
+ */
+function Composer({
+  sending,
+  onSend,
+}: {
+  sending: boolean;
+  onSend: (text: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState("");
+  const insets = useSafeAreaInsets();
+  const canSend = sending || draft.trim() === "";
+
+  const submit = useCallback(() => {
+    const text = draft.trim();
+    if (text === "" || sending) return;
+    void onSend(text).then((ok) => {
+      if (ok) setDraft("");
+    });
+  }, [draft, sending, onSend]);
+
+  return (
+    <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      <TextInput
+        style={styles.input}
+        multiline
+        placeholder="给 Near 发指令…"
+        placeholderTextColor={color.textMuted}
+        value={draft}
+        onChangeText={setDraft}
+        editable={!sending}
+      />
+      <Pressable
+        style={({ pressed }) => [
+          styles.sendButton,
+          canSend ? styles.sendDisabled : null,
+          pressed && !canSend ? styles.sendPressed : null,
+        ]}
+        disabled={canSend}
+        onPress={submit}
+      >
+        {sending ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Text style={styles.sendButtonText}>发送</Text>
+        )}
+      </Pressable>
+    </View>
+  );
 }
 
 /**
@@ -95,12 +149,10 @@ export default function SessionMessagesScreen() {
     title?: string;
     initialText?: string;
   }>();
-  const insets = useSafeAreaInsets();
   const { client } = useGateway();
 
   const [entries, setEntries] = useState<ChatEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,15 +195,13 @@ export default function SessionMessagesScreen() {
   );
 
   const handleSend = useCallback(
-    async (override?: string) => {
-      const text = (override ?? draft).trim();
-      if (text === "" || sending || client === null) return;
+    async (text: string): Promise<boolean> => {
+      if (text === "" || sending || client === null) return false;
       setSending(true);
       const pendingKey = `local-pending-${Date.now()}`;
       setEntries((prev) => [...(prev ?? []), { kind: "pending", key: pendingKey }]);
       try {
         const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
-        setDraft("");
         if (resp.pending_confirm !== null) {
           notifyConfirmsChanged();
         }
@@ -164,17 +214,19 @@ export default function SessionMessagesScreen() {
             { kind: "assistant", key: `local-reply-${Date.now()}`, text: resp.reply },
           ]);
         }
+        return true;
       } catch (err) {
         setEntries((prev) => (prev ?? []).filter((e) => e.key !== pendingKey));
         if (!(err instanceof ApiError && err.status === 401)) {
           // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
           showToast(`发送失败：${describeError(err)}`);
         }
+        return false;
       } finally {
         setSending(false);
       }
     },
-    [draft, sending, client, id, showToast, fetchMessages],
+    [sending, client, id, showToast, fetchMessages],
   );
 
   // 懒创建链路收口：new-task 页 replace 过来时带 initialText 自动发送首条消息
@@ -197,8 +249,13 @@ export default function SessionMessagesScreen() {
     [entries],
   );
 
+  // 稳定的 renderItem：配合 memo 的 MessageItem，页面 state 变化不重渲染消息项
+  const renderItem = useCallback(
+    ({ item }: { item: ChatEntry }) => <MessageItem entry={item} />,
+    [],
+  );
+
   const pageTitle = typeof title === "string" && title !== "" ? title : "会话";
-  const canSend = sending || draft.trim() === "";
 
   return (
     <View style={styles.page}>
@@ -236,7 +293,7 @@ export default function SessionMessagesScreen() {
           inverted
           keyExtractor={(item) => item.key}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <MessageItem entry={item} />}
+          renderItem={renderItem}
         />
       )}
 
@@ -245,34 +302,7 @@ export default function SessionMessagesScreen() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
         >
-          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-            <TextInput
-              style={styles.input}
-              multiline
-              placeholder="给 Near 发指令…"
-              placeholderTextColor={color.textMuted}
-              value={draft}
-              onChangeText={setDraft}
-              editable={!sending}
-            />
-            <Pressable
-              style={({ pressed }) => [
-                styles.sendButton,
-                canSend ? styles.sendDisabled : null,
-                pressed && !canSend ? styles.sendPressed : null,
-              ]}
-              disabled={canSend}
-              onPress={() => {
-                void handleSend();
-              }}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.sendButtonText}>发送</Text>
-              )}
-            </Pressable>
-          </View>
+          <Composer sending={sending} onSend={handleSend} />
         </KeyboardAvoidingView>
       ) : null}
 
