@@ -529,6 +529,12 @@ class GatewayClient:
             return await self._rpc_confirm_pending(params)
         if method == "confirm.respond":
             return await self._rpc_confirm_respond(params)
+        if method == "sessions.create":
+            return await self._rpc_sessions_create(params)
+        if method == "tools.registry":
+            return await self._rpc_tools_registry()
+        if method == "mcp.servers":
+            return await self._rpc_mcp_servers(params)
         raise ValueError(f"unknown rpc method: {method}")
 
     async def _rpc_sessions_list(self) -> Any:
@@ -547,6 +553,60 @@ class GatewayClient:
             rows = payload.get("sessions") if isinstance(payload, dict) else payload
             if not isinstance(rows, list):
                 raise RuntimeError("sessions list reply missing 'sessions' array")
+            return rows
+
+    async def _rpc_sessions_create(self, params: Dict[str, Any]) -> Any:
+        """POST /api/sessions 创建会话；body 透传（手机端懒创建用，默认空 dict）。"""
+        body = params if isinstance(params, dict) else {}
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                f"{self._settings.studio_base_url}/api/sessions",
+                headers=headers,
+                json=body,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"session create failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            if not isinstance(payload, dict) or not str(payload.get("session_id") or "").strip():
+                raise RuntimeError("session create reply missing 'session_id'")
+            return payload
+
+    async def _rpc_tools_registry(self) -> Any:
+        """GET /api/tools/registry 工具注册表（手机端「Near 会什么」只读展示）。"""
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/tools/registry",
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"tools registry failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            rows = payload.get("tools") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list):
+                raise RuntimeError("tools registry reply missing 'tools' array")
+            return rows
+
+    async def _rpc_mcp_servers(self, params: Dict[str, Any]) -> Any:
+        """GET /api/mcp/servers MCP 连接状态（只读；session_id 可选）。"""
+        session_id = str(params.get("session_id") or "").strip()
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/mcp/servers",
+                params={"session_id": session_id} if session_id else None,
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"mcp servers failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            rows = payload.get("servers") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list):
+                raise RuntimeError("mcp servers reply missing 'servers' array")
             return rows
 
     async def _rpc_session_messages(self, params: Dict[str, Any]) -> Any:

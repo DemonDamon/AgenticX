@@ -492,3 +492,67 @@ async def test_unbind_then_rebind(gateway: _Gateway, http: httpx.AsyncClient) ->
         headers=_mobile_headers(INSTALL_ID, r3.json()["mobile_token"]),
     )
     assert r4.status_code == 200
+
+
+# --------------------------------------------------------------------------
+# batch2：sessions.create / tools.registry / mcp.servers
+# --------------------------------------------------------------------------
+
+
+async def test_session_create_roundtrip(gateway: _Gateway, http: httpx.AsyncClient) -> None:
+    body = await _bind_ok(http)
+    h = _mobile_headers(INSTALL_ID, body["mobile_token"])
+    desktop = await gateway.start_desktop()
+
+    desktop.replies["sessions.create"] = {
+        "ok": True,
+        "data": {"ok": True, "session_id": "s-new", "session_name": None, "created_at": 1.0},
+    }
+    r = await http.post("/api/mobile/sessions", json={}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["session_id"] == "s-new"
+    frame = desktop.received[-1]
+    assert frame["method"] == "sessions.create"
+    assert frame["params"] == {}
+
+
+async def test_session_create_rpc_error_502(gateway: _Gateway, http: httpx.AsyncClient) -> None:
+    body = await _bind_ok(http)
+    h = _mobile_headers(INSTALL_ID, body["mobile_token"])
+    desktop = await gateway.start_desktop()
+    desktop.replies["sessions.create"] = {"ok": False, "error": "studio down"}
+    r = await http.post("/api/mobile/sessions", json={}, headers=h)
+    assert r.status_code == 502
+    assert r.json()["detail"] == "studio down"
+
+
+async def test_tools_registry_and_mcp_servers_roundtrip(
+    gateway: _Gateway, http: httpx.AsyncClient
+) -> None:
+    body = await _bind_ok(http)
+    h = _mobile_headers(INSTALL_ID, body["mobile_token"])
+    desktop = await gateway.start_desktop()
+
+    desktop.replies["tools.registry"] = {
+        "ok": True,
+        "data": [
+            {"name": "bash_exec", "description": "run shell", "category": "system", "is_meta": False}
+        ],
+    }
+    r = await http.get("/api/mobile/tools", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "tools": [
+            {"name": "bash_exec", "description": "run shell", "category": "system", "is_meta": False}
+        ]
+    }
+    assert desktop.received[-1]["method"] == "tools.registry"
+
+    desktop.replies["mcp.servers"] = {
+        "ok": True,
+        "data": [{"name": "m1", "connected": True, "connection_state": "healthy", "tool_count": 2}],
+    }
+    r = await http.get("/api/mobile/mcp", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["servers"][0]["name"] == "m1"
+    assert desktop.received[-1]["method"] == "mcp.servers"
