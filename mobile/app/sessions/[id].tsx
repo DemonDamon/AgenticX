@@ -13,96 +13,88 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../../src/api/client";
-import type { MobileMessage } from "../../src/api/types";
+import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
+import { ReasoningBlock } from "../../src/components/ReasoningBlock";
+import { ToolGroupCard } from "../../src/components/ToolGroupCard";
 import { useGateway } from "../../src/hooks/useGateway";
 import { notifyConfirmsChanged, onConfirmsChanged } from "../../src/lib/events";
 import { describeError } from "../../src/lib/errors";
+import { buildChatEntries, type ChatEntry } from "../../src/lib/messages";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
 
-/**
- * 消息流条目。后端消息无 id 字段，key 用 index+role+ts 组合兜底
- * （同批次 index 唯一，role+ts 降低跨批次碰撞）；本地乐观条目用 `local-` 前缀。
- */
-interface ChatEntry {
-  key: string;
-  role: "user" | "assistant" | "system";
-  text: string;
-  /** 本回合执行进度（仅本地 send 响应里有，历史消息无） */
-  progress?: string[];
-  /** 本地发送中的占位气泡 */
-  pending?: boolean;
-}
-
-/** 后端消息字段名兜底：text → content（弱类型 index signature）。 */
-function readText(m: MobileMessage): string {
-  const raw = typeof m.text === "string" ? m.text : m.content;
-  return typeof raw === "string" ? raw : "";
-}
-
-function MessageBubble({ entry }: { entry: ChatEntry }) {
-  const [progressOpen, setProgressOpen] = useState(false);
-
-  if (entry.role === "system") {
-    return (
-      <View style={styles.systemWrap}>
-        <Text style={styles.systemText}>{entry.text}</Text>
-      </View>
-    );
-  }
-
-  const isUser = entry.role === "user";
+function PendingBubble() {
   return (
-    <View
-      style={[
-        styles.bubbleColumn,
-        isUser ? styles.bubbleColumnUser : styles.bubbleColumnAssistant,
-      ]}
-    >
-      <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
-        {entry.pending === true ? (
-          <View style={styles.pendingRow}>
-            <ActivityIndicator size="small" color={brand.primary} />
-            <Text style={styles.pendingText}>正在执行…</Text>
-          </View>
-        ) : (
-          <Text style={isUser ? styles.bubbleUserText : styles.bubbleAssistantText}>
-            {entry.text}
-          </Text>
-        )}
+    <View style={[styles.bubble, styles.bubbleAssistant]}>
+      <View style={styles.pendingRow}>
+        <ActivityIndicator size="small" color={brand.primary} />
+        <Text style={styles.pendingText}>正在执行…</Text>
       </View>
-      {entry.progress !== undefined && entry.progress.length > 0 ? (
-        <Pressable
-          style={styles.progressToggle}
-          onPress={() => {
-            setProgressOpen(!progressOpen);
-          }}
-        >
-          <Text style={styles.progressToggleText}>
-            {progressOpen ? "收起进度" : `执行进度（${entry.progress.length}）`}
-          </Text>
-        </Pressable>
-      ) : null}
-      {progressOpen && entry.progress !== undefined ? (
-        <View style={styles.progressBox}>
-          {entry.progress.map((line, i) => (
-            <Text key={`${i}-${line.slice(0, 12)}`} style={styles.progressLine}>
-              {line}
-            </Text>
-          ))}
-        </View>
-      ) : null}
     </View>
   );
+}
+
+function AssistantBlock({ text, reasoning }: { text: string; reasoning?: string }) {
+  return (
+    <View style={styles.bubbleColumn}>
+      {reasoning !== undefined ? (
+        <View style={styles.reasoningWrap}>
+          <ReasoningBlock text={reasoning} />
+        </View>
+      ) : null}
+      <View style={[styles.bubble, styles.bubbleAssistant]}>
+        {text.trim() === "" ? (
+          <Text style={styles.bubbleAssistantText}>（无文本回复）</Text>
+        ) : (
+          <AssistantMarkdown text={text} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function MessageItem({ entry }: { entry: ChatEntry }) {
+  switch (entry.kind) {
+    case "user":
+      return (
+        <View style={styles.bubbleColumnUser}>
+          <View style={[styles.bubble, styles.bubbleUser]}>
+            <Text style={styles.bubbleUserText}>{entry.text}</Text>
+          </View>
+        </View>
+      );
+    case "assistant":
+      return <AssistantBlock text={entry.text} reasoning={entry.reasoning} />;
+    case "system":
+      return (
+        <View style={styles.systemWrap}>
+          <Text style={styles.systemText}>{entry.text}</Text>
+        </View>
+      );
+    case "toolGroup":
+      return (
+        <View style={styles.toolGroupWrap}>
+          <ToolGroupCard steps={entry.steps} />
+        </View>
+      );
+    case "pending":
+      return <PendingBubble />;
+  }
 }
 
 /**
  * 消息流（动态路由 /sessions/{id}）：
  * - 进入拉一次 messages；审批决策完成事件触发刷新
- * - 发送：乐观「正在执行」占位 → 成功追加 user+assistant(progress) → 失败移除占位 + toast + 草稿保留
+ * - 发送：乐观「正在执行」占位 → 成功后重拉消息线渲染结构化时间线
+ *   （Markdown / 工具分组卡 / 思考折叠）；重拉失败回退纯文本 reply
  * - pending_confirm 非空 → 广播事件让全局审批卡立即拉取
+ * - initialText：懒创建链路（new-task 页 replace 携带）自动发送首条消息
  */
 export default function SessionMessagesScreen() {
-  const { id, title } = useLocalSearchParams<{ id: string; title?: string }>();
+  const { id, title, initialText } = useLocalSearchParams<{
+    id: string;
+    title?: string;
+    initialText?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const { client } = useGateway();
 
@@ -130,13 +122,7 @@ export default function SessionMessagesScreen() {
   const fetchMessages = useCallback(async () => {
     if (client === null) return;
     const resp = await client.getMessages(id);
-    setEntries(
-      resp.messages.map((m, i) => ({
-        key: `${i}-${m.role}-${m.ts ?? "nots"}`,
-        role: m.role,
-        text: readText(m),
-      })),
-    );
+    setEntries(buildChatEntries(resp.messages));
   }, [client, id]);
 
   useEffect(() => {
@@ -156,42 +142,54 @@ export default function SessionMessagesScreen() {
     [fetchMessages, showToast],
   );
 
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if (text === "" || sending || client === null) return;
-    setSending(true);
-    const pendingKey = `local-pending-${Date.now()}`;
-    setEntries((prev) => [
-      ...(prev ?? []),
-      { key: pendingKey, role: "assistant", text: "", pending: true },
-    ]);
-    try {
-      const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
-      const ts = Date.now();
-      setEntries((prev) => [
-        ...(prev ?? []).filter((e) => e.key !== pendingKey),
-        { key: `local-user-${ts}`, role: "user", text },
-        {
-          key: `local-reply-${ts}`,
-          role: "assistant",
-          text: resp.reply,
-          progress: resp.progress.length > 0 ? resp.progress : undefined,
-        },
-      ]);
-      setDraft("");
-      if (resp.pending_confirm !== null) {
-        notifyConfirmsChanged();
+  const handleSend = useCallback(
+    async (override?: string) => {
+      const text = (override ?? draft).trim();
+      if (text === "" || sending || client === null) return;
+      setSending(true);
+      const pendingKey = `local-pending-${Date.now()}`;
+      setEntries((prev) => [...(prev ?? []), { kind: "pending", key: pendingKey }]);
+      try {
+        const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
+        setDraft("");
+        if (resp.pending_confirm !== null) {
+          notifyConfirmsChanged();
+        }
+        // 完成态结构化：从后端拉真实消息线（tool 分组 + reasoning + Markdown）
+        try {
+          await fetchMessages();
+        } catch {
+          setEntries((prev) => [
+            ...(prev ?? []).filter((e) => e.key !== pendingKey),
+            { kind: "assistant", key: `local-reply-${Date.now()}`, text: resp.reply },
+          ]);
+        }
+      } catch (err) {
+        setEntries((prev) => (prev ?? []).filter((e) => e.key !== pendingKey));
+        if (!(err instanceof ApiError && err.status === 401)) {
+          // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
+          showToast(`发送失败：${describeError(err)}`);
+        }
+      } finally {
+        setSending(false);
       }
-    } catch (err) {
-      setEntries((prev) => (prev ?? []).filter((e) => e.key !== pendingKey));
-      if (!(err instanceof ApiError && err.status === 401)) {
-        // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
-        showToast(`发送失败：${describeError(err)}`);
-      }
-    } finally {
-      setSending(false);
+    },
+    [draft, sending, client, id, showToast, fetchMessages],
+  );
+
+  // 懒创建链路收口：new-task 页 replace 过来时带 initialText 自动发送首条消息
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (
+      typeof initialText === "string" &&
+      initialText.trim() !== "" &&
+      !autoSentRef.current &&
+      client !== null
+    ) {
+      autoSentRef.current = true;
+      void handleSend(initialText.trim());
     }
-  }, [draft, sending, client, id, showToast]);
+  }, [initialText, client, handleSend]);
 
   // inverted 列表：数据倒序 + 容器翻转 = 视觉正序、最新贴底
   const displayData = useMemo(
@@ -238,7 +236,7 @@ export default function SessionMessagesScreen() {
           inverted
           keyExtractor={(item) => item.key}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <MessageBubble entry={item} />}
+          renderItem={({ item }) => <MessageItem entry={item} />}
         />
       )}
 
@@ -333,11 +331,15 @@ const styles = StyleSheet.create({
   bubbleColumnUser: {
     alignSelf: "flex-end",
     alignItems: "flex-end",
+    maxWidth: "84%",
+    marginVertical: spacing.xs,
   },
-  bubbleColumnAssistant: {
-    alignSelf: "flex-start",
-    alignItems: "flex-start",
+  reasoningWrap: {
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    marginBottom: spacing.xs,
   },
+  toolGroupWrap: { maxWidth: "92%", alignSelf: "flex-start" },
   bubble: {
     borderRadius: radius.lg,
     paddingHorizontal: spacing.lg - 2,
@@ -373,30 +375,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     color: brand.primaryDark,
     fontWeight: fontWeight.medium,
-  },
-  progressToggle: {
-    marginTop: spacing.xs,
-    paddingVertical: 2,
-  },
-  progressToggleText: {
-    fontSize: fontSize.caption,
-    color: brand.primary,
-    fontWeight: fontWeight.medium,
-  },
-  progressBox: {
-    backgroundColor: brand.cream,
-    borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: radius.sm + 2,
-    padding: spacing.sm + 2,
-    marginTop: spacing.xs,
-    gap: spacing.xs,
-    alignSelf: "stretch",
-  },
-  progressLine: {
-    fontSize: fontSize.caption,
-    color: color.textSecondary,
-    lineHeight: 18,
   },
   inputBar: {
     flexDirection: "row",
