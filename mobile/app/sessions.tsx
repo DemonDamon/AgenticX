@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { Stack, router } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -100,6 +100,20 @@ export default function SessionsScreen() {
 
   return (
     <View style={styles.page}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable
+              style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}
+              onPress={() => {
+                router.push("/new-task");
+              }}
+            >
+              <Text style={styles.plusText}>＋</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <FlatList
         data={sessions ?? []}
         keyExtractor={(item) => item.id}
@@ -400,5 +414,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     color: color.danger,
     textAlign: "center",
+  },
+  plusButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: brand.creamDeep,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.sm,
+  },
+  plusPressed: { backgroundColor: brand.primaryLight },
+  plusText: {
+    fontSize: 20,
+    lineHeight: 24,
+    color: brand.primaryDark,
+    fontWeight: fontWeight.bold,
   },
 });
