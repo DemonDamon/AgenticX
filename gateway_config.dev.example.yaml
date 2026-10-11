@@ -1,0 +1,25 @@
+# 本地真机联调专用 gateway 配置模板（真实 gateway_config.dev.yaml 不入库）
+#
+# 用途：手机 App（Near Mobile）与本机 Near 桌面端的扫码配对联调。
+# 启动：agx gateway -c gateway_config.dev.yaml
+#
+# 端口说明：默认 8081 在本机已被其它服务占用（CRM sidecar 等），故用 8787。
+# public_base_url 指向本机局域网 IP（示例 192.168.x.x），手机与 Mac 需同一 Wi-Fi。
+# 换网络后 IP 变了，改这里再重启 gateway 即可，二维码 URL 会随之更新。
+#
+# 使用：cp gateway_config.dev.example.yaml gateway_config.dev.yaml
+#       然后把 token 换成 Near 桌面端生成的设备令牌（仅本地保存，勿提交）。
+
+server:
+  host: "0.0.0.0"
+  port: 8787
+  public_base_url: "http://192.168.x.x:8787"
+
+reply_timeout_seconds: 300
+
+devices:
+  auth_tokens:
+    - device_id: "your-device-id"
+      token: "REPLACE_WITH_DESKTOP_GENERATED_DEVICE_TOKEN"
+      # Near 桌面端「扫码连接」用；POST /api/connect/session 复用此码
+      binding_code: "000000"

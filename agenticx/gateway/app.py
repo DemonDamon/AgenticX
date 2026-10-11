@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -34,14 +35,23 @@ from agenticx.gateway.config import (
 from agenticx.gateway.connect_page import render_connect_page
 from agenticx.gateway.connect_session import ConnectSessionManager
 from agenticx.gateway.device_manager import DeviceManager
+from agenticx.gateway.mobile_tokens import MobileTokenStore, resolve_mobile_tokens_path
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.router import MessageRouter
 from agenticx.gateway.user_device_map import UserDeviceMap, default_bindings_path
 
 logger = logging.getLogger(__name__)
 
+# /api/mobile/* 桥接 RPC 的等待时长下限（秒）：session.send 的长任务回合可能远超
+# cfg.reply_timeout_seconds，等待取两者最大值。测试可通过 monkeypatch 本常量缩短超时路径。
+MOBILE_RPC_TIMEOUT_FLOOR_SECONDS = 600.0
 
-def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
+
+def create_gateway_app(
+    config: Optional[GatewayServerConfig] = None,
+    *,
+    config_path: Optional[Path] = None,
+) -> FastAPI:
     cfg = config or GatewayServerConfig()
     app = FastAPI(title="AgenticX IM Gateway", version="0.1.0")
     app.add_middleware(
@@ -54,6 +64,7 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
 
     device_manager = DeviceManager()
     user_map = UserDeviceMap(default_bindings_path())
+    mobile_tokens = MobileTokenStore(resolve_mobile_tokens_path(config_path))
     tokens = device_token_table(cfg)
     bindings = binding_code_table(cfg)
     for code, did in bindings.items():
@@ -125,6 +136,7 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     app.state.config = cfg
     app.state.device_manager = device_manager
     app.state.user_map = user_map
+    app.state.mobile_tokens = mobile_tokens
     app.state.router = router
     app.state.feishu = feishu
     app.state.wecom = wecom
@@ -154,6 +166,34 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
         tok = (token or "").strip()
         if not did or not tok or tokens.get(did) != tok:
             raise HTTPException(status_code=401, detail="invalid device credentials")
+
+    def _require_mobile_auth(request: Request) -> str:
+        """校验 x-agx-install-id + x-agx-mobile-token 头，返回绑定的 device_id。"""
+        install_id = (request.headers.get("x-agx-install-id") or "").strip()
+        token = (request.headers.get("x-agx-mobile-token") or "").strip()
+        did = user_map.get_device("mobile", install_id) if install_id else None
+        if not install_id or not token or not did or not mobile_tokens.verify(install_id, did, token):
+            raise HTTPException(status_code=401, detail="invalid mobile credentials")
+        return did
+
+    async def _bridge_device_rpc(did: str, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """向桌面发 device_rpc 并同步等待 rpc_reply（桥接模式对齐 /api/command）。"""
+        if not device_manager.is_online(did):
+            raise HTTPException(status_code=503, detail="device offline")
+        cid = secrets.token_hex(16)
+        sent = await device_manager.send_to_device(
+            did,
+            {"type": "device_rpc", "correlation_id": cid, "method": method, "params": params},
+        )
+        if not sent:
+            raise HTTPException(status_code=503, detail="device send failed")
+        reply = await device_manager.wait_for_rpc_reply(
+            cid,
+            timeout=max(float(cfg.reply_timeout_seconds), MOBILE_RPC_TIMEOUT_FLOOR_SECONDS),
+        )
+        if reply is None:
+            raise HTTPException(status_code=504, detail="device reply timeout")
+        return reply
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -361,7 +401,11 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
                 detail="gateway_config: set binding_code for this device_id under devices.auth_tokens",
             )
         sess = connect_sessions.create(did, bcode)
-        base = str(request.base_url).rstrip("/")
+        # 二维码地址优先用显式配置的对外 base（真机联调填局域网 IP、
+        # 反代场景填公网域名）；未配置时退回请求 Host，此时若桌面端
+        # 用 localhost 访问，二维码对手机不可达。
+        public_base = (cfg.server.public_base_url or "").strip().rstrip("/")
+        base = public_base or str(request.base_url).rstrip("/")
         qr_url = f"{base}/connect/{sess.session_id}"
         out = sess.to_api_dict()
         out["qr_url"] = qr_url
@@ -412,6 +456,134 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
         user_map.remove_binding(plat, sid)
         return JSONResponse({"ok": True})
 
+    @app.post("/api/mobile/bind")
+    async def api_mobile_bind(request: Request) -> JSONResponse:
+        """手机扫码绑定：connect_session_id + install_id → device_id + mobile_token。"""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid json")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        connect_session_id = str(body.get("connect_session_id") or "").strip()
+        install_id = str(body.get("install_id") or "").strip()
+        if not connect_session_id or not install_id:
+            raise HTTPException(status_code=400, detail="connect_session_id and install_id required")
+        sess = connect_sessions.get(connect_session_id)
+        if sess is None or (sess.status != "bound" and time.time() >= sess.expires_at):
+            raise HTTPException(status_code=404, detail="connect session 无效或已过期")
+        existing = user_map.get_device("mobile", install_id)
+        if existing and existing != sess.device_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"install_id already bound to device {existing}; unbind first",
+            )
+        # 同设备重复 bind 幂等：覆盖式重签 token（旧 token 立即失效）
+        user_map.set_binding("mobile", install_id, sess.device_id)
+        token = mobile_tokens.issue(install_id, sess.device_id)
+        connect_sessions.try_complete_bind(sess.binding_code, sess.device_id, "mobile", install_id)
+        # config 目前无设备名字段；将来 DeviceAuthEntry 增加 name 时在此透传
+        return JSONResponse(
+            {"device_id": sess.device_id, "mobile_token": token, "desktop_name": None}
+        )
+
+    @app.get("/api/mobile/status")
+    async def api_mobile_status(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        return JSONResponse(
+            {"online": device_manager.is_online(did), "device_id": did, "desktop_name": None}
+        )
+
+    @app.get("/api/mobile/sessions")
+    async def api_mobile_sessions(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "sessions.list", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"sessions": reply.get("data")})
+
+    @app.get("/api/mobile/sessions/{session_id}/messages")
+    async def api_mobile_session_messages(session_id: str, request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "session.messages", {"session_id": session_id})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"messages": reply.get("data")})
+
+    @app.post("/api/mobile/sessions/{session_id}/send")
+    async def api_mobile_session_send(session_id: str, request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        install_id = (request.headers.get("x-agx-install-id") or "").strip()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid json")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        text = str(body.get("text") or "").strip()
+        sender_name = str(body.get("sender_name") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text required")
+        reply = await _bridge_device_rpc(
+            did,
+            "session.send",
+            {
+                "session_id": session_id,
+                "text": text,
+                "sender_name": sender_name,
+                "install_id": install_id,
+            },
+        )
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse(reply.get("data"))
+
+    @app.get("/api/mobile/confirms")
+    async def api_mobile_confirms(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        install_id = (request.headers.get("x-agx-install-id") or "").strip()
+        reply = await _bridge_device_rpc(did, "confirm.pending", {"install_id": install_id})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"confirms": reply.get("data")})
+
+    @app.post("/api/mobile/confirms/{request_id}")
+    async def api_mobile_confirm_respond(request_id: str, request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        install_id = (request.headers.get("x-agx-install-id") or "").strip()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid json")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        approved = bool(body.get("approved"))
+        reason = str(body.get("reason") or "").strip()
+        reply = await _bridge_device_rpc(
+            did,
+            "confirm.respond",
+            {
+                "install_id": install_id,
+                "request_id": request_id,
+                "approved": approved,
+                "reason": reason,
+            },
+        )
+        if not reply.get("ok"):
+            raise HTTPException(
+                status_code=404, detail=str(reply.get("error") or "confirm not found")
+            )
+        data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+        return JSONResponse({"ok": True, "message": str(data.get("message") or "")})
+
+    @app.delete("/api/mobile/bindings")
+    async def api_mobile_delete_binding(request: Request) -> JSONResponse:
+        install_id = (request.headers.get("x-agx-install-id") or "").strip()
+        _require_mobile_auth(request)
+        user_map.remove_binding("mobile", install_id)
+        mobile_tokens.revoke(install_id)
+        return JSONResponse({"ok": True})
+
     @app.websocket("/ws/device/{device_id}")
     async def ws_device(websocket: WebSocket, device_id: str) -> None:
         await websocket.accept()
@@ -450,6 +622,14 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
                     if cid and isinstance(payload, dict):
                         reply = GatewayReply.model_validate(payload)
                         dm.resolve_reply(cid, reply)
+                elif msg_type == "rpc_reply":
+                    # 设备 RPC 通道的回复：剥掉 type/correlation_id 后透传 {ok, data|error}
+                    cid = str(data.get("correlation_id") or "")
+                    if cid:
+                        payload = {
+                            k: v for k, v in data.items() if k not in ("type", "correlation_id")
+                        }
+                        dm.resolve_rpc_reply(cid, payload)
                 elif msg_type == "im_progress":
                     pass
         except WebSocketDisconnect:
@@ -464,7 +644,7 @@ def run_gateway_server(config_path: Path) -> None:
     import uvicorn
 
     cfg = load_gateway_config(config_path)
-    app = create_gateway_app(cfg)
+    app = create_gateway_app(cfg, config_path=config_path)
     uvicorn.run(
         app,
         host=cfg.server.host,

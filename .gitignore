@@ -141,3 +141,6 @@ harness-lab/*.log
 
 # Code deep research local clones (do not commit third-party source)
 research/codedeepresearch/*/upstream/
+
+# Local device-gateway config for real-device pairing (contains device token)
+gateway_config.dev.yaml

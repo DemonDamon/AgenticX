@@ -1,0 +1,24 @@
+{
+  "cli": {
+    "version": "latest",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "<TODO: Apple 账号创建后填>"
+      }
+    }
+  }
+}

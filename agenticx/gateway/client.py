@@ -55,6 +55,16 @@ class GatewayClientSettings:
     desktop_token: str
 
 
+@dataclass
+class TurnResult:
+    """一个 chat 回合的结构化结果（IM 文本格式化与设备 RPC 共用）。"""
+
+    text: str
+    progress_lines: list[str]
+    saw_final: bool = False
+    pending_confirm: Optional[PendingConfirm] = None
+
+
 def _merged_raw_config() -> Dict[str, Any]:
     global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
     project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
@@ -113,6 +123,18 @@ def _session_id_for_im(msg: GatewayMessage) -> str:
     return f"im-{msg.source}-{digest}"
 
 
+def _pending_confirm_dict(pending: Optional[PendingConfirm]) -> Optional[Dict[str, Any]]:
+    if pending is None:
+        return None
+    return {
+        "request_id": pending.request_id,
+        "agent_id": pending.agent_id,
+        "session_id": pending.session_id,
+        "question": pending.question,
+        "created_at": pending.created_at,
+    }
+
+
 class GatewayClient:
     """Maintains a WebSocket to the cloud gateway and executes chat turns locally."""
 
@@ -169,6 +191,14 @@ class GatewayClient:
                 payload = data.get("message")
                 if cid and isinstance(payload, dict):
                     asyncio.create_task(self._handle_im_message(ws, cid, payload))
+            elif msg_type == "device_rpc":
+                # 设备 RPC 通道：不经 self._sem（IM 回合串行信号量），只读方法直接并发；
+                # session.send 与 IM 回合在本地 studio 侧自然串行。
+                cid = str(data.get("correlation_id") or "")
+                method = str(data.get("method") or "")
+                params = data.get("params") if isinstance(data.get("params"), dict) else {}
+                if cid and method:
+                    asyncio.create_task(self._handle_device_rpc(ws, cid, method, params))
 
     async def _handle_im_message(
         self,
@@ -282,89 +312,122 @@ class GatewayClient:
                 external_id=msg.sender_id,
                 display_name=msg.sender_name or msg.sender_id,
             )
-            final_text = ""
-            group_chunks: list[str] = []
-            progress_lines: list[str] = []
-            saw_final = False
-            async with client.stream(
-                "POST",
-                f"{self._settings.studio_base_url}/api/chat",
-                headers=headers,
-                json=body,
-            ) as stream:
-                if stream.status_code >= 400:
-                    err_body = (await stream.aread()).decode("utf-8", errors="replace")
-                    raise RuntimeError(f"chat failed: {stream.status_code} {err_body[:300]}")
-                buf = ""
-                async for chunk in stream.aiter_text():
-                    buf += chunk
-                    while "\n\n" in buf:
-                        line, buf = buf.split("\n\n", 1)
-                        for part in line.split("\n"):
-                            if not part.startswith("data: "):
+            result = await self._execute_chat_turn_core(
+                client, body, session_id, sender_key=sender_key
+            )
+        if result.pending_confirm is not None:
+            prefix = ""
+            if result.progress_lines:
+                prefix = "执行进度：\n" + "\n".join(
+                    f"- {line}" for line in result.progress_lines[-6:]
+                )
+            hint = format_pending_hint(result.pending_confirm)
+            return ((prefix + "\n\n") if prefix else "") + hint
+        out = result.text
+        if result.progress_lines:
+            unique_progress = list(dict.fromkeys(result.progress_lines))
+            progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
+            if out:
+                out = f"{progress_block}\n\n{out}"
+            elif result.saw_final:
+                out = progress_block
+        return out or "（无文本回复）"
+
+    async def _execute_chat_turn_core(
+        self,
+        client: httpx.AsyncClient,
+        body: dict,
+        session_id: str,
+        *,
+        sender_key: str = "",
+    ) -> TurnResult:
+        """POST /api/chat（stream）→ SSE 采集 → TurnResult。
+
+        IM 回合与设备 RPC 的 session.send 共用；事件语义与 SSE 解析保持不变。
+        confirm_required 事件到达即提前结束（与原 _execute_turn 行为一致），
+        PendingConfirm 以 sender_key 写入 store（IM 用 "{source}:{sender_id}"，
+        mobile 用 "mobile:{install_id}"）。
+        """
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        final_text = ""
+        group_chunks: list[str] = []
+        progress_lines: list[str] = []
+        saw_final = False
+        async with client.stream(
+            "POST",
+            f"{self._settings.studio_base_url}/api/chat",
+            headers=headers,
+            json=body,
+        ) as stream:
+            if stream.status_code >= 400:
+                err_body = (await stream.aread()).decode("utf-8", errors="replace")
+                raise RuntimeError(f"chat failed: {stream.status_code} {err_body[:300]}")
+            buf = ""
+            async for chunk in stream.aiter_text():
+                buf += chunk
+                while "\n\n" in buf:
+                    line, buf = buf.split("\n\n", 1)
+                    for part in line.split("\n"):
+                        if not part.startswith("data: "):
+                            continue
+                        try:
+                            evt = json.loads(part[6:])
+                        except json.JSONDecodeError:
+                            continue
+                        et = str(evt.get("type") or "")
+                        data = evt.get("data") if isinstance(evt.get("data"), dict) else {}
+                        if et == "token":
+                            final_text += str(data.get("text") or "")
+                        elif et == "final":
+                            t = str(data.get("text") or "")
+                            if t:
+                                final_text = t
+                            saw_final = True
+                        elif et in {"group_reply", "group_clarification"}:
+                            chunk = format_im_group_reply(data)
+                            if chunk:
+                                group_chunks.append(chunk)
+                        elif et == "tool_call":
+                            tname = str(data.get("tool_name") or data.get("name") or "tool")
+                            progress_lines.append(f"开始：{tname}")
+                        elif et == "tool_result":
+                            tname = str(data.get("tool_name") or data.get("name") or "tool")
+                            progress_lines.append(f"完成：{tname}")
+                        elif et == "tool_progress":
+                            tname = str(data.get("name") or "tool")
+                            elapsed = data.get("elapsed_seconds")
+                            if isinstance(elapsed, (int, float)):
+                                sec = int(float(elapsed))
+                                if sec in {1, 3, 5} or sec % 15 == 0:
+                                    progress_lines.append(f"进行中：{tname} ({sec}s)")
+                        elif et == "confirm_required":
+                            request_id = str(data.get("id") or data.get("request_id") or "").strip()
+                            if not request_id:
                                 continue
-                            try:
-                                evt = json.loads(part[6:])
-                            except json.JSONDecodeError:
-                                continue
-                            et = str(evt.get("type") or "")
-                            data = evt.get("data") if isinstance(evt.get("data"), dict) else {}
-                            if et == "token":
-                                final_text += str(data.get("text") or "")
-                            elif et == "final":
-                                t = str(data.get("text") or "")
-                                if t:
-                                    final_text = t
-                                saw_final = True
-                            elif et in {"group_reply", "group_clarification"}:
-                                chunk = format_im_group_reply(data)
-                                if chunk:
-                                    group_chunks.append(chunk)
-                            elif et == "tool_call":
-                                tname = str(data.get("tool_name") or data.get("name") or "tool")
-                                progress_lines.append(f"开始：{tname}")
-                            elif et == "tool_result":
-                                tname = str(data.get("tool_name") or data.get("name") or "tool")
-                                progress_lines.append(f"完成：{tname}")
-                            elif et == "tool_progress":
-                                tname = str(data.get("name") or "tool")
-                                elapsed = data.get("elapsed_seconds")
-                                if isinstance(elapsed, (int, float)):
-                                    sec = int(float(elapsed))
-                                    if sec in {1, 3, 5} or sec % 15 == 0:
-                                        progress_lines.append(f"进行中：{tname} ({sec}s)")
-                            elif et == "confirm_required":
-                                request_id = str(data.get("id") or data.get("request_id") or "").strip()
-                                if not request_id:
-                                    continue
-                                question = str(data.get("question") or "需要你确认后继续执行。").strip()
-                                confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
-                                pending = PendingConfirm(
-                                    request_id=request_id,
-                                    agent_id=confirm_agent_id,
-                                    session_id=session_id,
-                                    question=question,
-                                    created_at=time.time(),
-                                )
+                            question = str(data.get("question") or "需要你确认后继续执行。").strip()
+                            confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
+                            pending = PendingConfirm(
+                                request_id=request_id,
+                                agent_id=confirm_agent_id,
+                                session_id=session_id,
+                                question=question,
+                                created_at=time.time(),
+                            )
+                            if sender_key:
                                 _PENDING_CONFIRMS.upsert(sender_key, pending)
-                                prefix = ""
-                                if progress_lines:
-                                    prefix = "执行进度：\n" + "\n".join(
-                                        f"- {line}" for line in progress_lines[-6:]
-                                    )
-                                hint = format_pending_hint(pending)
-                                return ((prefix + "\n\n") if prefix else "") + hint
-                            elif et == "error":
-                                raise RuntimeError(str(data.get("text") or "chat error"))
-            out = merge_im_sse_reply_text(final_text, group_chunks)
-            if progress_lines:
-                unique_progress = list(dict.fromkeys(progress_lines))
-                progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
-                if out:
-                    out = f"{progress_block}\n\n{out}"
-                elif saw_final:
-                    out = progress_block
-            return out or "（无文本回复）"
+                            return TurnResult(
+                                text=merge_im_sse_reply_text(final_text, group_chunks),
+                                progress_lines=progress_lines,
+                                saw_final=saw_final,
+                                pending_confirm=pending,
+                            )
+                        elif et == "error":
+                            raise RuntimeError(str(data.get("text") or "chat error"))
+        return TurnResult(
+            text=merge_im_sse_reply_text(final_text, group_chunks),
+            progress_lines=progress_lines,
+            saw_final=saw_final,
+        )
 
     async def _handle_confirm_command(
         self,
@@ -390,6 +453,25 @@ class GatewayClient:
             return "当前没有待确认任务。先发 `/pending` 查看。"
 
         approved = action == "approve"
+        try:
+            await self._submit_confirm_and_remove(sender_key, pending, approved)
+        except RuntimeError as exc:
+            return f"确认提交失败：{exc}"
+        if approved:
+            return f"已确认继续执行（request_id: `{pending.request_id}`）。"
+        reason = deny_reason or "Denied from IM"
+        return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
+
+    async def _submit_confirm_and_remove(
+        self,
+        sender_key: str,
+        pending: PendingConfirm,
+        approved: bool,
+    ) -> None:
+        """POST /api/confirm 提交审批结果，成功后从 store 移除（IM 与设备 RPC 共用）。
+
+        提交失败（>=400）抛 RuntimeError，携带响应体前 200 字符。
+        """
         headers = {"x-agx-desktop-token": self._settings.desktop_token}
         timeout = httpx.Timeout(30.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -404,13 +486,139 @@ class GatewayClient:
                 },
             )
             if confirm_resp.status_code >= 400:
-                err_body = confirm_resp.text[:200]
-                return f"确认提交失败：{err_body}"
+                raise RuntimeError(confirm_resp.text[:200])
         _PENDING_CONFIRMS.remove(sender_key, pending.request_id)
+
+    async def _handle_device_rpc(
+        self,
+        ws: WebSocketClientProtocol,
+        correlation_id: str,
+        method: str,
+        params: Dict[str, Any],
+    ) -> None:
+        """设备 RPC 分发：任何异常/未知 method 都回 ok:false，绝不让异常炸掉 WS 连接。"""
+        try:
+            data = await self._dispatch_device_rpc(method, params)
+            reply = {
+                "type": "rpc_reply",
+                "correlation_id": correlation_id,
+                "ok": True,
+                "data": data,
+            }
+        except Exception as exc:
+            logger.warning("device_rpc %s failed: %s", method, exc)
+            reply = {
+                "type": "rpc_reply",
+                "correlation_id": correlation_id,
+                "ok": False,
+                "error": str(exc) or exc.__class__.__name__,
+            }
+        try:
+            await ws.send(json.dumps(reply, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("rpc_reply send failed (cid=%s): %s", correlation_id, exc)
+
+    async def _dispatch_device_rpc(self, method: str, params: Dict[str, Any]) -> Any:
+        if method == "sessions.list":
+            return await self._rpc_sessions_list()
+        if method == "session.messages":
+            return await self._rpc_session_messages(params)
+        if method == "session.send":
+            return await self._rpc_session_send(params)
+        if method == "confirm.pending":
+            return await self._rpc_confirm_pending(params)
+        if method == "confirm.respond":
+            return await self._rpc_confirm_respond(params)
+        raise ValueError(f"unknown rpc method: {method}")
+
+    async def _rpc_sessions_list(self) -> Any:
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/sessions",
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"sessions list failed: {r.status_code} {r.text[:200]}")
+            # studio 返回 {"ok": true, "sessions": [...]}；设备 RPC 契约只透传数组，
+            # gateway 路由负责再包成 {"sessions": [...]}。兼容直接返回数组的形态
+            payload = r.json()
+            rows = payload.get("sessions") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list):
+                raise RuntimeError("sessions list reply missing 'sessions' array")
+            return rows
+
+    async def _rpc_session_messages(self, params: Dict[str, Any]) -> Any:
+        session_id = str(params.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id required")
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/session/messages",
+                params={"session_id": session_id},
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"session messages failed: {r.status_code} {r.text[:200]}")
+            # studio 返回 {"ok": true, "messages": [...]}；同样只透传数组，兼容裸数组
+            payload = r.json()
+            rows = payload.get("messages") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list):
+                raise RuntimeError("session messages reply missing 'messages' array")
+            return rows
+
+    async def _rpc_session_send(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = str(params.get("session_id") or "").strip()
+        text = str(params.get("text") or "")
+        sender_name = str(params.get("sender_name") or "").strip()
+        install_id = str(params.get("install_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id required")
+        if not install_id:
+            raise ValueError("install_id required")
+        if not text.strip():
+            raise ValueError("text required")
+        body = {
+            "session_id": session_id,
+            "user_input": text,
+            "user_display_name": sender_name or install_id,
+        }
+        timeout = httpx.Timeout(600.0, connect=30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            result = await self._execute_chat_turn_core(
+                client, body, session_id, sender_key=f"mobile:{install_id}"
+            )
+        return {
+            "reply": result.text,
+            "progress": list(dict.fromkeys(result.progress_lines)),
+            "pending_confirm": _pending_confirm_dict(result.pending_confirm),
+        }
+
+    async def _rpc_confirm_pending(self, params: Dict[str, Any]) -> list:
+        install_id = str(params.get("install_id") or "").strip()
+        rows = _PENDING_CONFIRMS.list_for_sender(f"mobile:{install_id}")
+        return [_pending_confirm_dict(r) for r in rows]
+
+    async def _rpc_confirm_respond(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        install_id = str(params.get("install_id") or "").strip()
+        request_id = str(params.get("request_id") or "").strip()
+        approved = bool(params.get("approved"))
+        reason = str(params.get("reason") or "").strip()
+        if not install_id:
+            raise ValueError("install_id required")
+        sender_key = f"mobile:{install_id}"
+        pending = _PENDING_CONFIRMS.get(sender_key, request_id=request_id or None)
+        if pending is None:
+            raise LookupError(f"pending confirm not found: {request_id or '(latest)'}")
+        await self._submit_confirm_and_remove(sender_key, pending, approved)
         if approved:
-            return f"已确认继续执行（request_id: `{pending.request_id}`）。"
-        reason = deny_reason or "Denied from IM"
-        return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
+            message = f"已确认继续执行（request_id: `{pending.request_id}`）。"
+        else:
+            message = f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason or 'Denied from mobile'}"
+        return {"ok": True, "message": message}
 
     async def _delete_session(self, session_id: str) -> None:
         headers = {"x-agx-desktop-token": self._settings.desktop_token}

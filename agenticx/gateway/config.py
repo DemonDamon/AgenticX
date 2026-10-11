@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 class ServerListenConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8081
+    # 二维码/connect 链接对外暴露的 base URL（含 scheme，可带端口）。
+    # 真机联调与反向代理场景必填：默认取请求的 Host（request.base_url），
+    # 桌面端若用 localhost/127.0.0.1 访问网关，二维码里就是手机不可达的地址。
+    public_base_url: str = ""
 
 
 class FeishuAdapterConfig(BaseModel):
