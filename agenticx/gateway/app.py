@@ -502,6 +502,36 @@ def create_gateway_app(
             raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
         return JSONResponse({"sessions": reply.get("data")})
 
+    @app.post("/api/mobile/sessions")
+    async def api_mobile_session_create(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        reply = await _bridge_device_rpc(did, "sessions.create", body)
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse(reply.get("data"))
+
+    @app.get("/api/mobile/tools")
+    async def api_mobile_tools(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "tools.registry", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"tools": reply.get("data")})
+
+    @app.get("/api/mobile/mcp")
+    async def api_mobile_mcp(request: Request) -> JSONResponse:
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "mcp.servers", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"servers": reply.get("data")})
+
     @app.get("/api/mobile/sessions/{session_id}/messages")
     async def api_mobile_session_messages(session_id: str, request: Request) -> JSONResponse:
         did = _require_mobile_auth(request)
