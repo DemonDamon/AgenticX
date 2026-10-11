@@ -199,15 +199,54 @@ export default function SessionMessagesScreen() {
       if (text === "" || sending || client === null) return false;
       setSending(true);
       const pendingKey = `local-pending-${Date.now()}`;
-      setEntries((prev) => [...(prev ?? []), { kind: "pending", key: pendingKey }]);
+      const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
+      setEntries((prev) => [...(prev ?? []), pendingEntry]);
+      // 伪流式：回合进行中每 2s 拉一次消息。桌面端在工具调用之间会增量落盘
+      // （incremental_persist），工具步骤得以逐步上屏；服务端尚未写入本条
+      // 用户消息前不应用快照，避免本地乐观 user 消息被旧快照顶掉。
+      let polling = true;
+      let pollInFlight = false;
+      const pollTimer = setInterval(() => {
+        if (!polling || pollInFlight || client === null) return;
+        pollInFlight = true;
+        void client
+          .getMessages(id)
+          .then((resp) => {
+            if (!polling) return;
+            const caughtUp = resp.messages.some(
+              (m) =>
+                m.role === "user" &&
+                typeof m.content === "string" &&
+                m.content.trim() === text,
+            );
+            if (!caughtUp) return;
+            setEntries([...buildChatEntries(resp.messages), pendingEntry]);
+          })
+          .catch(() => {
+            // 轮询失败静默：回合结束后的 fetchMessages 才是最终真相
+          })
+          .finally(() => {
+            pollInFlight = false;
+          });
+      }, 2000);
       try {
         const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
+        polling = false;
+        clearInterval(pollTimer);
         if (resp.pending_confirm !== null) {
           notifyConfirmsChanged();
         }
         // 完成态结构化：从后端拉真实消息线（tool 分组 + reasoning + Markdown）
         try {
           await fetchMessages();
+          // 延迟补拉 ×2：长回合的收尾消息可能在 send 返回后才落盘
+          // （桌面 SSE 先关流、summary 后写盘），+5s/+15s 兜底补齐
+          setTimeout(() => {
+            void fetchMessages().catch(() => undefined);
+          }, 5000);
+          setTimeout(() => {
+            void fetchMessages().catch(() => undefined);
+          }, 15_000);
         } catch {
           setEntries((prev) => [
             ...(prev ?? []).filter((e) => e.key !== pendingKey),
@@ -223,6 +262,8 @@ export default function SessionMessagesScreen() {
         }
         return false;
       } finally {
+        polling = false;
+        clearInterval(pollTimer);
         setSending(false);
       }
     },
