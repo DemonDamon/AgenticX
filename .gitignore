@@ -121,6 +121,8 @@ deploy/observability/pours/
 
 # RSI 数据飞轮产出物（数据集/轨迹库不入库，card 例外由脚本显式 add）
 datasets/
+# 决策层原始轨迹/标注数据不入库（捕获的终端输出可能含环境变量与凭证；汇总报告 .md/.json 例外）
+results/**/*.jsonl
 
 # harness comparison lab: 只忽略密钥与运行时产物，脚本/文档/图表入库
 harness-lab/.env
