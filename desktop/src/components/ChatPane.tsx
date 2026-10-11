@@ -8485,6 +8485,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (channelA || channelB || channelC) {
         // channelC = idle session whose last turn produced no visible reply
         // (ended-incomplete); channelA/B = a running turn gone silent.
+        if (channelC && !channelA && !channelB) {
+          // The desktop SSE closes before the final assistant reply is persisted
+          // (summary lands on disk afterwards), so the in-memory tail can lag
+          // until the next disk merge. Re-read the disk tail before concluding
+          // "no answer produced" — otherwise this window misreports a completed
+          // turn and tempts the user into stacking another round.
+          const merged = await mergeTailFromDisk(sid);
+          if (cancelled) return;
+          if (merged) {
+            const freshMsgs =
+              useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
+            if (
+              !shouldTriggerIncompleteEndStall(
+                execState,
+                sseActive,
+                freshMsgs,
+                graceMs,
+                messagesHydrated
+              )
+            ) {
+              if (stallState === "stall") setStallState("none");
+              return;
+            }
+          }
+        }
         setStallReason(channelA || channelB ? "silent" : "incomplete");
         setStallState("stall");
         return;
