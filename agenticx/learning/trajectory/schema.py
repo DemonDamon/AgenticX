@@ -7,6 +7,13 @@
 - token 真值对齐（SP24，设计规格移植自 JAZ RolloutRecorder）：reward 留在本记录
   （驱动侧），token-native rollout（agenticx.rl.rollout.TokenRollout）刻意不含
   reward，两者经 rollout_id 对齐——"轨迹是事实，reward 是判断"
+- 长时程 SLO 保留键（SP30 T5，全部可选；缺失=unknown 不许填 0 冒充）：
+  metadata["human_interventions"] int 本轨迹人工接管次数（一次就算）
+  metadata["wall_seconds"] int 端到端墙钟
+  metadata["checkpoints"] int 落盘检查点数（replay_ledger 口径）
+  metadata["resume_attempts"] int 断点恢复尝试次数
+  metadata["resume_completed"] int 恢复后最终完成（0/1）
+  指标消费方：agenticx.ops.rsi_slo.compute_slo
 """
 from __future__ import annotations
 
