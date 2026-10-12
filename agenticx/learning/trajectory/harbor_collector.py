@@ -28,6 +28,30 @@ def _load_json(path: Path):
     except (OSError, json.JSONDecodeError):
         return None
 
+
+def _parse_ts(ts) -> str | None:
+    """ISO8601（含 Z 结尾）→ datetime.fromisoformat 可吃的形式。"""
+    if not isinstance(ts, str) or not ts.strip():
+        return None
+    import datetime
+    s = ts.strip().replace("Z", "+00:00")
+    try:
+        return datetime.datetime.fromisoformat(s).isoformat()
+    except ValueError:
+        return None
+
+
+def derive_wall_seconds(started_at, finished_at) -> int | None:
+    """真实墙钟派生（SP30 埋点）：started/finished ISO 时间戳差（秒）。
+    任一缺失/非法 → None（不造假，metadata 不写该键）。"""
+    import datetime
+    a, b = _parse_ts(started_at), _parse_ts(finished_at)
+    if a is None or b is None:
+        return None
+    delta = (datetime.datetime.fromisoformat(b)
+             - datetime.datetime.fromisoformat(a)).total_seconds()
+    return int(delta) if delta >= 0 else None
+
 def _extract_tool_calls(messages: list[dict]) -> list[ToolCallRecord]:
     """从消息中提取工具调用序列（OpenAI 格式），按 tool_call_id 配对结果。
 
@@ -84,6 +108,15 @@ def collect_trial(trial_dir: Path) -> RSITrajectory | None:
     cfg = _load_json(trial_dir / "config.json") or {}
     task_name = result.get("task_name") or cfg.get("task", {}).get("name", "").split("/")[-1]
     model = traj.get("model") or "unknown"
+    # SP30 埋点：真实墙钟（顶层时间戳优先，回退 agent_execution；缺失不写键）
+    ae = result.get("agent_execution") or {}
+    wall = (derive_wall_seconds(result.get("started_at"),
+                                result.get("finished_at"))
+            or derive_wall_seconds(ae.get("started_at"), ae.get("finished_at")))
+    metadata = {"agent": traj.get("agent"), "iterations": traj.get("iterations"),
+                "job": trial_dir.parent.name, "verifier_raw": vr}
+    if wall is not None:
+        metadata["wall_seconds"] = wall            # schema T5 保留键
     return RSITrajectory(
         source="harbor-tb40",
         task_id=task_name,
@@ -96,8 +129,7 @@ def collect_trial(trial_dir: Path) -> RSITrajectory | None:
         decision_lineage=_lineage(tool_calls, reward),
         token_usage=traj.get("totals") or {},
         created_at=result.get("started_at") or "",
-        metadata={"agent": traj.get("agent"), "iterations": traj.get("iterations"),
-                  "job": trial_dir.parent.name, "verifier_raw": vr},
+        metadata=metadata,
     )
 
 def collect_jobs(jobs_dir: Path, job_pattern: str = "*tb40*") -> Iterator[RSITrajectory]:
