@@ -19,7 +19,12 @@ import { ToolGroupCard } from "../../src/components/ToolGroupCard";
 import { useGateway } from "../../src/hooks/useGateway";
 import { notifyConfirmsChanged, onConfirmsChanged } from "../../src/lib/events";
 import { describeError } from "../../src/lib/errors";
-import { buildChatEntries, applyStreamDelta, type ChatEntry } from "../../src/lib/messages";
+import {
+  buildChatEntries,
+  applyStreamDelta,
+  visibleStreamText,
+  type ChatEntry,
+} from "../../src/lib/messages";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
 
 function PendingBubble() {
@@ -79,14 +84,24 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
       );
     case "pending":
       return <PendingBubble />;
-    case "streaming":
+    case "streaming": {
       // 回合进行中的 token 增量：纯 Text 轻量渲染（避免 Markdown 高频重解析），
-      // 回合结束由 fetchMessages 的结构化终态替换
+      // 回合结束由 fetchMessages 的结构化终态替换。思考块原文（<thinking>）
+      // 剥除不外显；剥后为空（思考阶段）显示占位提示。
+      const visible = visibleStreamText(entry.text);
       return (
         <View style={[styles.bubble, styles.bubbleAssistant]}>
-          <Text style={styles.bubbleAssistantText}>{entry.text}</Text>
+          {visible.trim() === "" ? (
+            <View style={styles.pendingRow}>
+              <ActivityIndicator size="small" color={brand.primary} />
+              <Text style={styles.pendingText}>思考中…</Text>
+            </View>
+          ) : (
+            <Text style={styles.bubbleAssistantText}>{visible}</Text>
+          )}
         </View>
       );
+    }
   }
 });
 
@@ -209,11 +224,57 @@ export default function SessionMessagesScreen() {
       const pendingKey = `local-pending-${Date.now()}`;
       const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
       setEntries((prev) => [...(prev ?? []), pendingEntry]);
-      // 真流式：订阅回合 token 流（WS turn_delta），收到增量即打字机上屏；
+      // 打字机平滑：网络帧（桌面侧 120ms 节流聚合）较粗，直接上屏是
+      // 10+ 字一帧的跳变。这里把增量拆成字符入队，按 ~45ms/帧 匀速消费
+      // 呈现逐字打字机效果；仅当积压严重（模型产出远快于播放）才升速
+      // 追赶，短回复始终保有可感知的打字节奏。回合结束不 flush 余量，
+      // 而是等队列播空（waitSmoothDrain）再做终态替换，避免终局跳变。
+      const smoothBuf: string[] = [];
+      let smoothTimer: ReturnType<typeof setInterval> | null = null;
+      let smoothDoneResolve: (() => void) | null = null;
+      const consumeSmooth = () => {
+        if (smoothBuf.length === 0) {
+          if (smoothTimer !== null) {
+            clearInterval(smoothTimer);
+            smoothTimer = null;
+          }
+          if (smoothDoneResolve !== null) {
+            const resolve = smoothDoneResolve;
+            smoothDoneResolve = null;
+            resolve();
+          }
+          return;
+        }
+        const take =
+          smoothBuf.length > 150 ? 4 : smoothBuf.length > 60 ? 3 : smoothBuf.length > 25 ? 2 : 1;
+        const piece = smoothBuf.splice(0, take).join("");
+        setEntries((prev) => applyStreamDelta(prev, pendingKey, piece));
+      };
+      const stopSmooth = () => {
+        if (smoothTimer !== null) {
+          clearInterval(smoothTimer);
+          smoothTimer = null;
+        }
+        smoothDoneResolve = null;
+      };
+      const waitSmoothDrain = () =>
+        new Promise<void>((resolve) => {
+          if (smoothTimer === null && smoothBuf.length === 0) {
+            resolve();
+            return;
+          }
+          smoothDoneResolve = resolve;
+          // 兜底：队列异常播不空（不应发生）时强制放行，避免 sending 卡死
+          setTimeout(resolve, 30_000);
+        });
+      // 真流式：订阅回合 token 流（WS turn_delta），增量入队平滑上屏；
       // 连接失败静默降级为下面的轮询伪流式，不影响回合本身
       const streamHandle = client.openTurnStream(id, {
         onDelta: (delta) => {
-          setEntries((prev) => applyStreamDelta(prev, pendingKey, delta));
+          smoothBuf.push(...delta);
+          if (smoothTimer === null) {
+            smoothTimer = setInterval(consumeSmooth, 45);
+          }
         },
       });
       // 伪流式：回合进行中每 2s 拉一次消息。桌面端在工具调用之间会增量落盘
@@ -254,6 +315,8 @@ export default function SessionMessagesScreen() {
         const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
         polling = false;
         clearInterval(pollTimer);
+        // 回合结束：打字机余量按节奏播完（不 flush 跳变），再做终态结构化替换
+        await waitSmoothDrain();
         if (resp.pending_confirm !== null) {
           notifyConfirmsChanged();
         }
@@ -277,6 +340,7 @@ export default function SessionMessagesScreen() {
         }
         return true;
       } catch (err) {
+        stopSmooth();
         setEntries((prev) =>
           (prev ?? []).filter((e) => e.key !== pendingKey && e.kind !== "streaming"),
         );
@@ -288,6 +352,7 @@ export default function SessionMessagesScreen() {
       } finally {
         polling = false;
         clearInterval(pollTimer);
+        stopSmooth();
         streamHandle?.close();
         setSending(false);
       }

@@ -135,3 +135,21 @@ export function applyStreamDelta(
   }
   return [...list, { kind: "streaming", key: streamKey, text: delta }];
 }
+
+/**
+ * streaming 气泡的可见文本：token 流是模型原始输出，含 <thinking> 块
+ * 原文（终态由结构化替换渲染思考折叠，streaming 阶段只外显答案部分）。
+ * 完整闭合块、流式进行中的未闭合尾部、以及被 delta 分片截断的标签前缀
+ * （尾部 "<" / "<thi" 等）一并剥除——截断前缀只会让该字符晚一帧出现，
+ * 不会丢失。
+ */
+export function visibleStreamText(text: string): string {
+  let visible = text.replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/g, "");
+  for (let n = Math.min(9, visible.length); n > 0; n -= 1) {
+    if (visible.endsWith("<thinking>".slice(0, n))) {
+      visible = visible.slice(0, -n);
+      break;
+    }
+  }
+  return visible;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MobileMessage } from "../api/types";
-import { applyStreamDelta, buildChatEntries } from "./messages";
+import { applyStreamDelta, buildChatEntries, visibleStreamText, type ChatEntry } from "./messages";
 
 function toolMsg(over: Partial<MobileMessage>): MobileMessage {
   return {
@@ -103,7 +103,7 @@ describe("applyStreamDelta", () => {
   });
 
   it("pending 已被移除（快照重建过）时尾部追加", () => {
-    const base = [{ kind: "user", key: "u1", text: "hi" }];
+    const base: ChatEntry[] = [{ kind: "user", key: "u1", text: "hi" }];
     const next = applyStreamDelta(base, "k", "x");
     expect(next).toHaveLength(2);
     expect(next[1].kind).toBe("streaming");
@@ -120,5 +120,27 @@ describe("applyStreamDelta", () => {
     applyStreamDelta(list, "local-pending-1", "text");
     expect(list).toHaveLength(1);
     expect(list[0].kind).toBe("pending");
+  });
+});
+
+describe("visibleStreamText", () => {
+  it("剥除完整闭合的 thinking 块", () => {
+    expect(visibleStreamText("<thinking>想一下</thinking>答案是1")).toBe("答案是1");
+  });
+
+  it("剥除流式进行中的未闭合尾部", () => {
+    expect(visibleStreamText("<thinking>想")).toBe("");
+    expect(visibleStreamText("<thinking>想一下</thinking>答<thinking>继续想")).toBe("答");
+  });
+
+  it("剥除被分片截断的标签前缀", () => {
+    expect(visibleStreamText("答案")).toBe("答案");
+    expect(visibleStreamText("答案<thi")).toBe("答案");
+    expect(visibleStreamText("<")).toBe("");
+  });
+
+  it("多轮 thinking 块全部剥除，答案间内容保留", () => {
+    const text = "<thinking>a</thinking>第一段<thinking>b</thinking>第二段";
+    expect(visibleStreamText(text)).toBe("第一段第二段");
   });
 });
