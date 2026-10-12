@@ -1,0 +1,188 @@
+/**
+ * 市场图标纯函数层:确定性 hash 选渐变、名称关键词选行业图标。
+ * 不依赖 React/lucide,便于单测;组件层见 MarketIcon.tsx。
+ */
+
+/** djb2 字符串 hash:同名输入永远得到同一结果。 */
+export function hashName(name: string): number {
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/** 渐变底座色板:冷暖搭配的品牌感渐变(Tailwind class 片段)。 */
+export const MARKET_GRADIENTS: readonly string[] = [
+  "from-sky-500 to-blue-600",
+  "from-violet-500 to-purple-600",
+  "from-emerald-500 to-teal-600",
+  "from-amber-500 to-orange-600",
+  "from-rose-500 to-pink-600",
+  "from-cyan-500 to-sky-600",
+  "from-indigo-500 to-violet-600",
+  "from-lime-500 to-green-600",
+];
+
+/** 按名称确定性选取渐变:同名稳定,不同名尽量散开。 */
+export function pickGradientFor(name: string): string {
+  return MARKET_GRADIENTS[hashName(name) % MARKET_GRADIENTS.length];
+}
+
+/** glyph key 集合(组件层映射到 lucide 图标)。 */
+export type MarketIconGlyph =
+  | "map"
+  | "search"
+  | "video"
+  | "image"
+  | "file"
+  | "code"
+  | "database"
+  | "mail"
+  | "chat"
+  | "globe"
+  | "git"
+  | "music"
+  | "languages"
+  | "flask"
+  | "cloud"
+  | "sparkles";
+
+/** 关键词规则:顺序即优先级,先具体后一般;中英文都覆盖。 */
+const GLYPH_RULES: ReadonlyArray<readonly [readonly string[], MarketIconGlyph]> = [
+  [["地图", "map", "gaode", "amap"], "map"],
+  [["搜索", "search", "fetch", "bing", "抓取"], "search"],
+  [["视频", "video", "movie", "film", "剪辑"], "video"],
+  [["图片", "图像", "image", "photo", "画", "绘图", "视觉", "海报"], "image"],
+  [["文档", "表格", "幻灯", "doc", "sheet", "ppt", "excel", "word", "pdf", "笔记"], "file"],
+  [["代码", "前端", "code", "编程", "react", "vue", "css"], "code"],
+  [["数据", "数据库", "data", "sql", "bi", "报表"], "database"],
+  [["邮件", "mail", "email", "smtp"], "mail"],
+  [["聊天", "chat", "im", "message", "通讯", "客服"], "chat"],
+  [["浏览器", "browser", "chrome", "网页", "web", "http"], "globe"],
+  [["git", "github", "gitlab", "仓库", "repo"], "git"],
+  [["音乐", "music", "audio", "音频", "语音"], "music"],
+  [["翻译", "translate", "语言", "language", "i18n"], "languages"],
+  [["测试", "test", "qa", "自动化"], "flask"],
+  [["天气", "weather", "气候"], "cloud"],
+];
+
+/** 按名称关键词选行业图标;无命中回退 sparkles。 */
+export function pickMarketIconGlyph(name: string): MarketIconGlyph {
+  const n = name.toLowerCase();
+  for (const [keywords, glyph] of GLYPH_RULES) {
+    if (keywords.some((k) => n.includes(k))) return glyph;
+  }
+  return "sparkles";
+}
+
+/** 品牌图标:brand key 经 brand-assets.ts 解析为本地打包资产或 CDN 矢量。 */
+export type MarketBrandIcon = { brand: string };
+
+/**
+ * 品牌关键词 → brand key。
+ * 国际品牌 key 即 Simple Icons slug(CDN 兜底);国产服务 key 对应本地打包资产
+ * (brand-assets.ts)。规则顺序即优先级,先具体后一般。CDN 不可达时组件层回退渐变。
+ */
+const BRAND_RULES: ReadonlyArray<readonly [readonly string[], string]> = [
+  [["supabase"], "supabase"],
+  [["github"], "github"],
+  [["agent mail", "qqmail", "agently mail", "agently"], "qqmail"],
+  [["slack"], "slack"],
+  [["gmail"], "gmail"],
+  [["google drive", "gdrive"], "gdrive"],
+  [["airtable"], "airtable"],
+  [["bigquery"], "bigquery"],
+  [["gitlab"], "gitlab"],
+  [["anthropic", "claude"], "anthropic"],
+  [["deepseek"], "deepseek"],
+  [["gemini"], "googlegemini"],
+  [["ollama"], "ollama"],
+  [["notion"], "notion"],
+  [["figma"], "figma"],
+  [["docker"], "docker"],
+  [["kubernetes", "k8s"], "kubernetes"],
+  [["postgres"], "postgresql"],
+  [["mysql"], "mysql"],
+  [["mongodb", "mongo"], "mongodb"],
+  [["redis"], "redis"],
+  [["elasticsearch"], "elasticsearch"],
+  [["jenkins"], "jenkins"],
+  [["sentry"], "sentry"],
+  [["stripe"], "stripe"],
+  [["grafana"], "grafana"],
+  [["vercel"], "vercel"],
+  [["cloudflare"], "cloudflare"],
+  [["轻流", "qingflow"], "qingflow"],
+  [["知识星球", "zsxq"], "zsxq"],
+  [["高德", "amap", "gaode"], "amap"],
+  [["腾讯地图"], "tencent-maps"],
+  [["腾讯文档"], "tencent-docs"],
+  [["wps"], "wps"],
+  [["zoom"], "zoom"],
+  [["gitee"], "gitee"],
+  [["官方Linear", "linear"], "linear"],
+  [["asana"], "asana"],
+  [["outlook"], "outlook"],
+  [["天眼查", "tianyancha"], "tianyancha"],
+  [["企查查", "qichacha"], "qichacha"],
+  [["钉钉", "钉钉CLI", "dingtalk", "dingding"], "dingtalk"],
+  [["恒生聚源", "gildata", "聚源"], "gildata"],
+  [["盈米", "yingmi"], "yingmi"],
+  [["进门", "comein"], "comein"],
+  [["深度智联", "dichan"], "dichan"],
+  [["快递100", "kuaidi100", "快递"], "kuaidi100"],
+  [["法律之星", "lawstar"], "lawstar"],
+  [["e签宝", "esign", "esignbao"], "esign"],
+  [["北大法宝", "pkulaw", "法宝"], "pkulaw"],
+  [["销售易", "neocrm"], "neocrm"],
+  [["阿里云", "aliyun", "alibabacloud"], "alibabacloud"],
+    [["CNB", "cnb"], "cnb"],
+  [["EdgeOne", "edgeone"], "edgeone"],
+  [["法研", "fayan"], "fayan"],
+  [["Gangtise", "gangtise"], "gangtise"],
+  [["同花顺", "ifind", "iFinD"], "ifind"],
+  [["IMA", "ima"], "ima"],
+  [["金数据", "jinshuju"], "jinshuju"],
+  [["腾讯乐享", "lexiang"], "lexiang"],
+  [["Moka", "moka"], "moka"],
+  [["摩知轮", "mozlen"], "mozlen"],
+  [["启信慧眼", "qixin"], "qixin"],
+  [["通达信", "tdx"], "tdx"],
+  [["腾讯问卷", "wj"], "wj"],
+  [["威科先行", "wkinfo", "威科"], "wkinfo"],
+  [["WPS 项目管理", "wps-project"], "wps-project"],
+  [["小鹅通", "xiaoe"], "xiaoe"],
+  [["华宇元典", "yuandian", "元典"], "yuandian"],
+  [["智慧芽", "zhihuiya"], "zhihuiya"],
+  [["微信", "wechat", "weixin"], "wechat"],
+  // 国产服务(本地打包官方图标,见 assets/marketplace/brands)
+  [["飞书", "lark", "feishu"], "feishu"],
+  [["博查", "bocha"], "bocha"],
+  [["智谱", "zhipu", "chatglm"], "zhipu"],
+  [["通义", "千问", "qwen", "tongyi"], "qwen"],
+  [["kimi", "moonshot", "月之暗面"], "kimi"],
+  [["豆包", "doubao"], "doubao"],
+  [["混元", "hunyuan"], "hunyuan"],
+  [["minimax"], "minimax"],
+  [["百川", "baichuan"], "baichuan"],
+  [["腾讯", "tencent"], "tencent"],
+  [["百度", "baidu"], "baidu"],
+  [["知乎", "zhihu"], "zhihu"],
+  [["哔哩哔哩", "b站", "bilibili"], "bilibili"],
+  [["淘宝", "taobao"], "taobao"],
+  [["小红书", "xiaohongshu"], "xiaohongshu"],
+  [["美团", "meituan"], "meituan"],
+  [["快手", "kuaishou"], "kuaishou"],
+  [["秘塔", "metaso"], "metaso"],
+  [["mineru"], "mineru"],
+];
+
+/** 按名称关键词匹配品牌图标;无命中返回 null。 */
+export function pickBrandIcon(name: string): MarketBrandIcon | null {
+  const n = name.toLowerCase();
+  for (const [keywords, brand] of BRAND_RULES) {
+    if (keywords.some((k) => n.includes(k))) return { brand };
+  }
+  return null;
+}

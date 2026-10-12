@@ -26,6 +26,7 @@ import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { mapAvatarsFromApi, mapGroupsFromApi } from "../../utils/splash-preload-core";
 import { resolveGroupTitle } from "../../utils/quick-compose";
+import { EmptyStateHeaderFigures } from "../brand/EmptyStateCornerLotties";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   ClipboardList,
@@ -154,24 +155,27 @@ export function ProjectsView() {
 
   return (
     <MainViewShell>
-      <div className="mb-5 flex items-start justify-between gap-4">
+      <div className="mb-5 flex items-start justify-between gap-4 pb-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-text-strong">{t("groups.title")}</h2>
           <p className="mt-1 text-sm text-text-muted">
             {t("groups.subtitle")}
           </p>
+          <button
+            type="button"
+            className="mt-3 flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+            onClick={() => {
+              setSelectedTemplate(null);
+              setEditorState({ mode: "create" });
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            {t("groups.newGroup")}
+          </button>
         </div>
-        <button
-          type="button"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-          onClick={() => {
-            setSelectedTemplate(null);
-            setEditorState({ mode: "create" });
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          {t("groups.newGroup")}
-        </button>
+        <div className="hidden shrink-0 md:block [@media(max-height:560px)]:hidden">
+          <EmptyStateHeaderFigures />
+        </div>
       </div>
 
       {/* My groups */}

@@ -1,0 +1,160 @@
+import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import type { Message } from "../../store";
+import {
+  jevActionLabelZh,
+  jevConfidencePct,
+  jevFallbackLineZh,
+  isJevHardFallback,
+  jevGateLabelZh,
+  jevKbActionLabel,
+  jevPayloadFromMessage,
+  jevTargetLabel,
+  type JevDecisionPayload,
+} from "../../utils/jev-decision";
+import {
+  ASSISTANT_ICON_RAIL_CLASS,
+  GROUP_INLINE_CARD_SHELL_CLASS,
+  GROUP_SENDER_AVATAR_SLOT_CLASS,
+  GROUP_SENDER_NAME_CLASS,
+  GROUP_STANDALONE_RAIL_ROW_CLASS,
+} from "./im-layout";
+import { TypesafeIcon } from "../../utils/provider-icons";
+
+function JevMark({
+  pending = false,
+  avatar = false,
+}: {
+  pending?: boolean;
+  avatar?: boolean;
+}) {
+  const box = avatar ? `flex ${GROUP_SENDER_AVATAR_SLOT_CLASS} shrink-0 items-center justify-center` : ASSISTANT_ICON_RAIL_CLASS;
+  const glyph = avatar ? 18 : 13;
+  return (
+    <div
+      className={`${box} rounded-full bg-[#111] text-white`}
+      aria-hidden
+    >
+      <TypesafeIcon size={glyph} />
+      {pending ? (
+        <span className="sr-only">pending</span>
+      ) : null}
+    </div>
+  );
+}
+
+function ThinkingDots() {
+  return (
+    <span className="inline-flex items-center gap-1" aria-hidden>
+      <span className="h-1 w-1 rounded-full bg-text-faint agx-dot-pulse" />
+      <span className="h-1 w-1 rounded-full bg-text-faint agx-dot-pulse" style={{ animationDelay: "0.2s" }} />
+      <span className="h-1 w-1 rounded-full bg-text-faint agx-dot-pulse" style={{ animationDelay: "0.4s" }} />
+    </span>
+  );
+}
+
+function GateBadge({ gate }: { gate: string }) {
+  if (gate !== "auto" && gate !== "review") return null;
+  const ok = gate === "auto";
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10px] text-text-muted">
+      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-400"}`} />
+      {jevGateLabelZh(gate)}
+    </span>
+  );
+}
+
+function actionLine(payload: JevDecisionPayload): string {
+  if (payload.purpose === "kb_auto") return jevKbActionLabel(payload);
+  return `${jevActionLabelZh(payload.action, payload.purpose)} · ${jevTargetLabel(payload)}`;
+}
+
+export function JevDecisionCard({
+  message,
+  groupChatRail = false,
+}: {
+  message: Message;
+  groupChatRail?: boolean;
+}) {
+  const payload = jevPayloadFromMessage(message);
+  const [openProbs, setOpenProbs] = useState(false);
+  if (!payload) return null;
+  const model = payload.model || payload.requested_model;
+  const pct = jevConfidencePct(payload.confidence);
+  const shell = groupChatRail
+    ? `${GROUP_INLINE_CARD_SHELL_CLASS} ${GROUP_STANDALONE_RAIL_ROW_CLASS}`
+    : `my-2 min-w-0 w-full max-w-[520px] ${GROUP_STANDALONE_RAIL_ROW_CLASS}`;
+  const pending = payload.phase === "pending";
+  const fallback = !pending && payload.source !== "jev";
+  const entries = Object.entries(payload.probabilities);
+
+  return (
+    <div
+      className={shell}
+      data-slot="jev-decision-card"
+      data-jev-rail={groupChatRail ? "group" : "meta"}
+    >
+      <JevMark pending={pending} avatar={groupChatRail} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={GROUP_SENDER_NAME_CLASS}>Jev</span>
+          {model ? (
+            <span className="font-mono text-[10px] text-text-faint">{model}</span>
+          ) : null}
+          {!pending && !fallback ? <GateBadge gate={payload.gate} /> : null}
+        </div>
+        {pending ? (
+          <div className="mt-0.5 flex items-center gap-2 text-[12px] text-text-muted">
+            <ThinkingDots />
+            <span>
+              {payload.purpose === "kb_auto" ? "Jev 正在判断是否检索" : "Jev 正在判断谁来回复"}
+            </span>
+          </div>
+        ) : fallback ? (
+          <div
+            className={`mt-0.5 text-[12px] ${
+              isJevHardFallback(payload.fallback_reason) ? "text-red-400" : "text-amber-500"
+            }`}
+          >
+            {jevFallbackLineZh(payload.fallback_reason)}
+          </div>
+        ) : (
+          <>
+            <div className="mt-0.5 text-[12px] text-text-standard">{actionLine(payload)}</div>
+            {pct != null ? (
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="text-[11px] text-text-muted">置信度 {pct}%</span>
+                <div className="h-0.5 min-w-[64px] flex-1 overflow-hidden rounded-full bg-border">
+                  <div
+                    className="h-full bg-text-strong"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {entries.length > 0 ? (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-text-faint"
+                onClick={() => setOpenProbs((v) => !v)}
+              >
+                {openProbs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                概率
+              </button>
+            ) : null}
+            {openProbs ? (
+              <ul className="mt-0.5 space-y-0.5 text-[11px] text-text-muted">
+                {entries.map(([key, value]) => (
+                  <li key={key} className="flex justify-between gap-3">
+                    <span>{jevActionLabelZh(key, payload.purpose)}</span>
+                    <span className="font-mono tabular-nums">{value.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

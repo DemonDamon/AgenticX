@@ -1,6 +1,7 @@
 /**
  * Composer keystroke policy: keep contenteditable as source of truth and only
- * commit React state when the UI actually needs it (empty ↔ non-empty, @mention).
+ * commit React state when the UI actually needs it (empty ↔ non-empty, @mention,
+ * slash-command query). Ordinary prose must not setState on every keystroke.
  */
 
 export const AT_MENTION_SEARCH_DEBOUNCE_MS = 100;
@@ -20,6 +21,29 @@ export function matchTrailingAtMention(value: string): string | null {
   const match = value.match(TRAILING_AT_RE);
   if (!match) return null;
   return match[1] ?? "";
+}
+
+const SLASH_COMMAND_RE = /^\/([a-z0-9]*(?:-[a-z0-9]*)*)$/;
+
+/** Whole composer is `/` plus a lowercase command query, caret at the end. */
+export function matchSlashCommandQuery(value: string, caretOffset?: number): string | null {
+  const caret = caretOffset ?? value.length;
+  if (caret !== value.length) return null;
+  const match = value.match(SLASH_COMMAND_RE);
+  if (!match) return null;
+  return match[1] ?? "";
+}
+
+/**
+ * Commit composerPlain only when the derived slash-command query changes
+ * (open/close menu or filter string). Plain chat typing must return false.
+ */
+export function shouldCommitComposerPlain(
+  prev: string,
+  next: string,
+  caretOffset?: number
+): boolean {
+  return matchSlashCommandQuery(prev) !== matchSlashCommandQuery(next, caretOffset);
 }
 
 export function composerTextBeforeCaret(value: string, caretOffset = value.length): string {

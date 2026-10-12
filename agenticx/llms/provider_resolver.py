@@ -17,6 +17,7 @@ from agenticx.llms.bailian_provider import BailianProvider
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.llms.deepseek_provider import DeepSeekProvider
 from agenticx.llms.kimi_provider import KimiProvider
+from agenticx.llms.mimo_provider import MimoProvider
 from agenticx.llms.litellm_provider import (
     LiteLLMProvider,
     normalize_litellm_model_for_openai_compat_gateway,
@@ -167,6 +168,7 @@ class ProviderResolver:
         "kimi": KimiProvider,
         "minimax": MiniMaxProvider,
         "deepseek": DeepSeekProvider,
+        "mimo": MimoProvider,
         "ollama": LiteLLMProvider,
     }
 

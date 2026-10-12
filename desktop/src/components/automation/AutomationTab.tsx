@@ -90,6 +90,99 @@ function PreventSleepToggle() {
   );
 }
 
+function AutomationFlagToggle({
+  field,
+  titleKey,
+  hintKey,
+  onKey,
+  offKey,
+}: {
+  field: "desktop_notify" | "desktop_sound" | "open_at_login";
+  titleKey: string;
+  hintKey: string;
+  onKey: string;
+  offKey: string;
+}) {
+  const { t } = useTranslation("workspace");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const result = await window.agenticxDesktop.loadAutomationConfig();
+        if (!disposed && result?.ok && result.config) {
+          setEnabled(result.config[field] !== false);
+        }
+      } catch {
+        if (!disposed) setMessage(i18n.t("automation.loadConfigFailed", { ns: "workspace" }));
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => { disposed = true; };
+  }, [field]);
+
+  const persist = async (next: boolean) => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.saveAutomationConfig({ [field]: next });
+      if (!result?.ok) {
+        setMessage(result?.error ? String(result.error) : i18n.t("automation.saveFailed", { ns: "workspace" }));
+        setEnabled(!next);
+        return;
+      }
+      setEnabled(next);
+      setMessage(i18n.t("automation.saved", { ns: "workspace" }));
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : i18n.t("automation.saveFailed", { ns: "workspace" }));
+      setEnabled(!next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-text-strong">{t(titleKey)}</div>
+        <p className="mt-1 text-xs leading-relaxed text-text-muted">
+          {t(hintKey)}
+        </p>
+        {message ? (
+          <div className={`mt-1 text-xs ${message === t("automation.saved") ? "text-text-faint" : "text-rose-400"}`}>
+            {message}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={enabled ? t(onKey) : t(offKey)}
+        disabled={saving || loading}
+        onClick={() => { if (!saving && !loading) void persist(!enabled); }}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-focus,rgba(59,130,246,0.5))] ${
+          enabled ? "bg-[var(--ui-btn-primary-bg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]" : "bg-text-muted/35"
+        } ${saving || loading ? "cursor-not-allowed opacity-50" : ""}`}
+      >
+        <span
+          className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
+            enabled ? "bg-[var(--ui-btn-primary-text)]" : "bg-white"
+          } ${enabled ? "translate-x-4" : ""}`}
+        />
+      </button>
+    </div>
+  );
+}
+
 export function AutomationTab() {
   const { t } = useTranslation("workspace");
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
@@ -189,7 +282,30 @@ export function AutomationTab() {
 
       {/* System section */}
       <Panel title={t("automation.system")} collapsible defaultCollapsed>
-        <PreventSleepToggle />
+        <div className="space-y-3">
+          <PreventSleepToggle />
+          <AutomationFlagToggle
+            field="desktop_notify"
+            titleKey="automation.desktopNotify"
+            hintKey="automation.desktopNotifyHint"
+            onKey="automation.desktopNotifyOn"
+            offKey="automation.desktopNotifyOff"
+          />
+          <AutomationFlagToggle
+            field="desktop_sound"
+            titleKey="automation.desktopSound"
+            hintKey="automation.desktopSoundHint"
+            onKey="automation.desktopSoundOn"
+            offKey="automation.desktopSoundOff"
+          />
+          <AutomationFlagToggle
+            field="open_at_login"
+            titleKey="automation.openAtLogin"
+            hintKey="automation.openAtLoginHint"
+            onKey="automation.openAtLoginOn"
+            offKey="automation.openAtLoginOff"
+          />
+        </div>
       </Panel>
 
       {/* Templates */}

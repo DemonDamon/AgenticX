@@ -13,6 +13,78 @@ from pathlib import Path
 import re
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+# Deterministic tool errors that should not be blindly retried with the same args.
+_DETERMINISTIC_ERROR_HINTS: Tuple[Tuple[str, str], ...] = (
+    (
+        "patch token outdated",
+        "请重新 preview 获取新 token，不要复用旧的 patch_token。",
+    ),
+    (
+        "skill already exists",
+        "技能已存在：请改用 action=view/patch，或先 delete 再 create，或更换 name。",
+    ),
+    (
+        "path escapes workspace",
+        "路径超出 workspace：技能目录请用 skill_manage，不要用 bash_exec/file_* 直写。",
+    ),
+)
+
+# Same-CLASS sandbox failures: halt even when args change slightly between tries.
+# tip always steers toward the deterministic skillhub_install tool.
+_DESKTOP_SKILLHUB_TIP = (
+    "请直接调用 skillhub_install(ref='@ns/slug') 工具完成安装，"
+    "不要在沙箱里重装 SkillHub CLI，也不要探测本机 HTTP 端口。"
+)
+_SAME_CLASS_SANDBOX_HINTS: Tuple[Tuple[str, str], ...] = (
+    (
+        "path_escapes_workspace",
+        "路径超出 workspace：技能目录请用 skill_manage 或 skillhub_install，不要用 bash 直写。",
+    ),
+    (
+        "skillhub_home_eperm",
+        f"沙箱禁止访问 ~/.skillhub。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+    (
+        "sandbox_tmp_eperm",
+        f"沙箱禁止写 /tmp 或系统 mktemp。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+    (
+        "allowlist_rejection",
+        f"工具不在当前允许列表（含畸形工具名）。{_DESKTOP_SKILLHUB_TIP}",
+    ),
+    (
+        "malformed_tool_name",
+        f"工具名含畸形 XML/参数碎片（如 <arg_key>）。请把 name 与 arguments 分开；"
+        f"{_DESKTOP_SKILLHUB_TIP}",
+    ),
+)
+
+_HTTP_405_SKILLHUB_TIP = (
+    "禁止 curl/wget 公共 skillhub.cn 假 registry/install（会返回 Method Not Allowed / code:405）。"
+    f"{_DESKTOP_SKILLHUB_TIP}"
+)
+
+# Guessing endpoints: one bash_exec output full of 404 / not_found lines.
+_NOT_FOUND_PROBE_RE = re.compile(r"not[_ ]found|\b404\b", re.I)
+_NOT_FOUND_PROBE_MIN_HITS = 3
+_ENDPOINT_PROBE_CLASS_ID = "endpoint_probe_404"
+_ENDPOINT_PROBE_TIP = (
+    "连续多次请求返回 404 / not_found，说明在猜测并不存在的接口。立即停止探测端口或路径；"
+    "改用已有的专用工具（如 SkillHub 安装用 skillhub_install），否则把卡点直接告诉用户。"
+)
+
+_URL_HOST_PATH_RE = re.compile(
+    r"https?://([^/\s\"'<>]+)(/[^\s\"'<>]*)?",
+    re.I,
+)
+_CODE_405_RE = re.compile(r"[\"']?code[\"']?\s*[:=]\s*405\b", re.I)
+_HTTP_405_RE = re.compile(r"\bHTTP(?:/\d(?:\.\d)?)?\s*405\b|\bstatus(?:\s*code)?\s*[:=]?\s*405\b", re.I)
+
+# Same-class ids that must group across differing malformed tool-name strings.
+_COLLAPSE_TOOL_NAME_CLASS_IDS = frozenset(
+    {"allowlist_rejection", "malformed_tool_name"}
+)
+
 
 @dataclass
 class LoopCheckResult:
@@ -21,6 +93,42 @@ class LoopCheckResult:
     detector: str
     message: str
     nudge: Optional[str] = None
+
+
+class TurnSteerQueue:
+    """User follow-ups injected only at a round boundary.
+
+    Persistence happens before the text is returned for the model. A stop
+    discards anything not yet injected.
+    """
+
+    def __init__(self) -> None:
+        self._pending: List[str] = []
+
+    def enqueue(self, text: str) -> None:
+        cleaned = str(text or "").strip()
+        if cleaned:
+            self._pending.append(cleaned)
+
+    def discard(self) -> None:
+        self._pending.clear()
+
+    def drain(self, persist) -> List[str]:
+        """Persist each pending line. Failed writes stay queued."""
+
+        injected: List[str] = []
+        remaining: List[str] = []
+        for text in self._pending:
+            try:
+                ok = bool(persist(text))
+            except Exception:
+                ok = False
+            if ok:
+                injected.append(text)
+            else:
+                remaining.append(text)
+        self._pending = remaining
+        return injected
 
 
 class LoopDetector:
@@ -43,6 +151,15 @@ class LoopDetector:
         self._last_result_digests: Dict[Tuple[str, str], str] = {}
         self._file_edit_failures: Dict[str, int] = {}
         self._latest_file_edit_failure: Optional[Tuple[str, str, int]] = None
+        self._plain_repeat_content: Optional[str] = None
+        self._plain_repeat_count = 0
+        self._length_truncation_count = 0
+        self._same_error_key: Optional[Tuple[str, str, str]] = None
+        self._same_error_count = 0
+        self._latest_same_error: Optional[Tuple[str, str, str, int]] = None
+        self._same_class_key: Optional[Tuple[str, str]] = None
+        self._same_class_count = 0
+        self._latest_same_class: Optional[Tuple[str, str, str, int]] = None
 
     def reset(self) -> None:
         """Clear per-turn detector state without changing configured thresholds."""
@@ -53,6 +170,63 @@ class LoopDetector:
         self._last_result_digests.clear()
         self._file_edit_failures.clear()
         self._latest_file_edit_failure = None
+        self._plain_repeat_content = None
+        self._plain_repeat_count = 0
+        self._length_truncation_count = 0
+        self._same_error_key = None
+        self._same_error_count = 0
+        self._latest_same_error = None
+        self._same_class_key = None
+        self._same_class_count = 0
+        self._latest_same_class = None
+
+    def note_assistant_round(
+        self,
+        content: str,
+        *,
+        had_tool_calls: bool,
+        length_truncated: bool = False,
+        tool_args_complete: bool = True,
+    ) -> Optional[LoopCheckResult]:
+        """Count identical plain answers, including empty ones, and length cuts.
+
+        A round that issued tool calls clears the plain-text streak. Incomplete
+        tool arguments cut off by the completion cap stop the turn instead of
+        treating the preamble as the answer.
+        """
+
+        if had_tool_calls:
+            self._plain_repeat_content = None
+            self._plain_repeat_count = 0
+        else:
+            text = content if isinstance(content, str) else str(content or "")
+            if self._plain_repeat_content == text:
+                self._plain_repeat_count += 1
+            else:
+                self._plain_repeat_content = text
+                self._plain_repeat_count = 1
+            if self._plain_repeat_count >= self.critical_threshold:
+                return LoopCheckResult(
+                    stuck=True,
+                    level="critical",
+                    detector="plain_repeat",
+                    message="连续相同正文，包含空回复。",
+                    nudge="请给出完整正文。",
+                )
+
+        if length_truncated and not tool_args_complete:
+            self._length_truncation_count += 1
+        else:
+            self._length_truncation_count = 0
+        if self._length_truncation_count >= self.critical_threshold:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="length_truncated_tools",
+                message="连续在工具参数处被长度截断。",
+                nudge=None,
+            )
+        return None
 
     @staticmethod
     def args_signature(arguments: Dict[str, Any]) -> str:
@@ -79,7 +253,13 @@ class LoopDetector:
 
     @staticmethod
     def is_guard_rejection(result: str) -> bool:
-        text = str(result or "").strip().lower()
+        raw = str(result or "").strip()
+        text = raw.lower()
+        # Allowlist / malformed-name rejects (may not start with "error").
+        if "不在当前允许列表中" in raw:
+            return True
+        if "<arg_key>" in text or "</arg_value>" in text or "</arg_key>" in text:
+            return True
         if not text.startswith("error"):
             return False
         return "guard rejected" in text or "安全策略拦截" in text
@@ -146,6 +326,153 @@ class LoopDetector:
             return False
         return self._last_result_digests.get((tool_name, args_signature)) == digest
 
+    @staticmethod
+    def _deterministic_error_match(result_text: Optional[str]) -> Optional[Tuple[str, str]]:
+        text = str(result_text or "")
+        lower = text.lower()
+        if not lower:
+            return None
+        for needle, hint in _DETERMINISTIC_ERROR_HINTS:
+            if needle in lower:
+                return needle, hint
+        return None
+
+    def _record_same_args_same_error(
+        self,
+        tool_name: str,
+        args_signature: str,
+        result_text: Optional[str],
+    ) -> None:
+        self._latest_same_error = None
+        matched = self._deterministic_error_match(result_text)
+        if matched is None:
+            self._same_error_key = None
+            self._same_error_count = 0
+            return
+        needle, _hint = matched
+        key = (tool_name, args_signature, needle)
+        if self._same_error_key == key:
+            self._same_error_count += 1
+        else:
+            self._same_error_key = key
+            self._same_error_count = 1
+        self._latest_same_error = (tool_name, needle, _hint, self._same_error_count)
+
+    @staticmethod
+    def _same_class_sandbox_match(result_text: Optional[str]) -> Optional[Tuple[str, str]]:
+        """Classify sandbox / allowlist SkillHub-install failures independent of exact args."""
+        text = str(result_text or "")
+        lower = text.lower()
+        if not lower and not text:
+            return None
+        # Prefer allowlist / malformed-name (38× glm stuck-args-in-name case).
+        if "不在当前允许列表中" in text:
+            return _SAME_CLASS_SANDBOX_HINTS[3]
+        if "<arg_key>" in lower or "</arg_value>" in lower or "</arg_key>" in lower:
+            return _SAME_CLASS_SANDBOX_HINTS[4]
+        if "path escapes workspace" in lower:
+            return _SAME_CLASS_SANDBOX_HINTS[0]
+        eperm = (
+            "operation not permitted" in lower
+            or "eperm" in lower
+            or "errno 1" in lower
+        )
+        if eperm:
+            skillhub_home = any(
+                marker in lower
+                for marker in (
+                    ".skillhub",
+                    "skillhub/",
+                    "skills_store_cli",
+                    "skillhub_home",
+                )
+            )
+            if skillhub_home:
+                return _SAME_CLASS_SANDBOX_HINTS[1]
+            tmp_hit = any(
+                marker in lower
+                for marker in (
+                    "/tmp",
+                    "mktemp",
+                    "tmpdir",
+                    "tempfile",
+                    "temp dir",
+                    "temporary directory",
+                )
+            )
+            if tmp_hit:
+                return _SAME_CLASS_SANDBOX_HINTS[2]
+        # Consecutive Method Not Allowed / body code:405 (same host+path or same-class).
+        is_405 = (
+            "method not allowed" in lower
+            or bool(_CODE_405_RE.search(text))
+            or bool(_HTTP_405_RE.search(text))
+        )
+        if is_405:
+            host_path = ""
+            m = _URL_HOST_PATH_RE.search(text)
+            if m:
+                host = (m.group(1) or "").strip().lower()
+                raw_path = (m.group(2) or "/").split("?", 1)[0].rstrip("/") or "/"
+                host_path = f"{host}{raw_path}"
+            class_id = f"http_405:{host_path}" if host_path else "http_405"
+            skillhubish = (not host_path) or ("skillhub" in host_path) or (
+                "registry" in host_path and "install" in host_path
+            )
+            tip = (
+                _HTTP_405_SKILLHUB_TIP
+                if skillhubish
+                else (
+                    f"同一 URL 连续 Method Not Allowed (405)。请停止重复 bash_exec；"
+                    f"{_DESKTOP_SKILLHUB_TIP}"
+                )
+            )
+            return class_id, tip
+        if len(_NOT_FOUND_PROBE_RE.findall(text)) >= _NOT_FOUND_PROBE_MIN_HITS:
+            return _ENDPOINT_PROBE_CLASS_ID, _ENDPOINT_PROBE_TIP
+        return None
+
+    def _record_same_class_sandbox_error(
+        self,
+        tool_name: str,
+        result_text: Optional[str],
+    ) -> None:
+        """Track same-class sandbox errors even when args differ between tries."""
+        self._latest_same_class = None
+        matched = self._same_class_sandbox_match(result_text)
+        if (
+            matched is not None
+            and matched[0] == _ENDPOINT_PROBE_CLASS_ID
+            and not str(tool_name or "").startswith("bash_")
+        ):
+            matched = None
+        if matched is None:
+            self._same_class_key = None
+            self._same_class_count = 0
+            return
+        class_id, hint = matched
+        # Collapse varying malformed names (bash_exec(<arg_key>…) vs next blob)
+        # so ≤3 allowlist rejects still trip the same-class halt.
+        if (
+            class_id in _COLLAPSE_TOOL_NAME_CLASS_IDS
+            or class_id == _ENDPOINT_PROBE_CLASS_ID
+            or str(class_id).startswith("http_405")
+        ):
+            base_match = re.match(r"^([A-Za-z_][\w.-]*)", str(tool_name or ""))
+            effective_tool = base_match.group(1) if base_match else "malformed_tool"
+            # Same host+path 405 groups across differing curl args / methods.
+            key = ("*", class_id)
+            display_tool = effective_tool
+        else:
+            key = (tool_name, class_id)
+            display_tool = tool_name
+        if self._same_class_key == key:
+            self._same_class_count += 1
+        else:
+            self._same_class_key = key
+            self._same_class_count = 1
+        self._latest_same_class = (display_tool, class_id, hint, self._same_class_count)
+
     def record_call(
         self,
         tool_name: str,
@@ -159,6 +486,8 @@ class LoopDetector:
         self._calls.append((tool_name, args_signature))
         self._progress_marks.append(bool(has_progress))
         self._record_file_edit_outcome(tool_name, args_signature, result_text)
+        self._record_same_args_same_error(tool_name, args_signature, result_text)
+        self._record_same_class_sandbox_error(tool_name, result_text)
         if result_text and self.is_guard_rejection(result_text):
             self._guard_rejections.append(tool_name)
         if result_fingerprint:
@@ -195,6 +524,8 @@ class LoopDetector:
         for detector in (
             self._detect_guard_rejection_loop,
             self._detect_file_edit_failure,
+            self._detect_same_args_same_error,
+            self._detect_same_class_sandbox_error,
             self._detect_generic_repeat,
             self._detect_ping_pong,
             self._detect_no_progress,
@@ -233,6 +564,64 @@ class LoopDetector:
                 "不要复用旧快照或原 old_text。"
             ),
         )
+
+    def _detect_same_args_same_error(self) -> Optional[LoopCheckResult]:
+        latest = self._latest_same_error
+        if latest is None:
+            return None
+        tool_name, needle, hint, count = latest
+        if count >= 3:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="same_args_same_error",
+                message=(
+                    f"工具 {tool_name} 以相同参数连续返回确定性错误「{needle}」{count} 次。"
+                    f"{hint}"
+                ),
+                nudge=hint,
+            )
+        if count >= 2:
+            return LoopCheckResult(
+                stuck=True,
+                level="warning",
+                detector="same_args_same_error",
+                message=(
+                    f"工具 {tool_name} 以相同参数再次命中确定性错误「{needle}」。"
+                    f"{hint}"
+                ),
+                nudge=hint,
+            )
+        return None
+
+    def _detect_same_class_sandbox_error(self) -> Optional[LoopCheckResult]:
+        latest = self._latest_same_class
+        if latest is None:
+            return None
+        tool_name, class_id, hint, count = latest
+        if count >= 3:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="same_class_sandbox_error",
+                message=(
+                    f"工具 {tool_name} 连续命中同类沙箱错误「{class_id}」{count} 次"
+                    f"（参数可能不同）。{hint}"
+                ),
+                nudge=hint,
+            )
+        if count >= 2:
+            return LoopCheckResult(
+                stuck=True,
+                level="warning",
+                detector="same_class_sandbox_error",
+                message=(
+                    f"工具 {tool_name} 再次命中同类沙箱错误「{class_id}」"
+                    f"（即使参数已变化）。{hint}"
+                ),
+                nudge=hint,
+            )
+        return None
 
     def _classify(self, count: int) -> str:
         return "critical" if count >= self.critical_threshold else "warning"

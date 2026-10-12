@@ -21,11 +21,14 @@ import yaml
 from agenticx.utils.agx_home import agx_home, lazy_home_path
 
 from agenticx.avatar.portrait import (
+    COLLECTION_STYLE_IDS,
     PORTRAIT_STYLE,
     PORTRAIT_STYLE_CUSTOM,
     collection_fetch_enabled,
+    extract_cube_colorway_id,
     fetch_collection_portrait_url,
     generate_avatar_portrait_url,
+    is_near_cube_svg,
     needs_portrait_refresh,
 )
 
@@ -107,7 +110,7 @@ class AvatarConfig:
     name: str
     role: str = ""
     avatar_url: str = ""
-    # notionists-v1 = generated line art; custom = user upload; empty = legacy unmarked.
+    # near-cube-v3 = soft official-mark cube; custom = user upload; older styles migrate.
     portrait_style: str = ""
     system_prompt: str = ""
     # Short blurb shown on the gallery card, distinct from system_prompt (behavior rules).
@@ -206,8 +209,55 @@ class AvatarRegistry:
             workers = min(6, len(missing))
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 list(pool.map(self._ensure_portrait, missing))
+        self._dedupe_cube_colorways(avatars)
         avatars.sort(key=lambda a: (not a.pinned, a.created_at or ""), reverse=False)
         return avatars
+
+    def _occupied_colorways(self, *, exclude_id: str = "") -> list[str]:
+        taken: list[str] = []
+        skip = str(exclude_id or "").strip()
+        if not self.root.exists():
+            return taken
+        for child in self.root.iterdir():
+            if not child.is_dir():
+                continue
+            cfg = self._read_config(child.name)
+            if cfg is None or cfg.id == skip:
+                continue
+            if str(cfg.portrait_style or "").strip() == PORTRAIT_STYLE_CUSTOM:
+                continue
+            colorway = extract_cube_colorway_id(cfg.avatar_url)
+            if colorway:
+                taken.append(colorway)
+        return taken
+
+    def _dedupe_cube_colorways(self, avatars: List[AvatarConfig]) -> None:
+        """Keep the earliest cube; recolor later exact duplicates. Custom uploads stay."""
+        used: set[str] = set()
+        ordered = sorted(avatars, key=lambda item: (item.created_at or "", item.id))
+        for cfg in ordered:
+            if str(cfg.portrait_style or "").strip() == PORTRAIT_STYLE_CUSTOM:
+                continue
+            if not is_near_cube_svg(cfg.avatar_url):
+                continue
+            colorway = extract_cube_colorway_id(cfg.avatar_url)
+            if colorway and colorway not in used:
+                used.add(colorway)
+                continue
+            cfg.avatar_url = generate_avatar_portrait_url(
+                name=cfg.name,
+                role=cfg.role,
+                description=str(cfg.description or "").strip(),
+                tags=list(cfg.tags or []),
+                avatar_id=cfg.id,
+                color=cfg.color,
+                taken_colorways=sorted(used),
+            )
+            cfg.portrait_style = PORTRAIT_STYLE
+            self._write_config(cfg)
+            next_id = extract_cube_colorway_id(cfg.avatar_url)
+            if next_id:
+                used.add(next_id)
 
     def _ensure_portrait(self, config: AvatarConfig) -> AvatarConfig:
         """Fill or migrate an illustrated portrait when the collection is reachable."""
@@ -223,6 +273,7 @@ class AvatarRegistry:
             description=config.description,
             tags=list(config.tags or []),
             avatar_id=config.id,
+            color=config.color,
         )
         if not fetched:
             return config
@@ -251,6 +302,7 @@ class AvatarRegistry:
         brains_enabled: Optional[Any] = None,
         workspace_dir: str = "",
         color: str = "",
+        portrait_style: str = "",
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace.
 
@@ -268,9 +320,15 @@ class AvatarRegistry:
         se: Optional[Dict[str, bool]] = None
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
+        requested = str(portrait_style or "").strip()
         resolved_avatar_url = str(avatar_url or "").strip()
         if resolved_avatar_url:
-            resolved_style = PORTRAIT_STYLE_CUSTOM
+            if requested in COLLECTION_STYLE_IDS and requested != PORTRAIT_STYLE:
+                resolved_style = requested
+            elif requested == PORTRAIT_STYLE_CUSTOM:
+                resolved_style = PORTRAIT_STYLE_CUSTOM
+            else:
+                resolved_style = PORTRAIT_STYLE_CUSTOM
         else:
             resolved_avatar_url = generate_avatar_portrait_url(
                 name=name,
@@ -278,6 +336,8 @@ class AvatarRegistry:
                 description=str(description or "").strip(),
                 tags=normalize_avatar_tags(tags),
                 avatar_id=avatar_id,
+                color=normalize_avatar_color(color),
+                taken_colorways=self._occupied_colorways(),
             )
             resolved_style = PORTRAIT_STYLE
         config = AvatarConfig(
@@ -310,6 +370,7 @@ class AvatarRegistry:
         if config is None:
             return None
         original_url = str(config.avatar_url or "").strip()
+        original_color = config.color
         immutable = {"id", "created_at", "workspace_dir"}
         for key, value in patch.items():
             if key in immutable:
@@ -338,10 +399,13 @@ class AvatarRegistry:
             if key == "tags":
                 config.tags = normalize_avatar_tags(value)
                 continue
+            if key == "portrait_style":
+                continue
             if hasattr(config, key):
                 setattr(config, key, value)
         if "avatar_url" in patch:
             new_url = str(config.avatar_url or "").strip()
+            requested = str(patch.get("portrait_style") or "").strip()
             if not new_url:
                 config.avatar_url = generate_avatar_portrait_url(
                     name=config.name,
@@ -349,10 +413,36 @@ class AvatarRegistry:
                     description=str(config.description or "").strip(),
                     tags=list(config.tags or []),
                     avatar_id=config.id,
+                    color=config.color,
+                    taken_colorways=self._occupied_colorways(exclude_id=config.id),
                 )
+                config.portrait_style = PORTRAIT_STYLE
+            elif requested in COLLECTION_STYLE_IDS and requested != PORTRAIT_STYLE:
+                config.portrait_style = requested
+            elif requested == PORTRAIT_STYLE:
                 config.portrait_style = PORTRAIT_STYLE
             elif new_url != original_url:
                 config.portrait_style = PORTRAIT_STYLE_CUSTOM
+        elif "portrait_style" in patch:
+            requested = str(patch.get("portrait_style") or "").strip()
+            if requested in COLLECTION_STYLE_IDS or requested == PORTRAIT_STYLE_CUSTOM:
+                config.portrait_style = requested
+        elif (
+            "color" in patch
+            and config.color != original_color
+            and str(config.portrait_style or "").strip()
+            not in {PORTRAIT_STYLE_CUSTOM, *(COLLECTION_STYLE_IDS - {PORTRAIT_STYLE})}
+        ):
+            config.avatar_url = generate_avatar_portrait_url(
+                name=config.name,
+                role=config.role,
+                description=str(config.description or "").strip(),
+                tags=list(config.tags or []),
+                avatar_id=config.id,
+                color=config.color,
+                taken_colorways=self._occupied_colorways(exclude_id=config.id),
+            )
+            config.portrait_style = PORTRAIT_STYLE
         config.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_config(config)
         return config

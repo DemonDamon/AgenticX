@@ -1,6 +1,6 @@
 # AgenticX LLM 模块（agenticx/llms）完整结构分析
 
-> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\llms`
@@ -10,23 +10,26 @@
 ├── __init__.py
 ├── ark_provider.py          [火山引擎 Ark / Doubao 模型 Provider；usage 提取改用 runtime.usage_metadata 共享助手]
 ├── auth_profile.py          [新增：Auth Profile 轮换与冷却持久化（参考 OpenClaw）]
-├── bailian_provider.py      [阿里云百炼 Provider；stream usage 归一化复用共享助手]
+├── bailian_provider.py      [阿里云百炼 Provider；stream usage 归一化复用共享助手；Qwen3 混合思考 enable_thinking 解析 + reasoning 流式转 <think>]
 ├── base.py                  [增强：invoke_with_profile / supports_auth_profile_rotation；astream 契约修正]
 ├── deepseek_provider.py     [新增：DeepSeek 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.deepseek.com）]
 ├── failover.py              [新增：LLM 主备故障转移与冷却（内化自 IronClaw）]
 ├── kimi_provider.py
 ├── litellm_provider.py
-├── llm_factory.py           [Provider 工厂 / 路由；新增 deepseek 分支，与 knowledge.graphers 解耦]
+├── llm_factory.py           [Provider 工厂 / 路由；deepseek / mimo 分支，与 knowledge.graphers 解耦]
+├── mimo_provider.py         [新增：小米 MiMo 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.xiaomimimo.com）]
 ├── minimax_provider.py      [MiniMax OpenAI 兼容 Provider]
-├── provider_display.py      [Provider/模型用户可见展示名与目录块；新增 DeepSeek 展示名]
+├── provider_display.py      [Provider/模型用户可见展示名与目录块；DeepSeek / 小米 MiMo 展示名]
 ├── provider_fault.py        [Provider 故障分类与会话级熔断；新增 is_model_param_compat_error]
-├── provider_resolver.py     [增强：新增 deepseek 路由与会话模型兜底 / 默认模型回退助手]
+├── provider_resolver.py     [增强：deepseek / mimo 路由与会话模型兜底 / 默认模型回退助手]
 ├── qianfan_provider.py      [百度千帆 Provider]
 ├── response.py              [TokenUsage 新增 cached/reasoning tokens；LLMResponse 新增 reasoning_content]
 ├── response_cache.py        [新增：in-memory TTL+LRU 响应缓存（内化自 IronClaw）]
 ├── sampling_params.py       [新增：采样参数共享助手（gpt-5 强制 temperature=1、MiniMax 省略该参数等）]
 ├── transcript_sanitizer.py  [新增：Provider 感知的 Transcript 卫生管线（参考 OpenClaw）]
-├── vision.py                [视觉能力推断：改为按模型 slug 判定（provider 无关），GLM-5.3 系视为原生多模态]
+├── typesafe_client.py       [新增：TypeSafe System One 内部 HTTP 客户端（非聊天 Provider、非 MCP）]
+├── typesafe_config.py       [新增：TypeSafe（Jev）运行时配置与 API Key 解析]
+├── vision.py                [视觉能力推断：按模型 slug 判定（provider 无关），GLM-5.3 系视为原生多模态；新增 MiMo 纯文本/语音 SKU 规则]
 ├── vision_fallback.py       [新增：为 analyze_image 解析可用的视觉回退模型（企业路由策略优先）]
 └── zhipu_provider.py        [智谱 GLM Provider]
 ```
@@ -34,9 +37,15 @@
 ### __init__.py
 **文件功能**：作为 LLM 子模块的入口，统一导出核心基类、数据结构与多种 Provider 适配类，方便外部按模型名称快速实例化。  
 **技术实现**：通过 `from .xxx import xxx` 聚合导入，随后在 `__all__` 中显式暴露公开 API；**保留对 LiteLLM 等依赖的 lazy import 支持，增强在受限沙箱环境下的加载兼容性**；**`LlmFactory` 改为模块级 `__getattr__` 惰性导入**——其依赖 `knowledge.graphers`（Neo4j 为可选依赖），避免拖慢 Desktop / `agx serve` 冷启动路径。  
-**关键组件**：`OpenAIProvider`、`AnthropicProvider`、`OllamaProvider`、`GeminiProvider`、`MoonshotProvider` 五个快捷类；**新增导出 `DeepSeekProvider`**。  
+**关键组件**：`OpenAIProvider`、`AnthropicProvider`、`OllamaProvider`、`GeminiProvider`、`MoonshotProvider` 五个快捷类；**导出 `DeepSeekProvider`、`MimoProvider`**（与其他 Provider 同在 try 块内，导入失败时置 `None`）。`typesafe_client` / `typesafe_config` 不经 `__init__` 导出，调用方直接按子模块导入。  
 **业务逻辑**：为上层业务提供“按名称即用”的 LLM Provider，隐藏底层实现差异。  
-**依赖关系**：依赖本目录内 `base.py`、`response.py`、`litellm_provider.py`、`kimi_provider.py`、`deepseek_provider.py`。
+**依赖关系**：依赖本目录内 `base.py`、`response.py`、`litellm_provider.py`、`kimi_provider.py`、`deepseek_provider.py`、`mimo_provider.py`。
+
+### bailian_provider.py
+**文件功能**：阿里云百炼（DashScope）Provider `BailianProvider`，OpenAI 兼容客户端 + 部分模型走原生 HTTP（`_needs_native_request`）。  
+**enable_thinking 语义**：不再对命中原生请求的模型一律写死 `enable_thinking=False`，改由 `_resolve_enable_thinking(model, params)` 判定——仅当 `agenticx.memory.graph.json_compat.model_supports_enable_thinking_param(model)` 为真（`qwen3-*` / `qwen3.x-*` 混合思考系及 `qvq`）才下发，优先取 `extra_body.enable_thinking`，其次顶层 `enable_thinking`，缺省为 `True`；不支持的模型（如 `qwen-plus` / `qwen-turbo`）不会收到该参数（原生 payload 中会被 `pop`）。OpenAI 客户端路径经 `_apply_enable_thinking_to_openai_params` 嵌入 `extra_body`（OpenAI SDK 不接受顶层该 kwarg），原生 HTTP 路径经 `_apply_enable_thinking_to_native_params` 写顶层字段（同步/异步/流式原生请求均适用）。  
+**推理内容透出**：`stream_with_tools` 与 `_stream_with_tools_native` 通过 `_yield_reasoning_and_content_chunks` 把 delta 的 `reasoning_content` / `reasoning` 包成 `<think>…</think>` 内容块输出，遇正文、tool_call delta 或流结束时补 `</think>` 闭合；非流式 `_parse_response` 从 message 的 `reasoning_content` / `reasoning` 填充 `LLMResponse.reasoning_content`（`_convert_native_response` 同步映射该字段）。  
+**依赖关系**：`openai`、`requests`、`aiohttp`；`agenticx.runtime.usage_metadata`、`agenticx.memory.graph.json_compat`。
 
 ### auth_profile.py (新增，内化自 OpenClaw)
 **文件功能**：实现 API Key 轮换管理，支持多 Profile 冷却退避与状态持久化。  
@@ -97,6 +106,8 @@
 - `_parse_response` 经 `extract_cached_reasoning(usage)` 填充 `TokenUsage.cached_tokens` / `reasoning_tokens`。
 - `astream` 签名按 base.py 新契约修正为普通 `def` 直接返回异步生成器。
 
+**温度约束（当前实现）**：`_is_k2_series_model()` 覆盖 `kimi-k2.5` / `kimi-k2.6` / `kimi-k2.7` 前缀；`_requires_fixed_temperature_one()` 对 K3 系与 K2.7 系（含 `kimi-k2.7-code`）返回真，`_resolve_temperature` 此时无视 thinking 模式强制 `1.0`（Moonshot 报 `only 1 is allowed for this model`）；其余 K2.x 仍按 thinking 开启 `1.0` / 关闭 `0.6`。
+
 ### litellm_provider.py
 **文件功能**：实现基于第三方库 `litellm` 的通用 Provider `LiteLLMProvider`，可同时支持 OpenAI、Anthropic、Ollama 等多后端。  
 **技术实现**：
@@ -120,9 +131,14 @@
 **关键组件**：类 `MiniMaxProvider`、字段 `group_id`（可选，MiniMax account-scoped routes）。
 **依赖关系**：继承 `LiteLLMProvider`；被 `provider_resolver.py` 路由使用。
 
+### mimo_provider.py (新增)
+**文件功能**：小米 MiMo 官方 API Provider `MimoProvider`，继承 `LiteLLMProvider`，经 OpenAI 兼容端点接入。  
+**技术实现**：`@model_validator(mode="after")` 将空 `base_url` 默认为 `https://api.xiaomimimo.com/v1`；`_normalize_litellm_model_for_mimo()` 剥离 `mimo/`、`xiaomi/`、`openai/` 前缀后统一改写为 `openai/<id>`（空值回落默认模型 `mimo-v2.6-pro`），确保走官方网关；`from_config` 透传 `timeout` / `max_retries` / `drop_params` / `extra_body`（仅 dict）。  
+**依赖关系**：被 `provider_resolver.py`（`PROVIDER_MAP["mimo"]`）、`llm_factory.py`（`mimo` 分支）与 `__init__.py` 导出使用；视觉能力由 `vision._mimo_text_only` 判定。
+
 ### provider_display.py
 **文件功能**：维护与 Desktop 模型服务设置对齐的 Provider/模型用户可见展示名，并生成系统提示中的模型服务目录块。  
-**技术实现**：`BUILTIN_PROVIDER_DISPLAY_NAMES` 内置厂商展示名映射（**新增 `deepseek: DeepSeek`**）；`format_model_option_label()` / `get_provider_display_name()` 生成「厂商展示名/模型短名」；`normalize_bare_model_id()` 剥离 LiteLLM/网关路由前缀。  
+**技术实现**：`BUILTIN_PROVIDER_DISPLAY_NAMES` 内置厂商展示名映射（含 `deepseek: DeepSeek`、`mimo: 小米 MiMo`）；`format_model_option_label()` / `get_provider_display_name()` 生成「厂商展示名/模型短名」；`normalize_bare_model_id()` 剥离 LiteLLM/网关路由前缀。  
 **本次更新（f3ba65001c29 之后）**：`build_provider_catalog_block()` 不再在目录块尾部追加「当前会话模型（用户可见）」行——当前会话模型改由 `<session-context>` 承载，保持该稳定块内容不随会话切换而变化（`current_provider` / `current_model` 参数仅为兼容保留）。  
 **依赖关系**：读取 `~/.agenticx/config.yaml` 的 providers 配置；被 runtime 系统提示构建与 `vision_fallback.py` 复用。
 
@@ -139,19 +155,34 @@
 2. `resolve()` 在 `provider_key` 不在 `PROVIDER_MAP` 时回退：`extra.interface == "openai"` 或命中旧版兼容判定时，统一路由到 `LiteLLMProvider`，并将 `effective_key` 设为 `openai`；否则仍抛出 `Unsupported provider`；
 3. `_normalized_model()`：`effective_key == "openai"` 且存在 `base_url` 时，若模型名不含 `/`（如 `deepseek-r1`），自动补 `openai/` 前缀，避免 LiteLLM 在网关场景下因裸模型名路由失败。  
 **技术实现（f3ba65001c29 之后新增）**：
-1. `PROVIDER_MAP` 新增 `"deepseek": DeepSeekProvider` 路由；
+1. `PROVIDER_MAP` 新增 `"deepseek": DeepSeekProvider`、`"mimo": MimoProvider` 路由（`LlmFactory.create_llm` 同步提供 `deepseek` / `mimo` 类型分支）；
 2. `effective_session_llm_names(provider, model, session_id=)`：会话未持久化 provider/model 时（IM 绑定会话常见），依次从微信桌面绑定（`~/.agenticx/wechat_binding.json` 的 `_desktop`）、`active_provider/active_model`、`config_default_llm_names()` 补齐，避免静默落到被禁用的 `default_provider`（如 gpt-5 SKU 会拒绝 runtime 默认 temperature=0.2）；
 3. `config_default_llm_names()`：返回 `default_provider` 及其默认模型（`model` 或首个可见 `models[]` 条目，且该渠道未显式 `enabled: false`），回退到 last-used `active_provider/active_model`；
 4. `should_fallback_to_default_model(...)`：判断当前失败后是否值得一次性回退到配置的默认模型重试（默认 provider/model 与当前不同且尚未尝试过）。  
 **关键价值**：修复“健康检查可用但聊天时报 Unsupported provider / BadRequestError”的兼容问题，保障旧配置与自定义 OpenAI 网关模型在聊天链路中的可用性；新增助手保证 IM 绑定会话与默认模型回退场景拿到正确的 provider/model。
+
+### typesafe_config.py (新增)
+**文件功能**：TypeSafe（Jev）决策服务的运行时配置——**不是聊天 Provider**，不进入 `PROVIDER_MAP`。  
+**技术实现**：
+- `resolve_typesafe_api_key(configured=)`：Key 解析顺序为 `config.yaml` 的 `typesafe.api_key` → 环境变量 `TYPESAFE_API_KEY` → 文件 `~/.config/typesafe/key`；Key 不得作为工具参数传递；
+- `load_typesafe_settings()` 读取 `config.yaml` 的 `typesafe:` 节生成冻结 dataclass `TypesafeSettings`：`enabled`（默认 False）、`model`（默认 `jev-latest`）、`base_url`（默认 `https://api.typesafe.ai`）、`timeout_sec`（默认 8.0）、`soft_timeout_sec`（默认 2.0，经 `clamp_soft_timeout_sec` 限制不超过硬超时）、`group_routing`（默认 True）、`kb_auto`（默认 False）、`show_decision_card`（默认 True）、`act_above`（0.8）/ `review_above`（0.5）阈值、`has_key`；属性 `ready_for_group_routing` / `ready_for_kb_auto` 要求 enabled + 对应开关 + 有 Key；
+- `typesafe_settings_public_dict()`：设置表单载荷，**包含明文 `api_key`** 供 Desktop 显示/揭示。  
+**依赖关系**：`agenticx.cli.config_manager.ConfigManager`；被 `typesafe_client.py`、`agenticx/runtime/group_router.py`、`agenticx/runtime/agent_runtime.py`、`agenticx/studio/typesafe_routes.py` 使用。
+
+### typesafe_client.py (新增)
+**文件功能**：TypeSafe System One 的内部异步 HTTP 客户端（非聊天 Provider、非 MCP）。  
+**技术实现**：`system_one(state=, questions=, model=, api_key=, timeout_sec=, base_url=, transport=)` 以 Bearer 鉴权 `POST {base_url}/v1/systemone`，返回原始 JSON dict；`httpx.AsyncClient(trust_env=True)`，遵循 `HTTPS_PROXY` / `HTTP_PROXY`；**客户端不重试**，由调用方决定回退。  
+**错误语义**：`TypesafeError` 基类；超时抛 `TypesafeTimeout`；网络错误抛 `TypesafeHttpError(0, retryable=True)`；HTTP ≥400 抛 `TypesafeHttpError`（429 / 5xx 可重试，401 不可重试，detail 取响应 `error`/`message` 或正文前 240 字符）；响应非 object 亦抛不可重试错误。  
+**依赖关系**：`httpx`、`typesafe_config`；被 runtime 群聊路由 / 知识库自动门控与 Studio `typesafe_routes` 调用。
 
 ### vision.py
 **文件功能**：集中判断「某 provider/model 组合是否应接受图片（`image_url`）输入」，供 Studio/Desktop 在注入视觉附件前做统一守卫。  
 **技术实现**：纯函数模块（无外部依赖），核心 `is_vision_capable(provider_name, model_name) -> bool`。**f3ba65001c29 之后改为 provider 无关判定**：已知纯文本家族按模型 slug 识别，与 provider 无关——`custom_openai_*` 等 OpenAI 兼容网关上跑的 glm-5.x / qwen 文本 SKU 同样会被剥离图片；`provider_name` 仅为 API 兼容与日志保留。内置规则：
 - `_minimax_m2_family_no_vision()`：MiniMax M2 chat 系列（`minimax-m2*`、`m2.x` 等，名称不含 `vl`/`vision`）按非视觉处理
 - `_zhipu_text_only_family()`：智谱 GLM 文本系（`glm-5`/`glm-4.6`/`glm-4.5`/`glm-4`/`glm-z1`/`glm-zero`，不含 `\dv`/`vision`/`vl` 标记）按非视觉处理；**GLM-5.3 系（`glm-5.3`、`glm-5.3-flash`…）是首个无 v 标记的原生多模态 GLM-5 线，明确保持 vision-capable**。原 `_zhipu_glm5_family_no_vision` 保留为向后兼容别名
-- `_bailian_qwen_text_no_vision()`：百炼/DashScope 的 Qwen 文本 SKU（不含 `vl`/`vision`/`omni`）拒绝 OpenAI 风格 image_url 内容块  
-未知模型名保持 vision-permissive，避免误伤未来视觉 SKU。  
+- `_bailian_qwen_text_no_vision()`：百炼/DashScope 的 Qwen 文本 SKU（不含 `vl`/`vision`/`omni`）拒绝 OpenAI 风格 image_url 内容块
+- `_mimo_text_only()`：`mimo-` 前缀下，含 `-asr` / `-tts` 的语音 SKU 以及 `mimo-v2.5-pro`（含 `mimo-v2.5-pro-*`）按非视觉处理；v2.6 Pro/Flash 与精确 `mimo-v2.5` 为全模态，保持 vision-capable  
+未知模型名保持 vision-permissive，避免误伤未来视觉 SKU。`strip_nonvision_multimodal_messages()` 基于同一判定把 image_url 块扁平化为文本。  
 **业务逻辑**：是 `view_image` / 附图链路的前置闸门——对不支持多模态的模型剥离 `image_inputs`，避免上游因 image part 报错；与 Desktop `model-vision.ts` 的前端拦截一一对应。  
 **依赖关系**：被 runtime 视觉附件注入、`agent_tools.view_image` 守卫与 `vision_fallback.py` 调用。
 

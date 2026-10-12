@@ -245,6 +245,11 @@ class SessionSupervisor:
         )
 
         sessions = self._manager.list_sessions()
+        # One query off the event loop instead of one SQLite connection per
+        # session per tick (900+ sessions kept agx serve CPU-bound).
+        flagged = await asyncio.to_thread(
+            self._manager.sessions_with_scratchpad_flag, SESSION_META_UNATTENDED
+        )
         now = time.time()
         for row in sessions:
             sid = str(row.get("session_id", "") or "").strip()
@@ -263,9 +268,7 @@ class SessionSupervisor:
             # scratchpad-only SQLite read before paying for full restore.
             managed = self._manager.get_if_loaded(sid)
             if managed is None:
-                if not self._manager.session_scratchpad_flag(
-                    sid, SESSION_META_UNATTENDED
-                ):
+                if sid not in flagged:
                     continue
                 managed = self._manager.get(sid, touch=False)
             if managed is None:

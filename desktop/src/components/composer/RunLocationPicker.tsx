@@ -113,7 +113,7 @@ export function RunLocationPicker() {
       <button
         ref={anchorRef}
         type="button"
-        className={`inline-flex h-7 max-w-[160px] items-center gap-1.5 rounded-lg px-2 text-[12px] text-text-subtle transition-colors ${
+        className={`inline-flex h-7 max-w-[160px] items-center gap-1.5 rounded-lg px-2 text-[13px] text-text-subtle transition-colors ${
           open ? "bg-surface-hover text-text-strong" : "hover:bg-surface-hover hover:text-text-primary"
         }`}
         onClick={() => setOpen((v) => !v)}

@@ -7,7 +7,9 @@ import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { getRememberedSessionForAvatar } from "../../utils/avatar-last-session";
 import { sanitizeGroupAvatarIds } from "../../utils/group-editor-utils";
-import { isSessionAvatarMatch, pickMostRecentSessionId } from "../../utils/group-pane-open";
+import { pickPreferredSessionId } from "../../utils/group-pane-open";
+import { scratchHistoryBlocklist } from "../../utils/scratch-chat";
+import { collectionPortraitCreateFields } from "../../utils/expert-portrait";
 import {
   buildSuggestions,
   composeEnterHint,
@@ -37,6 +39,7 @@ function mapCreatedAvatar(item: {
   pinned?: boolean;
   created_by?: string;
   color?: string;
+  portrait_style?: string;
 }): Avatar {
   return {
     id: item.id,
@@ -46,6 +49,7 @@ function mapCreatedAvatar(item: {
     pinned: Boolean(item.pinned),
     createdBy: item.created_by ?? "manual",
     color: typeof item.color === "string" ? item.color : "",
+    portraitStyle: typeof item.portrait_style === "string" ? item.portrait_style : "",
   };
 }
 
@@ -202,16 +206,16 @@ export function QuickComposeOverlay() {
         }> }));
       if (previewGenRef.current !== gen) return;
       const rows = listed.ok && Array.isArray(listed.sessions) ? listed.sessions : [];
-      const rememberedSid = getRememberedSessionForAvatar(avatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        rows.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, avatarId),
-        );
-      const recentSid = pickMostRecentSessionId(rows, avatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const blocked = scratchHistoryBlocklist(
+        useAppStore.getState().panes,
+        useAppStore.getState().hiddenScratchSessionIds,
+      );
+      const preferredSid = pickPreferredSessionId({
+        sessions: rows,
+        avatarId,
+        rememberedSid: getRememberedSessionForAvatar(avatarId),
+        blockedIds: blocked,
+      });
       if (!preferredSid || previewGenRef.current !== gen) return;
       const latest = useAppStore.getState().panes.find((item) => item.id === paneId);
       if (!latest) return;
@@ -303,6 +307,7 @@ export function QuickComposeOverlay() {
       const result = await window.agenticxDesktop.createAvatar({
         name: name.trim(),
         created_by: "manual",
+        ...collectionPortraitCreateFields(name.trim()),
       });
       if (!result.ok || !result.avatar) {
         throw new Error(result.error || t("compose.createExpertFailed"));

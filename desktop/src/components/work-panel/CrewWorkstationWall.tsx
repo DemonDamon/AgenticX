@@ -8,6 +8,7 @@ import {
 import { Shimmer } from "../ds/Shimmer";
 import { formatDuration } from "../graph/span-derive";
 import { memberColorClass, memberInitials } from "./member-avatar";
+import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 
 type Props = {
   slots: CrewSlot[];
@@ -127,7 +128,7 @@ export function CrewWorkstationWall({
           <div key={slot.agentId} className={cardClass(slot.phase)}>
             <div className="relative h-8 w-8 shrink-0">
               {avatar?.avatarUrl && !isMeta ? (
-                <img src={avatar.avatarUrl} alt="" className="h-8 w-8 rounded-xl object-cover" />
+                <ThemedAvatarImage src={avatar.avatarUrl} alt="" className="h-8 w-8 rounded-xl object-cover" />
               ) : (
                 <div
                   className={`flex h-8 w-8 items-center justify-center rounded-xl text-[10px] font-bold text-white ${

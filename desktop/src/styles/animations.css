@@ -39,6 +39,16 @@
   animation: agx-dot-pulse 1.1s infinite ease-in-out;
 }
 
+.agx-near-buddy {
+  display: block;
+  flex-shrink: 0;
+}
+
+.agx-orb-burst {
+  display: block;
+  flex-shrink: 0;
+}
+
 /* Typographic "working..." — same glyph size as the status sentence, sequential fade. */
 @keyframes agx-working-ellipsis {
   0%,
@@ -99,6 +109,21 @@
   animation: agx-working-shimmer 4.2s linear infinite;
 }
 
+.scratch-wave-text > span {
+  display: inline-block;
+  animation: scratch-wave-glyph 1.6s ease-in-out infinite;
+}
+
+@keyframes scratch-wave-glyph {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Status meta (运行中 / 思考中): muted base + sharp peak, slow linear sweep. */
 .agx-working-shimmer.agx-status-shimmer {
   color: var(--text-faint);
@@ -116,6 +141,47 @@
   -webkit-background-clip: text;
   background-clip: text;
   animation: agx-working-shimmer 5.4s linear infinite;
+}
+
+@keyframes agx-stream-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.agx-stream-body > :nth-last-child(2) > :last-child:is(p, h1, h2, h3, h4, li, span) {
+  display: inline;
+}
+
+.agx-stream-caret {
+  display: inline-block;
+  width: 0.42em;
+  height: 1.05em;
+  margin-left: 0.12em;
+  vertical-align: -0.12em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.5;
+  animation: agx-stream-caret 1s steps(1) infinite;
+}
+
+@keyframes agx-widget-draw-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.agx-widget-draw-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-faint) 16%, transparent),
+    transparent
+  );
+  animation: agx-widget-draw-sweep 1.8s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -147,8 +213,23 @@
     -webkit-text-fill-color: var(--text-faint);
   }
 
+  .scratch-wave-text > span {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
   .agx-working-ellipsis > span {
     animation: none;
     opacity: 1;
+  }
+
+  .agx-stream-caret {
+    animation: none;
+    opacity: 0.4;
+  }
+
+  .agx-widget-draw-sweep {
+    animation: none;
+    background: none;
   }
 }

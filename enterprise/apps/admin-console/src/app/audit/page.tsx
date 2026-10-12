@@ -613,12 +613,18 @@ function AuditPageContent() {
                                 {t("detail.viewTrace")}
                               </Button>
                               <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                                <Link href={`/portal-logs?trace_id=${encodeURIComponent(selected.trace_id)}`}>
+                                <Link
+                                  href={`/portal-logs?trace_id=${encodeURIComponent(selected.trace_id)}`}
+                                  prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                                >
                                   {t("detail.viewPortalLogs")}
                                 </Link>
                               </Button>
                               <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                                <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
+                                <Link
+                                  href={`/traces/${encodeURIComponent(selected.trace_id)}`}
+                                  prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                                >
                                   {t("detail.viewRuntime")}
                                 </Link>
                               </Button>

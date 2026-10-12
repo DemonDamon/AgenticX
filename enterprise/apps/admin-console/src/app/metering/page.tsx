@@ -39,6 +39,9 @@ import {
 import { useTranslations } from "next-intl";
 import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
+import { RidgeChart } from "../../components/metering/RidgeChart";
+import { DistributionTable } from "../../components/metering/DistributionTable";
+import { TraceListModal } from "../../components/metering/TraceListModal";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -75,6 +78,43 @@ type RevenueRecord = {
 type UserOption = { id: string; name: string; deptId: string | null };
 type PatOption = { id: number; name: string; tokenPrefix: string };
 type ProviderOption = { id: string; name: string; models: string[] };
+
+// ---------- Diagnostics (new) ----------
+
+type OverviewStats = {
+  total_tokens: number;
+  daily_avg_tokens: number;
+  session_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  io_ratio: number;
+  cached_tokens: number;
+  cache_hit_rate: number;
+  total_cost: number;
+  record_count: number;
+  day_count: number;
+};
+
+type TraceRow = {
+  trace_id: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  cost_usd: number;
+  step_count: number;
+  first_seen: string | null;
+  models: string[];
+};
+
+type DistRow = {
+  model: string;
+  request_count: number;
+  avg_tokens: number;
+  p50: number;
+  p90: number;
+  p99: number;
+};
 
 const ALL = "__all__";
 
@@ -121,6 +161,15 @@ export default function MeteringPage() {
   const [patOptions, setPatOptions] = useState<PatOption[]>([]);
   const [providersData, setProvidersData] = useState<ProviderOption[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // ---------- Diagnostics state ----------
+  const [overview, setOverview] = useState<OverviewStats | null>(null);
+  const [traceModalOpen, setTraceModalOpen] = useState(false);
+  const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
+  const [ridgeHours, setRidgeHours] = useState<number[]>(Array.from({ length: 24 }, (_, i) => i));
+  const [ridgeModels, setRidgeModels] = useState<string[]>([]);
+  const [ridgeSeries, setRidgeSeries] = useState<Record<string, number[]>>({});
+  const [distRows, setDistRows] = useState<DistRow[]>([]);
 
   const deptOptions = useMemo(() => {
     const buckets = new Set<string>();
@@ -252,6 +301,69 @@ export default function MeteringPage() {
     [dept, user, apiToken, provider, model, start, end]
   );
 
+  // ---------- Diagnostics queries (new) ----------
+
+  const queryOverview = useCallback(async () => {
+    try {
+      const res = await adminFetch("/api/metering/overview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(filterPayload),
+      });
+      const json = await readJsonBody<{ data?: OverviewStats }>(res, {});
+      setOverview(json.data ?? null);
+    } catch {
+      setOverview(null);
+    }
+  }, [filterPayload]);
+
+  const queryRidge = useCallback(async () => {
+    try {
+      const res = await adminFetch("/api/metering/hourly-ridge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...filterPayload, top_n: 10 }),
+      });
+      const json = await readJsonBody<{ data?: { hours: number[]; models: string[]; series: Record<string, number[]> } }>(res, {});
+      const d = json.data;
+      if (d) {
+        setRidgeHours(d.hours);
+        setRidgeModels(d.models);
+        setRidgeSeries(d.series);
+      }
+    } catch { /* noop */ }
+  }, [filterPayload]);
+
+  const queryDist = useCallback(async () => {
+    try {
+      const res = await adminFetch("/api/metering/request-distribution", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...filterPayload, top_n: 15 }),
+      });
+      const json = await readJsonBody<{ data?: { rows: DistRow[] } }>(res, {});
+      setDistRows(json.data?.rows ?? []);
+    } catch {
+      setDistRows([]);
+    }
+  }, [filterPayload]);
+
+  const openTraceModal = useCallback(async () => {
+    try {
+      const res = await adminFetch("/api/metering/traces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...filterPayload, limit: 200 }),
+      });
+      const json = await readJsonBody<{ data?: { rows: TraceRow[] } }>(res, {});
+      setTraceRows(json.data?.rows ?? []);
+      setTraceModalOpen(true);
+    } catch {
+      setTraceRows([]);
+      setTraceModalOpen(true);
+    }
+  }, [filterPayload]);
+
   const queryHeatmap = useCallback(async () => {
     setHeatmapLoading(true);
     try {
@@ -320,7 +432,10 @@ export default function MeteringPage() {
     void queryHeatmap();
     void queryRoi();
     void loadRevenues();
-  }, [query, queryHeatmap, queryRoi, loadRevenues]);
+    void queryOverview();
+    void queryRidge();
+    void queryDist();
+  }, [query, queryHeatmap, queryRoi, loadRevenues, queryOverview, queryRidge, queryDist]);
 
   const exportCsv = async () => {
     const response = await adminFetch("/api/metering/export", {
@@ -483,6 +598,9 @@ export default function MeteringPage() {
                 void queryHeatmap();
                 void queryRoi();
                 void loadRevenues();
+                void queryOverview();
+                void queryRidge();
+                void queryDist();
               }}
               disabled={loading || heatmapLoading || roiLoading}
             >
@@ -598,8 +716,8 @@ export default function MeteringPage() {
         </CardContent>
       </Card>
 
-      {/* Summary */}
-      <section className="grid gap-3 sm:grid-cols-3">
+      {/* Summary — 7 KPI cards */}
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <Card>
           <CardContent className="flex items-center gap-3 p-4">
             <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
@@ -607,7 +725,51 @@ export default function MeteringPage() {
             </span>
             <div>
               <div className="text-xs text-muted-foreground">{t("totalTokens")}</div>
-              <div className="text-xl font-semibold">{totalTokens.toLocaleString()}</div>
+              <div className="text-xl font-semibold">{(overview?.total_tokens ?? totalTokens).toLocaleString()}</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <BarChart3 className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("diagnostics.dailyAvg")}</div>
+              <div className="text-xl font-semibold">{(overview?.daily_avg_tokens ?? 0).toLocaleString()}</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-success-soft text-success">
+              <Search className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("diagnostics.sessions")}</div>
+              <div className="text-xl font-semibold">{(overview?.session_count ?? 0).toLocaleString()}</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-success-soft text-success">
+              <Search className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("diagnostics.ioRatio")}</div>
+              <div className="text-xl font-semibold">{overview ? overview.io_ratio.toFixed(2) : "—"}</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-success-soft text-success">
+              <Search className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("diagnostics.cacheHit")}</div>
+              <div className="text-xl font-semibold">{overview ? `${(overview.cache_hit_rate * 100).toFixed(1)}%` : "—"}</div>
             </div>
           </CardContent>
         </Card>
@@ -618,7 +780,7 @@ export default function MeteringPage() {
             </span>
             <div>
               <div className="text-xs text-muted-foreground">{t("totalCost")}</div>
-              <div className="text-xl font-semibold">${totalCost.toFixed(4)}</div>
+              <div className="text-xl font-semibold">${(overview?.total_cost ?? totalCost).toFixed(4)}</div>
             </div>
           </CardContent>
         </Card>
@@ -629,7 +791,7 @@ export default function MeteringPage() {
             </span>
             <div>
               <div className="text-xs text-muted-foreground">{t("recordCount")}</div>
-              <div className="text-xl font-semibold">{rows.length}</div>
+              <div className="text-xl font-semibold">{overview?.record_count ?? rows.length}</div>
             </div>
           </CardContent>
         </Card>
@@ -639,6 +801,7 @@ export default function MeteringPage() {
       <Tabs defaultValue="charts" className="space-y-4">
         <TabsList>
           <TabsTrigger value="charts">{t("tabCharts")}</TabsTrigger>
+          <TabsTrigger value="distribution">{t("diagnostics.distributionTitle")}</TabsTrigger>
           <TabsTrigger value="heatmap">{t("tabHeatmap")}</TabsTrigger>
           <TabsTrigger value="roi">{t("tabRoi")}</TabsTrigger>
           <TabsTrigger value="table">{t("tabTable")}</TabsTrigger>
@@ -668,6 +831,27 @@ export default function MeteringPage() {
               hideLegend
             />
           </div>
+          {/* Ridge chart: 0-24h model distribution */}
+          <RidgeChart
+            title={t("diagnostics.hourlyRidgeTitle")}
+            description={t("diagnostics.hourlyRidgeDescription")}
+            hours={ridgeHours}
+            models={ridgeModels}
+            series={ridgeSeries}
+            emptyLabel={t("emptyTitle")}
+          />
+        </TabsContent>
+
+        <TabsContent value="distribution" className="space-y-4">
+          <DistributionTable
+            title={t("diagnostics.distributionTitle")}
+            description={t("diagnostics.distributionDescription")}
+            rows={distRows}
+            emptyLabel={t("emptyTitle")}
+            colModel={t("diagnostics.colModel")}
+            colRequests={t("diagnostics.colRequests")}
+            colAvg={t("diagnostics.colAvg")}
+          />
         </TabsContent>
 
         <TabsContent value="heatmap" className="space-y-4">
@@ -876,6 +1060,15 @@ export default function MeteringPage() {
 
         <TabsContent value="table">
           <Card>
+            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+              <div>
+                <CardTitle className="text-base">{t("tabTable")}</CardTitle>
+              </div>
+              <Button variant="outline" size="sm" onClick={openTraceModal}>
+                <Search className="mr-1.5 h-4 w-4" />
+                {t("diagnostics.tracesButton")}
+              </Button>
+            </CardHeader>
             <CardContent className="p-0">
               {rows.length === 0 ? (
                 <EmptyState
@@ -944,6 +1137,22 @@ export default function MeteringPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <TraceListModal
+        open={traceModalOpen}
+        onOpenChange={setTraceModalOpen}
+        rows={traceRows}
+        title={t("diagnostics.tracesTitle")}
+        description={t("diagnostics.tracesDescription")}
+        emptyTitle={t("diagnostics.tracesEmpty")}
+        emptyDescription={t("diagnostics.tracesEmptyDescription")}
+        colTraceId={t("diagnostics.colTraceId")}
+        colTokens={t("diagnostics.colTraceTokens")}
+        colCost={t("diagnostics.colTraceCost")}
+        colSteps={t("diagnostics.colTraceSteps")}
+        colFirstSeen={t("diagnostics.colTraceFirstSeen")}
+        colModels={t("diagnostics.colTraceModels")}
+      />
     </div>
   );
 }

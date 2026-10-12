@@ -7,7 +7,8 @@ from collections.abc import Sequence
 
 _TERMINATOR_RE = re.compile(r"""[。！？.!?)）」』】”’"'`*]$""")
 ACTION_INTENT_RE = re.compile(
-    r"让我先|我先|接下来要|然后加载|然后调用|去读取|去加载|去搜索|去查|查一下|搜一下|核实|todo_write"
+    r"让我先|我先|接下来要|然后加载|然后调用|去读取|去加载|去搜索|去查|查一下|搜一下|核实|获取|todo_write"
+    r"|\bfetch\b"
     r"|let me\s+(?:search|check|verify|look|find|do that|try)"
     r"|i\s+(?:need|have)\s+to\s+(?:search|check|verify|look|find)"
     r"|i'?ll\s+(?:search|check|verify|look|find)"
@@ -53,6 +54,11 @@ _LENGTH_FINISH_REASONS = frozenset(
         "max_completion_tokens",
     }
 )
+
+
+def is_length_finish_reason(finish_reason: str) -> bool:
+    """True when the vendor stopped because the completion cap was hit."""
+    return str(finish_reason or "").strip().lower() in _LENGTH_FINISH_REASONS
 
 SUSPECT_BODY_MAX_CHARS = 80
 

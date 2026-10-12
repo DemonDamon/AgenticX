@@ -29,7 +29,7 @@ export GATEWAY_MCP_TOOL_CALLS_PER_MINUTE=60
 1. 客户端打 `/mcp/{server}/streamable-http`（推荐）或旧 SSE 握手
 2. `mcphost.Host.ResolveServer`：先认内置 `demo`，再查 PG `mcp_servers`（`tenant_id + name + status=active`）
 3. `EntitlementChecker`：若 capability pack 治理该 server，撤销则拒绝；未治理则回退调用方 scopes
-4. Backend：`echo`（demo / ping）或 `openapi`（白名单 `operationId` → MCP tool）。`custom-go` **只是留口，未落地**
+4. Backend：`echo`（demo / ping）、`openapi`（白名单 `operationId` → MCP tool），或 `connector`（进程内连接器网关：五个发现型工具，定义来自 `connector_definitions`，凭据在 `connector_connections` 加密列）。`custom-go` **只是留口，未落地**
 5. 每次 `tools/call` 过策略、配额，再写 `gateway_audit_events`
 
 OpenAPI → MCP：parameters + requestBody 合并为 `inputSchema`；`oneOf` / `anyOf` 降级为 object + 描述。
@@ -69,7 +69,13 @@ OpenAPI → MCP：parameters + requestBody 合并为 `inputSchema`；`oneOf` / `
 
 `mcp_server`, `mcp_tool_name`, `mcp_input_hash`, `mcp_output_hash`, `mcp_status`, `latency_ms`
 
-输入 / 输出只存哈希，不落明文。Blake2b 链字段与 LLM 审计兼容（MCP 列可空）。
+连接器 backend 的 `execute_action` 还会写入 `connector_execution_id`、`connector_action_id`、`connector_connection_id`（可空）。
+
+输入 / 输出只存哈希，不落明文。Blake2b 链字段与 LLM 审计兼容（MCP / 连接器列可空）。
+
+## 连接器 backend
+
+启用 MCP 托管且库内存在 `mcp_servers` 行（`name=connector`，`backend_type=connector`）后，客户端走 `/mcp/connector/streamable-http` 调用五个发现型工具。导入 OpenAPI 走管理面 `/admin/connectors`（网关 `/internal/connectors/import`）；DELETE 动作需人工确认。凭据主密钥：`GATEWAY_CONNECTOR_MASTER_KEY`（base64 编码的 32 字节）。内网上游如需访问私网地址，另设 `GATEWAY_CONNECTOR_ALLOW_PRIVATE_NETWORK=on`。策略引擎可对阶段 `connector` 按动作 ID 拦截。
 
 ## Admin 控制台
 
@@ -77,6 +83,7 @@ OpenAPI → MCP：parameters + requestBody 合并为 `inputSchema`；`oneOf` / `
 
 - `mcp_servers` — 元数据 + `backend_config`（OpenAPI 原文可存 `openapi_json` / gzip `openapi_blob`）
 - `mcp_tools` — 启用工具清单 + JSON Schema
+- `connector_definitions` / `connector_connections` — 连接器定义与加密凭据（`/admin/connectors`）
 
 ## 验证
 

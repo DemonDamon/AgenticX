@@ -104,3 +104,41 @@ async def test_finish_terminal_reply_omits_zero_usage() -> None:
     assert hist["provider"] == "zhipu"
     assert hist["model"] == "glm-5"
     assert "usage" not in hist
+
+
+@pytest.mark.asyncio
+async def test_finish_terminal_reply_persists_visible_body_for_system_trigger() -> None:
+    runtime = AgentRuntime(llm=MagicMock(), confirm_gate=MagicMock())
+    session = StudioSession(provider_name="mimo", model_name="mimo-v2.6-flash")
+    session.chat_history = [{"role": "assistant", "content": "子智能体汇总:\n[A] 已完成"}]
+    before = list(session.chat_history)
+
+    event = await runtime._finish_terminal_reply(
+        session,
+        clean_body="三路对比已完成。",
+        terminal_reason="model_final",
+        agent_id="meta",
+        is_system_trigger=True,
+    )
+
+    assert event.data["text"] == "三路对比已完成。"
+    assert session.chat_history[-1]["role"] == "assistant"
+    assert session.chat_history[-1]["content"] == "三路对比已完成。"
+    assert session.chat_history[0] == before[0]
+
+
+@pytest.mark.asyncio
+async def test_finish_terminal_reply_skips_empty_system_trigger_history() -> None:
+    runtime = AgentRuntime(llm=MagicMock(), confirm_gate=MagicMock())
+    session = StudioSession()
+    session.chat_history = [{"role": "user", "content": "hi"}]
+
+    await runtime._finish_terminal_reply(
+        session,
+        clean_body="  ",
+        terminal_reason="model_final",
+        agent_id="meta",
+        is_system_trigger=True,
+    )
+
+    assert session.chat_history == [{"role": "user", "content": "hi"}]

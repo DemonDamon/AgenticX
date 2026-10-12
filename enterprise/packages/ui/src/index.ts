@@ -38,7 +38,14 @@ export * from "./components/data/DataTable";
 
 /* ======= 图表 ======= */
 export * from "./components/charts/ChartCard";
-export { chartPalette, chartColors } from "./components/charts/theme";
+export {
+  chartPalette,
+  chartColors,
+  chartTooltipStyle,
+  chartLabelStyle,
+  chartAxisTickProps,
+  chartLegendWrapperStyle,
+} from "./components/charts/theme";
 
 /* ======= 品牌 / 主题 ======= */
 export * from "./branding/MachiAvatar";

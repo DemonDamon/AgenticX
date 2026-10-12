@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
+import { Copy, ExternalLink, Loader2 } from "lucide-react";
+import QRCode from "qrcode";
 import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
-import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
+import { MarketIcon } from "../../marketplace/MarketIcon";
+import type { ConnectorHealth } from "./connector-health";
 import { i18n } from "../../../i18n/i18n";
 
 function st(key: string, opts?: Record<string, unknown>): string {
@@ -17,6 +19,22 @@ type Props = {
   sessionId: string;
   tapdConnected: boolean;
   onRefreshMcp: (sessionId?: string) => Promise<void>;
+  /**
+   * 市场「连接」深链：打开后直接进入该连接器的握手弹层（与设置页点 + 同一入口）。
+   * 配合 presentation="handshake-only" 可跳过设置墙网格。
+   */
+  autoOpenId?: ConnectorId | null;
+  /** 每次递增以在同一 id 上重复触发打开。 */
+  autoOpenSeq?: number;
+  /**
+   * 仅保留 handshake-only：只渲染原生连接器握手 Modal。
+   * 连接器页（目录 + 我的连接）统一由 ConnectorsHub 渲染（市场与设置共用）。
+   */
+  presentation?: "handshake-only";
+  /** handshake-only 下弹层关闭/完成后回调（宿主卸载）。 */
+  onHandshakeDismiss?: () => void;
+  /** 连接状态变化后通知宿主刷新 SSOT（市场卡片已连接态）。 */
+  onConnectionChange?: () => void;
 };
 
 type TmeetStatus = {
@@ -32,6 +50,7 @@ type GithubStatus = {
   label: string;
   error?: string;
   account?: string;
+  health?: ConnectorHealth;
 };
 
 type FeishuStatus = {
@@ -62,16 +81,26 @@ function StatusLabel({
   available,
   connected,
   busy = false,
+  health,
 }: {
   available: boolean;
   connected: boolean;
   busy?: boolean;
+  health?: ConnectorHealth;
 }) {
   if (busy) {
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-400">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
         {st("connectors.connecting")}
+      </span>
+    );
+  }
+  if (health === "degraded") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+        {st("connectors.needsReauth")}
       </span>
     );
   }
@@ -86,27 +115,28 @@ function StatusLabel({
 
 function ConnectorIcon({ item, large = false }: { item: ConnectorDefinition; large?: boolean }) {
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center rounded-xl border border-border bg-white ${large ? "h-14 w-14" : "h-9 w-9"}`}
-      aria-hidden
-    >
-      <img
-        src={item.iconSrc}
-        alt=""
-        className={large ? "h-9 w-9 object-contain" : "h-[22px] w-[22px] object-contain"}
-        draggable={false}
-      />
-    </div>
+    <MarketIcon
+      name={item.name}
+      iconSrc={item.iconSrc}
+      className={large ? "h-14 w-14" : "h-9 w-9"}
+    />
   );
 }
 
-export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props) {
+export function ConnectorsTab({
+  sessionId,
+  tapdConnected,
+  onRefreshMcp,
+  autoOpenId = null,
+  autoOpenSeq = 0,
+  presentation = "handshake-only",
+  onHandshakeDismiss,
+  onConnectionChange,
+}: Props) {
   const { t } = useTranslation("settings");
   const [selectedId, setSelectedId] = useState<ConnectorId | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
-  /** WorkBuddy marketplace: hide not-yet-integrated connectors unless toggled on. */
-  const [showUnavailable, setShowUnavailable] = useState(false);
   const [tmeetStatus, setTmeetStatus] = useState<TmeetStatus>({
     available: true,
     connected: false,
@@ -137,6 +167,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   });
   const [wecomBusy, setWecomBusy] = useState(false);
   const [wecomPhase, setWecomPhase] = useState("");
+  const [wecomMode, setWecomMode] = useState<"qrcode" | "manual">("qrcode");
+  const [wecomLoginUrl, setWecomLoginUrl] = useState("");
+  const [wecomQrDataUrl, setWecomQrDataUrl] = useState("");
   const [botIdInput, setBotIdInput] = useState("");
   const [botSecretInput, setBotSecretInput] = useState("");
   const [showBotSecret, setShowBotSecret] = useState(false);
@@ -155,74 +188,6 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const selected = useMemo(
     () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
     [selectedId],
-  );
-
-  const connectorState = useCallback(
-    (item: ConnectorDefinition) => {
-      const connected =
-        item.id === "tencent-meeting"
-          ? tmeetStatus.connected
-          : item.id === "tapd"
-            ? tapdConnected
-            : item.id === "github"
-              ? githubStatus.connected
-              : item.id === "feishu"
-                ? feishuStatus.connected
-                : item.id === "wecom"
-                  ? wecomStatus.connected
-                  : item.id === "qqmail"
-                    ? qqmailStatus.connected
-                    : false;
-      const available =
-        item.id === "tencent-meeting"
-          ? tmeetStatus.available
-          : nativeConnectorAvailability(item.id) === "available";
-      const busy =
-        item.id === "tencent-meeting"
-          ? tmeetBusy
-          : item.id === "tapd"
-            ? tapdBusy
-            : item.id === "github"
-              ? githubBusy
-              : item.id === "feishu"
-                ? feishuBusy
-                : item.id === "wecom"
-                  ? wecomBusy
-                  : item.id === "qqmail"
-                    ? qqmailBusy
-                    : false;
-      return { available, connected, busy };
-    },
-    [
-      feishuBusy,
-      feishuStatus.connected,
-      githubBusy,
-      githubStatus.connected,
-      qqmailBusy,
-      qqmailStatus.connected,
-      tapdBusy,
-      tapdConnected,
-      tmeetBusy,
-      tmeetStatus.available,
-      tmeetStatus.connected,
-      wecomBusy,
-      wecomStatus.connected,
-    ],
-  );
-
-  const visibleConnectors = useMemo(
-    () =>
-      CONNECTORS.filter((item) => {
-        if (showUnavailable) return true;
-        const { available, connected } = connectorState(item);
-        return available || connected;
-      }),
-    [connectorState, showUnavailable],
-  );
-
-  const unavailableCount = useMemo(
-    () => CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
-    [connectorState],
   );
 
   const showToast = useCallback((message: string) => {
@@ -248,6 +213,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       label: result.label,
       error: result.error,
       account: result.account,
+      health: result.health,
     });
   }, []);
 
@@ -341,15 +307,21 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
 
   useEffect(() => {
     void refreshWecomStatus();
-    return window.agenticxDesktop.onNativeConnectorWecomProgress(({ phase }) => {
+    return window.agenticxDesktop.onNativeConnectorWecomProgress(({ phase, loginUrl }) => {
       const labels: Record<string, string> = {
         installing: st("connectors.phaseWecomInstall"),
         initializing: st("connectors.phaseWecomInit"),
+        waiting_scan: st("connectors.phaseWecomScan"),
         probing: st("connectors.phaseWecomProbe"),
         success: st("connectors.phaseConnOk"),
         disconnected: st("connectors.phaseDisconnected"),
         error: st("connectors.phaseConnError"),
       };
+      if (loginUrl) setWecomLoginUrl(loginUrl);
+      if (phase === "success" || phase === "disconnected") {
+        setWecomLoginUrl("");
+        setWecomQrDataUrl("");
+      }
       if (labels[phase]) setWecomPhase(labels[phase]);
       if (phase === "success" || phase === "disconnected" || phase === "error") {
         void refreshWecomStatus();
@@ -385,6 +357,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setFeishuPhase("");
     setFeishuVerifyUrl("");
     setWecomPhase("");
+    setWecomMode("qrcode");
+    setWecomLoginUrl("");
+    setWecomQrDataUrl("");
     setBotIdInput("");
     setBotSecretInput("");
     setShowBotSecret(false);
@@ -392,6 +367,33 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setQqmailAuthUrl("");
     setSelectedId(item.id);
   };
+
+  const handshakeOpenedRef = useRef(false);
+
+  // 市场/设置深链：与点卡片 + 同一 openConnector 入口。
+  useEffect(() => {
+    if (!autoOpenId) return;
+    const item = CONNECTORS.find((c) => c.id === autoOpenId);
+    if (!item) return;
+    handshakeOpenedRef.current = false;
+    openConnector(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-open on id/seq
+  }, [autoOpenId, autoOpenSeq]);
+
+  // handshake-only：弹层关闭后通知宿主（成功连接也会 setSelectedId(null)）。
+  useEffect(() => {
+    if (presentation !== "handshake-only") return;
+    if (!autoOpenId) return;
+    if (selectedId === autoOpenId) {
+      handshakeOpenedRef.current = true;
+      return;
+    }
+    if (selectedId === null && handshakeOpenedRef.current) {
+      handshakeOpenedRef.current = false;
+      onConnectionChange?.();
+      onHandshakeDismiss?.();
+    }
+  }, [presentation, autoOpenId, selectedId, onHandshakeDismiss, onConnectionChange]);
 
   const handleTmeetConnect = async () => {
     setTmeetBusy(true);
@@ -451,17 +453,30 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
         label: result.label,
         error: result.error,
         account: result.account,
+        health: result.health,
       });
+      onConnectionChange?.();
       if (result.error === "已取消") {
         setGithubPhase("");
         setGithubDeviceCode("");
         return;
       }
+      // Native session OK but MCP still degraded: stop spinner, keep modal with clear next step.
+      if (result.health === "degraded") {
+        setGithubPhase("");
+        setGithubDeviceCode("");
+        setDialogError(result.error || st("connectors.needsReauthHint"));
+        showToast(st("connectors.githubNativeOkMcpDegraded"));
+        return;
+      }
       if (!result.ok || !result.connected) {
         setDialogError(result.error || st("connectors.githubIncomplete"));
+        setGithubPhase("");
         return;
       }
       showToast(st("connectors.githubConnected"));
+      setGithubPhase("");
+      setGithubDeviceCode("");
       setSelectedId(null);
     } finally {
       setGithubBusy(false);
@@ -494,7 +509,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
         label: result.label,
         error: result.error,
         account: result.account,
+        health: result.health,
       });
+      onConnectionChange?.();
       if (!result.ok) {
         setDialogError(result.error || st("connectors.githubDisconnectFail"));
         return;
@@ -574,8 +591,24 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     }
   };
 
+  useEffect(() => {
+    if (!wecomLoginUrl) {
+      setWecomQrDataUrl("");
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(wecomLoginUrl, { width: 220, margin: 2, errorCorrectionLevel: "M" }).then(
+      (png) => {
+        if (!cancelled) setWecomQrDataUrl(png);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [wecomLoginUrl]);
+
   const handleWecomConnect = async () => {
-    if (!botIdInput.trim() || !botSecretInput.trim()) {
+    if (wecomMode === "manual" && (!botIdInput.trim() || !botSecretInput.trim())) {
       setDialogError(st("connectors.needBotCreds"));
       return;
     }
@@ -583,10 +616,11 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setDialogError("");
     setWecomPhase(st("connectors.prepareWecom"));
     try {
-      const result = await window.agenticxDesktop.nativeConnectorWecomLogin({
-        botId: botIdInput.trim(),
-        botSecret: botSecretInput.trim(),
-      });
+      const result = await window.agenticxDesktop.nativeConnectorWecomLogin(
+        wecomMode === "manual"
+          ? { mode: "manual", botId: botIdInput.trim(), botSecret: botSecretInput.trim() }
+          : { mode: "qrcode" },
+      );
       setWecomStatus({
         available: result.available,
         connected: result.connected,
@@ -620,6 +654,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     }
     setWecomBusy(false);
     setWecomPhase("");
+    setWecomLoginUrl("");
+    setWecomQrDataUrl("");
     setDialogError("");
     setSelectedId(null);
   };
@@ -772,73 +808,6 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
 
   return (
     <>
-      <div className="space-y-4 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <p className="max-w-xl text-xs text-text-muted">
-            {st("connectors.intro")}
-          </p>
-          {unavailableCount > 0 ? (
-            <label className="flex shrink-0 items-center gap-2 text-[12px] text-text-muted">
-              <span>{st("connectors.showUnavailable")}</span>
-              <SettingsSwitch
-                checked={showUnavailable}
-                size="sm"
-                aria-label={st("connectors.showUnavailableAria")}
-                onChange={setShowUnavailable}
-              />
-            </label>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {visibleConnectors.map((item) => {
-            const { available, connected, busy } = connectorState(item);
-            return (
-              <div
-                key={item.id}
-                className={`flex min-h-[88px] items-start gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 transition ${
-                  available ? "hover:bg-surface-hover" : "opacity-70"
-                }`}
-              >
-                <ConnectorIcon item={item} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-text-strong">{st(`connectors.catalog.${item.id}.name`)}</span>
-                    {/* WorkBuddy: green = connected; grey = available but not connected */}
-                    {connected ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-label={st("connectors.connectedAria")} />
-                    ) : available ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-faint/50" aria-label={st("connectors.disconnectedAria")} />
-                    ) : null}
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-muted">{st(`connectors.catalog.${item.id}.description`)}</p>
-                  {!available && !connected ? (
-                    <p className="mt-1 text-[11px] text-text-faint">{st("connectors.notYet")}</p>
-                  ) : null}
-                </div>
-                {available ? (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                    aria-label={connected ? st("connectors.manageAria", { name: st(`connectors.catalog.${item.id}.name`) }) : st("connectors.connectAria", { name: st(`connectors.catalog.${item.id}.name`) })}
-                    disabled={busy}
-                    onClick={() => openConnector(item)}
-                  >
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : connected ? (
-                      <ChevronRight className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <Plus className="h-4 w-4" aria-hidden />
-                    )}
-                  </button>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       <Modal
         open={selected?.id === "tencent-meeting"}
         title={st("connectors.tmeetTitle")}
@@ -914,9 +883,21 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
               type="button"
               className="rounded-md bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
               disabled={githubBusy}
-              onClick={() => void (githubStatus.connected ? handleGithubLogout() : handleGithubConnect())}
+              onClick={() =>
+                void (
+                  githubStatus.health === "degraded" || !githubStatus.connected
+                    ? handleGithubConnect()
+                    : handleGithubLogout()
+                )
+              }
             >
-              {githubBusy ? st("connectors.processing") : githubStatus.connected ? st("connectors.disconnect") : st("connectors.githubConnect")}
+              {githubBusy
+                ? st("connectors.processing")
+                : githubStatus.health === "degraded"
+                  ? st("connectors.githubReauth")
+                  : githubStatus.connected
+                    ? st("connectors.disconnect")
+                    : st("connectors.githubConnect")}
             </button>
           </div>
         }
@@ -931,6 +912,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                   available={githubStatus.available}
                   connected={githubStatus.connected}
                   busy={githubBusy}
+                  health={githubStatus.health}
                 />
                 {githubStatus.connected && githubStatus.account ? (
                   <div className="mt-1 text-xs text-text-muted">{st("connectors.account", { account: githubStatus.account })}</div>
@@ -970,7 +952,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                 {githubPhase}
               </div>
             ) : null}
-            {dialogError || githubStatus.error ? (
+            {dialogError || (!githubBusy && githubStatus.error) ? (
               <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                 {dialogError || githubStatus.error}
               </div>
@@ -1110,6 +1092,52 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             </p>
             {!wecomStatus.connected ? (
               <div className="space-y-3">
+                <div className="flex gap-1 rounded-lg border border-border bg-surface-card p-1">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md px-3 py-1.5 text-xs ${
+                      wecomMode === "qrcode"
+                        ? "bg-surface-card-strong font-medium text-text-strong"
+                        : "text-text-muted hover:text-text-strong"
+                    }`}
+                    disabled={wecomBusy}
+                    onClick={() => setWecomMode("qrcode")}
+                  >
+                    {st("connectors.wecomModeQr")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md px-3 py-1.5 text-xs ${
+                      wecomMode === "manual"
+                        ? "bg-surface-card-strong font-medium text-text-strong"
+                        : "text-text-muted hover:text-text-strong"
+                    }`}
+                    disabled={wecomBusy}
+                    onClick={() => setWecomMode("manual")}
+                  >
+                    {st("connectors.wecomModeManual")}
+                  </button>
+                </div>
+                {wecomMode === "qrcode" ? (
+                  <div className="space-y-2">
+                    <p className="text-[11px] leading-relaxed text-text-faint">
+                      {st("connectors.wecomQrHint")}
+                    </p>
+                    {wecomQrDataUrl ? (
+                      <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-3">
+                        <img src={wecomQrDataUrl} alt="" width={220} height={220} />
+                        <button
+                          type="button"
+                          className="text-[11px] text-text-muted hover:text-text-strong"
+                          onClick={() => void window.agenticxDesktop.openExternal(wecomLoginUrl)}
+                        >
+                          {st("connectors.wecomOpenLogin")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
                 <div>
                   <label className="mb-1 block text-[11px] text-text-muted">Bot ID</label>
                   <input
@@ -1160,6 +1188,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                   {st("connectors.howBotCreds")}
                 </a>
+                  </>
+                )}
               </div>
             ) : null}
             {wecomPhase ? (

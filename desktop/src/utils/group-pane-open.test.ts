@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   existingGroupPaneNeedsBind,
   pickConfirmedGroupSessionId,
+  pickMostRecentSessionId,
   pickOptimisticGroupSessionId,
+  pickPreferredSessionId,
   shouldCreateGroupSession,
   shouldSkipGroupSessionListOnOpen,
 } from "./group-pane-open";
@@ -69,6 +71,37 @@ describe("pickConfirmedGroupSessionId", () => {
         listed: [{ session_id: "sid-meta", avatar_id: null, updated_at: 1 }],
       })
     ).toBeUndefined();
+  });
+});
+
+describe("pickMostRecentSessionId", () => {
+  it("skips blocked scratch sessions when restoring the latest pane session", () => {
+    expect(
+      pickMostRecentSessionId(
+        [
+          { session_id: "scratch-new", avatar_id: null, updated_at: 90 },
+          { session_id: "main-old", avatar_id: null, updated_at: 10 },
+        ],
+        null,
+        ["scratch-new"],
+      )
+    ).toBe("main-old");
+  });
+});
+
+describe("pickPreferredSessionId", () => {
+  it("does not restore a remembered scratch session onto the main pane", () => {
+    expect(
+      pickPreferredSessionId({
+        rememberedSid: "scratch-remembered",
+        avatarId: null,
+        blockedIds: ["scratch-remembered"],
+        sessions: [
+          { session_id: "scratch-remembered", avatar_id: null, updated_at: 90 },
+          { session_id: "main-old", avatar_id: null, updated_at: 10 },
+        ],
+      })
+    ).toBe("main-old");
   });
 });
 

@@ -20,7 +20,7 @@ type Props = {
   /** Sub-Plan E: once a cluster anchor exists in the message stream, hide the duplicate live cluster summary. */
   anchoredRunIds?: string[];
   onModelChange?: (agentId: string, provider: string, model: string) => void;
-  onConfirmResolve?: (agentId: string, approved: boolean) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean, remember?: "session") => void;
   tintColor?: string;
 };
 

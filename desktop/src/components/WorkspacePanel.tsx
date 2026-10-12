@@ -24,8 +24,15 @@ import { createResizeRafScheduler } from "../utils/resize-raf";
 import { ContextMenu, type ContextMenuAnchorRect } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import { pickPreferredSessionId } from "../utils/group-pane-open";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
+import { scratchHistoryBlocklist } from "../utils/scratch-chat";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
+import { mountModeSwitchForEntry } from "../utils/workspace-mount-mode";
+import {
+  isCurrentWorkspaceRequest,
+  workspaceNodeKey,
+} from "../utils/workspace-session-cache";
 import {
   findTaskspaceForAbsPath,
   relativePathFromRoot,
@@ -70,6 +77,14 @@ type TaskspaceFile = {
   virtual?: boolean;
 };
 
+function logWorkspacePerf(payload: Record<string, unknown>): void {
+  console.debug("[workspace-perf]", payload);
+  void window.agenticxDesktop?.writeWorkspacePerfLog?.({
+    component: "WorkspacePanel",
+    ...payload,
+  })?.catch(() => undefined);
+}
+
 function WorkspaceFileTypeIcon({ name }: { name: string }) {
   return <FileTypeMark kind={artifactGlyph(name).kind} />;
 }
@@ -106,7 +121,8 @@ function mountModeBadge(mode?: TaskspaceMountMode): { label: string; className: 
   }
   return {
     label: i18n.t("mountMode.direct", { ns: "workspace" }),
-    className: "bg-surface-hover text-rose-300",
+    className:
+      "bg-rose-500/10 text-rose-300 [html[data-theme=light]_&]:bg-rose-600/12 [html[data-theme=light]_&]:text-rose-700",
   };
 }
 
@@ -131,6 +147,7 @@ type Props = {
   /** WorkPanel 嵌入时：开终端后让父级切到顶栏 terminal tab */
   onFocusTerminalTab?: () => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
@@ -164,38 +181,9 @@ type OpenTerminalEventDetail = {
   command?: string;
 };
 
-function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
-  const targetAvatarId = (avatarId ?? "").trim();
-  const itemAvatarId = String(item.avatar_id ?? "").trim();
-  if (!targetAvatarId) return itemAvatarId.length === 0;
-  return itemAvatarId === targetAvatarId;
-}
-
-function pickMostRecentSessionId(
-  sessions: SessionListItem[],
-  avatarId?: string | null
-): string | undefined {
-  const sorted = [...sessions]
-    .filter((item) => {
-      const sid = String(item.session_id ?? "").trim();
-      if (!sid) return false;
-      if (item.archived === true) return false;
-      return isSessionAvatarMatch(item, avatarId);
-    })
-    .sort((a, b) => {
-      const ua = Number.isFinite(a.updated_at) ? a.updated_at : 0;
-      const ub = Number.isFinite(b.updated_at) ? b.updated_at : 0;
-      if (ub !== ua) return ub - ua;
-      const ca = Number.isFinite(a.created_at ?? Number.NaN) ? (a.created_at as number) : 0;
-      const cb = Number.isFinite(b.created_at ?? Number.NaN) ? (b.created_at as number) : 0;
-      return cb - ca;
-    });
-  const sid = sorted[0]?.session_id;
-  return sid ? String(sid).trim() : undefined;
-}
-
-function nodeKey(taskspaceId: string, relPath: string): string {
-  return `${taskspaceId}:${relPath || "."}`;
+function scratchBlocklistNow() {
+  const state = useAppStore.getState();
+  return scratchHistoryBlocklist(state.panes, state.hiddenScratchSessionIds);
 }
 
 function taskspaceReferenceLabel(taskspace: Taskspace): string {
@@ -236,6 +224,7 @@ export function WorkspacePanel({
   tintColor,
   onFocusTerminalTab,
   onQuotePreviewSnippet,
+  onOpenScratchSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
@@ -300,6 +289,7 @@ export function WorkspacePanel({
     setPendingMountMode,
     adding,
     confirmMountModeAndAttach,
+    linkSourcesIntoDefault,
   } = attachWorkspace;
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
@@ -350,7 +340,7 @@ export function WorkspacePanel({
   /** Sidebar: true while eagerly linking session artifacts on first open. */
   const [sidebarBootstrapping, setSidebarBootstrapping] = useState(false);
 
-  const defaultRootKey = nodeKey("default", ".");
+  const defaultRootKey = workspaceNodeKey(getBrowseSessionId(), "default", ".");
   const defaultRootEntries = entriesByDir[defaultRootKey];
   const defaultContentReady = defaultRootEntries !== undefined;
 
@@ -478,6 +468,7 @@ export function WorkspacePanel({
   const loadTaskspaces = async (): Promise<Taskspace[] | undefined> => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return undefined;
+    const startedAt = performance.now();
     setLoading(true);
     // Read live store value — event-handler closures can stale-capture null and
     // call onActiveTaskspaceChange on every refresh → update-depth loop.
@@ -497,30 +488,63 @@ export function WorkspacePanel({
       applyWorkspaces(workspaces);
       setWorkspaceLoadedOnce(true);
       setLoading(false);
+      logWorkspacePerf({
+        event: "listTaskspaces preload",
+        paneId,
+        sessionId: browseSessionId,
+        workspaceCount: workspaces.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       return workspaces;
     }
     const result = await window.agenticxDesktop.listTaskspaces(browseSessionId);
+    if (!isCurrentWorkspaceRequest(browseSessionId, getBrowseSessionId())) return undefined;
     if (!result.ok) {
       setErrorText(result.error ?? t("panel.loadFailed"));
       setLoading(false);
+      logWorkspacePerf({
+        event: "listTaskspaces failed",
+        paneId,
+        sessionId: browseSessionId,
+        durationMs: Math.round(performance.now() - startedAt),
+        error: result.error,
+      });
       return undefined;
     }
     const workspaces = Array.isArray(result.workspaces) ? result.workspaces : [];
     applyWorkspaces(workspaces);
     setWorkspaceLoadedOnce(true);
     setLoading(false);
+    logWorkspacePerf({
+      event: "listTaskspaces",
+      paneId,
+      sessionId: browseSessionId,
+      workspaceCount: workspaces.length,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
     return workspaces;
   };
 
   const loadDir = async (taskspaceId: string, relPath = ".", force = false) => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
-    const key = nodeKey(taskspaceId, relPath);
+    const key = workspaceNodeKey(browseSessionId, taskspaceId, relPath);
     if (!force && entriesByDir[key]) return;
+    const startedAt = performance.now();
     const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId: browseSessionId, taskspaceId, path: relPath });
+    if (!isCurrentWorkspaceRequest(browseSessionId, getBrowseSessionId())) return;
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
       setErrorText(result.error ?? t("panel.readDirFailed"));
+      logWorkspacePerf({
+        event: "listTaskspaceFiles failed",
+        paneId,
+        sessionId: browseSessionId,
+        taskspaceId,
+        path: relPath,
+        durationMs: Math.round(performance.now() - startedAt),
+        error: result.error,
+      });
       return;
     }
     setEntriesByDir((prev) => ({ ...prev, [key]: result.files ?? [] }));
@@ -531,10 +555,24 @@ export function WorkspacePanel({
         totalSeen: Number(result.total_seen || (result.files ?? []).length),
       },
     }));
+    logWorkspacePerf({
+      event: "listTaskspaceFiles",
+      paneId,
+      sessionId: browseSessionId,
+      taskspaceId,
+      path: relPath,
+      force,
+      fileCount: (result.files ?? []).length,
+      totalSeen: Number(result.total_seen || (result.files ?? []).length),
+      truncated: !!result.truncated,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
   };
 
   const refreshTaskspace = async (taskspaceId: string) => {
-    const prefix = `${taskspaceId}:`;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
+    const prefix = `${browseSessionId}:${taskspaceId}:`;
     const expandedPaths = Array.from(expandedDirs)
       .filter((key) => key.startsWith(prefix))
       .map((key) => key.slice(prefix.length));
@@ -545,6 +583,8 @@ export function WorkspacePanel({
   const refreshListAndActiveTaskspace = async () => {
     const workspaces = await loadTaskspaces();
     if (!workspaces?.length) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     // Flat view always shows default children — force-refresh that listing.
     if (workspaces.some((ts) => ts.id === "default")) {
       await refreshTaskspace("default");
@@ -552,7 +592,7 @@ export function WorkspacePanel({
     }
     await Promise.all(
       workspaces.map((ts) => {
-        const key = nodeKey(ts.id, ".");
+        const key = workspaceNodeKey(browseSessionId, ts.id, ".");
         if (expandedDirs.has(key)) {
           return refreshTaskspace(ts.id);
         }
@@ -606,16 +646,12 @@ export function WorkspacePanel({
         setWorkspaceLoadedOnce(true);
         return;
       }
-      const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        listed.sessions.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, paneAvatarId)
-        );
-      const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const preferredSid = pickPreferredSessionId({
+        sessions: listed.sessions,
+        avatarId: paneAvatarId,
+        rememberedSid: getRememberedSessionForAvatar(paneAvatarId),
+        blockedIds: scratchBlocklistNow(),
+      });
       if (cancelled) return;
       if (!preferredSid) {
         setWorkspaceLoadedOnce(true);
@@ -631,6 +667,11 @@ export function WorkspacePanel({
   }, [sessionId, awaitingFreshSession, paneAvatarId, recoverTick]);
 
   useEffect(() => {
+    logWorkspacePerf({
+      event: "session workspace switch",
+      paneId,
+      sessionId: String(sessionId ?? "").trim(),
+    });
     if (!sessionId) {
       if (shouldKeepWorkspaceVisibleWhenSessionMissing(sessionId, isPaneAwaitingFreshSession(paneId))) {
         return;
@@ -747,16 +788,12 @@ export function WorkspacePanel({
         setWorkspaceLoadedOnce(true);
         return;
       }
-      const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        listed.sessions.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, paneAvatarId)
-        );
-      const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const preferredSid = pickPreferredSessionId({
+        sessions: listed.sessions,
+        avatarId: paneAvatarId,
+        rememberedSid: getRememberedSessionForAvatar(paneAvatarId),
+        blockedIds: scratchBlocklistNow(),
+      });
       if (cancelled) return;
       if (!preferredSid) {
         // No recoverable session for this pane: end the skeleton and let the
@@ -782,7 +819,7 @@ export function WorkspacePanel({
     if (!browseSessionId) return;
     const timer = window.setInterval(() => {
       taskspaces.forEach((ts) => {
-        const key = nodeKey(ts.id, ".");
+        const key = workspaceNodeKey(getBrowseSessionId(), ts.id, ".");
         if (expandedDirs.has(key)) {
           void refreshTaskspace(ts.id);
         }
@@ -1031,6 +1068,56 @@ export function WorkspacePanel({
     setErrorText("");
   };
 
+  const changeEntryMountMode = async (entry: TaskspaceFile, next: "link" | "reference") => {
+    const browseSessionId = getBrowseSessionId();
+    const source = String(entry.source_path || "").trim();
+    const previous = entry.mount_mode === "link" || entry.mount_mode === "reference"
+      ? entry.mount_mode
+      : null;
+    if (!browseSessionId || !source) {
+      setErrorText(t("panel.changeMountFailed"));
+      return;
+    }
+    const unlink = window.agenticxDesktop.unlinkFromSessionWorkspace;
+    if (typeof unlink !== "function" || typeof window.agenticxDesktop.linkIntoSessionWorkspace !== "function") {
+      setErrorText(t("panel.changeMountNeedRestart"));
+      return;
+    }
+    if (next === "link") {
+      const confirmResult =
+        typeof window.agenticxDesktop.confirmDialog === "function"
+          ? await window.agenticxDesktop.confirmDialog({
+              title: i18n.t("composer.directMountTitle", { ns: "chat" }),
+              message: i18n.t("composer.directMountMessage", { ns: "chat" }),
+              detail: i18n.t("composer.directMountDetail", { ns: "chat", path: source }),
+              confirmText: i18n.t("composer.directMountConfirm", { ns: "chat" }),
+              cancelText: t("cancel", { ns: "common" }),
+              destructive: true,
+            })
+          : { ok: true, confirmed: false };
+      if (!confirmResult.confirmed) return;
+    }
+    const unlinked = await unlink({ sessionId: browseSessionId, sources: [source] });
+    if (!unlinked.ok) {
+      setErrorText(unlinked.error ?? t("panel.changeMountFailed"));
+      return;
+    }
+    const linked = await linkSourcesIntoDefault([source], next);
+    if (!linked && previous && previous !== next) {
+      await linkSourcesIntoDefault([source], previous);
+      setErrorText(t("panel.changeMountFailed"));
+      await refreshListAndActiveTaskspace();
+      return;
+    }
+    if (!linked) {
+      setErrorText(t("panel.changeMountFailed"));
+      await refreshListAndActiveTaskspace();
+      return;
+    }
+    setErrorText("");
+    await refreshListAndActiveTaskspace();
+  };
+
   const openFile = async (taskspaceId: string, relPath: string, entry?: TaskspaceFile) => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
@@ -1186,7 +1273,7 @@ export function WorkspacePanel({
     if (activeTaskspaceId !== taskspaceId) {
       onActiveTaskspaceChange(taskspaceId);
     }
-    const key = nodeKey(taskspaceId, relPath);
+    const key = workspaceNodeKey(getBrowseSessionId(), taskspaceId, relPath);
     if (expandedDirs.has(key)) {
       const next = new Set(expandedDirs);
       next.delete(key);
@@ -1219,7 +1306,8 @@ export function WorkspacePanel({
   };
 
   const renderDir = (taskspaceId: string, relPath: string, depth: number) => {
-    const key = nodeKey(taskspaceId, relPath);
+    const browseSessionId = getBrowseSessionId();
+    const key = workspaceNodeKey(browseSessionId, taskspaceId, relPath);
     const rows = entriesByDir[key] ?? [];
     const trunc = truncatedDirs[key];
     if (rows.length === 0) return null;
@@ -1227,7 +1315,7 @@ export function WorkspacePanel({
     return (
       <>
         {rows.map((item) => {
-          const itemKey = nodeKey(taskspaceId, item.path);
+          const itemKey = workspaceNodeKey(browseSessionId, taskspaceId, item.path);
           const isExpanded = expandedDirs.has(itemKey);
           const paddingLeft = 8 + depth * 14;
           const badge = showMountBadge ? mountModeBadge(item.mount_mode) : null;
@@ -1381,6 +1469,9 @@ export function WorkspacePanel({
     onFocusTerminalTab?.();
   };
 
+  const entryMountSwitch =
+    ctxMenu?.kind === "entry" ? mountModeSwitchForEntry(ctxMenu.entry) : null;
+
   return (
     <div
       ref={panelRef}
@@ -1388,7 +1479,7 @@ export function WorkspacePanel({
         useSidebarSurface
           ? "bg-surface-sidebar"
           : useWorkPanelSurface
-            ? "bg-surface-panel"
+            ? "bg-transparent"
             : "bg-surface-card"
       }`}
       style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}
@@ -1859,6 +1950,17 @@ export function WorkspacePanel({
                         },
                       ]
                     : []),
+                  ...(entryMountSwitch
+                    ? [
+                        { separator: true },
+                        {
+                          label: t(entryMountSwitch.labelKey),
+                          danger: entryMountSwitch.next === "link",
+                          onSelect: () =>
+                            void changeEntryMountMode(ctxMenu.entry, entryMountSwitch.next),
+                        },
+                      ]
+                    : []),
                 ]
             : []
         }
@@ -1876,6 +1978,7 @@ export function WorkspacePanel({
           }}
           initialLineRange={previewFocusLineRange ?? undefined}
           onQuoteSnippet={onQuotePreviewSnippet}
+          onOpenScratchSnippet={onOpenScratchSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
           taskspaceRoot={previewTaskspaceRoot}

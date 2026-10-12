@@ -15,6 +15,7 @@ import pytest
 
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
+from agenticx.llms.typesafe_config import TypesafeSettings
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
     GroupChatRouter,
@@ -26,6 +27,14 @@ from agenticx.runtime.harden_flags import (
     group_open_floor_enabled,
     group_open_floor_max_speakers,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_typesafe_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.load_typesafe_settings",
+        lambda: TypesafeSettings(),
+    )
 
 
 # ---------------------------------------------------------------------------

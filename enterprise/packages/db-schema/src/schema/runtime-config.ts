@@ -57,6 +57,23 @@ export const enterpriseRuntimeUserVisibleModels = pgTable(
   })
 );
 
+/** 部门默认模型。assignment_key 仅允许 `dept:<id>`。 */
+export const enterpriseRuntimeScopeDefaultModels = pgTable(
+  "enterprise_runtime_scope_default_models",
+  {
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    assignmentKey: text("assignment_key").notNull(),
+    modelId: text("model_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.tenantId, table.assignmentKey],
+      name: "enterprise_runtime_scope_default_pk",
+    }),
+  })
+);
+
 /** 租户 token 配额整包 JSON（等价原 quotas.json）。 */
 export const enterpriseRuntimeTokenQuotas = pgTable("enterprise_runtime_token_quotas", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),

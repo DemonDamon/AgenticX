@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import ast
 import json
 import asyncio
 import hashlib
@@ -31,6 +32,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 
 from agenticx.cli.agent_tools import (
@@ -46,6 +48,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.extensions.skillhub_install_guard import market_install_tool_for_intent
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.context_file_budget import serialize_context_files
@@ -68,7 +71,7 @@ from agenticx.runtime.events import (
     iter_content_block_start_events,
 )
 from agenticx.runtime.hooks import HookRegistry
-from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.loop_detector import LoopDetector, TurnSteerQueue
 from agenticx.runtime.plan_mode import (
     plan_mode_retry_limit_reached,
     turn_intent_denial_message,
@@ -78,6 +81,7 @@ from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
+    is_length_finish_reason,
     is_search_deferral_stub,
 )
 from agenticx.runtime.usage_metadata import (
@@ -160,10 +164,72 @@ def _chat_history_tail_matches(
     return str(last.get("content", "")).strip() == str(content or "").strip()
 
 
+def _assistant_content_key(content: Any) -> str:
+    raw = str(content or "")
+    if not raw.strip():
+        return ""
+    return parse_assistant_output(raw).visible_body.strip()
+
+
+def _last_assistant_row_in_turn(
+    history: Sequence[Dict[str, Any]] | None,
+) -> Optional[Dict[str, Any]]:
+    """Return the latest assistant row in the current user turn, skipping tools."""
+    if not history:
+        return None
+    for item in reversed(list(history)):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").lower()
+        if role == "user":
+            return None
+        if role == "assistant":
+            return item
+    return None
+
+
+def _merge_assistant_history_row(existing: Dict[str, Any], row: Dict[str, Any]) -> None:
+    """Fold a duplicate assistant persist into the earlier bubble."""
+    incoming_content = row.get("content")
+    if _assistant_content_key(incoming_content):
+        existing["content"] = incoming_content
+    incoming_meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    existing_meta = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+    if incoming_meta or existing_meta:
+        merged_meta = dict(existing_meta)
+        merged_meta.update(incoming_meta)
+        existing["metadata"] = merged_meta
+    for key in (
+        "suggested_questions",
+        "reasoning",
+        "reasoning_seconds",
+        "references",
+        "searched_queries",
+        "usage",
+        "provider",
+        "model",
+        "model_selection",
+        "blocks",
+    ):
+        value = row.get(key)
+        if value not in (None, "", [], {}):
+            existing[key] = value
+
+
 def _chat_history_append_deduped(history: List[Dict[str, Any]], row: Dict[str, Any]) -> bool:
     """Append when tail role, content, or stable user-turn identity differs."""
     role = str(row.get("role", ""))
     content = row.get("content", "")
+    if role.lower() == "assistant":
+        last_assistant = _last_assistant_row_in_turn(history)
+        if (
+            last_assistant is not None
+            and _assistant_content_key(last_assistant.get("content"))
+            == _assistant_content_key(content)
+            and _assistant_content_key(content)
+        ):
+            _merge_assistant_history_row(last_assistant, row)
+            return False
     if _chat_history_tail_matches(history, role, content):
         last = history[-1] if history else {}
         row_metadata = row.get("metadata")
@@ -473,6 +539,13 @@ def _parallel_tools_enabled() -> bool:
         return False
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
+
+
+def _should_surface_budget_compression_notice(budget_source: str) -> bool:
+    """Return whether token-budget pressure should be shown to the user."""
+    return str(budget_source or "").strip().lower() == "session"
+
+
 DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 60.0
 PROVIDER_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
     # Some providers/models (especially tool-heavy rounds) often need longer first-token latency.
@@ -516,6 +589,41 @@ def _spawn_usage_persist_task(coro: "Coroutine[Any, Any, None]") -> "asyncio.Tas
     _USAGE_PERSIST_TASKS.add(task)
     task.add_done_callback(_USAGE_PERSIST_TASKS.discard)
     return task
+
+
+def _log_model_fault(
+    session: Any,
+    *,
+    provider: str,
+    model: str,
+    kind: str,
+    phase: str,
+    message: str = "",
+    attempt: int = 1,
+    retryable: bool = False,
+    usage_session_id: str = "",
+    usage_avatar_id: str = "",
+) -> None:
+    try:
+        from agenticx.runtime.usage_store import log_model_fault
+
+        sid = (usage_session_id or "").strip() or str(
+            getattr(session, "_usage_owner_session_id", "") or ""
+        ).strip()
+        log_model_fault(
+            session,
+            session_id=sid,
+            avatar_id=(usage_avatar_id or "").strip(),
+            provider=provider,
+            model=model,
+            kind=kind,
+            phase=phase,
+            attempt=attempt,
+            retryable=retryable,
+            message=message,
+        )
+    except Exception:
+        logger.debug("model fault persist skipped", exc_info=True)
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -992,13 +1100,27 @@ def _chat_temperature_kwargs(
     return {"temperature": float(value)}
 
 
+# DeepSeek V4 thinking spends this same completion budget. 8192 is enough for
+# the reasoning trace alone, so the visible reply and tool call never start.
+# 24576 leaves room for a file write while staying inside the default 180s
+# round hard-timeout at the token rate seen on deepseek-v4-flash (~200 tok/s).
+# The model ceiling is 384K; this is a floor, not that ceiling.
+_DEEPSEEK_V4_THINKING_OUTPUT_FLOOR = 24576
+
+
 def _resolve_round_max_tokens(
     base: int,
     recent_tools: Sequence[str],
     *,
     provider: str = "",
+    model: str = "",
+    thinking: bool = False,
 ) -> int:
-    """Resolve per-round max_tokens, raising budget after recent file writes."""
+    """Resolve per-round max_tokens, raising budget after recent file writes.
+
+    When DeepSeek V4 thinking is on, reasoning and the answer share max_tokens.
+    Raise the floor unless ``base`` is already a vendor downshift below 8192.
+    """
     try:
         resolved_base = int(base)
     except Exception:
@@ -1012,9 +1134,34 @@ def _resolve_round_max_tokens(
     resolved = (
         min(16384, max(resolved_base, 12288)) if write_heavy else resolved_base
     )
+    if (
+        thinking
+        and resolved_base >= 8192
+        and _is_deepseek_v4_model(model)
+    ):
+        resolved = max(resolved, _DEEPSEEK_V4_THINKING_OUTPUT_FLOOR)
     if str(provider or "").strip().lower() == "minimax":
         return min(4096, int(resolved))
     return int(resolved)
+
+
+def _session_round_max_tokens(
+    session: Any,
+    recent_tools: Sequence[str],
+    *,
+    provider: str,
+    model: str,
+) -> int:
+    """Per-round completion cap for this session, including thinking floors."""
+    thinking_on = getattr(session, "_thinking_enabled", None) is not False
+    base = int(getattr(session, "_max_tokens_override", None) or 8192)
+    return _resolve_round_max_tokens(
+        base,
+        recent_tools,
+        provider=provider,
+        model=model,
+        thinking=thinking_on,
+    )
 
 
 def _is_kimi_effort_model(model_name: str) -> bool:
@@ -1040,6 +1187,25 @@ def _kimi_k3_reasoning_effort_kwargs(session: Any, model_name: str) -> Dict[str,
 def _is_deepseek_v4_model(model_name: str) -> bool:
     bare = str(model_name or "").strip().lower().split("/")[-1]
     return bare.startswith("deepseek-v4")
+
+
+def _bailian_qwen_thinking_kwargs(
+    session: Any,
+    model_name: str,
+    provider_name: str,
+) -> Dict[str, Any]:
+    """Pass DashScope ``enable_thinking`` for hybrid Qwen3.* chat models."""
+    from agenticx.memory.graph.json_compat import model_supports_enable_thinking_param
+
+    provider = str(provider_name or "").strip().lower()
+    if provider not in {"bailian", "dashscope", "aliyun"}:
+        return {}
+    if not model_supports_enable_thinking_param(model_name):
+        return {}
+    enabled = getattr(session, "_thinking_enabled", None)
+    if enabled is False:
+        return {"extra_body": {"enable_thinking": False}}
+    return {"extra_body": {"enable_thinking": True}}
 
 
 def _deepseek_v4_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
@@ -1547,6 +1713,70 @@ def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
     return {}
 
 
+_NOOP_ONLY_PROGRESS_TOOLS = frozenset({"todo_write"})
+
+
+def _tool_call_function_name(call: Dict[str, Any]) -> str:
+    function_obj = call.get("function") if isinstance(call.get("function"), dict) else {}
+    name = str(function_obj.get("name") or "").strip()
+    if name:
+        return name
+    return str(call.get("name") or "").strip()
+
+
+def _tool_call_arguments(call: Dict[str, Any]) -> Dict[str, Any]:
+    function_obj = call.get("function") if isinstance(call.get("function"), dict) else {}
+    if "arguments" in function_obj:
+        return _parse_tool_arguments(function_obj.get("arguments"))
+    if "arguments" in call:
+        return _parse_tool_arguments(call.get("arguments"))
+    return {}
+
+
+def _todo_write_is_noop(arguments: Dict[str, Any]) -> bool:
+    runtime_keys = {"__tool_call_id", "__agent_id"}
+    meaningful = {
+        key: value
+        for key, value in arguments.items()
+        if key not in runtime_keys
+    }
+    if not meaningful:
+        return True
+    for key in ("todos", "items", "tasks"):
+        if key not in meaningful:
+            continue
+        value = meaningful[key]
+        if value in (None, "", [], {}):
+            return True
+        if isinstance(value, list) and not value:
+            return True
+        return False
+    return False
+
+
+def _should_drop_noop_progress_tools(
+    tool_calls: Sequence[Dict[str, Any]],
+    visible_body: str,
+) -> bool:
+    """True when the only tools are empty todo_write after a public answer.
+
+    Native or inline empty todo_write after a finished reply used to persist
+    the answer as mid-turn, then regenerate the same final (any model).
+    """
+    if not str(visible_body or "").strip():
+        return False
+    if not tool_calls:
+        return False
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            return False
+        if _tool_call_function_name(call) not in _NOOP_ONLY_PROGRESS_TOOLS:
+            return False
+        if not _todo_write_is_noop(_tool_call_arguments(call)):
+            return False
+    return True
+
+
 def _summarize_tool_calls_for_history(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep only stable fields to avoid leaking runtime metadata ids into model context."""
     summarized: List[Dict[str, Any]] = []
@@ -1649,6 +1879,8 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
                     "continuation_notice",
                     "futile_resume_guard",
                     "clarification",
+                    "jev_decision",
+                    "jev_kb_gate",
                 ):
                     idx += 1
                     continue
@@ -1660,6 +1892,15 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             if _message_content_is_empty(msg.get("content")):
+                # A reasoning-only retry stores the draft in reasoning_content
+                # and a single space in content. Dropping that row makes the
+                # follow-up call forget the draft and think again with no body.
+                if not str(msg.get("reasoning_content") or "").strip():
+                    idx += 1
+                    continue
+                kept = dict(msg)
+                kept["content"] = " "
+                sanitized.append(kept)
                 idx += 1
                 continue
             sanitized.append(msg)
@@ -1805,6 +2046,40 @@ def _response_finish_reason(response: Any) -> str:
         if isinstance(raw, str) and raw.strip():
             return raw.strip().lower()
     return ""
+
+
+def _persist_steer_text(session: Any, text: str) -> bool:
+    """Write a follow-up before it is shown to the model. Failure keeps it queued."""
+
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        history = getattr(session, "agent_messages", None)
+    if not isinstance(history, list):
+        return False
+    history.append({"role": "user", "content": text, "metadata": {"source": "steer"}})
+    return True
+
+
+def _tool_args_complete(tool_calls: Any) -> bool:
+    """False when a tool call has empty or unparsable arguments."""
+
+    if not tool_calls:
+        return True
+    for call in tool_calls:
+        if isinstance(call, dict):
+            fn = call.get("function") if isinstance(call.get("function"), dict) else call
+            raw = fn.get("arguments", call.get("arguments"))
+        else:
+            fn = getattr(call, "function", None)
+            raw = getattr(fn, "arguments", None) if fn is not None else getattr(call, "arguments", None)
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return False
+        if isinstance(raw, str):
+            try:
+                json.loads(raw)
+            except json.JSONDecodeError:
+                return False
+    return True
 
 
 _MAX_TOKENS_CAP_RE = re.compile(
@@ -1962,6 +2237,145 @@ def _parse_glm_arg_key_value_body(body: str) -> Dict[str, Any]:
     return args
 
 
+def _normalize_stuck_args_in_tool_name(
+    tool_name: str, arguments: Dict[str, Any]
+) -> Tuple[str, Dict[str, Any], Optional[str]]:
+    """Recover name+args when GLM sticks XML/paren fragments into tool name.
+
+    Examples of broken names seen in session 1b7fd6f0:
+      ``bash_exec(command</arg_key><arg_value>ls …</arg_value>``
+
+    Returns ``(name, args, error_message)``. ``error_message`` is set when the
+    name looks malformed but cannot be recovered into a real tool call; callers
+    should surface that as a single recoverable correction instead of looping
+    allowlist rejects.
+    """
+    name = str(tool_name or "").strip()
+    args: Dict[str, Any] = dict(arguments) if isinstance(arguments, dict) else {}
+    if not name:
+        return name, args, None
+    lower = name.lower()
+    has_xml = any(
+        marker in lower
+        for marker in ("<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>")
+    )
+    has_paren_blob = "(" in name
+    if not has_xml and not has_paren_blob:
+        return name, args, None
+    # Exact allowlisted names never need repair.
+    if not has_xml and name.isidentifier():
+        return name, args, None
+
+    base_match = re.match(r"^([A-Za-z_][\w.-]*)", name)
+    if not base_match:
+        return (
+            name,
+            args,
+            (
+                "ERROR: 畸形工具调用：无法解析工具名。"
+                "请把工具名与参数分开：name 仅为工具名（如 bash_exec / skill_manage），"
+                "arguments 为 JSON 对象；不要把 <arg_key>/<arg_value> 或括号参数写进 name。"
+            ),
+        )
+    base = base_match.group(1)
+    remainder = name[len(base) :]
+    # No junk after a clean name → nothing to normalize.
+    if not remainder.strip():
+        return base, args, None
+    # Clean name with only a trailing "(" unfinished — treat as malformed.
+    if not has_xml and remainder.strip() in {"(", "()"}:
+        return base, args, None
+
+    parsed_args: Dict[str, Any] = {}
+    if has_xml or "<" in remainder:
+        body = remainder
+        if body.startswith("("):
+            body = body[1:]
+        if body.endswith(")"):
+            body = body[:-1]
+        body_l = body.lower()
+        if body and not body_l.startswith("<arg_key>"):
+            # sticky key: command</arg_key><arg_value>…
+            body = f"<arg_key>{body}"
+        parsed_args = _parse_glm_arg_key_value_body(body)
+        if not parsed_args:
+            return (
+                base,
+                args,
+                (
+                    f"ERROR: 畸形工具调用：工具名含 XML 参数碎片（以 {base} 开头）。"
+                    "请重新调用：name 只写工具名，arguments 使用 JSON，"
+                    f'例如 {{"name":"{base}","arguments":{{"command":"ls"}}}}。'
+                    "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具。"
+                ),
+            )
+    elif remainder.startswith("("):
+        inner = remainder[1:]
+        if inner.endswith(")"):
+            inner = inner[:-1]
+        inner = inner.strip()
+        if inner:
+            try:
+                obj = json.loads(inner)
+                if isinstance(obj, dict):
+                    parsed_args = obj
+            except Exception:
+                if base in {"bash_exec", "bash_bg_start"}:
+                    parsed_args = {"command": inner}
+                else:
+                    return (
+                        base,
+                        args,
+                        (
+                            f"ERROR: 畸形工具调用：参数被写进了工具名（{base}(…)）。"
+                            "请把 name 与 arguments 分开，arguments 必须是 JSON 对象。"
+                        ),
+                    )
+    else:
+        # Unrecognized junk after a valid-looking base name.
+        if has_xml or "<" in name or "</" in name:
+            return (
+                base,
+                args,
+                (
+                    f"ERROR: 畸形工具调用：工具名含不可解析碎片（以 {base} 开头）。"
+                    "请只把工具名放在 name，参数放在 arguments JSON。"
+                ),
+            )
+        return name, args, None
+
+    merged = dict(args)
+    for key, value in parsed_args.items():
+        if key not in merged or merged[key] in (None, "", {}, []):
+            merged[key] = value
+    merged = _normalize_file_tool_arg_aliases(base, merged)
+    return base, merged, None
+
+
+
+def _parse_python_kwargs_call_args(raw_args: str) -> Optional[Dict[str, Any]]:
+    """Parse ``name='x', source='y'`` (GLM writes tool calls as Python calls).
+
+    Only keyword arguments with literal values are accepted, so prose inside
+    parentheses never becomes a fake tool call.
+    """
+    try:
+        node = ast.parse(f"_f({raw_args})", mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(node, ast.Call) or node.args or not node.keywords:
+        return None
+    out: Dict[str, Any] = {}
+    for kw in node.keywords:
+        if kw.arg is None:
+            return None
+        try:
+            out[kw.arg] = ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError):
+            return None
+    return out
+
+
 def _extract_inline_tool_call(
     text: str, allowed_tool_names: set[str]
 ) -> Optional[Dict[str, Any]]:
@@ -2051,12 +2465,14 @@ def _extract_inline_tool_call(
         args = _normalize_file_tool_arg_aliases(name, args)
         return {"name": name, "arguments": args}
 
-    # Find the first allowed tool call anywhere in the snippet.
-    # This supports wrappers such as print(check_resources()).
+    # Parenthetical fallback: ``check_resources()`` / ``todo_write({...})``.
+    # Scan the visible body only — reasoning often says "skip todo_write (...)"
+    # and that used to become a fake empty tool call (session ae7b5446).
+    scan_text = parse_assistant_output(text).visible_body.strip() or snippet
     tool_name: Optional[str] = None
     raw_args = ""
     for name in sorted(allowed_tool_names, key=len, reverse=True):
-        match = re.search(rf"\b{re.escape(name)}\s*\((.*?)\)", snippet, re.S)
+        match = re.search(rf"\b{re.escape(name)}\s*\((.*?)\)", scan_text, re.S)
         if match:
             tool_name = name
             raw_args = (match.group(1) or "").strip()
@@ -2065,14 +2481,17 @@ def _extract_inline_tool_call(
         return None
 
     if not raw_args:
-        args_obj = {}
+        args_obj: Dict[str, Any] = {}
     else:
-        # Allow JSON object in parentheses: foo({"a":1})
+        # Real inline calls pass a JSON object. English/Chinese prose in
+        # parentheses (e.g. "skip todo_write (it's a simple Q&A)") is not.
         try:
             parsed = json.loads(raw_args)
-            args_obj = parsed if isinstance(parsed, dict) else {}
         except Exception:
-            args_obj = {}
+            parsed = _parse_python_kwargs_call_args(raw_args)
+        if not isinstance(parsed, dict):
+            return None
+        args_obj = parsed
     return {
         "name": tool_name,
         "arguments": _normalize_file_tool_arg_aliases(tool_name, args_obj),
@@ -2220,6 +2639,10 @@ def _recover_public_completion_from_reasoning(
 
 
 _EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
+_LENGTH_CUT_EMPTY_FALLBACK = (
+    "上一轮生成被输出长度上限截断，可见回复还没写出来。"
+    "直接回复「继续」，我会接着把结果写完。"
+)
 _TOOL_TURN_EMPTY_FALLBACK = (
     "工具已执行完成，但模型没有给出总结说明。"
     "请直接回复「继续」让我基于已有结果完成说明，或告诉我下一步。"
@@ -2406,13 +2829,27 @@ def _classify_tool_turn_outcome(
 # Forces one retry so the model emits a real final reply or an explicit tool_call,
 # instead of the runtime misjudging the turn as complete and surfacing a "继续" button.
 _REASONING_ONLY_NUDGE_HINT = (
-    "[runtime-reasoning-only] 上一轮只输出了思考内容（"
-    + _THINK_OPEN_TAG
-    + "），"
+    "[runtime-reasoning-only] 上一轮只输出了思考内容，"
     "没有给出用户可见的回复，也没有发出 tool_call。"
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
-    "或发出明确的 tool_call；不要只输出思考。"
+    "或发出明确的 tool_call；不要只输出思考，不要输出思考标签。"
 )
+_LENGTH_CUT_REASONING_NUDGE_HINT = (
+    "[runtime-output-cut] 上一轮输出在思考阶段被 max_tokens 截断，"
+    "没有用户可见回复，也没有 tool_call。"
+    "不要重写设计过程，不要继续展开方案。"
+    "立刻发出 tool_call 落盘，或直接输出完整的最终可见回复。"
+    "思考最多三句话。"
+)
+
+
+def _reasoning_only_retry_hint(finish_reason: str) -> str:
+    """Hint for a bodyless round. Length cuts must not restart the essay."""
+    if is_length_finish_reason(finish_reason):
+        return _LENGTH_CUT_REASONING_NUDGE_HINT
+    return _REASONING_ONLY_NUDGE_HINT
+
+
 _TRUNCATED_FINAL_NUDGE_HINT = (
     "[runtime-truncated-final] 你上一条回复似乎在中途被截断：正文很短、没有结束标记，"
     "而你的思考表明还需要继续执行（例如调用工具核实信息）。"
@@ -2698,6 +3135,10 @@ _KB_FORCED_TOOL_CHOICE: Dict[str, Any] = {
 }
 
 
+def _forced_tool_choice(tool_name: str) -> Dict[str, Any]:
+    return {"type": "function", "function": {"name": tool_name}}
+
+
 def _kb_retrieval_always_mode(session: Any) -> bool:
     """Return True when the effective KB retrieval mode is "always".
 
@@ -2720,6 +3161,198 @@ def _kb_retrieval_always_mode(session: Any) -> bool:
         return cfg_mode == "always"
     except Exception:
         return False
+
+
+def _kb_retrieval_effective_mode(session: Any) -> str:
+    mode = str(getattr(session, "kb_retrieval_mode", "") or "").strip().lower()
+    if mode in {"auto", "always", "manual", "off"}:
+        return mode
+    try:
+        from agenticx.studio.kb import KBManager
+
+        cfg = KBManager.instance().read_config()
+        if not bool(getattr(cfg, "enabled", True)):
+            return "off"
+        cfg_mode = str(
+            getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto"
+        ).strip().lower()
+        return cfg_mode if cfg_mode in {"auto", "always", "manual", "off"} else "auto"
+    except Exception:
+        return "auto"
+
+
+def _extract_need_search_noul(response: Any) -> float | None:
+    if not isinstance(response, Mapping):
+        return None
+    answers = response.get("answers")
+    if not isinstance(answers, Mapping):
+        return None
+    ans = answers.get("need_search")
+    if not isinstance(ans, Mapping):
+        return None
+    try:
+        return float(ans.get("noul"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _persist_jev_kb_gate(session: Any, payload: Dict[str, Any], content: str) -> None:
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        return
+    last = history[-1] if history else None
+    if isinstance(last, dict):
+        meta = last.get("metadata") if isinstance(last.get("metadata"), dict) else {}
+        if (
+            meta.get("kind") == "jev_kb_gate"
+            and meta.get("action") == payload.get("action")
+            and meta.get("source") == payload.get("source")
+        ):
+            return
+    history.append(
+        {
+            "role": "tool",
+            "tool_name": "jev",
+            "content": content,
+            "agent_id": "__jev__",
+            "sender_id": "__jev__",
+            "avatar_name": "Jev",
+            "sender_name": "Jev",
+            "tool_status": "done",
+            "metadata": dict(payload),
+        }
+    )
+
+
+async def _jev_kb_gate_events(
+    session: Any,
+    agent_id: str,
+    payload: Dict[str, Any],
+    content: str,
+) -> AsyncGenerator["RuntimeEvent", None]:
+    tool_call_id = str(payload.get("tool_call_id") or f"jev_kb_{uuid.uuid4().hex[:8]}")
+    args = dict(payload)
+    yield RuntimeEvent(
+        type=EventType.TOOL_CALL.value,
+        data={
+            "name": "jev",
+            "arguments": args,
+            "tool_call_id": tool_call_id,
+            "metadata": args,
+        },
+        agent_id=agent_id,
+    )
+    yield RuntimeEvent(
+        type=EventType.TOOL_RESULT.value,
+        data={
+            "name": "jev",
+            "result": content,
+            "tool_call_id": tool_call_id,
+            "tool_status": "done",
+            "metadata": args,
+        },
+        agent_id=agent_id,
+    )
+
+
+def _clear_session_jev_kb_gate(session: Any) -> None:
+    """Drop a previous turn's KB gate so a later turn cannot replay it."""
+    try:
+        if hasattr(session, "_jev_kb_gate"):
+            delattr(session, "_jev_kb_gate")
+    except Exception:
+        return
+
+
+async def _kb_retrieval_jev_should_search(session: Any, user_input: str) -> bool | None:
+    """Jev Noul gate for KB auto. None = do not intervene (always / off / no key)."""
+    if _kb_retrieval_always_mode(session):
+        _clear_session_jev_kb_gate(session)
+        return None
+    if _kb_retrieval_effective_mode(session) != "auto":
+        _clear_session_jev_kb_gate(session)
+        return None
+    from agenticx.llms.typesafe_client import TypesafeHttpError, TypesafeTimeout, system_one
+    from agenticx.llms.typesafe_config import load_typesafe_settings, resolve_typesafe_api_key
+    from agenticx.runtime.jev_intent import format_jev_kb_content_line
+
+    settings = load_typesafe_settings()
+    api_key = resolve_typesafe_api_key()
+    if not settings.enabled or not settings.kb_auto or not api_key:
+        _clear_session_jev_kb_gate(session)
+        return None
+
+    started = time.perf_counter()
+    fallback_reason = ""
+    noul: float | None = None
+    model = settings.model
+    source = "fallback"
+    should: bool | None = None
+    try:
+        data = await system_one(
+            state={"user_message": str(user_input or "")},
+            questions={
+                "need_search": {
+                    "type": "noul",
+                    "instructions": (
+                        "Does this user question require searching the user's local document library?"
+                    ),
+                }
+            },
+            model=settings.model,
+            api_key=api_key,
+            timeout_sec=settings.timeout_sec,
+            base_url=settings.base_url,
+        )
+        model = str(data.get("model") or settings.model).strip() or settings.model
+        noul = _extract_need_search_noul(data)
+        if noul is not None and noul >= 0.7:
+            should = True
+            source = "jev"
+        elif noul is not None:
+            should = False
+            source = "jev"
+        else:
+            fallback_reason = "jev_http"
+    except TypesafeTimeout:
+        fallback_reason = "jev_timeout"
+    except TypesafeHttpError:
+        fallback_reason = "jev_http"
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    action = "search" if should is True else "skip"
+    content = format_jev_kb_content_line(
+        source=source,
+        model=model,
+        search=should is True,
+        fallback_reason=fallback_reason,
+    )
+    payload: Dict[str, Any] = {
+        "kind": "jev_kb_gate",
+        "phase": "done",
+        "purpose": "kb_auto",
+        "source": source,
+        "model": model,
+        "requested_model": settings.model,
+        "action": action,
+        "target_ids": [],
+        "target_labels": [],
+        "requires_execution": should is True,
+        "confidence": noul,
+        "gate": "auto" if source == "jev" else "",
+        "probabilities": {},
+        "noul_execution": noul,
+        "latency_ms": latency_ms,
+        "fallback_reason": fallback_reason,
+        "tool_call_id": f"jev_kb_{uuid.uuid4().hex[:8]}",
+        "content": content,
+    }
+    try:
+        setattr(session, "_jev_kb_gate", payload)
+    except Exception:
+        pass
+    _persist_jev_kb_gate(session, payload, content)
+    return should
 
 
 def _prepare_tool_result_for_context(
@@ -2946,6 +3579,7 @@ class AgentRuntime:
             warning_threshold=loop_warning_threshold,
             critical_threshold=loop_critical_threshold,
         )
+        self.turn_steer = TurnSteerQueue()
         self._pending_loop_nudge: Optional[str] = None
         self._injected_loop_nudge: Optional[str] = None
         self._recent_exploratory_fps: deque[str] = deque(maxlen=10)
@@ -3236,7 +3870,7 @@ class AgentRuntime:
         elif body.strip():
             session.agent_messages.append({"role": "assistant", "content": body})
 
-        if not is_system_trigger:
+        if (not is_system_trigger) or body.strip():
             persisted_metadata: Dict[str, Any] = {
                 "turn_terminal": True,
                 "terminal_reason": terminal_reason,
@@ -3484,6 +4118,7 @@ class AgentRuntime:
 
         self.token_budget.reset_turn()
         self.loop_detector.reset()
+        self.turn_steer.discard()
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._overflow_retries_this_turn = 0
@@ -3606,6 +4241,9 @@ class AgentRuntime:
         _kb_force_always = (
             "knowledge_search" in allowed_tool_names and _kb_retrieval_always_mode(session)
         )
+        _market_install_tool = market_install_tool_for_intent(user_input)
+        if _market_install_tool not in allowed_tool_names:
+            _market_install_tool = ""
         history = _sanitize_context_messages(session.agent_messages)
         # Enrich plain user entries in agent_messages history from chat_history attachments
         # (covers resumes of sessions that had images persisted only to chat_history, and
@@ -3999,8 +4637,11 @@ class AgentRuntime:
 
         for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
+                self.turn_steer.discard()
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                 return
+            for steered in self.turn_steer.drain(lambda text: _persist_steer_text(session, text)):
+                messages.append({"role": "user", "content": steered})
             # Previous round (if any) fully completed at this point.
             self._write_run_checkpoint(session, round_idx=round_idx - 1)
             # Re-project each round so tool_search loads take effect next round.
@@ -4082,8 +4723,25 @@ class AgentRuntime:
             # FR-C: 标记本轮是否需要因流式工具调用截断而强制进入下一轮，
             # 而不是把空 tool_calls 当作模型最终回答处理。每轮起始重置。
             force_retry_next_round = False
+            _jev_kb_search = None
             if (
-                _kb_force_always
+                not _kb_force_always
+                and round_idx == 1
+                and "knowledge_search" in allowed_tool_names
+                and not _is_system_trigger
+            ):
+                _jev_kb_search = await _kb_retrieval_jev_should_search(session, user_input)
+                _jev_gate = getattr(session, "_jev_kb_gate", None)
+                if isinstance(_jev_gate, dict):
+                    async for _jev_evt in _jev_kb_gate_events(
+                        session,
+                        agent_id,
+                        _jev_gate,
+                        str(_jev_gate.get("content") or "Jev"),
+                    ):
+                        yield _jev_evt
+            if (
+                (_kb_force_always or _jev_kb_search is True)
                 and round_idx == 1
                 and "knowledge_search" not in executed_tool_names
                 and not _is_system_trigger
@@ -4168,6 +4826,10 @@ class AgentRuntime:
                     _merge_llm_call_kwargs(
                         llm_call_kwargs,
                         _kimi_k3_reasoning_effort_kwargs(session, model_name),
+                    )
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _bailian_qwen_thinking_kwargs(session, model_name, provider_name),
                     )
                     _merge_llm_call_kwargs(
                         llm_call_kwargs,
@@ -4342,13 +5004,18 @@ class AgentRuntime:
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
-                                _max_tokens = _resolve_round_max_tokens(
-                                    int(
-                                        getattr(session, "_max_tokens_override", None)
-                                        or 8192
-                                    ),
+                                elif (
+                                    _market_install_tool
+                                    and round_idx <= 2
+                                    and not executed_tool_names
+                                    and provider_name.strip().lower() != "minimax"
+                                ):
+                                    _round_tool_choice = _forced_tool_choice(_market_install_tool)
+                                _max_tokens = _session_round_max_tokens(
+                                    session,
                                     executed_tool_names,
                                     provider=provider_name,
+                                    model=model_name,
                                 )
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
@@ -4625,6 +5292,17 @@ class AgentRuntime:
                             provider_name,
                             fault=classify_provider_fault(stream_exc),
                         )
+                        _log_model_fault(
+                            session,
+                            provider=provider_name,
+                            model=model_name,
+                            kind=classify_provider_fault(stream_exc),
+                            phase="stream",
+                            message=str(stream_exc)[:300],
+                            retryable=True,
+                            usage_session_id=str(usage_session_id or ""),
+                            usage_avatar_id=str(usage_avatar_id or ""),
+                        )
                         used_stream_path = False
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:
@@ -4636,18 +5314,23 @@ class AgentRuntime:
                             and provider_name.strip().lower() != "minimax"
                         ):
                             _fallback_tool_choice = _KB_FORCED_TOOL_CHOICE
+                        elif (
+                            _market_install_tool
+                            and round_idx <= 2
+                            and not executed_tool_names
+                            and provider_name.strip().lower() != "minimax"
+                        ):
+                            _fallback_tool_choice = _forced_tool_choice(_market_install_tool)
                         try:
                             return self.llm.invoke(
                                 messages_for_llm,
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
-                                max_tokens=_resolve_round_max_tokens(
-                                    int(
-                                        getattr(session, "_max_tokens_override", None)
-                                        or 8192
-                                    ),
+                                max_tokens=_session_round_max_tokens(
+                                    session,
                                     executed_tool_names,
                                     provider=provider_name,
+                                    model=model_name,
                                 ),
                                 timeout=request_timeout_seconds,
                                 **_chat_temperature_kwargs(model_name, provider_name),
@@ -4686,7 +5369,20 @@ class AgentRuntime:
                                 raise last_exc
                             raise
 
-                    _retry_policy = LLMRetryPolicy()
+                    _retry_policy = LLMRetryPolicy(
+                        on_retry=lambda info: _log_model_fault(
+                            session,
+                            provider=provider_name,
+                            model=model_name,
+                            kind=str((info or {}).get("category") or "unknown"),
+                            phase="retry",
+                            message=str((info or {}).get("error") or "")[:300],
+                            attempt=int((info or {}).get("attempt") or 1),
+                            retryable=True,
+                            usage_session_id=str(usage_session_id or ""),
+                            usage_avatar_id=str(usage_avatar_id or ""),
+                        )
+                    )
 
                     def _invoke_with_retry() -> Any:
                         return _retry_policy.call_sync_with_retry(_invoke_once_with_fallback)
@@ -4830,6 +5526,7 @@ class AgentRuntime:
                     budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
                     if (
                         budget_level == BudgetLevel.COMPRESS
+                        and _should_surface_budget_compression_notice(budget_source)
                         and not self._budget_compress_notice_sent_this_turn
                     ):
                         self._budget_compress_notice_sent_this_turn = True
@@ -4868,7 +5565,10 @@ class AgentRuntime:
                             },
                             agent_id=agent_id,
                         )
-                    elif did_react:
+                    elif (
+                        did_react
+                        and _should_surface_budget_compression_notice(budget_source)
+                    ):
                         yield RuntimeEvent(
                             type=EventType.COMPACTION.value,
                             data={
@@ -4920,6 +5620,18 @@ class AgentRuntime:
                 provider_hint = provider_name or "(unknown)"
                 model_hint = model_name or "(unknown)"
                 streak = record_provider_timeout(session)
+                _log_model_fault(
+                    session,
+                    provider=provider_name,
+                    model=model_name,
+                    kind="timeout",
+                    phase="timeout",
+                    message=f"no response within {int(round_timeout)}s",
+                    attempt=retries + 1,
+                    retryable=retries < LLM_ROUND_TIMEOUT_RETRY_LIMIT,
+                    usage_session_id=str(usage_session_id or ""),
+                    usage_avatar_id=str(usage_avatar_id or ""),
+                )
                 applied, fallback_msg = maybe_apply_provider_fallback(session)
                 if applied and fallback_msg:
                     fallback_reloaded = False
@@ -5055,6 +5767,17 @@ class AgentRuntime:
                     provider_name,
                     fault=fault,
                 )
+                _log_model_fault(
+                    session,
+                    provider=provider_name,
+                    model=model_name,
+                    kind=fault,
+                    phase="invoke",
+                    message=str(exc)[:300],
+                    retryable=fault in {"rate_limit", "transient", "unknown"},
+                    usage_session_id=str(usage_session_id or ""),
+                    usage_avatar_id=str(usage_avatar_id or ""),
+                )
                 # 智谱视觉模型「多模态 + 工具」请求偶发 1210 invalid input（上游抖动）。
                 # 同请求重试常成功，做一次会话级一次性重试再放弃。
                 if (
@@ -5153,7 +5876,7 @@ class AgentRuntime:
 
                     if (
                         overflow_retry_enabled()
-                        and self._overflow_retries_this_turn < max_overflow_retries()
+                        and self._overflow_retries_this_turn < min(1, max_overflow_retries())
                     ):
                         hist_before = _sanitize_context_messages(session.agent_messages)
                         new_hist, did, summary, count, _pending_q = await self.compactor.maybe_compact(
@@ -5362,6 +6085,14 @@ class AgentRuntime:
                     ]
                     ac_clean = _strip_inline_tool_markup(ac_clean)
                     response_text = ac_clean
+            if tool_calls and _should_drop_noop_progress_tools(tool_calls, ac_clean):
+                logger.info(
+                    "drop_noop_progress_tools session=%s round=%s body_len=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                    len(str(ac_clean or "").strip()),
+                )
+                tool_calls = []
             if (
                 not tool_calls
                 and _has_unexecuted_inline_tool_markup(response_text)
@@ -5430,19 +6161,49 @@ class AgentRuntime:
                 )
                 continue
             model_finish_reason = _response_finish_reason(response)
+            plain_issue = self.loop_detector.note_assistant_round(
+                str(ac_clean or ""),
+                had_tool_calls=bool(tool_calls),
+                length_truncated=is_length_finish_reason(model_finish_reason),
+                tool_args_complete=_tool_args_complete(tool_calls),
+            )
+            if plain_issue is not None and plain_issue.detector == "plain_repeat" and not tool_calls:
+                messages.append(
+                    {"role": "system", "content": plain_issue.nudge or "请给出完整正文。"}
+                )
+                continue
+            if plain_issue is not None and plain_issue.detector == "length_truncated_tools":
+                yield RuntimeEvent(
+                    type=EventType.ERROR.value,
+                    data={
+                        "text": plain_issue.message,
+                        "severity": "warning",
+                        "detector": "length_truncated_tools",
+                    },
+                    agent_id=agent_id,
+                )
+                return
             _fr = str(model_finish_reason or "").strip().lower()
             if (
                 not tool_calls
-                and not str(ac_clean or "").strip()
                 and _fr in {"tool_calls", "tool_call", "function_call", "functions"}
                 and not getattr(session, "_empty_tool_calls_retry_used", False)
             ):
+                # A lead-in sentence is not a finished answer. Vendors set
+                # finish_reason=tool_calls when the tool payload was the point
+                # of the turn; dropping that because visible text exists ends
+                # the turn on the preamble.
                 setattr(session, "_empty_tool_calls_retry_used", True)
                 hint = (
                     "[系统通知] 上一轮 finish_reason 表明模型要调用工具，但没有收到完整可用的 tool_call。"
+                    "可见正文里的开场白不能代替工具调用。"
                     "请立即重新发出明确的 tool_call（补全所有 required 参数）；"
                     "若已无需工具，请直接给出用户可见的最终说明。"
                 )
+                visible = str(ac_clean or "").strip()
+                if visible:
+                    messages.append({"role": "assistant", "content": visible})
+                    session.agent_messages.append({"role": "assistant", "content": visible})
                 messages.append({"role": "system", "content": hint})
                 session.agent_messages.append({"role": "system", "content": hint})
                 logger.info(
@@ -5597,8 +6358,9 @@ class AgentRuntime:
                         round_idx,
                     )
                     messages.append(dict(assistant_message))
-                    messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
-                    session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    _reason_hint = _reasoning_only_retry_hint(model_finish_reason)
+                    messages.append({"role": "system", "content": _reason_hint})
+                    session.agent_messages.append({"role": "system", "content": _reason_hint})
                     synced_session_message_count = len(session.agent_messages)
                     continue
 
@@ -5649,11 +6411,17 @@ class AgentRuntime:
                             model_finish_reason or "unknown",
                         )
                         messages.append(dict(assistant_message))
+                        _trunc_hint = _TRUNCATED_FINAL_NUDGE_HINT
+                        if (
+                            truncation_signal == "finish_reason_length"
+                            and not parsed.visible_body.strip()
+                        ):
+                            _trunc_hint = _LENGTH_CUT_REASONING_NUDGE_HINT
                         messages.append(
-                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                            {"role": "system", "content": _trunc_hint}
                         )
                         session.agent_messages.append(
-                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                            {"role": "system", "content": _trunc_hint}
                         )
                         synced_session_message_count = len(session.agent_messages)
                         continue
@@ -5673,13 +6441,11 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    max_tokens=_resolve_round_max_tokens(
-                                        int(
-                                            getattr(session, "_max_tokens_override", None)
-                                            or 8192
-                                        ),
+                                    max_tokens=_session_round_max_tokens(
+                                        session,
                                         executed_tool_names,
                                         provider=provider_name,
+                                        model=model_name,
                                     ),
                                     timeout=request_timeout_seconds,
                                     **_chat_temperature_kwargs(model_name, provider_name),
@@ -5748,6 +6514,27 @@ class AgentRuntime:
                         str(streamed_text or "").strip(),
                         allowed_tool_names,
                     )
+                    # The fallback stream carries no tool schema, so a model that still
+                    # wants a tool writes it as text; send it back for a native call.
+                    if (
+                        raw_tail
+                        and not _is_system_trigger
+                        and not getattr(session, "_inline_markup_retry_used", False)
+                        and _extract_inline_tool_call(raw_tail, allowed_tool_names) is not None
+                    ):
+                        setattr(session, "_inline_markup_retry_used", True)
+                        hint = (
+                            "[系统通知] 上一轮把工具调用写成了正文（如 name(...)），运行时无法执行。"
+                            "请立即用原生 function calling 发出同一个工具调用，补全 required 参数。"
+                        )
+                        messages.append({"role": "system", "content": hint})
+                        session.agent_messages.append({"role": "system", "content": hint})
+                        logger.info(
+                            "sync_fallback_inline_tool_call session=%s round=%s",
+                            getattr(session, "session_id", ""),
+                            round_idx,
+                        )
+                        continue
                     if raw_tail:
                         authoritative_source_kind = "sync_fallback"
                         authoritative_raw = raw_tail
@@ -5764,7 +6551,13 @@ class AgentRuntime:
                 if reasoning_field_final_recovered:
                     reasoning_text = ""
                 elif parsed.malformed:
-                    reasoning_text = ""
+                    # Tag noise on the retry must not erase the earlier draft.
+                    # A malformed turn that still has a visible body stays hidden.
+                    reasoning_text = (
+                        reasoning_before_nudge
+                        if not parsed.visible_body.strip()
+                        else ""
+                    )
                 else:
                     reasoning_text = (
                         parsed.reasoning
@@ -5799,6 +6592,9 @@ class AgentRuntime:
                             )
                             tool_silence_kind = "success"
                         terminal_reason = "tool_turn_empty_fallback"
+                    elif is_length_finish_reason(model_finish_reason):
+                        clean_body = _LENGTH_CUT_EMPTY_FALLBACK
+                        terminal_reason = "output_length_fallback"
                     else:
                         clean_body = _EMPTY_RESPONSE_FALLBACK
                         terminal_reason = "empty_response_fallback"
@@ -5889,7 +6685,11 @@ class AgentRuntime:
                 yield await self._finish_terminal_reply(
                     session,
                     clean_body=clean_body,
-                    reasoning_text=reasoning_text if not parsed.malformed else "",
+                    reasoning_text=(
+                        ""
+                        if parsed.malformed and parsed.visible_body.strip()
+                        else reasoning_text
+                    ),
                     suggestions=sug_list,
                     reasoning_seconds=_rs,
                     references=_ref_list,
@@ -5917,6 +6717,7 @@ class AgentRuntime:
                             if terminal_reason
                             in {
                                 "empty_response_fallback",
+                                "output_length_fallback",
                                 "tool_turn_empty_fallback",
                                 "tool_result_fallback",
                             }
@@ -5948,15 +6749,46 @@ class AgentRuntime:
                 "tool_calls": tool_calls,
             }
             messages.append(assistant_tool_message)
-            if not _is_system_trigger and str(ac_clean or "").strip():
-                _chat_history_append_deduped(
-                    session.chat_history,
-                    {
+            # Mid-turn UI row: visible preface and/or per-round thinking.
+            # Reasoning used to stay only on agent_messages.reasoning_content
+            # (LLM context) while chat_history dropped it — Desktop then showed
+            # "已思考并调用 N 次工具" with tools only, never interleaved think
+            # rounds (WeKnora-style). Persist reasoning here so reload + process
+            # cards can render ReasoningBlock between tool groups.
+            if not _is_system_trigger:
+                _mid_body = str(ac_clean or "").strip()
+                _mid_reasoning = ""
+                if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call.strip():
+                    _mid_reasoning = _dedupe_reasoning_against_body(
+                        reasoning_for_tool_call, ac_clean
+                    ).strip()
+                if _mid_body or _mid_reasoning:
+                    _mid_row: Dict[str, Any] = {
                         "role": "assistant",
-                        "content": ac_clean,
+                        "content": ac_clean if _mid_body else "",
                         "metadata": {"turn_terminal": False},
-                    },
-                )
+                    }
+                    if _mid_reasoning:
+                        _mid_row["reasoning"] = _mid_reasoning[:16384]
+                        _mid_rs: int | None = None
+                        if (
+                            _stream_reasoning_start_ts is not None
+                            and _stream_body_start_ts is not None
+                        ):
+                            _candidate = int(
+                                _stream_body_start_ts - _stream_reasoning_start_ts
+                            )
+                            if _candidate >= 1:
+                                _mid_rs = _candidate
+                        elif _stream_reasoning_start_ts is not None:
+                            _candidate = int(
+                                time.monotonic() - _stream_reasoning_start_ts
+                            )
+                            if _candidate >= 1:
+                                _mid_rs = _candidate
+                        if _mid_rs is not None:
+                            _mid_row["reasoning_seconds"] = _mid_rs
+                    _chat_history_append_deduped(session.chat_history, _mid_row)
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:
@@ -5976,9 +6808,102 @@ class AgentRuntime:
                     tool_name = ""
                 tool_call_id = str(call.get("id", "")) if isinstance(call, dict) else ""
                 arguments = _parse_tool_arguments(function_obj.get("arguments"))
+                # GLM sometimes sticks <arg_key>/<arg_value> (or paren args) into name.
+                tool_name, arguments, _malformed_tool_err = _normalize_stuck_args_in_tool_name(
+                    tool_name, arguments
+                )
                 dispatch_arguments = dict(arguments)
                 dispatch_arguments["__tool_call_id"] = tool_call_id
                 dispatch_arguments["__agent_id"] = agent_id
+                if _malformed_tool_err:
+                    invalid_message = _malformed_tool_err
+                    emit_name = tool_name or "unknown_tool"
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={
+                            "name": emit_name,
+                            "arguments": arguments,
+                            "tool_call_id": tool_call_id,
+                        },
+                        agent_id=agent_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": emit_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": emit_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": invalid_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": emit_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "name": emit_name,
+                            "result": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    self.loop_detector.record_call(
+                        emit_name,
+                        LoopDetector.args_signature(arguments) or str(raw_tool_name)[:200],
+                        has_progress=False,
+                        result_text=invalid_message,
+                    )
+                    loop_issue = self.loop_detector.check()
+                    if loop_issue is not None and loop_issue.nudge:
+                        self._pending_loop_nudge = loop_issue.nudge
+                    if loop_issue is not None and loop_issue.level == "critical":
+                        terminal_text = (
+                            f"{loop_issue.message} "
+                            "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具，"
+                            "不要继续提交畸形工具名。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="loop_halt",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                            extra_final={
+                                "loop_halt": True,
+                                "detector": loop_issue.detector,
+                            },
+                        )
+                        return
+                    _record_tool_turn_outcome("failed")
+                    continue
                 if not tool_name:
                     invalid_message = "模型返回了无效工具调用（缺少 tool name），已忽略本次调用。"
                     tool_name = "unknown_tool"
@@ -6180,6 +7105,36 @@ class AgentRuntime:
                             terminal_reason="plan_mode_tool_violation",
                             agent_id=agent_id,
                             is_system_trigger=_is_system_trigger,
+                        )
+                        return
+                    # Feed allowlist rejects into loop_detector so same-class
+                    # 「不在当前允许列表中」 / malformed-name spam halts ≤3.
+                    self.loop_detector.record_call(
+                        tool_name,
+                        LoopDetector.args_signature(arguments) or str(tool_name)[:200],
+                        has_progress=False,
+                        result_text=denied_message,
+                    )
+                    loop_issue = self.loop_detector.check()
+                    if loop_issue is not None and loop_issue.nudge:
+                        self._pending_loop_nudge = loop_issue.nudge
+                    if loop_issue is not None and loop_issue.level == "critical":
+                        terminal_text = (
+                            f"{loop_issue.message} "
+                            "SkillHub 安装请直接调用 skillhub_install(ref='@ns/slug') 工具，"
+                            "不要继续提交被允许列表拒绝的调用。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="loop_halt",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                            extra_final={
+                                "loop_halt": True,
+                                "detector": loop_issue.detector,
+                            },
                         )
                         return
                     continue
@@ -6626,11 +7581,12 @@ class AgentRuntime:
 
                 while True:
                     if await _check_should_stop():
-                        dispatch_task.cancel()
-                        try:
-                            await dispatch_task
-                        except asyncio.CancelledError:
-                            pass
+                        # Turn abort only: cancel in-flight turn-scoped tool wait.
+                        # Must NOT call DurableJobStore.control(cancel) — durable
+                        # jobs survive chat stop until cancel_durable_job.
+                        from agenticx.runtime.turn_abort import cancel_turn_scoped_dispatch
+
+                        await cancel_turn_scoped_dispatch(dispatch_task)
                         for ev in iter_content_block_end_events(
                             tool_name,
                             tool_call_id,

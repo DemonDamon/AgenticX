@@ -4,9 +4,11 @@ import {
   domTextLooksNonEmpty,
   isComposerNonEmpty,
   matchTrailingAtMention,
+  matchSlashCommandQuery,
   nextComposerAtMentionState,
   replaceAtMentionAtCaret,
   shouldCommitComposerHasText,
+  shouldCommitComposerPlain,
 } from "./composer-input-sync";
 
 describe("isComposerNonEmpty", () => {
@@ -32,6 +34,38 @@ describe("shouldCommitComposerHasText", () => {
     expect(shouldCommitComposerHasText(true, "")).toBe(true);
     expect(shouldCommitComposerHasText(true, "   ")).toBe(true);
     expect(shouldCommitComposerHasText(false, "")).toBe(false);
+  });
+});
+
+describe("matchSlashCommandQuery", () => {
+  it("returns the query only for a whole lowercase slash token at the caret end", () => {
+    expect(matchSlashCommandQuery("/perf")).toBe("perf");
+    expect(matchSlashCommandQuery("/")).toBe("");
+    expect(matchSlashCommandQuery("/Users")).toBeNull();
+    expect(matchSlashCommandQuery("/a/b")).toBeNull();
+    expect(matchSlashCommandQuery("/Perf")).toBeNull();
+    expect(matchSlashCommandQuery("/a b")).toBeNull();
+    expect(matchSlashCommandQuery("/perf", 2)).toBeNull();
+  });
+});
+
+describe("shouldCommitComposerPlain", () => {
+  it("does not commit ordinary prose keystrokes", () => {
+    expect(shouldCommitComposerPlain("", "h")).toBe(false);
+    expect(shouldCommitComposerPlain("he", "hel")).toBe(false);
+    expect(shouldCommitComposerPlain("你好", "你好啊")).toBe(false);
+  });
+
+  it("commits when entering, refining, or leaving a slash command", () => {
+    expect(shouldCommitComposerPlain("", "/")).toBe(true);
+    expect(shouldCommitComposerPlain("/", "/p")).toBe(true);
+    expect(shouldCommitComposerPlain("/pe", "/per")).toBe(true);
+    expect(shouldCommitComposerPlain("/perf", "/perf ")).toBe(true);
+    expect(shouldCommitComposerPlain("/perf", "")).toBe(true);
+  });
+
+  it("does not commit when the slash query is unchanged", () => {
+    expect(shouldCommitComposerPlain("/perf", "/perf")).toBe(false);
   });
 });
 

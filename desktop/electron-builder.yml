@@ -31,11 +31,17 @@ mac:
     - target: dmg
   icon: assets/icon.icns
   category: public.app-category.developer-tools
+  extendInfo:
+    NSUserNotificationAlertStyle: banner
   identity: null
   gatekeeperAssess: false
   extraResources:
     - from: bundled-backend/${arch}
       to: backend
+      filter:
+        - "**/*"
+    - from: bundled-sidecar/${arch}
+      to: sidecar
       filter:
         - "**/*"
 win:
@@ -46,6 +52,10 @@ win:
   extraResources:
     - from: bundled-backend/win-amd64
       to: backend
+      filter:
+        - "**/*"
+    - from: bundled-sidecar/win-amd64
+      to: sidecar
       filter:
         - "**/*"
 linux:

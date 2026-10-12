@@ -52,6 +52,23 @@ def _zhipu_text_only_family(model_name: str) -> bool:
 _zhipu_glm5_family_no_vision = _zhipu_text_only_family
 
 
+def _mimo_text_only(model_name: str) -> bool:
+    """MiMo ASR/TTS and text-only v2.5-pro reject image input.
+
+    v2.6 Pro/Flash and exact ``mimo-v2.5`` are omnimodal and stay vision-capable.
+    """
+    raw = str(model_name or "").strip().lower()
+    if not raw:
+        return False
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    if not raw.startswith("mimo-"):
+        return False
+    if "-asr" in raw or "-tts" in raw:
+        return True
+    return raw == "mimo-v2.5-pro" or raw.startswith("mimo-v2.5-pro-")
+
+
 def _bailian_qwen_text_no_vision(model_name: str) -> bool:
     """Bailian/DashScope text Qwen SKUs reject OpenAI-style image_url content blocks."""
     raw = str(model_name or "").strip().lower()
@@ -78,6 +95,8 @@ def is_vision_capable(provider_name: str, model_name: str) -> bool:
     if _zhipu_text_only_family(model):
         return False
     if _bailian_qwen_text_no_vision(model):
+        return False
+    if _mimo_text_only(model):
         return False
     return True
 

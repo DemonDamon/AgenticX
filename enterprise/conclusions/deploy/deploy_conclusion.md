@@ -175,3 +175,10 @@ deploy/
 | `scripts/{bootstrap,start-dev,start-dev-with-infra,reset-dev-data}.sh` | 入口脚本 | README 推荐命令路由到这里 |
 | `apps/gateway/scripts/build-image.sh` | 镜像构建 | K8s 部署前置 |
 | `scripts/perf/mock-upstream` + `moderation-perf` fixture | 冒烟上游 | `compose.smoke.yml` 引用 |
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+- 压测/集成 compose：`docker-compose/{test,portal,portal_test,admin_test,gateway_test,nginx_test}.yml` + `load-test-runtime-env.sh`。
+- `prod.yml`：补 portal 相关服务块。
+- `nginx/gateway.conf`：入口小改（仍无 TLS server 块）。

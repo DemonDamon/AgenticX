@@ -144,6 +144,7 @@ export class HttpChatClient implements ChatClient {
           stream: true,
           messages: pending.request.messages.map((message) => toGatewayMessage(message)),
           ...(pending.request.webSearch ? { agenticx_web_search: true } : {}),
+          ...(pending.request.skillId ? { agenticx_skill_id: pending.request.skillId } : {}),
           ...(pending.request.deepResearch ? { agenticx_deep_research: true } : {}),
           ...(pending.request.deepResearchInteraction?.trim()
             ? { agenticx_deep_research_interaction: pending.request.deepResearchInteraction.trim() }

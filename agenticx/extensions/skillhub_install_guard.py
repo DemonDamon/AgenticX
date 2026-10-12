@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Inbound guard for SkillHub install prompts (stale Meta dead-path only).
+
+Mirrors desktop/src/utils/skillhub-install-prompt.ts so Settings Meta-seeding
+can refuse paste/history reuse of the old POST /api/registry/install dead path.
+Ordinary chat ``@ns/slug`` / 「安装 xxx skill」 are NOT intercepted — those go
+through the conversation agent. Settings market 「安装」 uses installFromSkillHub.
+
+Author: Damon Li
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Optional, Tuple
+
+# Keep in sync with SKILLHUB_AGENT_PROMPT_FORBIDDEN (TypeScript).
+SKILLHUB_AGENT_PROMPT_FORBIDDEN: Tuple[str, ...] = (
+    "POST /api/registry/install",
+    "/api/registry/install",
+    "请先检查是否已安装 SkillHub 商店",
+    "优先调用本机 Studio API",
+    "根据 https://skillhub-",
+    "请先装商店",
+    "安装 SkillHub 商店",
+    "先检查是否已安装 SkillHub",
+)
+
+# Entire-message @ns/slug (or ns/slug) — chat install shorthand.
+_AT_REF_ONLY = re.compile(
+    r"^\s*@?([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)(?:@[\w.-]+)?\s*$"
+)
+
+_SLUG_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"SkillHub\s*第三方技能[「「\"']([^」」\"']+)[」」\"']"),
+    re.compile(r"请安装\s*SkillHub[^「「\"'\n]{0,40}[「「\"']([^」」\"']+)[」」\"']"),
+    re.compile(r"skills_store_cli\.py[^\n]*\binstall\s+(@?[\w./-]+)", re.I),
+    re.compile(r"installFromSkillHub[^\n]{0,40}\b([A-Za-z0-9@_/.-]+)", re.I),
+    re.compile(
+        r"skillhub/install[^\n]{0,80}[\"']slug[\"']\s*:\s*[\"']([^\"']+)[\"']",
+        re.I,
+    ),
+    re.compile(r"\bskillhub\s+install\s+(@?[\w./-]+)", re.I),
+    # Prefer @ns/slug before patterns that treat trailing "skill" as a keyword.
+    re.compile(r"(?:请)?安装\s*(@[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)"),
+    re.compile(r"\binstall\s+(@[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)", re.I),
+    re.compile(r"@([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)"),
+    # 「安装 xxx skill」 / 「安装技能 xxx」 / install skill xxx
+    re.compile(
+        r"(?:请)?安装\s*(?:SkillHub\s*)?(?:第三方技能\s*)?"
+        r"[「「\"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」\"']?\s+(?:skill|技能)\b",
+        re.I,
+    ),
+    re.compile(
+        r"(?:请)?安装\s*(?:技能|skill)\s*[「「\"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」\"']?",
+        re.I,
+    ),
+    re.compile(r"\binstall\s+(?:the\s+)?skill\s+(@?[\w./-]+)", re.I),
+)
+
+_INSTALL_VERB = re.compile(
+    r"(?:请)?安装|\binstall\b|skillhub\s+install|installFromSkillHub|"
+    r"skills_store_cli\.py|SkillHub\s*第三方技能|第三方技能",
+    re.I,
+)
+
+
+def _body_hits_forbidden(body: str, needle: str) -> bool:
+    if needle in {"/api/registry/install", "POST /api/registry/install"}:
+        stripped = re.sub(r"/api/registry/skillhub/install", "", body)
+        return needle in stripped
+    return needle in body
+
+
+def is_forbidden_skillhub_agent_install_prompt(text: str) -> bool:
+    """True when inbound text matches old Meta SkillHub install dead-path copy."""
+    body = str(text or "")
+    if not body.strip():
+        return False
+    return any(_body_hits_forbidden(body, needle) for needle in SKILLHUB_AGENT_PROMPT_FORBIDDEN)
+
+
+def extract_skillhub_install_slug(text: str) -> Optional[str]:
+    """Best-effort skill slug / @ns/slug from SkillHub install copy."""
+    body = str(text or "")
+    m = _AT_REF_ONLY.match(body)
+    if m:
+        return f"@{m.group(1)}/{m.group(2)}"
+    for pattern in _SLUG_PATTERNS:
+        match = pattern.search(body)
+        if not match:
+            continue
+        slug = str(match.group(1) or "").strip()
+        if slug and slug.lower() not in {"skillhub", "skill", "the", "a", "an", "registry"}:
+            if (
+                "/" in slug
+                and not slug.startswith("@")
+                and not slug.startswith("registry/")
+                and not slug.startswith("http")
+            ):
+                return f"@{slug}"
+            return slug
+    return None
+
+
+def _is_clear_skillhub_install_intent(text: str) -> bool:
+    """True for @ns/slug shorthand or clear 「安装 … skill」 / skillhub install copy."""
+    body = str(text or "").strip()
+    if not body:
+        return False
+    if _AT_REF_ONLY.match(body):
+        return True
+    slug = extract_skillhub_install_slug(body)
+    if not slug:
+        return False
+    # Require an install/SkillHub verb so ordinary chat mentioning @ns/slug mid-sentence
+    # without install intent is not forced through Desktop IPC.
+    if _AT_REF_ONLY.match(body):
+        return True
+    return bool(_INSTALL_VERB.search(body))
+
+
+def is_clear_skillhub_install_intent(text: str) -> bool:
+    """Public alias: detect @ns/slug / install phrasing (classify does NOT hit)."""
+    return _is_clear_skillhub_install_intent(text)
+
+
+_CLAWHUB_INSTALL_RE = re.compile(
+    r"ClawHub[^\n「\"']{0,24}?(?:安装|install)(?:技能|\s+skill)?\s*[「\"']?"
+    r"@?[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?",
+    re.I,
+)
+
+
+def market_install_tool_for_intent(text: str) -> str:
+    """Install tool a clear SkillHub / ClawHub install request maps to, else ``""``.
+
+    The runtime forces this tool on the first round via ``tool_choice``: the
+    agent still runs the turn, but weak models cannot detour into curl / bash
+    or write the call as prose.
+    """
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    if _CLAWHUB_INSTALL_RE.search(body):
+        return "clawhub_install"
+    if not _is_clear_skillhub_install_intent(body):
+        return ""
+    slug = extract_skillhub_install_slug(body)
+    if slug and (slug.startswith("@") or "skillhub" in body.lower()):
+        return "skillhub_install"
+    return ""
+
+
+def classify_skillhub_inbound_install_prompt(text: str) -> dict:
+    """Return {hit, slug, reason, kind} for Settings Meta-seeding refuse only.
+
+    Hits ONLY ``forbidden_meta`` (old dead-path copy). Ordinary chat
+    ``@ns/slug`` / 「安装 … skill」 must NOT hit — conversation agent handles
+    those. Settings market 「安装」 calls installFromSkillHub directly.
+    """
+    body = str(text or "")
+    if not body.strip():
+        return {"hit": False, "slug": None, "reason": "", "kind": ""}
+
+    if is_forbidden_skillhub_agent_install_prompt(body):
+        slug = extract_skillhub_install_slug(body)
+        return {
+            "hit": True,
+            "slug": slug,
+            "kind": "forbidden_meta",
+            "reason": (
+                "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install "
+                "或先装商店文案）。请改用 Desktop 确定性安装 "
+                "(installFromSkillHub / POST /api/registry/skillhub/install)。"
+            ),
+        }
+
+    # Deliberately do NOT treat @ns/slug / 「安装 … skill」 as intercept hits.
+    return {"hit": False, "slug": None, "reason": "", "kind": ""}

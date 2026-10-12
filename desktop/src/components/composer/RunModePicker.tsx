@@ -29,8 +29,8 @@ const RUN_MODE_ICON: Record<RunMode, typeof Hand> = {
 
 export type RunModePanelPlacement = "up" | "down";
 
-/** 三档双行菜单的预估高度；下方够用就往下开，贴底再往上翻。 */
-const RUN_MODE_MENU_HEIGHT = 180;
+/** 三档双行 + 分隔 +「自定义」；低估会让贴底菜单往下开、被 Dock 挡住。 */
+const RUN_MODE_MENU_HEIGHT = 248;
 
 export function runModePanelStyle(rect: DOMRect): {
   style: CSSProperties;
@@ -39,9 +39,22 @@ export function runModePanelStyle(rect: DOMRect): {
   const width = 260;
   const margin = 8;
   const gap = 6;
-  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
-  const spaceBelow = window.innerHeight - rect.bottom - margin - gap;
-  if (spaceBelow >= RUN_MODE_MENU_HEIGHT) {
+  const viewport = typeof window !== "undefined" ? window.visualViewport : null;
+  const viewWidth = viewport?.width ?? window.innerWidth;
+  const viewHeight = viewport?.height ?? window.innerHeight;
+  const viewLeft = viewport?.offsetLeft ?? 0;
+  const viewTop = viewport?.offsetTop ?? 0;
+  const viewBottom = viewTop + viewHeight;
+  const left = Math.max(
+    viewLeft + margin,
+    Math.min(rect.left, viewLeft + viewWidth - width - margin),
+  );
+  const spaceBelow = Math.max(0, viewBottom - rect.bottom - margin - gap);
+  const spaceAbove = Math.max(0, rect.top - viewTop - margin - gap);
+  // Composer lives in the lower half. Opening down uses the leftover strip that
+  // macOS Dock paints over, even when innerHeight still "fits" the menu.
+  const preferUp = spaceAbove > spaceBelow || spaceBelow < RUN_MODE_MENU_HEIGHT;
+  if (!preferUp) {
     return {
       placement: "down",
       style: { position: "fixed", left, top: rect.bottom + gap, width, zIndex: 9999 },
@@ -262,19 +275,21 @@ export function RunModePicker() {
         ref={anchorRef}
         type="button"
         className={`inline-flex h-7 max-w-[160px] items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors ${
-          mode === "auto" ? "text-amber-500" : "text-text-subtle"
-        } ${open ? "bg-surface-hover" : "hover:bg-surface-hover hover:text-text-primary"}`}
+          mode === "auto"
+            ? "font-semibold text-red-600 [html[data-theme=dark]_&]:text-red-500 [html[data-theme=dim]_&]:text-red-500"
+            : "text-text-strong"
+        } ${open ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={t(currentKeys.hint)}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+        <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={mode === "auto" ? 2.2 : 1.8} />
         <span className="truncate">{t(currentKeys.label)}</span>
         {open && placement === "up" ? (
-          <ChevronUp className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
+          <ChevronUp className={`h-3 w-3 shrink-0 ${mode === "auto" ? "text-current" : "text-text-muted"}`} strokeWidth={2} />
         ) : (
-          <ChevronDown className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
+          <ChevronDown className={`h-3 w-3 shrink-0 ${mode === "auto" ? "text-current" : "text-text-muted"}`} strokeWidth={2} />
         )}
       </button>
       {open

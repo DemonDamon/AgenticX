@@ -31,6 +31,8 @@ const config: Config = {
           messages: "var(--surface-messages)",
           composer: "var(--surface-composer)",
           card: "var(--surface-card)",
+          cardSolid: "var(--surface-card-solid)",
+          cardSolidHover: "var(--surface-card-solid-hover)",
           cardStrong: "var(--surface-card-strong)",
           hover: "var(--surface-hover)",
           bubble: "var(--surface-bubble)",

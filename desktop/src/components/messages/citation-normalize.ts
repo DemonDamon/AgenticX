@@ -267,11 +267,75 @@ export function relocateCitationMarkersForDisplay(text: string): string {
   return out.join("\n");
 }
 
-/** Split assistant text into paragraph blocks; citations stay inside the same block as adjacent prose. */
+type FenceLine = {
+  indent: number;
+  marker: "`" | "~";
+  length: number;
+  info: string;
+};
+
+/** CommonMark fence line: 0–3 spaces, 3+ backticks/tildes, optional info string. */
+function parseFenceLine(line: string): FenceLine | null {
+  const match = /^(\s{0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) return null;
+  const ticks = match[2];
+  const marker = ticks[0] as "`" | "~";
+  const info = match[3];
+  if (marker === "`" && info.includes("`")) return null;
+  return { indent: match[1].length, marker, length: ticks.length, info };
+}
+
+function isFenceCloser(opener: FenceLine, candidate: FenceLine): boolean {
+  return (
+    candidate.marker === opener.marker &&
+    candidate.length >= opener.length &&
+    candidate.indent <= opener.indent &&
+    candidate.info.trim() === ""
+  );
+}
+
+/**
+ * Split assistant text into paragraph blocks on blank lines.
+ * Fenced code stays in one block so inner blank lines cannot tear ```python … ```
+ * (which would render the tail as inline markdown and overlap/garble the example).
+ */
 export function splitCitationParagraphBlocks(text: string): string[] {
   if (!text) return [];
-  return text
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+  const lines = text.split("\n");
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fence: FenceLine | null = null;
+
+  const flush = () => {
+    const part = current.join("\n").trim();
+    if (part.length > 0) blocks.push(part);
+    current = [];
+  };
+
+  for (const line of lines) {
+    if (fence) {
+      current.push(line);
+      const candidate = parseFenceLine(line);
+      if (candidate && isFenceCloser(fence, candidate)) {
+        fence = null;
+      }
+      continue;
+    }
+
+    const opener = parseFenceLine(line);
+    if (opener) {
+      fence = opener;
+      current.push(line);
+      continue;
+    }
+
+    if (line.trim() === "") {
+      flush();
+      continue;
+    }
+
+    current.push(line);
+  }
+  flush();
+  return blocks;
 }

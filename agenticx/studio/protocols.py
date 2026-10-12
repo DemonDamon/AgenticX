@@ -6,7 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,8 @@ class ChatRequest(BaseModel):
     meta_leader_display_name: Optional[str] = None
     # Human user's display name in group chat (shown in dialogue context; optional).
     user_display_name: Optional[str] = None
+    # Group-room speaker. Empty/omitted => sender_id "user" (desktop owner).
+    speaker_user_id: Optional[str] = None
     # Global user nickname (applies to all chats, not just group). Overrides user_display_name when set.
     user_nickname: Optional[str] = None
     # Free-text user preferences/style injected into agent system prompts. Max 500 chars.
@@ -58,6 +60,8 @@ class ChatRequest(BaseModel):
     # Idempotency key from desktop: a duplicate POST with the same id within a
     # short window is short-circuited so no second user row is persisted.
     client_turn_id: Optional[str] = None
+    # Composer command chip. Persisted on the user row metadata for history reload.
+    command_name: Optional[str] = None
     # Kimi K3 / K2.8 / GLM-5.3: "low" | "high" | "max". GLM-5.2: "high" | "max".
     reasoning_effort: Optional[str] = None
     # DeepSeek V4 thinking switch; None leaves session unset (runtime defaults on).
@@ -83,6 +87,7 @@ class ConfirmResponse(BaseModel):
     request_id: str
     approved: bool
     agent_id: str = "meta"
+    remember: Optional[Literal["session"]] = None
 
 
 class ClarifyResponse(BaseModel):
@@ -91,6 +96,14 @@ class ClarifyResponse(BaseModel):
     agent_id: str = "meta"
     answer_text: str = ""
     selected_options: List[str] = Field(default_factory=list)
+    # Optional versioned choice-panel fields (present_choices). When set,
+    # /api/clarify validates candidate_set_version before resolving the gate.
+    panel_id: Optional[str] = None
+    candidate_set_version: Optional[int] = None
+    option_id: Optional[str] = None
+    # Masked form fields (input_type=secret, e.g. connector credentials). Passed
+    # to the waiting tool only; never persisted, logged, or shown to the model.
+    secret_values: Dict[str, str] = Field(default_factory=dict)
 
 
 class SessionState(BaseModel):

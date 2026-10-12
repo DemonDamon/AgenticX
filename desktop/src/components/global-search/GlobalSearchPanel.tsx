@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   CATEGORY_TABS,
+  findPaneForGlobalSearchHit,
   formatFileSize,
   formatMtime,
   useGlobalSearch,
@@ -22,6 +23,7 @@ import {
   type GlobalSearchItem,
 } from "../../hooks/useGlobalSearch";
 import { useAppStore } from "../../store";
+import { activeAvatarIdForSidebarRow } from "../../utils/sidebar-session-history";
 import { ContextMenu } from "../ContextMenu";
 import { Toast } from "../ds/Toast";
 import { buildGlobalSearchContextMenuItems } from "./global-search-context-menu";
@@ -106,11 +108,11 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
   const jumpToConversation = useCallback(
     (hit: ConversationHit) => {
       setMainView("chat");
-      const existing = panes.find((p) => p.avatarId === hit.avatarId);
+      const existing = findPaneForGlobalSearchHit(panes, hit);
       const paneId =
         existing?.id ?? addPane(hit.avatarId, hit.avatarName || hit.title || t("search.session"), "");
       setActivePaneId(paneId);
-      setActiveAvatarId(hit.avatarId);
+      setActiveAvatarId(activeAvatarIdForSidebarRow(hit.avatarId));
       setPaneSessionId(paneId, hit.sessionId, { provider: hit.provider, model: hit.model });
       setPaneHistorySearchTerms(paneId, buildHighlightTermsFromQuery(search.query));
       onClose();

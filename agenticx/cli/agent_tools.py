@@ -35,6 +35,8 @@ from agenticx.cli.studio_mcp import (
     load_available_servers,
     mcp_call_tool_async,
     mcp_connect,
+    mcp_connect_async,
+    mcp_disconnect_async,
 )
 from agenticx.cli.studio_skill import (
     get_all_skill_summaries,
@@ -186,6 +188,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "memory_search",
         "memory_forget",
         "session_search",
+        "plugin_usage",
         "list_files",
         "liteparse",
         "video_understand",
@@ -201,6 +204,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "wb_bridge_describe",
         "bash_bg_poll",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
+        "knowledge_read",  # SP32 tiered reading — L1 full-text fetch for a single search hit.
         "knowledge_synthesize",
         "web_search",
         "get_current_datetime",
@@ -807,10 +811,46 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                                         "Only used when selection_mode is multiple."
                                     ),
                                 },
+                                "input_type": {
+                                    "type": "string",
+                                    "enum": ["choice", "text", "url"],
+                                    "description": (
+                                        "choice (default): pick from options. text / url: a form field "
+                                        "(options optional); url is validated as http(s). Never use this "
+                                        "to collect secrets."
+                                    ),
+                                },
+                                "required": {
+                                    "type": "boolean",
+                                    "description": "Whether submit stays disabled until answered (default true).",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short field label for text/url inputs, e.g. 上游地址.",
+                                },
+                                "placeholder": {
+                                    "type": "string",
+                                    "description": "Input placeholder for text/url fields or the custom option.",
+                                },
+                                "custom_option": {
+                                    "type": "string",
+                                    "description": (
+                                        "Exact option label (must also be in options), e.g. 其他（自定义输入）, "
+                                        "that reveals a text input when selected; the typed text becomes the answer."
+                                    ),
+                                },
                             },
-                            "required": ["question", "options"],
+                            "required": ["question"],
                             "additionalProperties": False,
                         },
+                    },
+                    "submit_label": {
+                        "type": "string",
+                        "description": "Optional submit button text (e.g. 确认). Defaults to the UI label.",
+                    },
+                    "skip_label": {
+                        "type": "string",
+                        "description": "Optional skip button text (e.g. 忽略). Defaults to the UI label.",
                     },
                     "allow_free_text": {
                         "type": "boolean",
@@ -822,6 +862,76 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "present_choices",
+            "description": (
+                "Present a versioned structured choice panel: either clarification buttons or a sourced "
+                "comparison card (max 3 options). Comparison options MUST each include at least one http(s) "
+                "source URL. This only asks the user for a preference — it performs no external write. "
+                "The panel carries a candidate_set_version; a superseded/outdated panel cannot be selected. "
+                "Prefer this over flattening multi-option research into free text. Continues the same turn "
+                "from the user's selection."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short panel title / question shown to the user (1-200 chars).",
+                    },
+                    "panel_type": {
+                        "type": "string",
+                        "enum": ["clarification", "comparison"],
+                        "description": (
+                            "clarification = preference buttons; comparison = sourced contrast cards "
+                            "(each option needs ≥1 http(s) source; at most 3 visible)."
+                        ),
+                    },
+                    "options": {
+                        "type": "array",
+                        "description": "1-12 clarification options, or 1-3 comparison options with sources.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Stable option id (optional; auto-assigned if omitted).",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Visible option label.",
+                                },
+                                "details": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "0-4 short detail lines (required grounding for comparison).",
+                                },
+                                "sources": {
+                                    "type": "array",
+                                    "description": "Citation sources. Required (≥1 http/https) for comparison.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "url": {"type": "string"},
+                                        },
+                                        "required": ["title", "url"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["label"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["title", "panel_type", "options"],
                 "additionalProperties": False,
             },
         },
@@ -1513,6 +1623,88 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "connector_manage",
+            "description": (
+                "Manage Near 连接器 (shown in 我的连接 / market / chat picker). A connector is NOT an avatar — "
+                "never use avatar tools. Kinds: mcp (remote MCP URL), rest (HTTP API via the local connector "
+                "gateway), database (SQLite/MySQL/PostgreSQL, read-only by default). Actions: list_templates, "
+                "list_instances (always both first), create / create_rest / create_database (one instance per "
+                "template+credential; error=exists → reuse or overwrite=true), request_credential (masked card; "
+                "secrets never returned — NEVER ask the user to paste secrets in chat), authorize_oauth "
+                "(browser PKCE for OAuth authorization_code), verify (connect + health). Follow skill connector-assistant."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list_templates",
+                            "list_instances",
+                            "create",
+                            "create_rest",
+                            "create_database",
+                            "request_credential",
+                            "authorize_oauth",
+                            "verify",
+                            "delete",
+                        ],
+                    },
+                    "query": {"type": "string", "description": "list_templates: optional name/id/category filter."},
+                    "name": {"type": "string", "description": "create*: display name (e.g. abc / 我的订单 API)."},
+                    "url": {"type": "string", "description": "create (mcp): full MCP Server URL including path (optional when the template has mcp_url)."},
+                    "template_id": {"type": "string", "description": "create (mcp): template id from list_templates."},
+                    "auth_style": {
+                        "type": "string",
+                        "enum": ["none", "bearer", "header", "query"],
+                        "description": "create (mcp): none / bearer / header / query.",
+                    },
+                    "header_name": {"type": "string", "description": "MCP header / REST api_key_header name."},
+                    "query_param": {"type": "string", "description": "MCP query / REST api_key_query param name."},
+                    "overwrite": {"type": "boolean", "description": "Update an existing instance instead of error=exists."},
+                    "mcp_oauth": {"type": "boolean", "description": "create (mcp): server uses standard MCP OAuth — verify opens the browser to authorize (no secret card)."},
+                    "server_name": {"type": "string", "description": "mcp/database instance id (create/list_instances)."},
+                    "instance_id": {"type": "string", "description": "REST: rest:<connector_id>; or alias of server_name."},
+                    "credential_label": {"type": "string", "description": "request_credential: single-field label (MCP)."},
+                    "kind": {"type": "string", "enum": ["mcp", "rest", "database"], "description": "request_credential/verify/delete target kind (inferred from id when omitted)."},
+                    "base_url": {"type": "string", "description": "create_rest: API base URL (http/https)."},
+                    "spec_source": {"type": "string", "description": "create_rest: OpenAPI/Swagger URL or local file path (preferred)."},
+                    "endpoints": {"type": "string", "description": "create_rest: short endpoint list when no OpenAPI (METHOD /path 描述, one per line)."},
+                    "auth_type": {
+                        "type": "string",
+                        "enum": ["none", "api_key_header", "api_key_query", "bearer", "hmac", "oauth2_client_credentials", "oauth2_authorization_code"],
+                        "description": "create_rest: REST auth (hmac = generic HMAC-SHA256 AK/SK).",
+                    },
+                    "token_url": {"type": "string"},
+                    "authorize_url": {"type": "string"},
+                    "scopes": {"type": "string", "description": "OAuth scopes, space- or comma-separated."},
+                    "client_auth": {"type": "string", "enum": ["body", "basic"]},
+                    "hmac_access_key_header": {"type": "string"},
+                    "hmac_signature_header": {"type": "string"},
+                    "hmac_timestamp_header": {"type": "string"},
+                    "hmac_string_to_sign": {"type": "string", "description": "HMAC template; placeholders {method}{path}{query}{timestamp}{body_sha256}{access_key}{host}{\\n}."},
+                    "hmac_signature_encoding": {"type": "string", "enum": ["hex", "base64"]},
+                    "hmac_timestamp_format": {"type": "string", "enum": ["unix", "unix_ms", "rfc3339"]},
+                    "include_writes": {"type": "boolean", "description": "create_rest: include write/destructive OpenAPI ops (default true)."},
+                    "description": {"type": "string"},
+                    "db_type": {"type": "string", "enum": ["sqlite", "mysql", "postgresql"]},
+                    "db_path": {"type": "string", "description": "create_database (sqlite): file path."},
+                    "db_host": {"type": "string"},
+                    "db_port": {"type": "integer"},
+                    "db_name": {"type": "string"},
+                    "db_user": {"type": "string"},
+                    "db_ssl": {"type": "boolean"},
+                    "allow_writes": {"type": "boolean", "description": "create_database: enable write tool (default false = read-only)."},
+                    "row_limit": {"type": "integer", "description": "create_database: max rows per query (default 200)."},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "skill_use",
             "description": (
                 "Activate a skill into current context_files (key: skill:<name>). "
@@ -1548,9 +1740,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "skill_manage",
             "description": (
-                "Create, patch, or delete skills stored under ~/.agenticx/skills/. "
-                "For 'create': provide action + name + content, or use from_path/from_url "
-                "instead of inline content for large SKILL.md files. "
+                "Create, patch, view, or delete skills stored under ~/.agenticx/skills/. "
+                "For 'create': provide action + name + content, or use from_path/from_url/from_dir "
+                "instead of inline content for large SKILL.md files (from_dir also copies references/). "
+                "Optional create 'source' (skillhub|registry|agent_created) preserves provenance. "
+                "For 'view': return on-disk SKILL.md, directory listing, and resolved source. "
                 "For 'patch': provide action + name + old_string + new_string. "
                 "For 'delete': provide action + name. "
                 "Sub-paths are supported (e.g. name='ima/notes'). "
@@ -1562,8 +1756,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "patch", "delete", "history", "rollback"],
-                        "description": "Operation: create/patch/delete/history/rollback.",
+                        "enum": ["create", "patch", "delete", "history", "rollback", "view"],
+                        "description": "Operation: create/patch/delete/history/rollback/view.",
                     },
                     "name": {
                         "type": "string",
@@ -1584,7 +1778,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "For 'create': read SKILL.md from this local path (workspace or ~/.agenticx/). "
-                            "Mutually exclusive with content/from_url."
+                            "Mutually exclusive with content/from_url/from_dir."
                         ),
                     },
                     "from_url": {
@@ -1592,7 +1786,23 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "description": (
                             "For 'create': download SKILL.md from an allowlisted https URL "
                             "(raw.githubusercontent.com, gist, registry.clawhub.ai). "
-                            "Mutually exclusive with content/from_path."
+                            "Mutually exclusive with content/from_path/from_dir."
+                        ),
+                    },
+                    "from_dir": {
+                        "type": "string",
+                        "description": (
+                            "For 'create': import a whole skill directory (must contain SKILL.md). "
+                            "Copies companion files such as references/ into the install dir. "
+                            "Mutually exclusive with content/from_path/from_url."
+                        ),
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["skillhub", "registry", "agent_created"],
+                        "description": (
+                            "For 'create': provenance source written into frontmatter and sidecar. "
+                            "Default agent_created. Pass skillhub/registry when installing third-party skills."
                         ),
                     },
                     "old_string": {"type": "string", "description": "Required for 'patch': exact substring to find and replace in the existing SKILL.md."},
@@ -1716,6 +1926,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "skill_import_repo",
             "description": (
                 "Bulk install skills from a GitHub repository into ~/.agenticx/skills/. "
+                "Pass skill=<name> to install ONE skill's full directory (SKILL.md + "
+                "references/ + scripts/ + assets/) from the repo tarball into "
+                "~/.agenticx/skills/registry/<name>/ — required for multi-file skills "
+                "like cathrynlavery/diagram-design. "
                 "Use dry_run=true first to list pending skills without writing. "
                 "Preferred for installing many skills (e.g. mattpocock/skills)."
             ),
@@ -1725,6 +1939,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "repo": {
                         "type": "string",
                         "description": "GitHub repo as owner/name (e.g. mattpocock/skills).",
+                    },
+                    "skill": {
+                        "type": "string",
+                        "description": (
+                            "Optional single skill directory name (e.g. diagram-design). "
+                            "When set, installs that skill's FULL directory from the repo "
+                            "tarball instead of SKILL.md-only bulk import."
+                        ),
                     },
                     "branch": {"type": "string", "description": "Branch name (default main)."},
                     "path_glob": {
@@ -1746,6 +1968,97 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["repo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skillhub_install",
+            "description": (
+                "Install one SkillHub (skillhub.cn) skill into ~/.agenticx/skills/registry/<slug>/ "
+                "in a single call. Use this whenever the user asks to install a SkillHub skill, "
+                "including prompts like 「请根据 https://skillhub.cn/install/skillhub.md，安装 @ns/slug」. "
+                "The namespace is resolved automatically when only a slug is given; download, "
+                "security scan and registration all run outside the sandbox. "
+                "Do NOT web_fetch skillhub.md, run curl install.sh, or call the skillhub CLI via bash_exec."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Skill reference: '@namespace/slug', 'namespace/slug', or bare 'slug'.",
+                    },
+                    "acknowledge_high_risk": {
+                        "type": "boolean",
+                        "description": (
+                            "Only after a previous call in this chat was refused as high risk AND the user "
+                            "has explicitly replied that they still want it installed."
+                        ),
+                    },
+                },
+                "required": ["ref"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clawhub_install",
+            "description": (
+                "Install one ClawHub skill into ~/.agenticx/skills/registry/<name>/ in a single call "
+                "(fetch SKILL.md from the configured ClawHub registry, security scan, register). "
+                "Use this whenever the user asks to install a ClawHub skill. "
+                "Do NOT curl ClawHub APIs or write skill files via bash_exec."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "ClawHub skill as '@owner/slug' (preferred; required when several publishers "
+                            "share a slug) or bare 'slug'."
+                        ),
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Registry source name from the market list (default: first ClawHub registry).",
+                    },
+                    "acknowledge_high_risk": {
+                        "type": "boolean",
+                        "description": (
+                            "Only after a previous call in this chat was refused as high risk AND the user "
+                            "has explicitly replied that they still want it installed."
+                        ),
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skillhub_search",
+            "description": (
+                "Search the SkillHub (skillhub.cn) market. Returns slug, namespace, canonical "
+                "'@namespace/slug', downloads and description; pass canonical to skillhub_install."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search keywords."},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 10, max 30).",
+                    },
+                },
+                "required": ["query"],
                 "additionalProperties": False,
             },
         },
@@ -1972,6 +2285,71 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "limit": {
                         "type": "integer",
                         "description": "Max sessions to return (1-5, default 3).",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plugin_usage",
+            "description": (
+                "Look up usage for any model/provider plugin. "
+                "Pass a model name, date range, and/or session_id to see call counts, "
+                "timeouts, retries, consecutive failures, and why a session failed. "
+                "plugin=all (default) reads the local usage ledger; plugin=jev reads "
+                "structured-decision cards. Use when the user asks how often a model "
+                "ran, which calls timed out or failed, or why a session needs retry. "
+                "Read-only; these rows are not injected into normal chat context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin": {
+                        "type": "string",
+                        "description": "all (default), jev, a provider id, or a model name.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name or substring, e.g. gpt-4o, claude, jev-1.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Provider id, e.g. openai, anthropic, zhipu.",
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": "Start day YYYY-MM-DD, or today/yesterday.",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": "End day YYYY-MM-DD, or today/yesterday.",
+                    },
+                    "range": {
+                        "type": "string",
+                        "description": "day, week, month (default for all models), or total.",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "all (default) or current session.",
+                    },
+                    "purpose": {
+                        "type": "string",
+                        "description": (
+                            "all (default), failed, timeout, retry, adopted/ok, "
+                            "routing, or kb."
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session folder name. Use with model to diagnose that pair.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max recent rows (1-30, default 8).",
                     },
                 },
                 "required": [],
@@ -2270,7 +2648,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "instruction": {
                         "type": "string",
                         "description": (
-                            "Prompt for the automation runner on each trigger. Must use the same Python/paths as verified during setup. "
+                            "Prompt for the automation runner on each trigger. Write it in the language the user asked for; "
+                            "the auto-injected Execution Contract follows that language. "
+                            "Must use the same Python/paths as verified during setup. "
                             "Meta-Agent should have already installed deps (pip) in the task workspace or a dedicated venv and confirmed the script runs."
                         ),
                     },
@@ -2360,8 +2740,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "instruction": {
                         "type": "string",
                         "description": (
-                            "New prompt for the automation runner. When provided, the tool re-runs MCP preflight and re-injects "
-                            "the Execution Contract, replacing any previously auto-injected contract block."
+                            "New prompt for the automation runner. Write it in the language the user asked for. "
+                            "When provided, the tool re-runs MCP preflight and re-injects the Execution Contract "
+                            "in that same language, replacing any previously auto-injected contract block."
                         ),
                     },
                     "frequency_type": {
@@ -2430,9 +2811,12 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "knowledge_search",
             "description": (
                 "Search mounted document brains (知识库 / docs brain) for the current session. "
-                "Returns {hits, by_brain, used_top_k, brains} — hits are merged top-k; "
-                "by_brain groups results per brain. Respects avatar brain mount settings. "
-                "Optional brain_id searches a single brain. If nothing is mounted, returns a hint."
+                "Returns {hits, used_top_k, brains} — hits are merged top-k. Respects avatar brain mount settings. "
+                "By default returns a COMPACT view (detail=\"compact\"): each hit carries only a query-relevant "
+                "snippet plus its id — use this to judge relevance and cite sources cheaply. "
+                "When you need the complete passage of a hit, call knowledge_read(hit_id=...) on that specific hit. "
+                "Pass detail=\"full\" to retrieve full texts of all hits in one call (costs far more context tokens). "
+                "If nothing is mounted, returns a hint."
             ),
             "parameters": {
                 "type": "object",
@@ -2446,8 +2830,43 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": "Optional: search only this docs brain id (must be visible to the session avatar).",
                     },
+                    "detail": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "description": (
+                            "compact (default): snippets only, then knowledge_read for the hits you need. "
+                            "full: every hit with its complete text."
+                        ),
+                    },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "knowledge_read",
+            "description": (
+                "Fetch the FULL text of a single knowledge_search hit by its hit id (L1 read). "
+                "Use after a compact knowledge_search: first pick relevant hits from the snippets, "
+                "then call this tool only for the hits you actually need, to keep context small. "
+                "The hit id must come from a recent knowledge_search result in this session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hit_id": {
+                        "type": "string",
+                        "description": "The hit `id` value from a knowledge_search result.",
+                    },
+                    "brain_id": {
+                        "type": "string",
+                        "description": "Optional: docs brain id the hit came from (disambiguates same-id hits across brains).",
+                    },
+                },
+                "required": ["hit_id"],
                 "additionalProperties": False,
             },
         },
@@ -2927,6 +3346,195 @@ def merge_computer_use_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[
     return out
 
 
+NEAR_BROWSER_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_open",
+            "description": (
+                "Open a URL in the Near WorkPanel in-app browser (right-side visible webview). "
+                "Use when the user says 打开页面 / 看看这个链接 / 打开这个网页. "
+                "Reveals the workspace browser even if that panel is closed. "
+                "Prefer this over browser-use MCP and never fall back to the system browser. "
+                "User sees every navigation. After open, call near_browser_snapshot before click/type."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "http(s) URL or a host that will be prefixed with https://.",
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_snapshot",
+            "description": (
+                "Snapshot interactive elements in the WorkPanel browser and return index/tag/text/"
+                "is_password. Must be called before every near_browser_click or near_browser_type."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_click",
+            "description": (
+                "Click an indexed element in the WorkPanel browser. "
+                "Call near_browser_snapshot first and use the returned index."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "Element index from the latest near_browser_snapshot.",
+                    },
+                },
+                "required": ["index"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_type",
+            "description": (
+                "Type into an indexed input in the WorkPanel browser. "
+                "Call near_browser_snapshot first. Password fields require one user confirmation. "
+                "Set submit=true to press Enter / requestSubmit after typing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "Element index from the latest near_browser_snapshot.",
+                    },
+                    "text": {"type": "string", "description": "Text to insert."},
+                    "submit": {
+                        "type": "boolean",
+                        "description": "If true, press Enter and try form.requestSubmit after typing.",
+                    },
+                },
+                "required": ["index", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_press_key",
+            "description": (
+                "Dispatch a key (e.g. Enter, Escape, Tab) in the WorkPanel browser."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Keyboard key name, e.g. Enter."},
+                },
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_extract_text",
+            "description": (
+                "Read visible text from the current WorkPanel browser page. "
+                "Optional query keeps matching lines."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional substring filter for visible text lines.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_screenshot",
+            "description": (
+                "Capture the current WorkPanel browser viewport to a PNG under "
+                "~/.agenticx/desktop-use/ and return the absolute path."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+NEAR_BROWSER_TOOL_NAMES = frozenset(
+    name
+    for t in NEAR_BROWSER_TOOLS
+    if isinstance(t, dict)
+    for name in (str(t.get("function", {}).get("name", "") or "").strip(),)
+    if name
+)
+
+_NEAR_BROWSER_HUMAN_TAKEOVER = "用户已接管浏览器，请停止自动操作并询问用户下一步。"
+
+
+def browser_control_config_enabled() -> bool:
+    """True when ``browser_control.enabled`` is unset or true (default on)."""
+    try:
+        return bool(ConfigManager.load().browser_control.enabled)
+    except Exception:
+        return True
+
+
+def merge_near_browser_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Append WorkPanel browser tool specs when enabled; dedupe by function name."""
+    if not browser_control_config_enabled():
+        return tool_list
+    seen: set[str] = set()
+    for t in tool_list:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function", {})
+        if isinstance(fn, dict):
+            n = str(fn.get("name", "") or "").strip()
+            if n:
+                seen.add(n)
+    out = list(tool_list)
+    for spec in NEAR_BROWSER_TOOLS:
+        if not isinstance(spec, dict):
+            continue
+        fn = spec.get("function", {})
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name", "") or "").strip()
+        if not name or name in seen:
+            continue
+        out.append(spec)
+        seen.add(name)
+    return out
+
+
 _CODE_SEARCH_TOOL: Dict[str, Any] = {
     "type": "function",
     "function": {
@@ -2989,6 +3597,7 @@ def _code_search_tool_defs() -> List[Dict[str, Any]]:
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
     """Studio/Meta tool list with optional code_search when mounted code brains exist."""
     tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
+    tools = merge_near_browser_tools_into(tools)
     from agenticx.ops.tools import merge_ops_tools_into
 
     tools = merge_ops_tools_into(tools)
@@ -3227,6 +3836,239 @@ async def _tool_desktop_keyboard_type(
             ensure_ascii=False,
         )
     return json.dumps({"ok": True, "chars": len(text)}, ensure_ascii=False)
+
+
+def _studio_session_id(session: Optional[StudioSession]) -> str:
+    if session is None:
+        return ""
+    for attr in ("_session_id", "session_id", "id"):
+        raw = getattr(session, attr, None)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return ""
+
+
+def _near_browser_index(arguments: Dict[str, Any]) -> Optional[int]:
+    raw = arguments.get("index")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_near_browser_result(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    error = str(payload.get("error") or "").strip()
+    if error == "human_takeover":
+        return _NEAR_BROWSER_HUMAN_TAKEOVER
+    return raw
+
+
+async def _tool_near_browser_http(
+    session: StudioSession,
+    action: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    timeout_sec: float,
+) -> str:
+    from agenticx.cli.browser_bridge_settings import (
+        MISSING_BRIDGE_ERROR,
+        browser_bridge_base_url,
+        browser_bridge_token,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for near_browser tools"
+
+    base = browser_bridge_base_url()
+    token = browser_bridge_token()
+    if not base or not token:
+        return f"ERROR: {MISSING_BRIDGE_ERROR}"
+    session_id = _studio_session_id(session)
+    if not session_id:
+        return "ERROR: near_browser tools require an active Studio session"
+    body: Dict[str, Any] = {"session_id": session_id, "action": action}
+    if payload:
+        body.update(payload)
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{base}/v1/browser/act"
+    client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
+    try:
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            response = await client.post(url, headers=headers, json=body)
+    except httpx.ConnectError as exc:
+        return (
+            f"ERROR: {MISSING_BRIDGE_ERROR}；连接失败 {base}。可改用 browser-use MCP。Details: {exc}"
+        )
+    except httpx.TimeoutException as exc:
+        return f"ERROR: Near 浏览器桥超时（browser_bridge.port / {base}）：{exc}"
+    except httpx.HTTPError as exc:
+        return f"ERROR: Near 浏览器桥请求失败（browser_bridge.port / {base}）：{exc}"
+    text = response.text
+    if response.status_code in (401, 403):
+        return (
+            f"ERROR: Near 浏览器桥鉴权失败（HTTP {response.status_code}，browser_bridge.port）。"
+            f" Body: {text[:800]}"
+        )
+    if response.status_code >= 400:
+        return f"ERROR: Near 浏览器桥 {response.status_code}（browser_bridge.port）：{text[:2000]}"
+    return _format_near_browser_result(text)
+
+
+def _near_browser_attach_profile_id(result: str, profile_id: str) -> str:
+    """Merge stable profile_id into a JSON bridge response when possible."""
+    pid = str(profile_id or "").strip()
+    if not pid:
+        return result
+    raw = str(result or "").strip()
+    if not raw or raw.startswith("ERROR:"):
+        return result
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return json.dumps(
+            {"ok": True, "result": raw, "profile_id": pid},
+            ensure_ascii=False,
+        )
+    if isinstance(payload, dict):
+        payload.setdefault("profile_id", pid)
+        return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(
+        {"ok": True, "result": payload, "profile_id": pid},
+        ensure_ascii=False,
+    )
+
+
+async def _tool_near_browser_open(arguments: Dict[str, Any], session: StudioSession) -> str:
+    url = str(arguments.get("url") or "").strip()
+    if not url:
+        return "ERROR: near_browser_open requires parameter url"
+    from agenticx.tools.near_browser.profile import get_or_create_browser_profile_id
+    from agenticx.tools.near_browser.url_guard import UrlGuardError, validate_public_http_url
+
+    try:
+        validated = validate_public_http_url(url)
+    except UrlGuardError as exc:
+        return f"ERROR: {exc.message}"
+
+    session_id = _studio_session_id(session)
+    if not session_id:
+        return "ERROR: near_browser tools require an active Studio session"
+    try:
+        profile_id = get_or_create_browser_profile_id(session_id)
+    except Exception as exc:
+        return f"ERROR: failed to bind browser profile for session: {exc}"
+
+    _log.info(
+        "near_browser_open session=%s profile_id=%s host=%s pinned=%s",
+        session_id,
+        profile_id,
+        validated.hostname,
+        validated.address,
+    )
+    result = await _tool_near_browser_http(
+        session,
+        "open",
+        {"url": validated.url, "profile_id": profile_id},
+        timeout_sec=30.0,
+    )
+    return _near_browser_attach_profile_id(result, profile_id)
+
+
+async def _tool_near_browser_snapshot(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_near_browser_http(session, "snapshot", {}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_click(arguments: Dict[str, Any], session: StudioSession) -> str:
+    index = _near_browser_index(arguments)
+    if index is None:
+        return "ERROR: near_browser_click requires integer parameter index"
+    return await _tool_near_browser_http(session, "click", {"index": index}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_type(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    index = _near_browser_index(arguments)
+    if index is None:
+        return "ERROR: near_browser_type requires integer parameter index"
+    text = str(arguments.get("text") or "")
+    submit = arguments.get("submit") is True
+    snap_raw = await _tool_near_browser_http(session, "snapshot", {}, timeout_sec=20.0)
+    if snap_raw == _NEAR_BROWSER_HUMAN_TAKEOVER:
+        return snap_raw
+    if snap_raw.startswith("ERROR:"):
+        return snap_raw
+    try:
+        snap = json.loads(snap_raw)
+    except Exception:
+        snap = {}
+    elements = snap.get("elements") if isinstance(snap, dict) else None
+    if isinstance(elements, list):
+        target = next(
+            (
+                row
+                for row in elements
+                if isinstance(row, dict) and row.get("index") == index
+            ),
+            None,
+        )
+        if target is None:
+            return (
+                "ERROR: index not found in latest snapshot; call near_browser_snapshot first"
+            )
+        if target.get("is_password") is True:
+            preview = text if len(text) <= 8 else text[:3] + "…"
+            if not await _confirm(
+                f"将在应用内浏览器密码框输入（预览 {preview!r}）— 是否继续？",
+                confirm_gate=confirm_gate,
+                context={"tool": "near_browser_type", "risk": "computer_use"},
+                emit_event=emit_event,
+            ):
+                return _cancelled("应用内浏览器密码输入未执行", confirm_gate)
+    return await _tool_near_browser_http(
+        session,
+        "type",
+        {"index": index, "text": text, "submit": submit},
+        timeout_sec=20.0,
+    )
+
+
+async def _tool_near_browser_press_key(arguments: Dict[str, Any], session: StudioSession) -> str:
+    key = str(arguments.get("key") or "").strip()
+    if not key:
+        return "ERROR: near_browser_press_key requires parameter key"
+    return await _tool_near_browser_http(session, "press_key", {"key": key}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_extract_text(arguments: Dict[str, Any], session: StudioSession) -> str:
+    query = str(arguments.get("query") or "").strip()
+    payload: Dict[str, Any] = {}
+    if query:
+        payload["query"] = query
+    return await _tool_near_browser_http(session, "extract_text", payload, timeout_sec=20.0)
+
+
+async def _tool_near_browser_screenshot(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_near_browser_http(session, "screenshot", {}, timeout_sec=30.0)
 
 
 META_TOOL_NAMES = {
@@ -3482,6 +4324,20 @@ async def _confirm(
             payload_context.get("tool"),
         )
         return True
+    sticky_tool = str(payload_context.get("tool") or "")
+    if (
+        session is not None
+        and sticky_tool
+        and sticky_tool in getattr(session, "sticky_allowed_tools", set())
+        and not is_protected_confirm(payload_context)
+        and not (set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES)
+    ):
+        _log.info(
+            "[confirm] auto-approved id=%s tool=%s by session sticky allow",
+            request_id,
+            sticky_tool,
+        )
+        return True
     # 受保护的请求带上「为什么问你」。界面自己也能按 risk 推，但理由由后端给出才有
     # 唯一出处——risk 取值将来加一个，不用记得同步改两处文案。
     if is_protected_confirm(payload_context):
@@ -3571,25 +4427,48 @@ def build_clarification_tool_result(answer: Dict[str, Any]) -> str:
     return "；".join(parts) + "。"
 
 
-def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
+_CLARIFY_INPUT_TYPES = ("choice", "text", "url")
+
+
+def _normalize_clarification_decisions(
+    raw: Any, *, allow_secret: bool = False
+) -> List[Dict[str, Any]]:
     """Parse structured decision groups for multi-part sign-off cards.
 
     Each decision gets ``selection_mode`` (``single`` | ``multiple``, default
     ``single``) and ``exclusive_options`` (only meaningful for ``multiple``;
     filtered to labels that exist in ``options``).
+
+    Optional form extensions (emitted only when non-default, so legacy payloads
+    are unchanged):
+
+    - ``input_type``: ``text`` / ``url`` render a form field and may omit
+      ``options``. ``secret`` is internal-only (``allow_secret=True``, used by
+      ``connector_manage``) — its value bypasses the model entirely.
+    - ``required``: ``False`` lets the user submit without answering.
+    - ``label`` / ``placeholder``: field copy.
+    - ``custom_option``: an option label that reveals a free-text input.
     """
     if not isinstance(raw, list):
         return []
+    allowed_types = _CLARIFY_INPUT_TYPES + (("secret",) if allow_secret else ())
     out: List[Dict[str, Any]] = []
     for idx, item in enumerate(raw[:6]):
         if not isinstance(item, dict):
             continue
         question = str(item.get("question", "") or "").strip()
         raw_opts = item.get("options") or []
-        if not question or not isinstance(raw_opts, list):
+        if not question:
             continue
+        if not isinstance(raw_opts, list):
+            raw_opts = []
+        input_type = str(item.get("input_type", "") or "").strip().lower() or "choice"
+        if input_type not in allowed_types:
+            input_type = "choice"
         options = [str(opt).strip() for opt in raw_opts if str(opt).strip()][:8]
-        if not options:
+        if input_type == "secret":
+            options = []
+        if not options and input_type == "choice":
             continue
         decision_id = str(item.get("id", "") or "").strip() or f"decision-{idx + 1}"
         selection_mode = (
@@ -3607,16 +4486,41 @@ def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
                         continue
                     seen.add(text)
                     exclusive_options.append(text)
-        out.append(
-            {
-                "id": decision_id,
-                "question": question,
-                "options": options,
-                "selection_mode": selection_mode,
-                "exclusive_options": exclusive_options,
-            }
-        )
+        decision: Dict[str, Any] = {
+            "id": decision_id,
+            "question": question,
+            "options": options,
+            "selection_mode": selection_mode,
+            "exclusive_options": exclusive_options,
+        }
+        if input_type != "choice":
+            decision["input_type"] = input_type
+        if item.get("required") is False:
+            decision["required"] = False
+        if input_type == "secret" and item.get("masked") is False:
+            # Routed via secret_values (never reaches the model) but shown in
+            # clear text, e.g. Access Key ID / Client ID.
+            decision["masked"] = False
+        for key, limit in (("label", 40), ("placeholder", 120)):
+            val = str(item.get(key, "") or "").strip()
+            if val:
+                decision[key] = val[:limit]
+        custom = str(item.get("custom_option", "") or "").strip()
+        if custom and custom in options:
+            decision["custom_option"] = custom
+        out.append(decision)
     return out
+
+
+def _redact_clarification_answer(answer: Any) -> Any:
+    """Strip ``secret_values`` from an answer before it is logged / emitted / shown to the model."""
+    if not isinstance(answer, dict) or "secret_values" not in answer:
+        return answer
+    redacted = {k: v for k, v in answer.items() if k != "secret_values"}
+    raw = answer.get("secret_values")
+    if isinstance(raw, dict):
+        redacted["secret_fields"] = sorted(str(k) for k, v in raw.items() if str(v or "").strip())
+    return redacted
 
 
 _ACTION_CONFIRM_MIN_TTL = 30
@@ -3653,24 +4557,25 @@ def _normalize_action_confirmation_summary(raw: Any) -> List[Dict[str, str]]:
     return out
 
 
-def build_action_confirmation_tool_result(
+def _classify_action_confirmation_answer(
     answer: Dict[str, Any],
     *,
     approve_label: str = "确认执行",
     reject_label: str = "取消",
 ) -> str:
-    """Render action-confirmation answers as explicit tool-result guidance."""
+    """Classify a confirmation answer as approve|reject|timeout|suspended|ambiguous."""
     if isinstance(answer, dict):
         if answer.get("__timeout__"):
-            return (
-                "[ACTION_CONFIRMATION_EXPIRED] 确认已失效。不得继续该动作，"
-                "若仍需执行必须重新生成预览。"
-            )
+            return "timeout"
         if answer.get("__suspended__"):
-            return "[ACTION_CONFIRMATION_SUSPENDED] 无人值守会话不能确认外部写操作。"
+            return "suspended"
 
     answer_text = str((answer or {}).get("answer_text", "") or "").strip()
-    selected = [str(x).strip() for x in list((answer or {}).get("selected_options", []) or []) if str(x).strip()]
+    selected = [
+        str(x).strip()
+        for x in list((answer or {}).get("selected_options", []) or [])
+        if str(x).strip()
+    ]
     approve = str(approve_label or "确认执行").strip() or "确认执行"
     reject = str(reject_label or "取消").strip() or "取消"
 
@@ -3679,16 +4584,54 @@ def build_action_confirmation_tool_result(
     reject_hits = {reject, "取消", "拒绝", "不用了", "no", "n"}
 
     if any(opt in approve_hits or opt.lower() in approve_hits for opt in selected):
-        return "[ACTION_CONFIRMED] 用户已确认执行。"
+        return "approve"
     if any(opt in reject_hits or opt.lower() in reject_hits for opt in selected):
-        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+        return "reject"
     if answer_text in approve_hits or lowered in {x.lower() for x in approve_hits if x.isascii()}:
-        return "[ACTION_CONFIRMED] 用户已确认执行。"
+        return "approve"
     if answer_text in reject_hits or lowered in {x.lower() for x in reject_hits if x.isascii()}:
-        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+        return "reject"
+    return "ambiguous"
 
+
+def build_action_confirmation_tool_result(
+    answer: Dict[str, Any],
+    *,
+    approve_label: str = "确认执行",
+    reject_label: str = "取消",
+    proposal_id: str = "",
+    proposal_status: str = "",
+) -> str:
+    """Render action-confirmation answers as explicit tool-result guidance."""
+    verdict = _classify_action_confirmation_answer(
+        answer if isinstance(answer, dict) else {},
+        approve_label=approve_label,
+        reject_label=reject_label,
+    )
+    pid = str(proposal_id or "").strip()
+    status = str(proposal_status or "").strip()
+    suffix = ""
+    if pid:
+        suffix = f" proposal_id={pid}"
+        if status:
+            suffix += f" status={status}"
+        suffix += "。不得静默重放同一 proposal；若需重试必须新建审阅提案。"
+
+    if verdict == "timeout":
+        base = (
+            "[ACTION_CONFIRMATION_EXPIRED] 确认已失效。不得继续该动作，"
+            "若仍需执行必须重新生成预览。"
+        )
+        return base if not pid else f"{base}{suffix}"
+    if verdict == "suspended":
+        base = "[ACTION_CONFIRMATION_SUSPENDED] 无人值守会话不能确认外部写操作。"
+        return base if not pid else f"{base}{suffix}"
+    if verdict == "approve":
+        return f"[ACTION_CONFIRMED] 用户已确认执行。{suffix}".rstrip()
+    if verdict == "reject":
+        return f"[ACTION_REJECTED] 用户已取消执行。不得继续该动作。{suffix}".rstrip()
     # Ambiguous / empty answers must never silently approve an external write.
-    return "[ACTION_REJECTED] 用户未明确确认。不得继续该动作。"
+    return f"[ACTION_REJECTED] 用户未明确确认。不得继续该动作。{suffix}".rstrip()
 
 
 async def _request_action_confirmation(
@@ -3703,13 +4646,24 @@ async def _request_action_confirmation(
     emit_event: Optional[Any] = None,
     is_unattended: bool = False,
     caller_context: Optional[Dict[str, Any]] = None,
+    session_id: str = "",
 ) -> str:
     """Block for a binary action confirmation via the clarification transport.
 
     Emits ``clarification_required`` with ``context.kind = action_confirmation``
     so Desktop can render the dedicated confirm card while still resolving
     through ``POST /api/clarify``.
+
+    Persists an ActionProposal before the UI prompt; approve/deny goes through
+    ``ActionProposalService.decide`` so outcome_unknown / expired states are
+    durable and silent retry of the same proposal is refused.
     """
+    from agenticx.runtime.action_proposals import (
+        HashMismatchError,
+        ProposalExpiredError,
+        get_default_service,
+    )
+
     title_text = str(title or "").strip()[:200]
     if not title_text:
         return (
@@ -3724,11 +4678,31 @@ async def _request_action_confirmation(
     source_text = str(source or "").strip()[:80]
     request_id = str(uuid.uuid4())
     expires_at_ms = int((time.time() + ttl) * 1000)
+    sid = str(session_id or "").strip()
+
+    proposal_payload: Dict[str, Any] = {
+        "title": title_text,
+        "summary": summary_rows,
+        "approve_label": approve,
+        "reject_label": reject,
+        "source": source_text,
+        "request_id": request_id,
+    }
+    proposal_service = get_default_service()
+    proposal = proposal_service.propose(
+        proposal_payload,
+        ttl_seconds=ttl,
+        session_id=sid,
+        proposal_id=request_id,
+    )
 
     # Controlled context only — never trust caller-provided kind/secrets.
     payload_context: Dict[str, Any] = {
         "kind": "action_confirmation",
         "request_id": request_id,
+        "proposal_id": proposal.id,
+        "proposal_hash": proposal.hash,
+        "proposal_status": proposal.status,
         "title": title_text,
         "summary": summary_rows,
         "approve_label": approve,
@@ -3742,8 +4716,9 @@ async def _request_action_confirmation(
 
     if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
         _log.info(
-            "[action_confirm] suspended id=%s title=%s (unattended)",
+            "[action_confirm] suspended id=%s proposal=%s title=%s (unattended)",
             request_id,
+            proposal.id,
             title_text[:80],
         )
         if emit_event is not None:
@@ -3760,11 +4735,21 @@ async def _request_action_confirmation(
                     },
                 }
             )
-        return build_action_confirmation_tool_result({"__suspended__": True})
+        return build_action_confirmation_tool_result(
+            {"__suspended__": True},
+            proposal_id=proposal.id,
+            proposal_status=proposal.status,
+        )
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
-    _log.info("[action_confirm] requested id=%s title=%s ttl=%.1fs", request_id, title_text[:80], ttl)
+    _log.info(
+        "[action_confirm] requested id=%s proposal=%s title=%s ttl=%.1fs",
+        request_id,
+        proposal.id,
+        title_text[:80],
+        ttl,
+    )
     wait_task = asyncio.create_task(
         gate.request_clarification(
             title_text,
@@ -3815,14 +4800,46 @@ async def _request_action_confirmation(
                 },
             }
         )
-    return build_action_confirmation_tool_result(
-        answer if isinstance(answer, dict) else {},
+
+    answer_dict = answer if isinstance(answer, dict) else {}
+    verdict = _classify_action_confirmation_answer(
+        answer_dict,
         approve_label=approve,
         reject_label=reject,
     )
+    final_status = proposal.status
+    if verdict == "timeout":
+        expired = proposal_service.mark_expired(proposal.id)
+        final_status = expired.status if expired is not None else "expired"
+    elif verdict == "approve":
+        try:
+            decided = proposal_service.decide(proposal.id, proposal.hash, "approve")
+            final_status = decided.status
+        except ProposalExpiredError:
+            final_status = "expired"
+            answer_dict = {"__timeout__": True}
+            verdict = "timeout"
+        except HashMismatchError:
+            final_status = "denied"
+            answer_dict = {"answer_text": "", "selected_options": [reject]}
+            verdict = "reject"
+    elif verdict == "reject":
+        decided = proposal_service.decide(proposal.id, proposal.hash, "deny")
+        final_status = decided.status
+    elif verdict == "ambiguous":
+        decided = proposal_service.decide(proposal.id, proposal.hash, "deny")
+        final_status = decided.status
+
+    return build_action_confirmation_tool_result(
+        answer_dict,
+        approve_label=approve,
+        reject_label=reject,
+        proposal_id=proposal.id,
+        proposal_status=final_status,
+    )
 
 
-async def _request_clarification(
+async def _await_clarification_answer(
     prompt: str,
     *,
     options: Optional[List[str]] = None,
@@ -3832,15 +4849,21 @@ async def _request_clarification(
     clarify_gate: Optional[ClarifyGate] = None,
     emit_event: Optional[Any] = None,
     is_unattended: bool = False,
-) -> str:
-    """Block inside a tool call to ask the user an open-ended question.
+) -> Dict[str, Any]:
+    """Emit a clarification prompt and wait for the raw answer dict.
 
-    Emits ``clarification_required`` (or ``clarification_suspended`` for
-    unattended sessions), waits on the clarify gate, and returns a tool-result
-    string built by :func:`build_clarification_tool_result`.
+    The returned dict may carry ``secret_values`` (only for internal callers
+    that asked for ``input_type=secret`` fields); logs and the
+    ``clarification_response`` event always get the redacted form.
+    Unattended sessions return ``{"__suspended__": True}``.
     """
     options = list(options or [])
     decisions = list(decisions or [])
+    # A clarification without any selectable choice is necessarily open-ended.
+    # Never emit an impossible prompt that offers neither choices nor a text
+    # answer surface; desktop also mirrors this invariant for persisted rows.
+    if not options and not decisions:
+        allow_free_text = True
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
@@ -3867,7 +4890,7 @@ async def _request_clarification(
                     },
                 }
             )
-        return build_clarification_tool_result({"__suspended__": True})
+        return {"__suspended__": True}
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
@@ -3911,18 +4934,105 @@ async def _request_clarification(
             allow_free_text=allow_free_text,
             context=payload_context,
         )
-    _log.info("[clarify] resolved id=%s answer=%s", request_id, answer)
+    redacted = _redact_clarification_answer(answer)
+    _log.info("[clarify] resolved id=%s answer=%s", request_id, redacted)
     if emit_prompt:
         await emit_event(
             {
                 "type": "clarification_response",
                 "data": {
                     "id": request_id,
-                    "answer": answer,
+                    "answer": redacted,
                 },
             }
         )
-    return build_clarification_tool_result(answer)
+    return answer if isinstance(answer, dict) else {}
+
+
+async def _request_clarification(
+    prompt: str,
+    *,
+    options: Optional[List[str]] = None,
+    decisions: Optional[List[Dict[str, Any]]] = None,
+    allow_free_text: bool = True,
+    context: Optional[Dict[str, Any]] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Block inside a tool call to ask the user an open-ended question.
+
+    Emits ``clarification_required`` (or ``clarification_suspended`` for
+    unattended sessions), waits on the clarify gate, and returns a tool-result
+    string built by :func:`build_clarification_tool_result`.
+    """
+    answer = await _await_clarification_answer(
+        prompt,
+        options=options,
+        decisions=decisions,
+        allow_free_text=allow_free_text,
+        context=context,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    # Public tool never exposes secret fields; drop any stray secret_values.
+    return build_clarification_tool_result(_redact_clarification_answer(answer))
+
+
+async def _present_choices(
+    *,
+    title: str,
+    panel_type: str,
+    options: Any,
+    session: Optional[Any] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Create a versioned choice panel and block via the clarification gate.
+
+    Validation (comparison sources, max 3 options, etc.) lives in
+    :mod:`agenticx.runtime.choice_panels.store` so ``/api/clarify`` only needs
+    to re-check version on select.
+    """
+    from agenticx.runtime.choice_panels.store import (
+        ValidationError,
+        get_choice_panel_store,
+        panel_to_clarification_context,
+    )
+
+    sid = str(
+        getattr(session, "session_id", "")
+        or getattr(session, "_session_id", "")
+        or getattr(session, "id", "")
+        or ""
+    ).strip() or "default"
+    store = get_choice_panel_store()
+    try:
+        panel = store.create_panel(
+            session_id=sid,
+            panel_type=panel_type,
+            title=title,
+            options=options,
+        )
+    except ValidationError as exc:
+        return f"ERROR: present_choices rejected — {exc}"
+
+    labels = [opt.label for opt in panel.options]
+    ctx = panel_to_clarification_context(panel)
+    # Free-text is allowed for clarification panels, disabled for sourced comparisons.
+    allow_free = panel.panel_type == "clarification"
+    return await _request_clarification(
+        panel.title,
+        options=labels,
+        decisions=None,
+        allow_free_text=allow_free,
+        context=ctx,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
 
 
 def _path_from_arg(path_arg: str) -> Path:
@@ -6856,6 +7966,831 @@ def _tool_mcp_import(arguments: Dict[str, Any], session: StudioSession) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+def _connector_server_secrets(doc: Dict[str, Any], server_name: str) -> List[str]:
+    """Header / query values of one server — used only to scrub error text."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    raw = (doc.get("mcpServers") or {}).get(server_name) if isinstance(doc, dict) else None
+    out: List[str] = []
+    if isinstance(raw, dict):
+        headers = raw.get("headers")
+        if isinstance(headers, dict):
+            for v in headers.values():
+                if isinstance(v, str) and v.strip():
+                    out.append(v.strip())
+                    if v.lower().startswith("bearer "):
+                        out.append(v[7:].strip())
+        try:
+            out.extend(v for _k, v in parse_qsl(urlsplit(str(raw.get("url") or "")).query) if v)
+        except ValueError:
+            pass
+    return [x for x in out if len(x) >= 4]
+
+
+def _session_uses_global_mcp(session: Any) -> bool:
+    """Real StudioSession delegates MCP state to GlobalMcpManager (read-through properties)."""
+    return isinstance(getattr(type(session), "mcp_configs", None), property)
+
+
+def _connector_reload_configs(session: StudioSession) -> None:
+    if _session_uses_global_mcp(session):
+        # GlobalMcpManager hot-reloads mcp.json on mtime change when read.
+        _ = session.mcp_configs
+        return
+    try:
+        session.mcp_configs = load_available_servers()
+    except Exception:
+        pass
+
+
+async def _connector_disconnect(session: StudioSession, server_name: str) -> None:
+    try:
+        if _session_uses_global_mcp(session):
+            from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+            await GlobalMcpManager.singleton().disconnect_one(server_name)
+        else:
+            await mcp_disconnect_async(
+                session.mcp_hub, session.mcp_configs, session.connected_servers, server_name
+            )
+    except Exception:
+        pass
+
+
+async def _connector_connect(session: StudioSession, server_name: str) -> Tuple[bool, str]:
+    if _session_uses_global_mcp(session):
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+        return await GlobalMcpManager.singleton().connect_one(server_name)
+    return await mcp_connect_async(
+        session.mcp_hub, session.mcp_configs, session.connected_servers, server_name
+    )
+
+
+async def _connector_rest_instances() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """REST connectors registered in the local gateway (only when any exist on disk)."""
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.connectors import manage as cm
+
+    user_dir = gc.data_dir() / "connectors"
+    if not user_dir.is_dir() or not any(user_dir.glob("*.json")):
+        return [], None
+    try:
+        gw = await asyncio.to_thread(gc.ensure_gateway)
+        return await asyncio.to_thread(cm.rest_instances, gw), None
+    except Exception as exc:
+        return [], str(exc)[:200]
+
+
+async def _connector_ensure_gateway_mcp(session: StudioSession) -> Tuple[Optional[str], Optional[str]]:
+    """Ensure the local gateway runs, mcp.json points at it and the session is connected.
+
+    Returns ``(gateway_server_name, error)``.
+    """
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.runtime import connectors_store as cs
+
+    try:
+        gw = await asyncio.to_thread(gc.ensure_gateway)
+    except Exception as exc:
+        return None, str(exc)[:300]
+    try:
+        doc = cs.read_mcp_doc()
+        new_doc, name = gc.ensure_gateway_mcp_entry(doc, gw)
+        if new_doc is not None:
+            cs.write_mcp_doc(new_doc)
+    except (cs.McpDocError, OSError) as exc:
+        return None, f"mcp.json update failed: {exc}"[:300]
+    _connector_reload_configs(session)
+    connected = set(getattr(session, "connected_servers", set()) or set())
+    if name in connected and new_doc is not None:
+        await _connector_disconnect(session, name)
+        connected.discard(name)
+    if name not in connected and getattr(session, "mcp_hub", None) is not None:
+        task = asyncio.ensure_future(_connector_connect(session, name))
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if task.cancelled():
+            return name, "gateway MCP connect aborted"
+        if task.exception() is not None:
+            return name, str(task.exception())[:300]
+        ok, detail = task.result()
+        if not ok:
+            return name, str(detail or "gateway MCP connect failed")[:300]
+    return name, None
+
+
+def _connector_secret_decisions(fields: List[Dict[str, Any]], display: str) -> List[Dict[str, Any]]:
+    raw = []
+    for f in fields:
+        raw.append(
+            {
+                "id": f["id"],
+                "question": f"「{display}」的 {f['label']}",
+                "input_type": "secret",
+                "label": f["label"],
+                "required": bool(f.get("required", True)),
+                "masked": bool(f.get("masked", True)),
+                "placeholder": "仅保存到本机（加密存储），不会出现在对话中",
+            }
+        )
+    return _normalize_clarification_decisions(raw, allow_secret=True)
+
+
+async def _connector_collect_secrets(
+    title: str,
+    fields: List[Dict[str, Any]],
+    display: str,
+    *,
+    clarify_gate: Optional[ClarifyGate],
+    emit_event: Optional[Any],
+    is_unattended: bool,
+) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
+    """Masked multi-field card → ``(values, error_payload)``; values never logged/returned."""
+    answer = await _await_clarification_answer(
+        title,
+        decisions=_connector_secret_decisions(fields, display),
+        allow_free_text=False,
+        context={"kind": "connector_credential", "submit_label": "保存", "skip_label": "稍后填写"},
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    if answer.get("__suspended__") or answer.get("__timeout__"):
+        return None, {"ok": False, "error": "no_answer", "hint": "用户暂未填写；可稍后在「设置 → 连接器 → 我的连接」中更新凭证。"}
+    raw = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+    values = {str(k): str(v or "").strip() for k, v in raw.items()}
+    raw.clear()
+    missing = [f["label"] for f in fields if f.get("required", True) and not values.get(f["id"])]
+    if not any(values.values()) or missing:
+        values.clear()
+        return None, {"ok": False, "error": "skipped", "missing": missing, "hint": "用户选择稍后填写或未填完整。"}
+    return values, None
+
+
+def _connector_scrub(text: str, values: Dict[str, str]) -> str:
+    from agenticx.runtime import connectors_store as cs
+
+    out = text
+    for v in values.values():
+        out = cs.scrub_secret(out, v)
+    return out
+
+
+async def _connector_manage_ext(
+    action: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    doc: Dict[str, Any],
+    connected: set,
+    *,
+    clarify_gate: Optional[ClarifyGate],
+    emit_event: Optional[Any],
+    is_unattended: bool,
+) -> Optional[str]:
+    """REST (gateway) / database / OAuth branches of connector_manage. None = not handled."""
+    from agenticx.connectors import gateway_client as gc
+    from agenticx.connectors import manage as cm
+    from agenticx.runtime import connectors_store as cs
+
+    def _dump(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False)
+
+    instance_id = str(arguments.get("instance_id", "") or arguments.get("server_name", "") or "").strip()
+    kind = str(arguments.get("kind", "") or "").strip()
+    if not kind:
+        if instance_id.startswith(cm.REST_PREFIX):
+            kind = "rest"
+        else:
+            hit = next((i for i in cs.list_instances(doc) if i["server_name"] == instance_id), None)
+            kind = (hit or {}).get("kind") or "mcp"
+
+    if action == "create_rest":
+        auth, err = (None, None)
+        if str(arguments.get("auth_type", "") or "").strip():
+            auth, err = cm.build_rest_auth(arguments)
+            if err:
+                return _dump({"ok": False, "error": "invalid_form", "field": "auth_type", "detail": err})
+        try:
+            gw = await asyncio.to_thread(gc.ensure_gateway)
+            result = await asyncio.to_thread(
+                lambda: cm.register_rest(
+                    gw,
+                    name=str(arguments.get("name", "") or ""),
+                    base_url=str(arguments.get("base_url", "") or ""),
+                    spec_source=str(arguments.get("spec_source", "") or ""),
+                    endpoints=arguments.get("endpoints"),
+                    auth=auth,
+                    include_writes=arguments.get("include_writes", True) is not False,
+                    overwrite=bool(arguments.get("overwrite", False)),
+                    description=str(arguments.get("description", "") or ""),
+                )
+            )
+        except gc.GatewayError as exc:
+            return _dump({"ok": False, "error": "gateway_unavailable", "detail": str(exc)})
+        if result.get("ok"):
+            gw_name, gw_err = await _connector_ensure_gateway_mcp(session)
+            result["gateway_server"] = gw_name
+            if gw_err:
+                result["gateway_warning"] = gw_err
+            result["usage"] = (
+                f"Call the gateway MCP tools: search_actions(connectorId='{result['connector_id']}') → "
+                "get_action_guide → execute_action(actionId, input)."
+            )
+        return _dump(result)
+
+    if action == "create_database":
+        new_doc, result = cm.create_database(
+            doc,
+            name=str(arguments.get("name", "") or ""),
+            db_type=str(arguments.get("db_type", "") or ""),
+            path=str(arguments.get("db_path", "") or ""),
+            host=str(arguments.get("db_host", "") or ""),
+            port=arguments.get("db_port"),
+            database=str(arguments.get("db_name", "") or ""),
+            user=str(arguments.get("db_user", "") or ""),
+            ssl=bool(arguments.get("db_ssl", False)),
+            allow_writes=bool(arguments.get("allow_writes", False)),
+            row_limit=arguments.get("row_limit"),
+            overwrite=bool(arguments.get("overwrite", False)),
+        )
+        if new_doc is not None:
+            try:
+                cs.write_mcp_doc(new_doc)
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+            if result.get("server_name") in connected:
+                await _connector_disconnect(session, result["server_name"])
+        return _dump(result)
+
+    if kind == "rest" and action in ("request_credential", "authorize_oauth", "verify", "delete"):
+        cid = instance_id[len(cm.REST_PREFIX):] if instance_id.startswith(cm.REST_PREFIX) else instance_id
+        try:
+            gw = await asyncio.to_thread(gc.ensure_gateway)
+            definition = await asyncio.to_thread(cm.get_rest_definition, gw, cid)
+        except gc.GatewayError as exc:
+            return _dump({"ok": False, "error": "gateway_unavailable", "detail": str(exc)})
+        if definition is None:
+            return _dump({"ok": False, "error": "not_found", "instance_id": instance_id})
+        display = str(definition.get("displayName") or cid)
+        auth = definition.get("auth") or {"type": "none"}
+        if action == "delete":
+            return _dump(await asyncio.to_thread(cm.unregister_rest, gw, cid))
+        if action == "verify":
+            gw_name, gw_err = await _connector_ensure_gateway_mcp(session)
+            res = await asyncio.to_thread(cm.check_rest, gw, cid)
+            res["instance_id"] = cm.REST_PREFIX + cid
+            res["gateway_server"] = gw_name
+            if gw_err:
+                res["gateway_warning"] = gw_err
+            return _dump(res)
+        fields = cm.credential_fields(auth)
+        if not fields:
+            return _dump({"ok": True, "action": "no_credential_needed", "instance_id": cm.REST_PREFIX + cid})
+        oauth = auth.get("oauth2") or {}
+        is_code = auth.get("type") == "oauth2" and oauth.get("grant") == "authorization_code"
+        if action == "authorize_oauth" and not is_code:
+            return _dump({"ok": False, "error": "not_oauth_authorization_code"})
+        values, err_payload = await _connector_collect_secrets(
+            f"为连接器「{display}」填写凭证", fields, display,
+            clarify_gate=clarify_gate, emit_event=emit_event, is_unattended=is_unattended,
+        )
+        if err_payload is not None:
+            return _dump(err_payload)
+        assert values is not None
+        try:
+            if is_code:
+                from agenticx.connectors.oauth import OAuthFlowError, run_pkce_authorization
+
+                try:
+                    tokens = await run_pkce_authorization(
+                        authorize_url=str(oauth.get("authorizeUrl") or ""),
+                        token_url=str(oauth.get("tokenUrl") or ""),
+                        client_id=values.get("clientId", ""),
+                        client_secret=values.get("clientSecret", ""),
+                        scopes=list(oauth.get("scopes") or []),
+                        client_auth=str(oauth.get("clientAuth") or "body"),
+                    )
+                except OAuthFlowError as exc:
+                    return _dump({"ok": False, "error": "oauth_failed", "detail": _connector_scrub(str(exc), values)})
+                refresh = str(tokens.get("refresh_token") or "")
+                tokens.clear()
+                if not refresh:
+                    return _dump({
+                        "ok": False,
+                        "error": "no_refresh_token",
+                        "hint": "授权成功但服务端未返回 refresh_token（常需 offline_access 等 scope），无法长期自动刷新。",
+                    })
+                values["refreshToken"] = refresh
+            result = await asyncio.to_thread(cm.save_rest_credential, gw, cid, display, values)
+            if result.get("ok"):
+                result["note"] = "凭证已加密保存在本机连接器网关（未在对话中回显）。下一步调用 verify。"
+            return _connector_scrub(_dump(result), values)
+        finally:
+            values.clear()
+
+    if kind == "database" and action in ("request_credential", "verify", "delete"):
+        servers = cs.servers_map(doc)
+        raw = servers.get(instance_id)
+        if not isinstance(raw, dict):
+            return _dump({"ok": False, "error": "not_found", "server_name": instance_id})
+        meta = raw.get(cs.META_KEY) if isinstance(raw.get(cs.META_KEY), dict) else {}
+        display = str(meta.get("displayName") or instance_id)
+        if action == "delete":
+            if instance_id in connected:
+                await _connector_disconnect(session, instance_id)
+            servers.pop(instance_id, None)
+            try:
+                cs.write_mcp_doc({**doc, "mcpServers": servers})
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+            return _dump({"ok": True, "action": "deleted", "server_name": instance_id})
+        if action == "request_credential":
+            if str(meta.get("dbType") or "") == "sqlite":
+                return _dump({"ok": True, "action": "no_credential_needed", "server_name": instance_id})
+            values, err_payload = await _connector_collect_secrets(
+                f"为数据库连接器「{display}」填写密码",
+                [{"id": "password", "label": "数据库密码", "masked": True, "required": True}],
+                display,
+                clarify_gate=clarify_gate, emit_event=emit_event, is_unattended=is_unattended,
+            )
+            if err_payload is not None:
+                return _dump(err_payload)
+            assert values is not None
+            try:
+                new_doc, result = cm.set_database_password(cs.read_mcp_doc(), server_name=instance_id, password=values.get("password", ""))
+                if new_doc is not None:
+                    cs.write_mcp_doc(new_doc)
+                    _connector_reload_configs(session)
+                    if instance_id in connected:
+                        await _connector_disconnect(session, instance_id)
+                if result.get("ok"):
+                    result["note"] = "密码已写入本机 mcp.json（未在对话中回显）。下一步调用 verify。"
+                return _connector_scrub(_dump(result), values)
+            except (cs.McpDocError, OSError) as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": _connector_scrub(str(exc), values)})
+            finally:
+                values.clear()
+        # verify: direct health (connect + list tables), then MCP handshake
+        from agenticx.connectors.database import Database, DbConfig, DbError
+
+        env = raw.get("env") if isinstance(raw.get("env"), dict) else {}
+        cfg = DbConfig.from_env({str(k): str(v) for k, v in env.items()})
+        secrets_ = {"password": cfg.password} if cfg.password else {}
+        try:
+            health = await asyncio.to_thread(lambda: Database(cfg).health())
+        except DbError as exc:
+            return _dump({"ok": False, "error": "connect_failed", "server_name": instance_id, "detail": _connector_scrub(str(exc), secrets_)[:500]})
+        _connector_reload_configs(session)
+        if instance_id in connected:
+            await _connector_disconnect(session, instance_id)
+        mcp_ok, mcp_detail = True, ""
+        if getattr(session, "mcp_hub", None) is not None:
+            task = asyncio.ensure_future(_connector_connect(session, instance_id))
+            try:
+                await asyncio.wait({task})
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            if task.cancelled():
+                mcp_ok, mcp_detail = False, "MCP 握手被中止"
+            elif task.exception() is not None:
+                mcp_ok, mcp_detail = False, str(task.exception())
+            else:
+                mcp_ok, mcp_detail = task.result()
+        payload = {
+            "ok": bool(mcp_ok),
+            "server_name": instance_id,
+            "table_count": health["table_count"],
+            "tables_preview": health["tables_preview"],
+            "read_only": not cfg.allow_writes,
+        }
+        if not mcp_ok:
+            payload["error"] = "mcp_connect_failed"
+            payload["detail"] = _connector_scrub(str(mcp_detail or ""), secrets_)[:500]
+        return _dump(payload)
+
+    if action in ("authorize_oauth",):
+        return _dump({"ok": False, "error": "unsupported", "hint": "authorize_oauth 仅用于 REST OAuth authorization_code 连接器（instance_id=rest:<id>）。"})
+    if action == "delete" and kind == "mcp":
+        servers = cs.servers_map(doc)
+        raw = servers.get(instance_id)
+        meta = raw.get(cs.META_KEY) if isinstance(raw, dict) and isinstance(raw.get(cs.META_KEY), dict) else {}
+        if not isinstance(raw, dict) or meta.get("source") != cs.SOURCE_CONNECTOR:
+            return _dump({"ok": False, "error": "not_found_or_not_owned", "server_name": instance_id})
+        if instance_id in connected:
+            await _connector_disconnect(session, instance_id)
+        servers.pop(instance_id, None)
+        try:
+            cs.write_mcp_doc({**doc, "mcpServers": servers})
+        except OSError as exc:
+            return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+        _connector_reload_configs(session)
+        return _dump({"ok": True, "action": "deleted", "server_name": instance_id})
+    return None
+
+
+async def _tool_connector_manage(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Chat-side connector CRUD sharing the desktop dedupe rules (no secrets in results)."""
+    from agenticx.runtime import connectors_store as cs
+
+    action = str(arguments.get("action", "") or "").strip()
+
+    def _dump(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False)
+
+    if action == "list_templates":
+        rows = cs.filter_templates(cs.load_connector_templates(), str(arguments.get("query", "") or ""))
+        return _dump(
+            {
+                "ok": True,
+                "templates": [
+                    {
+                        k: t.get(k)
+                        for k in (
+                            "id",
+                            "name",
+                            "kind",
+                            "auth",
+                            "category",
+                            "create_via",
+                            "mcp_url",
+                            "auth_query",
+                            "auth_header",
+                            "credential_label",
+                            "credential_placeholder",
+                            "credential_help_url",
+                            "credential_fields",
+                        )
+                        if t.get(k) is not None
+                    }
+                    for t in rows
+                ],
+                "note": (
+                    "create_via=mcp_url → connector_manage create with template_id (url defaults to the template mcp_url); "
+                    "auth=mcp_oauth → official MCP OAuth 2.1 with dynamic client registration: only a name is needed, "
+                    "never ask for a token/Client ID — verify opens the browser to authorize; "
+                    "auth_query set → the API key goes in that URL query parameter (request_credential fills it); "
+                    "credential_fields (2+) → multi custom headers (Comate dual-cred); request_credential asks for each field; "
+                    "credential_label / credential_help_url set → request_credential uses that label and the card shows "
+                    "the official 如何获取凭证 link; also give the user that link in your reply when asking for it; "
+                    "ui_native → tell the user to connect it in 市场/设置 → 连接器 (native handshake, not creatable here); "
+                    "unavailable → no ready-made template (OAuth etc.): use create with mcp_oauth=true for an "
+                    "MCP server with standard MCP OAuth, or create_rest with an oauth2_* auth_type for an HTTP API."
+                ),
+            }
+        )
+
+    try:
+        doc = cs.read_mcp_doc()
+    except cs.McpDocError as exc:
+        return _dump({"ok": False, "error": "invalid_mcp_json", "detail": str(exc)})
+
+    connected = set(getattr(session, "connected_servers", set()) or set())
+
+    if action == "list_instances":
+        native: Dict[str, bool] = {}
+        try:
+            status = json.loads(
+                (Path.home() / ".agenticx" / "connectors" / "native-status.json").read_text(encoding="utf-8")
+            )
+            for cid, row in (status.get("connectors") or {}).items():
+                if isinstance(row, dict):
+                    native[f"native:{cid}"] = bool(row.get("connected"))
+        except Exception:
+            pass
+        payload_li: Dict[str, Any] = {
+            "ok": True,
+            "instances": [cs.public_instance(i, connected) for i in cs.list_instances(doc)],
+            "native_connected": native,
+        }
+        rest_rows, rest_err = await _connector_rest_instances()
+        payload_li["rest_instances"] = rest_rows
+        if rest_err:
+            payload_li["rest_error"] = rest_err
+        return _dump(payload_li)
+
+    if action == "create":
+        template_id = str(arguments.get("template_id", "") or "").strip() or None
+        create_url = str(arguments.get("url", "") or "").strip()
+        create_style = str(arguments.get("auth_style", "") or "").strip()
+        create_query = str(arguments.get("query_param", "") or "").strip()
+        use_mcp_oauth = bool(arguments.get("mcp_oauth", False))
+        header_override = ""
+        if template_id:
+            tpl = cs.find_template(template_id)
+            if tpl is None:
+                return _dump({"ok": False, "error": "unknown_template", "template_id": template_id})
+            if tpl.get("create_via") != "mcp_url":
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "template_not_creatable_here",
+                        "create_via": tpl.get("create_via"),
+                        "hint": "原生连接器请引导用户在「市场 / 设置 → 连接器」中点击连接；未接线模板请改用自定义 MCP URL。",
+                    }
+                )
+            # Template defaults (mirrors the desktop create form): official URL, MCP OAuth, query-key style.
+            if not create_url and tpl.get("mcp_url"):
+                create_url = str(tpl["mcp_url"])
+            if tpl.get("auth") == "mcp_oauth":
+                use_mcp_oauth = True
+                create_style = "none"
+            elif tpl.get("auth_query") and create_style in ("", "none", "query"):
+                create_style = "query"
+                create_query = create_query or str(tpl["auth_query"])
+            elif isinstance(tpl.get("credential_fields"), list) and len(tpl.get("credential_fields") or []) > 1 and create_style in ("", "none", "header", "headers"):
+                create_style = "headers"
+            elif tpl.get("auth_header") and create_style in ("", "none", "header"):
+                create_style = "header"
+                header_override = str(tpl["auth_header"])
+            elif tpl.get("auth") in ("api_key", "custom_credential") and not create_style:
+                # Mirrors the desktop form: token / key → Authorization: Bearer.
+                create_style = "bearer"
+        multi_headers = []
+        if template_id:
+            tpl_for_fields = cs.find_template(template_id) or {}
+            if create_style == "headers":
+                for f in tpl_for_fields.get("credential_fields") or []:
+                    if isinstance(f, dict) and str(f.get("name") or "").strip():
+                        multi_headers.append(str(f["name"]).strip())
+        new_doc, result = cs.upsert_connector(
+            doc,
+            name=str(arguments.get("name", "") or ""),
+            url=create_url,
+            template_id=template_id,
+            auth_style=create_style or "none",
+            header_name=str(arguments.get("header_name", "") or "") or header_override,
+            query_param=create_query,
+            auth_headers=multi_headers or None,
+            overwrite=bool(arguments.get("overwrite", False)),
+        )
+        if result.get("ok") and use_mcp_oauth:
+            base_doc = new_doc if new_doc is not None else doc
+            srv = cs.servers_map(base_doc)
+            entry = srv.get(result.get("server_name"))
+            if isinstance(entry, dict) and not entry.get("oauth"):
+                entry = dict(entry)
+                entry["oauth"] = True
+                srv[result["server_name"]] = entry
+                new_doc = {**base_doc, "mcpServers": srv}
+                if result.get("action") == "unchanged":
+                    result["action"] = "updated"
+        if new_doc is not None:
+            try:
+                cs.write_mcp_doc(new_doc)
+            except OSError as exc:
+                return _dump({"ok": False, "error": "write_failed", "detail": str(exc)})
+            _connector_reload_configs(session)
+        if result.get("ok"):
+            inst = next(
+                (i for i in cs.list_instances(new_doc or doc) if i["server_name"] == result.get("server_name")),
+                None,
+            )
+            if inst is not None:
+                result["instance"] = cs.public_instance(inst, connected)
+                style = inst.get("auth_style") or "none"
+                result["needs_credential"] = style != "none" and not inst.get("has_credential")
+                tpl_meta = cs.find_template(template_id) if template_id else None
+                if tpl_meta and result["needs_credential"]:
+                    if tpl_meta.get("credential_label"):
+                        result["credential_label"] = tpl_meta["credential_label"]
+                    if tpl_meta.get("credential_help_url"):
+                        result["credential_help_url"] = tpl_meta["credential_help_url"]
+                if use_mcp_oauth:
+                    result["needs_credential"] = False
+                    result["oauth"] = "mcp_standard"
+                    result["note"] = "MCP OAuth：调用 verify 时会打开系统浏览器授权，令牌保存在本机 ~/.agenticx/connectors/oauth/。"
+        return _dump(result)
+
+    ext = await _connector_manage_ext(
+        action,
+        arguments,
+        session,
+        doc,
+        connected,
+        clarify_gate=clarify_gate,
+        emit_event=emit_event,
+        is_unattended=is_unattended,
+    )
+    if ext is not None:
+        return ext
+
+    server_name = str(arguments.get("server_name", "") or "").strip()
+    inst = next((i for i in cs.list_instances(doc) if i["server_name"] == server_name), None)
+    if action in ("request_credential", "verify") and inst is None:
+        return _dump({"ok": False, "error": "not_found", "server_name": server_name})
+
+    if action == "request_credential":
+        cred_tpl = cs.find_template(str(inst.get("template_id") or "")) if inst.get("template_id") else None
+        cred_tpl = cred_tpl or {}
+        multi_fields = [
+            f
+            for f in (cred_tpl.get("credential_fields") or [])
+            if isinstance(f, dict) and str(f.get("name") or "").strip()
+        ]
+        help_url = str(cred_tpl.get("credential_help_url") or "").strip()
+        if not help_url.lower().startswith(("https://", "http://")):
+            help_url = ""
+        if len(multi_fields) > 1:
+            decisions_raw = []
+            for f in multi_fields:
+                fname = str(f["name"]).strip()
+                flabel = str(f.get("label") or fname).strip()[:24] or fname
+                fph = str(f.get("placeholder") or "").strip() or "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中"
+                q = f"请输入「{inst['display_name']}」的 {flabel}"
+                if help_url:
+                    q += f"（如何获取凭证：{help_url}）"
+                decisions_raw.append(
+                    {
+                        "id": fname,
+                        "question": q,
+                        "input_type": "secret",
+                        "label": flabel,
+                        "placeholder": fph,
+                    }
+                )
+            decisions = _normalize_clarification_decisions(decisions_raw, allow_secret=True)
+            answer = await _await_clarification_answer(
+                f"为连接器「{inst['display_name']}」填写凭证",
+                decisions=decisions,
+                allow_free_text=False,
+                context={
+                    "kind": "connector_credential",
+                    "submit_label": "保存",
+                    "skip_label": "稍后填写",
+                },
+                clarify_gate=clarify_gate,
+                emit_event=emit_event,
+                is_unattended=is_unattended,
+            )
+            if answer.get("__suspended__") or answer.get("__timeout__"):
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "no_answer",
+                        "hint": "用户暂未填写；告诉用户可稍后在「设置 → 连接器 → 我的连接」中更新凭证。",
+                    }
+                )
+            secret_values = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+            secrets = {str(f["name"]).strip(): str(secret_values.get(str(f["name"]).strip(), "") or "").strip() for f in multi_fields}
+            if not all(secrets.values()):
+                return _dump(
+                    {
+                        "ok": False,
+                        "error": "skipped",
+                        "hint": "用户选择稍后填写；提示可在「设置 → 连接器 → 我的连接」中点「更新凭证」。",
+                    }
+                )
+            try:
+                doc = cs.read_mcp_doc()
+                new_doc, result = cs.set_connector_credentials(doc, server_name=server_name, secrets=secrets)
+                if new_doc is not None:
+                    cs.write_mcp_doc(new_doc)
+                    _connector_reload_configs(session)
+                    if server_name in connected:
+                        await _connector_disconnect(session, server_name)
+            except (cs.McpDocError, OSError) as exc:
+                detail = str(exc)
+                for s in secrets.values():
+                    detail = cs.scrub_secret(detail, s)
+                return _dump({"ok": False, "error": "write_failed", "detail": detail})
+            finally:
+                secret_values.clear()
+                secrets.clear()
+            if result.get("ok"):
+                result["note"] = "凭证已写入本机 mcp.json（已脱敏，未在对话中回显）。下一步调用 verify 做连通性检查。"
+            return _dump(result)
+
+        label = (
+            str(arguments.get("credential_label", "") or "").strip()[:24]
+            or str(cred_tpl.get("credential_label") or "").strip()[:24]
+            or "凭证"
+        )
+        question = f"请输入「{inst['display_name']}」的 {label}"
+        if help_url:
+            question += f"（如何获取凭证：{help_url}）"
+        placeholder = str(cred_tpl.get("credential_placeholder") or "").strip() or (
+            "仅保存到本机 ~/.agenticx/mcp.json，不会出现在对话中"
+        )
+        decisions = _normalize_clarification_decisions(
+            [
+                {
+                    "id": "credential",
+                    "question": question,
+                    "input_type": "secret",
+                    "label": label,
+                    "placeholder": placeholder,
+                }
+            ],
+            allow_secret=True,
+        )
+        answer = await _await_clarification_answer(
+            f"为连接器「{inst['display_name']}」填写{label}",
+            decisions=decisions,
+            allow_free_text=False,
+            context={
+                "kind": "connector_credential",
+                "submit_label": "保存",
+                "skip_label": "稍后填写",
+            },
+            clarify_gate=clarify_gate,
+            emit_event=emit_event,
+            is_unattended=is_unattended,
+        )
+        if answer.get("__suspended__") or answer.get("__timeout__"):
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "no_answer",
+                    "hint": "用户暂未填写；告诉用户可稍后在「设置 → 连接器 → 我的连接」中更新凭证。",
+                }
+            )
+        secret_values = answer.get("secret_values") if isinstance(answer.get("secret_values"), dict) else {}
+        secret = str(secret_values.get("credential", "") or "").strip()
+        if not secret:
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "skipped",
+                    "hint": "用户选择稍后填写；提示可在「设置 → 连接器 → 我的连接」中点「更新凭证」。",
+                }
+            )
+        try:
+            doc = cs.read_mcp_doc()
+            new_doc, result = cs.set_connector_credential(doc, server_name=server_name, secret=secret)
+            if new_doc is not None:
+                cs.write_mcp_doc(new_doc)
+                _connector_reload_configs(session)
+                if server_name in connected:
+                    await _connector_disconnect(session, server_name)
+        except (cs.McpDocError, OSError) as exc:
+            return _dump({"ok": False, "error": "write_failed", "detail": cs.scrub_secret(str(exc), secret)})
+        finally:
+            secret_values.clear()
+        if result.get("ok"):
+            result["note"] = "凭证已写入本机 mcp.json（已脱敏，未在对话中回显）。下一步调用 verify 做连通性检查。"
+        return cs.scrub_secret(_dump(result), secret)
+
+    if action == "verify":
+        _connector_reload_configs(session)
+        secrets = _connector_server_secrets(doc, server_name)
+        hub = getattr(session, "mcp_hub", None)
+        if hub is None:
+            return _dump({"ok": False, "error": "mcp_hub_unavailable"})
+        if server_name in session.connected_servers:
+            await _connector_disconnect(session, server_name)
+        # Run the handshake in its own task: MCP clients surface HTTP 401/404 as an
+        # anyio cancel-scope CancelledError, which must not abort this tool call.
+        task = asyncio.ensure_future(_connector_connect(session, server_name))
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if task.cancelled():
+            ok, detail = False, "连接被中止（常见原因：401/403 凭证无效、URL path 错误或服务不可达）"
+        elif task.exception() is not None:
+            ok, detail = False, str(task.exception())
+        else:
+            ok, detail = task.result()
+        tool_count: Optional[int] = None
+        if ok:
+            try:
+                tool_count = sum(
+                    1
+                    for route in getattr(hub, "_tool_routing", {}).values()
+                    if getattr(getattr(getattr(route, "client", None), "server_config", None), "name", None)
+                    == server_name
+                )
+            except Exception:
+                tool_count = None
+        detail_text = str(detail or "")
+        for sec in secrets:
+            detail_text = detail_text.replace(sec, "***")
+        payload: Dict[str, Any] = {"ok": bool(ok), "server_name": server_name}
+        if ok:
+            payload["tool_count"] = tool_count
+        else:
+            payload["error"] = "connect_failed"
+            payload["detail"] = detail_text[:600]
+        return _dump(payload)
+
+    return _dump({"ok": False, "error": f"unknown action: {action}"})
+
+
 def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     name = str(arguments.get("name", "")).strip()
     if not name:
@@ -7089,10 +9024,32 @@ def _tool_knowledge_search(
         top_k = default_top_k
     top_k = max(1, min(20, top_k))
 
+    # SP32 tiered reading: default L0 compact view (query-relevant snippets)
+    # keeps chat context small; detail="full" restores the legacy full-text
+    # payload for callers that want everything in one shot.
+    detail_raw = str(arguments.get("detail") or "compact").strip().lower()
+    detail = detail_raw if detail_raw in {"compact", "full"} else "compact"
+
     avatar_id = None
     if session is not None:
         avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     brain_id = str(arguments.get("brain_id") or "").strip() or None
+
+    # KB disabled 短路（与 /api/kb/search 语义一致）。注意多 brain 架构：
+    # KBManager 委托的是 default_docs，它 disabled 不等于知识库整体禁用——
+    # 真机上有用户关掉默认库、只用自建 GLOBAL brain（SP31 验证库即此形态）。
+    # 判定依据因此是「会话可见的 docs brain 里一个 enabled 的都没有」。
+    if not cfg.enabled and not brain_id:
+        from agenticx.brain.mount import list_visible_brains
+        from agenticx.brain.types import BrainType
+
+        if not any(
+            b.enabled for b in list_visible_brains(avatar_id=avatar_id, brain_type=BrainType.DOCS)
+        ):
+            return json.dumps(
+                {"ok": True, "disabled": True, "hits": []},
+                ensure_ascii=False,
+            )
 
     try:
         payload = search_docs_brains(
@@ -7100,12 +9057,35 @@ def _tool_knowledge_search(
             top_k=top_k,
             avatar_id=avatar_id,
             brain_id=brain_id,
+            detail=detail,
         )
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"search failed: {exc}", "hits": []},
             ensure_ascii=False,
         )
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _tool_knowledge_read(
+    arguments: Dict[str, Any], session: Optional["StudioSession"] = None
+) -> str:
+    """L1 read: fetch the full text of one hit returned by a prior knowledge_search."""
+    hit_id = str(arguments.get("hit_id", "")).strip()
+    if not hit_id:
+        return json.dumps(
+            {"ok": False, "error": "hit_id is required", "hits": []},
+            ensure_ascii=False,
+        )
+    brain_id = str(arguments.get("brain_id") or "").strip() or None
+    try:
+        from agenticx.brain.search import read_kb_hit
+    except Exception as exc:
+        return json.dumps(
+            {"ok": False, "error": f"KB subsystem unavailable: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+    payload = read_kb_hit(hit_id, brain_id=brain_id)
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -7714,6 +9694,114 @@ def _agent_created_skill_root() -> Path:
     return Path.home() / ".agenticx" / "skills"
 
 
+def _skill_manage_bare_name(name: str) -> str:
+    """Return the final path segment (``archify`` from ``registry/archify``)."""
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    if not n:
+        return ""
+    return n.split("/")[-1]
+
+
+
+def _skill_manage_registry_qualified_name(name: str, source: str) -> str:
+    """Force SkillHub/registry creates under ``registry/<bare>``.
+
+    Third-party SkillHub skills must land at ``~/.agenticx/skills/registry/<slug>/``
+    so Settings third-party bucket picks them up. Agents often pass bare ``name``
+    with ``source=skillhub``; silently rewriting avoids top-level false installs.
+    """
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    src = str(source or "").strip().lower().replace("-", "_")
+    if not n or src not in {"skillhub", "registry"}:
+        return n
+    if n.startswith("registry/"):
+        return n
+    bare = n.split("/")[-1]
+    return f"registry/{bare}" if bare else n
+
+
+def _skill_manage_delete_candidates(root: Path, name: str) -> List[Path]:
+    """Resolve delete targets for short or ``registry/<name>`` skill names.
+
+    Always considers ``skills/{name}``. When ``name`` has no slash, also
+    considers ``skills/registry/{name}`` so SkillHub installs are found.
+    """
+    n = str(name or "").strip().replace("\\", "/").strip("/")
+    if not n:
+        return []
+    root = root.expanduser().resolve(strict=False)
+    ordered: List[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        try:
+            resolved = p.resolve(strict=False)
+            resolved.relative_to(root)
+        except ValueError:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        ordered.append(resolved)
+
+    _add(root / n)
+    if "/" not in n:
+        _add(root / "registry" / n)
+    elif n.startswith("registry/"):
+        # Explicit registry path already covered by root/n; keep bare fallback off.
+        pass
+    return ordered
+
+
+def _skill_manage_is_market_skill(skill_dir: Path, root: Path) -> bool:
+    """True when dir lives under skills/registry or provenance is skillhub/registry."""
+    try:
+        rel = skill_dir.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    parts = rel.parts
+    if parts and parts[0] == "registry":
+        return True
+    try:
+        from agenticx.skills.frontmatter import read_skill_provenance_source
+
+        source = (read_skill_provenance_source(skill_dir) or "").strip().lower().replace("-", "_")
+    except Exception:
+        source = ""
+    if source in {"skillhub", "registry"}:
+        return True
+    # Frontmatter source=skillhub also counts when sidecar is missing.
+    try:
+        md = skill_dir / "SKILL.md"
+        if md.is_file():
+            from agenticx.skills.frontmatter import (
+                _extract_frontmatter_block,
+                _frontmatter_get_scalar,
+            )
+
+            fm = _extract_frontmatter_block(md.read_text(encoding="utf-8")) or ""
+            fm_src = (_frontmatter_get_scalar(fm, "source") or "").strip().lower().replace("-", "_")
+            if fm_src in {"skillhub", "registry"}:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _invalidate_skills_list_after_manage() -> bool:
+    """Drop /api/skills list cache so Settings refresh sees deletes/installs."""
+    try:
+        from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+        invalidate_skills_list_cache()
+        return True
+    except Exception:
+        return False
+
+
+
+
 def _skill_url_allowlist() -> List[str]:
     defaults = [
         "raw.githubusercontent.com",
@@ -7762,6 +9850,27 @@ def _resolve_skill_content_path(path_arg: str, session: Optional[StudioSession])
     return resolved
 
 
+def _resolve_skill_dir_path(path_arg: str, session: Optional[StudioSession]) -> Path:
+    """Resolve a local skill directory (workspace or ~/.agenticx/)."""
+    agx_root = (Path.home() / ".agenticx").resolve()
+    try:
+        resolved = _resolve_workspace_path(path_arg, session, pick_existing=True)
+    except ValueError:
+        raw = _path_from_arg(path_arg)
+        if not raw.is_absolute():
+            raw = (Path.home() / raw).resolve(strict=False)
+        else:
+            raw = raw.resolve(strict=False)
+        if not _is_path_under_root(raw, agx_root) and not _desktop_unrestricted_fs_enabled():
+            raise ValueError(f"path must be under workspace or ~/.agenticx/: {raw}") from None
+        resolved = raw
+    if resolved.is_file() and resolved.name.upper() == "SKILL.MD":
+        resolved = resolved.parent
+    if not resolved.is_dir():
+        raise ValueError(f"directory not found: {resolved}")
+    return resolved
+
+
 def _fetch_skill_content_from_url(url: str) -> str:
     from urllib.parse import urlparse
     import urllib.request
@@ -7782,28 +9891,114 @@ def _fetch_skill_content_from_url(url: str) -> str:
     return data.decode("utf-8")
 
 
-def _resolve_skill_create_content(arguments: Dict[str, Any], session: Optional[StudioSession]) -> Tuple[Optional[str], Optional[str]]:
+_SKILL_MANAGE_CREATE_SOURCES = frozenset({"skillhub", "registry", "agent_created"})
+_skill_manage_last_write_path: Optional[str] = None
+
+
+def _mark_skill_manage_write(path: Path) -> None:
+    """Record a successful skill disk write for post-write crash messaging."""
+    global _skill_manage_last_write_path
+    _skill_manage_last_write_path = str(path)
+
+
+def _clear_skill_manage_write() -> None:
+    global _skill_manage_last_write_path
+    _skill_manage_last_write_path = None
+
+
+def _consume_skill_manage_write() -> Optional[str]:
+    global _skill_manage_last_write_path
+    path = _skill_manage_last_write_path
+    _skill_manage_last_write_path = None
+    return path
+
+
+def _normalize_skill_manage_source(raw: Any) -> Tuple[Optional[str], Optional[str]]:
+    """Validate optional create ``source``; empty means default agent_created."""
+    value = str(raw or "").strip().lower().replace("-", "_")
+    if not value:
+        return "agent_created", None
+    if value not in _SKILL_MANAGE_CREATE_SOURCES:
+        allowed = ", ".join(sorted(_SKILL_MANAGE_CREATE_SOURCES))
+        return None, f"ERROR: invalid source {raw!r}; allowed: {allowed}"
+    return value, None
+
+
+def _copy_skill_companion_files(src_dir: Path, dest_dir: Path) -> List[str]:
+    """Copy non-SKILL.md files (e.g. references/) from an import directory."""
+    copied: List[str] = []
+    if not src_dir.is_dir():
+        return copied
+    for path in sorted(src_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(src_dir)
+        if str(rel).replace("\\", "/").upper() == "SKILL.MD":
+            continue
+        # Skip hidden provenance/version internals from source trees.
+        parts = rel.parts
+        if any(p.startswith(".") for p in parts):
+            continue
+        target = dest_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(str(rel).replace("\\", "/"))
+    return copied
+
+
+def _resolve_skill_create_content(
+    arguments: Dict[str, Any], session: Optional[StudioSession]
+) -> Tuple[Optional[str], Optional[str], Optional[Path]]:
+    """Resolve create content.
+
+    Returns:
+        (content, error, from_dir_path). Exactly one of content/error is set.
+        from_dir_path is set when importing a whole skill directory.
+    """
     from_path = str(arguments.get("from_path", "") or "").strip()
     from_url = str(arguments.get("from_url", "") or "").strip()
+    from_dir = str(arguments.get("from_dir", "") or "").strip()
     content = str(arguments.get("content", "") or "")
+    provided = [bool(from_path), bool(from_url), bool(from_dir), bool(content.strip())]
+    if sum(1 for x in provided if x) > 1 and (from_path or from_url or from_dir):
+        # content may accompany from_* only when empty; reject overlapping sources.
+        sources = [n for n, v in (("from_path", from_path), ("from_url", from_url), ("from_dir", from_dir), ("content", content.strip())) if v]
+        if len(sources) > 1:
+            return None, f"ERROR: {'/'.join(sources)} are mutually exclusive", None
     if from_path and from_url:
-        return None, "ERROR: from_path and from_url are mutually exclusive"
+        return None, "ERROR: from_path and from_url are mutually exclusive", None
+    if from_dir and (from_path or from_url or content.strip()):
+        return None, "ERROR: from_dir is mutually exclusive with content/from_path/from_url", None
+    if from_dir:
+        try:
+            dir_path = _resolve_skill_dir_path(from_dir, session)
+        except ValueError as exc:
+            return None, f"ERROR: {exc}", None
+        except OSError as exc:
+            return None, f"ERROR: read failed: {exc}", None
+        skill_md = dir_path / "SKILL.md"
+        if not skill_md.is_file():
+            return None, f"ERROR: from_dir missing SKILL.md: {from_dir}", None
+        try:
+            return skill_md.read_text(encoding="utf-8"), None, dir_path
+        except OSError as exc:
+            return None, f"ERROR: read failed: {exc}", None
     if from_path:
         try:
             path = _resolve_skill_content_path(from_path, session)
-            return path.read_text(encoding="utf-8"), None
+            return path.read_text(encoding="utf-8"), None, None
         except ValueError as exc:
-            return None, f"ERROR: {exc}"
+            return None, f"ERROR: {exc}", None
         except OSError as exc:
-            return None, f"ERROR: read failed: {exc}"
+            return None, f"ERROR: read failed: {exc}", None
     if from_url:
         try:
-            return _fetch_skill_content_from_url(from_url), None
+            return _fetch_skill_content_from_url(from_url), None, None
         except Exception as exc:
-            return None, f"ERROR: from_url fetch failed: {exc}"
+            return None, f"ERROR: from_url fetch failed: {exc}", None
     if not content.strip():
-        return None, "ERROR: content is required for create (or provide from_path/from_url)"
-    return content, None
+        return None, "ERROR: content is required for create (or provide from_path/from_url/from_dir)", None
+    return content, None, None
 
 
 def _skill_manage_error(code: str, message: str) -> str:
@@ -8058,6 +10253,36 @@ def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSess
     return json.dumps({"mode": "search", "sessions": sessions_out}, ensure_ascii=False)
 
 
+def _tool_plugin_usage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    from agenticx.runtime.plugin_usage import query_plugin_usage
+
+    live_id = _studio_session_id(session)
+    live_messages = None
+    if session is not None:
+        history = getattr(session, "chat_history", None)
+        if isinstance(history, list):
+            live_messages = history
+    try:
+        limit = int(arguments.get("limit") or 8)
+    except (TypeError, ValueError):
+        limit = 8
+    payload = query_plugin_usage(
+        plugin=str(arguments.get("plugin") or "all"),
+        scope=str(arguments.get("scope") or "all"),
+        purpose=str(arguments.get("purpose") or "all"),
+        session_id=str(arguments.get("session_id") or ""),
+        model=str(arguments.get("model") or ""),
+        provider=str(arguments.get("provider") or ""),
+        from_date=str(arguments.get("from_date") or ""),
+        to_date=str(arguments.get("to_date") or ""),
+        range_key=str(arguments.get("range") or ""),
+        limit=limit,
+        live_messages=live_messages,
+        live_session_id=live_id,
+    )
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _should_queue_skill_write() -> bool:
     from agenticx.learning.config import get_learning_config
 
@@ -8141,8 +10366,10 @@ def _skill_manage_success_payload(
         "validation_warnings": validation_warnings,
     }
     if extra:
-        payload.update(extra)
-    return json.dumps(payload, ensure_ascii=False)
+        # Strip internal keys (e.g. _session: StudioSession) — never JSON-serialize them.
+        safe_extra = {k: v for k, v in extra.items() if not str(k).startswith("_")}
+        payload.update(safe_extra)
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _write_skill_md_with_checks(
@@ -8154,6 +10381,7 @@ def _write_skill_md_with_checks(
     on_rollback: Optional[Any] = None,
     extra: Optional[Dict[str, Any]] = None,
     skip_queue: bool = False,
+    source: str = "agent_created",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Normalize, write, guard-scan, and verify discoverability.
 
@@ -8171,10 +10399,22 @@ def _write_skill_md_with_checks(
     except SkillFrontmatterError as exc:
         return None, f"ERROR: {exc}"
 
+    create_source = str(source or "agent_created").strip().lower().replace("-", "_") or "agent_created"
     if action == "create":
-        from agenticx.skills.frontmatter import ensure_skill_source, write_skill_provenance
+        from agenticx.skills.frontmatter import (
+            _extract_frontmatter_block,
+            _frontmatter_get_scalar,
+            ensure_skill_source,
+        )
 
-        normalized = ensure_skill_source(normalized, "agent_created")
+        fm_before = _extract_frontmatter_block(normalized) or ""
+        old_source = _frontmatter_get_scalar(fm_before, "source")
+        normalized = ensure_skill_source(normalized, create_source)
+        if old_source != create_source:
+            if old_source:
+                frontmatter_fixed.append(f"source: {old_source} → {create_source}")
+            else:
+                frontmatter_fixed.append(f"injected source: {create_source}")
 
     from agenticx.learning.config import get_learning_config
     from agenticx.learning.skill_quality_gate import check_size_limits
@@ -8210,34 +10450,39 @@ def _write_skill_md_with_checks(
 
     validation_warnings: List[str] = []
     skill_md = skill_dir / "SKILL.md"
+    wrote = False
+
+    def _do_rollback() -> None:
+        _clear_skill_manage_write()
+        if on_rollback:
+            on_rollback()
+        else:
+            skill_md.unlink(missing_ok=True)
+
     try:
         skill_md.write_text(normalized, encoding="utf-8")
+        wrote = True
+        _mark_skill_manage_write(skill_md)
         if action == "create":
             from agenticx.skills.frontmatter import write_skill_provenance
 
-            write_skill_provenance(skill_dir, "agent_created", extra={"name": canonical_name})
+            write_skill_provenance(skill_dir, create_source, extra={"name": canonical_name})
         result = scan_skill(skill_dir, source="agent-created")
         ok, reason = should_allow(result, "agent-created")
         if not ok:
-            if on_rollback:
-                on_rollback()
-            else:
-                skill_md.unlink(missing_ok=True)
+            _do_rollback()
             from agenticx.skills.guard import format_guard_rejection_message
 
             return None, format_guard_rejection_message(result, action=action)
 
         discoverable, skill_name, errors = verify_skill_discoverable(skill_dir)
         if not discoverable:
-            if on_rollback:
-                on_rollback()
-            else:
-                skill_md.unlink(missing_ok=True)
+            _do_rollback()
             detail = "; ".join(errors) if errors else "unknown parse failure"
             return None, f"ERROR: skill not discoverable after write ({detail})"
 
-        return (
-            _skill_manage_success_payload(
+        try:
+            success_json = _skill_manage_success_payload(
                 action=action,
                 skill_md=skill_md,
                 discoverable=discoverable,
@@ -8245,14 +10490,39 @@ def _write_skill_md_with_checks(
                 frontmatter_fixed=frontmatter_fixed,
                 validation_warnings=validation_warnings,
                 extra=extra,
-            ),
-            None,
-        )
+            )
+        except Exception as ser_exc:
+            # Write already succeeded; never report a bare crash that hides the path.
+            return (
+                json.dumps(
+                    {
+                        "ok": True,
+                        "action": action,
+                        "path": str(skill_md),
+                        "discoverable": discoverable,
+                        "skill_name": skill_name,
+                        "frontmatter_fixed": frontmatter_fixed,
+                        "validation_warnings": validation_warnings
+                        + [f"response_serialization_fallback: {ser_exc}"],
+                        "note": f"File was written: {skill_md}",
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                None,
+            )
+        _clear_skill_manage_write()
+        return success_json, None
     except OSError as exc:
-        if on_rollback:
-            on_rollback()
-        else:
-            skill_md.unlink(missing_ok=True)
+        _do_rollback()
+        return None, f"ERROR: {exc}"
+    except Exception as exc:
+        if wrote:
+            return None, (
+                f"ERROR: skill_manage failed after successful write: {exc}. "
+                f"File was written: {skill_md}"
+            )
+        _clear_skill_manage_write()
         return None, f"ERROR: {exc}"
 
 
@@ -8444,12 +10714,29 @@ async def _tool_skill_manage(
         return "ERROR: skill path outside skills root"
 
     if action == "create":
-        content, content_err = _resolve_skill_create_content(arguments, session)
+        content, content_err, from_dir_path = _resolve_skill_create_content(arguments, session)
         if content_err:
             return content_err
         assert content is not None
+        create_source, source_err = _normalize_skill_manage_source(arguments.get("source"))
+        if source_err:
+            return source_err
+        assert create_source is not None
+        # SkillHub / registry market skills must land under skills/registry/<slug>/.
+        qualified = _skill_manage_registry_qualified_name(name, create_source)
+        if qualified != name:
+            name = qualified
+            skill_dir = (root / name).resolve(strict=False)
+            try:
+                skill_dir.relative_to(root)
+            except ValueError:
+                return "ERROR: skill path outside skills root"
         if skill_dir.exists():
-            return "ERROR: skill already exists"
+            return (
+                "ERROR: skill already exists. "
+                "Use action=view to inspect it, action=patch to modify it, "
+                "or action=delete then create again."
+            )
         from agenticx.skills.frontmatter import SkillFrontmatterError, normalize_skill_md
 
         try:
@@ -8473,17 +10760,33 @@ async def _tool_skill_manage(
             content=content,
             canonical_name=name,
             on_rollback=lambda: shutil.rmtree(skill_dir, ignore_errors=True),
-            extra={"_session": session},
+            extra={"_session": session, "source": create_source},
             skip_queue=_interactive,
+            source=create_source,
         )
         if err:
             if skill_dir.exists() and not (skill_dir / "SKILL.md").is_file():
                 shutil.rmtree(skill_dir, ignore_errors=True)
             return err
+        if from_dir_path is not None:
+            try:
+                copied = _copy_skill_companion_files(from_dir_path, skill_dir)
+                if success and copied:
+                    try:
+                        payload = json.loads(success)
+                        payload["copied_files"] = copied
+                        success = json.dumps(payload, ensure_ascii=False, default=str)
+                    except Exception:
+                        pass
+            except OSError as exc:
+                return (
+                    f"ERROR: skill_manage failed after successful write: {exc}. "
+                    f"File was written: {skill_dir / 'SKILL.md'}"
+                )
         try:
             from agenticx.skills.versioning import append_changelog
 
-            append_changelog(skill_dir, action="create", summary="agent-created skill")
+            append_changelog(skill_dir, action="create", summary=f"{create_source} skill")
         except Exception:
             pass
         return success or "ERROR: unknown create failure"
@@ -8612,7 +10915,11 @@ async def _tool_skill_manage(
             if str(decoded.get("name", "")) != name:
                 return _skill_manage_error("validation", "patch token skill mismatch")
             if str(decoded.get("old_hash", "")) != old_hash:
-                return _skill_manage_error("validation", "patch token outdated: file changed since preview")
+                return _skill_manage_error(
+                    "validation",
+                    "patch token outdated: file changed since preview. "
+                    "重新 preview 获取新 token（do not reuse the old patch_token）。",
+                )
             if str(decoded.get("old_string_sha256", "")) != hashlib.sha256(old_s.encode("utf-8")).hexdigest():
                 return _skill_manage_error("validation", "patch token old_string mismatch")
             if str(decoded.get("new_string_sha256", "")) != hashlib.sha256(new_s.encode("utf-8")).hexdigest():
@@ -8686,27 +10993,119 @@ async def _tool_skill_manage(
         return success or _skill_manage_error("validation", "unknown patch failure")
 
     if action == "delete":
-        if not skill_dir.exists():
-            return json.dumps({"ok": True, "action": "delete", "removed": False}, ensure_ascii=False)
+        candidates = _skill_manage_delete_candidates(root, name)
+        existing = [p for p in candidates if p.exists()]
+        if not existing:
+            # Nothing to delete at top-level or registry — honest empty result.
+            return json.dumps(
+                {
+                    "ok": True,
+                    "action": "delete",
+                    "name": name,
+                    "removed": False,
+                    "removed_paths": [],
+                    "remaining": [],
+                },
+                ensure_ascii=False,
+            )
+        path_preview = ", ".join(f"`{p}`" for p in existing)
         if _interactive:
             approved = await _confirm(
-                f"skill_manage 请求**删除**技能「{name}」\n\n路径：`~/.agenticx/skills/{name}/`\n\n此操作不可撤销（除非系统有版本快照），确认删除？",
+                f"skill_manage 请求**删除**技能「{name}」\n\n路径：{path_preview}\n\n此操作不可撤销（除非系统有版本快照），确认删除？",
                 confirm_gate=confirm_gate,  # type: ignore[arg-type]
                 context={"tool": "skill_manage", "action": "delete", "skill": name, "risk": "destructive"},
                 emit_event=emit_event,
             )
             if not approved:
                 return "CANCELLED: 用户拒绝了 skill_manage delete 操作"
-        try:
-            from agenticx.skills.versioning import append_changelog
-            append_changelog(skill_dir, action="delete", summary="skill deleted by agent")
-        except Exception:
-            pass
-        try:
-            shutil.rmtree(skill_dir)
-        except OSError as exc:
-            return f"ERROR: delete failed: {exc}"
-        return json.dumps({"ok": True, "action": "delete", "removed": True}, ensure_ascii=False)
+
+        removed_paths: List[str] = []
+        errors: List[str] = []
+        used_market = False
+        bare = _skill_manage_bare_name(name)
+        market_targets_done: set[str] = set()
+
+        for target in existing:
+            is_market = _skill_manage_is_market_skill(target, root)
+            if is_market:
+                market_key = str((root / "registry" / (bare or target.name)).resolve(strict=False))
+                if market_key in market_targets_done:
+                    continue
+                used_market = True
+                try:
+                    from agenticx.extensions.skillhub_adapter import uninstall_market_skill
+
+                    market = uninstall_market_skill(bare or name, skills_root=root)
+                    market_targets_done.add(market_key)
+                    for rp in market.get("removed") or []:
+                        if rp not in removed_paths:
+                            removed_paths.append(str(rp))
+                    if not market.get("ok"):
+                        for rem in market.get("remaining") or []:
+                            errors.append(f"remaining: {rem}")
+                        if market.get("error"):
+                            errors.append(str(market["error"]))
+                    continue
+                except Exception as exc:
+                    errors.append(f"uninstall_market_skill failed: {exc}")
+                    # fall through to local rmtree
+
+            try:
+                from agenticx.skills.versioning import append_changelog
+
+                append_changelog(target, action="delete", summary="skill deleted by agent")
+            except Exception:
+                pass
+            try:
+                if target.exists():
+                    shutil.rmtree(target)
+                    removed_paths.append(str(target))
+            except OSError as exc:
+                errors.append(f"delete failed for {target}: {exc}")
+                continue
+
+            # Clean version snapshots for non-market paths too.
+            try:
+                rel = target.relative_to(root)
+                ver_root = (root / ".versions").resolve(strict=False)
+                ver_dir = (root / ".versions" / rel).resolve(strict=False)
+                ver_dir.relative_to(ver_root)
+                if ver_dir.exists():
+                    shutil.rmtree(ver_dir, ignore_errors=True)
+                    if str(ver_dir) not in removed_paths:
+                        removed_paths.append(str(ver_dir))
+            except Exception:
+                pass
+
+        # Re-check all candidates (and registry/{bare}) so ghost skills cannot report success.
+        remaining_paths = [str(p) for p in _skill_manage_delete_candidates(root, name) if p.exists()]
+        if bare and "/" not in str(name):
+            reg = (root / "registry" / bare).resolve(strict=False)
+            if reg.exists() and str(reg) not in remaining_paths:
+                remaining_paths.append(str(reg))
+
+        refreshed = _invalidate_skills_list_after_manage()
+        ok = not remaining_paths and not errors
+        payload: Dict[str, Any] = {
+            "ok": ok,
+            "action": "delete",
+            "name": name,
+            "bare_name": bare,
+            # Bool for back-compat with older parsers / smoke tests.
+            "removed": bool(removed_paths) and ok,
+            "removed_paths": removed_paths,
+            "remaining": remaining_paths,
+            "market_uninstall": used_market,
+            "skills_cache_invalidated": refreshed,
+        }
+        if errors:
+            payload["errors"] = errors
+            payload["error"] = "; ".join(errors)
+        elif remaining_paths:
+            payload["error"] = (
+                "skill still present after delete: " + ", ".join(remaining_paths)
+            )
+        return json.dumps(payload, ensure_ascii=False)
 
     if action == "history":
         limit = int(arguments.get("limit", 50) or 50)
@@ -8789,6 +11188,51 @@ async def _tool_skill_manage(
             pass
         return success or _skill_manage_error("validation", "unknown rollback failure")
 
+    if action == "view":
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file() and "/" not in name:
+            alt_dir = (root / "registry" / name).resolve(strict=False)
+            try:
+                alt_dir.relative_to(root)
+            except ValueError:
+                alt_dir = skill_dir
+            alt_md = alt_dir / "SKILL.md"
+            if alt_md.is_file():
+                skill_dir = alt_dir
+                skill_md = alt_md
+                name = f"registry/{name}"
+        if not skill_md.is_file():
+            return _skill_manage_error("validation", "SKILL.md not found")
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _skill_manage_error("validation", f"read failed: {exc}")
+        listing: List[str] = []
+        try:
+            for path in sorted(skill_dir.rglob("*")):
+                if path.is_file():
+                    listing.append(str(path.relative_to(skill_dir)).replace("\\", "/"))
+        except OSError:
+            listing = ["SKILL.md"]
+        resolved_source = ""
+        try:
+            from agenticx.skills.frontmatter import _extract_frontmatter_block
+            from agenticx.tools.skill_bundle import resolve_skill_source
+
+            resolved_source = resolve_skill_source(skill_dir, _extract_frontmatter_block(content))
+        except Exception:
+            resolved_source = ""
+        payload = {
+            "ok": True,
+            "action": "view",
+            "name": name,
+            "path": str(skill_md),
+            "source": resolved_source,
+            "listing": listing,
+            "content": content,
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
     return "ERROR: unknown action"
 
 
@@ -8803,6 +11247,7 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
     if not repo:
         return "ERROR: repo is required (owner/name)"
     branch = str(arguments.get("branch", "main") or "main").strip() or "main"
+    skill = str(arguments.get("skill", "") or "").strip()
     path_glob = str(arguments.get("path_glob", "skills/**/SKILL.md") or "skills/**/SKILL.md").strip()
     exclude_raw = arguments.get("exclude")
     exclude: Optional[List[str]] = None
@@ -8810,17 +11255,219 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
         exclude = [str(x) for x in exclude_raw if str(x).strip()]
     dry_run = bool(arguments.get("dry_run", False))
     overwrite = bool(arguments.get("overwrite", False))
-    from agenticx.skills.import_repo import import_skills_from_repo, result_to_json
-
-    result = import_skills_from_repo(
-        repo=repo,
-        branch=branch,
-        path_glob=path_glob,
-        exclude=exclude,
-        dry_run=dry_run,
-        overwrite=overwrite,
+    acknowledge_high_risk = bool(arguments.get("acknowledge_high_risk", False))
+    from agenticx.skills.import_repo import (
+        import_skills_from_repo,
+        install_skill_full_from_repo,
+        result_to_json,
     )
+
+    if skill:
+        # Full-directory install of a single named skill (SKILL.md + references/
+        # + scripts/ + assets/) via the repo tarball.
+        result = install_skill_full_from_repo(
+            repo=repo,
+            skill=skill,
+            branch=branch,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            acknowledge_high_risk=acknowledge_high_risk,
+        )
+    else:
+        result = import_skills_from_repo(
+            repo=repo,
+            branch=branch,
+            path_glob=path_glob,
+            exclude=exclude,
+            dry_run=dry_run,
+            overwrite=overwrite,
+        )
+    if result.installed:
+        _refresh_skill_catalog_after_install()
     return result_to_json(result)
+
+
+def _refresh_skill_catalog_after_install() -> None:
+    try:
+        from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+        from agenticx.tools.skill_bundle import SkillBundleLoader
+
+        invalidate_skills_list_cache()
+        SkillBundleLoader().refresh()
+    except Exception as exc:  # noqa: BLE001 - install already succeeded on disk
+        logging.getLogger(__name__).warning("skill catalog refresh after install failed: %s", exc)
+
+
+_MARKET_HIGH_RISK_REFUSALS_KEY = "__market_install_high_risk_refusals__"
+_HIGH_RISK_ASK_USER_NEXT = (
+    "安全扫描判定高风险，已拒绝安装。把命中原因告诉用户，询问是否仍要安装；"
+    "用户明确回复同意后，再以 acknowledge_high_risk=true 调用一次。不要绕过或自行决定。"
+)
+
+
+def _user_turn_count(session: Optional[StudioSession]) -> int:
+    history = getattr(session, "agent_messages", None) or []
+    return sum(1 for m in history if isinstance(m, dict) and m.get("role") == "user")
+
+
+def _market_refusals(session: Optional[StudioSession]) -> Dict[str, int]:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        return {}
+    refusals = scratchpad.setdefault(_MARKET_HIGH_RISK_REFUSALS_KEY, {})
+    return refusals if isinstance(refusals, dict) else {}
+
+
+def _note_high_risk_refusal(session: Optional[StudioSession], key: str) -> None:
+    _market_refusals(session)[key] = _user_turn_count(session)
+
+
+def _high_risk_ack_allowed(session: Optional[StudioSession], key: str) -> bool:
+    """Honor acknowledge_high_risk only after a refusal followed by a new user turn."""
+    refused_at = _market_refusals(session).get(key)
+    return isinstance(refused_at, int) and _user_turn_count(session) > refused_at
+
+
+def _tool_skillhub_install(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    ref = str(arguments.get("ref") or arguments.get("slug") or "").strip()
+    if not ref:
+        return "ERROR: ref is required, e.g. '@indiv-ebandao/tiangong-skill'"
+    from agenticx.extensions.skillhub_adapter import install_skillhub_skill, parse_skillhub_ref
+
+    risk_key = "skillhub:" + parse_skillhub_ref(ref)[1]
+    ack = bool(arguments.get("acknowledge_high_risk")) and _high_risk_ack_allowed(session, risk_key)
+    result = install_skillhub_skill(ref, acknowledge_high_risk=ack)
+    if result.get("ok"):
+        _refresh_skill_catalog_after_install()
+        payload = {
+            "ok": True,
+            "name": result.get("name"),
+            "canonical": result.get("canonical"),
+            "installed_path": result.get("installed_path"),
+            "scan_verdict": (result.get("scan_summary") or {}).get("overall"),
+            "next": "安装完成，技能已在 设置 → Skills 可见；直接向用户汇报，无需再验证或重装。",
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    payload = {
+        "ok": False,
+        "ref": ref,
+        "error": result.get("error"),
+        "error_code": result.get("error_code"),
+        "namespace": result.get("namespace"),
+        "next": (
+            "不要改用 bash_exec / curl / 探测本机端口重试。"
+            "若是命名空间或 slug 不对，可先 skillhub_search 确认 canonical 后再调用一次；"
+            "否则直接把 error 原样告诉用户。"
+        ),
+    }
+    if result.get("error_code") == "high_risk_confirm_required":
+        _note_high_risk_refusal(session, risk_key)
+        payload["scan_summary"] = result.get("scan_summary")
+        payload["next"] = _HIGH_RISK_ASK_USER_NEXT
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    name = str(arguments.get("name") or "").strip()
+    if not name:
+        return "ERROR: name is required, e.g. 'archify'"
+    from agenticx.extensions.registry_hub import RegistryHub, split_clawhub_ref
+    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+
+    _, bare_name = split_clawhub_ref(name)
+    hub = RegistryHub.from_config()
+    source = str(arguments.get("source") or "").strip()
+    if not source:
+        source = next(
+            (
+                str(r.get("name") or "")
+                for r in getattr(hub, "_registries", [])
+                if str(r.get("type", "")).lower() == "clawhub" and str(r.get("name") or "").strip()
+            ),
+            "",
+        )
+    if not source:
+        return json.dumps(
+            {"ok": False, "name": name, "error": "no ClawHub registry configured"},
+            ensure_ascii=False,
+        )
+    content, err = hub.fetch_skill_markdown(source, name)
+    if err or content is None:
+        return json.dumps(
+            {
+                "ok": False,
+                "name": name,
+                "source": source,
+                "error": err or "fetch failed",
+                "next": (
+                    "不要改用 bash_exec / curl 重试。若 error 含 409 / AMBIGUOUS，"
+                    "改用 '@owner/slug' 形式再调用一次；否则把 error 原样告诉用户。"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    scan = scan_skill_markdown_text(content)
+    risk_key = "clawhub:" + bare_name
+    ack = bool(arguments.get("acknowledge_high_risk")) and _high_risk_ack_allowed(session, risk_key)
+    if scan.verdict == "dangerous" and not ack:
+        _note_high_risk_refusal(session, risk_key)
+        return json.dumps(
+            {
+                "ok": False,
+                "name": name,
+                "source": source,
+                "error_code": "high_risk_confirm_required",
+                "scan": scan_result_to_payload(scan, bare_name),
+                "next": _HIGH_RISK_ASK_USER_NEXT,
+            },
+            ensure_ascii=False,
+        )
+    md_path = hub.write_registry_skill(bare_name, content)
+    _refresh_skill_catalog_after_install()
+    return json.dumps(
+        {
+            "ok": True,
+            "name": name,
+            "source": source,
+            "installed_path": str(md_path),
+            "scan_verdict": scan.verdict,
+            "next": "安装完成，技能已在 设置 → Skills 可见；直接向用户汇报，无需再验证或重装。",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_skillhub_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    _ = session
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return "ERROR: query is required"
+    try:
+        limit = int(arguments.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 30))
+    from agenticx.extensions.skillhub_adapter import search_skillhub_market
+
+    result = search_skillhub_market(query)
+    items = []
+    for item in (result.get("items") or [])[:limit]:
+        desc = str(item.get("description") or "").strip().splitlines()
+        items.append(
+            {
+                "slug": item.get("slug"),
+                "name": item.get("name"),
+                "canonical": item.get("canonical"),
+                "downloads": item.get("downloads"),
+                "description": (desc[0] if desc else "")[:160],
+            }
+        )
+    payload: Dict[str, Any] = {"ok": bool(result.get("ok")), "count": len(items), "items": items}
+    if result.get("error"):
+        payload["error"] = result.get("error")
+    if result.get("hint"):
+        payload["hint"] = result.get("hint")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
@@ -9265,6 +11912,12 @@ for _td in COMPUTER_USE_TOOLS:
     _req = _fn.get("parameters", {}).get("required", [])
     if _name and _req:
         _TOOL_REQUIRED_PARAMS[_name] = _req
+for _td in NEAR_BROWSER_TOOLS:
+    _fn = _td.get("function", {})
+    _name = _fn.get("name", "")
+    _req = _fn.get("parameters", {}).get("required", [])
+    if _name and _req:
+        _TOOL_REQUIRED_PARAMS[_name] = _req
 
 
 def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -9655,7 +12308,8 @@ async def dispatch_tool_async(
                 "以及 content / from_path / from_url（create）或 old_string / new_string（patch）"
             ),
             "skill_import_repo": (
-                "repo（owner/name）, 可选 branch/path_glob/exclude/dry_run/overwrite"
+                "repo（owner/name）, skill（指定时安装该技能的完整目录 SKILL.md+references+scripts+assets）, "
+                "可选 branch/path_glob/exclude/dry_run/overwrite"
             ),
             "schedule_task": (
                 "name（任务名）、frequency / time / date 至少一项、instruction（具体指令）、workspace（执行目录）"
@@ -9745,6 +12399,22 @@ async def dispatch_tool_async(
             return await _tool_desktop_mouse_click(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "desktop_keyboard_type":
             return await _tool_desktop_keyboard_type(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "near_browser_open":
+            return await _tool_near_browser_open(arguments, session)
+        if name == "near_browser_snapshot":
+            return await _tool_near_browser_snapshot(arguments, session)
+        if name == "near_browser_click":
+            return await _tool_near_browser_click(arguments, session)
+        if name == "near_browser_type":
+            return await _tool_near_browser_type(
+                arguments, session, confirm_gate=gate, emit_event=event_callback
+            )
+        if name == "near_browser_press_key":
+            return await _tool_near_browser_press_key(arguments, session)
+        if name == "near_browser_extract_text":
+            return await _tool_near_browser_extract_text(arguments, session)
+        if name == "near_browser_screenshot":
+            return await _tool_near_browser_screenshot(arguments, session)
         if name == "mcp_call":
             return await _tool_mcp_call_async(arguments, session)
         if name == "tool_search":
@@ -9761,6 +12431,12 @@ async def dispatch_tool_async(
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":
             return _tool_skill_import_repo(arguments, session)
+        if name == "skillhub_install":
+            return await asyncio.to_thread(_tool_skillhub_install, arguments, session)
+        if name == "skillhub_search":
+            return await asyncio.to_thread(_tool_skillhub_search, arguments, session)
+        if name == "clawhub_install":
+            return await asyncio.to_thread(_tool_clawhub_install, arguments, session)
         if name == "plan_create":
             return create_plan_artifact(session, arguments)
         if name == "plan_update":
@@ -9806,6 +12482,8 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(dispatch_ops_tool, name, arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
+        if name == "knowledge_read":
+            return await asyncio.to_thread(_tool_knowledge_read, arguments, session)
         if name == "knowledge_synthesize":
             return await asyncio.to_thread(_tool_knowledge_synthesize, arguments, session)
         if name == "web_search":
@@ -9838,6 +12516,8 @@ async def dispatch_tool_async(
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":
             return _tool_session_search(arguments, session)
+        if name == "plugin_usage":
+            return _tool_plugin_usage(arguments, session)
         if name == "code_search":
             return await asyncio.to_thread(_tool_code_search, arguments, session)
         if name == "code_index_create":
@@ -9850,6 +12530,14 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=gate.is_service_mode())
+        if name == "connector_manage":
+            return await _tool_connector_manage(
+                arguments,
+                session,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
         if name == "request_clarification":
             prompt = str(arguments.get("prompt", "") or "").strip()
             if not prompt:
@@ -9868,12 +12556,35 @@ async def dispatch_tool_async(
             ctx = arguments.get("context")
             if not isinstance(ctx, dict):
                 ctx = None
+            for _label_key in ("submit_label", "skip_label"):
+                _label = str(arguments.get(_label_key, "") or "").strip()[:16]
+                if _label:
+                    ctx = dict(ctx or {})
+                    ctx[_label_key] = _label
             return await _request_clarification(
                 prompt,
                 options=options,
                 decisions=decisions,
                 allow_free_text=allow_free_text,
                 context=ctx,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
+        if name == "present_choices":
+            title = str(arguments.get("title", "") or "").strip()
+            if not title:
+                return (
+                    "ERROR: present_choices requires a non-empty `title`. "
+                    "请立即重新调用 present_choices 并填写 title / panel_type / options。"
+                )
+            panel_type = str(arguments.get("panel_type", "") or "").strip()
+            raw_opts = arguments.get("options")
+            return await _present_choices(
+                title=title,
+                panel_type=panel_type,
+                options=raw_opts,
+                session=session,
                 clarify_gate=clarify_gate,
                 emit_event=event_callback,
                 is_unattended=is_unattended,
@@ -9898,6 +12609,7 @@ async def dispatch_tool_async(
                 clarify_gate=clarify_gate,
                 emit_event=event_callback,
                 is_unattended=is_unattended,
+                session_id=_studio_session_id(session),
             )
         if name == "list_files":
             return _tool_list_files(arguments, session)
@@ -9935,6 +12647,13 @@ async def dispatch_tool_async(
         if name.startswith("lsp_"):
             return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:
+        if name == "skill_manage":
+            written = _consume_skill_manage_write()
+            if written:
+                return (
+                    f"ERROR: {name} crashed after successful write: {exc}. "
+                    f"File was written: {written}"
+                )
         return f"ERROR: {name} crashed: {exc}"
     if name.startswith("confirm_"):
         return (

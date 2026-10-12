@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "enterprise-root",
+  "generation": "0255cb5b6d8447a393d2afd34fff71c0",
+  "mapping_revision": 1,
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:565e4d9706cdfe93dd766870ccd9bf1e78f94ce3c1019a13a4e876a2c93b23a8",
+  "summary_path": "enterprise/conclusions/enterprise_root_conclusion.md",
+  "summary_sha256": "sha256:1aa64f5a5b280a7298bc3f09f4b96b5dd4902c95c7003c35f9fb4a46fb8e3535",
+  "updated_at": "2026-09-17T23:54:08.280447+00:00"
+}

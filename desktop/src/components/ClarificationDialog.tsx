@@ -31,7 +31,10 @@ export function ClarificationDialog({
 }: Props) {
   const { t } = useTranslation("chat");
   const opts = Array.isArray(options) ? options.filter((o) => typeof o === "string" && o.trim()) : [];
-  const canFreeText = allowFreeText !== false;
+  const openEnded = opts.length === 0;
+  // A prompt-only clarification is an open-ended question. Keep it answerable
+  // even if an old or malformed payload incorrectly disables free text.
+  const canFreeText = allowFreeText !== false || openEnded;
   const [selected, setSelected] = useState<string | null>(null);
   const [useCustom, setUseCustom] = useState(false);
   const [text, setText] = useState("");
@@ -39,18 +42,19 @@ export function ClarificationDialog({
   useEffect(() => {
     if (open) {
       setSelected(opts.length > 0 ? null : null);
-      setUseCustom(false);
+      setUseCustom(openEnded);
       setText("");
     }
-  }, [open, prompt, opts.length]);
+  }, [open, prompt, openEnded, opts.length]);
 
-  const canSubmit = canFreeText && useCustom ? text.trim().length > 0 : selected !== null;
+  const textReplyActive = openEnded || useCustom;
+  const canSubmit = canFreeText && textReplyActive ? text.trim().length > 0 : selected !== null;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     onSubmit({
-      answerText: useCustom ? text.trim() : "",
-      selectedOptions: selected && !useCustom ? [selected] : [],
+      answerText: textReplyActive ? text.trim() : "",
+      selectedOptions: selected && !textReplyActive ? [selected] : [],
     });
   };
 
@@ -100,23 +104,30 @@ export function ClarificationDialog({
 
       {canFreeText ? (
         <div className="mb-2 rounded-md border border-border bg-surface-card p-3 text-xs text-text-muted">
-          <label className="mb-1.5 flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useCustom}
-              onChange={(e) => {
-                setUseCustom(e.target.checked);
-                if (e.target.checked) setSelected(null);
-              }}
-              className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
-            />
-            {t("clarify.customReply")}
-          </label>
-          {useCustom ? (
+{openEnded ? (
+            <label htmlFor="clarification-open-answer" className="mb-1.5 block">
+              {t("clarify.openAnswer")}
+            </label>
+          ) : (
+            <label className="mb-1.5 flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={useCustom}
+                onChange={(e) => {
+                  setUseCustom(e.target.checked);
+                  if (e.target.checked) setSelected(null);
+                }}
+                className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
+              />
+              {t("clarify.customReply")}
+            </label>
+          )}
+          {textReplyActive ? (
             <textarea
+              id={openEnded ? "clarification-open-answer" : undefined}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={t("clarify.replyPlaceholder")}
+placeholder={t("clarify.openAnswerPlaceholder")}
               rows={4}
               className="mt-1 w-full resize-y rounded-md border border-border bg-surface-panel p-2 text-sm text-text-primary outline-none focus:border-[var(--ui-btn-primary-bg,--ui-accent)]"
             />

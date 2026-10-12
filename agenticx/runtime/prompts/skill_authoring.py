@@ -15,5 +15,8 @@ def build_skill_authoring_prompt_block() -> str:
         "过时立即 action='patch'。创建/删除前需与用户确认。一次性任务不必保存。\n"
         "## skill_manage / skill_import_repo 使用规范\n"
         "- 落盘唯一入口是 `skill_manage`（批量用 `skill_import_repo`）；"
-        "**禁止** `file_write` 直写 `~/.agenticx/skills/`。细则见 `skill_manage` description。\n\n"
+        "**禁止** `file_write` 直写 `~/.agenticx/skills/`。细则见 `skill_manage` description。\n"
+        "- SkillHub 安装（含 skillhub.cn/install/skillhub.md 链接或 `@ns/slug`）：第一步直接 "
+        "`skillhub_install(ref='@ns/slug')`，每个技能一次调用；不要先读 skillhub.md、不要用 bash 跑 "
+        "curl/skillhub CLI、不要探测本机端口。ClawHub 安装同理直接 `clawhub_install(name=..., source=...)`。\n\n"
     )

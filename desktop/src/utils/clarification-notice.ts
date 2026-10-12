@@ -6,18 +6,29 @@
  * the agent, and dedupe against the persisted chat_history row.
  */
 
+import type {
+  ChoicePanelOption,
+  ClarificationDecision,
+  ClarificationInputType,
+  PendingClarification,
+} from "../store";
+
 export type ClarificationAnswer = {
   answerText: string;
   selectedOptions: string[];
+  /** Versioned choice panel select payload (present_choices). */
+  panelId?: string;
+  candidateSetVersion?: number;
+  optionId?: string;
+  /**
+   * Masked `input_type=secret` field values keyed by decision id. Sent once to
+   * POST /api/clarify (`secret_values`) for the waiting backend tool; never put
+   * into selectedOptions, the store, or the answered-card text.
+   */
+  secretValues?: Record<string, string>;
 };
 
-export type ClarificationDecisionPayload = {
-  id: string;
-  question: string;
-  options: string[];
-  selectionMode: "single" | "multiple";
-  exclusiveOptions: string[];
-};
+export type ClarificationDecisionPayload = ClarificationDecision;
 
 export type PendingClarificationPayload = {
   requestId: string;
@@ -28,7 +39,113 @@ export type PendingClarificationPayload = {
   agentId: string;
   sessionId: string;
   context?: Record<string, unknown> | undefined;
+  panelId?: string;
+  candidateSetVersion?: number;
+  panelType?: "clarification" | "comparison";
+  choiceOptions?: ChoicePanelOption[];
+  superseded?: boolean;
 };
+
+/** Extract versioned choice-panel fields from clarification context / metadata. */
+export function parseChoicePanelFields(
+  context: Record<string, unknown> | undefined | null,
+): Pick<
+  PendingClarification,
+  "panelId" | "candidateSetVersion" | "panelType" | "choiceOptions" | "superseded"
+> {
+  if (!context || typeof context !== "object") return {};
+  if (context.kind !== "choice_panel") return {};
+  const panelId = String(context.panel_id ?? "").trim() || undefined;
+  const rawVersion = context.candidate_set_version;
+  const candidateSetVersion =
+    typeof rawVersion === "number" && Number.isFinite(rawVersion)
+      ? rawVersion
+      : typeof rawVersion === "string" && rawVersion.trim()
+        ? Number(rawVersion)
+        : undefined;
+  const panelType =
+    context.panel_type === "comparison"
+      ? ("comparison" as const)
+      : context.panel_type === "clarification"
+        ? ("clarification" as const)
+        : undefined;
+  const rawOpts = Array.isArray(context.choice_options) ? context.choice_options : [];
+  const choiceOptions: ChoicePanelOption[] = [];
+  for (const item of rawOpts.slice(0, 12)) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const id = String(rec.id ?? "").trim();
+    const label = String(rec.label ?? "").trim();
+    if (!id || !label) continue;
+    const details = Array.isArray(rec.details)
+      ? rec.details.map((d) => String(d).trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const sources: ChoicePanelOption["sources"] = [];
+    if (Array.isArray(rec.sources)) {
+      for (const s of rec.sources.slice(0, 5)) {
+        if (!s || typeof s !== "object") continue;
+        const src = s as Record<string, unknown>;
+        const title = String(src.title ?? "").trim();
+        const url = String(src.url ?? "").trim();
+        if (!title || !url) continue;
+        if (!/^https?:\/\//i.test(url)) continue;
+        sources.push({ title, url });
+      }
+    }
+    choiceOptions.push({
+      id,
+      label,
+      details: details.length > 0 ? details : undefined,
+      sources: sources.length > 0 ? sources : undefined,
+    });
+  }
+  return {
+    panelId,
+    candidateSetVersion:
+      candidateSetVersion !== undefined && Number.isFinite(candidateSetVersion)
+        ? candidateSetVersion
+        : undefined,
+    panelType,
+    choiceOptions: choiceOptions.length > 0 ? choiceOptions : undefined,
+    superseded: context.superseded === true,
+  };
+}
+
+/**
+ * Attach panel_id / candidate_set_version / option_id onto a clarify POST body
+ * when the answer (or prompt) carries versioned choice-panel fields.
+ */
+export function buildClarifyRequestBody(args: {
+  sessionId: string;
+  requestId: string;
+  agentId?: string;
+  answer: ClarificationAnswer;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    session_id: args.sessionId,
+    request_id: args.requestId,
+    agent_id: args.agentId || "meta",
+    answer_text: args.answer.answerText ?? "",
+    selected_options: args.answer.selectedOptions ?? [],
+  };
+  const panelId = (args.answer.panelId || "").trim();
+  if (panelId) {
+    body.panel_id = panelId;
+    if (
+      typeof args.answer.candidateSetVersion === "number" &&
+      Number.isFinite(args.answer.candidateSetVersion)
+    ) {
+      body.candidate_set_version = args.answer.candidateSetVersion;
+    }
+    const optionId = (args.answer.optionId || "").trim();
+    if (optionId) body.option_id = optionId;
+  }
+  const secrets = Object.entries(args.answer.secretValues ?? {}).filter(
+    ([k, v]) => k.trim() && typeof v === "string" && v.trim(),
+  );
+  if (secrets.length > 0) body.secret_values = Object.fromEntries(secrets);
+  return body;
+}
 
 function normalizeExclusiveOptions(
   raw: unknown,
@@ -48,6 +165,8 @@ function normalizeExclusiveOptions(
   return out;
 }
 
+const CLARIFY_INPUT_TYPES: readonly ClarificationInputType[] = ["choice", "text", "url", "secret"];
+
 export function parseClarificationDecisions(raw: unknown): ClarificationDecisionPayload[] {
   if (!Array.isArray(raw)) return [];
   const out: ClarificationDecisionPayload[] = [];
@@ -55,9 +174,16 @@ export function parseClarificationDecisions(raw: unknown): ClarificationDecision
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
     const question = String(rec.question ?? "").trim();
+    const rawType = String(rec.input_type ?? "").trim().toLowerCase();
+    const inputType = (CLARIFY_INPUT_TYPES as readonly string[]).includes(rawType)
+      ? (rawType as ClarificationInputType)
+      : "choice";
     const rawOpts = Array.isArray(rec.options) ? rec.options : [];
-    const options = rawOpts.map((o) => String(o).trim()).filter(Boolean).slice(0, 8);
-    if (!question || options.length === 0) continue;
+    const options =
+      inputType === "secret"
+        ? []
+        : rawOpts.map((o) => String(o).trim()).filter(Boolean).slice(0, 8);
+    if (!question || (inputType === "choice" && options.length === 0)) continue;
     const id = String(rec.id ?? "").trim() || `decision-${out.length + 1}`;
     const selectionMode = rec.selection_mode === "multiple" ? "multiple" : "single";
     const exclusiveOptions = normalizeExclusiveOptions(
@@ -65,9 +191,100 @@ export function parseClarificationDecisions(raw: unknown): ClarificationDecision
       options,
       selectionMode,
     );
-    out.push({ id, question, options, selectionMode, exclusiveOptions });
+    const decision: ClarificationDecisionPayload = { id, question, options, selectionMode, exclusiveOptions };
+    if (inputType !== "choice") decision.inputType = inputType;
+    if (rec.required === false) decision.required = false;
+    if (inputType === "secret" && rec.masked === false) decision.masked = false;
+    const label = String(rec.label ?? "").trim();
+    if (label) decision.label = label;
+    const placeholder = String(rec.placeholder ?? "").trim();
+    if (placeholder) decision.placeholder = placeholder;
+    const customOption = String(rec.custom_option ?? "").trim();
+    if (customOption && options.includes(customOption)) decision.customOption = customOption;
+    out.push(decision);
   }
   return out;
+}
+
+/** http(s) URL with a host (form field validation for `input_type=url`). */
+export function isValidClarifyUrl(value: string): boolean {
+  const raw = String(value ?? "").trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(raw)) return false;
+  try {
+    const u = new URL(raw);
+    return (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Form state of a grouped clarification card. `custom` holds field text, custom-option text and legacy free text. */
+export type DecisionFormState = {
+  selected: Record<string, string[]>;
+  custom: Record<string, string>;
+};
+
+type DecisionValue = { text: string; secret?: string; valid: boolean };
+
+/** Resolve one decision's answer; `null` when unanswered. */
+export function resolveDecisionValue(
+  decision: ClarificationDecisionPayload,
+  state: DecisionFormState,
+  canFree: boolean,
+  secretFilledLabel = "已填写（已隐藏）",
+): DecisionValue | null {
+  const typed = (state.custom[decision.id] ?? "").trim();
+  const kind = decision.inputType ?? "choice";
+  if (kind === "text") return typed ? { text: typed, valid: true } : null;
+  if (kind === "url") return typed ? { text: typed, valid: isValidClarifyUrl(typed) } : null;
+  if (kind === "secret") return typed ? { text: secretFilledLabel, secret: typed, valid: true } : null;
+
+  const choices = (state.selected[decision.id] ?? []).map((c) => c.trim()).filter(Boolean);
+  if (decision.customOption) {
+    const usesCustom = choices.includes(decision.customOption);
+    const parts = choices.map((c) => (c === decision.customOption ? typed : c)).filter(Boolean);
+    if (choices.length === 0) return null;
+    return { text: parts.join("、"), valid: !usesCustom || Boolean(typed) };
+  }
+  const choiceText = choices.join("、");
+  const custom = canFree ? typed : "";
+  if (choiceText && custom) return { text: `${choiceText}（补充：${custom}）`, valid: true };
+  if (choiceText) return { text: choiceText, valid: true };
+  if (custom) return { text: custom, valid: true };
+  return null;
+}
+
+/** Required decisions answered and every given value valid (gates the submit button). */
+export function isDecisionFormComplete(
+  decisions: readonly ClarificationDecisionPayload[],
+  state: DecisionFormState,
+  canFree: boolean,
+): boolean {
+  return decisions.every((d) => {
+    const v = resolveDecisionValue(d, state, canFree);
+    if (!v) return d.required === false;
+    return v.valid;
+  });
+}
+
+/** Build the clarify answer; secret fields go to `secretValues` only. */
+export function buildDecisionFormAnswer(
+  decisions: readonly ClarificationDecisionPayload[],
+  state: DecisionFormState,
+  canFree: boolean,
+  secretFilledLabel?: string,
+): ClarificationAnswer {
+  const selectedOptions: string[] = [];
+  const secretValues: Record<string, string> = {};
+  for (const d of decisions) {
+    const v = resolveDecisionValue(d, state, canFree, secretFilledLabel);
+    if (!v) continue;
+    selectedOptions.push(`${d.question}：${v.text}`);
+    if (v.secret) secretValues[d.id] = v.secret;
+  }
+  const answer: ClarificationAnswer = { answerText: "", selectedOptions };
+  if (Object.keys(secretValues).length > 0) answer.secretValues = secretValues;
+  return answer;
 }
 
 /** Best-effort: bucket flat options into context dimensions for legacy tool calls. */
@@ -214,6 +431,8 @@ export function clarificationPayloadFromMeta(
   if (!requestId) return null;
   const rawOptions = Array.isArray(m.options) ? m.options : [];
   const decisions = parseClarificationDecisions(m.decisions);
+  const context = (m.context as Record<string, unknown> | undefined) ?? undefined;
+  const choiceFields = parseChoicePanelFields(context);
   return {
     requestId,
     prompt: String(m.prompt || ""),
@@ -222,6 +441,7 @@ export function clarificationPayloadFromMeta(
     allowFreeText: m.allow_free_text !== false,
     agentId,
     sessionId,
-    context: (m.context as Record<string, unknown> | undefined) ?? undefined,
+    context,
+    ...choiceFields,
   };
 }

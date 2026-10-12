@@ -1,28 +1,233 @@
-/** Official SkillHub install doc (Tencent COS). */
+/** Official SkillHub install doc (Tencent COS) — reference only; do not tell agent to install the store first. */
 const SKILLHUB_INSTALL_DOC =
   "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/skillhub.md";
 
 /**
- * Agent prompt aligned with SkillHub "我是 Agent" install flow (accelerated path).
+ * Substrings that must never appear in the Meta-agent fallback prompt.
+ * Matches the old Settings→Meta dead path (Studio registry install + store-first).
+ * Also used to intercept paste/history reuse of the same copy on any inbound path.
+ */
+export const SKILLHUB_AGENT_PROMPT_FORBIDDEN: readonly string[] = [
+  "POST /api/registry/install",
+  "/api/registry/install",
+  "请先检查是否已安装 SkillHub 商店",
+  "优先调用本机 Studio API",
+  "根据 https://skillhub-", // old: fetch install doc then install the store
+  "请先装商店",
+  "安装 SkillHub 商店",
+  "先检查是否已安装 SkillHub",
+];
+
+/**
+ * Fail-fast: refuse any agent prompt that still steers into the old dead path.
+ * `/api/registry/skillhub/install` is allowed (deterministic path); plain
+ * `/api/registry/install` is not.
+ */
+export function assertSafeSkillHubAgentInstallPrompt(text: string): void {
+  const body = String(text || "");
+  for (const needle of SKILLHUB_AGENT_PROMPT_FORBIDDEN) {
+    if (needle === "/api/registry/install" || needle === "POST /api/registry/install") {
+      // Allow .../skillhub/install; forbid the bare Studio registry install route.
+      const stripped = body.replace(/\/api\/registry\/skillhub\/install/g, "");
+      if (stripped.includes(needle)) {
+        throw new Error(
+          `SkillHub agent install prompt contains forbidden instruction: ${needle}`,
+        );
+      }
+      continue;
+    }
+    if (body.includes(needle)) {
+      throw new Error(
+        `SkillHub agent install prompt contains forbidden instruction: ${needle}`,
+      );
+    }
+  }
+}
+
+/** True when text matches old SkillHub Meta dead-path fingerprints. */
+export function isForbiddenSkillHubAgentInstallPrompt(text: string): boolean {
+  try {
+    assertSafeSkillHubAgentInstallPrompt(text);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Entire-message @ns/slug (or ns/slug) — chat install shorthand. */
+const AT_REF_ONLY =
+  /^\s*@?([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)(?:@[\w.-]+)?\s*$/;
+
+const INSTALL_VERB =
+  /(?:请)?安装|\binstall\b|skillhub\s+install|installFromSkillHub|skills_store_cli\.py|SkillHub\s*第三方技能|第三方技能/i;
+
+/**
+ * Best-effort slug extraction from old/new SkillHub install copy
+ * (e.g. 「archify」, @ns/slug, or skills_store_cli … install archify).
+ */
+export function extractSkillHubInstallSlugFromPrompt(text: string): string | null {
+  const body = String(text || "");
+  const atOnly = body.match(AT_REF_ONLY);
+  if (atOnly) {
+    return `@${atOnly[1]}/${atOnly[2]}`;
+  }
+  const patterns: RegExp[] = [
+    /SkillHub\s*第三方技能[「「"']([^」」"']+)[」」"']/,
+    /请安装\s*SkillHub[^「「"'\n]{0,40}[「「"']([^」」"']+)[」」"']/,
+    /skills_store_cli\.py[^\n]*\binstall\s+(@?[\w./-]+)/i,
+    /installFromSkillHub[^\n]{0,40}\b([A-Za-z0-9@_/.-]+)/i,
+    /skillhub\/install[^\n]{0,80}["']slug["']\s*:\s*["']([^"']+)["']/i,
+    /\bskillhub\s+install\s+(@?[\w./-]+)/i,
+    /(?:请)?安装\s*(@[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/,
+    /\binstall\s+(@[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/i,
+    /@([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)/,
+    /(?:请)?安装\s*(?:SkillHub\s*)?(?:第三方技能\s*)?[「「"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」"']?\s+(?:skill|技能)\b/i,
+    /(?:请)?安装\s*(?:技能|skill)\s*[「「"']?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)[」」"']?/i,
+    /\binstall\s+(?:the\s+)?skill\s+(@?[\w./-]+)/i,
+  ];
+  for (const re of patterns) {
+    const m = body.match(re);
+    const slug = (m?.[1] || "").trim();
+    if (slug && !["skillhub", "skill", "the", "a", "an", "registry"].includes(slug.toLowerCase())) {
+      if (
+        slug.includes("/") &&
+        !slug.startsWith("@") &&
+        !slug.startsWith("registry/") &&
+        !slug.startsWith("http")
+      ) {
+        return `@${slug}`;
+      }
+      return slug;
+    }
+  }
+  return null;
+}
+
+/** Detect clear @ns/slug / install phrasing (informational; classify does NOT hit). */
+export function isClearSkillHubInstallIntent(text: string): boolean {
+  const body = String(text || "").trim();
+  if (!body) return false;
+  if (AT_REF_ONLY.test(body)) return true;
+  const slug = extractSkillHubInstallSlugFromPrompt(body);
+  if (!slug) return false;
+  return INSTALL_VERB.test(body);
+}
+
+export type SkillHubInboundIntercept =
+  | { hit: false }
+  | {
+      hit: true;
+      slug: string | null;
+      reason: string;
+      kind: "forbidden_meta";
+    };
+
+/**
+ * Classify inbound text for Settings Meta-seeding / dead-path refuse only.
  *
- * Third-party skills must land under registry/ or carry explicit `source` in
- * SKILL.md so the Desktop settings UI labels them as third-party, not self-built.
+ * Hits ONLY old Meta SkillHub dead-path copy (POST /api/registry/install /
+ * store-first). Ordinary chat ``@ns/slug`` / 「安装 … skill」 must NOT hit —
+ * those go through the conversation agent (no silent installFromSkillHub).
+ * Settings market 「安装」 still calls installFromSkillHub directly.
+ */
+export function classifySkillHubInboundInstallPrompt(text: string): SkillHubInboundIntercept {
+  const body = String(text || "");
+  if (!body.trim()) return { hit: false };
+  if (isForbiddenSkillHubAgentInstallPrompt(body)) {
+    return {
+      hit: true,
+      slug: extractSkillHubInstallSlugFromPrompt(body),
+      kind: "forbidden_meta",
+      reason:
+        "拦截旧版 SkillHub Meta 安装提示词（含 POST /api/registry/install 或先装商店文案）。请改用 Desktop 确定性安装。",
+    };
+  }
+  // Deliberately do NOT treat @ns/slug / 「安装 … skill」 as intercept hits.
+  // Chat installs belong to the conversation agent; Settings market uses IPC.
+  return { hit: false };
+}
+
+/**
+ * Agent fallback prompt for SkillHub installs when the deterministic Desktop
+ * IPC path fails (CLI missing, network error, etc.).
+ *
+ * Prefer Desktop `installFromSkillHub` / Studio
+ * `POST /api/registry/skillhub/install` — this prompt is only the fallback.
+ *
+ * Shortest path only: CLI download into taskspace → skill_manage create → view.
+ * Does NOT ask the agent to install the SkillHub store or curl Studio registry APIs.
  */
 export function buildSkillHubAgentInstallPrompt(skillSlug: string): string {
   const name = skillSlug.trim();
   if (!name) {
     return "";
   }
-  return [
-    `请安装 SkillHub 第三方技能「${name}」。`,
+  const prompt = [
+    `请安装 SkillHub 第三方技能「${name}」（这是确定性安装失败后的 agent 回退路径）。`,
     "",
     "安装要求（必须遵守，以便设置页正确归类为「第三方技能」）：",
-    `1. 优先调用本机 Studio API：POST /api/registry/install，body 含 source（已配置的 ClawHub registry 名）与 name: "${name}"。`,
-    `2. 若 API 不可用，可将 SKILL.md 安装到 ~/.agenticx/skills/registry/${name}/，并在 frontmatter 写入 source: skillhub。`,
-    "3. 禁止把第三方技能直接放到 ~/.agenticx/skills/<name>/ 且不带 source 标记。",
+    "1. 禁止先检查或部署 SkillHub store；禁止在 Studio 里盲目扫描；禁止 curl/wget 本机 localhost 的旧 Studio registry install API（非 skillhub 专用接口；沙箱内无 desktop token）。",
+    "2. 禁止读写 ~/.skillhub 或系统 /tmp（沙箱会 EPERM）。若 CLI 需要 HOME，把 HOME 重定向到当前 taskspace 内目录。",
+    `3. 最短路径：skills_store_cli.py --skip-self-upgrade install ${name} --dir <taskspace>/skillhub-dl（下载到当前 taskspace，勿写 ~/.skillhub）。`,
+    `4. 再用 skill_manage create：name=registry/${name}，source=skillhub，from_dir=<下载目录>（会带上 references/）。`,
+    "5. 创建成功后用 skill_manage action=view 核对 on-disk 内容与 source=skillhub。",
+    "6. 禁止把第三方技能直接放到 ~/.agenticx/skills/<name>/ 且不带 source: skillhub。",
     "",
-    `请先检查是否已安装 SkillHub 商店；若未安装，请根据 ${SKILLHUB_INSTALL_DOC} 安装 SkillHub 商店，并优先采用 SkillHub 加速安装，然后安装 ${name} 技能。`,
-    "",
-    `若已安装 SkillHub 商店，则直接安装 ${name} 技能。`,
+    `确定性安装应走 Desktop IPC installFromSkillHub / POST /api/registry/skillhub/install；本提示仅在其失败后使用。文档备查（不要先装 store）：${SKILLHUB_INSTALL_DOC}`,
   ].join("\n");
+  assertSafeSkillHubAgentInstallPrompt(prompt);
+  return prompt;
+}
+
+/** SkillHub's own "copy prompt" wording; the conversation agent answers it with skillhub_install. */
+export function buildSkillHubChatInstallPrompt(ref: string): string {
+  const raw = String(ref || "").trim();
+  if (!raw) return "";
+  const canonical = raw.startsWith("@") || !raw.includes("/") ? raw : `@${raw}`;
+  return `请根据 https://skillhub.cn/install/skillhub.md，安装 ${canonical}。`;
+}
+
+/** Settings ClawHub market → conversational install (agent answers with clawhub_install). */
+export function buildClawHubChatInstallPrompt(name: string, source?: string | null): string {
+  const skill = String(name || "").trim();
+  if (!skill) return "";
+  const src = String(source || "").trim();
+  return src
+    ? `请从 ClawHub 安装技能「${skill}」（市场来源：${src}）。`
+    : `请从 ClawHub 安装技能「${skill}」。`;
+}
+
+/**
+ * SkillHub public detail page URL.
+ *
+ * Rule (confirmed against live skillhub.cn SPA):
+ *   https://skillhub.tencent.com/skills/{namespace}/{slug}
+ * skillhub.tencent.com redirects to skillhub.cn with the same path.
+ * Namespace-less fallback (generic hub page, not a skill detail):
+ *   https://skillhub.tencent.com/skills/{slug}
+ *
+ * Example: namespace=indiv-seafish, slug=archify
+ *   → https://skillhub.tencent.com/skills/indiv-seafish/archify
+ */
+export function buildSkillHubDetailUrl(input: {
+  slug: string;
+  namespace?: string | null;
+}): string {
+  const slug = String(input?.slug ?? "").trim().replace(/^@/, "");
+  if (!slug) return "https://skillhub.tencent.com/";
+  // Allow callers to pass canonical "@ns/slug" or "ns/slug" as slug alone.
+  const slash = slug.indexOf("/");
+  let ns = String(input?.namespace ?? "").trim().replace(/^@/, "");
+  let bare = slug;
+  if (!ns && slash > 0) {
+    ns = slug.slice(0, slash).trim();
+    bare = slug.slice(slash + 1).trim();
+  }
+  if (!bare) return "https://skillhub.tencent.com/";
+  const encNs = ns ? encodeURIComponent(ns) : "";
+  const encSlug = encodeURIComponent(bare);
+  if (encNs) {
+    return `https://skillhub.tencent.com/skills/${encNs}/${encSlug}`;
+  }
+  return `https://skillhub.tencent.com/skills/${encSlug}`;
 }

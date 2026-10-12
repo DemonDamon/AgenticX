@@ -45,6 +45,8 @@ try:  # SSE transport (legacy MCP wire protocol)
 except ImportError:
     sse_client = None  # type: ignore
 
+from agenticx.utils.proxy_policy import mcp_httpx_client_factory
+
 from .base import BaseTool, ToolError
 
 # 类型导入（用于 Sampling）
@@ -123,6 +125,10 @@ class MCPServerConfig(BaseModel):
         default_factory=list,
         description="Assign this MCP to specific agents; empty means all agents.",
     )
+    oauth: bool = Field(
+        default=False,
+        description="Remote server uses the standard MCP OAuth flow (tokens kept under ~/.agenticx/connectors/oauth).",
+    )
 
     @model_validator(mode="after")
     def _validate_transport(self) -> "MCPServerConfig":
@@ -198,6 +204,18 @@ class MCPClientV2:
         self._tools_cache: Optional[List[MCPToolInfo]] = None
         self._initialized = False
         self._closed = False
+
+    def _mcp_auth_kwargs(self) -> Dict[str, Any]:
+        """``auth=`` for MCP OAuth servers (standard MCP authorization flow)."""
+        if not getattr(self.server_config, "oauth", False) or not self.server_config.url:
+            return {}
+        try:
+            from agenticx.connectors.oauth import build_mcp_oauth_provider
+
+            return {"auth": build_mcp_oauth_provider(self.server_config.name, self.server_config.url)}
+        except Exception as exc:  # pragma: no cover - optional path
+            logger.warning("MCP OAuth unavailable for %s: %s", self.server_config.name, exc)
+            return {}
 
     async def _reset_mcp_connection_unlocked(self) -> None:
         """Tear down stdio stack and session. Caller must hold ``_session_lock``."""
@@ -296,6 +314,10 @@ class MCPClientV2:
                     url=self.server_config.url,
                     headers=dict(self.server_config.headers) or None,
                     timeout=timedelta(seconds=float(self.server_config.timeout)),
+                    # Central proxy policy: loopback/LAN direct, remote via
+                    # proxy when reachable, direct fallback when it is dead.
+                    httpx_client_factory=mcp_httpx_client_factory,
+                    **self._mcp_auth_kwargs(),
                 )
                 streams = await self._exit_stack.enter_async_context(http_cm)
                 # streamablehttp_client returns (read, write, get_session_id_callback)
@@ -308,6 +330,8 @@ class MCPClientV2:
                 sse_cm = sse_client(
                     url=self.server_config.url,
                     headers=dict(self.server_config.headers) or None,
+                    httpx_client_factory=mcp_httpx_client_factory,
+                    **self._mcp_auth_kwargs(),
                 )
                 read_stream, write_stream = await self._exit_stack.enter_async_context(sse_cm)
             else:

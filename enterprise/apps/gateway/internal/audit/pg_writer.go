@@ -117,6 +117,7 @@ INSERT INTO gateway_audit_events (
   input_tokens, output_tokens, total_tokens, latency_ms,
 	  digest, policies_hit, tools_called,
   mcp_server, mcp_tool_name, mcp_input_hash, mcp_output_hash, mcp_status,
+  connector_execution_id, connector_action_id, connector_connection_id,
   src_region, dst_region, cross_border, residency_rule,
 	  checksum_version, checksum_payload, prev_checksum, checksum, signature,
   created_at, updated_at
@@ -128,6 +129,7 @@ INSERT INTO gateway_audit_events (
   ?,?,?,?,
   ?,?,?,
   ?,?,?,?,?,
+  ?,?,?,
   ?,?,?,?,
   ?,?,?,?,?,
   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -163,6 +165,9 @@ INSERT INTO gateway_audit_events (
 		nullStr(e.MCPInputHash),
 		nullStr(e.MCPOutputHash),
 		nullStr(e.MCPStatus),
+		nullStr(e.ConnectorExecutionID),
+		nullStr(e.ConnectorActionID),
+		nullStr(e.ConnectorConnectionID),
 		nullStr(e.SrcRegion),
 		nullStr(e.DstRegion),
 		nullBool(e.CrossBorder),

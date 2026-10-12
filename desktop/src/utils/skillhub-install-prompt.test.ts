@@ -1,0 +1,173 @@
+import { describe, expect, it } from "vitest";
+import {
+  assertSafeSkillHubAgentInstallPrompt,
+  buildClawHubChatInstallPrompt,
+  buildSkillHubAgentInstallPrompt,
+  buildSkillHubChatInstallPrompt,
+  buildSkillHubDetailUrl,
+  classifySkillHubInboundInstallPrompt,
+  extractSkillHubInstallSlugFromPrompt,
+  isClearSkillHubInstallIntent,
+  isForbiddenSkillHubAgentInstallPrompt,
+  SKILLHUB_AGENT_PROMPT_FORBIDDEN,
+} from "./skillhub-install-prompt";
+
+describe("buildSkillHubAgentInstallPrompt", () => {
+  it("builds shortest-path prompt without old Studio registry install", () => {
+    const prompt = buildSkillHubAgentInstallPrompt("archify");
+    expect(prompt).toContain("archify");
+    expect(prompt).toContain("skills_store_cli.py --skip-self-upgrade install archify");
+    expect(prompt).toContain("skill_manage create");
+    expect(prompt).toContain("source=skillhub");
+    expect(prompt).toContain("action=view");
+    expect(prompt).toContain("/api/registry/skillhub/install");
+    expect(prompt).toContain("禁止先检查或部署 SkillHub store");
+    for (const needle of SKILLHUB_AGENT_PROMPT_FORBIDDEN) {
+      if (needle === "/api/registry/install" || needle === "POST /api/registry/install") {
+        const stripped = prompt.replace(/\/api\/registry\/skillhub\/install/g, "");
+        expect(stripped).not.toContain(needle);
+      } else {
+        expect(prompt).not.toContain(needle);
+      }
+    }
+  });
+
+  it("returns empty for blank slug", () => {
+    expect(buildSkillHubAgentInstallPrompt("  ")).toBe("");
+  });
+});
+
+describe("assertSafeSkillHubAgentInstallPrompt", () => {
+  it("rejects old Meta Settings prompt that demands POST /api/registry/install", () => {
+    const old = [
+      "请安装 SkillHub 第三方技能「archify」。",
+      "1. 优先调用本机 Studio API：POST /api/registry/install，body 含 source 与 name。",
+      "请先检查是否已安装 SkillHub 商店；若未安装，请根据 https://skillhub-xxx 安装 SkillHub 商店",
+    ].join("\n");
+    expect(() => assertSafeSkillHubAgentInstallPrompt(old)).toThrow(
+      /forbidden instruction/,
+    );
+  });
+
+  it("rejects bare /api/registry/install but allows skillhub install route", () => {
+    expect(() =>
+      assertSafeSkillHubAgentInstallPrompt("curl http://127.0.0.1:3000/api/registry/install"),
+    ).toThrow(/forbidden instruction/);
+    expect(() =>
+      assertSafeSkillHubAgentInstallPrompt(
+        "use Desktop IPC POST /api/registry/skillhub/install",
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("inbound intercept of old SkillHub install copy", () => {
+  const oldCopy = [
+    "请安装 SkillHub 第三方技能「archify」。",
+    "1. 优先调用本机 Studio API：POST /api/registry/install，body 含 source 与 name。",
+    "2. 若 API 不可用，可将 SKILL.md 安装到 ~/.agenticx/skills/registry/archify/",
+    "请先检查是否已安装 SkillHub 商店；若未安装，请根据 https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/skillhub.md 安装 SkillHub 商店",
+  ].join("\n");
+
+  it("flags old Meta install prompt as forbidden", () => {
+    expect(isForbiddenSkillHubAgentInstallPrompt(oldCopy)).toBe(true);
+  });
+
+  it("does not flag the new agent fallback prompt", () => {
+    const prompt = buildSkillHubAgentInstallPrompt("archify");
+    expect(isForbiddenSkillHubAgentInstallPrompt(prompt)).toBe(false);
+  });
+
+  it("extracts slug from old copy", () => {
+    expect(extractSkillHubInstallSlugFromPrompt(oldCopy)).toBe("archify");
+  });
+
+  it("classify hits and returns slug so callers can force installFromSkillHub", () => {
+    const hit = classifySkillHubInboundInstallPrompt(oldCopy);
+    expect(hit.hit).toBe(true);
+    if (hit.hit) {
+      expect(hit.slug).toBe("archify");
+      expect(hit.reason).toMatch(/拦截|Desktop|install/i);
+    }
+  });
+
+  it("classify misses ordinary chat", () => {
+    expect(classifySkillHubInboundInstallPrompt("帮我写个 hello world").hit).toBe(false);
+  });
+});
+
+describe("buildSkillHubDetailUrl", () => {
+  it("builds namespaced detail URL for archify / indiv-seafish", () => {
+    expect(
+      buildSkillHubDetailUrl({ slug: "archify", namespace: "indiv-seafish" }),
+    ).toBe("https://skillhub.tencent.com/skills/indiv-seafish/archify");
+  });
+
+  it("falls back to slug-only path when namespace missing", () => {
+    expect(buildSkillHubDetailUrl({ slug: "archify" })).toBe(
+      "https://skillhub.tencent.com/skills/archify",
+    );
+  });
+
+  it("parses ns/slug when namespace omitted", () => {
+    expect(buildSkillHubDetailUrl({ slug: "indiv-seafish/archify" })).toBe(
+      "https://skillhub.tencent.com/skills/indiv-seafish/archify",
+    );
+  });
+
+  it("returns hub root for empty slug", () => {
+    expect(buildSkillHubDetailUrl({ slug: "  " })).toBe("https://skillhub.tencent.com/");
+  });
+});
+
+describe("chat @ns/slug does NOT force IPC install", () => {
+  it("at-ns/slug classify miss — conversation agent handles install", () => {
+    const hit = classifySkillHubInboundInstallPrompt("@indiv-ebandao/tiangong-skill");
+    expect(hit.hit).toBe(false);
+    expect(isClearSkillHubInstallIntent("@indiv-ebandao/tiangong-skill")).toBe(true);
+  });
+
+  it("安装 @ns/slug is not intercepted", () => {
+    const hit = classifySkillHubInboundInstallPrompt("安装 @indiv-ebandao/tiangong-skill");
+    expect(hit.hit).toBe(false);
+    expect(isClearSkillHubInstallIntent("安装 @indiv-ebandao/tiangong-skill")).toBe(true);
+  });
+
+  it("does not flag ordinary 安装依赖 chat", () => {
+    expect(classifySkillHubInboundInstallPrompt("安装依赖").hit).toBe(false);
+  });
+
+  it("old Meta dead-path still hits forbidden_meta (Settings seeding refuse)", () => {
+    const old = [
+      "请安装 SkillHub 第三方技能「archify」。",
+      "1. 优先调用本机 Studio API：POST /api/registry/install，body 含 source 与 name。",
+      "请先检查是否已安装 SkillHub 商店；若未安装，请根据 https://skillhub-xxx 安装 SkillHub 商店",
+    ].join("\n");
+    const hit = classifySkillHubInboundInstallPrompt(old);
+    expect(hit.hit).toBe(true);
+    if (hit.hit) {
+      expect(hit.kind).toBe("forbidden_meta");
+      expect(hit.slug).toBe("archify");
+    }
+  });
+});
+
+describe("chat install prompts (Settings market → conversation)", () => {
+  it("uses SkillHub copy-prompt wording with canonical @ns/slug", () => {
+    const p = buildSkillHubChatInstallPrompt("@user_cb5e2841/openclaw-v3");
+    expect(p).toBe("请根据 https://skillhub.cn/install/skillhub.md，安装 @user_cb5e2841/openclaw-v3。");
+    expect(buildSkillHubChatInstallPrompt("indiv-seafish/archify")).toContain("@indiv-seafish/archify");
+    expect(buildSkillHubChatInstallPrompt("archify")).toContain("安装 archify。");
+    expect(buildSkillHubChatInstallPrompt("  ")).toBe("");
+    expect(() => assertSafeSkillHubAgentInstallPrompt(p)).not.toThrow();
+    expect(classifySkillHubInboundInstallPrompt(p).hit).toBe(false);
+  });
+
+  it("names the ClawHub skill and source", () => {
+    expect(buildClawHubChatInstallPrompt("paintforge", "clawhub")).toBe(
+      "请从 ClawHub 安装技能「paintforge」（市场来源：clawhub）。",
+    );
+    expect(buildClawHubChatInstallPrompt("archify")).toBe("请从 ClawHub 安装技能「archify」。");
+    expect(buildClawHubChatInstallPrompt("")).toBe("");
+  });
+});

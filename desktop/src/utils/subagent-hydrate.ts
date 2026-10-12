@@ -78,6 +78,8 @@ export function buildSubAgentFromRunRecord(
     status,
     task: String(record.task ?? "").trim(),
     sessionId,
+    avatarSessionId: String(record.avatar_session_id ?? "").trim() || undefined,
+    kind: record.kind === "delegate" ? "delegate" : "subagent",
     progress: status === "completed" ? 1 : undefined,
     currentAction,
     resultSummary: resultSummary || undefined,
@@ -138,6 +140,8 @@ export async function hydrateSessionSubAgentsFromDisk(
           resultFile: built.resultFile,
           outputFiles: built.outputFiles,
           sessionId: sid,
+          avatarSessionId: built.avatarSessionId,
+          kind: built.kind,
         });
       } else {
         store.addSubAgent({
@@ -148,6 +152,8 @@ export async function hydrateSessionSubAgentsFromDisk(
           provider: built.provider,
           model: built.model,
           sessionId: sid,
+          avatarSessionId: built.avatarSessionId,
+          kind: built.kind,
         });
         store.updateSubAgent(rid, {
           status: built.status,

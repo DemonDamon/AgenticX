@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "evaluation",
-  "generation": "2fa7cd462e304d5fa2c2b0ac3bc2cd01",
+  "generation": "df06318acddb4b23b1cb48d1f37e2975",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
-  "source_fingerprint": "sha256:c031ebfea6ecdcb74af4b491be119c01234f67680c0081838d972bbe8324b64a",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "source_fingerprint": "sha256:fdbe563607a2a245de7d7ab026b08b157e4cd81b9a3eaba4c96782ab03157a8f",
   "summary_path": "conclusions/evaluation_module_conclusion.md",
-  "summary_sha256": "sha256:5b5393cf275963eb1bae72d3234a5d35a3c550e54f7f80db46ed67e09813af37",
-  "updated_at": "2026-09-01T06:08:37.193117+00:00"
+  "summary_sha256": "sha256:e85c38dc514810a05acbb7e35259bdbd28a7e5dfaa4e2e30eb8514d3d0d82e53",
+  "updated_at": "2026-09-30T00:54:07.627969+00:00"
 }

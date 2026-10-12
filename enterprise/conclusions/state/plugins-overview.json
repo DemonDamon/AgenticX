@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "plugins-overview",
-  "generation": "67bbb3c15d40486c98b0646c9d0c0d04",
+  "generation": "68e624c44fec44108b10000e71c6cd3e",
   "mapping_revision": 1,
-  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
-  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:b6b2ab10054b9023ab96958d6ee87fffbc53148d9ba4a841f7dcc2d54f5be82b",
   "summary_path": "enterprise/conclusions/plugins/plugins_overview_conclusion.md",
   "summary_sha256": "sha256:2eae8d964b64b609557bc886adf7208f3acc0b15c42d4d64d2386b088835ddb3",
-  "updated_at": "2026-07-21T07:50:35.045066+00:00"
+  "updated_at": "2026-09-17T23:54:07.244724+00:00"
 }

@@ -1,7 +1,17 @@
 """任务集拆分守卫（SP18）：考试题禁止进训练侧。"""
+from pathlib import Path
+
 import pytest
+
 from agenticx.learning.trajectory.task_split import (
     assert_trainable_task, is_eval_task, load_split,
+)
+
+# 拆分配置为运行时产出物（datasets/ 不入库），缺失时跳过真值校验
+_SPLIT_CONFIG = Path(__file__).resolve().parents[2] / "datasets" / "task_split.json"
+
+pytestmark = pytest.mark.skipif(
+    not _SPLIT_CONFIG.exists(), reason="datasets/task_split.json 未生成"
 )
 
 

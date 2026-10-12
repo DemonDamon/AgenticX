@@ -197,6 +197,17 @@ export function supportsDeepSeekV4Thinking(model: string): boolean {
   return normalizeBareModelId(model).toLowerCase().startsWith("deepseek-v4");
 }
 
+/** Bailian/DashScope hybrid Qwen3.* models accept enable_thinking. */
+export function supportsQwenHybridThinking(model: string): boolean {
+  const bare = normalizeBareModelId(model).toLowerCase();
+  if (bare.includes("qvq")) return true;
+  return /^qwen3[\-.]/.test(bare);
+}
+
+export function supportsThinkingModeToggle(model: string): boolean {
+  return supportsDeepSeekV4Thinking(model) || supportsQwenHybridThinking(model);
+}
+
 export function normalizeDeepSeekReasoningEffort(raw: unknown): DeepSeekReasoningEffort {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "high" || v === "max") return v;
@@ -260,6 +271,18 @@ const CURATED_BLURBS: CuratedRule[] = [
   {
     test: (m) => m.startsWith("deepseek-v4") || m.includes("deepseek-v4"),
     description: "DeepSeek 旗舰模型，支持 1M 上下文窗口",
+  },
+  {
+    test: (m) => m.includes("mimo-v2.6-pro"),
+    description: "小米旗舰全模态，1M 上下文，适合复杂推理与长任务",
+  },
+  {
+    test: (m) => m.includes("mimo-v2.6-flash"),
+    description: "小米快速全模态，适合日常对话与低延迟任务",
+  },
+  {
+    test: (m) => m === "mimo-v2.5" || m.endsWith("/mimo-v2.5"),
+    description: "全模态理解，该型号即将下线",
   },
   {
     test: (m) => m.includes("deepseek-r1") || m.includes("deepseek-reasoner"),
@@ -347,7 +370,7 @@ export function describeModelForPicker(
     metaLabel: "服务渠道",
     metaValue: (providerLabel || "").trim() || provider,
     supportsReasoningEffort: reasoningEffortOptions.length > 0,
-    supportsDeepSeekThinking: supportsDeepSeekV4Thinking(model),
+    supportsDeepSeekThinking: supportsThinkingModeToggle(model),
     supportsContextWindow: contextWindowOptions.length > 0,
     reasoningEffortOptions,
     contextWindowOptions,

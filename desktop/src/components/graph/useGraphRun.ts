@@ -86,8 +86,12 @@ export async function fetchGraphRun(
   apiBase: string,
   apiToken: string,
   runId: string,
+  sessionId: string,
+  groupId = "",
 ): Promise<{ run: GraphRunSnapshot; projection: GraphProjection | null }> {
-  const res = await fetch(`${apiBase}/api/graph/runs/${encodeURIComponent(runId)}`, {
+  const query = new URLSearchParams({ session_id: sessionId });
+  if (groupId) query.set("group_id", groupId);
+  const res = await fetch(`${apiBase}/api/graph/runs/${encodeURIComponent(runId)}?${query.toString()}`, {
     headers: { "x-agx-desktop-token": apiToken },
   });
   if (!res.ok) {
@@ -107,10 +111,16 @@ export async function listGraphRunsForSession(
   apiBase: string,
   apiToken: string,
   sessionId: string,
+  groupId = "",
 ): Promise<Array<{ run_id: string; status: string; version: number }>> {
-  const url = `${apiBase}/api/graph/runs?session_id=${encodeURIComponent(sessionId)}`;
+  const query = new URLSearchParams({ session_id: sessionId });
+  if (groupId) query.set("group_id", groupId);
+  const url = `${apiBase}/api/graph/runs?${query.toString()}`;
   const res = await fetch(url, { headers: { "x-agx-desktop-token": apiToken } });
-  if (!res.ok) return [];
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status}`);
+  }
   const body = (await res.json()) as { runs?: Array<{ run_id: string; status: string; version: number }> };
   return Array.isArray(body.runs) ? body.runs : [];
 }
@@ -120,6 +130,8 @@ export async function postGraphIntervene(
   apiToken: string,
   runId: string,
   body: InterveneRequest,
+  sessionId: string,
+  groupId = "",
 ): Promise<{ ok: boolean; version: number; warnings: string[]; status?: number; error?: string }> {
   const res = await fetch(`${apiBase}/api/graph/runs/${encodeURIComponent(runId)}/intervene`, {
     method: "POST",
@@ -127,7 +139,11 @@ export async function postGraphIntervene(
       "Content-Type": "application/json",
       "x-agx-desktop-token": apiToken,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ...body,
+      session_id: sessionId,
+      ...(groupId ? { group_id: groupId } : {}),
+    }),
   });
   const json = (await res.json().catch(() => ({}))) as {
     ok?: boolean;

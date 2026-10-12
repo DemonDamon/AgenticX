@@ -49,6 +49,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           </button>
         ) : null}
       </div>
+      <div className="no-drag min-w-6 flex-1 self-stretch" data-window-zoom="" aria-hidden />
       {sidebarCollapsed ? (
         <div className="agx-topbar-right">
           <ThemeToggleButton />

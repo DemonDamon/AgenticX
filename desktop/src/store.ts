@@ -4,6 +4,7 @@ import { isSettingsFocus, isSettingsTab } from "./settings-tab";
 import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
+import { loadPendingMessageQueues, savePendingMessageQueues } from "./utils/pending-message-queue";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { COMPOSE_PREVIEW_PANE_ID, isComposePreviewPane } from "./utils/compose-preview";
 import {
@@ -13,7 +14,25 @@ import {
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
+import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
+import {
+  attachUnhostedScratchChats,
+  clearScratchChatsForHost,
+  closeOrParkScratchChat,
+  deleteScratchChatFromLists,
+  dismissParkedScratchChat as dismissParkedScratchChatList,
+  forgetScratchSessionIds,
+  patchScratchChatList,
+  rememberScratchSessionIds,
+  restoreParkedScratchChat as restoreParkedScratchChatList,
+  scratchHistoryBlocklist,
+  setScratchFloating,
+  upsertScratchChatList,
+  type ScratchChat,
+  type ScratchChatDraft,
+} from "./utils/scratch-chat";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import { findLastOwnedMessageIndex } from "./utils/message-ownership";
 import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
@@ -37,6 +56,20 @@ import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
+import {
+  BRAND_CUBE_COLORWAY_ID,
+  isUserCubeColorwayId,
+} from "./utils/cube-colorway";
+import {
+  isPersistedUserAvatarUrl,
+  resolveMetaAvatarFromColorway,
+} from "./utils/identity-avatar";
+import {
+  CUBE_PORTRAIT_STYLE,
+  loadCollectionPortraitStyle,
+  writeCollectionPortraitStyle,
+  type CollectionStyleId,
+} from "./utils/expert-portrait";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -113,6 +146,8 @@ export type Avatar = {
   description?: string;
   /** Skill tags shown as chips on the gallery card. */
   tags?: string[];
+  /** near-cube-v3, a collection style id, or custom for an uploaded photo. */
+  portraitStyle?: string;
 };
 
 export type SessionItem = {
@@ -147,7 +182,14 @@ export type GroupChat = {
 };
 
 /** Main-area view router state for button-style sidebar navigation. */
-export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation";
+export type MainView =
+  | "chat"
+  | "avatars"
+  | "groups"
+  | "collab"
+  | "automation"
+  | "wiki"
+  | "market";
 
 /** Sidebar「+」快捷创建：收件人栏意图。不落盘。 */
 export type QuickComposeIntent = "expert" | "group";
@@ -215,6 +257,10 @@ export type ChatPane = {
   historyJumpMessageId?: string | null;
   /** One-shot cross-pane quote payload set by "引用至新对话"; consumed once on mount then cleared. */
   pendingQuote?: { messageId: string; body: string; label: string } | null;
+  /** Workspace-only scratch chats. Not listed in sidebar history. */
+  scratchChats?: ScratchChat[];
+  /** Closed scratch chats kept in the workspace until dismissed. */
+  parkedScratchChats?: ScratchChat[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
   /** + menu turn intent: default execute / plan first / isolated copy. */
@@ -276,6 +322,9 @@ export type Message = {
    * can never surface under the wrong conversation. */
   ownerSessionId?: string;
   agentId?: string;
+  /** Group-room human speaker. Absent/"user" = desktop owner. */
+  speakerUserId?: string;
+  speakerName?: string;
   avatarName?: string;
   avatarUrl?: string;
   /** Centered muted system line (rename confirmation, etc.). */
@@ -331,6 +380,8 @@ export type Message = {
   budgetSource?: string;
   budgetCurrent?: number;
   budgetMax?: number;
+  /** Composer command that produced this user turn. */
+  command_name?: string;
   /** messages.json metadata (e.g. view_image_inject). */
   metadata?: Record<string, unknown>;
   /** Sub-Plan E: persisted anchor for a historical sub-agent cluster card. */
@@ -428,12 +479,38 @@ export type PendingConfirm = {
   context?: Record<string, unknown>;
 };
 
+/** `choice` (default) picks options; `text` / `url` render a form field; `secret` is a masked
+ * field whose value goes to the backend tool only (never into selectedOptions / chat). */
+export type ClarificationInputType = "choice" | "text" | "url" | "secret";
+
 export type ClarificationDecision = {
   id: string;
   question: string;
   options: string[];
   selectionMode: "single" | "multiple";
   exclusiveOptions: string[];
+  /** Optional form extensions (absent on legacy payloads). */
+  inputType?: ClarificationInputType;
+  /** Defaults to true; false lets the user submit without answering. */
+  required?: boolean;
+  label?: string;
+  placeholder?: string;
+  /** Option label (in `options`) that reveals a free-text input, e.g. 其他（自定义输入）. */
+  customOption?: string;
+  /** secret fields only: false = shown in clear text (e.g. Access Key ID) but still routed via secretValues. */
+  masked?: boolean;
+};
+
+export type ChoicePanelSource = {
+  title: string;
+  url: string;
+};
+
+export type ChoicePanelOption = {
+  id: string;
+  label: string;
+  details?: string[];
+  sources?: ChoicePanelSource[];
 };
 
 export type PendingClarification = {
@@ -446,6 +523,13 @@ export type PendingClarification = {
   agentId: string;
   sessionId: string;
   context?: Record<string, unknown>;
+  /** Versioned structured choice panel (present_choices). */
+  panelId?: string;
+  candidateSetVersion?: number;
+  panelType?: "clarification" | "comparison";
+  choiceOptions?: ChoicePanelOption[];
+  /** True when a newer panel superseded this one — UI must disable selection. */
+  superseded?: boolean;
 };
 
 export type SubAgent = {
@@ -457,6 +541,10 @@ export type SubAgent = {
   status: SubAgentStatus;
   task: string;
   sessionId?: string;
+  /** 委派运行（dlg-*）的目标分身会话；工作区归属用 sessionId，「对话」跳转用本字段。 */
+  avatarSessionId?: string;
+  /** 运行类型：delegate=委派到数字分身，subagent=spawn 的临时子智能体。 */
+  kind?: "delegate" | "subagent";
   progress?: number;
   currentAction?: string;
   liveOutput?: string;
@@ -529,6 +617,7 @@ type TokenDashboardState = {
 
 type CollabRoomsState = {
   open: boolean;
+  activeRoomId: string | null;
 };
 
 type DeliveryPanelState = {
@@ -543,6 +632,8 @@ type AppState = {
   status: UiStatus;
   messages: Message[];
   subAgents: SubAgent[];
+  /** 子智能体已结束、但主智能体的汇总汇报尚未完成的会话 id（用于在汇总完成前不呈现“已完成”UI）。 */
+  reportPendingSessionIds: string[];
   selectedSubAgent: string | null;
   codePreview: string;
   confirm: ConfirmState;
@@ -588,8 +679,14 @@ type AppState = {
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
-  /** Custom avatar for current user. */
+  /** Custom avatar for the human user (group chats). Independent of Near's cube costume. */
   userAvatarUrl: string;
+  /** Near cube colorway. Drives the cube face when the collection style is cubes. */
+  userCubeColorwayId: string;
+  /** Shared portrait style for built-in agents and generated experts. */
+  collectionPortraitStyle: CollectionStyleId;
+  /** Extra Near seeds for non-cube styles. Empty uses the stable default face. */
+  nearSeedsByStyle: Record<string, string>;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
   /** 附件路由策略。无企业下发时保持关闭；真正 containment 在 Studio 侧。 */
@@ -620,7 +717,7 @@ type AppState = {
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
-  /** Which content the right main area shows (chat / gallery / projects / automation). */
+  /** Which content the right main area shows (chat / gallery / projects / automation / wiki). */
   mainView: MainView;
   setMainView: (view: MainView) => void;
   /**
@@ -637,6 +734,10 @@ type AppState = {
   sessionHistoryHints: Record<string, { activityAt: number; running: boolean }>;
   markSessionHistoryActive: (sessionId: string) => void;
   clearSessionHistoryHint: (sessionId: string) => void;
+  /** Closed/materialized scratch session ids that must never appear in sidebar history. */
+  hiddenScratchSessionIds: string[];
+  rememberHiddenScratchSessionIds: (sessionIds: Iterable<string>) => void;
+  forgetHiddenScratchSessionIds: (sessionIds: Iterable<string>) => void;
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
   forwardAutoReply: {
     paneId: string;
@@ -656,6 +757,8 @@ type AppState = {
   ) => void;
   /** Per-pane queued user messages (sent automatically after current stream ends). */
   pendingMessages: Record<string, QueuedMessage[]>;
+  /** True when queued follow-ups could not be saved for recovery after restart. */
+  pendingMessagesPersistenceFailed: boolean;
   enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;
   dequeuePaneMessage: (paneId: string) => QueuedMessage | undefined;
   dequeuePaneMessageForSession: (paneId: string, sessionId: string) => QueuedMessage | undefined;
@@ -693,6 +796,9 @@ type AppState = {
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
+  setUserCubeColorwayId: (colorwayId: string) => void;
+  setCollectionPortraitStyle: (style: CollectionStyleId) => void;
+  setNearStyleSeed: (style: CollectionStyleId, seed: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
   setRunMode: (v: RunMode) => void;
@@ -723,6 +829,8 @@ type AppState = {
   clearComposePreview: (restorePaneId?: string) => void;
   promoteComposePreview: () => string | null;
   removePane: (paneId: string) => void;
+  /** Last-pane Close: replace the sole pane with Meta 「新建任务」 empty home. */
+  resetSolePaneToMetaHome: () => string;
   /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
   removePanesForAutomationTaskId: (taskId: string) => void;
   reorderPanes: (fromIndex: number, toIndex: number) => void;
@@ -753,15 +861,22 @@ type AppState = {
         | "searchedQueries"
         | "ownerSessionId"
         | "metadata"
+        | "command_name"
         | "blocks"
         | "usage"
         | "modelSelection"
+        | "id"
       >
     > &
       Partial<MessageToolExtras>
   ) => void;
-  /** Merge *patch* into the last pane message with the given *role* (search from end). */
-  mergeLastPaneMessageByRole: (paneId: string, role: MsgRole, patch: Partial<Message>) => boolean;
+  /** Merge *patch* into the last pane message with the given *role* owned by *ownerSessionId*. */
+  mergeLastPaneMessageByRole: (
+    paneId: string,
+    role: MsgRole,
+    patch: Partial<Message>,
+    ownerSessionId: string,
+  ) => boolean;
   /** Merge fields into an existing pane `tool` message by `toolCallId`. */
   updatePaneMessageByToolCallId: (
     paneId: string,
@@ -814,7 +929,7 @@ type AppState = {
   cancelInFlightPaneTools: (paneId: string, ownerSessionId?: string) => number;
   /** Lite / global `messages` counterpart of {@link cancelInFlightPaneTools}. */
   cancelInFlightLiteTools: (ownerSessionId?: string) => number;
-  updateLastPaneMessage: (paneId: string, content: string) => void;
+  updateLastPaneMessage: (paneId: string, content: string, ownerSessionId: string) => void;
   /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
   markClarificationAnswered: (
     requestId: string,
@@ -840,6 +955,18 @@ type AppState = {
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   setPaneHistoryJumpMessageId: (paneId: string, messageId: string | null) => void;
   setPanePendingQuote: (paneId: string, payload: ChatPane["pendingQuote"]) => void;
+  upsertScratchChat: (
+    paneId: string,
+    draft: ScratchChatDraft
+  ) => { chatId: string; reused: boolean };
+  setScratchChatFloating: (paneId: string, chatId: string, floating: boolean) => void;
+  closeScratchChat: (paneId: string, chatId: string) => string[];
+  restoreParkedScratchChat: (paneId: string, chatId: string) => string;
+  dismissParkedScratchChat: (paneId: string, chatId: string) => string;
+  deleteScratchChat: (paneId: string, chatId: string) => string;
+  promoteScratchChat: (paneId: string, chatId: string) => string;
+  clearHostScratchChats: (paneId: string, hostSessionId: string) => string[];
+  patchScratchChat: (paneId: string, chatId: string, patch: Partial<ScratchChat>) => void;
   togglePaneHistory: (paneId: string) => void;
   togglePaneMemoryGraph: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
@@ -897,8 +1024,9 @@ type AppState = {
   mergeLastMessageByRole: (role: MsgRole, patch: Partial<Message>) => boolean;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
-  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
+  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string; avatarSessionId?: string; kind?: SubAgent["kind"] }) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
+  setReportPendingSessions: (sessionIds: string[]) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
   removeSubAgent: (id: string) => void;
   setSelectedSubAgent: (id: string | null) => void;
@@ -934,6 +1062,7 @@ type AppState = {
   closeTokenDashboard: () => void;
   openCollabRooms: () => void;
   closeCollabRooms: () => void;
+  setActiveCollabRoomId: (id: string | null) => void;
   setTokenDashboardRange: (range: TokenDashboardRange) => void;
   setTokenDashboardCustomRange: (from: string, to: string) => void;
   openDeliveryPanel: (taskId?: string | null) => void;
@@ -973,6 +1102,8 @@ function makeDefaultPane(): ChatPane {
     sessionTokens: { ...EMPTY_SESSION_TOKENS },
     historySearchTerms: [],
     historyJumpMessageId: null,
+    scratchChats: [],
+    parkedScratchChats: [],
     loadingMessages: false,
     oldestLoadedIndex: 0,
     hasOlderMessages: false,
@@ -1008,6 +1139,22 @@ const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
+const NEAR_STYLE_SEEDS_KEY = "agx-near-style-seeds";
+const USER_CUBE_COLORWAY_KEY = "agx-user-cube-colorway";
+
+function loadNearSeedsByStyle(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(NEAR_STYLE_SEEDS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
 const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
 const SESSION_TOKEN_CACHE_KEY = "agx-session-token-cache-v1";
 
@@ -1062,10 +1209,20 @@ function loadUserPreference(): string {
   return "";
 }
 
+function loadUserCubeColorwayId(): string {
+  try {
+    const saved = window.localStorage.getItem(USER_CUBE_COLORWAY_KEY);
+    if (typeof saved === "string" && isUserCubeColorwayId(saved)) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return BRAND_CUBE_COLORWAY_ID;
+}
+
 function loadUserAvatarUrl(): string {
   try {
     const saved = window.localStorage.getItem(USER_AVATAR_URL_KEY);
-    if (typeof saved === "string") return saved;
+    if (isPersistedUserAvatarUrl(saved)) return String(saved).trim();
   } catch {
     // ignore storage errors
   }
@@ -1075,11 +1232,11 @@ function loadUserAvatarUrl(): string {
 function loadMetaAvatarUrl(): string {
   try {
     const saved = window.localStorage.getItem(META_AVATAR_URL_KEY);
-    if (typeof saved === "string") return saved;
+    if (typeof saved === "string" && saved.trim()) return saved;
   } catch {
     // ignore storage errors
   }
-  return "";
+  return resolveMetaAvatarFromColorway(loadUserCubeColorwayId());
 }
 
 export type SessionTokens = {
@@ -1194,6 +1351,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
+  userCubeColorwayId: loadUserCubeColorwayId(),
+  collectionPortraitStyle: loadCollectionPortraitStyle(),
+  nearSeedsByStyle: loadNearSeedsByStyle(),
   userPreference: loadUserPreference(),
   attachmentRouting: ATTACHMENT_ROUTING_OFF,
   attachmentRoutingLock: null,
@@ -1245,6 +1405,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionCatalogRevision: 0,
   bumpSessionCatalogRevision: () =>
     set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),
+  hiddenScratchSessionIds: [],
+  rememberHiddenScratchSessionIds: (sessionIds) => {
+    const incoming = [...sessionIds].map((id) => String(id ?? "").trim()).filter(Boolean);
+    if (incoming.length === 0) return;
+    set((state) => ({
+      hiddenScratchSessionIds: rememberScratchSessionIds(state.hiddenScratchSessionIds, incoming),
+    }));
+  },
+  forgetHiddenScratchSessionIds: (sessionIds) => {
+    const incoming = [...sessionIds].map((id) => String(id ?? "").trim()).filter(Boolean);
+    if (incoming.length === 0) return;
+    set((state) => ({
+      hiddenScratchSessionIds: forgetScratchSessionIds(state.hiddenScratchSessionIds, incoming),
+    }));
+  },
   sessionHistoryHints: {},
   markSessionHistoryActive: (sessionId) => {
     const sid = String(sessionId ?? "").trim();
@@ -1269,6 +1444,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   forwardAutoReply: null,
   subAgents: [],
+  reportPendingSessionIds: [],
   selectedSubAgent: null,
   codePreview: "",
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
@@ -1282,7 +1458,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {}, focusSeq: 0 },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
-  collabRooms: { open: false },
+  collabRooms: { open: false, activeRoomId: null },
   deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
@@ -1514,6 +1690,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { userAvatarUrl: next };
     }),
+  setUserCubeColorwayId: (colorwayId) =>
+    set(() => {
+      const next = isUserCubeColorwayId(colorwayId) ? colorwayId : BRAND_CUBE_COLORWAY_ID;
+      const avatarUrl = resolveMetaAvatarFromColorway(next);
+      try {
+        if (next === BRAND_CUBE_COLORWAY_ID) {
+          window.localStorage.removeItem(USER_CUBE_COLORWAY_KEY);
+          window.localStorage.removeItem(META_AVATAR_URL_KEY);
+        } else {
+          window.localStorage.setItem(USER_CUBE_COLORWAY_KEY, next);
+          window.localStorage.setItem(META_AVATAR_URL_KEY, avatarUrl);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return { userCubeColorwayId: next, metaAvatarUrl: avatarUrl };
+    }),
+  setCollectionPortraitStyle: (style) =>
+    set(() => {
+      const next = style || CUBE_PORTRAIT_STYLE;
+      writeCollectionPortraitStyle(next);
+      return { collectionPortraitStyle: next };
+    }),
+  setNearStyleSeed: (style, seed) =>
+    set((state) => {
+      const next = { ...state.nearSeedsByStyle, [style]: seed };
+      try {
+        window.localStorage.setItem(NEAR_STYLE_SEEDS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return { nearSeedsByStyle: next };
+    }),
   setUserPreference: (pref) =>
     set(() => {
       const next = String(pref ?? "").slice(0, 500);
@@ -1713,24 +1922,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
-  pendingMessages: {},
+  pendingMessages: loadPendingMessageQueues(),
+  pendingMessagesPersistenceFailed: false,
   enqueuePaneMessage: (paneId, msg) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: [...(state.pendingMessages[paneId] ?? []), msg],
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   dequeuePaneMessage: (paneId) => {
     const queue = get().pendingMessages[paneId];
     if (!queue?.length) return undefined;
     const first = queue[0];
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).slice(1),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return first;
   },
   dequeuePaneMessageForSession: (paneId, sessionId) => {
@@ -1740,49 +1960,74 @@ export const useAppStore = create<AppState>((set, get) => ({
     const idx = queue.findIndex((m) => String(m.sessionId ?? "").trim() === sid);
     if (idx < 0) return undefined;
     const item = queue[idx];
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((_, i) => i !== idx),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return item;
   },
   takePendingMessage: (paneId, msgId) => {
     const queue = get().pendingMessages[paneId] ?? [];
     const item = queue.find((m) => m.id === msgId);
     if (!item) return undefined;
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
-      },
-    }));
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    });
     return item;
   },
   removePendingMessage: (paneId, msgId) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   editPendingMessage: (paneId, msgId, newText) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: (state.pendingMessages[paneId] ?? []).map((m) =>
           m.id === msgId ? { ...m, text: newText } : m
         ),
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   clearPendingMessages: (paneId) =>
-    set((state) => ({
-      pendingMessages: {
+    set((state) => {
+      const pendingMessages = {
         ...state.pendingMessages,
         [paneId]: [],
-      },
-    })),
+      };
+      return {
+        pendingMessages,
+        pendingMessagesPersistenceFailed:
+          typeof window !== "undefined" && !savePendingMessageQueues(pendingMessages),
+      };
+    }),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
     set((state) => {
@@ -1832,6 +2077,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessionTokens: { ...EMPTY_SESSION_TOKENS },
           historySearchTerms: [],
           historyJumpMessageId: null,
+          scratchChats: [],
+          parkedScratchChats: [],
         },
       ],
       activePaneId: paneId,
@@ -1917,6 +2164,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePaneId: state.activePaneId === preview.id ? paneId : state.activePaneId,
     }));
     return paneId;
+  },
+  resetSolePaneToMetaHome: () => {
+    const fresh = makeDefaultPane();
+    set({
+      panes: [fresh],
+      activePaneId: fresh.id,
+      activeAvatarId: null,
+      mainView: "chat",
+    });
+    return fresh.id;
   },
   removePane: (paneId) =>
     set((state) => {
@@ -2140,13 +2397,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     return cancelledCount;
   },
-  updateLastPaneMessage: (paneId, content) =>
+  updateLastPaneMessage: (paneId, content, ownerSessionId) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
         if (pane.messages.length === 0) return pane;
+        const owner = String(ownerSessionId ?? "").trim();
         const msgs = [...pane.messages];
-        msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content };
+        const idx = findLastOwnedMessageIndex(msgs, "assistant", owner);
+        if (idx < 0) return pane;
+        msgs[idx] = { ...msgs[idx], content };
         return { ...pane, messages: msgs };
       }),
     })),
@@ -2198,19 +2458,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
     }));
   },
-  mergeLastPaneMessageByRole: (paneId, role, patch) => {
+  mergeLastPaneMessageByRole: (paneId, role, patch, ownerSessionId) => {
     let found = false;
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
+        const owner = String(ownerSessionId ?? "").trim();
         const msgs = [...pane.messages];
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === role && !msgs[i].systemNotice) {
-            msgs[i] = { ...msgs[i], ...patch };
-            found = true;
-            break;
-          }
-        }
+        const idx = findLastOwnedMessageIndex(msgs, role, owner);
+        if (idx < 0) return pane;
+        msgs[idx] = { ...msgs[idx], ...patch };
+        found = true;
         return { ...pane, messages: msgs };
       }),
     }));
@@ -2303,7 +2561,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Switching to a *different* non-empty session clears the previous
         // session's messages here so no async path (history switch, 404
         // migration, binding re-bind, automation reuse, etc.) can leave a stale
-        // pane that visually merges two sessions. Callers that immediately
+        // pane that visually merges two sessions. The workspace chrome follows
+        // the same switch: close the panel so the previous session's file /
+        // terminal view does not stay on screen. Callers that immediately
         // re-apply messages (cache hit / reload) still work — React batches the
         // follow-up setPaneMessages within the same tick. This centralizes the
         // "one pane shows exactly one session" invariant instead of relying on
@@ -2319,10 +2579,26 @@ export const useAppStore = create<AppState>((set, get) => ({
             : prevTrimmed === nextTrimmed
               ? normalizeSessionTokens(p.sessionTokens)
               : { ...EMPTY_SESSION_TOKENS };
+        const blocked = scratchHistoryBlocklist(
+          state.panes,
+          state.hiddenScratchSessionIds,
+        );
+        const shouldAttachHost = Boolean(nextTrimmed) && !blocked.has(nextTrimmed);
         return {
           ...p,
           sessionId,
           sessionTokens: baseTokens,
+          scratchChats: shouldAttachHost
+            ? attachUnhostedScratchChats(p.scratchChats ?? [], nextTrimmed)
+            : p.scratchChats,
+          parkedScratchChats: shouldAttachHost
+            ? attachUnhostedScratchChats(p.parkedScratchChats ?? [], nextTrimmed)
+            : p.parkedScratchChats,
+          taskspacePanelOpen: nextTaskspacePanelOpenOnSessionBind({
+            prevSessionId: prevTrimmed,
+            nextSessionId: nextTrimmed,
+            currentlyOpen: !!p.taskspacePanelOpen,
+          }),
           ...(isSwitchToDifferentSession
             ? {
                 messages: [],
@@ -2484,6 +2760,175 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, pendingQuote: payload ?? null } : pane
       ),
     })),
+  upsertScratchChat: (paneId, draft) => {
+    let chatId = "";
+    let reused = false;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = upsertScratchChatList(
+          pane.scratchChats ?? [],
+          draft,
+          uid(),
+          pane.parkedScratchChats ?? [],
+          String(pane.sessionId ?? "").trim(),
+        );
+        chatId = next.chat.id;
+        reused = next.reused;
+        return { ...pane, scratchChats: next.chats, parkedScratchChats: next.parked };
+      }),
+    }));
+    return { chatId, reused };
+  },
+  setScratchChatFloating: (paneId, chatId, floating) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, scratchChats: setScratchFloating(pane.scratchChats ?? [], chatId, floating) }
+          : pane
+      ),
+    })),
+  closeScratchChat: (paneId, chatId) => {
+    const evictedIds: string[] = [];
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const closing = pane?.scratchChats?.find((chat) => chat.id === chatId);
+      const result = closeOrParkScratchChat(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      for (const item of result.evicted) {
+        const sid = String(item.sessionId ?? "").trim();
+        if (sid) evictedIds.push(sid);
+      }
+      const sid = String(closing?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: rememberScratchSessionIds(
+          state.hiddenScratchSessionIds,
+          [sid, ...evictedIds],
+        ),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: result.open, parkedScratchChats: result.parked }
+            : item
+        ),
+      };
+    });
+    return evictedIds;
+  },
+  restoreParkedScratchChat: (paneId, chatId) => {
+    let restoredId = "";
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = restoreParkedScratchChatList(pane.scratchChats ?? [], pane.parkedScratchChats ?? [], chatId);
+        restoredId = next.chat?.id ?? "";
+        return { ...pane, scratchChats: next.open, parkedScratchChats: next.parked };
+      }),
+    }));
+    return restoredId;
+  },
+  dismissParkedScratchChat: (paneId, chatId) => {
+    let removedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = dismissParkedScratchChatList(pane?.parkedScratchChats ?? [], chatId);
+      removedSid = String(next.removed?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: removedSid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [removedSid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((item) =>
+          item.id === paneId ? { ...item, parkedScratchChats: next.parked } : item
+        ),
+      };
+    });
+    return removedSid;
+  },
+  deleteScratchChat: (paneId, chatId) => {
+    let removedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = deleteScratchChatFromLists(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      removedSid = String(next.removed?.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: removedSid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [removedSid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return removedSid;
+  },
+  promoteScratchChat: (paneId, chatId) => {
+    let promotedSid = "";
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = deleteScratchChatFromLists(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        chatId,
+      );
+      promotedSid = String(next.removed?.sessionId ?? "").trim();
+      if (!promotedSid) return state;
+      return {
+        hiddenScratchSessionIds: forgetScratchSessionIds(state.hiddenScratchSessionIds, [promotedSid]),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return promotedSid;
+  },
+  clearHostScratchChats: (paneId, hostSessionId) => {
+    const removedIds: string[] = [];
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      const next = clearScratchChatsForHost(
+        pane?.scratchChats ?? [],
+        pane?.parkedScratchChats ?? [],
+        hostSessionId,
+      );
+      for (const item of next.removed) {
+        const sid = String(item.sessionId ?? "").trim();
+        if (sid) removedIds.push(sid);
+      }
+      return {
+        hiddenScratchSessionIds: rememberScratchSessionIds(state.hiddenScratchSessionIds, removedIds),
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? { ...item, scratchChats: next.open, parkedScratchChats: next.parked }
+            : item
+        ),
+      };
+    });
+    return removedIds;
+  },
+  patchScratchChat: (paneId, chatId, patch) =>
+    set((state) => {
+      const sid = String(patch.sessionId ?? "").trim();
+      return {
+        hiddenScratchSessionIds: sid
+          ? rememberScratchSessionIds(state.hiddenScratchSessionIds, [sid])
+          : state.hiddenScratchSessionIds,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? { ...pane, scratchChats: patchScratchChatList(pane.scratchChats ?? [], chatId, patch) }
+            : pane
+        ),
+      };
+    }),
   togglePaneHistory: (paneId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -2741,6 +3186,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === state.activePaneId ? { ...pane, messages: [] } : pane
       ),
     })),
+  setReportPendingSessions: (sessionIds) =>
+    set((state) => {
+      const next = Array.from(new Set(sessionIds.map((id) => id.trim()).filter(Boolean))).sort();
+      const prev = state.reportPendingSessionIds;
+      if (prev.length === next.length && prev.every((id, i) => id === next[i])) return state;
+      return { reportPendingSessionIds: next };
+    }),
   addSubAgent: (item) =>
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);
@@ -2851,10 +3303,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   closeCollabRooms: () => {
     set((state) => ({
-      collabRooms: { ...state.collabRooms, open: false },
+      collabRooms: { ...state.collabRooms, open: false, activeRoomId: null },
     }));
     get().returnToPreviousChat();
   },
+  setActiveCollabRoomId: (id) =>
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, activeRoomId: id ?? null },
+    })),
   setTokenDashboardRange: (range) =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, range },

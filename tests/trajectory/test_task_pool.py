@@ -183,10 +183,10 @@ def test_real_pool_split_no_overlap():
     """真实数据: 池任务与 TB held-out 零交集（前缀隔离）。"""
     pool_path = task_pool.__dict__.get("Path")  # noqa: F841 仅为引用模块
     from agenticx.learning.trajectory.task_split import load_pool_tasks
-    split = load_split()
     pool = load_pool_tasks()
     if not pool:
         pytest.skip("datasets/task_pool.json 未生成")
+    split = load_split()  # 依赖 datasets/task_split.json（运行时产出，不入库）
     overlap = pool & set(split["heldout"]) & set(split["train"])
     assert not overlap
     assert all(t.startswith(("code-", "cyber-", "general-")) for t in pool)

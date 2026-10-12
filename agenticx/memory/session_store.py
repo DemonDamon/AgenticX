@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -15,6 +16,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_log = logging.getLogger(__name__)
+
 
 def default_session_db_path() -> Path:
     """会话库位置，按**调用时**的 HOME 解析。
@@ -46,6 +50,20 @@ def _encode_scratchpad_value(value: Any) -> str:
     """Encode one scratchpad value without losing JSON-compatible types."""
     payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return f"{_SCRATCHPAD_JSON_PREFIX}{payload}"
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """``with conn:`` commits/rolls back AND closes.
+
+    The stock context manager only ends the transaction, so every
+    ``with self._connect()`` used to leak an open handle until GC.
+    """
+
+    def __exit__(self, exc_type, exc, tb):  # type: ignore[override]
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
 
 
 def _decode_scratchpad_value(raw: str) -> Any:
@@ -111,7 +129,7 @@ class SessionStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, factory=_ClosingConnection)
         conn.row_factory = sqlite3.Row
         # busy_timeout is connection-scoped and must be set on every connection.
         # Under WAL this lets a reader briefly wait out a concurrent writer's
@@ -335,6 +353,18 @@ class SessionStore:
             ).fetchall()
             return {
                 str(row["key"]): _decode_scratchpad_value(str(row["value"]))
+                for row in rows
+            }
+
+    def _session_ids_with_scratchpad_key_sync(self, key: str) -> Dict[str, Any]:
+        """``{session_id: decoded value}`` for every session holding ``key`` (one query)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id, value FROM scratchpad WHERE key = ?",
+                (key,),
+            ).fetchall()
+            return {
+                str(row["session_id"]): _decode_scratchpad_value(str(row["value"]))
                 for row in rows
             }
 
@@ -576,14 +606,33 @@ class SessionStore:
             ts = self._message_timestamp(msg)
             rows.append((sid, role, text, ts, now))
         with self._connect() as conn:
-            conn.execute("DELETE FROM session_messages WHERE session_id = ?", (sid,))
-            if rows:
+            # Persist runs every few seconds while a turn is live and chat_history
+            # only grows at the tail. Rewriting the whole session re-tokenized every
+            # message through the FTS triggers and left tombstones (fts_data grew to
+            # ~46x the message text). Only rewrite rows after the unchanged prefix.
+            existing = conn.execute(
+                "SELECT id, role, content, timestamp FROM session_messages "
+                "WHERE session_id = ? ORDER BY id",
+                (sid,),
+            ).fetchall()
+            keep = 0
+            limit = min(len(existing), len(rows))
+            while keep < limit:
+                old = existing[keep]
+                new = rows[keep]
+                if (old["role"], old["content"], old["timestamp"]) != (new[1], new[2], new[3]):
+                    break
+                keep += 1
+            stale_ids = [(old["id"],) for old in existing[keep:]]
+            if stale_ids:
+                conn.executemany("DELETE FROM session_messages WHERE id = ?", stale_ids)
+            if rows[keep:]:
                 conn.executemany(
                     """
                     INSERT INTO session_messages (session_id, role, content, timestamp, indexed_at)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    rows,
+                    rows[keep:],
                 )
             conn.commit()
         return len(rows)
@@ -775,7 +824,36 @@ class SessionStore:
                 indexed += 1
             except Exception:
                 errors += 1
-        return {"indexed": indexed, "skipped": skipped, "errors": errors}
+        result: Dict[str, Any] = {"indexed": indexed, "skipped": skipped, "errors": errors}
+        if not overwrite and self._repair_fts_index_if_inconsistent_sync():
+            result["fts_rebuilt"] = True
+        return result
+
+    def _repair_fts_index_if_inconsistent_sync(self) -> bool:
+        """Rebuild the FTS index from session_messages when it no longer matches.
+
+        Orphaned index entries never get purged by later deletes, so the index
+        silently grows (a ~20 MB message table carried a 922 MB index).
+        """
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO session_messages_fts(session_messages_fts, rank) "
+                    "VALUES('integrity-check', 1)"
+                )
+            return False
+        except sqlite3.DatabaseError:
+            pass
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO session_messages_fts(session_messages_fts) VALUES('rebuild')"
+                )
+            _log.warning("[session_fts] index was inconsistent with session_messages; rebuilt")
+            return True
+        except sqlite3.DatabaseError as exc:
+            _log.warning("[session_fts] index rebuild failed: %s", exc)
+            return False
 
     def _mark_backfilled_sync(self, session_id: str, when: str) -> None:
         sid = str(session_id or "").strip()

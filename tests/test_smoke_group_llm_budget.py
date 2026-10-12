@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agenticx.llms.typesafe_config import TypesafeSettings
 from agenticx.runtime.group_context import GroupChatContext
 from agenticx.runtime.group_router import (
     GroupChatRouter,
@@ -21,6 +22,15 @@ from agenticx.runtime.harden_flags import (
     group_intent_max_tokens,
     group_meta_reply_max_tokens,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_typesafe_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.runtime.group_router.load_typesafe_settings",
+        lambda: TypesafeSettings(),
+    )
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _GROUP_ROUTER_PATH = _REPO_ROOT / "agenticx" / "runtime" / "group_router.py"

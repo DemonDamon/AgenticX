@@ -15,6 +15,7 @@ try:  # sandbox may block SSL when importing litellm/requests
     from .qianfan_provider import QianfanProvider
     from .minimax_provider import MiniMaxProvider
     from .deepseek_provider import DeepSeekProvider
+    from .mimo_provider import MimoProvider
     from .provider_resolver import ProviderResolver
 except Exception:  # pragma: no cover
     LiteLLMProvider = None  # type: ignore
@@ -25,6 +26,7 @@ except Exception:  # pragma: no cover
     QianfanProvider = None  # type: ignore
     MiniMaxProvider = None  # type: ignore
     DeepSeekProvider = None  # type: ignore
+    MimoProvider = None  # type: ignore
     ProviderResolver = None  # type: ignore
 
 from agenticx.llms.failover import FailoverProvider
@@ -107,6 +109,7 @@ __all__ = [
     "QianfanProvider",
     "MiniMaxProvider",
     "DeepSeekProvider",
+    "MimoProvider",
     "ProviderResolver",
     "LlmFactory",
 

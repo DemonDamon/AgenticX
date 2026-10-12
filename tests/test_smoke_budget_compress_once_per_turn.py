@@ -10,7 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agenticx.runtime.agent_runtime import AgentRuntime
+from agenticx.runtime.agent_runtime import (
+    AgentRuntime,
+    _should_surface_budget_compression_notice,
+)
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 
 
@@ -72,3 +75,9 @@ def test_run_turn_resets_budget_compress_latches() -> None:
     runtime._budget_compress_notice_sent_this_turn = False
     assert runtime._forced_budget_compact_this_turn is False
     assert runtime._budget_compress_notice_sent_this_turn is False
+
+
+def test_turn_budget_compression_is_silent_but_session_budget_is_visible() -> None:
+    """Only session-level budget pressure should surface a user-facing notice."""
+    assert _should_surface_budget_compression_notice("turn") is False
+    assert _should_surface_budget_compression_notice("session") is True

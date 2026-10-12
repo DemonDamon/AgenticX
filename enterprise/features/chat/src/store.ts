@@ -103,6 +103,7 @@ type SendMessageInput = {
   userId?: string;
   webSearch?: boolean;
   deepResearch?: boolean;
+  skillId?: string;
 };
 
 type SendMessageOptions = {
@@ -176,6 +177,8 @@ export type ChatStoreState = {
   lastWebSearchBySessionId: Record<string, boolean>;
   /** Last composer deep-research toggle per session (retry / regenerate / queue). */
   lastDeepResearchBySessionId: Record<string, boolean>;
+  /** Enterprise skill id bound to a session until cleared. */
+  lastSkillIdBySessionId: Record<string, string>;
   /** 主输入正在改计划（resume HTTP 进行中）——输入区显示发送中，而非假 idle。 */
   planChatRevising: boolean;
 };
@@ -326,6 +329,7 @@ function toSdkRequest(
   webSearch?: boolean,
   deepResearch?: boolean,
   interactionPref: string = "auto",
+  skillId?: string,
 ): SdkChatRequest {
   return {
     sessionId,
@@ -355,6 +359,7 @@ function toSdkRequest(
       };
     }),
     ...(webSearch ? { webSearch: true } : {}),
+    ...(skillId ? { skillId } : {}),
     ...(deepResearch ? { deepResearch: true } : {}),
     ...(deepResearch && interactionPref !== "auto"
       ? { deepResearchInteraction: interactionPref }
@@ -938,6 +943,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamStateBySessionId: {},
   lastWebSearchBySessionId: {},
   lastDeepResearchBySessionId: {},
+  lastSkillIdBySessionId: {},
   planChatRevising: false,
 
   setHistoryPrincipal(principal) {
@@ -1790,6 +1796,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ...prev.lastWebSearchBySessionId,
         [sessionId]: webSearchEnabled,
       },
+      lastSkillIdBySessionId: {
+        ...prev.lastSkillIdBySessionId,
+        ...(Object.prototype.hasOwnProperty.call(input, "skillId")
+          ? { [sessionId]: input.skillId?.trim() ?? "" }
+          : {}),
+      },
       lastDeepResearchBySessionId: {
         ...prev.lastDeepResearchBySessionId,
         [sessionId]: deepResearchEnabled,
@@ -1851,6 +1863,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         webSearchEnabled,
         deepResearchEnabled,
         getDeepResearchInteractionPref(),
+        get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -2115,6 +2128,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         Boolean(state.lastWebSearchBySessionId[sessionId]),
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
         getDeepResearchInteractionPref(),
+        get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -2345,6 +2359,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         Boolean(state.lastWebSearchBySessionId[sessionId]),
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
         getDeepResearchInteractionPref(),
+        get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });

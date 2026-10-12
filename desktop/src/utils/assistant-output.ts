@@ -419,6 +419,16 @@ export function normalizeFinalAssistantPayload(
   };
 }
 
+/** True when the next terminal body is the same public answer already shown. */
+export function shouldReuseLastAssistantRow(
+  lastAssistantContent: string | undefined,
+  nextBody: string,
+): boolean {
+  const last = assistantVisibleBodyForUi(String(lastAssistantContent ?? "")).trim();
+  const next = assistantVisibleBodyForUi(String(nextBody ?? "")).trim();
+  return Boolean(last) && last === next;
+}
+
 /** Build a merge patch for an already-committed assistant bubble after FINAL. */
 export function buildCommittedAssistantPatch(
   content: string,

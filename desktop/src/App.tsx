@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
+import { buildClarifyRequestBody } from "./utils/clarification-notice";
+import { shouldDeferAutoReport, shouldNotifySubagentCompletion } from "./utils/auto-report-gate";
+import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
@@ -12,6 +16,8 @@ import { PaneManager } from "./components/PaneManager";
 import { AvatarGalleryView } from "./components/gallery/AvatarGalleryView";
 import { ProjectsView } from "./components/groups/ProjectsView";
 import { AutomationView } from "./components/automation/AutomationView";
+import { WikiBrowseView } from "./components/wiki/WikiBrowseView";
+import { MarketplaceView } from "./components/marketplace/MarketplaceView";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
@@ -23,6 +29,16 @@ import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/sess
 import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
 import { i18n } from "./i18n/i18n";
+import { announceDesktopTaskComplete, isDesktopWindowFocusedAndVisible } from "./utils/desktop-task-notify";
+import {
+  collectScratchSessionIds,
+  mergeHiddenScratchSessionIdsForPersist,
+  normalizePersistedScratchChats,
+  rememberScratchSessionIds,
+  scratchHistoryBlocklist,
+  normalizePersistedScratchSessionIds,
+  type ScratchChat,
+} from "./utils/scratch-chat";
 import { LOCALE_STORAGE_KEY, isAppLocale } from "./i18n/locales";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
@@ -45,7 +61,9 @@ import {
   workspaceFromConfirmContext,
 } from "./utils/confirm-scope";
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
+import { ensureBrowserAgentIpc } from "./components/work-panel/browser-agent-registry";
 import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
+import { notifySidebarSessionCatalogChangedForAutomationProgress } from "./utils/sidebar-session-history";
 import {
   coerceSelectableModel,
   isModelSelectable,
@@ -92,12 +110,15 @@ type PersistedPaneState = {
   };
   turnIntent?: "default" | "plan" | "isolate";
   isolateActive?: boolean;
+  scratchChats?: ScratchChat[];
+  parkedScratchChats?: ScratchChat[];
 };
 
 type PersistedWorkspaceState = {
   sessionId: string;
   activePaneId: string;
   panes: PersistedPaneState[];
+  hiddenScratchSessionIds: string[];
 };
 
 function toProviderEntries(
@@ -227,11 +248,21 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         },
         turnIntent: normalizeTurnIntent(row.turnIntent),
         isolateActive: row.isolateActive === true,
+        scratchChats: normalizePersistedScratchChats(row.scratchChats),
+        parkedScratchChats: normalizePersistedScratchChats(row.parkedScratchChats),
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
   if (panes.length === 0) return null;
-  return { sessionId, activePaneId, panes };
+  return {
+    sessionId,
+    activePaneId,
+    panes,
+    hiddenScratchSessionIds: rememberScratchSessionIds(
+      normalizePersistedScratchSessionIds(obj.hiddenScratchSessionIds),
+      collectScratchSessionIds(panes),
+    ),
+  };
 }
 
 type SessionListItem = {
@@ -253,12 +284,17 @@ function isSessionItemMatchingAvatar(item: SessionListItem, avatarId?: string | 
 
 function pickMostRecentSessionId(
   sessions: SessionListItem[],
-  avatarId?: string | null
+  avatarId?: string | null,
+  blockedIds?: Iterable<string>,
 ): string | undefined {
+  const blocked = new Set(
+    [...(blockedIds ?? [])].map((id) => String(id ?? "").trim()).filter(Boolean)
+  );
   const sorted = [...sessions]
     .filter((item) => {
       const sid = String(item.session_id ?? "").trim();
       if (!sid) return false;
+      if (blocked.has(sid)) return false;
       if (item.archived === true) return false;
       return isSessionItemMatchingAvatar(item, avatarId);
     })
@@ -301,6 +337,7 @@ export function App() {
   const sessionId = useAppStore((s) => s.sessionId);
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
+  const hiddenScratchSessionIds = useAppStore((s) => s.hiddenScratchSessionIds);
   const confirm = useAppStore((s) => s.confirm);
   const clarification = useAppStore((s) => s.clarification);
   const settings = useAppStore((s) => s.settings);
@@ -381,6 +418,7 @@ export function App() {
     sessionId: string;
     status: "completed" | "failed" | "paused";
     attempts?: number;
+    queuedAt?: number;
   }>>([]);
   const autoReportingRef = useRef(false);
   const directNoticeSentRef = useRef<Set<string>>(new Set());
@@ -417,8 +455,86 @@ export function App() {
     const activePane = panes.find((pane) => pane.id === activePaneId);
     const sid = String(activePane?.sessionId ?? "").trim();
     if (!sid) return;
+    const blocked = scratchHistoryBlocklist(panes, hiddenScratchSessionIds);
+    if (blocked.has(sid)) return;
     rememberSessionForAvatar(activePane?.avatarId ?? null, sid);
-  }, [activePaneId, panes]);
+  }, [activePaneId, panes, hiddenScratchSessionIds]);
+  useEffect(() => {
+    const blocked = scratchHistoryBlocklist(panes, hiddenScratchSessionIds);
+    if (blocked.size === 0) return;
+    for (const pane of panes) {
+      const sid = String(pane.sessionId ?? "").trim();
+      if (sid && blocked.has(sid)) {
+        setPaneSessionId(pane.id, "");
+      }
+    }
+  }, [panes, hiddenScratchSessionIds, setPaneSessionId]);
+  useEffect(() => {
+    ensureBrowserAgentIpc();
+  }, []);
+  useEffect(() => {
+    const desktop = window.agenticxDesktop;
+    if (!desktop?.toggleWindowZoom) return;
+    const interactive = "button, a, input, textarea, select, label, [role='button'], [data-no-window-zoom]";
+    const chrome = ".agx-pane-toolbar, .agx-sidebar-topbar, .agx-topbar, .drag-region";
+    const isChrome = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      if (document.documentElement.dataset.platform === "win32") return false;
+      if (target.closest(".agx-voice-focus-root")) return false;
+      if (target.closest(interactive)) return false;
+      return Boolean(target.closest(chrome));
+    };
+    const onDblClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (document.documentElement.dataset.platform === "win32") return;
+      if (target instanceof Element && target.classList.contains("agx-chatpane")) {
+        const top = event.clientY - target.getBoundingClientRect().top;
+        if (top > 12) return;
+        event.preventDefault();
+        void desktop.toggleWindowZoom();
+        return;
+      }
+      if (!isChrome(target)) return;
+      event.preventDefault();
+      void desktop.toggleWindowZoom();
+    };
+    let dragging = false;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("[data-window-zoom]")) return;
+      if (target.closest(interactive)) return;
+      const startX = event.screenX;
+      const startY = event.screenY;
+      dragging = false;
+      const onMove = (ev: PointerEvent) => {
+        if (dragging) return;
+        if (Math.hypot(ev.screenX - startX, ev.screenY - startY) < 4) return;
+        dragging = true;
+        void desktop.windowDragStart?.();
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", onUp, true);
+        window.removeEventListener("pointercancel", onUp, true);
+        if (dragging) {
+          dragging = false;
+          void desktop.windowDragEnd?.();
+        }
+      };
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", onUp, true);
+      window.addEventListener("pointercancel", onUp, true);
+    };
+    window.addEventListener("dblclick", onDblClick, true);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("dblclick", onDblClick, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      if (dragging) void desktop.windowDragEnd?.();
+    };
+  }, []);
   const resolvePaneForSession = useCallback((sid: string, fallbackAgentId?: string) => {
     const store = useAppStore.getState();
     let pane = store.panes.find((p) => p.sessionId === sid);
@@ -580,6 +696,26 @@ export function App() {
 
       setConfigLoaded(true);
 
+      const revealMainWindow = async () => {
+        if (startupRendererReadyRef.current) return;
+        startupRendererReadyRef.current = true;
+        try {
+          await window.agenticxDesktop.startupRendererReady();
+        } catch (err) {
+          console.warn("[App init] startupRendererReady failed:", err);
+          startupRendererReadyRef.current = false;
+        }
+      };
+
+      // Close the glass splash on the first real paint. Waiting for core
+      // preload used to leave an always-on-top transparent pane that ate
+      // clicks while other apps showed through.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void revealMainWindow();
+        });
+      });
+
       // Background: drop historically visible models that the current key cannot call
       // (gateway Model Auth). Must not block splash / startupRendererReady.
       void (async () => {
@@ -653,18 +789,10 @@ export function App() {
         }
       })();
 
-      // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息，再关 splash 进主窗。
+      // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息。
+      // 主窗已在首帧露出；这里只补数据，不再挡住启动页关闭。
       await runSplashCorePreload();
-
-      if (!startupRendererReadyRef.current) {
-        startupRendererReadyRef.current = true;
-        try {
-          await window.agenticxDesktop.startupRendererReady();
-        } catch (err) {
-          console.warn("[App init] startupRendererReady failed:", err);
-          startupRendererReadyRef.current = false;
-        }
-      }
+      await revealMainWindow();
 
       // Fallback when splash preload did not populate avatars (timeout / disabled).
       if (useAppStore.getState().avatars.length === 0) {
@@ -697,10 +825,14 @@ export function App() {
       }
 
       let recovered = false;
+      let scratchBlocklist = new Set<string>();
       try {
         const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
         const saved = normalizePersistedWorkspaceState(parsed);
+        if (saved) {
+          scratchBlocklist = scratchHistoryBlocklist(saved.panes, saved.hiddenScratchSessionIds);
+        }
         const sessionsCache = new Map<string, SessionListItem[]>();
         const recentSidCache = new Map<string, string>();
         const getSessionsForAvatar = async (avatarId?: string | null): Promise<SessionListItem[]> => {
@@ -755,7 +887,7 @@ export function App() {
             recentSidCache.set(key, "");
             return undefined;
           }
-          const sid = pickMostRecentSessionId(rows, key || undefined);
+          const sid = pickMostRecentSessionId(rows, key || undefined, scratchBlocklist);
           recentSidCache.set(key, sid ?? "");
           return sid;
         };
@@ -769,6 +901,9 @@ export function App() {
               const lazyEligible = !isGroupPane && !isAutomationTaskPane;
 
               let wantedSid = String(pane.sessionId ?? "").trim();
+              if (wantedSid && scratchBlocklist.has(wantedSid)) {
+                wantedSid = "";
+              }
               if (wantedSid && !(await isSessionCompatible(wantedSid, pane.avatarId))) {
                 wantedSid = "";
               }
@@ -859,8 +994,14 @@ export function App() {
                 activeTerminalTabId: null,
                 turnIntent: normalizeTurnIntent(pane.turnIntent),
                 isolateActive: pane.isolateActive === true,
+                scratchChats: normalizePersistedScratchChats(pane.scratchChats),
+                parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
               })),
               activePaneId: nextActivePaneId,
+              hiddenScratchSessionIds: rememberScratchSessionIds(
+                saved.hiddenScratchSessionIds,
+                collectScratchSessionIds(hydratedPanes),
+              ),
             });
             // Re-apply sid bindings so store can restore per-session token cache
             // and seed the model from the newly-returned session.provider/model
@@ -919,7 +1060,7 @@ export function App() {
           try {
             const listed = await window.agenticxDesktop.listSessions();
             if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) return undefined;
-            return pickMostRecentSessionId(listed.sessions, null);
+            return pickMostRecentSessionId(listed.sessions, null, scratchBlocklist);
           } catch {
             return undefined;
           }
@@ -971,6 +1112,23 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
+
+  useEffect(() => {
+    const off = window.agenticxDesktop.onDesktopNotifyActivate?.((payload) => {
+      const paneId = String(payload.paneId ?? "").trim();
+      const sessionId = String(payload.sessionId ?? "").trim();
+      if (paneId) useAppStore.getState().setActivePaneId(paneId);
+      if (paneId && sessionId) {
+        const pane = useAppStore.getState().panes.find((p) => p.id === paneId);
+        if (pane && (pane.sessionId || "").trim() !== sessionId) {
+          useAppStore.getState().setPaneSessionId(paneId, sessionId);
+        }
+      }
+    });
+    return () => {
+      off?.();
+    };
+  }, []);
 
   useEffect(() => {
     const off = window.agenticxDesktop.onStudioReady(() => {
@@ -1068,14 +1226,30 @@ export function App() {
         sessionTokens: pane.sessionTokens,
         turnIntent: normalizeTurnIntent(pane.turnIntent),
         isolateActive: pane.isolateActive === true,
+        scratchChats: normalizePersistedScratchChats(pane.scratchChats),
+        parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
       })),
+      hiddenScratchSessionIds: mergeHiddenScratchSessionIdsForPersist(
+        (() => {
+          try {
+            const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (!parsed || typeof parsed !== "object") return [];
+            return (parsed as { hiddenScratchSessionIds?: unknown }).hiddenScratchSessionIds;
+          } catch {
+            return [];
+          }
+        })(),
+        hiddenScratchSessionIds,
+        panes,
+      ),
     };
     try {
       writeScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
       // ignore storage failures
     }
-  }, [sessionId, activePaneId, panes]);
+  }, [sessionId, activePaneId, panes, hiddenScratchSessionIds]);
 
   useEffect(() => {
     subAgentsRef.current = subAgents;
@@ -1126,6 +1300,9 @@ export function App() {
             model?: string;
             task?: string;
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+            delegation?: boolean;
+            kind?: string;
+            avatar_session_id?: string;
             result_summary?: string;
             result_file?: string;
             output_files?: string[];
@@ -1148,8 +1325,15 @@ export function App() {
           if (!id) continue;
           subAgentSessionRef.current[id] = sid;
 
-          const exists = subAgentsRef.current.some((sub) => sub.id === id);
-          if (!exists) {
+          const existing = subAgentsRef.current.find((sub) => sub.id === id);
+          const prevStatus = existing?.status;
+          const itemKind: "delegate" | "subagent" =
+            item.delegation === true || item.kind === "delegate" ? "delegate" : "subagent";
+          const itemAvatarSessionId =
+            typeof item.avatar_session_id === "string" && item.avatar_session_id.trim()
+              ? item.avatar_session_id.trim()
+              : undefined;
+          if (!existing) {
             addSubAgent({
               id,
               name: item.name ?? id,
@@ -1158,11 +1342,12 @@ export function App() {
               model: item.model ?? undefined,
               task: item.task ?? "",
               sessionId: sid,
+              avatarSessionId: itemAvatarSessionId,
+              kind: itemKind,
             });
           }
 
           const status = item.status ?? "running";
-          const existing = subAgentsRef.current.find((sub) => sub.id === id);
           const hasPendingConfirm = !!(item.pending_confirm?.request_id);
           const hasPendingClarification = !!(item.pending_clarification?.request_id);
           const effectiveStatus =
@@ -1243,6 +1428,8 @@ export function App() {
             currentAction,
             provider: item.provider ?? existing?.provider,
             model: item.model ?? existing?.model,
+            avatarSessionId: itemAvatarSessionId ?? existing?.avatarSessionId,
+            kind: itemKind,
             resultSummary: summaryText || undefined,
             resultFile,
             outputFiles,
@@ -1255,6 +1442,7 @@ export function App() {
             !completionNotifiedRef.current.has(id)
           ) {
             completionNotifiedRef.current.add(id);
+            if (shouldNotifySubagentCompletion(prevStatus, effectiveStatus)) {
             const agentName = item.name ?? id;
             const emoji = effectiveStatus === "completed" ? "✅" : effectiveStatus === "paused" ? "⏸" : "❌";
             const statusLabel =
@@ -1295,7 +1483,12 @@ export function App() {
                     ? "paused"
                     : "failed",
               attempts: 0,
+              queuedAt: Date.now(),
             });
+            useAppStore
+              .getState()
+              .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            }
           }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
@@ -1401,6 +1594,16 @@ export function App() {
     try {
       for (const [sid, items] of bySession) {
         const store = useAppStore.getState();
+        if (
+          shouldDeferAutoReport({
+            sessionId: sid,
+            subAgents: store.subAgents,
+            oldestQueuedAt: Math.min(...items.map((it) => it.queuedAt ?? Date.now())),
+            now: Date.now(),
+          })
+        ) {
+          continue;
+        }
         const matchingPane = resolvePaneForSession(sid, items[0]?.agentId);
         if (!matchingPane) {
           for (const it of items) retryAgentIds.add(it.agentId);
@@ -1430,11 +1633,11 @@ export function App() {
         const agentLines = items
           .map((it) => {
             const state = it.status === "completed" ? "已完成" : it.status === "paused" ? "已暂停" : "失败";
-            return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 300)}`;
+            return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 2000)}`;
           })
           .join("\n");
         const triggerMsg =
-          `[系统通知] 以下子智能体已结束或暂停（可能成功、失败或因限流/轮次触顶暂停），请立即向用户主动汇报：完成情况/暂停原因/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
+          `[系统通知] 以下子智能体已全部结束或暂停（可能成功、失败或因限流/轮次触顶暂停）。请结合用户最初的请求，直接完成其中尚未完成的后续步骤（例如汇总、对比、成稿），基于这些产出给出最终结果；不要只复述状态，也不要原样粘贴子智能体的输出。若有失败或暂停，说明原因并给出下一步建议；有产出文件请列出。\n${agentLines}`;
 
         const paneProvider = String(matchingPane.modelProvider ?? "").trim();
         const paneModel = String(matchingPane.modelName ?? "").trim();
@@ -1481,10 +1684,12 @@ export function App() {
                   full += tokenText;
                   const s = useAppStore.getState();
                   if (!placeholderAdded) {
-                    s.addPaneMessage(matchingPane.id, "assistant", full, "meta");
+                    s.addPaneMessage(matchingPane.id, "assistant", full, "meta", undefined, undefined, undefined, {
+                      ownerSessionId: sid,
+                    });
                     placeholderAdded = true;
                   } else {
-                    s.updateLastPaneMessage(matchingPane.id, full);
+                    s.updateLastPaneMessage(matchingPane.id, full, sid);
                   }
                 }
                 if (payload.type === "final") {
@@ -1493,9 +1698,11 @@ export function App() {
                     reportResponded = true;
                     const s = useAppStore.getState();
                     if (!placeholderAdded) {
-                      s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta");
+                      s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta", undefined, undefined, undefined, {
+                        ownerSessionId: sid,
+                      });
                     } else {
-                      s.updateLastPaneMessage(matchingPane.id, finalText);
+                      s.updateLastPaneMessage(matchingPane.id, finalText, sid);
                     }
                   }
                 }
@@ -1550,6 +1757,9 @@ export function App() {
       }
     } finally {
       autoReportingRef.current = false;
+      useAppStore
+        .getState()
+        .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
     }
   }, [apiBase, apiToken, resolvePaneForSession]);
 
@@ -1930,7 +2140,7 @@ export function App() {
   const onSubmitClarification = useCallback(
     async (
       requestId: string,
-      answer: { answerText: string; selectedOptions: string[] },
+      answer: ClarifySubmitAnswer,
       sessionId?: string,
       agentId = "meta",
     ): Promise<boolean> => {
@@ -1964,13 +2174,14 @@ export function App() {
       const res = await fetch(`${apiBase}/api/clarify`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({
-          session_id: sid,
-          request_id: requestId,
-          agent_id: agentId,
-          answer_text: answer.answerText ?? "",
-          selected_options: answer.selectedOptions ?? [],
-        }),
+        body: JSON.stringify(
+          buildClarifyRequestBody({
+            sessionId: sid,
+            requestId,
+            agentId,
+            answer,
+          }),
+        ),
       });
 
       // 404 means the gate is already resolved/missing — treat as "already handled".
@@ -2254,6 +2465,10 @@ export function App() {
         setActiveAvatarId(aid.startsWith("automation:") ? null : (openedPane?.avatarId ?? null));
       }
       if (!sid) return;
+      notifySidebarSessionCatalogChangedForAutomationProgress(
+        payload,
+        () => useAppStore.getState().bumpSessionCatalogRevision(),
+      );
       const taskKey = String(payload.taskId ?? "").trim() || `ts:${Date.now()}`;
       if (payload.phase === "queued" || payload.phase === "running") {
         const runningSet = automationRunningRef.current.get(sid) ?? new Set<string>();
@@ -2274,6 +2489,17 @@ export function App() {
       }
       void refreshSessionMessages(sid);
       stopAutomationPollIfIdle();
+      if (payload.phase === "success" || payload.phase === "error") {
+        void announceDesktopTaskComplete({
+          kind: payload.phase === "error" ? "error" : "success",
+          label: String(payload.taskName || payload.taskId || "Near"),
+          text: payload.phase === "error" ? "定时任务执行失败" : "定时任务已完成",
+          paneId: paneId ?? "",
+          sessionId: sid,
+          windowFocusedAndVisible: isDesktopWindowFocusedAndVisible(),
+          locale: i18n.language?.startsWith("en") ? "en" : "zh",
+        });
+      }
     });
 
     return () => {
@@ -2452,20 +2678,30 @@ export function App() {
                         onOpenClarification={onOpenClarification}
                         onSubmitClarification={onSubmitClarification}
                       />
-                    ) : mainView === "avatars" ? (
-                      <AvatarGalleryView />
-                    ) : mainView === "groups" ? (
-                      <ProjectsView />
-                    ) : mainView === "collab" ? (
-                      <CollabRoomPanel variant="page" />
-                    ) : mainView === "automation" ? (
-                      <AutomationView />
                     ) : (
-                      <PaneManager
-                        onOpenConfirm={onOpenConfirm}
-                        onOpenClarification={onOpenClarification}
-                        onSubmitClarification={onSubmitClarification}
-                      />
+                      <>
+                        {/*
+                          Keep PaneManager mounted across landing views (automation /
+                          avatars / …). Unmounting wiped the contenteditable composer
+                          (and raced draft persistence). Hide instead of unmount.
+                        */}
+                        <div
+                          className={mainView === "chat" ? "h-full min-h-0" : "hidden"}
+                          aria-hidden={mainView !== "chat"}
+                        >
+                          <PaneManager
+                            onOpenConfirm={onOpenConfirm}
+                            onOpenClarification={onOpenClarification}
+                            onSubmitClarification={onSubmitClarification}
+                          />
+                        </div>
+                        {mainView === "avatars" ? <AvatarGalleryView /> : null}
+                        {mainView === "groups" ? <ProjectsView /> : null}
+                        {mainView === "collab" ? <CollabRoomPanel variant="page" /> : null}
+                        {mainView === "automation" ? <AutomationView /> : null}
+                        {mainView === "wiki" ? <WikiBrowseView /> : null}
+                        {mainView === "market" ? <MarketplaceView /> : null}
+                      </>
                     )}
                   </div>
                 </div>
@@ -2477,6 +2713,7 @@ export function App() {
         <div className="flex-1" aria-hidden />
       )}
 
+      <ExternalLinkConfirmDialog />
       <ConfirmDialog
         open={confirm.open}
         question={confirm.question}

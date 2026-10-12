@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findCurrentTurnTruncationAutoResume,
   isTurnInterruptionNoticeMessage,
   parseTurnInterruptionNotice,
   shouldAutoResumeTruncationInterruption,
@@ -54,6 +55,59 @@ describe("turn-interruption-notice", () => {
     });
 
     expect(parsed?.cause).toBe("suspected_truncated_final");
+  });
+
+  it("does not auto-resume a historical truncation after a newer non-truncation interrupt", () => {
+    const oldTruncation = {
+      id: "old-trunc",
+      role: "tool" as const,
+      content: "本轮生成已取消，未收到模型最终响应。可点「恢复执行」继续。（原因：工具参数流式截断）",
+      metadata: {
+        kind: TURN_INTERRUPTED_KIND,
+        cause: "cancelled",
+        detector: "streamed_tool_call_truncated",
+      },
+    };
+    const laterUser = { id: "u2", role: "user" as const, content: "看下 huggingface laya" };
+    const laterNoFinal = {
+      id: "later-nofinal",
+      role: "tool" as const,
+      content: "本轮生成已取消，未收到模型最终响应。可点「恢复执行」继续。",
+      metadata: { kind: TURN_INTERRUPTED_KIND, cause: "no_final" },
+    };
+    const parked = {
+      id: "a2",
+      role: "assistant" as const,
+      content: "无可自主推进的代码任务",
+    };
+    expect(
+      findCurrentTurnTruncationAutoResume([
+        { id: "u1", role: "user" as const, content: "先做 fan-out" },
+        oldTruncation,
+        laterUser,
+        laterNoFinal,
+        parked,
+      ]),
+    ).toBeNull();
+  });
+
+  it("auto-resumes only when the latest current-turn interrupt is a truncation", () => {
+    const truncation = {
+      id: "cur-trunc",
+      role: "tool" as const,
+      content: "本轮生成已取消…（原因：工具参数流式截断）",
+      metadata: {
+        kind: TURN_INTERRUPTED_KIND,
+        cause: "cancelled",
+        detector: "streamed_tool_call_truncated",
+      },
+    };
+    expect(
+      findCurrentTurnTruncationAutoResume([
+        { id: "u1", role: "user" as const, content: "写脚本" },
+        truncation,
+      ])?.id,
+    ).toBe("cur-trunc");
   });
 
   it("auto-resumes streamed tool truncation but not user interrupt", () => {

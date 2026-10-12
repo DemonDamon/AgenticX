@@ -11,7 +11,10 @@ export function shouldShowAssistantIconButtons(args: {
   isLastAssistantInPane?: boolean;
   /** Group replies are committed on arrival; keep copy/quote visible while others still run. */
   keepActionsWhileBusy?: boolean;
+  /** Run replay presentation: hide chrome so the demo is not cluttered. */
+  presenting?: boolean;
 }): boolean {
+  if (args.presenting) return false;
   const base =
     !args.hideActions &&
     !args.isUser &&
@@ -35,7 +38,9 @@ export function shouldShowAssistantFollowups(args: {
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
   keepActionsWhileBusy?: boolean;
+  presenting?: boolean;
 }): boolean {
+  if (args.presenting) return false;
   if (args.isUser) return false;
   if (args.isStreaming) return false;
   if (args.isGroupTyping) return false;
@@ -45,4 +50,21 @@ export function shouldShowAssistantFollowups(args: {
   if (!args.hasFollowupHandler) return false;
   if (args.sessionBusy && args.isLastAssistantInPane && !args.keepActionsWhileBusy) return false;
   return true;
+}
+
+/** Peeled ReAct copy/quote row — same chrome as ImBubble, hidden while the turn is live or presenting. */
+export function shouldShowReActBlockActionTail(args: {
+  hasStreamingRow: boolean;
+  sessionWorkInProgress: boolean;
+  subAgentsPending: boolean;
+  hasWorkMessages: boolean;
+  presenting?: boolean;
+}): boolean {
+  if (args.presenting) return false;
+  return (
+    !args.hasStreamingRow &&
+    !args.sessionWorkInProgress &&
+    !args.subAgentsPending &&
+    args.hasWorkMessages
+  );
 }

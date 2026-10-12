@@ -88,6 +88,26 @@ def test_skill_list_output_includes_tag_and_icon(tmp_path: Path) -> None:
     assert "icon=Wrench" in output
 
 
+def test_skill_metadata_strips_surrounding_quotes(tmp_path: Path) -> None:
+    """成对引号包裹的 YAML 标量(clawhub 上游常见写法)不应把引号带进 name/description。"""
+    _write_skill(
+        tmp_path / "quoted_skill",
+        "\n".join(
+            [
+                "source: registry",
+                'name: "quoted_skill"',
+                "description: 'A quoted description'",
+            ],
+        ),
+    )
+
+    loader = SkillBundleLoader(search_paths=[tmp_path])
+    skills = loader.scan()
+    assert len(skills) == 1
+    assert skills[0].name == "quoted_skill"
+    assert skills[0].description == "A quoted description"
+
+
 def test_skill_metadata_ignores_body_tag_icon_lines(tmp_path: Path) -> None:
     _write_skill(
         tmp_path / "demo_body_noise",

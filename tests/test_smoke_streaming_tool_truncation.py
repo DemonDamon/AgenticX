@@ -103,3 +103,46 @@ def test_resolve_round_max_tokens_default_and_write_heavy() -> None:
     write_budget = _resolve_round_max_tokens(8192, ["file_write"])
     assert 12288 <= write_budget <= 16384
     assert _resolve_round_max_tokens(8192, ["file_write"], provider="minimax") <= 4096
+
+
+def test_resolve_round_max_tokens_deepseek_v4_thinking_floor() -> None:
+    """Thinking shares the completion cap, so 8192 must not stay the ceiling."""
+    raised = _resolve_round_max_tokens(
+        8192,
+        [],
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        thinking=True,
+    )
+    assert raised >= 24576
+    assert (
+        _resolve_round_max_tokens(
+            8192,
+            [],
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            thinking=False,
+        )
+        == 8192
+    )
+    # A vendor downshift below the default must not be raised back up.
+    assert (
+        _resolve_round_max_tokens(
+            1024,
+            [],
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            thinking=True,
+        )
+        == 1024
+    )
+    assert (
+        _resolve_round_max_tokens(
+            8192,
+            ["file_write"],
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            thinking=True,
+        )
+        >= 24576
+    )

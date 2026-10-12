@@ -99,6 +99,25 @@ export const ASSISTANT_INLINE_CARD_SHELL_CLASS =
 export const GROUP_INLINE_CARD_SHELL_CLASS =
   "my-1 min-w-0 w-full max-w-[520px]";
 
+/**
+ * Standalone system row (Jev decision) that is NOT wrapped in GroupSenderRail.
+ * Shares ImBubble `px-3` so the mark column starts on the same gutter as
+ * thought / tool / pending-orb rows. Meta uses the 20px assistant rail
+ * (center 22px). Group uses the 28px speaker slot (center 26px).
+ */
+export const GROUP_STANDALONE_RAIL_ROW_CLASS =
+  "flex min-w-0 w-full items-start gap-2 px-3";
+
+/** Same slot as `ChatImAvatar` size="sm" / group speaker portraits (28px). */
+export const GROUP_SENDER_AVATAR_SLOT_CLASS = "h-7 w-7";
+
+/** Speaker / decision title — same weight and ink as the group Jev name. */
+export const GROUP_SENDER_NAME_CLASS =
+  "max-w-full truncate text-[13px] font-semibold leading-4 text-text-strong";
+
+/** Compact Meta pending orb — same 20px box as `ASSISTANT_ICON_RAIL_CLASS`. */
+export const META_PENDING_ORB_PX = 20;
+
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
 

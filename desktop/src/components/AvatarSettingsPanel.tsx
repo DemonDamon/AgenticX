@@ -5,6 +5,7 @@ import type { Avatar } from "../store";
 import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
+import { ThemedAvatarImage } from "./ds/ThemedAvatarImage";
 import { i18n } from "../i18n/i18n";
 import { displayBrainName } from "./settings/brains/brain-display";
 
@@ -442,7 +443,7 @@ export function AvatarSettingsPanel(props: Props) {
                 <div className="text-sm text-text-muted">{st("avatar.avatarImage")}</div>
                 <div className="mt-2 flex items-center gap-3">
                   {avatarUrlDraft ? (
-                    <img
+                    <ThemedAvatarImage
                       src={avatarUrlDraft}
                       alt=""
                       className="h-12 w-12 shrink-0 rounded-full border border-border object-cover"

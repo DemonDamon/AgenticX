@@ -135,6 +135,23 @@ export function MachiChatView({
   const displayErrorMessage =
     errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
   const [draft, setDraft] = React.useState("");
+  const [orgSkills, setOrgSkills] = React.useState<
+    Array<{ id: string; displayName: string; selectable: boolean; reason?: string }>
+  >([]);
+  const [focusedSkillBySession, setFocusedSkillBySession] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/me/skills", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { skills?: typeof orgSkills } } | null) => {
+        if (!cancelled) setOrgSkills(json?.data?.skills ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const focusedSkillId = activeSessionId ? focusedSkillBySession[activeSessionId] ?? "" : "";
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   /** 深度研究确认方式偏好（localStorage 持久化；auto = 交给服务端 policy）。 */
@@ -450,14 +467,18 @@ export function MachiChatView({
   // 管理员随时可能改变部门/用户的可见模型分配，因此这里不能只在挂载时拉一次：
   // 定期轮询 + 页面重新可见/聚焦时立即刷新，让列表与实际权限自动保持同步，无需用户手动刷新整页。
   const [availableModels, setAvailableModels] = React.useState<PortalModelOption[]>([]);
+  const [deptDefaultModelId, setDeptDefaultModelId] = React.useState<string | null>(null);
   const [modelsLoaded, setModelsLoaded] = React.useState(false);
 
   const refreshAvailableModels = React.useCallback(async () => {
     try {
       const res = await fetch("/api/me/models", { cache: "no-store" });
       if (!res.ok) return;
-      const json = (await res.json()) as { data?: { models: PortalModelOption[] } };
+      const json = (await res.json()) as {
+        data?: { models: PortalModelOption[]; deptDefaultModelId?: string | null };
+      };
       setAvailableModels(json.data?.models ?? []);
+      setDeptDefaultModelId(json.data?.deptDefaultModelId ?? null);
     } catch {
       // 开发服过载 / 本机代理劫持 localhost 时 fetch 会抛 TypeError: Failed to fetch。
       // 轮询失败不应打到 Next 运行时错误浮层；保留上一份 models，等下次轮询。
@@ -489,14 +510,17 @@ export function MachiChatView({
     if (!availableModelIdsKey) return;
     const exists = availableModels.some((m) => m.id === activeModel);
     if (exists) return;
-    const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
+    const next =
+      (deptDefaultModelId ? availableModels.find((m) => m.id === deptDefaultModelId) : undefined) ??
+      availableModels.find((m) => m.isDefault) ??
+      availableModels[0];
     if (!next) return;
     if (useChatStore.getState().activeModel === next.id) return;
     probeNote("MachiChatView.switchModelFallback", { from: activeModel, to: next.id });
     switchModel(next.id);
     // availableModels read from latest render when ids key / activeModel changes
     // eslint-disable-next-line react-hooks/exhaustive-deps -- availableModelIdsKey proxies list identity
-  }, [modelsLoaded, availableModelIdsKey, activeModel, switchModel]);
+  }, [modelsLoaded, availableModelIdsKey, activeModel, switchModel, deptDefaultModelId]);
 
   // 若发送因「模型已不在可见范围内」被服务端拒绝（管理员刚收窄了权限，轮询尚未来得及刷新），
   // 立即补拉一次最新列表，让下拉框与兜底选择马上纠正，不必等下一个轮询周期或用户手动刷新整页。
@@ -730,6 +754,7 @@ export function MachiChatView({
             attachments: messageAttachments,
             webSearch: webSearchMode === "auto",
             deepResearch: deepResearchMode,
+            skillId: focusedSkillId,
           },
           opts?.forceSend && !gateStillOpen ? { forceSend: true } : undefined,
         );
@@ -744,6 +769,7 @@ export function MachiChatView({
       sendMessage,
       toMessageAttachments,
       webSearchMode,
+      focusedSkillId,
     ],
   );
 
@@ -855,6 +881,39 @@ export function MachiChatView({
         onRemove={removePendingMessage}
         onSendNow={(id) => void sendQueuedMessageNow(client, id)}
       />
+
+      {orgSkills.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 px-1">
+          {orgSkills.map((skill) => {
+            const selected = skill.selectable && focusedSkillId === skill.id;
+            const reason = skill.reason && skill.reason in { caution: 1, dangerous: 1, unscanned: 1, inactive: 1 }
+              ? tw(`skills.${skill.reason as "caution" | "dangerous" | "unscanned" | "inactive"}`)
+              : undefined;
+            return (
+              <button
+                key={skill.id}
+                type="button"
+                disabled={!skill.selectable}
+                title={reason}
+                className={[
+                  "rounded-full border px-2.5 py-1 text-xs",
+                  selected ? "border-primary bg-primary-soft text-foreground" : "border-border text-muted-foreground",
+                  skill.selectable ? "" : "cursor-not-allowed opacity-60",
+                ].join(" ")}
+                onClick={() => {
+                  if (!activeSessionId || !skill.selectable) return;
+                  setFocusedSkillBySession((prev) => ({
+                    ...prev,
+                    [activeSessionId]: prev[activeSessionId] === skill.id ? "" : skill.id,
+                  }));
+                }}
+              >
+                {skill.displayName}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       <InputArea
         value={draft}

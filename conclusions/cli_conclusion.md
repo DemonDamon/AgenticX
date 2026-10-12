@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 
@@ -36,7 +36,9 @@ agenticx/cli/
 ├── skills_commands.py       # skills 子命令
 ├── volcengine_commands.py   # 火山引擎专属命令
 ├── log_config.py            # 日志配置
-├── main.py                  # Typer CLI 主程序入口
+├── main.py                  # Typer CLI 主程序入口（含延迟注册 `wb-bridge`）
+├── wb_bridge_commands.py    # (NEW) `agx wb-bridge serve`
+├── browser_bridge_settings.py  # (NEW) Near WorkPanel 浏览器桥 URL/Token
 ├── client.py                # AgenticXClient / AsyncAgenticXClient SDK
 ├── debug.py                 # DebugServer 调试工具
 ├── deploy.py                # DeployManager 部署工具
@@ -108,6 +110,7 @@ agenticx/cli/
 | Todo 管理 | `todo_write` |
 | Scratchpad | `scratchpad_write`, `scratchpad_read` |
 | 记忆 | **(NEW)** `memory_search`, `memory_append`, `session_search`（跨会话 FTS5 检索） |
+| 用量诊断 | **(NEW)** `plugin_usage`（只读：按 `plugin`（`all` 默认读本地 usage 台账 / `jev` 读结构化决策卡 / provider id / 模型名）、`model`、`provider`、`from_date`/`to_date`（`YYYY-MM-DD` 或 `today`/`yesterday`）、`range`（day/week/month/total）、`scope`（all/current）、`purpose`（all/failed/timeout/retry/adopted·ok/routing/kb）、`session_id`、`limit`（1–30，默认 8）查询调用次数、超时、重试、连续失败与会话失败原因；`_tool_plugin_usage` 委托 `agenticx.runtime.plugin_usage.query_plugin_usage`，并传入当前会话 `chat_history` 与 session id 作为 live 数据，结果 JSON 返回、不注入常规对话上下文；列入 `_CONCURRENCY_SAFE_STUDIO_TOOLS`） |
 | 知识/代码索引 | **(NEW)** `knowledge_search`, `code_search`, `code_outline`, `code_index_create` / `code_index_status` / `code_index_cancel` / `code_index_clear` |
 | 子智能体 | `spawn_subagent`, `query_subagent_status`, `cancel_subagent`, `send_message_to_subagent`（委派/接力均通过 meta_tools 暴露） |
 | MCP | `mcp_call`, **(NEW)** `mcp_connect`, `mcp_import` |
@@ -118,7 +121,10 @@ agenticx/cli/
 | 任务经验 | **(NEW)** `task_experience_learn` / `task_experience_retrieve` / `task_experience_clear`（随 routing="team" Workforce 桥接引入） |
 | 代码生成 | **(NEW)** `codegen` |
 | Claude Code 桥接 | **(NEW)** `cc_bridge_start` / `cc_bridge_send` / `cc_bridge_list` / `cc_bridge_stop` / `cc_bridge_permission` |
+| CodeBuddy / WB 桥接 | **(NEW，2026-09)** `wb_bridge_start` / `wb_bridge_send` / `wb_bridge_list` / `wb_bridge_describe` / `wb_bridge_stop`（本机 `codebuddy` 子进程；进行中重发由桥返回 409，须 poll `describe`） |
+| 计划产物 | **(NEW，2026-09)** `plan_create` / `plan_update`（项目本地 Markdown Plan；Plan mode 白名单） |
 | 桌面操控（Computer Use） | **(NEW)** `desktop_screenshot`, `desktop_mouse_click`, `desktop_keyboard_type` |
+| Ops 只读排障 | **(NEW，2026-09)** 经 `agenticx.ops.tools.merge_ops_tools_into` 注入 `get_trace` / `get_logs` / `get_recent_changes` / `get_session_review` / `get_umodel` / `sync_changeplane` / `get_trace_parity` / `get_channel_slo`（`ops.tools_enabled` 默认开） |
 
 **dispatch_tool_async(tool_name, arguments, session, confirm_gate, event_callback, team_manager)**：
 - 按 tool_name 路由到对应工具实现
@@ -140,6 +146,7 @@ agenticx/cli/
 - `file_read` / `file_write` / `file_edit` 完成后调用 `session.file_state_tracker.refresh_from_disk` 刷新文件快照；`file_write` / `file_edit` / `memory_append` / `skill_manage` 等确认文案中文化并带 `risk` 分级（`low` / `policy`）
 - `skill_use` 返回文案明确「正文已注入本轮上下文，不要再用 file_read/bash_exec 读技能目录（工作区外不可读）」
 - `META_TOOL_NAMES` 新增 `fresh_round_loop`
+- `_request_clarification`：当 `options` 与 `decisions` 均为空时强制 `allow_free_text=True`，避免下发既无选项又无文本输入的澄清请求（Desktop 对持久化行做同样兜底）
 
 ---
 
@@ -227,7 +234,7 @@ agenticx/cli/
 - `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析 `Path.home()`——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
 - `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 写入后主动 `_invalidate_yaml_cache`，不依赖时间戳精度。实测消除 `get_value` 读路径上约 96% 的重复 YAML 解析耗时
 
-**Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）。
+**Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）与 **(NEW)** `mimo`（必填 `api_key`，环境变量 `MIMO_API_KEY`，默认模型 `mimo-v2.6-pro`）。
 
 **配置项说明**：
 - `workspace_dir`：Meta-Agent workspace 目录
@@ -240,6 +247,7 @@ agenticx/cli/
 - **(NEW)** `web_search`：内置 Web 搜索配置（DuckDuckGo 默认 + 可选 API providers）；导出时对 `providers.*.api_key` 做掩码（参见 Studio `web_search` 路由）
 - **(NEW)** `longrun`（`LongRunSettings`）：Symphony 风格长任务编排开关——`enabled` / `workspace_root`（默认 `~/.agenticx/task-workspaces`）/ `stall_threshold_sec`（300s）/ `poll_interval_sec`（30s）/ `worker_session_id` / `linear_api_key` / `linear_team_ids`
 - **(NEW，2026-09)** `permissions.command_permissions`：OS 命令沙箱档位——`read-only` / `workspace-write`（默认）/ `danger-full-access`；`permissions.unattended_allow_workspace_scripts`（默认关）：无人值守（含 `automation:*` 定时任务）是否可执行工作区内已存在脚本，仅对非 never 类别、可执行文件在 writable roots 内且调用前已存在的调用生效；`permissions.allowed_tools` 语义明确为「跳过确认」（沙箱仍生效）
+- **(NEW，2026-09)** `OpsSettings.tools_enabled`（`ops.tools_enabled`，默认 True）：是否把 Ops 只读工具并入 STUDIO 表；`set_wb_bridge_field()` 写 `wb_bridge.*`（与 cc_bridge 对称）
 
 ---
 
@@ -259,6 +267,7 @@ agenticx/cli/
 - `generate`：代码生成（来自 generate_commands.py）
 - `skills`：Skill 管理（来自 skills_commands.py）
 - **(NEW)** `harness`：会话工作循环健康审查（来自 harness_app.py，延迟导入注册）
+- **(NEW，2026-09)** `wb-bridge`：延迟导入 `wb_bridge_commands.wb_bridge_app`，`agx wb-bridge serve`（`--host`/`--port`/`--token`，默认 9743）
 
 **(NEW，2026-09)** `loop` 命令构造系统提示时传 `include_volatile=False`（`build_meta_agent_system_prompt`），保持系统前缀稳定以利于 prompt 缓存。
 

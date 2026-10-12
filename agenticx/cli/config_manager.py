@@ -10,6 +10,8 @@ import copy
 from dataclasses import asdict, dataclass, field
 import os
 from pathlib import Path
+import shutil
+import stat
 import threading
 from typing import Any, Dict, Optional, Tuple
 
@@ -41,6 +43,7 @@ SUPPORTED_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "abab6.5s-chat",
     },
     "deepseek": {"required": ["api_key"], "default_model": "deepseek-v4-pro"},
+    "mimo": {"required": ["api_key"], "default_model": "mimo-v2.6-pro"},
     "ollama": {"required": ["base_url"], "default_model": "llama3"},
 }
 
@@ -54,6 +57,7 @@ ENV_PROVIDER_MAP = {
     "kimi": ("MOONSHOT_API_KEY", "kimi-k2-0711-preview"),
     "minimax": ("MINIMAX_API_KEY", "abab6.5s-chat"),
     "deepseek": ("DEEPSEEK_API_KEY", "deepseek-v4-pro"),
+    "mimo": ("MIMO_API_KEY", "mimo-v2.6-pro"),
 }
 
 
@@ -118,6 +122,13 @@ class ComputerUseSettings:
     require_first_access_approval: bool = True
     scheduler_enabled: bool = True
     scheduler_max_concurrent: int = 5
+
+
+@dataclass
+class BrowserControlSettings:
+    """WorkPanel in-app browser control (near_browser_* tools)."""
+
+    enabled: bool = True
 
 
 @dataclass
@@ -195,6 +206,7 @@ class AgxConfig:
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
+    browser_control: BrowserControlSettings = field(default_factory=BrowserControlSettings)
     ops: OpsSettings = field(default_factory=OpsSettings)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     longrun: LongRunSettings = field(default_factory=LongRunSettings)
@@ -295,8 +307,23 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
     @classmethod
     def _dump_yaml(cls, path: Path, data: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+        text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            if path.exists():
+                os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         # 不靠 mtime 兜底：同一纳秒内先写后读理论上会读到陈旧值。
         cls._invalidate_yaml_cache(path)
 
@@ -371,6 +398,10 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if not isinstance(cu_raw, dict):
             cu_raw = {}
 
+        bc_raw = merged.get("browser_control", {}) or {}
+        if not isinstance(bc_raw, dict):
+            bc_raw = {}
+
         ops_raw = merged.get("ops", {}) or {}
         if not isinstance(ops_raw, dict):
             ops_raw = {}
@@ -406,6 +437,9 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 require_first_access_approval=bool(cu_raw.get("require_first_access_approval", True)),
                 scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
                 scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
+            ),
+            browser_control=BrowserControlSettings(
+                enabled=bool(bc_raw.get("enabled", True)),
             ),
             ops=OpsSettings(
                 tools_enabled=_ops_tools_enabled_from_raw(ops_raw.get("tools_enabled")),

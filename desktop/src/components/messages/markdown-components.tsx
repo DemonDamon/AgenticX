@@ -37,6 +37,8 @@ export const MarkdownContext = createContext<{
   documentImage?: boolean;
   /** Turn deliverables already shown as a handoff chip; collapse matching path pills. */
   handoffPaths?: string[];
+  /** Chat bubbles only: user clicked an http(s) link. */
+  onHttpLinkClick?: (url: string) => void;
 }>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -494,8 +496,8 @@ function ChatInlineCode({
         type="button"
         className={
           label != null
-            ? "cursor-pointer font-medium text-text-strong underline-offset-2 transition-colors duration-150 hover:underline"
-            : "cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 hover:underline"
+            ? "inline-block max-w-full cursor-pointer whitespace-normal break-all text-left align-baseline font-medium leading-relaxed text-text-strong underline-offset-2 transition-colors duration-150 [overflow-wrap:anywhere] hover:underline"
+            : "inline-block max-w-full cursor-pointer whitespace-normal break-all rounded bg-surface-card px-1.5 py-0.5 text-left align-baseline font-mono text-[0.85em] leading-relaxed text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 [overflow-wrap:anywhere] hover:underline"
         }
         title={text}
         onClick={(event) => {
@@ -588,6 +590,7 @@ export const chatMarkdownComponents: Partial<Components> = {
     return <MarkdownImage src={src} alt={alt} title={title} />;
   },
   a({ href, children, ...rest }) {
+    const { onHttpLinkClick } = useContext(MarkdownContext);
     const url = String(href ?? "").trim();
     const external = /^https?:\/\//i.test(url);
     const localArtifactPath = external ? null : parseLocalArtifactPath(url);
@@ -609,6 +612,10 @@ export const chatMarkdownComponents: Partial<Components> = {
           external
             ? (event) => {
                 event.preventDefault();
+                if (onHttpLinkClick) {
+                  onHttpLinkClick(url);
+                  return;
+                }
                 openExternalUrl(url);
               }
             : rest.onClick

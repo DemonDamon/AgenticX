@@ -13,6 +13,7 @@ const PROVIDER_BRAND_COLOR: Record<string, string> = {
   minimax: "#ffffff",
   kimi: "#ffffff",
   deepseek: "#ffffff",
+  mimo: "#ffffff",
   ollama: "#ffffff",
 };
 
@@ -20,8 +21,9 @@ const PROVIDER_BRAND_TEXT_COLOR: Record<string, string> = {
   openai: "#111111",
   ollama: "#18181b",
   deepseek: "#4d6bfe",
+  mimo: "#1F2329",
   kimi: "#111111",
-  zhipu: "#3859FF",
+  zhipu: "#111111",
 };
 
 const PALETTE = [
@@ -55,6 +57,7 @@ const BUILTIN_PROVIDER_IDS = new Set([
   "minimax",
   "kimi",
   "deepseek",
+  "mimo",
   "ollama",
 ]);
 

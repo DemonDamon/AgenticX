@@ -11,6 +11,7 @@ import {
   collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
   collectWorkspaceListingArtifactPaths,
+  filterArtifactPathsForSession,
   isWalkableWorkspaceArtifactDir,
   parseSessionMessageFilePayload,
 } from "./session-artifacts";
@@ -50,7 +51,7 @@ export function startPersistedArtifactPathResync(
   const run = (): void => {
     void (async () => {
       try {
-        const paths = await load(sid);
+        const paths = filterArtifactPathsForSession(await load(sid), sid);
         if (!cancelled) opts.onPaths(paths);
       } catch (err) {
         if (cancelled) return;
@@ -165,7 +166,12 @@ export async function loadPersistedSessionArtifactPaths(sessionId: string): Prom
     agentMessageRows,
   });
   const fromWorkspace = await loadDefaultWorkspaceArtifactPaths(sid);
-  return collectSessionArtifactPaths([], [], [...fromMessages, ...fromWorkspace]);
+  return collectSessionArtifactPaths(
+    [],
+    [],
+    [...fromMessages, ...fromWorkspace],
+    sid,
+  );
 }
 
 const WORKSPACE_ARTIFACT_MAX_DEPTH = 2;
@@ -313,7 +319,9 @@ export async function ensureArtifactTaskspacesForSession(
 
   let linked = 0;
   let defaultDir: string | undefined;
-  const paths = artifactPaths.map((p) => String(p || "").trim()).filter(Boolean);
+  // Never auto-mount another session's ~/.agenticx/{sessions,taskspaces}/… paths
+  // (stale diskArtifactPaths after history switch caused cross-session leaks).
+  const paths = filterArtifactPathsForSession(artifactPaths, sid);
 
   if (paths.length > 0) {
     const linker =

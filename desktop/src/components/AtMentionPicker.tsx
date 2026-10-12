@@ -8,6 +8,7 @@ import {
   groupAtMentionCandidates,
 } from "../utils/at-mention-display";
 import { ComposerRefIcon, type ComposerRefIconKind } from "./icons/ComposerRefIcon";
+import { ThemedAvatarImage } from "./ds/ThemedAvatarImage";
 
 export type AtMentionBrowseState = {
   taskspaceId: string;
@@ -63,7 +64,7 @@ function AtMentionIcon({ item }: { item: AtMentionCandidate }) {
   if (item.kind === "avatar") {
     const src = String(item.avatarUrl || "").trim();
     if (src) {
-      return <img src={src} alt="" className="h-[15px] w-[15px] shrink-0 rounded-full object-cover" />;
+      return <ThemedAvatarImage src={src} alt="" className="h-[15px] w-[15px] shrink-0 rounded-full object-cover" />;
     }
     return (
       <span className="flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full bg-surface-hover text-[9px] leading-none text-text-muted">
