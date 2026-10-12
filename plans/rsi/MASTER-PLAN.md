@@ -73,6 +73,23 @@ P0 完成后（PR #54），基于已落地的 TrajectoryStore 增设回放模拟
 - 演化评分只允许绑定 train 区任务树（复用 SP2 held-out 隔离）；held-out 仅作验收报告
 - 分支：继续用 `feat/rsi-data-flywheel`（P0 PR 合入前在同一分支追加，或视 PR 状态切新分支——以执行时 git 状态为准）
 
+## P0.6 阶段：行业对照后的六个补链方向（2026-10 调研增补，拆为 SP30 七个 TDD 任务）
+
+P0/P0.5 之后，对照 2026-09~10 行业 RSI 实践（MemoraX 经验归因、华泰 RSI 可度量研报、SeeAct 自顶向下派发、Macaron-V1 MoL/Adapter、AReaL/LongStraw 选择性重放）补齐软件缺口。全部硬件无关、零采购，明细与 TDD 任务见 [sp30-p06-attribution-verifier-adapter.md](sp30-p06-attribution-verifier-adapter.md)。
+
+| # | 增补 | 对标来源 | 交付 |
+|---|---|---|---|
+| T1 | 路由事件（memory/skill/adapter 选择，带版本）入 decision_lineage | Macaron「路由即工具」+ MemoraX 归因前置 | schema 扩展 + collector best-effort |
+| T2 | 经验贡献归因账本：路由事件×结局，Beta 平滑后验胜率，unknown 版本单列 | MemoraX Memory Credit Assignment | attribution.py + credit_report |
+| T3 | 验证器漂移只读监控：双判别 gap/长度漂移/模板化/通过率异动 + 基线快照 | 华泰（验证器决定上限）、MiniMax 误报 2.9%→8% | verifier_drift.py + 基线 JSON |
+| T4 | 能力缺口派发：失败聚类×账本覆盖判定 → 提案队列（只提案不开训） | SeeAct「能力拓展自顶向下」 | gap_dispatch.py + datasets/gap_queue |
+| T5 | 长时程 SLO：人工干预率/断点恢复率/未采集率 | OpenAI 4-8h 任务 50%+ 干预 | ops/rsi_slo.py + 报告 |
+| T6 | Adapter 一等公民：AdapterRecord + 租户命名空间 + LoRA manifest 契约（不接真实训练） | Macaron MoL（经验按 LoRA 粒度沉淀、热插拔） | trainer/adapters.py + exporter |
+| T7 | replay_spans 从 lineage 派生学习相关消息区间（P1 长轨迹 RL 消费） | LongStraw + AReaL-DTA 选择性重放 | replay_spans.py |
+
+- 红线延续：账本/漂移/manifest 三处 held-out 守卫，复用 `trainer/heldout.py`；held-out 数据仅允许出现在双判别验收报告
+- P1 前置（只记录不实施）：AReaL build-vs-borrow 对标；Macaron-V1-Tall 纳入基座横评（FinnewsHunter 首批）；REPL Harness token 收益实验
+
 ## 明确不做（YAGNI / 属后续阶段）
 
 - 运营商场景采集器（P0 用 TB 4.0 内部验证场，场景切换在 harness-lab 适配后）
