@@ -22,7 +22,7 @@ import { describeError } from "../../src/lib/errors";
 import {
   buildChatEntries,
   applyStreamDelta,
-  visibleStreamText,
+  splitStreamThinking,
   type ChatEntry,
 } from "../../src/lib/messages";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
@@ -85,20 +85,44 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
     case "pending":
       return <PendingBubble />;
     case "streaming": {
-      // 回合进行中的 token 增量：纯 Text 轻量渲染（避免 Markdown 高频重解析），
-      // 回合结束由 fetchMessages 的结构化终态替换。思考块原文（<thinking>）
-      // 剥除不外显；剥后为空（思考阶段）显示占位提示。
-      const visible = visibleStreamText(entry.text);
-      return (
-        <View style={[styles.bubble, styles.bubbleAssistant]}>
-          {visible.trim() === "" ? (
+      // 思考链实时渲染：思考增量实时上屏（观感对齐终态 ReasoningBlock），
+      // 正文增量照旧轻量 Text 打字机；回合结束由 fetchMessages 结构化替换。
+      // 思考未闭合时「思考中…」转圈 + 思考文本逐字增长；闭合后正文开始，
+      // 思考区标题转为「思考过程」静态收尾。
+      const { thinking, visible } = splitStreamThinking(entry.text);
+      const bodyLive = visible.trim() !== "";
+      if (thinking === "" && !bodyLive) {
+        return (
+          <View style={[styles.bubble, styles.bubbleAssistant]}>
             <View style={styles.pendingRow}>
               <ActivityIndicator size="small" color={brand.primary} />
               <Text style={styles.pendingText}>思考中…</Text>
             </View>
-          ) : (
-            <Text style={styles.bubbleAssistantText}>{visible}</Text>
-          )}
+          </View>
+        );
+      }
+      return (
+        <View>
+          {thinking !== "" ? (
+            <View style={styles.thinkingLive}>
+              <View style={styles.pendingRow}>
+                {bodyLive ? null : (
+                  <ActivityIndicator size="small" color={brand.primary} />
+                )}
+                <Text style={styles.thinkingLiveTitle}>
+                  {bodyLive ? "思考过程" : "思考中…"}
+                </Text>
+              </View>
+              <Text style={styles.thinkingLiveText} numberOfLines={8}>
+                {thinking}
+              </Text>
+            </View>
+          ) : null}
+          {bodyLive ? (
+            <View style={[styles.bubble, styles.bubbleAssistant]}>
+              <Text style={styles.bubbleAssistantText}>{visible}</Text>
+            </View>
+          ) : null}
         </View>
       );
     }
@@ -544,6 +568,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+  },
+  thinkingLive: {
+    backgroundColor: brand.cream,
+    borderRadius: radius.sm + 2,
+    borderWidth: 1,
+    borderColor: color.border,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    marginBottom: spacing.xs,
+    alignSelf: "stretch",
+  },
+  thinkingLiveTitle: {
+    fontSize: fontSize.caption,
+    color: brand.primaryDark,
+    fontWeight: fontWeight.medium,
+  },
+  thinkingLiveText: {
+    fontSize: fontSize.caption,
+    color: color.textSecondary,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+    fontFamily: "Menlo",
   },
   pendingText: {
     fontSize: fontSize.body,

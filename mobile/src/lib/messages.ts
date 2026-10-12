@@ -137,19 +137,35 @@ export function applyStreamDelta(
 }
 
 /**
- * streaming 气泡的可见文本：token 流里的思考段有两种形态——
- * ① 后端 safe_stream 规范化的 ` Mattis`/` Mattis/`（模型输出 `< think >`
- *   等非规范变体时被规范成 Mattis 下发）；② parser 不识别的变体
- * （`<thinking>`）原文透传。两种都要剥除，终态由结构化替换渲染思考
- * 折叠，streaming 阶段只外显答案部分。完整闭合块、流式进行中的未闭合
- * 尾部、以及被 delta 分片截断的标签前缀（尾部 "<" / "<thi" 等）一并
- * 剥除——截断前缀只会让该字符晚一帧出现，不会丢失。
+ * 流式 token 里思考段的两种形态：后端 safe_stream 规范化的 think
+ * 标签（模型输出非规范变体时被规范下发）、parser 不识别的 <thinking>
+ * 原文透传。splitStreamThinking 依据它们做思考/正文分流。
  */
-const THINK_BLOCK_RE = /<(think|thinking)>[\s\S]*?(?:<\/\1>|$)/g;
+const THINK_BLOCK_RE = /<(think|thinking)>([\s\S]*?)(?:<\/\1>|$)/g;
 const THINK_OPEN_PREFIXES = ["<think>", "<thinking>"];
 
-export function visibleStreamText(text: string): string {
-  let visible = text.replace(THINK_BLOCK_RE, "");
+/**
+ * 流式思考链分离：把累积 token 流拆成「思考」「正文」两路——思考段
+ * （safe_stream 规范的 think 标签，或 parser 不识别的 <thinking> 原文
+ * 透传）内容归 thinking 实时上屏渲染，闭合后的增量归 visible 走打字
+ * 机。完整闭合块与流式进行中的未闭合尾部同样归 thinking；被 delta 分
+ * 片截断的开标签前缀（尾部 "<" / "<thi" 等）暂扣一帧，避免尖括号
+ * 闪现——下一帧标签补全后自然归位。
+ */
+export function splitStreamThinking(text: string): {
+  thinking: string;
+  visible: string;
+} {
+  const chunks: string[] = [];
+  let visible = "";
+  let cursor = 0;
+  THINK_BLOCK_RE.lastIndex = 0;
+  for (let m = THINK_BLOCK_RE.exec(text); m !== null; m = THINK_BLOCK_RE.exec(text)) {
+    visible += text.slice(cursor, m.index);
+    chunks.push(m[2]);
+    cursor = m.index + m[0].length;
+  }
+  visible += text.slice(cursor);
   for (let n = Math.min(9, visible.length); n > 0; n -= 1) {
     const tail = visible.slice(-n);
     if (THINK_OPEN_PREFIXES.some((p) => p.slice(0, n) === tail)) {
@@ -157,5 +173,5 @@ export function visibleStreamText(text: string): string {
       break;
     }
   }
-  return visible;
+  return { thinking: chunks.join(""), visible };
 }

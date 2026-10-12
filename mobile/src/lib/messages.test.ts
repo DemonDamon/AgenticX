@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MobileMessage } from "../api/types";
-import { applyStreamDelta, buildChatEntries, visibleStreamText, type ChatEntry } from "./messages";
+import { applyStreamDelta, buildChatEntries, splitStreamThinking, type ChatEntry } from "./messages";
 
 function toolMsg(over: Partial<MobileMessage>): MobileMessage {
   return {
@@ -123,33 +123,43 @@ describe("applyStreamDelta", () => {
   });
 });
 
-describe("visibleStreamText", () => {
-  it("剥除完整闭合的 thinking 块", () => {
-    expect(visibleStreamText("<thinking>想一下</thinking>答案是1")).toBe("答案是1");
+describe("splitStreamThinking", () => {
+  it("思考与正文分流（safe_stream 规范 think 标签）", () => {
+    expect(splitStreamThinking("<think>想一下</think>答案是1")).toEqual({
+      thinking: "想一下",
+      visible: "答案是1",
+    });
   });
 
-  it("剥除协议规范的 Mattis 块（safe_stream 规范形态）", () => {
-    expect(visibleStreamText("<think>想一下</think>答案是1")).toBe("答案是1");
+  it("thinking 原文透传形态同样分流", () => {
+    expect(splitStreamThinking("<thinking>想一下</thinking>答案是1")).toEqual({
+      thinking: "想一下",
+      visible: "答案是1",
+    });
   });
 
-  it("剥除流式进行中的未闭合尾部", () => {
-    expect(visibleStreamText("<thinking>想")).toBe("");
-    expect(visibleStreamText("<think>想")).toBe("");
-    expect(visibleStreamText("<thinking>想一下</thinking>答<thinking>继续想")).toBe("答");
-    expect(visibleStreamText("<think>想一下</think>答<think>继续想")).toBe("答");
+  it("思考未闭合：全部归思考，正文为空", () => {
+    expect(splitStreamThinking("<think>想")).toEqual({ thinking: "想", visible: "" });
+    expect(splitStreamThinking("<thinking>想")).toEqual({ thinking: "想", visible: "" });
   });
 
-  it("剥除被分片截断的标签前缀", () => {
-    expect(visibleStreamText("答案")).toBe("答案");
-    expect(visibleStreamText("答案<thi")).toBe("答案");
-    expect(visibleStreamText("答案<t")).toBe("答案");
-    expect(visibleStreamText("<")).toBe("");
+  it("思考完成后出现正文，正文后再思考则续归思考", () => {
+    expect(splitStreamThinking("<think>想一下</think>答<think>继续想")).toEqual({
+      thinking: "想一下继续想",
+      visible: "答",
+    });
   });
 
-  it("多轮 thinking 块全部剥除，答案间内容保留", () => {
-    const text = "<thinking>a</thinking>第一段<thinking>b</thinking>第二段";
-    expect(visibleStreamText(text)).toBe("第一段第二段");
-    const thinkText = "<think>a</think>第一段<think>b</think>第二段";
-    expect(visibleStreamText(thinkText)).toBe("第一段第二段");
+  it("尾部被分片截断的开标签前缀暂扣一帧", () => {
+    expect(splitStreamThinking("答案<t")).toEqual({ thinking: "", visible: "答案" });
+    expect(splitStreamThinking("<")).toEqual({ thinking: "", visible: "" });
+  });
+
+  it("多轮思考块内容合并，正文段落保留", () => {
+    const text = "<think>a</think>第一段<think>b</think>第二段";
+    expect(splitStreamThinking(text)).toEqual({
+      thinking: "ab",
+      visible: "第一段第二段",
+    });
   });
 });
