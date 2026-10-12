@@ -1,5 +1,6 @@
 /**
- * 能力 id 的唯一构造与解析入口：`mcp:<ulid>` / `skill:<ulid>`。
+ * 能力 id 的唯一构造与解析入口：`mcp:<rowId>` / `skill:<rowId>`。
+ * rowId 是行主键：正常是 Crockford ULID；连接器网关早期写过的标准 Base32 主键同样接受。
  *
  * 用不可变的 ULID 而不是 name/slug，因为后者是管理员起的可变标签：改一次名，
  * 分配记录、用户关闭偏好、用量与审计就会全部指空，用量归属错乱对按能力计费
@@ -82,11 +83,19 @@ export function parseFeatureCapabilityId(capabilityId: string): PlatformFeature 
 
 export type ParsedCapabilityId = {
   kind: CapabilityKind;
-  /** 被引用行的主键（ULID）。 */
+  /** 被引用行的主键（Crockford ULID，或连接器网关早期的标准 Base32 id）。 */
   rowId: string;
 };
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+// 连接器网关早期用 encoding/base32（RFC 4648、无 padding）写 mcp_servers.id：
+// 16 字节恰好 26 字符，但字母表含 I/L/O/U，过不了 Crockford。这些值已经是主键，
+// 改不了名，能力目录必须能指向它们，否则渲染 mcp:<id> 时会直接把整页打崩。
+const LEGACY_STD_BASE32_ROW_ID_RE = /^[A-Z2-7]{26}$/;
+
+function isCapabilityRowId(rowId: string): boolean {
+  return ULID_RE.test(rowId) || LEGACY_STD_BASE32_ROW_ID_RE.test(rowId);
+}
 
 export function isCapabilityKind(value: unknown): value is CapabilityKind {
   return typeof value === "string" && (CAPABILITY_KINDS as readonly string[]).includes(value);
@@ -102,7 +111,7 @@ export function formatCapabilityId(kind: CapabilityKind, rowId: string): string 
   // feature 走固定标识，不是 ULID：见 PLATFORM_FEATURES 上的说明。
   if (kind === "feature") return featureCapabilityId(rowId as PlatformFeature);
   const normalized = normalizeRowId(rowId);
-  if (!ULID_RE.test(normalized)) throw new Error(`capability id requires a ULID, got: ${rowId}`);
+  if (!isCapabilityRowId(normalized)) throw new Error(`capability id requires a ULID, got: ${rowId}`);
   return `${kind}:${normalized}`;
 }
 
@@ -118,7 +127,7 @@ export function parseCapabilityId(capabilityId: string): ParsedCapabilityId | nu
     return feature ? { kind, rowId: feature } : null;
   }
   const rowId = normalizeRowId(raw.slice(separator + 1));
-  if (!ULID_RE.test(rowId)) return null;
+  if (!isCapabilityRowId(rowId)) return null;
   return { kind, rowId };
 }
 
