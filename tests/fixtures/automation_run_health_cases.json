@@ -1,0 +1,339 @@
+[
+  {
+    "name": "AC-1 R1 start writes runningSince",
+    "before": { "id": "t1", "enabled": true },
+    "action": "start",
+    "args": { "nowIso": "2026-10-12T00:00:00.000Z" },
+    "expect": {
+      "id": "t1",
+      "enabled": true,
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AC-2 success after two failures clears the counter",
+    "before": {
+      "id": "t2",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "lastRunStatus": "error",
+      "lastRunError": "temporary",
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "outcome",
+    "args": { "ok": true, "trigger": "schedule", "nowIso": "2026-10-12T00:05:00.000Z" },
+    "expect": {
+      "id": "t2",
+      "enabled": true,
+      "consecutiveFailures": 0,
+      "lastRunStatus": "success",
+      "lastRunAt": "2026-10-12T00:05:00.000Z"
+    }
+  },
+  {
+    "name": "AC-3 ordinary failures stay enabled before the threshold",
+    "before": {
+      "id": "t3a",
+      "enabled": true,
+      "consecutiveFailures": 1,
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "network reset",
+      "trigger": "schedule",
+      "nowIso": "2026-10-12T00:01:00.000Z"
+    },
+    "expect": {
+      "id": "t3a",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "lastRunStatus": "error",
+      "lastRunError": "network reset",
+      "lastRunAt": "2026-10-12T00:01:00.000Z"
+    }
+  },
+  {
+    "name": "AC-3 third ordinary failure auto-pauses",
+    "before": {
+      "id": "t3",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "runningSince": "2026-10-12T00:02:00.000Z"
+    },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "network reset",
+      "trigger": "schedule",
+      "nowIso": "2026-10-12T00:03:00.000Z"
+    },
+    "expect": {
+      "id": "t3",
+      "enabled": false,
+      "consecutiveFailures": 3,
+      "lastRunStatus": "error",
+      "lastRunError": "network reset",
+      "lastRunAt": "2026-10-12T00:03:00.000Z",
+      "autoPausedReason": "连续失败 3 次，已自动暂停"
+    }
+  },
+  {
+    "name": "AC-4 HTTP 401 pauses immediately",
+    "before": {
+      "id": "t4",
+      "enabled": true,
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "provider returned HTTP 401 from upstream",
+      "trigger": "schedule",
+      "nowIso": "2026-10-12T00:04:00.000Z"
+    },
+    "expect": {
+      "id": "t4",
+      "enabled": false,
+      "consecutiveFailures": 1,
+      "lastRunStatus": "error",
+      "lastRunError": "provider returned HTTP 401 from upstream",
+      "lastRunAt": "2026-10-12T00:04:00.000Z",
+      "autoPausedReason": "需要你处理：鉴权失败",
+      "autoPausedAt": "2026-10-12T00:04:00.000Z"
+    }
+  },
+  {
+    "name": "AC-5 protected operation pauses immediately",
+    "before": { "id": "t5", "enabled": true },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "执行停止：无人值守运行不批准受保护操作（bash）",
+      "trigger": "schedule",
+      "nowIso": "2026-10-12T00:06:00.000Z"
+    },
+    "expect": {
+      "id": "t5",
+      "enabled": false,
+      "consecutiveFailures": 1,
+      "lastRunStatus": "error",
+      "lastRunError": "执行停止：无人值守运行不批准受保护操作（bash）",
+      "lastRunAt": "2026-10-12T00:06:00.000Z",
+      "autoPausedReason": "需要你处理：任务里有需要批准的操作",
+      "autoPausedAt": "2026-10-12T00:06:00.000Z"
+    }
+  },
+  {
+    "name": "AC-6 manual failures do not count or pause",
+    "before": {
+      "id": "t6",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "runningSince": "2026-10-11T00:00:00.000Z"
+    },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "nope",
+      "trigger": "manual",
+      "nowIso": "2026-10-12T00:07:00.000Z",
+      "repeat": 5
+    },
+    "expect": {
+      "id": "t6",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "runningSince": "2026-10-11T00:00:00.000Z",
+      "lastRunStatus": "error",
+      "lastRunError": "nope",
+      "lastRunAt": "2026-10-12T00:07:00.000Z"
+    }
+  },
+  {
+    "name": "AC-7 startup marks a leftover run interrupted",
+    "before": {
+      "id": "t7",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "runningSince": "2026-10-12T00:00:00.000Z",
+      "lastRunAt": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "startup",
+    "args": { "id": "t7", "runningIds": [] },
+    "expect": {
+      "id": "t7",
+      "enabled": true,
+      "consecutiveFailures": 2,
+      "lastRunAt": "2026-10-12T00:00:00.000Z",
+      "lastRunStatus": "interrupted",
+      "lastRunError": "上次运行在完成前中断（应用退出或进程崩溃），其中的外部操作可能已部分执行。请先查看那次会话，再决定是否重跑。"
+    }
+  },
+  {
+    "name": "AC-8 startup leaves an in-flight run unchanged",
+    "before": {
+      "id": "t8",
+      "enabled": true,
+      "consecutiveFailures": 1,
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "startup",
+    "args": { "id": "t8", "runningIds": ["t8"] },
+    "expect": {
+      "id": "t8",
+      "enabled": true,
+      "consecutiveFailures": 1,
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AC-9 re-enable clears auto-pause",
+    "before": {
+      "id": "t9",
+      "enabled": false,
+      "name": "daily",
+      "consecutiveFailures": 3,
+      "autoPausedReason": "连续失败 3 次，已自动暂停",
+      "autoPausedAt": "2026-10-11T00:00:00.000Z"
+    },
+    "action": "toggle",
+    "args": {
+      "next": {
+        "id": "t9",
+        "enabled": true,
+        "name": "daily",
+        "consecutiveFailures": 3,
+        "autoPausedReason": "连续失败 3 次，已自动暂停",
+        "autoPausedAt": "2026-10-11T00:00:00.000Z"
+      }
+    },
+    "expect": {
+      "id": "t9",
+      "enabled": true,
+      "name": "daily",
+      "consecutiveFailures": 0
+    }
+  },
+  {
+    "name": "AC-9 staying enabled does not clear auto-pause",
+    "before": {
+      "id": "t9b",
+      "enabled": true,
+      "name": "daily",
+      "consecutiveFailures": 3,
+      "autoPausedReason": "连续失败 3 次，已自动暂停",
+      "autoPausedAt": "2026-10-11T00:00:00.000Z"
+    },
+    "action": "toggle",
+    "args": {
+      "next": {
+        "id": "t9b",
+        "enabled": true,
+        "name": "daily",
+        "consecutiveFailures": 3,
+        "autoPausedReason": "连续失败 3 次，已自动暂停",
+        "autoPausedAt": "2026-10-11T00:00:00.000Z"
+      }
+    },
+    "expect": {
+      "id": "t9b",
+      "enabled": true,
+      "name": "daily",
+      "consecutiveFailures": 3,
+      "autoPausedReason": "连续失败 3 次，已自动暂停",
+      "autoPausedAt": "2026-10-11T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AC-10 legacy task success",
+    "before": {
+      "id": "legacy",
+      "name": "old",
+      "enabled": true,
+      "prompt": "hi",
+      "frequency": { "type": "daily", "time": "09:00", "days": [1] },
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    "action": "outcome",
+    "args": { "ok": true, "trigger": "schedule", "nowIso": "2026-10-12T01:00:00.000Z" },
+    "expect": {
+      "id": "legacy",
+      "name": "old",
+      "enabled": true,
+      "prompt": "hi",
+      "frequency": { "type": "daily", "time": "09:00", "days": [1] },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "consecutiveFailures": 0,
+      "lastRunStatus": "success",
+      "lastRunAt": "2026-10-12T01:00:00.000Z"
+    }
+  },
+  {
+    "name": "approval timeout is not an immediate pause",
+    "before": { "id": "t-timeout", "enabled": true },
+    "action": "outcome",
+    "args": {
+      "ok": false,
+      "error": "无人值守等待审批超时，已停止",
+      "trigger": "schedule",
+      "nowIso": "2026-10-12T00:08:00.000Z"
+    },
+    "expect": {
+      "id": "t-timeout",
+      "enabled": true,
+      "consecutiveFailures": 1,
+      "lastRunStatus": "error",
+      "lastRunError": "无人值守等待审批超时，已停止",
+      "lastRunAt": "2026-10-12T00:08:00.000Z"
+    }
+  },
+  {
+    "name": "R7 manual success clears failures and keeps runningSince",
+    "before": {
+      "id": "t7m",
+      "enabled": false,
+      "consecutiveFailures": 3,
+      "lastRunError": "old",
+      "runningSince": "2026-10-12T00:00:00.000Z",
+      "autoPausedReason": "连续失败 3 次，已自动暂停"
+    },
+    "action": "outcome",
+    "args": { "ok": true, "trigger": "manual", "nowIso": "2026-10-12T02:00:00.000Z" },
+    "expect": {
+      "id": "t7m",
+      "enabled": false,
+      "consecutiveFailures": 0,
+      "runningSince": "2026-10-12T00:00:00.000Z",
+      "autoPausedReason": "连续失败 3 次，已自动暂停",
+      "lastRunStatus": "success",
+      "lastRunAt": "2026-10-12T02:00:00.000Z"
+    }
+  },
+  {
+    "name": "edit save that omits health fields keeps them",
+    "before": {
+      "id": "t-edit",
+      "enabled": true,
+      "name": "old",
+      "consecutiveFailures": 2,
+      "autoPausedReason": "需要你处理：鉴权失败",
+      "autoPausedAt": "2026-10-11T00:00:00.000Z",
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    },
+    "action": "toggle",
+    "args": {
+      "next": { "id": "t-edit", "enabled": true, "name": "renamed" }
+    },
+    "expect": {
+      "id": "t-edit",
+      "enabled": true,
+      "name": "renamed",
+      "consecutiveFailures": 2,
+      "autoPausedReason": "需要你处理：鉴权失败",
+      "autoPausedAt": "2026-10-11T00:00:00.000Z",
+      "runningSince": "2026-10-12T00:00:00.000Z"
+    }
+  }
+]
