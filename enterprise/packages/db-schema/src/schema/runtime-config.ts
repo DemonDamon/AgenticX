@@ -181,6 +181,13 @@ export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Tenant-level desktop agent action policy. Separate from budgets so a budget rewrite cannot drop it. */
+export const enterpriseDesktopAgentPolicies = pgTable("enterprise_desktop_agent_policies", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: jsonb("config").notNull().$type<Record<string, unknown>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = pgTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),

@@ -4,6 +4,7 @@ const resolveDesktopIdentity = vi.fn();
 const listAvailableModelsForUser = vi.fn();
 const loadDesktopManagedPolicy = vi.fn();
 const listAvailableCapabilitiesForUser = vi.fn();
+const loadDesktopAgentPolicy = vi.fn();
 
 vi.mock("../../../../../lib/desktop-auth", () => ({
   resolveDesktopIdentity: (...args: unknown[]) => resolveDesktopIdentity(...args),
@@ -22,6 +23,10 @@ vi.mock("../../../../../lib/capability-packs-reader", () => ({
     listAvailableCapabilitiesForUser(...args),
 }));
 
+vi.mock("../../../../../lib/desktop-agent-policy-reader", () => ({
+  loadDesktopAgentPolicy: (...args: unknown[]) => loadDesktopAgentPolicy(...args),
+}));
+
 describe("GET /api/desktop/bootstrap", () => {
   beforeEach(() => {
     resolveDesktopIdentity.mockReset();
@@ -38,6 +43,11 @@ describe("GET /api/desktop/bootstrap", () => {
       },
     });
     listAvailableCapabilitiesForUser.mockReset().mockResolvedValue([]);
+    loadDesktopAgentPolicy.mockReset().mockResolvedValue({
+      deniedTools: [],
+      alwaysAskTools: [],
+      disableSessionAllow: false,
+    });
   });
 
   it("returns 401 without a valid PAT", async () => {
@@ -75,6 +85,60 @@ describe("GET /api/desktop/bootstrap", () => {
       "d1",
       "desktop",
     );
+  });
+
+  it("passes through a non-default agent action policy", async () => {
+    resolveDesktopIdentity.mockResolvedValue({
+      userId: "u1",
+      tenantId: "t1",
+      deptId: "d1",
+      email: "a@example.invalid",
+      displayName: "A",
+      tokenId: 1,
+      scopes: ["workspace:chat", "desktop:managed"],
+    });
+    loadDesktopAgentPolicy.mockResolvedValue({
+      deniedTools: ["git:push"],
+      alwaysAskTools: ["mcp:send_*"],
+      disableSessionAllow: true,
+    });
+
+    const { GET } = await import("../route");
+    const res = await GET(new Request("http://localhost/api/desktop/bootstrap"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.policy.agentActions).toEqual({
+      deniedTools: ["git:push"],
+      alwaysAskTools: ["mcp:send_*"],
+      disableSessionAllow: true,
+    });
+    expect(loadDesktopAgentPolicy).toHaveBeenCalledWith("t1");
+  });
+
+  it("returns the default agent action policy when the policy table is missing", async () => {
+    resolveDesktopIdentity.mockResolvedValue({
+      userId: "u1",
+      tenantId: "t1",
+      deptId: "d1",
+      email: "a@example.invalid",
+      displayName: "A",
+      tokenId: 1,
+      scopes: ["workspace:chat"],
+    });
+    loadDesktopAgentPolicy.mockRejectedValue(
+      new Error('relation "enterprise_desktop_agent_policies" does not exist'),
+    );
+
+    const { GET } = await import("../route");
+    const res = await GET(new Request("http://localhost/api/desktop/bootstrap"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.policy.agentActions).toEqual({
+      deniedTools: [],
+      alwaysAskTools: [],
+      disableSessionAllow: false,
+    });
+    expect(json.data.models).toEqual([{ id: "local/demo" }]);
   });
 
   it("returns empty capabilities when the pack tables are not migrated yet", async () => {

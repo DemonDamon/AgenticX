@@ -157,8 +157,14 @@
         "tabs": {
           "packs": "能力包",
           "skills": "Skill",
-          "mcp": "MCP"
+          "mcp": "MCP",
+          "agentPolicy": "智能体动作"
         },
+        "deniedTools": "禁止执行",
+        "alwaysAskTools": "必须确认",
+        "disableSessionAllow": "禁止员工使用『本会话不再询问』",
+        "onePerLine": "每行一个，支持 * 通配",
+        "saved": "已保存",
         "mcp": {
           "title": "已托管的 MCP",
           "description": "这里列出可被能力包引用的服务器。新增与凭据仍在 MCP 托管页配置。",

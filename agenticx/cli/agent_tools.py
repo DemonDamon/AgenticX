@@ -4306,18 +4306,32 @@ async def _confirm(
         for item in (payload_context.get("risk_categories") or [])
         if isinstance(item, dict)
     ]
+    from agenticx.runtime.enterprise_agent_policy import load_enterprise_agent_policy
+
+    enterprise_forced = bool(payload_context.get("enterprise_policy"))
+    tool_for_policy = str(payload_context.get("tool") or "")
+    if (
+        not enterprise_forced
+        and session is not None
+        and tool_for_policy
+        and getattr(session, "_enterprise_ask_satisfied_tool", None) == tool_for_policy
+    ):
+        setattr(session, "_enterprise_ask_satisfied_tool", None)
+        _log.info("[confirm] auto-approved id=%s tool=%s by enterprise pre-confirmation", request_id, tool_for_policy)
+        return True
+    ent_policy = load_enterprise_agent_policy()
     path_raw = payload_context.get("path")
     path_allow = bool(path_raw) and _path_allowed_without_confirm(Path(str(path_raw)))
     if set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES:
         path_allow = False
-    if tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow:
+    if not enterprise_forced and (tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow):
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by permissions allow rule",
             request_id,
             payload_context.get("tool"),
         )
         return True
-    if _unattended_workspace_script_allowed(payload_context, risk_codes, session):
+    if not enterprise_forced and _unattended_workspace_script_allowed(payload_context, risk_codes, session):
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by unattended workspace-script rule",
             request_id,
@@ -4331,6 +4345,8 @@ async def _confirm(
         and sticky_tool in getattr(session, "sticky_allowed_tools", set())
         and not is_protected_confirm(payload_context)
         and not (set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES)
+        and not enterprise_forced
+        and not ent_policy.disable_session_allow
     ):
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by session sticky allow",
@@ -12274,6 +12290,17 @@ async def dispatch_tool_async(
     policy_denial = tool_denied_by_session_permissions(name)
     if policy_denial:
         return f"ERROR: {policy_denial}"
+    setattr(session, "_enterprise_ask_satisfied_tool", None)
+    from agenticx.runtime.enterprise_agent_policy import (
+        enterprise_ask_subject,
+        enterprise_denied_subject,
+        load_enterprise_agent_policy,
+    )
+
+    enterprise_policy = load_enterprise_agent_policy()
+    denied_subject = enterprise_denied_subject(name, arguments, enterprise_policy)
+    if denied_subject:
+        return f"ERROR: 企业策略禁止执行「{denied_subject}」。如需使用请联系管理员。"
     intent_denial = turn_intent_denial_message(name, session)
     if intent_denial:
         return f"ERROR: {intent_denial}"
@@ -12325,6 +12352,24 @@ async def dispatch_tool_async(
             f"如果你忘记了目标路径或正文内容，请回头查看用户最近的原始任务描述（含 [user-pending-question] 与 [user-goal-anchor]）以及 system prompt 里的工作区根，再生成完整调用。"
         )
     gate = confirm_gate or SyncConfirmGate()
+    ask_subject = enterprise_ask_subject(name, arguments, enterprise_policy)
+    if ask_subject:
+        approved = await _confirm(
+            f"企业策略要求确认：即将执行「{ask_subject}」",
+            confirm_gate=gate,
+            context={
+                "tool": name,
+                "risk": "policy",
+                "enterprise_policy": True,
+                "policy_subject": ask_subject,
+            },
+            emit_event=event_callback,
+            session=session,
+        )
+        if not approved:
+            note = getattr(gate, "last_denial_note", "") or "用户拒绝"
+            return f"CANCELLED: 企业策略要求的确认未通过（{note}）"
+        setattr(session, "_enterprise_ask_satisfied_tool", name)
     try:
         if name in META_TOOL_NAMES:
             tm = team_manager or getattr(session, "_team_manager", None)

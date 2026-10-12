@@ -96,6 +96,7 @@ import {
   startEnterpriseDeviceAuth,
 } from "./enterprise-device-login";
 import { normalizeEnterpriseCapabilities } from "./enterprise-capabilities";
+import { normalizeAgentActionPolicy } from "./enterprise-agent-policy";
 import {
   applyEnterpriseCapabilitiesToDisk,
   digestSkillBundle,
@@ -398,6 +399,7 @@ type AgxConfig = {
     capabilities?: unknown;
     managed_mcp_servers?: string[];
     managed_skills?: string[];
+    agent_action_policy?: unknown;
     /** 上次使用/预置的门户地址；登出后保留，用于下次登录预填。 */
     default_portal_url?: string;
     /** 仅用于设置页展示当前登录者，非鉴权依据。 */
@@ -2261,6 +2263,7 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
   const token = String(cfg.enterprise?.token ?? "").trim();
   const portal = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
   let capabilities = cfg.enterprise?.capabilities;
+  let agentPolicy: unknown = cfg.enterprise?.agent_action_policy;
   if (portal) {
     try {
       const resp = await proxyAwareFetch(`${portal}/api/desktop/bootstrap`, {
@@ -2268,8 +2271,13 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
         signal: AbortSignal.timeout(15_000),
       });
       if (resp.ok) {
-        const json = (await resp.json()) as { data?: { capabilities?: unknown } };
+        const json = (await resp.json()) as {
+          data?: { capabilities?: unknown; policy?: { agentActions?: unknown } };
+        };
         capabilities = json.data?.capabilities ?? capabilities;
+        if (json.data?.policy && "agentActions" in json.data.policy) {
+          agentPolicy = json.data.policy.agentActions;
+        }
       }
     } catch (error) {
       console.warn(`[enterprise] bootstrap capabilities failed: ${String(error)}`);
@@ -2295,6 +2303,7 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
     cfg.enterprise.capabilities = normalizeEnterpriseCapabilities(capabilities);
     cfg.enterprise.managed_mcp_servers = result.managedMcp;
     cfg.enterprise.managed_skills = result.managedSkills;
+    cfg.enterprise.agent_action_policy = normalizeAgentActionPolicy(agentPolicy);
     saveAgxConfig(cfg);
   }
   return { ok: true, skipped: result.skipped };

@@ -157,8 +157,14 @@
         "tabs": {
           "packs": "Packs",
           "skills": "Skills",
-          "mcp": "MCP"
+          "mcp": "MCP",
+          "agentPolicy": "Agent actions"
         },
+        "deniedTools": "Deny execution",
+        "alwaysAskTools": "Require confirmation",
+        "disableSessionAllow": "Disable “don’t ask again this session”",
+        "onePerLine": "One pattern per line. * is a wildcard",
+        "saved": "Saved",
         "mcp": {
           "title": "Hosted MCP servers",
           "description": "These servers can be referenced by a pack. Create and credential them on the MCP hosting page.",
