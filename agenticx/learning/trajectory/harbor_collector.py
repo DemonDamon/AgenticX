@@ -10,7 +10,17 @@ import json
 from pathlib import Path
 from typing import Iterator
 
-from .schema import DecisionStep, RewardRecord, RSITrajectory, ToolCallRecord
+from .schema import (
+    DecisionStep,
+    RewardRecord,
+    RSITrajectory,
+    ToolCallRecord,
+    classify_routing_tool,
+    routing_step,          # SP30 T1：主动埋点入口，re-export 供上层调用
+    ROUTING_KINDS,
+)
+
+__all__ = ["collect_trial", "collect_jobs", "routing_step", "ROUTING_KINDS"]
 
 def _load_json(path: Path):
     try:
@@ -49,7 +59,10 @@ def _extract_tool_calls(messages: list[dict]) -> list[ToolCallRecord]:
     return calls
 
 def _lineage(tool_calls: list[ToolCallRecord], reward: RewardRecord) -> list[DecisionStep]:
-    steps = [DecisionStep(kind="tool_call", ref=c.name, note="") for c in tool_calls]
+    steps: list[DecisionStep] = []
+    for c in tool_calls:
+        r = classify_routing_tool(c.name, c.arguments)   # SP30 T1：路由工具升级为路由事件
+        steps.append(r if r is not None else DecisionStep(kind="tool_call", ref=c.name))
     steps.append(DecisionStep(kind="verification", ref=reward.source,
                               note=f"label={reward.label}"))
     return steps

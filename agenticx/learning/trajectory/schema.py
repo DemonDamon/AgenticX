@@ -34,8 +34,55 @@ class ToolCallRecord:
 @dataclass
 class DecisionStep:
     kind: str                                      # knowledge_ref|tool_call|verification|correction
+                                                   # |memory_recall|skill_select|adapter_route（SP30 路由事件）
     ref: str
     note: str = ""
+    version: str = ""                              # SP30：被引用经验/技能/adapter 的版本；"unknown"=采集端拿不到
+    outcome: str = ""                              # SP30：used | ignored | harmful（best-effort 阶段只填 used/空）
+
+ROUTING_KINDS = ("memory_recall", "skill_select", "adapter_route")
+
+# 路由事件约定（SP30 T1）：Harness 层选择记忆/技能/adapter 的动作必须在 lineage
+# 留痕；ref 用 URN 风格（memory:/skill:/adapter:），version 必填到能定位的粒度，
+# 拿不到填 "unknown" 不许空着——归因账本会把 unknown 单列，倒逼采集补齐埋点。
+
+
+def routing_step(kind: str, ref: str, *, version: str = "unknown",
+                 outcome: str = "used", note: str = "") -> DecisionStep:
+    """构造一条路由事件（供采集端埋点与 collector 共用）。"""
+    if kind not in ROUTING_KINDS:
+        raise ValueError(f"路由事件 kind 须为 {ROUTING_KINDS} 之一, got {kind!r}")
+    if not version:
+        version = "unknown"
+    return DecisionStep(kind=kind, ref=ref, note=note, version=version, outcome=outcome)
+
+
+_REF_KEYS = ("id", "key", "skill", "alias", "adapter", "name", "query")
+
+
+def classify_routing_tool(name: str, arguments: dict | None) -> DecisionStep | None:
+    """best-effort：从工具调用名/参数识别路由动作。识别不出返回 None（不造假）。
+
+    名字含 memory/recall → memory_recall；skill → skill_select；adapter → adapter_route。
+    ref 从参数常见键（id/key/skill/alias/name/query）取，全无则退化为工具名；
+    version 取参数 version 键，取不到为 unknown。
+    """
+    low = (name or "").lower()
+    if "memory" in low or "recall" in low:
+        kind, prefix = "memory_recall", "memory"
+    elif "skill" in low:
+        kind, prefix = "skill_select", "skill"
+    elif "adapter" in low:
+        kind, prefix = "adapter_route", "adapter"
+    else:
+        return None
+    args = arguments if isinstance(arguments, dict) else {}
+    ref_val = next((str(args[k]).strip() for k in _REF_KEYS
+                    if isinstance(args.get(k), str) and str(args.get(k)).strip()), "")
+    ver = args.get("version")
+    version = str(ver).strip() if isinstance(ver, (str, int)) and str(ver).strip() else "unknown"
+    return routing_step(kind, f"{prefix}:{ref_val or low}", version=version,
+                        note=f"tool:{name}")
 
 @dataclass
 class RSITrajectory:

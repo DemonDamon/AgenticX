@@ -9,7 +9,17 @@ import json
 from pathlib import Path
 from typing import Iterator
 
-from .schema import DecisionStep, RewardRecord, RSITrajectory, ToolCallRecord
+from .schema import (
+    DecisionStep,
+    RewardRecord,
+    RSITrajectory,
+    ToolCallRecord,
+    classify_routing_tool,
+    routing_step,          # SP30 T1：主动埋点入口，re-export 供上层调用
+    ROUTING_KINDS,
+)
+
+__all__ = ["collect_session", "collect_sessions", "routing_step", "ROUTING_KINDS"]
 
 def _load_json(path: Path, default):
     try:
@@ -32,7 +42,10 @@ def collect_session(session_dir: Path) -> RSITrajectory | None:
         )
         for o in observations if isinstance(o, dict)
     ]
-    lineage = [DecisionStep(kind="tool_call", ref=c.name) for c in tool_calls]
+    lineage = []
+    for c in tool_calls:
+        r = classify_routing_tool(c.name, c.arguments)   # SP30 T1：路由工具升级为路由事件
+        lineage.append(r if r is not None else DecisionStep(kind="tool_call", ref=c.name))
     for o in observations:
         if isinstance(o, dict) and o.get("success") is False:
             lineage.append(DecisionStep(kind="correction", ref=o.get("tool_name", "?"),
