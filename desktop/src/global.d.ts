@@ -158,7 +158,11 @@ type AutomationTaskData = {
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
-  lastRunStatus?: "success" | "error";
+  lastRunStatus?: "success" | "error" | "interrupted";
+  runningSince?: string;
+  consecutiveFailures?: number;
+  autoPausedReason?: string;
+  autoPausedAt?: string;
   fromTemplate?: string;
 };
 

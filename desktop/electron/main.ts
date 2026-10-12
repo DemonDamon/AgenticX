@@ -78,6 +78,7 @@ import {
   shouldStartHidden,
   welcomeNotificationCopy,
 } from "./desktop-notify";
+import { applyRunOutcome, applyUserEnableToggle, markInterruptedOnStartup, markRunStarted } from "./automation-run-health";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
@@ -810,8 +811,12 @@ interface AutomationTaskData {
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
-  lastRunStatus?: "success" | "error";
+  lastRunStatus?: "success" | "error" | "interrupted";
   lastRunError?: string;
+  runningSince?: string;
+  consecutiveFailures?: number;
+  autoPausedReason?: string;
+  autoPausedAt?: string;
   fromTemplate?: string;
 }
 
@@ -1265,9 +1270,20 @@ async function runAutomationTaskHttp(
 class AutomationScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastCheckMinute = "";
+  private running = new Set<string>();
 
   start(): void {
     if (this.timer) return;
+    const tasks = loadAutomationTasks();
+    let interruptedDirty = false;
+    for (let i = 0; i < tasks.length; i += 1) {
+      const updated = markInterruptedOnStartup(tasks[i], this.running, tasks[i].id);
+      if (updated !== tasks[i]) {
+        tasks[i] = updated;
+        interruptedDirty = true;
+      }
+    }
+    if (interruptedDirty) saveAutomationTasks(tasks);
     this.timer = setInterval(() => this.tick(), 30_000);
     this.tick();
   }
@@ -1302,6 +1318,7 @@ class AutomationScheduler {
       if (task.lastRunAt && task.lastRunAt.startsWith(minuteKey)) continue;
 
       task.lastRunAt = now.toISOString();
+      Object.assign(task, markRunStarted(task, now.toISOString()));
       dirty = true;
       // queued phase intentionally emits without sessionId:
       // a new automation session is created inside executeTask (每次触发新开 session)，
@@ -1345,6 +1362,7 @@ class AutomationScheduler {
   }
 
   private async executeTask(task: AutomationTaskData): Promise<void> {
+    this.running.add(task.id);
     try {
       const result = await runAutomationTaskHttp(task, {
         reusePersistedSession: false,
@@ -1362,13 +1380,13 @@ class AutomationScheduler {
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
-        found.lastRunStatus = result.ok ? "success" : "error";
-        found.lastRunAt = new Date().toISOString();
-        if (result.ok) {
-          delete found.lastRunError;
-        } else {
-          found.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
-        }
+        const recorded = applyRunOutcome(found, {
+          ok: result.ok,
+          error: result.ok ? undefined : (sanitizeAutomationRunError(result.error) ?? "执行失败"),
+        }, { trigger: "schedule", nowIso: new Date().toISOString() });
+        Object.assign(found, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete found.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete found.lastRunError;
         saveAutomationTasks(tasks);
       }
       emitAutomationTaskProgress({
@@ -1384,9 +1402,13 @@ class AutomationScheduler {
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
-        found.lastRunStatus = "error";
-        found.lastRunAt = new Date().toISOString();
-        found.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
+        const recorded = applyRunOutcome(found, {
+          ok: false,
+          error: sanitizeAutomationRunError(err) ?? "执行异常",
+        }, { trigger: "schedule", nowIso: new Date().toISOString() });
+        Object.assign(found, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete found.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete found.lastRunError;
         saveAutomationTasks(tasks);
       }
       emitAutomationTaskProgress({
@@ -1398,6 +1420,8 @@ class AutomationScheduler {
         message: String(err),
         ts: Date.now(),
       });
+    } finally {
+      this.running.delete(task.id);
     }
   }
 }
@@ -11047,7 +11071,7 @@ function registerIpc(): void {
       const tasks = loadAutomationTasks();
       const idx = tasks.findIndex((t) => t.id === task.id);
       if (idx >= 0) {
-        tasks[idx] = task;
+        tasks[idx] = applyUserEnableToggle(tasks[idx], task);
       } else {
         tasks.unshift(task);
       }
@@ -11178,13 +11202,13 @@ function registerIpc(): void {
         },
       });
 
-      task.lastRunAt = new Date().toISOString();
-      task.lastRunStatus = result.ok ? "success" : "error";
-      if (result.ok) {
-        delete task.lastRunError;
-      } else {
-        task.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
-      }
+      const recorded = applyRunOutcome(task, {
+        ok: result.ok,
+        error: result.ok ? undefined : (sanitizeAutomationRunError(result.error) ?? "执行失败"),
+      }, { trigger: "manual", nowIso: new Date().toISOString() });
+      Object.assign(task, recorded);
+      if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete task.runningSince;
+      if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete task.lastRunError;
       saveAutomationTasks(tasks);
       emitAutomationTaskProgress({
         taskId: task.id,
@@ -11204,9 +11228,13 @@ function registerIpc(): void {
       const tasks = loadAutomationTasks();
       const task = tasks.find((t) => t.id === taskId);
       if (task) {
-        task.lastRunStatus = "error";
-        task.lastRunAt = new Date().toISOString();
-        task.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
+        const recorded = applyRunOutcome(task, {
+          ok: false,
+          error: sanitizeAutomationRunError(err) ?? "执行异常",
+        }, { trigger: "manual", nowIso: new Date().toISOString() });
+        Object.assign(task, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete task.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete task.lastRunError;
         saveAutomationTasks(tasks);
       }
       const sidFromTask = task ? resolveAutomationSessionId(task, sessionOverride) : "";

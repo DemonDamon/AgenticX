@@ -18,9 +18,13 @@ export interface AutomationTask {
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
-  lastRunStatus?: "success" | "error";
+  lastRunStatus?: "success" | "error" | "interrupted";
   /** 最近一次失败时的核心报错（短文本，由主进程截断后写入） */
   lastRunError?: string;
+  runningSince?: string;
+  consecutiveFailures?: number;
+  autoPausedReason?: string;
+  autoPausedAt?: string;
   fromTemplate?: string;
 }
 
