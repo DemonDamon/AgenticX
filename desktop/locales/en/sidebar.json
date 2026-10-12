@@ -70,6 +70,16 @@
   "account": {
     "tokenDashboard": "Token usage"
   },
+  "approvals": {
+    "title": "Approvals",
+    "empty": "Nothing waiting for you",
+    "sourceAutomation": "Scheduled task",
+    "sourceUnattended": "Unattended run",
+    "remaining": "Auto-deny in {{minutes}} min",
+    "approve": "Approve",
+    "deny": "Deny",
+    "failed": "Submit failed"
+  },
   "topbar": {
     "switchToLight": "Switch to light",
     "switchToDark": "Switch to dark"

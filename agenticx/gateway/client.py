@@ -765,10 +765,58 @@ class GatewayClient:
             "pending_confirm": _pending_confirm_dict(result.pending_confirm),
         }
 
+    async def _fetch_parked_approvals(self) -> list[Dict[str, Any]]:
+        """Read unattended parked approvals from the local studio. Never raises."""
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                transport=httpx.AsyncHTTPTransport(),
+            ) as client:
+                resp = await client.get(
+                    f"{self._settings.studio_base_url}/api/approvals/pending",
+                    headers=headers,
+                )
+            if resp.status_code != 200:
+                return []
+            items = resp.json().get("items")
+            if not isinstance(items, list):
+                return []
+            return [i for i in items if isinstance(i, dict)]
+        except Exception:
+            logger.debug("fetch parked approvals failed", exc_info=True)
+            return []
+
     async def _rpc_confirm_pending(self, params: Dict[str, Any]) -> list:
         install_id = str(params.get("install_id") or "").strip()
-        rows = _PENDING_CONFIRMS.list_for_sender(f"mobile:{install_id}")
-        return [_pending_confirm_dict(r) for r in rows]
+        sender_key = f"mobile:{install_id}"
+        rows: list = [
+            _pending_confirm_dict(row)
+            for row in _PENDING_CONFIRMS.list_for_sender(sender_key)
+        ]
+        seen = {
+            row["request_id"]
+            for row in rows
+            if isinstance(row, dict) and row.get("request_id")
+        }
+        for item in await self._fetch_parked_approvals():
+            request_id = item.get("request_id")
+            session_id = item.get("session_id")
+            if not request_id or request_id in seen or not session_id:
+                continue
+            rows.append(
+                {
+                    "request_id": request_id,
+                    "agent_id": item.get("agent_id") or "meta",
+                    "session_id": session_id,
+                    "question": item.get("question") or "",
+                    "created_at": item.get("created_at") or 0,
+                    "source": "parked",
+                    "expires_at": item.get("expires_at"),
+                }
+            )
+            seen.add(request_id)
+        return rows
 
     async def _rpc_confirm_respond(self, params: Dict[str, Any]) -> Dict[str, Any]:
         install_id = str(params.get("install_id") or "").strip()
@@ -779,6 +827,22 @@ class GatewayClient:
             raise ValueError("install_id required")
         sender_key = f"mobile:{install_id}"
         pending = _PENDING_CONFIRMS.get(sender_key, request_id=request_id or None)
+        # Blank request_id stays on the store "latest" path.
+        if pending is None and request_id:
+            for item in await self._fetch_parked_approvals():
+                if item.get("request_id") != request_id:
+                    continue
+                session_id = item.get("session_id")
+                if not session_id:
+                    continue
+                pending = PendingConfirm(
+                    request_id=str(item["request_id"]),
+                    agent_id=str(item.get("agent_id") or "meta"),
+                    session_id=str(session_id),
+                    question=str(item.get("question") or ""),
+                    created_at=float(item.get("created_at") or 0),
+                )
+                break
         if pending is None:
             raise LookupError(f"pending confirm not found: {request_id or '(latest)'}")
         await self._submit_confirm_and_remove(sender_key, pending, approved)

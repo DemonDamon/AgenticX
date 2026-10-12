@@ -70,6 +70,16 @@
   "account": {
     "tokenDashboard": "Token 消耗看板"
   },
+  "approvals": {
+    "title": "待审批",
+    "empty": "没有等待你决定的操作",
+    "sourceAutomation": "定时任务",
+    "sourceUnattended": "无人值守运行",
+    "remaining": "{{minutes}} 分钟后自动拒绝",
+    "approve": "批准",
+    "deny": "拒绝",
+    "failed": "提交失败"
+  },
   "topbar": {
     "switchToLight": "切换到亮色",
     "switchToDark": "切换到暗色"
