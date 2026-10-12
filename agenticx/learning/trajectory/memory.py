@@ -25,8 +25,9 @@ def _is_error(content: str) -> bool:
     return "error" in content.lower()[:200]      # 与 forest._is_error_result 同口径
 
 
-def _vote_key(content: str) -> str:
-    """跨任务投票键: 归一化到异常类型级（error: 后第一个冒号段）。"""
+def vote_key(content: str) -> str:
+    """跨任务投票键: 归一化到异常类型级（error: 后第一个冒号段）。
+    （SP30 T4 公开化，gap_dispatch 与本模块共用，不复制实现。）"""
     low = content.lower()
     idx = low.find("error")
     if idx < 0:
@@ -35,7 +36,11 @@ def _vote_key(content: str) -> str:
     return ":".join(s.strip().lower() for s in seg[:2])[:60]
 
 
-def _error_patterns(messages: list) -> dict[str, str]:
+# 向后兼容别名（模块内旧引用）
+_vote_key = vote_key
+
+
+def error_patterns(messages: list) -> dict[str, str]:
     """一条轨迹的 {消息级键: 代表性原始片段}（同键保首个, 120 字符截断）。"""
     out: dict[str, str] = {}
     for m in messages:
@@ -44,6 +49,9 @@ def _error_patterns(messages: list) -> dict[str, str]:
             if _is_error(content):
                 out.setdefault(content[:120], content[:120])
     return out
+
+
+_error_patterns = error_patterns
 
 
 def extract_contrastive_lessons(task_id: str, pass_messages_list: list,
