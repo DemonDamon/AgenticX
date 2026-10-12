@@ -6,10 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback } from "react";
 
 import { CapabilityPacksPanel } from "../../../components/capabilities/CapabilityPacksPanel";
+import { DesktopAgentPolicyPanel } from "../../../components/capabilities/DesktopAgentPolicyPanel";
 import { McpServersPanel } from "../../../components/capabilities/McpServersPanel";
 import { SkillsPanel } from "../../../components/capabilities/SkillsPanel";
 
-const TABS = ["packs", "skills", "mcp"] as const;
+const TABS = ["packs", "skills", "mcp", "agentPolicy"] as const;
 type TabId = (typeof TABS)[number];
 
 function isTabId(value: string | null): value is TabId {
@@ -47,6 +48,9 @@ function CapabilitiesTabs() {
       </TabsContent>
       <TabsContent value="mcp" className="pt-4">
         <McpServersPanel />
+      </TabsContent>
+      <TabsContent value="agentPolicy" className="pt-4">
+        <DesktopAgentPolicyPanel />
       </TabsContent>
     </Tabs>
   );

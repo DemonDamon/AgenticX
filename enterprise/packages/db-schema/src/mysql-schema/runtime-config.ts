@@ -172,6 +172,13 @@ export const enterpriseRuntimeWebSearch = mysqlTable("enterprise_runtime_web_sea
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
+/** Tenant-level desktop agent action policy. Separate from budgets so a budget rewrite cannot drop it. */
+export const enterpriseDesktopAgentPolicies = mysqlTable("enterprise_desktop_agent_policies", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: json("config").notNull().$type<Record<string, unknown>>(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = mysqlTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),
