@@ -6,12 +6,14 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.reliability.call_ledger import CallLedger
 from agenticx.runtime import effect_guard
 from agenticx.runtime.effect_guard import (
@@ -242,3 +244,65 @@ def test_ac16_reused_tool_call_id_keeps_both_rows(tmp_path: Path) -> None:
     restored = CallLedger("ac16", root=tmp_path)
     assert restored.lookup(first.ledger_call_id) is not None
     assert restored.lookup(second.ledger_call_id) is not None
+
+
+def _enable_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+    def get_value(cls: object, key: str) -> object:
+        del cls
+        if key == "enterprise.enabled":
+            return True
+        if key == "enterprise.token":
+            return "agx-pat-test"
+        return None
+
+    monkeypatch.setattr(ConfigManager, "get_value", classmethod(get_value))
+
+
+def _audit_events() -> list[dict[str, object]]:
+    path = Path.home() / ".agenticx" / "action_audit" / "outbox.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_ac6_orphan_block_and_completed_effect_are_audited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_audit(monkeypatch)
+    guard1 = _guard(tmp_path, "ac6")
+    first = guard1.before_dispatch(
+        tool_call_id="push-1",
+        tool_name="bash_exec",
+        arguments=_PUSH,
+    )
+    assert first.ledger_call_id
+    assert _audit_events() == []
+    _advance_process_start(monkeypatch)
+    guard2 = _guard(tmp_path, "ac6")
+    intercepted = guard2.before_dispatch(
+        tool_call_id="push-2",
+        tool_name="bash_exec",
+        arguments=_PUSH,
+    )
+    assert intercepted.action == "prefilled"
+    orphan = _audit_events()
+    assert len(orphan) == 1
+    assert orphan[0]["kind"] == "effect_intercepted"
+    assert orphan[0]["outcome"] == "orphan_blocked"
+    assert orphan[0]["session_id"] == "ac6"
+    assert orphan[0]["tool_name"] == "bash_exec"
+    assert orphan[0]["summary"] == ""
+
+    done = guard2.before_dispatch(
+        tool_call_id="push-3",
+        tool_name="bash_exec",
+        arguments=_PUSH,
+    )
+    assert done.ledger_call_id
+    guard2.after_result(done.ledger_call_id, "ok", is_error=False)
+    events = _audit_events()
+    assert len(events) == 2
+    assert events[1]["kind"] == "external_effect"
+    assert events[1]["outcome"] == "completed"
+    assert events[1]["session_id"] == "ac6"
+    assert events[1]["tool_name"] == "bash_exec"

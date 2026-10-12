@@ -152,6 +152,7 @@ export class LocalAuditStore implements AuditStore {
         const has = event.policies_hit?.some((item) => item.policy_id === input.policy_hit);
         if (!has) return false;
       }
+      if (input.event_type && event.event_type !== input.event_type) return false;
       const eventTime = Date.parse(event.event_time);
       if (eventTime < start || eventTime > end) return false;
       return true;

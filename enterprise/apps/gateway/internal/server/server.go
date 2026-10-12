@@ -674,6 +674,7 @@ func (s *Server) Router() http.Handler {
 	r.Post("/internal/channels/{id}/probe", s.handleInternalChannelProbe)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
+	r.Post("/v1/desktop/action-audit", s.handleDesktopActionAudit)
 	if claudeInboundEnabled() {
 		r.Post("/v1/messages", s.handleClaudeMessages)
 	}

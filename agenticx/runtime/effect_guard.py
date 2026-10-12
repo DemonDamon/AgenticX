@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -14,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal
 
-from agenticx.reliability.call_identity import canonical_call_key
+from agenticx.reliability.call_identity import canonical_call_key, canonical_payload
 from agenticx.reliability.call_ledger import CallLedger
 from agenticx.runtime.replay_ledger.effects import classify_tool_effect
 
@@ -142,6 +143,7 @@ class EffectGuard:
     def __init__(self, session_id: str, *, root: str | None = None) -> None:
         self._ledger = CallLedger(session_id, root=root)
         self.session_id = self._ledger.session_id
+        self._pending_meta: dict[str, tuple[str, str]] = {}
 
     def before_dispatch(
         self, *, tool_call_id: str, tool_name: str, arguments: dict[str, Any]
@@ -151,6 +153,7 @@ class EffectGuard:
             return GuardDecision("dispatch")
         clean = {k: v for k, v in arguments.items() if k not in _RUNTIME_ARG_KEYS}
         key = canonical_call_key(tool_name, clean)
+        digest = hashlib.sha256(canonical_payload(clean).encode("utf-8")).hexdigest()
         try:
             prior = self._ledger.find_prior_by_canonical_key(
                 key,
@@ -164,6 +167,12 @@ class EffectGuard:
                 self._ledger.mark_reconciled(prior.call_id, "orphan_intercepted")
             except Exception:
                 return _decision_after_ledger_error()
+            self._emit_guard_audit(
+                kind="effect_intercepted",
+                outcome="orphan_blocked",
+                tool_name=tool_name,
+                args_digest=digest,
+            )
             return GuardDecision("prefilled", text=ORPHAN_TEXT)
         if (
             prior is not None
@@ -175,6 +184,12 @@ class EffectGuard:
                 self._ledger.mark_reconciled(prior.call_id, "completed_reused")
             except Exception:
                 return _decision_after_ledger_error()
+            self._emit_guard_audit(
+                kind="effect_intercepted",
+                outcome="completed_reused",
+                tool_name=tool_name,
+                args_digest=digest,
+            )
             return GuardDecision(
                 "prefilled", text=REUSED_PREFIX + prior.result_payload
             )
@@ -190,12 +205,14 @@ class EffectGuard:
             )
         except Exception:
             return _decision_after_ledger_error()
+        self._pending_meta[ledger_call_id] = (tool_name, digest)
         return GuardDecision("dispatch", ledger_call_id=ledger_call_id)
 
     def after_result(
         self, ledger_call_id: str, result: str, *, is_error: bool
     ) -> None:
         """Record success or failure. Ledger errors are logged and swallowed."""
+        meta = self._pending_meta.pop(str(ledger_call_id), None)
         try:
             text = str(result)
             if is_error:
@@ -208,3 +225,38 @@ class EffectGuard:
                 ledger_call_id,
                 exc_info=True,
             )
+        if meta is None:
+            return
+        tool_name, digest = meta
+        self._emit_guard_audit(
+            kind="external_effect",
+            outcome="failed" if is_error else "completed",
+            tool_name=tool_name,
+            args_digest=digest,
+        )
+
+    def _emit_guard_audit(
+        self,
+        *,
+        kind: str,
+        outcome: str,
+        tool_name: str,
+        args_digest: str,
+    ) -> None:
+        """Best-effort audit. A missing outbox must not change the guard decision."""
+        try:
+            from agenticx.runtime.action_audit import emit_action_audit
+        except Exception:
+            logger.debug("action audit import failed", exc_info=True)
+            return
+        emit_action_audit(
+            {
+                "kind": kind,
+                "outcome": outcome,
+                "tool_name": tool_name,
+                "args_digest": args_digest,
+                "session_id": self.session_id,
+                "decision_source": "",
+                "summary": "",
+            }
+        )
