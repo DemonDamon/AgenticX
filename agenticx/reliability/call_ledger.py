@@ -49,6 +49,7 @@ class CallRecord:
     error: str | None = None
     replay_safety: str = "unknown"
     arguments: Any = field(default=None)
+    reconciled: bool = False
 
 
 @dataclass
@@ -241,6 +242,53 @@ class CallLedger:
                 record=self.lookup(call_id),
             )
 
+    def find_prior_by_canonical_key(
+        self,
+        canonical_key: str,
+        *,
+        dispatched_before: float,
+        max_age_seconds: float,
+        now: float | None = None,
+    ) -> CallRecord | None:
+        """Latest unreconciled record with this key dispatched before a cutoff.
+
+        Only ``dispatched`` and ``completed`` records qualify; ``failed`` ones
+        never block a retry.
+        """
+        current = time.time() if now is None else now
+        best: CallRecord | None = None
+        with self._lock:
+            for record in self._records.values():
+                if record.canonical_key != canonical_key:
+                    continue
+                if record.reconciled:
+                    continue
+                if record.state not in ("dispatched", "completed"):
+                    continue
+                if record.dispatched_at >= dispatched_before:
+                    continue
+                if current - record.dispatched_at > max_age_seconds:
+                    continue
+                if best is None or record.dispatched_at > best.dispatched_at:
+                    best = record
+            return CallRecord(**best.__dict__) if best is not None else None
+
+    def mark_reconciled(self, call_id: str, note: str = "") -> None:
+        """Consume a prior record so the same call is not intercepted twice."""
+        self._append(
+            {
+                "v": 1,
+                "op": "reconciled",
+                "ts": time.time(),
+                "call_id": call_id,
+                "note": note[:200],
+            }
+        )
+        with self._lock:
+            record = self._records.get(call_id)
+            if record is not None:
+                record.reconciled = True
+
     def _store_result(self, result: str) -> tuple[str | None, str]:
         text = str(result)
         digest = _digest(text)
@@ -332,5 +380,8 @@ class CallLedger:
             )
             record.error = str(data.get("error", "") or "")
             record.result_payload = None
+            return True
+        if op == "reconciled":
+            record.reconciled = True
             return True
         return False

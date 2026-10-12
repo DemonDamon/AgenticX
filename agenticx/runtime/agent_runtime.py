@@ -3680,6 +3680,30 @@ class AgentRuntime:
             self._last_persist_time = now
             self._tools_since_persist = 0
 
+    def _get_effect_guard(self, session: Any) -> Any:
+        """Per-session EffectGuard; None when disabled or unavailable."""
+        from agenticx.runtime.effect_guard import (
+            EffectGuard,
+            effect_guard_enabled,
+            resolve_session_id,
+        )
+
+        if not effect_guard_enabled():
+            return None
+        sid = resolve_session_id(session)
+        if not sid:
+            return None
+        cache = self.__dict__.setdefault("_effect_guards", {})
+        guard = cache.get(sid)
+        if guard is None:
+            try:
+                guard = EffectGuard(sid)
+            except Exception:
+                logger.warning("effect guard unavailable session=%s", sid, exc_info=True)
+                return None
+            cache[sid] = guard
+        return guard
+
     def _persist_or_abort(self, reason: str) -> tuple[bool, str]:
         """Flush the turn prefix before a side effect. Returns (ok, detail)."""
         if self._mid_turn_persist is None:
@@ -7544,7 +7568,24 @@ class AgentRuntime:
                     continue
                 effective_tm = self.team_manager or getattr(session, "_team_manager", None)
                 meta_only_names, meta_dispatch = _resolve_meta_tool_dispatchers()
-                if tool_name in meta_only_names:
+                _effect_guard = self._get_effect_guard(session)
+                _effect_ledger_id: Optional[str] = None
+                _effect_prefilled: Optional[str] = None
+                if _effect_guard is not None and tool_name not in meta_only_names:
+                    _effect_decision = _effect_guard.before_dispatch(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                    )
+                    if _effect_decision.action == "prefilled":
+                        _effect_prefilled = _effect_decision.text
+                    else:
+                        _effect_ledger_id = _effect_decision.ledger_call_id
+                if _effect_prefilled is not None:
+                    dispatch_task = asyncio.create_task(
+                        asyncio.sleep(0, result=_effect_prefilled)
+                    )
+                elif tool_name in meta_only_names:
                     if effective_tm is None:
                         dispatch_task = asyncio.create_task(
                             asyncio.sleep(0, result=f"ERROR: meta tool '{tool_name}' requires team manager")
@@ -7631,6 +7672,13 @@ class AgentRuntime:
                     result = await dispatch_task
                 except Exception as exc:
                     result = f"ERROR: tool execution failed: {exc}"
+                if _effect_guard is not None and _effect_ledger_id:
+                    _effect_text = str(result)
+                    _effect_guard.after_result(
+                        _effect_ledger_id,
+                        _effect_text,
+                        is_error=_effect_text.startswith(("ERROR:", "CANCELLED:")),
+                    )
                 if tool_name == "query_subagent_status":
                     has_rows = False
                     try:

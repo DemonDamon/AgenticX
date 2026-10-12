@@ -1091,6 +1091,12 @@ class SessionManager:
                 pass
         if interrupted:
             _log.info("Found %d interrupted sessions on startup: %s", len(interrupted), interrupted[:5])
+        try:
+            from agenticx.runtime.effect_guard import register_interrupted_sessions
+
+            register_interrupted_sessions(interrupted)
+        except Exception:
+            _log.debug("effect guard interrupted registration failed", exc_info=True)
         return interrupted
 
     def _iter_running_session_rows_for_scan(self) -> list[dict]:
