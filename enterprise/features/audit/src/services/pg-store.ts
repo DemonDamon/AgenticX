@@ -147,6 +147,9 @@ export class PgAuditStore implements AuditStore {
         conditions.push(sql`${gatewayAuditEvents.policiesHit}::jsonb @> ${needle}::jsonb`);
       }
     }
+    if (input.event_type) {
+      conditions.push(eq(gatewayAuditEvents.eventType, input.event_type));
+    }
     if (input.cross_border === true) {
       conditions.push(eq(gatewayAuditEvents.crossBorder, true));
     }
@@ -223,6 +226,9 @@ export class PgAuditStore implements AuditStore {
         const needle = JSON.stringify([{ policy_id: pid }]);
         conditions.push(sql`${gatewayAuditEvents.policiesHit}::jsonb @> ${needle}::jsonb`);
       }
+    }
+    if (input.event_type) {
+      conditions.push(eq(gatewayAuditEvents.eventType, input.event_type));
     }
     if (input.cross_border === true) {
       conditions.push(eq(gatewayAuditEvents.crossBorder, true));

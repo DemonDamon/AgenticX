@@ -33,8 +33,6 @@ export type RunHealthFields = {
   autoPausedAt?: string;
 };
 
-const HEALTH_CARRY_KEYS = ["runningSince", "consecutiveFailures", "autoPausedReason", "autoPausedAt"] as const;
-
 export function matchNeedsUserAction(error: string | undefined): string | null {
   const text = (error ?? "").toLowerCase();
   if (!text) return null;
@@ -110,10 +108,17 @@ export function markInterruptedOnStartup<T extends RunHealthFields>(
 export function applyUserEnableToggle<T extends RunHealthFields>(prev: T | undefined, next: T): T {
   const out: T = { ...next };
   if (prev) {
-    for (const key of HEALTH_CARRY_KEYS) {
-      if (out[key] === undefined && prev[key] !== undefined) {
-        out[key] = prev[key] as T[typeof key];
-      }
+    if (out.runningSince === undefined && prev.runningSince !== undefined) {
+      out.runningSince = prev.runningSince;
+    }
+    if (out.consecutiveFailures === undefined && prev.consecutiveFailures !== undefined) {
+      out.consecutiveFailures = prev.consecutiveFailures;
+    }
+    if (out.autoPausedReason === undefined && prev.autoPausedReason !== undefined) {
+      out.autoPausedReason = prev.autoPausedReason;
+    }
+    if (out.autoPausedAt === undefined && prev.autoPausedAt !== undefined) {
+      out.autoPausedAt = prev.autoPausedAt;
     }
   }
   if (prev && prev.enabled === false && next.enabled === true) {

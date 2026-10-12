@@ -150,6 +150,9 @@ export class MysqlAuditStore implements AuditStore {
         );
       }
     }
+    if (input.event_type) {
+      conditions.push(eq(gatewayAuditEvents.eventType, input.event_type));
+    }
     if (input.cross_border === true) {
       conditions.push(eq(gatewayAuditEvents.crossBorder, true));
     }
@@ -228,6 +231,9 @@ export class MysqlAuditStore implements AuditStore {
           sql`JSON_CONTAINS(${gatewayAuditEvents.policiesHit}, CAST(${needle} AS JSON))`,
         );
       }
+    }
+    if (input.event_type) {
+      conditions.push(eq(gatewayAuditEvents.eventType, input.event_type));
     }
     if (input.cross_border === true) {
       conditions.push(eq(gatewayAuditEvents.crossBorder, true));

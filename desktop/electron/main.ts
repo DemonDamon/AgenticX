@@ -65,6 +65,7 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { flushActionAuditOnce, startActionAuditUploader } from "./action-audit-uploader";
 import {
   buildLoginItemSettings,
   deliverTaskCompleteNotification,
@@ -2211,12 +2212,29 @@ function notifyRendererConnectionModeChanged(): void {
   mainWindow.webContents.send("agx-connection-mode-changed");
 }
 
+function actionAuditUploaderDeps() {
+  return {
+    loadConfig: loadAgxConfig,
+    fetchImpl: proxyAwareFetch,
+    homeDir: os.homedir(),
+    now: () => Date.now(),
+  };
+}
+
+let stopActionAuditUploader: (() => void) | null = null;
+
+function ensureActionAuditUploader(): void {
+  if (stopActionAuditUploader) return;
+  stopActionAuditUploader = startActionAuditUploader(actionAuditUploaderDeps());
+}
+
 function notifyRendererStudioReady(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agx-studio-ready");
   void scheduleEnterpriseCapabilitySync().catch((error) => {
     console.warn(`[enterprise] capability sync failed: ${String(error)}`);
   });
+  ensureActionAuditUploader();
 }
 
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
@@ -13956,6 +13974,7 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     isQuitting = true;
+    void flushActionAuditOnce(actionAuditUploaderDeps()).catch(() => null);
     automationScheduler.stop();
     stopSkillsDirWatcher();
     killAllTerminalSessions();

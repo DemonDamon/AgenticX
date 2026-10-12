@@ -4299,6 +4299,49 @@ async def _confirm(
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
+
+    def _audit(approved: bool, source: str) -> None:
+        if not (is_protected_confirm(payload_context) or payload_context.get("enterprise_policy")):
+            return
+        from agenticx.reliability.call_identity import canonical_payload
+        from agenticx.runtime.action_audit import emit_action_audit
+
+        digest_src = {
+            k: v for k, v in payload_context.items() if k not in {"request_id", "protected_reason"}
+        }
+        try:
+            args_digest = hashlib.sha256(canonical_payload(digest_src).encode("utf-8")).hexdigest()
+        except Exception:
+            _log.debug("[confirm] audit digest failed id=%s", request_id, exc_info=True)
+            return
+        emit_action_audit({
+            "kind": "confirm_resolved",
+            "session_id": str(getattr(session, "_session_id", "") or getattr(session, "session_id", "") or ""),
+            "agent_id": str(payload_context.get("agent_id") or "meta"),
+            "tool_name": str(payload_context.get("tool") or ""),
+            "subject": str(payload_context.get("policy_subject") or payload_context.get("tool") or ""),
+            "outcome": "approved" if approved else "denied",
+            "decision_source": source,
+            "risk": str(payload_context.get("risk") or ""),
+            "args_digest": args_digest,
+            "summary": question,
+        })
+
+    def _final_source(approved: bool) -> str:
+        if approved:
+            return "human"
+        last = getattr(confirm_gate, "last_request", None)
+        if isinstance(last, dict) and str(last.get("id") or "") == request_id:
+            decision = str(last.get("decision") or "")
+            if decision == "blocked_unattended":
+                return "blocked_unattended"
+            if decision == "parked_timeout":
+                return "parked_timeout"
+        timeout_info = getattr(confirm_gate, "last_timeout_info", None)
+        if isinstance(timeout_info, dict) and str(timeout_info.get("request_id") or "") == request_id:
+            return "timeout"
+        return "human"
+
     from agenticx.runtime.command_safety import NEVER_AUTO_APPROVED_CATEGORIES
 
     risk_codes = [
@@ -4330,6 +4373,7 @@ async def _confirm(
             request_id,
             payload_context.get("tool"),
         )
+        _audit(True, "allow_rule")
         return True
     if not enterprise_forced and _unattended_workspace_script_allowed(payload_context, risk_codes, session):
         _log.info(
@@ -4337,6 +4381,7 @@ async def _confirm(
             request_id,
             payload_context.get("tool"),
         )
+        _audit(True, "workspace_script")
         return True
     sticky_tool = str(payload_context.get("tool") or "")
     if (
@@ -4353,6 +4398,7 @@ async def _confirm(
             request_id,
             sticky_tool,
         )
+        _audit(True, "session_allow")
         return True
     # 受保护的请求带上「为什么问你」。界面自己也能按 risk 推，但理由由后端给出才有
     # 唯一出处——risk 取值将来加一个，不用记得同步改两处文案。
@@ -4409,6 +4455,7 @@ async def _confirm(
                 },
             }
         )
+    _audit(approved, _final_source(approved))
     return approved
 
 
@@ -12300,6 +12347,26 @@ async def dispatch_tool_async(
     enterprise_policy = load_enterprise_agent_policy()
     denied_subject = enterprise_denied_subject(name, arguments, enterprise_policy)
     if denied_subject:
+        try:
+            from agenticx.reliability.call_identity import canonical_payload
+            from agenticx.runtime.action_audit import emit_action_audit
+
+            emit_action_audit({
+                "kind": "policy_denied",
+                "session_id": str(
+                    getattr(session, "_session_id", "") or getattr(session, "session_id", "") or ""
+                ),
+                "tool_name": name,
+                "subject": denied_subject,
+                "outcome": "denied",
+                "decision_source": "enterprise_policy",
+                "args_digest": hashlib.sha256(
+                    canonical_payload(arguments).encode("utf-8")
+                ).hexdigest(),
+                "summary": denied_subject,
+            })
+        except Exception:
+            _log.debug("policy denial audit emit failed", exc_info=True)
         return f"ERROR: 企业策略禁止执行「{denied_subject}」。如需使用请联系管理员。"
     intent_denial = turn_intent_denial_message(name, session)
     if intent_denial:
