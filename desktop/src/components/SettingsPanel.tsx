@@ -14,6 +14,7 @@ import {
   settingsMarkdownComponents,
   settingsRemarkPlugins,
 } from "./messages/markdown-components";
+import { assistVisibleText } from "./messages/reasoning-parser";
 import {
   Settings2,
   Cpu,
@@ -49,6 +50,7 @@ import {
   TriangleAlert,
   ShieldCheck,
 } from "lucide-react";
+import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
 import {
   SETTINGS_HINT_CLASS,
@@ -66,22 +68,35 @@ import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
+import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
 import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
 import {
   RECOMMENDED_SKILLS,
   type RecommendedSkillTier,
 } from "../data/recommended-skills";
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
-import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import {
+  assertSafeSkillHubAgentInstallPrompt,
+  buildClawHubChatInstallPrompt,
+  buildSkillHubChatInstallPrompt,
+  buildSkillHubDetailUrl,
+  classifySkillHubInboundInstallPrompt,
+  extractSkillHubInstallSlugFromPrompt,
+} from "../utils/skillhub-install-prompt";
+import { openExternalUrl } from "../utils/open-external";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { TypesafeConfigSection } from "./settings/typesafe/TypesafeConfigSection";
+import { useTypesafeSettings } from "../hooks/useTypesafeSettings";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
+import { CommandPromptIcon } from "./icons/CommandPromptIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
 import {
@@ -108,6 +123,7 @@ import {
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
+import { GatewayAdaptersPanel } from "./settings/server/GatewayAdaptersPanel";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
@@ -126,7 +142,7 @@ import {
   previewProviderApiEndpoint,
   type ProviderInterfaceKind,
 } from "../utils/provider-display";
-import { PROVIDER_ICON_MAP } from "../utils/provider-icons";
+import { PROVIDER_ICON_MAP, TypesafeIcon } from "../utils/provider-icons";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -136,8 +152,12 @@ import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
 import { McpRemoteServerModal } from "./settings/mcp/McpRemoteServerModal";
 import { McpRemoteServerDetail } from "./settings/mcp/McpRemoteServerDetail";
 import { McpGatewayImportPanel } from "./settings/mcp/McpGatewayImportPanel";
-import { ConnectorsTab } from "./settings/connectors/ConnectorsTab";
-import { mcpRemoteHostLabel, mcpTransportBadgeLabel } from "../utils/mcp-remote-config";
+import { ConnectorsSettingsPage } from "./settings/connectors/ConnectorsSettingsPage";
+import {
+  MCP_PRIMARY_CONFIG_PATH,
+  mcpRemoteHostLabel,
+  mcpTransportBadgeLabel,
+} from "../utils/mcp-remote-config";
 import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
 import {
   VoiceSettingsPanel,
@@ -226,7 +246,7 @@ export type FavoriteForwardContext = {
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
-  "zhipu", "qianfan", "minimax", "kimi", "deepseek", "ollama",
+  "zhipu", "qianfan", "minimax", "kimi", "deepseek", "mimo", "ollama",
 ] as const;
 
 /** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
@@ -347,7 +367,6 @@ function providerDraftMapsEqual(
   });
 }
 
-const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 const BUNDLED_DEFAULT_MCP_NAMES_FALLBACK = ["browser-use", "firecrawl"] as const;
 
 /** 与后端 `connection_state` 对齐；缺省时按 connected 推断（兼容旧 Studio） */
@@ -551,6 +570,7 @@ function SkillRowButton({
   globalSkillEnabled,
   skillScanBusy,
   onToggleGlobalSkill,
+  onUninstallSkill,
 }: {
   skill: SkillItem;
   isActive: boolean;
@@ -567,6 +587,7 @@ function SkillRowButton({
   globalSkillEnabled: boolean;
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const src = skillSourceBadge(effectiveSkillSource(skill), t);
@@ -582,6 +603,11 @@ function SkillRowButton({
   const selectedSource = preferredSource && uniqueSources.includes(preferredSource)
     ? preferredSource
     : effectiveSkillSource(skill);
+  // 一键卸载仅对 ~/.agenticx/skills 下的用户安装来源开放;builtin/bundle/第三方根(cursor/claude 等)不显示。
+  const uninstallSkillRowVisible =
+    locationLabel === "全局" &&
+    onUninstallSkill != null &&
+    ["registry", "agent_created", "agenticx", "custom"].includes(selectedSource);
   const locClass =
     locationLabel === "项目"
       ? "shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400"
@@ -640,6 +666,21 @@ function SkillRowButton({
             aria-label={t("skills.enableSkill", { name: skill.name })}
             onChange={(next) => onToggleGlobalSkill(skill.name, next)}
           />
+          {uninstallSkillRowVisible ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-text-faint transition hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400"
+              aria-label={t("skills.uninstallAria", { name: skill.name })}
+              title={t("skills.uninstall")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onUninstallSkill?.(skill.name, selectedSource);
+              }}
+            >
+              <Trash2 className="h-3 w-3" aria-hidden />
+              {t("skills.uninstall")}
+            </button>
+          ) : null}
         </div>
       </div>
       {conflictCount > 1 ? (
@@ -710,6 +751,7 @@ function SkillList({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const PREVIEW_COUNT = 15;
   const [showAll, setShowAll] = useState(false);
@@ -768,6 +810,7 @@ function SkillGroup({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (skills.length === 0) return null;
@@ -823,6 +866,7 @@ function SkillsLocationSection({
   disabledSkillNames: string[];
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+  onUninstallSkill?: (name: string, source?: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const isGlobal = locationLabel === "全局";
@@ -880,6 +924,8 @@ type RegistrySearchItem = {
   author: string;
   source: string;
   source_type: string;
+  /** ClawHub publisher handle; required to install slugs shared by several publishers. */
+  owner?: string;
 };
 
 /** Matches SkillHubSearchResult.items from preload / agx serve. */
@@ -890,6 +936,10 @@ type SkillHubRow = {
   version: string;
   author: string;
   downloads?: string | number;
+  /** Community handle (e.g. indiv-seafish); required for correct detail URL. */
+  namespace?: string;
+  /** Canonical @ns/slug when present. */
+  canonical?: string;
 };
 
 type Props = {
@@ -967,7 +1017,10 @@ function ProviderAvatar({
       style={{ width: size, height: size, backgroundColor: bg, color }}
     >
       {IconComp ? (
-        <IconComp size={Math.round(size * 0.64)} className="shrink-0" />
+        <IconComp
+          size={Math.round(size * (providerId === "mimo" ? 0.92 : 0.64))}
+          className="shrink-0"
+        />
       ) : (
         <span style={{ fontSize: Math.round(size * 0.4), fontWeight: 700, lineHeight: 1 }}>
           {getProviderInitials(providerId, entry)}
@@ -1041,6 +1094,7 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "connectors", icon: Link2 },
   { id: "tools", icon: Wrench },
   { id: "skills", icon: SkillPuzzleIcon },
+  { id: "commands", icon: CommandPromptIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", icon: Library },
   { id: "data_sources", icon: Database },
@@ -1109,7 +1163,7 @@ const TOOL_LABEL_IDS = [
   "lsp_goto_definition", "lsp_find_references", "lsp_hover", "lsp_diagnostics",
   "mcp_connect", "mcp_call", "mcp_import", "skill_use", "skill_list", "skill_manage",
   "todo_write", "scratchpad_write", "scratchpad_read", "memory_append", "memory_search",
-  "session_search", "code_search", "code_index_create", "code_index_status",
+  "session_search", "plugin_usage", "code_search", "code_index_create", "code_index_status",
   "code_index_clear", "code_index_cancel", "liteparse", "schedule_task",
   "list_scheduled_tasks", "cancel_scheduled_task", "spawn_subagent", "cancel_subagent",
   "retry_subagent", "query_subagent_status", "check_resources", "recommend_subagent_model",
@@ -2780,6 +2834,41 @@ function SkillsTab() {
     ],
   );
 
+  /** 一键卸载:仅对 ~/.agenticx/skills 下的全局技能生效(端点侧再做路径安全校验)。 */
+  const uninstallSkillRow = useCallback(
+    async (name: string, source?: string) => {
+      const dlg = await window.agenticxDesktop.confirmDialog({
+        title: t("skills.uninstallConfirmTitle"),
+        message: t("skills.uninstallConfirmBody", { name }),
+        confirmText: t("skills.uninstallConfirmOk"),
+        cancelText: t("skills.uninstallConfirmCancel"),
+        destructive: true,
+      });
+      if (!dlg.confirmed) return;
+      setSkillScanMsg(t("skills.uninstalling", { name }));
+      try {
+        const res = await window.agenticxDesktop.uninstallSkill({ name, source });
+        if (res.ok) {
+          setSkillScanMsg(t("skills.uninstalledNamed", { name }));
+          try {
+            await window.agenticxDesktop.refreshSkills();
+          } catch {
+            /* still try load */
+          }
+          const skillsRes = await window.agenticxDesktop.loadSkills();
+          if (skillsRes.ok) setItems(skillsRes.items ?? []);
+          setDetail(null);
+          setExpandedSkillName(null);
+        } else {
+          setSkillScanMsg(t("skills.uninstallFailed", { reason: res.error ?? "unknown" }));
+        }
+      } catch (e) {
+        setSkillScanMsg(t("skills.uninstallFailed", { reason: String(e) }));
+      }
+    },
+    [t],
+  );
+
   const onAddCustomSkillPath = useCallback(() => {
     if (skillScanBusy) return;
     if (skillScanDraftPath !== null) {
@@ -2899,6 +2988,58 @@ function SkillsTab() {
       setSkillhubMsg("");
       setInstallPromptBusy(true);
       try {
+        // Refuse old Meta dead-path copy on Settings seeding only (not chat @ns/slug).
+        const inbound = classifySkillHubInboundInstallPrompt(text);
+        if (inbound.hit && inbound.kind === "forbidden_meta") {
+          const slug = inbound.slug || extractSkillHubInstallSlugFromPrompt(text);
+          if (slug) {
+            const installFn = window.agenticxDesktop?.installFromSkillHub;
+            if (typeof installFn === "function") {
+              try {
+                const res = await installFn.call(window.agenticxDesktop, { slug });
+                if (res?.ok) {
+                  setSkillhubMsg(
+                    `已拦截 SkillHub 安装意图，并确定性安装 ${slug} → ${res.installed_path || "registry/" + slug}`,
+                  );
+                  try {
+                    await reloadSkillsAfterMarketInstall(slug);
+                  } catch {
+                    try {
+                      await window.agenticxDesktop.refreshSkills?.();
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                  return;
+                }
+                {
+                  const cause = [res?.error_code, res?.error]
+                    .filter((x) => Boolean(x && String(x).trim()))
+                    .join(": ");
+                  setSkillhubMsg(
+                    `已拦截 SkillHub 安装意图；确定性安装失败：${cause || "failed"}。请重试 Settings → SkillHub 安装。`,
+                  );
+                }
+                return;
+              } catch (e) {
+                setSkillhubMsg(
+                  `已拦截 SkillHub 安装意图；确定性安装异常：${String(e)}。请重试 Settings → SkillHub 安装。`,
+                );
+                return;
+              }
+            }
+          }
+          setSkillhubMsg(inbound.reason);
+          return;
+        }
+        try {
+          assertSafeSkillHubAgentInstallPrompt(text);
+        } catch (assertErr) {
+          setSkillhubMsg(
+            `已拒绝不安全的 agent 安装提示词（${String(assertErr)}）。请使用 Desktop 确定性安装。`,
+          );
+          return;
+        }
         const created = await window.agenticxDesktop.createSession({});
         if (!created.ok || !created.session_id) {
           const err = created.error ?? t("skills.createMetaFailed");
@@ -2906,7 +3047,18 @@ function SkillsTab() {
           return;
         }
         const sid = created.session_id;
-        const paneId = addPane(null, "Near", sid);
+        // Reuse a Near pane instead of opening one per install (installs used to pile up dozens of tabs).
+        const { panes, activePaneId, setPaneSessionId, setActivePaneId } = useAppStore.getState();
+        const metaPanes = panes.filter((p) => !p.avatarId && !p.composePreview);
+        const reuse = metaPanes.find((p) => p.id === activePaneId) ?? metaPanes[0];
+        let paneId: string;
+        if (reuse) {
+          paneId = reuse.id;
+          setPaneSessionId(paneId, sid);
+          setActivePaneId(paneId);
+        } else {
+          paneId = addPane(null, "Near", sid);
+        }
         // Skill-market install is a real user-initiated turn. Do not inherit
         // forwardAutoReply's merge-forward defaults (suppressUserEcho /
         // skipUserHistory = true), or the pane looks like it started with no
@@ -2929,9 +3081,9 @@ function SkillsTab() {
     [addPane, setForwardAutoReply, closeSettings],
   );
 
-  const onSkillHubMarketInstall = (slug: string) => {
-    const prompt = buildSkillHubAgentInstallPrompt(slug);
-    if (!prompt.trim()) return;
+  const onSkillHubMarketInstall = (ref: string) => {
+    const prompt = buildSkillHubChatInstallPrompt(ref);
+    if (!prompt) return;
     void runInstallPromptInMetaAgent(prompt);
   };
 
@@ -2968,6 +3120,8 @@ function SkillsTab() {
         const r = row as SkillHubRow;
         const slug = String(r.slug || r.name || "").trim();
         if (!slug) continue;
+        const namespace = String((r as { namespace?: string }).namespace || "").trim();
+        const canonical = String((r as { canonical?: string }).canonical || "").trim();
         rows.push({
           slug,
           name: String(r.name || slug).trim() || slug,
@@ -2975,6 +3129,8 @@ function SkillsTab() {
           version: String(r.version || "latest"),
           author: String(r.author || "unknown"),
           downloads: r.downloads,
+          ...(namespace ? { namespace } : {}),
+          ...(canonical ? { canonical } : {}),
         });
       }
       setSkillhubResults(rows);
@@ -3018,113 +3174,10 @@ function SkillsTab() {
   };
 
   const onMarketInstall = async (item: RegistrySearchItem) => {
-    const key = `${item.source}:${item.name}`;
-    if (registryInstallBusy && marketInstallingKey && marketInstallingKey !== key) {
-      const exists = marketInstallQueueRef.current.some(
-        (q) => q.source === item.source && q.name === item.name
-      );
-      if (!exists) {
-        marketInstallQueueRef.current.push(item);
-        setMarketQueuedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
-      }
-      setMarketMsg(t("skills.installQueued", { current: marketInstallingKey.split(":")[1], queued: item.name }));
-      return;
-    }
-    setMarketQueuedKeys((prev) => prev.filter((k) => k !== key));
-    marketInstallQueueRef.current = marketInstallQueueRef.current.filter(
-      (q) => !(q.source === item.source && q.name === item.name)
-    );
-    setMarketInstallingKey(key);
-    setRegistryInstallBusy(true);
-    setMarketNeedsConfirmNonHigh(false);
-    setMarketNeedsConfirmHigh(false);
-    setMarketPending(null);
-    setMarketMsg(t("skills.pulling", { name: item.name }));
-    let pauseQueue = false;
-    try {
-      const prev = await window.agenticxDesktop.installFromRegistryPreview({
-        source: item.source,
-        name: item.name,
-      });
-      if (!prev.ok) {
-        const rawErr = String(prev.error ?? t("commonSettings.unknownError"));
-        const is429 = rawErr.includes("rate limited (429)") || rawErr.includes("Too Many Requests");
-        if (is429) {
-          const secMatch = rawErr.match(/about (\d+)s/);
-          const waitSec = secMatch ? Math.min(Number(secMatch[1]), 30) : 10;
-          setMarketMsg(t("skills.rateLimited", { seconds: waitSec }));
-          await new Promise((r) => setTimeout(r, waitSec * 1000));
-          setMarketMsg(t("skills.repulling", { name: item.name }));
-          const retry = await window.agenticxDesktop.installFromRegistryPreview({
-            source: item.source,
-            name: item.name,
-          });
-          if (!retry.ok) {
-            const retryErr = String(retry.error ?? t("commonSettings.unknownError"));
-            setMarketMsg(t("skills.pullFailed", { reason: retryErr }));
-            return;
-          }
-          Object.assign(prev, retry);
-        } else if (rawErr.includes("fetch failed") || rawErr.includes("Failed to fetch skill")) {
-          setMarketMsg(t("skills.pullFailed", { reason: rawErr }));
-          return;
-        } else {
-          setMarketMsg(t("skills.scanFailed", { reason: rawErr }));
-          return;
-        }
-      }
-      if (prev.scan) {
-        setMarketMsg(formatSkillScanSummary(prev.scan, t));
-      }
-
-      const res = await window.agenticxDesktop.installFromRegistry({
-        source: item.source,
-        name: item.name,
-      });
-      if (res.ok) {
-        setMarketMsg(
-          formatInstallDoneMsg(t("skills.installedNamed", { name: item.name }), res.scan_summary ?? prev.scan, t),
-        );
-        await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
-        return;
-      }
-      if (res.error_code === "non_high_risk_confirm_required") {
-        setMarketPending(item);
-        setMarketNeedsConfirmNonHigh(true);
-        pauseQueue = true;
-        if (res.scan_summary) {
-          setMarketMsg(t("skills.confirmThenWriteWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
-        } else {
-          setMarketMsg(t("skills.confirmThenWrite"));
-        }
-        return;
-      }
-      if (res.error_code === "high_risk_confirm_required") {
-        setMarketPending(item);
-        setMarketNeedsConfirmHigh(true);
-        pauseQueue = true;
-        if (res.scan_summary) {
-          setMarketMsg(t("skills.highRiskConfirmWithScan", { summary: formatSkillScanSummary(res.scan_summary, t) }));
-        } else {
-          setMarketMsg(t("skills.highRiskConfirm"));
-        }
-        return;
-      }
-      setMarketMsg(t("skills.installFailedReason", { reason: res.error ?? t("commonSettings.unknownError") }));
-    } catch (e) {
-      setMarketMsg(String(e));
-    } finally {
-      setRegistryInstallBusy(false);
-      setMarketInstallingKey(null);
-      if (!pauseQueue && marketInstallQueueRef.current.length > 0) {
-        const next = marketInstallQueueRef.current.shift()!;
-        const nextKey = `${next.source}:${next.name}`;
-        setMarketQueuedKeys((prev) => prev.filter((k) => k !== nextKey));
-        setTimeout(() => {
-          void onMarketInstall(next);
-        }, 0);
-      }
-    }
+    const owner = (item.owner || "").trim();
+    const prompt = buildClawHubChatInstallPrompt(owner ? `@${owner}/${item.name}` : item.name, item.source);
+    if (!prompt) return;
+    await runInstallPromptInMetaAgent(prompt);
   };
 
   const onConfirmMarketInstall = async (kind: "non_high" | "high") => {
@@ -3441,6 +3494,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
             <SkillsLocationSection
               skills={projectSkills}
@@ -3459,6 +3513,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
           </>
         ) : (
@@ -3480,6 +3535,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
             <SkillsLocationSection
               skills={globalSkills}
@@ -3503,6 +3559,7 @@ function SkillsTab() {
               disabledSkillNames={disabledSkillNames}
               skillScanBusy={skillScanBusy}
               onToggleGlobalSkill={toggleGlobalSkill}
+              onUninstallSkill={uninstallSkillRow}
             />
           </>
         )}
@@ -3767,7 +3824,7 @@ function SkillsTab() {
                 <button
                   type="button"
                   className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
-                  onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
+                  onClick={() => openExternalUrl("https://skillhub.tencent.com/")}
                 >
                   skillhub.tencent.com ↗
                 </button>
@@ -3794,7 +3851,7 @@ function SkillsTab() {
               {skillhubMsg && (
                 <div
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
-                    settingsMsgLooksFail(skillhubMsg) ? "text-amber-400" : "text-rose-400"
+                    settingsMsgLooksFail(skillhubMsg) ? "text-amber-400" : "text-emerald-400"
                   }`}
                 >
                   {skillhubMsg}
@@ -3859,7 +3916,7 @@ function SkillsTab() {
                           type="button"
                           className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
                           disabled={installPromptBusy}
-                          onClick={() => onSkillHubMarketInstall(item.slug)}
+                          onClick={() => onSkillHubMarketInstall(item.canonical || item.slug)}
                         >
                           {t("tools.install")}
                         </button>
@@ -3867,10 +3924,11 @@ function SkillsTab() {
                           type="button"
                           className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
                           onClick={() =>
-                            window.open(
-                              `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
-                              "_blank",
-                              "noopener,noreferrer",
+                            openExternalUrl(
+                              buildSkillHubDetailUrl({
+                                slug: item.slug,
+                                namespace: item.namespace,
+                              }),
                             )
                           }
                         >
@@ -4931,6 +4989,8 @@ export function SettingsPanel({
 }: Props) {
   const { t } = useTranslation("settings");
   const { t: tCommon } = useTranslation("common");
+  const { t: tw } = useTranslation("workspace");
+  const typesafeSettings = useTypesafeSettings();
   const locale = useAppStore((s) => s.locale);
   const setLocale = useAppStore((s) => s.setLocale);
   const tabs = useMemo(
@@ -4941,12 +5001,14 @@ export function SettingsPanel({
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
+  const userCubeColorwayId = useAppStore((s) => s.userCubeColorwayId);
+  const setUserCubeColorwayId = useAppStore((s) => s.setUserCubeColorwayId);
   const userPreference = useAppStore((s) => s.userPreference);
   const setUserPreference = useAppStore((s) => s.setUserPreference);
   const themeColor = useAppStore((s) => s.themeColor);
   const setThemeColor = useAppStore((s) => s.setThemeColor);
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
-  const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
+  const displayedMetaAvatarUrl = useDisplayedMetaAvatarUrl();
+  const effectiveMetaAvatarUrl = displayedMetaAvatarUrl;
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
   const settingsOpenToFocus = useAppStore((s) => s.settings.openToFocus);
   const settingsFocusSeq = useAppStore((s) => s.settings.focusSeq ?? 0);
@@ -4956,6 +5018,7 @@ export function SettingsPanel({
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const metaWorkspaceHydratedRef = useRef(false);
+  const userAvatarFileRef = useRef<HTMLInputElement>(null);
   const [aiAssistLoading, setAiAssistLoading] = useState<"identity" | "soul" | "preference" | null>(null);
   const metaIdentityDraftRef = useRef("");
   const metaIdentitySavedRef = useRef("");
@@ -4969,7 +5032,7 @@ export function SettingsPanel({
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
-  const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
+  const [metaEditorKind, setMetaEditorKind] = useState<"costume" | "identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
     loadSettingsNavWidth(loadSettingsPanelSize().width),
@@ -5063,6 +5126,7 @@ export function SettingsPanel({
     window.addEventListener("mouseup", onUp);
   }, [navWidth, panelSize.width]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
+  const [providerNavIsJev, setProviderNavIsJev] = useState(false);
   const providerListScrollRef = useScrollbarOnScroll<HTMLDivElement>();
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [providerSavedSnapshot, setProviderSavedSnapshot] = useState<Record<string, ProviderEntry>>({});
@@ -5188,7 +5252,6 @@ export function SettingsPanel({
   const [userNicknameDraft, setUserNicknameDraft] = useState("");
   const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
   const [userProfileMessage, setUserProfileMessage] = useState("");
-  const [userAvatarMessage, setUserAvatarMessage] = useState("");
   const [workspaceDirDraft, setWorkspaceDirDraft] = useState("~/.agenticx/workspace");
   const [workspaceDirSaved, setWorkspaceDirSaved] = useState("~/.agenticx/workspace");
   const [workspaceDirResolved, setWorkspaceDirResolved] = useState("");
@@ -5419,6 +5482,33 @@ export function SettingsPanel({
     void window.agenticxDesktop.saveUserMd({ content: userMdContent });
     setUserProfileMessage(t("profile.savedToast"));
   }, [setUserNickname, setUserPreference, t, userNicknameDraft, userPreferenceDraft]);
+
+  const handlePickUserAvatar = useCallback(
+    (file: File) => {
+      const maxBytes = 1.8 * 1024 * 1024;
+      if (!file.type.startsWith("image/")) {
+        setUserProfileMessage(t("profile.pickImage"));
+        return;
+      }
+      if (file.size > maxBytes) {
+        setUserProfileMessage(t("profile.imageTooLarge"));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === "string" ? reader.result : "";
+        if (!result) {
+          setUserProfileMessage(t("profile.readImageFailed"));
+          return;
+        }
+        setUserAvatarUrl(result);
+        setUserProfileMessage(t("profile.avatarUpdated"));
+      };
+      reader.onerror = () => setUserProfileMessage(t("profile.readImageFailed"));
+      reader.readAsDataURL(file);
+    },
+    [setUserAvatarUrl, t],
+  );
 
   const metaSoulDirty = metaSoul !== metaSoulSaved;
   const metaIdentityDirty = metaIdentity !== metaIdentitySaved;
@@ -5700,7 +5790,7 @@ export function SettingsPanel({
         },
         preference: {
           system:
-            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 200 字，直接输出内容，不要加任何前缀。",
+            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 200 字，直接输出内容，不要加任何前缀，不要输出思考过程或 think 标签。",
           user: currentContent.trim()
             ? `请润色以下用户偏好描述，让它更自然、更清晰：\n\n${currentContent}`
             : "请生成一段示例用户偏好描述，内容包含：回复风格、格式偏好、沟通习惯等，字数在 100 字以内。",
@@ -5731,7 +5821,7 @@ export function SettingsPanel({
           setMsg(t("profile.aiAssistFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
           return;
         }
-        const result = (res.content ?? "").trim();
+        const result = assistVisibleText(res.content ?? "");
         if (!result) {
           setMsg(t("profile.aiEmpty"));
           return;
@@ -5753,35 +5843,6 @@ export function SettingsPanel({
       }
     },
     [metaIdentity, metaSoul, userPreferenceDraft, defaultProvider, providers],
-  );
-
-  const handleProfileAvatarUpload = useCallback(
-    (file: File) => {
-      const maxBytes = 1.8 * 1024 * 1024;
-      if (!file.type.startsWith("image/")) {
-        setUserAvatarMessage(t("profile.pickImage"));
-        return;
-      }
-      if (file.size > maxBytes) {
-        setUserAvatarMessage(t("profile.imageTooLarge"));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = typeof reader.result === "string" ? reader.result : "";
-        if (!result) {
-          setUserAvatarMessage(t("profile.readImageFailed"));
-          return;
-        }
-        setUserAvatarUrl(result);
-        setUserAvatarMessage(t("profile.avatarUpdated"));
-      };
-      reader.onerror = () => {
-        setUserAvatarMessage(t("profile.readImageFailed"));
-      };
-      reader.readAsDataURL(file);
-    },
-    [setUserAvatarUrl]
   );
 
   useEffect(() => {
@@ -6672,11 +6733,12 @@ export function SettingsPanel({
     try {
       const keyword = mcpMarketplaceSearch.trim();
       const hasKeyword = keyword.length > 0;
-      const pageSize = hasKeyword ? 100 : 20;
+      const pageSize = 100;
       const res = await window.agenticxDesktop.mcpMarketplaceList({
         search: keyword,
         page: 1,
         pageSize,
+        isHosted: hasKeyword ? undefined : true,
       });
       if (isStale()) return;
       if (res?.ok && Array.isArray(res.items)) {
@@ -6733,19 +6795,13 @@ export function SettingsPanel({
           setMcpMarketplaceSummary(t("mcp.listedAll", { total: totalCount }));
           return;
         }
-        const filtered = enriched.filter((item) => {
-          const isVerified = Boolean(item.is_verified);
-          const isHosted = Boolean(item.is_hosted);
-          const names = extractMarketplaceMcpServerNames(item);
-          return isVerified && isHosted && names.length > 0;
-        });
+        // 列表已不再带 is_verified/server_config；托管由 isHosted 请求保证。
+        // 保留显式非托管丢弃；无 server 名的条目仍展示（安装时再拉详情）。
+        const filtered = enriched.filter((item) => item.is_hosted !== false);
         setMcpMarketplaceItems(filtered);
         setMcpMarketplaceSummary(
           t("mcp.listedFiltered", { total: totalCount, filtered: filtered.length }),
         );
-        if (totalCount > filtered.length) {
-          setMcpMessage(t("mcp.filteredOut", { count: totalCount - filtered.length }));
-        }
       } else {
         setMcpMessage(t("mcp.marketLoadFailed", { reason: res?.error ?? t("commonSettings.unknownError") }));
       }
@@ -7230,7 +7286,7 @@ export function SettingsPanel({
                           { id: "blue", color: "bg-blue-500", label: t("display.accentBlue") },
                           { id: "green", color: "bg-emerald-500", label: t("display.accentGreen") },
                           { id: "pink", color: "bg-pink-500", label: t("display.accentPink") },
-                          { id: "yellow", color: "bg-amber-500", label: t("display.accentYellow") },
+                          { id: "yellow", color: "bg-[#F9731A]", label: t("display.accentYellow") },
                           {
                             id: "white",
                             color: theme === "light" ? "bg-slate-900" : "bg-white",
@@ -7263,19 +7319,22 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
-                    <div className="relative shrink-0">
-                      {userAvatarUrl ? (
+                    <button
+                      type="button"
+                      className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-text-muted transition-colors hover:bg-surface-card-strong"
+                      onClick={() => userAvatarFileRef.current?.click()}
+                      aria-label={t("profile.changeAvatar")}
+                    >
+                      {userAvatarUrl.trim() ? (
                         <img
-                          src={userAvatarUrl}
+                          src={userAvatarUrl.trim()}
                           alt={t("profile.myAvatar")}
-                          className="h-12 w-12 rounded-full border border-border object-cover"
+                          className="h-full w-full object-cover"
                         />
                       ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-base font-semibold text-[var(--theme-color-text)]">
-                          {(userNicknameDraft.trim().slice(0, 1) || t("profile.me")).toUpperCase()}
-                        </div>
+                        <User className="h-5 w-5" />
                       )}
-                    </div>
+                    </button>
                     <div className="min-w-0 flex-1">
                       <div className={`truncate ${SETTINGS_LABEL_CLASS}`}>
                         {userNicknameDraft.trim() || t("profile.me")}
@@ -7293,40 +7352,49 @@ export function SettingsPanel({
                       {userProfileEditing ? t("commonSettings.collapse") : tCommon("edit")}
                     </button>
                   </div>
+                  <input
+                    ref={userAvatarFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) handlePickUserAvatar(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <div className="mt-2 flex items-start justify-between gap-3">
+                    <p className={SETTINGS_HINT_CLASS}>{t("profile.avatarHint")}</p>
+                    {userAvatarUrl.trim() ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-[11px] text-text-faint transition-colors hover:text-text-muted"
+                        onClick={() => {
+                          setUserAvatarUrl("");
+                          setUserProfileMessage(t("profile.resetDefaultDone"));
+                        }}
+                      >
+                        {t("profile.resetDefault")}
+                      </button>
+                    ) : null}
+                  </div>
+                  {userProfileMessage && !userProfileEditing ? (
+                    <p
+                      className={`mt-1.5 text-right text-[11px] ${
+                        userProfileMessage.startsWith(t("profile.saved")) ||
+                        userProfileMessage.startsWith(t("profile.aiDonePrefix")) ||
+                        userProfileMessage === t("profile.avatarUpdated") ||
+                        userProfileMessage === t("profile.resetDefaultDone")
+                          ? "text-text-subtle"
+                          : "text-rose-400"
+                      }`}
+                    >
+                      {userProfileMessage}
+                    </p>
+                  ) : null}
 
                   {userProfileEditing ? (
                     <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
-                      <div className="mb-4 flex items-center gap-3">
-                        <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary">
-                          {t("profile.changeAvatar")}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) handleProfileAvatarUpload(file);
-                              event.currentTarget.value = "";
-                            }}
-                          />
-                        </label>
-                        {userAvatarUrl ? (
-                          <button
-                            type="button"
-                            className="text-xs text-text-faint transition-colors hover:text-text-muted"
-                            onClick={() => {
-                              setUserAvatarUrl("");
-                              setUserAvatarMessage(t("profile.resetDefaultDone"));
-                            }}
-                          >
-                            {t("profile.resetDefault")}
-                          </button>
-                        ) : null}
-                        {userAvatarMessage ? (
-                          <span className="text-[11px] text-text-faint">{userAvatarMessage}</span>
-                        ) : null}
-                      </div>
-
                       <div className="space-y-4">
                       <div>
                         <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.nickname")}</div>
@@ -7346,8 +7414,8 @@ export function SettingsPanel({
                       <div>
                         <div className="mb-1.5 text-xs font-medium text-text-muted">{t("profile.preference")}</div>
                         <textarea
-                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                          rows={3}
+                          className="max-h-64 min-h-[4.75rem] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          rows={Math.min(12, Math.max(4, userPreferenceDraft.split("\n").length + 1))}
                           value={userPreferenceDraft}
                           onChange={(e) => {
                             setUserPreferenceDraft(e.target.value);
@@ -7404,6 +7472,12 @@ export function SettingsPanel({
                   </p>
 
                   <div className="mt-4 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
+                    <UserCubeColorwayPicker
+                      selectedId={userCubeColorwayId}
+                      onSelect={setUserCubeColorwayId}
+                      open={metaEditorKind === "costume"}
+                      onOpenChange={(next) => setMetaEditorKind(next ? "costume" : null)}
+                    />
                     {[
                       {
                         kind: "identity" as const,
@@ -7417,7 +7491,7 @@ export function SettingsPanel({
                         description: t("meta.soulHint"),
                         preview: metaSoul,
                       },
-                    ].map((item, index) => {
+                    ].map((item) => {
                       const open = metaEditorKind === item.kind;
                       const preview =
                         item.preview
@@ -7427,7 +7501,7 @@ export function SettingsPanel({
                       return (
                         <div
                           key={item.kind}
-                          className={index > 0 ? "border-t border-[var(--border-muted)]" : ""}
+                          className="border-t border-[var(--border-muted)]"
                         >
                           <button
                             type="button"
@@ -7676,10 +7750,46 @@ export function SettingsPanel({
                     ref={providerListScrollRef}
                     className="agx-scrollbar-on-scroll min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-1.5 pt-2.5"
                   >
+                    {(() => {
+                      const jevOn = typesafeSettings.enabled && typesafeSettings.has_key;
+                      return (
+                        <button
+                          type="button"
+                          className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition ${
+                            providerNavIsJev
+                              ? "bg-[var(--settings-accent-row-bg)]"
+                              : "hover:bg-surface-hover"
+                          }`}
+                          onClick={() => {
+                            setProviderNavIsJev(true);
+                            setProviderEnableHint(null);
+                            setDefaultProvHint(null);
+                            setAddModelModalOpen(false);
+                            setAddServiceVendorModalOpen(false);
+                            setEditModelModalOpen(false);
+                          }}
+                        >
+                          <span
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111] text-white shadow-sm"
+                            aria-hidden
+                          >
+                            <TypesafeIcon size={18} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block truncate text-xs font-medium ${providerNavIsJev ? "text-[var(--settings-accent-fg)]" : "text-text-primary"}`}>
+                              {tw("typesafe.listName")}
+                            </span>
+                            <span className={`block text-[10px] ${jevOn ? "text-emerald-500" : "text-text-faint"}`}>
+                              {jevOn ? t("commonSettings.enabled") : t("commonSettings.notEnabled")}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })()}
                     {providerNames.map((name) => {
                       const entry = draft[name];
                       const isOn = providerEffectiveOn(entry);
-                      const isSelected = active === name;
+                      const isSelected = !providerNavIsJev && active === name;
                       return (
                         <button
                           key={name}
@@ -7689,6 +7799,7 @@ export function SettingsPanel({
                               : "hover:bg-surface-hover"
                           }`}
                           onClick={() => {
+                            setProviderNavIsJev(false);
                             if (name !== active) cancelInlineProviderRename();
                             setActive(name);
                             setProviderEnableHint(null);
@@ -7740,6 +7851,8 @@ export function SettingsPanel({
 
                 {/* Provider detail */}
                 <div className="min-h-0 flex-1 min-w-0 space-y-3 overflow-y-auto pr-0.5">
+                  {providerNavIsJev ? <TypesafeConfigSection variant="embedded" /> : null}
+                  <div className={providerNavIsJev ? "hidden" : "contents"}>
                   {/* ── Header: logo + name + toggles ── */}
                   <div className="flex items-center gap-3 pt-1">
                     <ProviderAvatar providerId={active} size={40} entry={current} />
@@ -8407,8 +8520,10 @@ export function SettingsPanel({
                           {t("provider.deleteConfirmAfter")}
                         </p>
                       </Modal>
+                  </div>
                 </div>
               </div>
+              {!providerNavIsJev ? (
               <div className="flex shrink-0 items-center justify-end gap-2 pt-2">
                 {providerConfigMessage ? (
                   <span
@@ -8430,6 +8545,7 @@ export function SettingsPanel({
                   {providerConfigSaving ? t("commonSettings.saving") : tCommon("save")}
                 </button>
               </div>
+              ) : null}
               </div>
             )}
 
@@ -8856,13 +8972,7 @@ export function SettingsPanel({
             })()}
 
             {tab === "connectors" && (
-              <ConnectorsTab
-                sessionId={sessionId}
-                tapdConnected={mcpServers.some(
-                  (server) => server.name === "tapd" && server.connected,
-                )}
-                onRefreshMcp={onRefreshMcp}
-              />
+              <ConnectorsSettingsPage sessionId={sessionId} onRefreshMcp={onRefreshMcp} />
             )}
             <div className={tab === "tools" ? "space-y-4" : "hidden"}>
               <ToolsTab ref={toolsTabRef} />
@@ -8876,6 +8986,8 @@ export function SettingsPanel({
                 <SkillAdvancedPanel />
               </div>
             )}
+
+            {tab === "commands" && <CommandsSettings />}
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
             {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
@@ -9246,6 +9358,8 @@ export function SettingsPanel({
                   )}
                   </>)}
                 </Panel>
+
+                <GatewayAdaptersPanel />
 
                 <Panel title={t("server.wechat")}>
                   {wechatStatus === "idle" && !wechatBotId && (

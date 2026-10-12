@@ -28,6 +28,8 @@ class DeviceManager:
         self._locks: Dict[str, asyncio.Lock] = {}
         self._pending: Dict[str, Deque[PendingMessage]] = {}
         self._reply_waiters: Dict[str, asyncio.Future[GatewayReply]] = {}
+        # 设备 RPC 通道（device_rpc/rpc_reply）的通用 dict 等待器，与 _reply_waiters 平行互不干扰
+        self._rpc_waiters: Dict[str, asyncio.Future[dict]] = {}
         self._waiter_lock = asyncio.Lock()
 
     def _lock_for(self, device_id: str) -> asyncio.Lock:
@@ -106,4 +108,24 @@ class DeviceManager:
         if fut is None or fut.done():
             return False
         fut.set_result(reply)
+        return True
+
+    async def wait_for_rpc_reply(self, correlation_id: str, timeout: float) -> Optional[dict]:
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future[dict] = loop.create_future()
+        async with self._waiter_lock:
+            self._rpc_waiters[correlation_id] = fut
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            async with self._waiter_lock:
+                self._rpc_waiters.pop(correlation_id, None)
+
+    def resolve_rpc_reply(self, correlation_id: str, payload: dict) -> bool:
+        fut = self._rpc_waiters.get(correlation_id)
+        if fut is None or fut.done():
+            return False
+        fut.set_result(payload)
         return True

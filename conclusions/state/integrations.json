@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "integrations",
-  "generation": "905f6f13bc274a338c62405d58e247a6",
+  "generation": "363ad15483cc42b1896b8b8a4cccfff9",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
   "source_fingerprint": "sha256:c376f901db3c58cce4c40a41a2d4803bb93ff80ea59dea81be4595c248f465ba",
   "summary_path": "conclusions/integrations_module_conclusion.md",
   "summary_sha256": "sha256:2a3805ce5d5f96e0a8a5eb0651160723366fd06c56b1032957da3fcf43094356",
-  "updated_at": "2026-09-01T06:08:43.671766+00:00"
+  "updated_at": "2026-09-30T00:54:14.090802+00:00"
 }

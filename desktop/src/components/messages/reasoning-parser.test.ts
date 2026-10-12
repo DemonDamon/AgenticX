@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseReasoningContent } from "./reasoning-parser";
+import { assistVisibleText, parseReasoningContent } from "./reasoning-parser";
 
 // Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
 describe("parseReasoningContent", () => {
@@ -28,5 +28,23 @@ describe("parseReasoningContent", () => {
       response: "前文正文",
       hasReasoningTag: true,
     });
+  });
+});
+
+describe("assistVisibleText", () => {
+  it("keeps only the answer after a think block", () => {
+    expect(
+      assistVisibleText("<think>先想回复风格</think>\n直接给结论，少客套。"),
+    ).toBe("直接给结论，少客套。");
+  });
+
+  it("drops an unclosed think block instead of saving it", () => {
+    expect(assistVisibleText("<think>用户要求生成偏好描述")).toBe("");
+  });
+
+  it("drops redacted thinking wrappers", () => {
+    expect(assistVisibleText("<redacted_thinking>secret</redacted_thinking>\n用表格。")).toBe(
+      "用表格。",
+    );
   });
 });

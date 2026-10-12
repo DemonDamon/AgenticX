@@ -28,6 +28,8 @@ export type ChatRequest = {
   stream?: boolean;
   /** User toggled web search in the composer; BFF injects the web_search tool when true. */
   webSearch?: boolean;
+  /** Enterprise skill id (`skill:<ulid>`) for this turn. Stripped before the gateway. */
+  skillId?: string;
   /** User toggled deep research in the composer; BFF runs the multi-stage research pipeline. */
   deepResearch?: boolean;
   /** Deep-research interaction preference: auto / direct / card_first / plan_chat. */

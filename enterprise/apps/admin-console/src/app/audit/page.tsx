@@ -42,6 +42,17 @@ import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { auditListLoadPolicy } from "./audit-list-load";
 
+const AUDIT_EVENT_TYPE_OPTIONS = [
+  { value: "", label: "全部" },
+  { value: "desktop_agent_action", label: "桌面智能体操作" },
+  { value: "mcp_tool_call", label: "mcp_tool_call" },
+] as const;
+
+function desktopAuditEventLabel(eventType: string): string {
+  if (eventType === "desktop_agent_action") return "桌面智能体操作";
+  return eventType;
+}
+
 type QueryResult = {
   total: number;
   items: AuditEvent[];
@@ -82,6 +93,7 @@ function AuditPageContent() {
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
+  const [eventType, setEventType] = useState("");
   const [crossBorderOnly, setCrossBorderOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tracePanel, setTracePanel] = useState<TracePanelState>({ status: "idle" });
@@ -148,6 +160,7 @@ function AuditPageContent() {
             user_id: userId || undefined,
             model: model || undefined,
             policy_hit: policyHit || undefined,
+            event_type: eventType || undefined,
             cross_border: crossBorderOnly ? true : undefined,
           }),
         },
@@ -183,7 +196,7 @@ function AuditPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [traceId, sessionId, userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
+  }, [traceId, sessionId, userId, model, policyHit, eventType, crossBorderOnly, loadChainVerify, t]);
 
   useEffect(() => {
     const fromQuery = searchParams.get("trace_id")?.trim() ?? "";
@@ -244,6 +257,7 @@ function AuditPageContent() {
         user_id: userId || undefined,
         model: model || undefined,
         policy_hit: policyHit || undefined,
+        event_type: eventType || undefined,
         cross_border: crossBorderOnly ? true : undefined,
       }),
     });
@@ -270,7 +284,9 @@ function AuditPageContent() {
       {
         accessorKey: "event_type",
         header: t("columns.event"),
-        cell: ({ row }) => <span className="font-medium">{row.original.event_type}</span>,
+        cell: ({ row }) => (
+          <span className="font-medium">{desktopAuditEventLabel(row.original.event_type)}</span>
+        ),
       },
       {
         accessorKey: "user_id",
@@ -340,9 +356,16 @@ function AuditPageContent() {
     if (userId) list.push({ id: "user", label: `${t("filterLabels.user")}${userId}`, onRemove: () => setUserId("") });
     if (model) list.push({ id: "model", label: `${t("filterLabels.model")}${model}`, onRemove: () => setModel("") });
     if (policyHit) list.push({ id: "policy", label: `${t("filterLabels.policy")}${policyHit}`, onRemove: () => setPolicyHit("") });
+    if (eventType) {
+      list.push({
+        id: "event-type",
+        label: desktopAuditEventLabel(eventType),
+        onRemove: () => setEventType(""),
+      });
+    }
     if (crossBorderOnly) list.push({ id: "cross", label: t("filterLabels.cross"), onRemove: () => setCrossBorderOnly(false) });
     return list;
-  }, [traceId, sessionId, userId, model, policyHit, crossBorderOnly, t]);
+  }, [traceId, sessionId, userId, model, policyHit, eventType, crossBorderOnly, t]);
 
   const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
   const headerChainPartial = chainFull?.valid === true && chainFull.verification === "partial";
@@ -423,6 +446,7 @@ function AuditPageContent() {
               setUserId("");
               setModel("");
               setPolicyHit("");
+              setEventType("");
               setCrossBorderOnly(false);
             }}
             onRowClick={(row) => setSelected(row.original)}
@@ -493,6 +517,21 @@ function AuditPageContent() {
                       />
                     </div>
                     <div className="space-y-1.5">
+                      <Label htmlFor="flt-event-type">事件类型</Label>
+                      <select
+                        id="flt-event-type"
+                        value={eventType}
+                        onChange={(event) => setEventType(event.target.value)}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                      >
+                        {AUDIT_EVENT_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value || "all"} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="flt-policy">{t("filterPolicy")}</Label>
                       <Input
                         id="flt-policy"
@@ -519,6 +558,7 @@ function AuditPageContent() {
                           setUserId("");
                           setModel("");
                           setPolicyHit("");
+                          setEventType("");
                           setCrossBorderOnly(false);
                         }}
                       >
@@ -613,12 +653,18 @@ function AuditPageContent() {
                                 {t("detail.viewTrace")}
                               </Button>
                               <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                                <Link href={`/portal-logs?trace_id=${encodeURIComponent(selected.trace_id)}`}>
+                                <Link
+                                  href={`/portal-logs?trace_id=${encodeURIComponent(selected.trace_id)}`}
+                                  prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                                >
                                   {t("detail.viewPortalLogs")}
                                 </Link>
                               </Button>
                               <Button type="button" variant="outline" size="sm" className="h-7" asChild>
-                                <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
+                                <Link
+                                  href={`/traces/${encodeURIComponent(selected.trace_id)}`}
+                                  prefetch={process.env.NEXT_PUBLIC_ADMIN_NAV_PREFETCH === "1"}
+                                >
                                   {t("detail.viewRuntime")}
                                 </Link>
                               </Button>

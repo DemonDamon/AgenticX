@@ -30,6 +30,7 @@ export type EnterpriseSyncConfig = {
     capabilities?: unknown;
     managed_mcp_servers?: string[];
     managed_skills?: string[];
+    agent_action_policy?: unknown;
   };
 };
 

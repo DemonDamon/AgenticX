@@ -8,18 +8,23 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 
 from agenticx.brain.manager import BrainManager
 from agenticx.brain.registry import BrainError, BrainRegistry
 from agenticx.brain.runtime_docs import DocsBrainRuntime
 from agenticx.brain.search import search_code_brains, search_docs_brains
 from agenticx.brain.types import BrainScope, BrainType
+from agenticx.brain.wiki_compile_queue import enqueue_wiki_backfill
 from agenticx.brain.wiki_compiler import WikiCompiler
+from agenticx.brain.wiki_graph import wiki_graph_payload
 from agenticx.brain.wiki_ops import (
     brain_storage_root,
+    draft_writing_brief,
     list_wiki_pages,
     maybe_compile_wiki_after_ingest,
+    clear_sample_wiki,
+    seed_sample_wiki,
     purge_wiki_source,
     read_wiki_page,
     run_brain_maintenance,
@@ -422,6 +427,45 @@ def register_brain_routes(app: FastAPI) -> None:
         pages = await asyncio.to_thread(list_wiki_pages, brain_storage_root(rt.brain))
         return {"ok": True, "pages": pages}
 
+    @app.get("/api/brains/{brain_id}/wiki/graph")
+    async def brain_wiki_graph(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        payload = await asyncio.to_thread(wiki_graph_payload, brain_storage_root(rt.brain))
+        return {"ok": True, **payload}
+
+    @app.post("/api/brains/{brain_id}/wiki/sample")
+    async def brain_wiki_sample(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        written = await asyncio.to_thread(seed_sample_wiki, brain_storage_root(rt.brain))
+        return {"ok": True, "written": written}
+
+    @app.delete("/api/brains/{brain_id}/wiki/sample")
+    async def brain_wiki_sample_clear(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        removed = await asyncio.to_thread(clear_sample_wiki, brain_storage_root(rt.brain))
+        return {"ok": True, "removed": removed}
+
+    @app.get("/api/brains/{brain_id}/wiki/compiles")
+    async def brain_wiki_compiles(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        return {"ok": True, "compiles": rt.wiki_compiles.list_status()}
+
+    @app.post("/api/brains/{brain_id}/wiki/backfill")
+    async def brain_wiki_backfill(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        queued = enqueue_wiki_backfill(rt, None)
+        return {"ok": True, "queued": queued}
+
+    @app.post("/api/brains/{brain_id}/wiki/compiles/cancel")
+    async def brain_wiki_compiles_cancel(
+        brain_id: str,
+        payload: Optional[Dict[str, Any]] = Body(default=None),
+    ) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        doc_id = str(payload.get("document_id") or "").strip() if isinstance(payload, dict) else ""
+        cancelled = rt.wiki_compiles.cancel(doc_id or None)
+        return {"ok": True, "cancelled": cancelled}
+
     @app.get("/api/brains/{brain_id}/wiki/page")
     async def brain_wiki_page(brain_id: str, path: str) -> Dict[str, Any]:
         rt = _require_docs_brain(brain_id)
@@ -449,6 +493,19 @@ def register_brain_routes(app: FastAPI) -> None:
         purpose_path.parent.mkdir(parents=True, exist_ok=True)
         purpose_path.write_text(content, encoding="utf-8")
         return {"ok": True}
+
+    @app.post("/api/brains/{brain_id}/wiki/purpose/draft")
+    async def brain_wiki_purpose_draft(brain_id: str, payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        content = str(payload.get("content") or "") if isinstance(payload, dict) else ""
+        try:
+            result = await asyncio.to_thread(draft_writing_brief, rt, content)
+        except Exception as exc:
+            logger.exception("wiki purpose draft failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=str(result.get("error") or "生成失败"))
+        return {"ok": True, "content": result.get("content") or ""}
 
     @app.post("/api/brains/{brain_id}/wiki/compile/{doc_id}")
     async def brain_wiki_compile(brain_id: str, doc_id: str) -> Dict[str, Any]:

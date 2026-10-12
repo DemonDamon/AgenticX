@@ -21,6 +21,7 @@ import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-sto
 import { log } from "../../../../lib/observability/logger";
 import { withRequestLog } from "../../../../lib/observability/with-request-log";
 import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
+import { applyAssignedSkillPrompt } from "../../../../lib/enterprise-skill-context";
 import type { PlatformFeature } from "@agenticx/config";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
@@ -128,6 +129,7 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   let providerHint = "";
   let forwardBody = rawBody;
+  let focusedSkillId: string | null = null;
   let enableWebSearch = false;
   let enableDeepResearch = false;
   let parsedBody: Record<string, unknown> | null = null;
@@ -138,12 +140,15 @@ export async function POST(request: Request) {
       model?: string;
       agenticx_web_search?: unknown;
       agenticx_deep_research?: unknown;
+      agenticx_skill_id?: unknown;
     };
     enableWebSearch = parsed.agenticx_web_search === true;
     enableDeepResearch = parsed.agenticx_deep_research === true;
+    focusedSkillId = typeof parsed.agenticx_skill_id === "string" ? parsed.agenticx_skill_id : null;
     const {
       agenticx_web_search: _stripWs,
       agenticx_deep_research: _stripDr,
+      agenticx_skill_id: _stripSkill,
       ...withoutFlag
     } = parsed;
     parsedBody = withoutFlag;
@@ -208,10 +213,23 @@ export async function POST(request: Request) {
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 
+  const withSkills = async (body: Record<string, unknown>) => {
+    const sanitized = withSanitizedMessages(body);
+    if (!Array.isArray(sanitized.messages)) return sanitized;
+    const messages = await applyAssignedSkillPrompt({
+      messages: sanitized.messages as Array<{ role: string; content?: string | null }>,
+      userId: session.userId,
+      email: session.email,
+      deptId: session.deptId,
+      focusedId: focusedSkillId,
+    });
+    return { ...sanitized, messages };
+  };
+
   if (enableDeepResearch && parsedBody) {
     const deepResearchRunId = ulid().toLowerCase();
     logCtx.setRun(deepResearchRunId);
-    return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
+    return runDeepResearchTurn(await withSkills(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       signal: request.signal,
@@ -259,7 +277,7 @@ export async function POST(request: Request) {
 
   if (enableWebSearch && parsedBody) {
     try {
-      return await runWebSearchTurn(withSanitizedMessages(parsedBody), {
+      return await runWebSearchTurn(await withSkills(parsedBody), {
         url: GATEWAY_COMPLETIONS_URL,
         headers: gatewayHeaders,
         signal: request.signal,
@@ -280,7 +298,7 @@ export async function POST(request: Request) {
   }
 
   if (parsedBody) {
-    forwardBody = JSON.stringify(withSanitizedMessages(parsedBody));
+    forwardBody = JSON.stringify(await withSkills(parsedBody));
   }
 
   let upstream: Response;

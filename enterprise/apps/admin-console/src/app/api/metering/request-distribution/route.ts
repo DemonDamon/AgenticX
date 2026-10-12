@@ -1,0 +1,38 @@
+import { NextResponse } from "next/server";
+import { queryRequestSizeDistribution } from "../../../../lib/metering-service";
+import { requireAdminScope } from "../../../../lib/admin-auth";
+
+export async function POST(request: Request) {
+  const guard = await requireAdminScope(["metering:read"]);
+  if (!guard.ok) return guard.response;
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
+  }
+
+  const toArray = (v: unknown) =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+
+  try {
+    const result = await queryRequestSizeDistribution({
+      dept_id: toArray(body.dept_id),
+      user_id: toArray(body.user_id),
+      api_token_id: toArray(body.api_token_id),
+      provider: toArray(body.provider),
+      model: toArray(body.model),
+      start: typeof body.start === "string" ? body.start : new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
+      end: typeof body.end === "string" ? body.end : new Date().toISOString(),
+      top_n: typeof body.top_n === "number" ? body.top_n : 15,
+    });
+    return NextResponse.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { code: "50001", message, data: { rows: [] } },
+      { status: 500 }
+    );
+  }
+}

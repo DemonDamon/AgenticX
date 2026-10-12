@@ -48,6 +48,23 @@ export const enterpriseRuntimeUserVisibleModels = mysqlTable(
   })
 );
 
+/** 部门默认模型。assignment_key 仅允许 `dept:<id>`。 */
+export const enterpriseRuntimeScopeDefaultModels = mysqlTable(
+  "enterprise_runtime_scope_default_models",
+  {
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    assignmentKey: varchar("assignment_key", { length: 320 }).notNull(),
+    modelId: varchar("model_id", { length: 256 }).notNull(),
+    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.tenantId, table.assignmentKey],
+      name: "enterprise_runtime_scope_default_pk",
+    }),
+  })
+);
+
 /** 租户 token 配额整包 JSON（等价原 quotas.json）。 */
 export const enterpriseRuntimeTokenQuotas = mysqlTable("enterprise_runtime_token_quotas", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
@@ -152,6 +169,13 @@ export const enterpriseRuntimeWebSearch = mysqlTable("enterprise_runtime_web_sea
   apiKeyCipher: text("api_key_cipher").default("").notNull(),
   maxResults: int("max_results").default(50).notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+});
+
+/** Tenant-level desktop agent action policy. Separate from budgets so a budget rewrite cannot drop it. */
+export const enterpriseDesktopAgentPolicies = mysqlTable("enterprise_desktop_agent_policies", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: json("config").notNull().$type<Record<string, unknown>>(),
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 

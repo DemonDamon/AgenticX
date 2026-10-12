@@ -31,6 +31,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from agenticx.runtime._automation_tasks_io import load_automation_tasks, save_automation_tasks
+from agenticx.runtime.automation_run_health import (
+    apply_run_outcome,
+    mark_interrupted_on_startup,
+    mark_run_started,
+)
 from agenticx.runtime.coordination.leader import LeaderGate
 
 logger = logging.getLogger(__name__)
@@ -126,6 +131,7 @@ class ServerAutomationScheduler:
         self._last_check_minute = ""
         self._task: Optional[asyncio.Task] = None
         self._running: set[str] = set()
+        self._interrupted_checked = False
 
     async def start(self) -> None:
         if self._task is not None:
@@ -159,6 +165,9 @@ class ServerAutomationScheduler:
         """Fire due tasks once. Returns fired task ids (empty when not leader)."""
         if not await self._leader_gate.am_i_leader():
             return []
+        if not self._interrupted_checked:
+            self._interrupted_checked = True
+            await asyncio.to_thread(self._mark_interrupted_tasks)
         now = now or datetime.now()
         minute_key = _minute_key(now)
         if minute_key == self._last_check_minute:
@@ -185,6 +194,7 @@ class ServerAutomationScheduler:
             if last_run_at and last_run_at.startswith(minute_key):
                 continue
             task["lastRunAt"] = _utc_iso_now()
+            task.update(mark_run_started(task, task["lastRunAt"]))
             dirty = True
             fired.append(str(task.get("id") or ""))
             asyncio.create_task(self._execute_task(task))
@@ -320,6 +330,20 @@ class ServerAutomationScheduler:
 
     # ── task record updates ──
 
+    def _mark_interrupted_tasks(self) -> None:
+        """R6: leftover runningSince from a crashed process becomes interrupted."""
+        tasks = load_automation_tasks()
+        changed = False
+        for index, task in enumerate(tasks):
+            if not isinstance(task, dict):
+                continue
+            updated = mark_interrupted_on_startup(task, self._running)
+            if updated is not task:
+                tasks[index] = updated
+                changed = True
+        if changed:
+            save_automation_tasks(tasks)
+
     def _persist_task_session_id(self, task_id: str, session_id: str) -> None:
         if not task_id or not session_id:
             return
@@ -339,12 +363,17 @@ class ServerAutomationScheduler:
             for task in tasks:
                 if not isinstance(task, dict) or str(task.get("id") or "") != task_id:
                     continue
-                task["lastRunStatus"] = "success" if ok else "error"
-                task["lastRunAt"] = _utc_iso_now()
-                if ok:
-                    task.pop("lastRunError", None)
-                else:
-                    task["lastRunError"] = (error or "执行失败")[:500]
+                updated = apply_run_outcome(
+                    task,
+                    ok=ok,
+                    error=(error or "执行失败")[:500] if not ok else "",
+                    trigger="schedule",
+                    now_iso=_utc_iso_now(),
+                )
+                task.update(updated)
+                for key in ("runningSince", "lastRunError"):
+                    if key not in updated:
+                        task.pop(key, None)
                 save_automation_tasks(tasks)
                 return
         except Exception:

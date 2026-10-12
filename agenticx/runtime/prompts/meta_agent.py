@@ -255,7 +255,14 @@ def _build_near_browser_capabilities_block() -> str:
         "## 应用内浏览器（WorkPanel）\n"
         "当前已启用应用内浏览器工具。操作的是用户右侧 WorkPanel 里那个可见 webview，"
         "会复用其登录态；**优先于** `browser-use` MCP（那是另一套外部浏览器进程）。\n"
-        "- `near_browser_open`：打开或复用浏览器 tab，并切到浏览器视图。\n"
+        "用户说「打开/看看这个页面/打开这个链接」时必须 `near_browser_open`："
+        "它会自动展开右侧工作区浏览器，即使用户还没打开工作区。"
+        "**禁止**用 bash / `open` / `xdg-open` 调系统默认浏览器；"
+        "**禁止**因此改走 browser-use。"
+        "若 `near_browser_open` 超时或失败，再调用一次即可，不要改用系统浏览器。"
+        "对用户说话不要提工具名，只说「已在右侧打开」。\n"
+        "- `near_browser_open`：打开或复用浏览器 tab，并切到浏览器视图。"
+        "工作区未展开时也会先拉开再打开页面。\n"
         "- `near_browser_snapshot`：给可交互元素打 index，返回 url/title/elements"
         "（含 `is_password`）。**每次点击/输入前必须先 snapshot**。\n"
         "- `near_browser_click` / `near_browser_type` / `near_browser_press_key`："
@@ -673,6 +680,23 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
         pass
 
     if not enabled:
+        # Multi-brain alignment (same rule as _tool_knowledge_search): KBManager
+        # only delegates to default_docs, so a disabled default library does not
+        # mean the whole KB is off — a user-created GLOBAL docs brain that is
+        # enabled still entitles the model to search. Without this the prompt
+        # tells the model "KB disabled" and it never even calls the tool.
+        try:
+            from agenticx.brain.mount import list_visible_brains
+            from agenticx.brain.types import BrainType
+
+            enabled = any(
+                b.enabled
+                for b in list_visible_brains(avatar_id=None, brain_type=BrainType.DOCS)
+            )
+        except Exception:
+            pass
+
+    if not enabled:
         return (
             "## 知识库检索（Stage-1 MVP）\n"
             "- 本地知识库当前处于禁用状态：不要主动调用 `knowledge_search`，除非用户先要求启用知识库。\n"
@@ -697,7 +721,9 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
         f"- 当前检索模式：`{mode}`；检索通道：`{retrieval_mode}`；默认 Top-K：`{top_k}`。{mode_hint}\n"
         f"{synthesis_hint}"
         f"- 除非用户显式指定，优先省略 `top_k` 参数，让系统自动采用默认 Top-K={top_k}。\n"
-        "- 回答必须基于 `hits[].text`，句末用 `[N]` 对应本轮 references。`hits` 为空则说明未命中。\n"
+        "- 两级读取：`knowledge_search` 默认返回紧凑摘要（每条 hit 仅含查询相关摘录），足够判断相关性与标注 `[N]` 引用；"
+        "只有当需要引用某条的完整段落/原文细节时，才对该条调用 `knowledge_read(hit_id=...)` 取全文，按需索取、不要批量读全。\n"
+        "- 回答必须基于 `hits[].text` 或 `knowledge_read` 返回的全文，句末用 `[N]` 对应本轮 references。`hits` 为空则说明未命中。\n"
         "- **本轮没调 `knowledge_search` 就禁止输出 `[N]`**；不要复用上一轮角标。不要把 hits 原始 JSON 复读给用户。\n"
         "- 禁止手写「已调用知识库」并粘贴 JSON 代替 function calling。\n"
         "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
@@ -743,7 +769,8 @@ def _build_url_vision_capability_block() -> str:
     """Describe built-in web_fetch + view_image workflow for URL visual tasks."""
     return (
         "## URL 正文与看图\n"
-        "- URL 正文用 `web_fetch`；要看图用 `view_image`（`target` 可为 discovered_images / 本地路径 / data URL）。\n"
+        "- 用户要在应用里看见页面（打开/看看这个链接）：用 `near_browser_open`，不要只用 `web_fetch`，也不要调系统浏览器。\n"
+        "- 只要摘要/事实、用户不必看见页面：才用 `web_fetch`；要看图用 `view_image`（`target` 可为 discovered_images / 本地路径 / data URL）。\n"
         "- 当前模型不支持视觉时改用 `analyze_image`；不要对每一张图预览。每轮视觉附件最多 4 张。\n\n"
     )
 
@@ -1023,6 +1050,7 @@ def build_meta_agent_system_prompt(
         "- **任务主线自检**：对照 `[user-goal-anchor]`；已偏离则立即停收集并产出最终方案。\n"
         "- 文件必须 `file_write` 真落盘，只引用真实绝对路径；**禁止 `sandbox:` 协议链接**。未指定目录时写入会话默认工作区，禁止在 `$HOME` 另起平行目录。\n"
         "- 能力/skills/mcp/工具类问题基于“已注册能力”作答，不要 `check_resources`。\n"
+        "- 用户问任意模型/Provider/Jev 的调用次数、日期范围内用量、超时、连续失败或某 session 为何要重试时，调用 `plugin_usage`（可带 model / from_date / to_date / session_id），不要凭记忆编造。\n"
         "- 扫码/阻塞命令用 `bash_bg_start`，不要用 `bash_exec`。禁止单条命令里合并 `rm -rf`/`rm -fr` 与 `curl|wget ... | bash`。\n"
         "- **wb_bridge 无人值守强约束**：写文件/跑命令须显式 `acceptEdits` 或 `dontAsk`/`bypassPermissions`。\n"
         "- **wb_bridge 重发禁令**：`running` 时禁止重复 `wb_bridge_send`，改 `wb_bridge_describe`；`blocked` 先看 `observed_tools`。\n"
@@ -1070,7 +1098,9 @@ def build_meta_agent_system_prompt(
         "- 问“某分身是谁/角色/ID”时直接按 Avatars 列表回答，禁止 `delegate_to_avatar`；正文不要写可执行 `delegate_to_avatar(...)` 示例。\n"
         "- 查分身 workspace 已落盘信息优先 `read_avatar_workspace`；只需内部答复用 `chat_with_avatar`；多步骤执行用 `delegate_to_avatar`（真委派到该分身真实 session）。\n"
         "- 问委派进度用 `query_subagent_status`（名称/avatar_id/delegation_id 均可）。核对名单用 `list_avatars`。拉群用 `create_group_chat`。\n"
-        "- **严禁对已注册分身使用 `spawn_subagent`**，必须 `delegate_to_avatar`。\n\n"
+        "- **严禁对已注册分身使用 `spawn_subagent`**，必须 `delegate_to_avatar`。\n"
+        "- 「连接器」≠「分身」：连接器是接入外部系统的实例（MCP/模板，见「我的连接」）。用户说「创建/新建连接器（叫 X）」时 X 是连接器名，"
+        "用 `connector_manage` 按技能 connector-assistant 流程处理，禁止 `create_avatar` 或把 X 当分身追问。\n\n"
         "## 向用户提问（human-in-the-loop）\n"
         "- 开放式决策必须调用 `request_clarification`，禁止把问题写进正文后结束回合。用户提交后须在同一回合继续。\n"
         "- 无人值守会话返回 `[CLARIFICATION_PENDING]` 时写入待办并结束本轮，不要重复同一提问。\n"

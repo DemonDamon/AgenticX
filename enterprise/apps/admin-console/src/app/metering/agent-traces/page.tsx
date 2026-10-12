@@ -96,7 +96,15 @@ export default function AgentTracesPage() {
 
   useEffect(() => {
     void loadIds();
-  }, [loadIds]);
+    // 支持 /metering/agent-traces?trace_id=xxx 直达（从 metering trace 下钻跳转）
+    if (typeof window !== "undefined") {
+      const param = new URLSearchParams(window.location.search).get("trace_id");
+      if (param) {
+        setQueryId(param);
+        void loadDetail(param);
+      }
+    }
+  }, [loadIds, loadDetail]);
 
   return (
     <div className="flex flex-col gap-6 p-6">

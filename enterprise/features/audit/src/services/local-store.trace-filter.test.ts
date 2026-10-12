@@ -77,4 +77,18 @@ describe("LocalAuditStore trace/session filters", () => {
     const result = await store.query(actor, { tenant_id: "tenant-1" });
     expect(result.items.map((item) => item.id).sort()).toEqual(["1", "2"]);
   });
+
+  it("filters event_type down to desktop agent actions", async () => {
+    const store = await storeWith([
+      baseEvent({ id: "desktop", event_type: "desktop_agent_action" }),
+      baseEvent({ id: "mcp", event_type: "mcp_tool_call" }),
+      baseEvent({ id: "chat", event_type: "chat_call" }),
+    ]);
+    const result = await store.query(actor, {
+      tenant_id: "tenant-1",
+      event_type: "desktop_agent_action",
+    });
+    expect(result.items.map((item) => item.id)).toEqual(["desktop"]);
+    expect(result.items.every((item) => item.event_type === "desktop_agent_action")).toBe(true);
+  });
 });

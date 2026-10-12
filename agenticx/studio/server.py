@@ -67,6 +67,7 @@ from agenticx.cli.studio_mcp import (
 from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAutoConfirmGate
+from agenticx.runtime.confirm import is_protected_confirm
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.checkpoint import CheckpointStore
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
@@ -81,6 +82,7 @@ from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_m
 from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
+from agenticx.runtime.group_context import GroupChatContext
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
     GroupChatRouter,
@@ -446,6 +448,47 @@ def _persist_clarification_prompt(
         history.append(row)
     except Exception:
         logger.exception("[clarify] failed to persist clarification prompt")
+
+
+def _persist_jev_decision(session: Any, reply: Any) -> None:
+    """Append a UI-only Jev decision row. Pending events are not persisted."""
+    try:
+        ctx = dict(getattr(reply, "confirm_context", None) or {})
+        if str(ctx.get("kind") or "") != "jev_decision":
+            ctx["kind"] = "jev_decision"
+        history = getattr(session, "chat_history", None)
+        if history is None:
+            return
+        purpose = str(ctx.get("purpose") or "")
+        action = str(ctx.get("action") or "")
+        target_ids = list(ctx.get("target_ids") or [])
+        if history:
+            tail = history[-1]
+            meta = tail.get("metadata") if isinstance(tail, dict) else None
+            if (
+                isinstance(tail, dict)
+                and tail.get("role") == "tool"
+                and isinstance(meta, dict)
+                and meta.get("kind") == "jev_decision"
+                and str(meta.get("purpose") or "") == purpose
+                and str(meta.get("action") or "") == action
+                and list(meta.get("target_ids") or []) == target_ids
+            ):
+                return
+        history.append(
+            {
+                "role": "tool",
+                "tool_name": "jev",
+                "agent_id": "__jev__",
+                "sender_id": "__jev__",
+                "avatar_name": "Jev",
+                "sender_name": "Jev",
+                "content": str(getattr(reply, "content", "") or ""),
+                "metadata": ctx,
+            }
+        )
+    except Exception:
+        logger.exception("[jev] failed to persist decision card")
 
 
 def _parse_sse_since_seq(
@@ -896,6 +939,10 @@ def _studio_cors_origins() -> list[str]:
 
 
 def create_studio_app() -> FastAPI:
+    # Proxy on/off must not matter for local traffic: loopback never via proxy.
+    from agenticx.utils.proxy_policy import ensure_local_no_proxy_env
+
+    ensure_local_no_proxy_env()
     _pending_mcp_autoconnect_tasks: set[asyncio.Task[Any]] = set()
 
     @contextlib.asynccontextmanager
@@ -907,6 +954,19 @@ def create_studio_app() -> FastAPI:
             install_mcp_crash_guard()
         except Exception as exc:
             logger.debug("install_mcp_crash_guard failed (non-fatal): %s", exc)
+
+        # ActionProposal startup recovery: leftover executing → outcome_unknown.
+        try:
+            from agenticx.runtime.action_proposals import recover_interrupted_proposals
+
+            _recovered_n = recover_interrupted_proposals()
+            if _recovered_n:
+                logger.info(
+                    "action_proposals: recovered %s interrupted proposal(s)",
+                    _recovered_n,
+                )
+        except Exception as exc:
+            logger.debug("action_proposals recovery skipped (non-fatal): %s", exc)
 
         # Initialise process-level MCP hub and kick off background restore.
         from agenticx.runtime.global_mcp_manager import GlobalMcpManager as _GmcpM
@@ -1315,6 +1375,20 @@ def create_studio_app() -> FastAPI:
         unattended: bool = False,
     ) -> Any:
         if unattended:
+            from agenticx.runtime.confirm import ParkedApprovalConfirmGate
+            from agenticx.runtime.parked_approvals import (
+                approval_parking_enabled,
+                approval_timeout_seconds,
+            )
+
+            if approval_parking_enabled():
+                return ParkedApprovalConfirmGate(
+                    managed.get_confirm_gate(agent_id),
+                    session_id=str(getattr(managed, "session_id", "") or ""),
+                    agent_id=agent_id or "meta",
+                    timeout_seconds=approval_timeout_seconds(),
+                    label=str(getattr(managed, "avatar_id", "") or ""),
+                )
             return RiskAwareAutoConfirmGate(unattended=True)
         managed_gate = managed.get_confirm_gate(agent_id)
         if _global_auto_confirm_enabled():
@@ -1428,6 +1502,10 @@ def create_studio_app() -> FastAPI:
 
     register_data_sources_routes(app, check_token=_check_token)
 
+    from agenticx.studio.command_routes import register_command_routes
+
+    register_command_routes(app, _check_token)
+
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
             raise HTTPException(status_code=403, detail="desktop token required for MCP admin APIs")
@@ -1515,7 +1593,7 @@ def create_studio_app() -> FastAPI:
     def _modelscope_headers() -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "AgenticX/0.6.0",
+            "User-Agent": "AgenticX/0.6.5",
         }
         token = str(os.getenv("MODELSCOPE_API_TOKEN", "")).strip()
         if token:
@@ -2225,7 +2303,11 @@ def create_studio_app() -> FastAPI:
         if session_id:
             managed = manager.get(session_id, touch=False)
             if managed is not None:
-                taskspaces = getattr(managed.studio_session, "taskspaces", None) or []
+                # Restored workspace metadata may live on ManagedSession before chat
+                # populates the StudioSession compatibility attribute.
+                taskspaces = getattr(managed, "taskspaces", None) or getattr(
+                    managed.studio_session, "taskspaces", None
+                ) or []
                 for ts in taskspaces:
                     if isinstance(ts, dict):
                         path = str(ts.get("path", "") or "").strip()
@@ -2633,10 +2715,27 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        manager.request_interrupt(session_id)
+        # Turn abort only — does not cancel durable jobs (use cancel_durable_job).
+        from agenticx.runtime.turn_abort import abort_chat_turn
+
+        turn_result = abort_chat_turn(manager, session_id)
         manager.set_execution_state(session_id, "interrupted")
         await manager.persist_async(session_id)
-        return {"ok": True, "session_id": session_id}
+        return {
+            "ok": bool(turn_result.get("ok")),
+            "session_id": session_id,
+            "scope": "turn",
+            "durable_jobs_cancelled": False,
+        }
+
+    @app.get("/api/approvals/pending")
+    async def get_pending_approvals(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.parked_approvals import list_pending
+
+        return {"ok": True, "items": list_pending()}
 
     @app.post("/api/confirm")
     async def post_confirm(
@@ -2652,10 +2751,24 @@ def create_studio_app() -> FastAPI:
             team_gate = managed.team_manager.get_confirm_gate(payload.agent_id)
             if team_gate is not None:
                 gate = team_gate
+        remembered = False
+        if payload.approved and payload.remember == "session":
+            pending_meta = getattr(gate, "_pending_meta", {}) or {}
+            remember_ctx = (pending_meta.get(payload.request_id) or {}).get("context") or {}
+            remember_tool = str(remember_ctx.get("tool") or "")
+            if remember_tool and not is_protected_confirm(remember_ctx):
+                sticky_target = managed.studio_session
+                if payload.agent_id != "meta" and managed.team_manager is not None:
+                    sticky_target = (
+                        getattr(managed.team_manager, "_agent_sessions", {}).get(payload.agent_id)
+                        or sticky_target
+                    )
+                sticky_target.sticky_allowed_tools.add(remember_tool)
+                remembered = True
         ok = gate.resolve(payload.request_id, payload.approved)
         if not ok:
             raise HTTPException(status_code=404, detail="confirm request not found")
-        return {"ok": True}
+        return {"ok": True, "remembered": remembered}
 
     @app.post("/api/clarify")
     async def post_clarify(
@@ -2666,6 +2779,33 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # Versioned choice panel: validate candidate_set_version before resolving
+        # the gate so a stale select never writes selected_id or unblocks the turn.
+        panel_id = str(getattr(payload, "panel_id", None) or "").strip()
+        if panel_id:
+            from agenticx.runtime.choice_panels.store import (
+                StaleChoiceError,
+                get_choice_panel_store,
+            )
+
+            option_id = str(getattr(payload, "option_id", None) or "").strip()
+            if not option_id and payload.selected_options:
+                option_id = str(payload.selected_options[0] or "").strip()
+            try:
+                get_choice_panel_store().select(
+                    session_id=payload.session_id,
+                    panel_id=panel_id,
+                    candidate_set_version=int(
+                        getattr(payload, "candidate_set_version", None) or 0
+                    ),
+                    option_id=option_id,
+                )
+            except StaleChoiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409, detail="candidate_set_version invalid"
+                ) from exc
         gate = managed.get_clarify_gate(payload.agent_id)
         if payload.agent_id != "meta" and managed.team_manager is not None:
             team_gate = managed.team_manager.get_clarify_gate(payload.agent_id)
@@ -2675,6 +2815,24 @@ def create_studio_app() -> FastAPI:
             "answer_text": payload.answer_text or "",
             "selected_options": list(payload.selected_options or []),
         }
+        if panel_id:
+            answer["panel_id"] = panel_id
+            answer["candidate_set_version"] = getattr(
+                payload, "candidate_set_version", None
+            )
+            if getattr(payload, "option_id", None):
+                answer["option_id"] = payload.option_id
+        # Persisted / displayed copy never carries secrets; only the waiting
+        # tool (connector_manage credential prompt) receives secret_values.
+        persisted_answer = dict(answer)
+        secret_values = {
+            str(k): str(v)
+            for k, v in (getattr(payload, "secret_values", None) or {}).items()
+            if str(k).strip() and str(v or "").strip()
+        }
+        if secret_values:
+            answer["secret_values"] = secret_values
+            persisted_answer["secret_fields"] = sorted(secret_values)
         ok = gate.resolve(payload.request_id, answer)
         if not ok:
             raise HTTPException(status_code=404, detail="clarification request not found")
@@ -2692,7 +2850,7 @@ def create_studio_app() -> FastAPI:
                         and str(meta.get("request_id") or meta.get("id") or "") == payload.request_id
                     ):
                         meta["clarification_answered"] = True
-                        meta["clarification_answer"] = answer
+                        meta["clarification_answer"] = persisted_answer
                         break
                 managed.session.persist_async()
         except Exception:
@@ -2755,6 +2913,95 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_automation_session = active_avatar_id.startswith("automation:")
+        # Inbound intercept: refuse old SkillHub Meta dead-path copy only
+        # (POST /api/registry/install / store-first). Ordinary chat @ns/slug /
+        # 「安装 … skill」 go to the conversation agent — no silent install.
+        try:
+            from agenticx.extensions.skillhub_install_guard import (
+                classify_skillhub_inbound_install_prompt,
+            )
+
+            _inbound = classify_skillhub_inbound_install_prompt(
+                str(getattr(payload, "user_input", "") or "")
+            )
+        except Exception:
+            _inbound = {"hit": False}
+        # Only forbidden_meta (classify no longer hits install_intent).
+        if _inbound.get("hit") and str(_inbound.get("kind") or "") == "forbidden_meta":
+            _slug = str(_inbound.get("slug") or "").strip()
+            _reason = str(_inbound.get("reason") or "").strip()
+
+            async def _skillhub_intercept_stream() -> AsyncGenerator[str, None]:
+                msg = _reason
+                install_ok = False
+                if _slug:
+                    try:
+                        from agenticx.extensions.skillhub_adapter import (
+                            install_skillhub_skill,
+                        )
+                        from agenticx.studio.skills_list_api import (
+                            invalidate_skills_list_cache,
+                        )
+
+                        result = await asyncio.to_thread(install_skillhub_skill, _slug)
+                        if isinstance(result, dict) and result.get("ok"):
+                            try:
+                                invalidate_skills_list_cache()
+                            except Exception:
+                                pass
+                            install_ok = True
+                            path = result.get("installed_path") or f"registry/{_slug}"
+                            msg = (
+                                f"已拦截 SkillHub 安装意图，并改为确定性安装「{_slug}」成功 → {path}。"
+                                "未启动 Meta 死路安装。"
+                            )
+                        else:
+                            err = (
+                                (result or {}).get("error")
+                                if isinstance(result, dict)
+                                else "skillhub install failed"
+                            )
+                            msg = (
+                                f"已拦截 SkillHub 安装意图。确定性安装「{_slug}」失败：{err}。"
+                                "请改用 Settings → SkillHub 市场（installFromSkillHub / "
+                                "POST /api/registry/skillhub/install），不要粘贴旧指令到 Meta。"
+                            )
+                    except Exception as exc:
+                        msg = (
+                            f"已拦截 SkillHub 安装意图。确定性安装「{_slug}」异常：{exc}。"
+                            "请改用 Settings → SkillHub 市场确定性安装。"
+                        )
+                else:
+                    msg = (
+                        f"{_reason} "
+                        "未能从提示词解析技能 slug；请打开 Settings → SkillHub 市场直接安装。"
+                    )
+                final = SseEvent(
+                    type="final",
+                    data={
+                        "text": msg,
+                        "skillhub_inbound_intercept": True,
+                        "install_ok": install_ok,
+                        "slug": _slug or None,
+                        "terminal_reason": "skillhub_inbound_intercept",
+                    },
+                )
+                yield f"data: {json.dumps(final.model_dump(), ensure_ascii=False)}\n\n"
+                done_payload = {
+                    "type": "done",
+                    "data": {
+                        "reason": "skillhub_inbound_intercept",
+                        "install_ok": install_ok,
+                        "slug": _slug or None,
+                    },
+                }
+                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(
+                _skillhub_intercept_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
         from agenticx.runtime.plan_mode import apply_turn_intent_to_session, filter_tools_for_turn_intent
 
         setattr(session, "session_id", payload.session_id)
@@ -3062,6 +3309,7 @@ def create_studio_app() -> FastAPI:
                         "kimi",
                         "minimax",
                         "deepseek",
+                        "mimo",
                         "ollama",
                     ]
                 )
@@ -3203,6 +3451,11 @@ def create_studio_app() -> FastAPI:
             import asyncio as _asyncio_group
 
             group_use_event_hub = live_reattach_enabled()
+            keep_runtime_after_disconnect = bool(
+                getattr(payload, "keep_runtime_after_disconnect", False)
+            )
+            if group_use_event_hub:
+                keep_runtime_after_disconnect = True
             group_event_hub = (
                 manager.ensure_event_hub(payload.session_id) if group_use_event_hub else None
             )
@@ -3306,6 +3559,22 @@ def create_studio_app() -> FastAPI:
                         await _emit_group_event(typing_evt)
 
                     u_display = str(getattr(payload, "user_display_name", None) or "").strip() or None
+                    # Desktop polls ~/.agenticx/sessions/<id>/messages.json and will
+                    # not see an IM-owned group turn until this flush. Do it before
+                    # routing/LLM, which can take minutes before the first reply.
+                    GroupChatContext(session).append_user(
+                        str(payload.user_input or ""),
+                        sender_name=str(u_display or "").strip() or "我",
+                        sender_id=str(getattr(payload, "speaker_user_id", None) or "").strip()
+                        or "user",
+                        quoted_message_id=quoted_message_id,
+                        quoted_content=quoted_content,
+                        attachments=history_image_attachments or None,
+                    )
+                    try:
+                        manager.incremental_persist(payload.session_id)
+                    except Exception:
+                        pass
                     async for reply in router.run_group_turn(
                         base_session=session,
                         group_id=group_id,
@@ -3318,6 +3587,7 @@ def create_studio_app() -> FastAPI:
                         quoted_message_id=quoted_message_id,
                         should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
+                        speaker_user_id=str(getattr(payload, "speaker_user_id", None) or "").strip() or None,
                         image_inputs=image_inputs,
                         history_image_attachments=history_image_attachments,
                     ):
@@ -3372,7 +3642,9 @@ def create_studio_app() -> FastAPI:
                                 agent_id=str(reply.agent_id or ""),
                                 avatar_name=str(reply.avatar_name or ""),
                             )
-                        if evt_type in {"group_reply", "group_skipped", "group_clarification"}:
+                        if evt_type == "group_jev_decision":
+                            _persist_jev_decision(session, reply)
+                        if evt_type in {"group_reply", "group_skipped", "group_clarification", "group_jev_decision"}:
                             try:
                                 manager.incremental_persist(payload.session_id)
                             except Exception:
@@ -3403,7 +3675,8 @@ def create_studio_app() -> FastAPI:
                         while True:
                             if await request.is_disconnected():
                                 client_disconnected = True
-                                break
+                                if not keep_runtime_after_disconnect:
+                                    break
                             try:
                                 buffered = await _asyncio_group.wait_for(
                                     hub_sub_q.get(), timeout=0.1
@@ -3422,7 +3695,8 @@ def create_studio_app() -> FastAPI:
                         while True:
                             if await request.is_disconnected():
                                 client_disconnected = True
-                                break
+                                if not keep_runtime_after_disconnect:
+                                    break
                             try:
                                 evt = await _asyncio_group.wait_for(
                                     group_fallback_queue.get(), timeout=0.1
@@ -3444,9 +3718,11 @@ def create_studio_app() -> FastAPI:
                     if hub_sub_id is not None and group_event_hub is not None:
                         group_event_hub.unsubscribe(hub_sub_id)
                     if group_runtime_task is not None and not group_runtime_task.done():
-                        if group_event_hub is not None and client_disconnected:
+                        if client_disconnected and (
+                            group_event_hub is not None or keep_runtime_after_disconnect
+                        ):
                             logger.info(
-                                "[group] client disconnected, runtime continues (hub) session=%s",
+                                "[group] client disconnected, runtime continues session=%s",
                                 payload.session_id,
                             )
                         else:
@@ -3956,7 +4232,15 @@ def create_studio_app() -> FastAPI:
                             user_message_content=user_message_content,
                             history_user_attachments=history_user_attachments,
                             history_user_metadata=(
-                                {"client_turn_id": _ctid} if _ctid else None
+                                {
+                                    key: value
+                                    for key, value in {
+                                        "client_turn_id": _ctid,
+                                        "command_name": str(getattr(payload, "command_name", "") or "").strip(),
+                                    }.items()
+                                    if value
+                                }
+                                or None
                             ),
                             history_user_content=(
                                 user_display_content or str(payload.user_input or "")
@@ -5329,6 +5613,10 @@ def create_studio_app() -> FastAPI:
             filter_obj["category"] = str(category).strip()
         if is_hosted is not None:
             filter_obj["is_hosted"] = bool(is_hosted)
+        # 上游列表已不再返回 is_verified；仍写入 filter 以便未来兼容，勿在客户端
+        # 对缺失字段做 bool(None) is True 过滤（会把整页筛空）。
+        if is_verified is not None:
+            filter_obj["is_verified"] = bool(is_verified)
         body = {
             "filter": filter_obj,
             "page_number": page,
@@ -5345,7 +5633,13 @@ def create_studio_app() -> FastAPI:
         if not isinstance(items, list):
             items = []
         if is_verified is not None:
-            items = [it for it in items if bool((it or {}).get("is_verified")) is bool(is_verified)]
+            # 仅当列表项显式带有该字段时才过滤；否则保留上游结果。
+            if any(isinstance(it, dict) and "is_verified" in it for it in items):
+                items = [
+                    it
+                    for it in items
+                    if bool((it or {}).get("is_verified")) is bool(is_verified)
+                ]
         result = {
             "ok": True,
             "page": page,
@@ -5572,10 +5866,11 @@ def create_studio_app() -> FastAPI:
             "file_read": "filesystem", "file_write": "filesystem", "file_edit": "filesystem", "list_files": "filesystem",
             "codegen": "code",
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
-            "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp",
+            "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp", "connector_manage": "mcp",
             "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
+            "skillhub_install": "skill", "skillhub_search": "skill", "clawhub_install": "skill",
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
-            "memory_append": "memory", "memory_search": "memory", "session_search": "memory",
+            "memory_append": "memory", "memory_search": "memory", "session_search": "memory", "plugin_usage": "memory",
             "liteparse": "document",
             "list_data_sources": "data_source", "query_data_source": "data_source",
             "schedule_task": "scheduling", "list_scheduled_tasks": "scheduling", "cancel_scheduled_task": "scheduling",
@@ -5837,6 +6132,7 @@ def create_studio_app() -> FastAPI:
             skills_enabled=skills_enabled,
             brains_enabled=brains_enabled,
             workspace_dir=str(payload.get("workspace_dir", "")).strip(),
+            portrait_style=str(payload.get("portrait_style", "")).strip(),
         )
         return {"ok": True, "avatar": config.to_dict()}
 
@@ -6447,6 +6743,23 @@ def create_studio_app() -> FastAPI:
         if config is None:
             raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True, "group": config.to_dict()}
+
+    @app.post("/api/groups/{group_id}/human-members")
+    async def add_group_human_member(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            cfg = group_registry.add_human_member(
+                group_id, payload if isinstance(payload, dict) else {},
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        return {"ok": True, "group": cfg.to_dict()}
 
     # ── Group Team Events SSE + Action endpoints ──────────────────────────────
     # Registered event buses keyed by (group_id, session_id).
@@ -8688,6 +9001,33 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install_preview error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/registry/skillhub/install")
+    async def registry_skillhub_install(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Deterministically install a SkillHub skill outside the agent sandbox."""
+        _check_token(x_agx_desktop_token)
+        slug = str(payload.get("slug") or payload.get("name") or "").strip()
+        if not slug:
+            raise HTTPException(status_code=400, detail="slug is required")
+        try:
+            from agenticx.extensions.skillhub_adapter import install_skillhub_skill
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            result = install_skillhub_skill(slug)
+            if result.get("ok"):
+                invalidate_skills_list_cache()
+            return result
+        except Exception as exc:
+            logger.warning("registry_skillhub_install error: %s", exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_code": "skillhub_install_exception",
+                "fallback_to_agent": True,
+            }
+
     @app.post("/api/registry/install")
     async def registry_install(
         payload: dict,
@@ -8759,6 +9099,117 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/registry/install-repo-skill")
+    async def registry_install_repo_skill(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Deterministically install one skill's FULL directory from a GitHub repo tarball."""
+        _check_token(x_agx_desktop_token)
+        repo = str(payload.get("repo", "")).strip()
+        skill = str(payload.get("skill", "")).strip()
+        branch = str(payload.get("branch", "main") or "main").strip() or "main"
+        if not repo or not skill:
+            raise HTTPException(status_code=400, detail="repo and skill are required")
+        try:
+            import asyncio
+
+            from agenticx.skills.import_repo import install_skill_full_from_repo
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            result = await asyncio.to_thread(
+                install_skill_full_from_repo,
+                repo=repo,
+                skill=skill,
+                branch=branch,
+                overwrite=bool(payload.get("overwrite")),
+                acknowledge_high_risk=bool(payload.get("acknowledge_high_risk")),
+            )
+            if result.installed:
+                invalidate_skills_list_cache()
+            body: dict = {
+                "ok": bool(result.installed),
+                "name": skill,
+                "installed": result.installed,
+                "skipped_existing": result.skipped_existing,
+                "errors": result.errors,
+                "rejected_by_guard": result.rejected_by_guard,
+            }
+            if result.scan_summary is not None:
+                body["scan_summary"] = result.scan_summary
+            if result.high_risk_confirm_required:
+                body["error_code"] = "high_risk_confirm_required"
+                body["error"] = "high_risk_confirm_required"
+            elif result.rejected_by_guard:
+                reasons = "; ".join(
+                    str(r.get("reason") or "guard rejected") for r in result.rejected_by_guard
+                )
+                body["error_code"] = "guard_rejected"
+                body["error"] = reasons
+            elif result.errors:
+                body["error_code"] = "install_failed"
+                body["error"] = "; ".join(result.errors)
+            return body
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("registry_install_repo_skill error: %s", exc)
+            return {"ok": False, "name": skill, "error": str(exc), "error_code": "install_exception"}
+
+    @app.post("/api/skills/uninstall")
+    async def skills_uninstall(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Uninstall a locally installed skill directory (one-click remove).
+
+        Safety boundary: only directories under ~/.agenticx/skills/ can be
+        removed — builtin (package) skills, project skills and third-party
+        roots (cursor/claude/...) are never touched.
+        """
+        _check_token(x_agx_desktop_token)
+        name = str(payload.get("name", "")).strip()
+        source = str(payload.get("source", "") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        try:
+            import shutil as _shutil
+
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            candidates = [
+                m for m in SkillBundleLoader().scan() if m.name == name
+            ]
+            if source:
+                candidates = [m for m in candidates if m.source == source]
+            home_skills_root = (Path.home() / ".agenticx" / "skills").resolve()
+            target = None
+            for meta in candidates:
+                try:
+                    resolved = meta.base_dir.resolve()
+                    resolved.relative_to(home_skills_root)
+                except (ValueError, OSError):
+                    continue
+                target = resolved
+                break
+            if target is None:
+                return {
+                    "ok": False,
+                    "name": name,
+                    "error": "skill not found under ~/.agenticx/skills (builtin/project skills cannot be uninstalled here)",
+                }
+            if not (target / "SKILL.md").is_file():
+                return {"ok": False, "name": name, "error": "not a skill directory"}
+            _shutil.rmtree(target)
+            invalidate_skills_list_cache()
+            return {"ok": True, "name": name}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("skills_uninstall error: %s", exc)
+            return {"ok": False, "name": name, "error": str(exc)}
+
     # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
     register_kb_routes(app)
     register_brain_routes(app)
@@ -8766,6 +9217,8 @@ def create_studio_app() -> FastAPI:
     from agenticx.studio.web_search.routes import register_web_search_routes
 
     register_web_search_routes(app)
+    from agenticx.studio.typesafe_routes import register_typesafe_routes
+    register_typesafe_routes(app)
 
     from agenticx.studio.delivery_api import register_delivery_routes
 

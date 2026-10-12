@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons, shouldShowReActBlockActionTail } from "../../utils/im-bubble-actions";
+import { i18n } from "../../i18n/i18n";
 import { ChatImAvatar, ImBubble } from "./ImBubble";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  DEFAULT_META_AVATAR_URL,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
+} from "../../constants/meta-avatar";
 
 const baseVisible = {
   hideActions: false,
@@ -63,6 +69,10 @@ describe("shouldShowAssistantIconButtons", () => {
       })
     ).toBe(true);
   });
+
+  it("hides actions during run presentation", () => {
+    expect(shouldShowAssistantIconButtons({ ...baseVisible, presenting: true })).toBe(false);
+  });
 });
 
 const baseFollowups = {
@@ -120,6 +130,31 @@ describe("shouldShowAssistantFollowups", () => {
       })
     ).toBe(true);
   });
+
+  it("hides followups during run presentation", () => {
+    expect(shouldShowAssistantFollowups({ ...baseFollowups, presenting: true })).toBe(false);
+  });
+});
+
+describe("shouldShowReActBlockActionTail", () => {
+  const ready = {
+    hasStreamingRow: false,
+    sessionWorkInProgress: false,
+    subAgentsPending: false,
+    hasWorkMessages: true,
+  };
+
+  it("shows the peeled action row when the turn is idle", () => {
+    expect(shouldShowReActBlockActionTail(ready)).toBe(true);
+  });
+
+  it("hides the peeled action row during run presentation", () => {
+    expect(shouldShowReActBlockActionTail({ ...ready, presenting: true })).toBe(false);
+  });
+
+  it("hides the peeled action row while tools are still running", () => {
+    expect(shouldShowReActBlockActionTail({ ...ready, sessionWorkInProgress: true })).toBe(false);
+  });
 });
 
 describe("ImBubble group expert identity", () => {
@@ -142,10 +177,55 @@ describe("ImBubble group expert identity", () => {
     expect(html).toContain("agx-im-avatar");
     expect(html).toContain("https://example.test/avatar.png");
     expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain('data-slot="conversation-bubble"');
+    expect(html).toContain('data-slot="conversation-content"');
+    expect(html).toContain("max-w-[var(--agx-conversation-bubble-max)]");
     expect(html).toContain("架构师");
+    expect(html).toContain("text-text-strong");
+    expect(html).toContain("font-semibold");
+    expect(html).not.toContain("mt-[18px]");
     expect(html).toContain("结论：建议采用方案 A。");
     expect(html).not.toContain("展开");
     expect(html).not.toContain("折叠");
+  });
+
+  it("marks a live group stream bubble for paced output", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "__group_stream__:architect",
+          role: "assistant",
+          content: "结论：建议采用方案 A。",
+          avatarName: "架构师",
+        }}
+        showSenderIdentity
+        senderAvatarId="architect"
+        assistantName="架构师"
+      />,
+    );
+    expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain("agx-streaming");
+    expect(html).toContain("agx-stream-caret");
+    expect(html).not.toContain("agx-dot-pulse");
+  });
+
+  it("caps group user bubbles in the conversation column", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "u-group",
+          role: "user",
+          content: "采用方案 A",
+        }}
+        showSenderIdentity
+        userName="我"
+      />,
+    );
+    expect(html).toContain("agx-im-user-bubble");
+    expect(html).toContain('data-slot="conversation-bubble"');
+    expect(html).toContain('data-align="end"');
+    expect(html).toContain('data-slot="conversation-content"');
+    expect(html).toContain("采用方案 A");
   });
 
   it("keeps copy/quote on a group reply while the session is still running", () => {
@@ -193,6 +273,74 @@ describe("ImBubble group expert identity", () => {
     expect(html).not.toContain("lucide-copy");
   });
 
+  it("hides expert avatar and name on a same-sender continuation", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "g-continue",
+          role: "assistant",
+          content: "再补一句：先改第 3 条。",
+          avatarName: "架构师",
+        }}
+        showSenderIdentity
+        clusterContinue
+        senderAvatarId="architect"
+        assistantName="架构师"
+      />,
+    );
+    expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain("再补一句：先改第 3 条。");
+    expect(html).toContain("h-7 w-7");
+    expect(html).not.toContain("agx-im-avatar");
+    expect(html).not.toContain("架构师");
+  });
+
+  it("peels a long group report into a write-up card", () => {
+    const lead = "结论：这块预算超了，超在差旅和外包。";
+    const section =
+      "本轮核对了差旅、外包和采购三类支出，下面按科目展开说明，便于对照合同与报销单。差旅超标主要来自临时改签和周末停留；外包超标来自两周的加急档期与驻场加班。采购基本持平，但发票尚未齐，不能当作本周可关闭项。若需要完整表格，我可以再补一版到工作区，不把细项继续堆在群里。建议先砍差旅改签，再谈外包档期，采购维持原单并催发票。这版先给结论和三块拆解，细表不进群气泡。";
+    const content = `${lead}\n\n## 背景\n${section}\n\n## 明细\n${section}\n\n## 建议\n${section}`;
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "g-report",
+          role: "assistant",
+          content,
+          avatarName: "财务",
+        }}
+        showSenderIdentity
+        senderAvatarId="finance"
+        assistantName="财务"
+      />,
+    );
+    expect(html).toContain("这块预算超了");
+    expect(html).toContain('data-slot="group-talk-report"');
+    expect(html).not.toContain("## 背景");
+  });
+
+  it("does not peel a live group stream into a write-up card", () => {
+    const lead = "结论：这块预算超了，超在差旅和外包。";
+    const section =
+      "本轮核对了差旅、外包和采购三类支出，下面按科目展开说明，便于对照合同与报销单。差旅超标主要来自临时改签和周末停留；外包超标来自两周的加急档期与驻场加班。采购基本持平，但发票尚未齐，不能当作本周可关闭项。若需要完整表格，我可以再补一版到工作区，不把细项继续堆在群里。建议先砍差旅改签，再谈外包档期，采购维持原单并催发票。这版先给结论和三块拆解，细表不进群气泡。";
+    const content = `${lead}\n\n## 背景\n${section}\n\n## 明细\n${section}\n\n## 建议\n${section}`;
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "__group_stream__:finance",
+          role: "assistant",
+          content,
+          avatarName: "财务",
+        }}
+        showSenderIdentity
+        senderAvatarId="finance"
+        assistantName="财务"
+      />,
+    );
+    expect(html).toContain("结论");
+    expect(html).toContain("agx-streaming");
+    expect(html).not.toContain('data-slot="group-talk-report"');
+  });
+
   it("keeps Meta single chat free of group avatar chrome", () => {
     const metaHtml = renderToStaticMarkup(
       <ImBubble
@@ -207,6 +355,8 @@ describe("ImBubble group expert identity", () => {
     expect(metaHtml).toContain("我来帮你看一下这段代码。");
     expect(metaHtml).not.toContain("agx-im-avatar");
     expect(metaHtml).not.toContain("agx-im-group-bubble");
+    expect(metaHtml).not.toContain('data-slot="conversation-bubble"');
+    expect(metaHtml).not.toContain('data-slot="conversation-content"');
   });
 });
 
@@ -225,6 +375,52 @@ describe("ChatImAvatar", () => {
     expect(html).toContain("agx-im-avatar");
     expect(html).toContain("h-8 w-8");
     expect(html).toContain("N");
+  });
+
+  it("zooms the official Near logo inside the same 28px circle as expert portraits", () => {
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="Near" imageUrl={DEFAULT_META_AVATAR_URL} size="sm" />,
+    );
+    expect(html).toContain("agx-im-avatar");
+    expect(html).toContain("h-7 w-7");
+    expect(html).toContain("overflow-hidden");
+    expect(html).toContain('data-avatar-fit="logo"');
+    expect(html).toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
+    expect(html).toContain(DEFAULT_META_AVATAR_URL);
+  });
+
+  it("does not treat a regular photo portrait as the official logo", () => {
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="调研" imageUrl="https://example.test/r.png" size="sm" />,
+    );
+    expect(html).not.toContain('data-avatar-fit="logo"');
+    expect(html).not.toContain(BUNDLED_META_AVATAR_IM_ZOOM_CLASS);
+  });
+
+  it("keeps collectible cubes as cubes, not circular-cropped", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" data-portrait="near-cube-v3" data-colorway="cotton"></svg>';
+    const src = `data:image/svg+xml;base64,${btoa(svg)}`;
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="后端·北辰" imageUrl={src} size="sm" />,
+    );
+    expect(html).toContain("h-7 w-7");
+    expect(html).toContain('data-avatar-fit="cube"');
+    expect(html).toContain("overflow-visible");
+    expect(html).toContain("object-contain");
+    expect(html).toContain(NEAR_CUBE_AVATAR_FIT_CLASS);
+    expect(html).not.toContain("rounded-full");
+    expect(html).not.toContain("agx-themed-portrait");
+  });
+
+  it("rewrites generated line-art so ink follows the theme color", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1744 1744"><path fill="#ea580c"/></svg>';
+    const src = `data:image/svg+xml;base64,${btoa(svg)}`;
+    const html = renderToStaticMarkup(<ChatImAvatar label="后端·北辰" imageUrl={src} size="sm" />);
+    expect(html).toContain("agx-themed-portrait");
+    expect(html).toContain("currentColor");
+    expect(html).not.toContain("#ea580c");
   });
 });
 
@@ -467,5 +663,164 @@ describe("ImBubble assistant protocol boundary", () => {
     );
     expect(assistant).toContain(continueMark);
     expect(user).not.toContain(continueMark);
+  });
+});
+
+describe("ImBubble peer human speaker", () => {
+  it("shows the peer display name on a user bubble", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "peer-1",
+          role: "user",
+          content: "进度如何",
+          speakerUserId: "human:feishu:ou_1",
+          speakerName: "甲",
+        }}
+      />,
+    );
+    expect(html).toContain("甲");
+    expect(html).toContain("进度如何");
+    expect(html).not.toContain("agx-im-group-bubble");
+  });
+
+  it("keeps owner user rows labeled as me", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "owner-1",
+          role: "user",
+          content: "hello",
+        }}
+      />,
+    );
+    expect(html).toContain("hello");
+    expect(html).toContain("agx-im-user-bubble");
+    expect(html).not.toContain("rounded-tr-[4px]");
+    expect(html).not.toContain("rounded-xl");
+    expect(html).not.toContain("甲");
+    expect(html).not.toContain("text-text-faint");
+  });
+
+  it("keeps bare article URLs visible on the solid user bubble", () => {
+    const url = "https://mp.weixin.qq.com/s/u3oTtbEFuTUAPWsEYZSXkw";
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "owner-url",
+          role: "user",
+          content: `你看下 ${url}\n\n其实他们两个厂商所谓的统一`,
+        }}
+      />,
+    );
+    expect(html).toContain(url);
+    expect(html).toContain(`href="${url}"`);
+    const anchor = html.match(/<a\b[^>]*>https:\/\/mp\.weixin\.qq\.com\/s\/u3oTtbEFuTUAPWsEYZSXkw<\/a>/);
+    expect(anchor?.[0]).toBeTruthy();
+    expect(anchor?.[0]).not.toContain("theme-color-rgb");
+    expect(anchor?.[0]).toMatch(/chat-im-user-text|text-inherit/);
+  });
+
+  it("shows the scratch action beside quote-to-new without replacing it", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "scratch-entry",
+          role: "assistant",
+          content: "可以先从工作区打开。",
+        }}
+        assistantName="Near"
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onQuoteToNewPane={() => {}}
+        onOpenScratchChat={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
+    expect(html).toContain("lucide-message-square");
+    expect(html).toContain("lucide-quote");
+  });
+
+  it("hides the scratch action when the callback is missing", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "no-scratch",
+          role: "assistant",
+          content: "只引用到新对话。",
+        }}
+        assistantName="Near"
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onQuoteToNewPane={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).not.toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
+  });
+});
+
+describe("ImBubble long scheduled-task query", () => {
+  const contract = [
+    "## Execution Contract (Auto Injected)",
+    "- 这是执行任务，不是方案讨论。禁止输出“是否按此方案执行”。",
+    "- 禁止把 MCP 工具名当作 bash 命令执行（例如 firecrawl_scrape）。",
+    "- mcp_call 参数字段优先使用 arguments；调用前核对目标工具 schema。",
+    "- 若某工具参数校验失败，立即按 schema 修正并继续执行；不要向用户追问。",
+    "- Preflight strategy: Use basic-web-crawler batch_browser_extract for site-list pages first.",
+    "- 时间窗口必须严格限定在最近 7 天，无法解析日期的条目直接丢弃。",
+  ].join("\n");
+
+  it("collapses a long automation query until it is expanded", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "task-query", role: "user", content: contract }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain('data-user-query="collapsed"');
+    expect(html).toContain("这是执行任务");
+    expect(html).not.toContain("Execution Contract");
+    expect(html).not.toContain("<h2");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("leaves a short automation query fully open", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "short-query", role: "user", content: "汇总今日收盘价量" }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain("汇总今日收盘价量");
+    expect(html).not.toContain("data-user-query");
+  });
+
+  it("collapses a long user query in a normal chat", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble message={{ id: "chat-query", role: "user", content: contract }} />,
+    );
+    expect(html).toContain("这是执行任务");
+    expect(html).not.toContain("<h2");
+    expect(html).toContain('data-user-query="collapsed"');
+  });
+
+  it("leads a scheduled task with the instruction and tucks the contract into a note", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "task-with-instruction",
+          role: "user",
+          content: `${contract}\n\n抓取最近 7 天的公告并汇总。`,
+        }}
+        collapseLongUserQuery
+      />,
+    );
+    expect(html).toContain("抓取最近 7 天的公告并汇总。");
+    expect(html).toContain("执行约束");
+    expect(html).toContain("<details");
+    expect(html).not.toContain("<h2");
+    expect(html).not.toContain("Execution Contract");
   });
 });

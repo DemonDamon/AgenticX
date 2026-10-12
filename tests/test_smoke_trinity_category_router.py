@@ -33,6 +33,7 @@ class _DummyAvatarRegistry:
             id = avatar_id
             name = "Demo Avatar"
             role = "researcher"
+            system_prompt = ""
 
         return _Avatar()
 

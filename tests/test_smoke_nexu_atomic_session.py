@@ -29,7 +29,9 @@ def test_atomic_snapshot_writes_and_cleanup(manager: SessionManager, tmp_path: P
     managed = manager.create(session_id=sid)
     managed.studio_session.context_files = {str(tmp_path / "a.txt"): "a"}
 
-    manager._save_messages_snapshot(sid, [{"role": "user", "content": "hello"}])
+    manager._save_messages_snapshot(
+        sid, [{"role": "user", "content": "hello"}], default_timestamp_ms=1_700_000_000_000
+    )
     manager._save_agent_messages_snapshot(sid, [{"x": i} for i in range(50)])
     manager._save_context_refs(sid, managed.studio_session)
     manager._save_global_taskspaces([{"id": "d", "label": "default", "path": str(tmp_path)}])
@@ -39,7 +41,9 @@ def test_atomic_snapshot_writes_and_cleanup(manager: SessionManager, tmp_path: P
     refs_path = Path(manager._context_refs_path(sid))
     global_path = Path(manager._global_taskspaces_path())
 
-    assert json.loads(messages_path.read_text(encoding="utf-8")) == [{"role": "user", "content": "hello"}]
+    assert json.loads(messages_path.read_text(encoding="utf-8")) == [
+        {"role": "user", "content": "hello", "timestamp": 1_700_000_000_000}
+    ]
     assert len(json.loads(agent_messages_path.read_text(encoding="utf-8"))) == 40
     assert json.loads(refs_path.read_text(encoding="utf-8")) == [str(tmp_path / "a.txt")]
     payload = json.loads(global_path.read_text(encoding="utf-8"))

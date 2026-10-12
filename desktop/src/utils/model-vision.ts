@@ -26,6 +26,17 @@ function zhipuTextOnlySlug(slug: string): boolean {
   return /^glm-(5|4\.6|4\.5|4|z1|zero)/.test(s);
 }
 
+/**
+ * MiMo speech SKUs and the text-only v2.5-pro line reject image input.
+ * v2.6 Pro/Flash and exact mimo-v2.5 are omnimodal and stay permissive.
+ */
+function mimoTextOnlySlug(slug: string): boolean {
+  const s = slug.toLowerCase();
+  if (!s.startsWith("mimo-")) return false;
+  if (s.includes("-asr") || s.includes("-tts")) return true;
+  return s === "mimo-v2.5-pro" || s.startsWith("mimo-v2.5-pro-");
+}
+
 /** Bailian/DashScope text Qwen SKUs reject OpenAI-style image_url blocks (e.g. qwen3.7-max). */
 function bailianQwenTextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
@@ -51,5 +62,6 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
   if (minimaxM2TextOnlySlug(slug)) return true;
   if (zhipuTextOnlySlug(slug)) return true;
   if (bailianQwenTextOnlySlug(slug)) return true;
+  if (mimoTextOnlySlug(slug)) return true;
   return false;
 }

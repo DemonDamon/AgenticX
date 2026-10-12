@@ -25,7 +25,10 @@ def compute_source_content_hash(source_path: str) -> str:
 
 
 def chunking_fingerprint(spec: ChunkingSpec) -> str:
-    return f"{spec.strategy}:{spec.chunk_size}:{spec.chunk_overlap}"
+    return (
+        f"{spec.strategy}:{spec.chunk_size}:{spec.chunk_overlap}:"
+        f"{int(spec.parent_child)}:{spec.parent_chunk_size}:{spec.child_chunk_size}"
+    )
 
 
 def ingest_cache_key(

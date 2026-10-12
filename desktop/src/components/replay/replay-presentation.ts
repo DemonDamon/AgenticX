@@ -196,6 +196,79 @@ function isChatAssistant(message: PresentationMessage): boolean {
   return message.role === "assistant" && !message.systemNotice;
 }
 
+function bindTurnMessagesToEvents(
+  inTurn: readonly PresentationMessage[],
+  turnEvents: readonly ReplayEvent[],
+  userSeq: number,
+  revealSeq: Map<string, number>,
+  startedSeq: Map<string, number>,
+  completeSeq: Map<string, number>,
+): void {
+  const toolEvents = turnEvents.filter((item) => item.toolCallId && (
+    item.type === "tool_call" || item.type === "tool_result"
+  ));
+  for (const message of inTurn) {
+    if (message.role !== "tool" || !message.toolCallId) continue;
+    const started = toolEvents.find((item) => (
+      item.toolCallId === message.toolCallId && item.type === "tool_call"
+    ));
+    const finished = toolEvents.find((item) => (
+      item.toolCallId === message.toolCallId && item.type === "tool_result"
+    ));
+    if (started) {
+      revealSeq.set(message.id, started.seq);
+      startedSeq.set(message.id, started.seq);
+    }
+    if (finished) completeSeq.set(message.id, finished.seq);
+  }
+
+  const assistantMessages = inTurn.filter(isChatAssistant);
+  const completed = turnEvents.filter((item) => item.type === "assistant_output_completed");
+  const started = turnEvents.filter((item) => item.type === "assistant_output_started");
+  const pairCount = Math.min(
+    assistantMessages.length,
+    Math.max(completed.length, started.length),
+  );
+  const asstOffset = assistantMessages.length - pairCount;
+  const startOffset = Math.max(0, started.length - pairCount);
+  const endOffset = Math.max(0, completed.length - pairCount);
+  const earlyReveal = turnEvents.find((item) => (
+    item.type === "tool_call"
+    || item.type === "assistant_output_started"
+    || item.type === "assistant_output_completed"
+  ))?.seq ?? userSeq;
+
+  for (let index = 0; index < asstOffset; index += 1) {
+    const message = assistantMessages[index];
+    if (!message) continue;
+    revealSeq.set(message.id, earlyReveal);
+  }
+  for (let index = 0; index < pairCount; index += 1) {
+    const message = assistantMessages[asstOffset + index];
+    if (!message) continue;
+    const startEvent = started[startOffset + index];
+    const endEvent = completed[endOffset + index] ?? startEvent;
+    if (startEvent) {
+      revealSeq.set(message.id, startEvent.seq);
+      startedSeq.set(message.id, startEvent.seq);
+    } else if (endEvent) {
+      revealSeq.set(message.id, endEvent.seq);
+    }
+    if (endEvent) completeSeq.set(message.id, endEvent.seq);
+  }
+
+  const leftoverSeq = turnEvents.find((item) => (
+    item.type === "error"
+    || item.type === "stall"
+    || item.type === "subagent_error"
+  ))?.seq ?? turnEvents[turnEvents.length - 1]?.seq ?? userSeq;
+  for (const message of inTurn) {
+    if (revealSeq.has(message.id)) continue;
+    if (message.role === "user") continue;
+    revealSeq.set(message.id, leftoverSeq);
+  }
+}
+
 export function bindMessagesToRun(
   messages: readonly PresentationMessage[],
   events: readonly ReplayEvent[],
@@ -239,13 +312,10 @@ export function bindMessagesToRun(
     revealSeq.set(message.id, item.seq);
   }
 
-  const firstBoundIndex = messages.findIndex((message) => boundUsers.has(message.id));
-  const nextUnboundUserIndex = firstBoundIndex >= 0
-    ? messages.findIndex((message, index) => (
-      index > firstBoundIndex && isChatUser(message) && !boundUsers.has(message.id)
-    ))
-    : -1;
-  const runEnd = nextUnboundUserIndex >= 0 ? nextUnboundUserIndex : messages.length;
+  const boundUserIndexes = messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => boundUsers.has(message.id));
+  const firstBoundIndex = boundUserIndexes[0]?.index ?? -1;
 
   if (firstBoundIndex < 0) {
     return {
@@ -259,56 +329,42 @@ export function bindMessagesToRun(
     };
   }
 
+  const lastBoundIndex = boundUserIndexes[boundUserIndexes.length - 1]!.index;
+  const nextUnboundUserIndex = messages.findIndex((message, index) => (
+    index > lastBoundIndex && isChatUser(message) && !boundUsers.has(message.id)
+  ));
+  const sessionRunEnd = nextUnboundUserIndex >= 0 ? nextUnboundUserIndex : messages.length;
+
   for (let index = 0; index < firstBoundIndex; index += 1) {
     prefixIds.add(messages[index]!.id);
   }
-  for (let index = runEnd; index < messages.length; index += 1) {
+  for (let index = sessionRunEnd; index < messages.length; index += 1) {
     afterIds.add(messages[index]!.id);
   }
 
-  const inRun = messages.slice(firstBoundIndex, runEnd);
-  const toolEvents = events.filter((item) => item.toolCallId && (
-    item.type === "tool_call" || item.type === "tool_result"
-  ));
-  for (const message of inRun) {
-    if (message.role !== "tool" || !message.toolCallId) continue;
-    const started = toolEvents.find((item) => (
-      item.toolCallId === message.toolCallId && item.type === "tool_call"
-    ));
-    const finished = toolEvents.find((item) => (
-      item.toolCallId === message.toolCallId && item.type === "tool_result"
-    ));
-    if (started) {
-      revealSeq.set(message.id, started.seq);
-      startedSeq.set(message.id, started.seq);
-    }
-    if (finished) completeSeq.set(message.id, finished.seq);
+  for (let turn = 0; turn < boundUserIndexes.length; turn += 1) {
+    const start = boundUserIndexes[turn]!.index;
+    const end = turn + 1 < boundUserIndexes.length
+      ? boundUserIndexes[turn + 1]!.index
+      : sessionRunEnd;
+    const userSeq = boundUsers.get(boundUserIndexes[turn]!.message.id) ?? 0;
+    const nextUserSeq = turn + 1 < boundUserIndexes.length
+      ? (boundUsers.get(boundUserIndexes[turn + 1]!.message.id) ?? Number.POSITIVE_INFINITY)
+      : Number.POSITIVE_INFINITY;
+    bindTurnMessagesToEvents(
+      messages.slice(start, end),
+      events.filter((item) => item.seq >= userSeq && item.seq < nextUserSeq),
+      userSeq,
+      revealSeq,
+      startedSeq,
+      completeSeq,
+    );
   }
 
-  const assistantMessages = inRun.filter(isChatAssistant);
-  const completed = events.filter((item) => item.type === "assistant_output_completed");
-  const started = events.filter((item) => item.type === "assistant_output_started");
-  const assistantCount = Math.min(
-    assistantMessages.length,
-    Math.max(completed.length, started.length),
-  );
-  for (let index = 0; index < assistantCount; index += 1) {
-    const message = assistantMessages[index];
-    if (!message) continue;
-    const startEvent = started[index];
-    const endEvent = completed[index] ?? started[index];
-    if (startEvent) {
-      revealSeq.set(message.id, startEvent.seq);
-      startedSeq.set(message.id, startEvent.seq);
-    } else if (endEvent) {
-      revealSeq.set(message.id, endEvent.seq);
-    }
-    if (endEvent) completeSeq.set(message.id, endEvent.seq);
-  }
-
-  for (const message of inRun) {
-    if (prefixIds.has(message.id) || afterIds.has(message.id)) continue;
-    if (!revealSeq.has(message.id)) unmatchedInRunIds.add(message.id);
+  for (let index = firstBoundIndex; index < sessionRunEnd; index += 1) {
+    const message = messages[index];
+    if (!message || revealSeq.has(message.id)) continue;
+    unmatchedInRunIds.add(message.id);
   }
 
   const canPresent = [...revealSeq.keys()].some((id) => {

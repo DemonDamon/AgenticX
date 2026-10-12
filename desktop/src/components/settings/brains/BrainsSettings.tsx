@@ -17,7 +17,6 @@ import { displayBrainName } from "./brain-display";
 import { KnowledgeConfigPanel } from "../knowledge/KnowledgeConfigPanel";
 import { KnowledgeMaterialsPanel } from "../knowledge/KnowledgeMaterialsPanel";
 import { KnowledgeDebugPanel } from "../knowledge/KnowledgeDebugPanel";
-import { KnowledgeWikiPanel } from "../knowledge/KnowledgeWikiPanel";
 import { createKbApi } from "../knowledge/api";
 import type { KBConfig, KBStats } from "../knowledge/types";
 import { defaultKBConfig, normalizeKbConfig } from "../knowledge/types";
@@ -41,7 +40,7 @@ export type BrainsSettingsHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
 };
 
-type DetailTab = "config" | "materials" | "debug" | "wiki";
+type DetailTab = "config" | "materials" | "debug";
 
 export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSettings(
   _props,
@@ -67,6 +66,16 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("config");
+  useEffect(() => {
+    const focusWikiCompile = () => setDetailTab("config");
+    const focusMaterials = () => setDetailTab("materials");
+    window.addEventListener("agenticx:focus-wiki-compile", focusWikiCompile);
+    window.addEventListener("agenticx:focus-wiki-materials", focusMaterials);
+    return () => {
+      window.removeEventListener("agenticx:focus-wiki-compile", focusWikiCompile);
+      window.removeEventListener("agenticx:focus-wiki-materials", focusMaterials);
+    };
+  }, []);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<"docs" | "code">("docs");
@@ -288,7 +297,6 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const detailTabs: { id: DetailTab; label: string }[] = [
     { id: "config", label: st("brains.tabConfig") },
     { id: "materials", label: st("brains.tabMaterials") },
-    { id: "wiki", label: "Wiki" },
     { id: "debug", label: st("brains.tabDebug") },
   ];
 
@@ -439,13 +447,13 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                       <KnowledgeMaterialsPanel
                         api={kbApi}
                         enabled={kbDraft.enabled}
+                        wikiCompileEnabled={kbDraft.wiki_compiler?.enabled ?? false}
                         extensions={kbDraft.file_filters.extensions}
                       />
                     ) : null}
                     {detailTab === "debug" ? (
                       <KnowledgeDebugPanel api={kbApi} config={kbConfig} />
                     ) : null}
-                    {detailTab === "wiki" ? <KnowledgeWikiPanel api={kbApi} /> : null}
                   </>
                 ) : null}
 

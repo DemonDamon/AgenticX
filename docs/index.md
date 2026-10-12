@@ -9,7 +9,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![PyPI version](https://img.shields.io/pypi/v/agenticx)](https://pypi.org/project/agenticx/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1e88e5?logo=readthedocs&logoColor=white)](https://deepwiki.com/DemonDamon/AgenticX)
 
 ---
 

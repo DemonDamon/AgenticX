@@ -18,6 +18,7 @@ BUILTIN_PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "minimax": "MiniMax",
     "kimi": "月之暗面",
     "deepseek": "DeepSeek",
+    "mimo": "小米 MiMo",
     "ollama": "Ollama",
 }
 

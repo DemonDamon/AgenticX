@@ -22,6 +22,7 @@ export const SETTINGS_TAB_IDS = [
   "connectors",
   "tools",
   "skills",
+  "commands",
   "knowledge",
   "data_sources",
   "memory",

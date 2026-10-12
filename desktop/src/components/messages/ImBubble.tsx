@@ -3,9 +3,14 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { ScratchChatIcon } from "../work-panel/ScratchChatIcon";
 import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
+import { OrbBurst } from "../brand/OrbBurst";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
+import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl";
+import { isRegistryAvatarId, preferCostumeOverBrandMark, preferLiveAvatarUrl } from "../../utils/live-avatar-url";
+import { ThemedAvatarImage } from "../ds/ThemedAvatarImage";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
@@ -16,6 +21,8 @@ import { CitationSourcesCard } from "./WebSearchSources";
 import { withBibliographyFallback } from "./source-attribution-parse";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
+import { splitCommandBody } from "../../utils/command-send";
+import { isPeerHumanSpeakerId, resolveUserBubbleName } from "../../utils/peer-human-speaker";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { InlineImageBlock } from "./InlineImageBlock";
@@ -37,17 +44,33 @@ import {
   ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
+  ASSISTANT_ICON_RAIL_CLASS,
+  GROUP_SENDER_NAME_CLASS,
+  META_PENDING_ORB_PX,
   getAssistantActionStyle,
   getAssistantTextClassName,
   getAssistantTextStyle,
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
+import {
+  BUNDLED_META_AVATAR_IM_ZOOM_CLASS,
+  NEAR_CUBE_AVATAR_FIT_CLASS,
+  resolveBundledMetaAvatarUrl,
+  isBundledMetaAvatarUrl,
+} from "../../constants/meta-avatar";
+import { isNearCubePortraitUrl } from "../../utils/theme-portrait";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
+import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
+import { GroupTalkReportCard } from "./GroupTalkReportCard";
+import { usePacedStreamText } from "./usePacedStreamText";
+import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
+import { isLongUserQuery } from "../../utils/long-user-query";
+import { splitAutomationExecutionContract } from "../../utils/automation-contract-display";
 
 type Props = {
   message: Message;
@@ -70,6 +93,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onWebSearchMessage?: (message: Message, selectedText: string) => void;
   onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
+  onOpenScratchChat?: (message: Message, selectedText?: string) => void;
   onContinueFromMessage?: (message: Message) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
@@ -95,6 +119,8 @@ type Props = {
    * User bubbles match Meta layout (no name/avatar chrome).
    */
   showSenderIdentity?: boolean;
+  /** Same sender as the previous visible group row: hide name/avatar. */
+  clusterContinue?: boolean;
   /** @deprecated Avatars removed from group chat; kept for API compat. */
   senderAvatarVariant?: "circle" | "rounded-square";
   /** Fallback tint when no imageUrl (avatar id for color hash). */
@@ -102,6 +128,8 @@ type Props = {
   /** When true, suppress action buttons on the last assistant bubble while the session is busy/stalled. */
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  /** Run replay presentation: hide copy/quote chrome. */
+  presenting?: boolean;
   /** Replace animated streaming dots with a stalled indicator on the __stream__ placeholder. */
   streamStalled?: boolean;
   streamStalledSeconds?: number;
@@ -113,7 +141,114 @@ type Props = {
   onOpenWorkspaceRefs?: () => void;
   /** Session-level web refs so the chip still shows when this row omitted `references`. */
   sessionWebRefs?: SearchReference[];
+  /** Also collapse a long user query when the caller opts in explicitly. */
+  collapseLongUserQuery?: boolean;
 };
+
+function ExecutionContractNote({ lines }: { lines: string[] }) {
+  const { t } = useTranslation("chat");
+  if (lines.length === 0) return null;
+  return (
+    <details className="agx-execution-contract">
+      <summary>{t("actions.executionContract")}</summary>
+      <ul>
+        {lines.map((line, index) => (
+          <li key={`${index}-${line}`}>{line}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function CollapsibleUserQuery({
+  enabled,
+  text,
+  children,
+}: {
+  enabled: boolean;
+  text: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation("chat");
+  const long = enabled && isLongUserQuery(text);
+  const [expanded, setExpanded] = useState(false);
+  if (!long) {
+    return <div className="whitespace-pre-wrap break-words">{children}</div>;
+  }
+  return (
+    <div>
+      <div
+        className={
+          expanded
+            ? "whitespace-pre-wrap break-words"
+            : "agx-user-query-collapsed whitespace-pre-wrap break-words"
+        }
+        data-user-query={expanded ? "expanded" : "collapsed"}
+        role={expanded ? undefined : "button"}
+        tabIndex={expanded ? undefined : 0}
+        aria-expanded={expanded ? undefined : false}
+        onClick={expanded ? undefined : () => setExpanded(true)}
+        onKeyDown={
+          expanded
+            ? undefined
+            : (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setExpanded(true);
+                }
+              }
+        }
+      >
+        {children}
+      </div>
+      {expanded ? (
+        <button
+          type="button"
+          className="mt-1 text-[12px] leading-none text-inherit opacity-75 hover:opacity-100"
+          aria-expanded
+          aria-label={t("actions.collapseQuery")}
+          onClick={() => setExpanded(false)}
+        >
+          {t("actions.collapseQuery")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function UserQueryBody({
+  text,
+  quotedItems,
+  referenceAttachments,
+  onOpenFileReference,
+}: {
+  text: string;
+  quotedItems: string[];
+  referenceAttachments: MessageAttachment[];
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
+}) {
+  const { instruction, contractLines } = splitAutomationExecutionContract(text);
+  const hasTask = instruction.trim().length > 0;
+  const plainContract = contractLines.length > 0 && !hasTask;
+  const visibleText = plainContract ? contractLines.join("\n") : hasTask ? instruction : text;
+  return (
+    <>
+      <CollapsibleUserQuery enabled text={visibleText}>
+        {plainContract ? (
+          contractLines.map((line, index) => <div key={`${index}-${line}`}>{line}</div>)
+        ) : (
+          renderUserBubbleInlineContent(
+            visibleText,
+            quotedItems,
+            referenceAttachments,
+            onOpenFileReference,
+          )
+        )}
+      </CollapsibleUserQuery>
+      {hasTask && contractLines.length > 0 ? <ExecutionContractNote lines={contractLines} /> : null}
+    </>
+  );
+}
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
   const { t } = useTranslation("chat");
@@ -132,12 +267,25 @@ function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
 /** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
 function StreamingDots({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation("chat");
+  const orb = (
+    <OrbBurst
+      width={compact ? META_PENDING_ORB_PX : 32}
+      height={compact ? META_PENDING_ORB_PX : 32}
+    />
+  );
   return (
     <div
-      className={`inline-flex items-center gap-1.5 ${compact ? "py-0" : "py-1.5"}`}
+      className={`inline-flex items-center gap-2 ${compact ? "py-0" : "py-1.5"}`}
       aria-live="polite"
       aria-label={t("status.processingAria")}
     >
+      {compact ? (
+        <span className={ASSISTANT_ICON_RAIL_CLASS} data-pending-orb-rail="meta">
+          {orb}
+        </span>
+      ) : (
+        orb
+      )}
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
         style={{ background: "var(--text-faint)" }}
@@ -171,17 +319,52 @@ export function ChatImAvatar({
   color?: string;
   size?: "sm" | "md";
 }) {
-  const storeColor = useAppStore((s) =>
-    avatarId ? s.avatars.find((a) => a.id === avatarId)?.color : undefined,
+  const metaCostumeUrl = useDisplayedMetaAvatarUrl();
+  const liveExpert = useAppStore((s) => {
+    const id = String(avatarId ?? "").trim();
+    if (!isRegistryAvatarId(id)) return undefined;
+    return s.avatars.find((item) => item.id === id);
+  });
+  const resolvedColor = color ?? liveExpert?.color ?? "";
+  const resolvedImage = preferCostumeOverBrandMark(
+    preferLiveAvatarUrl(liveExpert?.avatarUrl, imageUrl),
+    metaCostumeUrl,
   );
-  const resolvedColor = color ?? storeColor ?? "";
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
-  if (imageUrl) {
+  if (resolvedImage) {
+    if (isBundledMetaAvatarUrl(resolvedImage)) {
+      return (
+        <span
+          className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-hidden ${rounded}`}
+          data-avatar-fit="logo"
+        >
+          <img
+            src={resolveBundledMetaAvatarUrl(resolvedImage)}
+            alt={label}
+            className={`h-full w-full origin-center object-cover ${BUNDLED_META_AVATAR_IM_ZOOM_CLASS}`}
+          />
+        </span>
+      );
+    }
+    if (isNearCubePortraitUrl(resolvedImage)) {
+      return (
+        <span
+          className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-visible`}
+          data-avatar-fit="cube"
+        >
+          <img
+            src={resolvedImage}
+            alt={label}
+            className={`h-full w-full ${NEAR_CUBE_AVATAR_FIT_CLASS}`}
+          />
+        </span>
+      );
+    }
     return (
-      <img
-        src={imageUrl}
+      <ThemedAvatarImage
+        src={resolvedImage}
         alt={label}
         className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
       />
@@ -220,6 +403,7 @@ export function ImBubble({
   onQuoteMessage,
   onWebSearchMessage,
   onQuoteToNewPane,
+  onOpenScratchChat,
   onContinueFromMessage,
   onFavoriteMessage,
   onToggleSelectMessage,
@@ -237,23 +421,35 @@ export function ImBubble({
   actionRhythmBodyTail = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
+  clusterContinue = false,
   senderAvatarVariant: _senderAvatarVariant = "circle",
   senderAvatarId,
   sessionBusy = false,
   isLastAssistantInPane = false,
+  presenting = false,
   streamStalled = false,
   streamStalledSeconds = 0,
   lightboxGallery,
   afterBody,
   onOpenWorkspaceRefs,
   sessionWebRefs,
+  collapseLongUserQuery = false,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
   void userAvatarUrl;
+  void collapseLongUserQuery;
   const isUser = message.role === "user";
   const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
-  const displayName = isUser ? (userName || t("actions.me")) : (assistantName || "AI");
+  const fallbackMe = userName || t("actions.me");
+  const displayName = isUser
+    ? resolveUserBubbleName({
+        speakerUserId: message.speakerUserId,
+        speakerName: message.speakerName,
+        fallbackMe,
+      })
+    : (assistantName || "AI");
+  const isPeerHuman = isUser && isPeerHumanSpeakerId(message.speakerUserId);
   const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
@@ -267,7 +463,8 @@ export function ImBubble({
     !isGroupTyping &&
     !isMetaPendingWork;
   const isGroupAssistant = showSenderIdentity && !isUser && !compactAssistant;
-  const showExpertLabel = isGroupAssistant;
+  const showGroupIdentityChrome = isGroupAssistant && !clusterContinue;
+  const showExpertLabel = showGroupIdentityChrome;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const protocolParsed = !isUser ? parseAssistantOutputForUi(message.content) : null;
@@ -287,9 +484,23 @@ export function ImBubble({
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
   const bodyText =
-    showExpertLabel && !isUser
+    isGroupAssistant
       ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
       : strippedBody;
+  const commandName = isUser ? String(message.command_name ?? "").trim() : "";
+  const commandParts = commandName ? splitCommandBody(String(bodyText ?? "")) : null;
+  const groupStreamActive = isGroupAssistant && isStreaming;
+  const pacedBodyText = usePacedStreamText(String(bodyText ?? ""), groupStreamActive);
+  const canPeelGroupReport =
+    isGroupAssistant &&
+    !isStreaming &&
+    !isGroupTyping &&
+    !isMetaPendingWork &&
+    !hasImageBlock(message.blocks);
+  const peeled = canPeelGroupReport
+    ? splitGroupTalkFromReport(String(bodyText ?? ""))
+    : { talk: String(bodyText ?? ""), report: null as string | null };
+  const assistantBodyText = groupStreamActive ? pacedBodyText : peeled.talk;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
@@ -369,6 +580,11 @@ export function ImBubble({
   const runQuoteToNewPane = () => {
     const picked = getContainedSelectionText(msgContentRef.current);
     onQuoteToNewPane?.(message, picked ?? undefined);
+  };
+
+  const runOpenScratchChat = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onOpenScratchChat?.(message, picked ?? undefined);
   };
 
   const runSelectAll = () => {
@@ -490,6 +706,7 @@ export function ImBubble({
     sessionBusy,
     isLastAssistantInPane,
     keepActionsWhileBusy: showSenderIdentity,
+    presenting,
   });
   const assistantTextClassName = !isUser
     ? getAssistantTextClassName({
@@ -536,6 +753,7 @@ export function ImBubble({
     sessionBusy,
     isLastAssistantInPane,
     keepActionsWhileBusy: showSenderIdentity,
+    presenting,
   }) ? (
       <>
         <HoverTip label={t("actions.copy")}>
@@ -553,6 +771,19 @@ export function ImBubble({
             <Quote size={14} strokeWidth={2} />
           </button>
         </HoverTip>
+        {onOpenScratchChat ? (
+          <HoverTip label={t("actions.openScratch")}>
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={runOpenScratchChat}
+              aria-label={t("actions.openScratch")}
+            >
+              <ScratchChatIcon className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          </HoverTip>
+        ) : null}
         <HoverTip label={t("actions.favorite")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
             <Bookmark size={14} strokeWidth={2} />
@@ -696,8 +927,8 @@ export function ImBubble({
           </svg>
         </button>
       ) : null}
-      {isGroupAssistant ? (
-        <div className="mt-[18px] shrink-0">
+      {showGroupIdentityChrome ? (
+        <div className="shrink-0">
           <ChatImAvatar
             label={displayName}
             imageUrl={assistantAvatarUrl}
@@ -706,11 +937,26 @@ export function ImBubble({
             size="sm"
           />
         </div>
+      ) : isGroupAssistant && clusterContinue ? (
+        <div className="shrink-0" aria-hidden="true">
+          <div className="h-7 w-7" />
+        </div>
       ) : null}
-      <div
-        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
+      <MaybeConversationBubble
+        active={isGroupAssistant}
+        align="start"
+        className={
+          isGroupAssistant
+            ? `items-start${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`
+            : `flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`
+        }
       >
-        {isGroupAssistant ? (
+        {showGroupIdentityChrome ? (
+          <div className={`mb-0.5 ${GROUP_SENDER_NAME_CLASS}`}>
+            {displayName}
+          </div>
+        ) : null}
+        {isPeerHuman && !clusterContinue ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
             {displayName}
           </div>
@@ -770,7 +1016,12 @@ export function ImBubble({
             </div>
           </div>
         ) : isUser ? (
-          <div className="agx-im-user-stack" style={userStackStyle}>
+          <MaybeConversationBubble
+            active={isUser && showSenderIdentity}
+            align="end"
+            className="agx-im-user-stack"
+            style={userStackStyle}
+          >
             {/* Trae-style: attachment chips sit above the text bubble, not inside it. */}
             {displayAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap justify-end gap-2">
@@ -783,8 +1034,9 @@ export function ImBubble({
               </div>
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
-            <div
-              className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+            <MaybeConversationContent
+              active={showSenderIdentity}
+              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -810,18 +1062,35 @@ export function ImBubble({
                       </div>
                     </div>
                   </div>
-                ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
-                  <div className="whitespace-pre-wrap break-words">
-                    {renderUserBubbleInlineContent(
-                      bodyText,
-                      displayQuotedItems,
-                      referenceAttachments,
-                      onOpenFileReference
-                    )}
+                ) : commandParts ? (
+                  <div>
+                    <div className="mb-1 inline-flex rounded-full bg-surface-hover px-2 py-0.5 font-mono text-[11px]">
+                      /{commandName}
+                    </div>
+                    {commandParts.extra ? (
+                      <div className="whitespace-pre-wrap break-words">{commandParts.extra}</div>
+                    ) : null}
+                    {commandParts.instructions ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[11px] opacity-70">
+                          {t("composer.commands.instructions")}
+                        </summary>
+                        <div className="mt-1 whitespace-pre-wrap break-words text-[12px]">
+                          {commandParts.instructions}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
+                ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
+                  <UserQueryBody
+                    text={String(bodyText ?? "")}
+                    quotedItems={displayQuotedItems}
+                    referenceAttachments={referenceAttachments}
+                    onOpenFileReference={onOpenFileReference}
+                  />
                 ) : null}
               </div>
-            </div>
+            </MaybeConversationContent>
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}
@@ -843,6 +1112,18 @@ export function ImBubble({
                       <Quote size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
+                  {onOpenScratchChat ? (
+                    <HoverTip label={t("actions.openScratch")}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={runOpenScratchChat}
+                        aria-label={t("actions.openScratch")}
+                      >
+                        <ScratchChatIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                      </button>
+                    </HoverTip>
+                  ) : null}
                   <HoverTip label={t("actions.favorite")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
                       <Bookmark size={14} strokeWidth={2} />
@@ -895,30 +1176,31 @@ export function ImBubble({
                 </div>
               </div>
             )}
-          </div>
+          </MaybeConversationBubble>
         ) : (
           <>
-            <div
+            <MaybeConversationContent
+              active={isGroupAssistant}
               className={
                 compactAssistant && noBubbleBorder
-                  ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                  ? `agx-im-body-type relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isMetaPendingWork
-                    ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    ? `agx-im-body-type relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : isGroupAssistant
-                      ? `agx-im-group-bubble relative min-w-0 rounded-2xl px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      ? `agx-im-group-bubble agx-im-body-type relative min-w-0 px-3.5 py-2 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}${isStreaming ? " agx-streaming" : ""}`
                       : (message.references?.length ?? 0) > 0
-                        ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                        : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        ? `agx-im-body-type relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        : `agx-im-body-type relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
               }
               style={
                 compactAssistant && noBubbleBorder
                   ? undefined
                   : isGroupAssistant
                     ? {
-                        background: "var(--chat-im-group-bg)",
+                        background: "var(--chat-im-assistant-bg)",
                         color: "var(--chat-im-assistant-text)",
                         width: "fit-content",
-                        maxWidth: "min(100%, 760px)",
+                        maxWidth: "100%",
                       }
                     : userBubbleStyle
               }
@@ -1013,7 +1295,7 @@ export function ImBubble({
                     ) : null}
                     {hasBody ? (
                       <div
-                        className={showExpertLabel ? undefined : assistantTextClassName}
+                        className={`${isGroupAssistant ? "" : assistantTextClassName ?? ""}${groupStreamActive ? " agx-stream-body" : ""}`.trim() || undefined}
                         style={assistantTextStyle}
                       >
                         {renderInlineBlocks ? (
@@ -1024,7 +1306,7 @@ export function ImBubble({
                                     block.text.trim() ? (
                                       <CitationMarkdownBody
                                         key={`text-${idx}`}
-                                        content={block.text}
+                                        content={groupStreamActive ? assistantBodyText : block.text}
                                         references={citationReferences}
                                         isStreaming={isStreaming}
                                         onQuoteText={(text) => onQuoteMessage?.(message, text)}
@@ -1037,9 +1319,9 @@ export function ImBubble({
                                 )
                               : (
                                 <>
-                                  {bodyText.trim() ? (
+                                  {assistantBodyText.trim() ? (
                                     <CitationMarkdownBody
-                                      content={bodyText}
+                                      content={assistantBodyText}
                                       references={citationReferences}
                                       isStreaming={isStreaming}
                                       onQuoteText={(text) => onQuoteMessage?.(message, text)}
@@ -1056,19 +1338,22 @@ export function ImBubble({
                           </>
                         ) : (
                           <CitationMarkdownBody
-                            content={bodyText}
+                            content={assistantBodyText}
                             references={citationReferences}
                             isStreaming={isStreaming}
                             onQuoteText={(text) => onQuoteMessage?.(message, text)}
                             onRevealPath={onRevealPath}
                           />
                         )}
+                        {groupStreamActive && !streamStalled ? (
+                          <span className="agx-stream-caret" aria-hidden="true" />
+                        ) : null}
                       </div>
                     ) : null}
                     {isStreaming && hasBody && (!hasThinkTag || reasoningClosed) ? (
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
-                      ) : (
+                      ) : isGroupAssistant ? null : (
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
@@ -1080,7 +1365,14 @@ export function ImBubble({
                   </>
                 )}
               </div>
-            </div>
+            </MaybeConversationContent>
+            {peeled.report ? (
+              <GroupTalkReportCard
+                content={peeled.report}
+                onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                onRevealPath={onRevealPath}
+              />
+            ) : null}
             {afterBody ? (
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>
@@ -1113,7 +1405,7 @@ export function ImBubble({
             )}
           </>
         )}
-      </div>
+      </MaybeConversationBubble>
       {menuOpen ? createPortal(
         <div
           ref={menuRef}
@@ -1139,6 +1431,15 @@ export function ImBubble({
           >
             <Quote size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToCurrent")}
           </button>
+          {onOpenScratchChat ? (
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setMenuOpen(false); runOpenScratchChat(); }}
+            >
+              <ScratchChatIcon className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />{t("actions.openScratch")}
+            </button>
+          ) : null}
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}

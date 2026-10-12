@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agenticx.brain.wiki_compile_queue import WikiCompileQueue
 from agenticx.studio.kb.contracts import KBConfig, RetrievalHit
 from agenticx.studio.kb.jobs import JobRegistry
 from agenticx.studio.kb.runtime import KBRuntime
@@ -24,6 +25,7 @@ class DocsBrainRuntime:
             brain_storage_root=Path(brain.storage_root).expanduser(),
         )
         self._jobs = JobRegistry(max_workers=2)
+        self.wiki_compiles = WikiCompileQueue()
 
     @property
     def runtime(self) -> KBRuntime:

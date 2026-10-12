@@ -8,6 +8,7 @@ import {
   parseAssistantOutputForUi,
   reasoningDuplicatesVisibleBody,
   sanitizeSuggestedQuestions,
+  shouldReuseLastAssistantRow,
 } from "./assistant-output";
 
 type FixtureCase = {
@@ -153,5 +154,29 @@ describe("reasoningDuplicatesVisibleBody", () => {
   it("detects exact trimmed echoes", () => {
     expect(reasoningDuplicatesVisibleBody(" 答案 ", "答案\n")).toBe(true);
     expect(reasoningDuplicatesVisibleBody("先读文件", "答案")).toBe(false);
+  });
+});
+
+describe("shouldReuseLastAssistantRow", () => {
+  it("reuses when the final body repeats the last assistant bubble", () => {
+    const body = "看完了，团长。结论先说：这是兼容，不是合并。";
+    expect(shouldReuseLastAssistantRow(body, `${body}\n\n`)).toBe(true);
+  });
+
+  it("does not reuse a short tool preface", () => {
+    expect(
+      shouldReuseLastAssistantRow("微信拦截了直接抓取，我换浏览器方式打开。", "看完了，这是最终结论。"),
+    ).toBe(false);
+  });
+
+  it("does not reuse an empty last assistant", () => {
+    expect(shouldReuseLastAssistantRow("   ", "看完了。")).toBe(false);
+  });
+
+  it("reuses when the last bubble still has think tags around the same body", () => {
+    const body = "看完了，团长。结论先说：这是兼容，不是合并。";
+    expect(
+      shouldReuseLastAssistantRow(`<think>skip todo_write (simple Q&A)</think>${body}`, `${body}\n\n`),
+    ).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../../i18n/i18n";
 import { Pencil, Trash2, Play, ChevronDown, FileText } from "lucide-react";
+import { useAppStore } from "../../store";
 import type { AutomationTask } from "./types";
 
 interface Props {
@@ -10,6 +11,36 @@ interface Props {
   onEdit: (task: AutomationTask) => void;
   onDelete: (taskId: string) => void;
   onRunNow: (task: AutomationTask) => void;
+  onOpenRunSession?: (task: AutomationTask) => void;
+}
+
+function openAutomationRunSession(task: AutomationTask): void {
+  const sid = String(task.sessionId ?? "").trim();
+  if (!sid) return;
+  const store = useAppStore.getState();
+  const avatarId = `automation:${task.id}`;
+  const paneTitle = i18n.t("automationPane", {
+    ns: "sidebar",
+    name: task.name || i18n.t("automationTask", { ns: "sidebar" }),
+  });
+  const existingByAvatar = store.panes.find((pane) => pane.avatarId === avatarId);
+  let paneId: string | null = null;
+  if (existingByAvatar) {
+    const prevSid = (existingByAvatar.sessionId || "").trim();
+    if (prevSid !== sid) {
+      store.setPaneMessages(existingByAvatar.id, []);
+      store.setPaneSessionId(existingByAvatar.id, sid);
+    }
+    paneId = existingByAvatar.id;
+  } else {
+    paneId = store.addPane(avatarId, paneTitle, sid);
+    store.setPaneSessionId(paneId, sid);
+  }
+  if (!paneId) return;
+  store.setActivePaneId(paneId);
+  store.setActiveAvatarId(null);
+  store.setMainView("chat");
+  store.closeSettings();
 }
 
 function SettingsSwitch({
@@ -76,7 +107,7 @@ const TASK_ROW_IDLE =
 const TASK_ROW_EXPANDED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
-export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props) {
+export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow, onOpenRunSession }: Props) {
   const { t } = useTranslation("workspace");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -144,11 +175,16 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-text-strong">{task.name}</div>
                 <div className="mt-0.5 text-xs text-text-faint">{frequencyLabel(task)}</div>
+                {task.autoPausedReason ? (
+                  <div className="mt-0.5 text-[11px] leading-snug text-rose-400" title={task.autoPausedReason}>
+                    {task.autoPausedReason}
+                  </div>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  title={t("automation.runNow")}
+                  title={task.lastRunStatus === "interrupted" ? t("automation.rerunAfterReview") : t("automation.runNow")}
                   disabled={runningId === task.id}
                   className="rounded-md p-1 text-text-faint transition hover:bg-surface-panel hover:text-text-primary disabled:opacity-40"
                   onClick={() => handleRunNow(task)}
@@ -201,17 +237,41 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                     <span className="text-text-faint">{t("automation.lastRun")}</span>
                     {relativeTime(task.lastRunAt)}
                     {task.lastRunStatus && (
-                      <span className={`ml-1 ${task.lastRunStatus === "success" ? "text-emerald-400" : "text-rose-400"}`}>
-                        ({task.lastRunStatus === "success" ? t("automation.success") : t("automation.failed")})
+                      <span className={`ml-1 ${
+                        task.lastRunStatus === "success"
+                          ? "text-emerald-400"
+                          : task.lastRunStatus === "interrupted"
+                            ? "text-amber-400"
+                            : "text-rose-400"
+                      }`}>
+                        ({task.lastRunStatus === "success"
+                          ? t("automation.success")
+                          : task.lastRunStatus === "interrupted"
+                            ? t("automation.interrupted")
+                            : t("automation.failed")})
                       </span>
                     )}
-                    {task.lastRunStatus === "error" && task.lastRunError ? (
+                    {(task.lastRunStatus === "error" || task.lastRunStatus === "interrupted") && task.lastRunError ? (
                       <div
-                        className="mt-1 line-clamp-3 break-words text-[11px] leading-snug text-rose-300/95"
+                        className={`mt-1 line-clamp-3 break-words text-[11px] leading-snug ${
+                          task.lastRunStatus === "interrupted" ? "text-amber-300/95" : "text-rose-300/95"
+                        }`}
                         title={task.lastRunError}
                       >
                         {task.lastRunError}
                       </div>
+                    ) : null}
+                    {task.lastRunStatus === "interrupted" && task.sessionId ? (
+                      <button
+                        type="button"
+                        className="mt-1 inline-flex items-center rounded-md border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted transition hover:border-text-faint hover:text-text-primary"
+                        onClick={() => {
+                          if (onOpenRunSession) onOpenRunSession(task);
+                          else openAutomationRunSession(task);
+                        }}
+                      >
+                        {t("automation.openRunSession")}
+                      </button>
                     ) : null}
                   </div>
                 )}

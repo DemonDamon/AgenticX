@@ -103,6 +103,9 @@ class ChunkingSpec:
     strategy: str = "recursive"
     chunk_size: int = 800
     chunk_overlap: int = 80
+    parent_child: bool = False
+    parent_chunk_size: int = 4096
+    child_chunk_size: int = 384
 
 
 @dataclass
@@ -114,6 +117,8 @@ class FileFilterSpec:
 @dataclass
 class WikiCompilerSpec:
     enabled: bool = False
+    provider: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -197,6 +202,9 @@ class KBConfig:
                 strategy=str(c.get("strategy", "recursive")),
                 chunk_size=int(c.get("chunk_size", 800)),
                 chunk_overlap=int(c.get("chunk_overlap", 80)),
+                parent_child=bool(c.get("parent_child", False)),
+                parent_chunk_size=int(c.get("parent_chunk_size", 4096)),
+                child_chunk_size=int(c.get("child_chunk_size", 384)),
             )
         if isinstance(data.get("file_filters"), dict):
             f = data["file_filters"]
@@ -246,7 +254,11 @@ class KBConfig:
             )
         if isinstance(data.get("wiki_compiler"), dict):
             wc = data["wiki_compiler"]
-            merged.wiki_compiler = WikiCompilerSpec(enabled=bool(wc.get("enabled", False)))
+            merged.wiki_compiler = WikiCompilerSpec(
+                enabled=bool(wc.get("enabled", False)),
+                provider=str(wc.get("provider") or "").strip(),
+                model=str(wc.get("model") or "").strip(),
+            )
         if isinstance(data.get("synthesis"), dict):
             syn = data["synthesis"]
             merged.synthesis = SynthesisSpec(enabled=bool(syn.get("enabled", False)))
@@ -319,6 +331,7 @@ class IngestJob:
     report: IngestReport = field(default_factory=IngestReport)
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    generation: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -330,6 +343,7 @@ class IngestJob:
             "report": asdict(self.report),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "generation": self.generation,
         }
 
 

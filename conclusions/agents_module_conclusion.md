@@ -1,6 +1,6 @@
 # AgenticX Agents 模块总结
 
-> 结论更新时间：2026-05-29（覆盖 2026-01-02 之后的变更）（新增可嵌入的规范 ReActAgent SDK 原语与 legacy 文本门面）
+> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1`；保留此前对 ReActAgent / InterruptedEvent 的手写修订）
 
 ## 模块概述
 
@@ -39,7 +39,9 @@ agenticx/agents/
   - 可选注入：`compactor`（上下文压缩）、`offloader`（超阈值工具结果落盘并回填占位符，依赖 `core.offload`）、`loop_detector`（`runtime.loop_detector.LoopDetector`，循环检测后注入 nudge system 消息）
 - `ReActResult` 数据类：`success` / `output` / `error` / `messages`（历史进出）/ `iterations` / `events`
 - 取消语义：透传 `asyncio.CancelledError`，并在事件流中产出 `InterruptedEvent`（可续跑）
-- 可选耐久：`run_store` / `call_ledger` 为 keyword-only，默认关闭时行为与无持久化时一致
+  - 可选耐久：`run_store` / `call_ledger` 为 keyword-only，默认关闭时行为与无持久化时一致
+  - **调用身份**：`_enforce_call_identity` 经 `CallLedger.reconcile` 拦截同 id 改参（`IDENTITY_CONFLICT`）；`_rewrite_assistant_tool_ids` 在恢复路径重写 assistant tool_call id
+  - **续跑待执行工具**：`aresume` → `_resume_pending_tools` 按 `replay_policy.decide_replay` 决定 replay / skip_use_recorded / mark_unknown / abort，再回到 `_loop`
 
 **业务逻辑**：作为对外 SDK 的「一等公民」ReAct 原语，覆盖原生工具调用、流式可观测、循环检测、上下文压缩/卸载等能力，且与产品运行时解耦，便于在 FastAPI SSE、嵌入式集成等场景复用。
 

@@ -35,6 +35,8 @@ describe("MessageTurnMeta", () => {
     expect(html).not.toContain("leading-5");
     expect(html).toContain("data-turn-model-chip");
     expect(html).toContain("kimi-k2.6");
+    expect(html).not.toContain("agx-chip-sparkle");
+    expect(html).not.toContain("lucide-sparkle");
     expect(html).toContain('data-turn-usage-arrow="in"');
     expect(html).toContain('data-turn-usage-arrow="out"');
     expect(html).toContain("status-success");

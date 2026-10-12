@@ -14,6 +14,7 @@ import {
 import "../../i18n/i18n";
 import { HoverTip } from "../ds/HoverTip";
 import { Shimmer } from "../ds/Shimmer";
+import { GROUP_SENDER_NAME_CLASS, GROUP_STANDALONE_RAIL_ROW_CLASS } from "./im-layout";
 import { ChatImAvatar } from "./ImBubble";
 
 type Props = {
@@ -21,6 +22,7 @@ type Props = {
   now: number;
   /** Test hook so static markup can assert the expanded tool list. */
   defaultExpanded?: boolean;
+  onResolveConfirm?: (approved: boolean) => void;
 };
 
 function WorkingEllipsis() {
@@ -37,19 +39,32 @@ function toolStepLabel(toolName: string, fallback: string): string {
   return formatGroupToolLabel(toolName) || fallback;
 }
 
-export function GroupExpertActivityCard({ activity, now, defaultExpanded = false }: Props) {
+export function GroupExpertActivityCard({
+  activity,
+  now,
+  defaultExpanded = false,
+  onResolveConfirm,
+}: Props) {
   const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const elapsed = formatActivityElapsed(activity.startedAt, now);
   const waiting = activity.phase === "waiting";
+  const pendingConfirm = waiting ? activity.pendingConfirm : undefined;
   const hasSteps = activity.toolSteps.length > 0;
   const summaryText = waiting
     ? activity.summary
     : stripTrailingStatusEllipsis(activity.summary);
 
+  const resolveConfirm = (approved: boolean) => {
+    if (!pendingConfirm || confirmBusy || !onResolveConfirm) return;
+    setConfirmBusy(true);
+    onResolveConfirm(approved);
+  };
+
   return (
     <div
-      className="agx-group-expert-activity ml-3 mb-2 flex max-w-[min(100%,680px)] items-start gap-2"
+      className={`agx-group-expert-activity mb-2 max-w-[520px] ${GROUP_STANDALONE_RAIL_ROW_CLASS}`}
       data-agent-id={activity.agentId}
       data-phase={activity.phase}
     >
@@ -60,8 +75,8 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
         avatarId={activity.agentId}
         size="sm"
       />
-      <div className="min-w-0 flex-1 rounded-xl bg-surface-card/60 px-3 py-2">
-        <div className="text-[12px] leading-none text-text-faint">{activity.avatarName}</div>
+      <div className="min-w-0 w-fit max-w-full">
+        <div className={GROUP_SENDER_NAME_CLASS}>{activity.avatarName}</div>
         <div className="agx-group-activity-status mt-1 flex w-fit max-w-full flex-wrap items-center gap-1.5">
           {waiting ? (
             <p className="min-w-0 text-[13px] leading-snug text-text-muted">{summaryText}</p>
@@ -109,17 +124,22 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
             {activity.toolSteps.map((step) => {
               const label = toolStepLabel(step.toolName, t("tool.tool"));
               const running = step.phase !== "done";
-              const status = running ? t("groupActivity.statusRunning") : t("groupActivity.statusDone");
+              const waitingStep = running && waiting;
+              const status = waitingStep
+                ? t("groupActivity.statusWaiting")
+                : running
+                  ? t("groupActivity.statusRunning")
+                  : t("groupActivity.statusDone");
               const title = `${label} · ${status}`;
               return (
                 <li key={step.callId} className="min-w-0 text-[11px] leading-snug text-text-muted">
-                  {running ? (
+                  {running && !waitingStep ? (
                     <Shimmer variant="status" text={title} className="text-[11px]" />
                   ) : (
                     <div className="text-text-muted">{title}</div>
                   )}
                   {step.detail ? (
-                    running ? (
+                    running && !waitingStep ? (
                       <Shimmer
                         variant="status"
                         text={step.detail}
@@ -136,6 +156,33 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
               );
             })}
           </ul>
+        ) : null}
+        {pendingConfirm ? (
+          <div className="mt-2 border-t border-border/40 pt-2">
+            <p className="break-all text-[11px] leading-snug text-text-muted">
+              {pendingConfirm.question}
+            </p>
+            {onResolveConfirm ? (
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md bg-[var(--ui-btn-primary-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ui-btn-primary-text)] hover:opacity-90 disabled:opacity-50"
+                  disabled={confirmBusy}
+                  onClick={() => resolveConfirm(true)}
+                >
+                  {t("groupActivity.approve")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-border bg-surface-hover px-2.5 py-1 text-[11px] text-text-strong hover:opacity-90 disabled:opacity-50"
+                  disabled={confirmBusy}
+                  onClick={() => resolveConfirm(false)}
+                >
+                  {t("groupActivity.reject")}
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

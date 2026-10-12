@@ -26,7 +26,7 @@ body,
   grid-template-columns: var(--sidebar-width, 260px) 1fr;
   height: 100vh;
   width: 100vw;
-  background: var(--surface-base);
+  background: var(--shell-canvas, var(--surface-base));
   color: var(--text-primary);
   /* Avoid transitioning grid tracks: during OS window resize it fights layout and feels "laggy". */
   overflow: hidden;
@@ -53,9 +53,8 @@ body,
   width: var(--sidebar-width, 260px);
   max-width: 80vw;
   z-index: 60;
-  background: var(--surface-base);
+  background: var(--shell-canvas, var(--surface-base));
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.32);
-  border-right: 1px solid var(--border-strong);
 }
 
 .agx-sidebar-overlay-backdrop {
@@ -113,8 +112,7 @@ body,
   min-height: 0;
   overflow: hidden;
   position: relative;
-  /* 侧栏与主区分隔：浅色边线（dark 主题为 --border-strong） */
-  border-right: 1px solid var(--border-strong);
+  background: var(--shell-canvas, var(--surface-sidebar));
 }
 
 .agx-main-shell {
@@ -122,6 +120,7 @@ body,
   min-height: 0;
   display: grid;
   grid-template-rows: var(--topbar-height, 44px) 1fr;
+  background: var(--shell-canvas, var(--surface-sidebar));
 }
 
 .agx-main-shell--no-topbar {
@@ -273,6 +272,25 @@ html[data-platform="win32"] .agx-topbar {
   overflow: hidden;
 }
 
+/* 对话列和工作区是两块面板，嵌在更浅的窗口底上，四周留缝。 */
+.agx-chatpane {
+  background: var(--shell-canvas, var(--surface-sidebar));
+  gap: 8px;
+  padding: 8px 4px 8px 8px;
+}
+
+.agx-chatpane-main-column,
+.agx-chatpane-side-card {
+  background: var(--shell-panel, var(--surface-base));
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  min-height: 0;
+  align-self: stretch;
+  height: auto;
+}
+
 .agx-sidebar-resizer {
   position: absolute;
   top: 0;
@@ -292,13 +310,11 @@ html[data-platform="win32"] .agx-topbar {
   width: 1px;
   background: var(--border-strong);
   opacity: 0;
-  transition: all var(--ds-dur-fast) var(--ds-ease-out);
+  transition: opacity var(--ds-dur-fast) var(--ds-ease-out);
 }
 
 .agx-sidebar-resizer:hover::after {
-  opacity: 1;
-  width: 2px;
-  background: var(--ui-btn-primary-bg);
+  opacity: 0.45;
 }
 
 /* 历史会话面板：更小字号、紧凑行高；抗锯齿与字距优化，接近豆包式清晰列表 */

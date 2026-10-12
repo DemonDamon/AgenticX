@@ -2,6 +2,7 @@ import { Gauge, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
+import { ApprovalInboxButton } from "./ApprovalInbox";
 import { ThemeToggleButton } from "./TopbarLeftControls";
 
 export function SidebarAccountBar() {
@@ -14,6 +15,7 @@ export function SidebarAccountBar() {
     <div className="flex shrink-0 items-center gap-1.5 border-t border-[var(--border-muted)] px-2 py-2">
       <AccountIdentityControl variant="pill" menuPlacement="up" className="min-w-0 flex-1" />
       <ThemeToggleButton />
+      <ApprovalInboxButton />
       <button
         type="button"
         className="agx-topbar-btn agx-topbar-btn--icon-only"

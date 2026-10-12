@@ -4,13 +4,19 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { i18n } from "../../../i18n/i18n";
 import {
-
+  AGENTICX_MCP_META_KEY,
   buildRemoteMcpServerPayload,
   extractRemoteMcpServerConfig,
   getMcpServersMap,
+  mcpCredentialFingerprint,
   parseMcpJsonDocument,
   setMcpServersMap,
 } from "../../../utils/mcp-remote-config";
+import {
+  findExistingConnectorInstance,
+  isConnectorNameTaken,
+  listConnectorInstances,
+} from "../connectors/create-connector-model";
 
 function st(key: string, opts?: Record<string, unknown>): string {
   return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
@@ -27,6 +33,8 @@ type Props = {
   locateServerPath?: (name: string) => Promise<string>;
   onClose: () => void;
   onSaved: (message: string) => void | Promise<void>;
+  /** 覆盖弹层标题。 */
+  title?: string;
 };
 
 function newHeaderRow(key = "", value = ""): HeaderRow {
@@ -57,6 +65,7 @@ export function McpRemoteServerModal({
   locateServerPath,
   onClose,
   onSaved,
+  title,
 }: Props) {
   const { t } = useTranslation("settings");
   const [name, setName] = useState("");
@@ -156,18 +165,37 @@ export function McpRemoteServerModal({
       const doc = parseMcpJsonDocument(raw.text);
       const servers = getMcpServersMap(doc);
 
+      // 编辑时保留 `_agenticx` 元数据（模板 / 展示名），否则连接器去重会失效。
+      const prevEntry = mode === "edit" && serverName ? servers[serverName] : undefined;
+      const prevMeta =
+        prevEntry && typeof prevEntry === "object" && !Array.isArray(prevEntry)
+          ? (prevEntry as Record<string, unknown>)[AGENTICX_MCP_META_KEY]
+          : undefined;
       if (mode === "edit" && serverName && serverName !== trimmedName) {
         delete servers[serverName];
       }
       if (mode === "add" && Object.prototype.hasOwnProperty.call(servers, trimmedName)) {
         throw new Error(st("mcpRemote.nameExists", { name: trimmedName }));
       }
+      const headers = headersFromRows(headerRows);
+      // 新增时按「同端点 + 同凭证」/ 同名去重（通用 MCP 不打连接器标，只进 MCP 列表）。
+      if (mode === "add") {
+        const instances = listConnectorInstances(doc);
+        if (isConnectorNameTaken(instances, trimmedName)) {
+          throw new Error(st("mcpRemote.nameExists", { name: trimmedName }));
+        }
+        const dup = findExistingConnectorInstance(instances, {
+          url: trimmedUrl,
+          credentialFingerprint: mcpCredentialFingerprint(headers),
+        });
+        if (dup) {
+          throw new Error(st("mcpRemote.connectionExists", { name: dup.instance.displayName }));
+        }
+      }
 
-      servers[trimmedName] = buildRemoteMcpServerPayload(
-        trimmedUrl,
-        headersFromRows(headerRows),
-        timeoutNum,
-      );
+      const payload = buildRemoteMcpServerPayload(trimmedUrl, headers, timeoutNum);
+      if (prevMeta && typeof prevMeta === "object") payload[AGENTICX_MCP_META_KEY] = prevMeta;
+      servers[trimmedName] = payload;
       const nextDoc = setMcpServersMap(doc, servers);
       const save = await window.agenticxDesktop.mcpPutRaw({
         path,
@@ -187,7 +215,7 @@ export function McpRemoteServerModal({
   return (
     <Modal
       open={open}
-      title={mode === "add" ? st("mcpRemote.addTitle") : st("mcpRemote.editTitle", { name: serverName ?? "" })}
+      title={title ?? (mode === "add" ? st("mcpRemote.addTitle") : st("mcpRemote.editTitle", { name: serverName ?? "" }))}
       onClose={() => {
         if (saving) return;
         onClose();

@@ -17,14 +17,19 @@ def _bare_model_id(model: str) -> str:
 
 
 def model_requires_fixed_temperature_one(model: str) -> bool:
-    """True for OpenAI gpt-5 reasoning SKUs that reject non-1 temperature.
+    """True for SKUs that reject any temperature other than 1.0.
 
-    LiteLLM raises UnsupportedParamsError when temperature != 1 for these
-    models. ``gpt-5-chat*`` is excluded (regular chat sampling is allowed).
+    Covers:
+    - OpenAI gpt-5 reasoning family (LiteLLM UnsupportedParamsError).
+      ``gpt-5-chat*`` is excluded (regular chat sampling is allowed).
+    - Kimi K3 / K2.7 (incl. ``kimi-k2.7-code``), via Moonshot or Bailian:
+      ``only 1 is allowed`` / Bailian ``invalid_parameter_error`` on temperature.
     """
     bare = _bare_model_id(model)
     if not bare:
         return False
+    if bare.startswith("kimi-k3") or bare.startswith("kimi-k2.7"):
+        return True
     if "gpt-5-chat" in bare:
         return False
     return "gpt-5" in bare
@@ -40,7 +45,7 @@ def resolve_chat_temperature(
     """Return temperature for a chat round, or None to omit the param.
 
     - MiniMax: omit (vendor rejects arbitrary sampling values on some SKUs)
-    - gpt-5 reasoning family: force 1.0
+    - gpt-5 reasoning / Kimi K3 / Kimi K2.7: force 1.0
     - otherwise: ``default`` (historically 0.2 for Studio/runtime)
 
     ``fallback_model`` is used when the session model name is empty but the

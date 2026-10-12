@@ -86,6 +86,9 @@ class StudioSession:
     # payload so continue/loop prompt builds in the same process honor the
     # session's choice instead of the global retrieval.mode config.
     kb_retrieval_mode: Optional[str] = None
+    # Low-risk tools the user chose to stop being asked about for this session
+    # (in-memory only; protected tools are never added).
+    sticky_allowed_tools: Set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
     # MCP read-through properties → GlobalMcpManager

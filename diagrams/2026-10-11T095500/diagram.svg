@@ -1,0 +1,342 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 2240" font-family="Noto Sans CJK SC, Noto Sans SC, sans-serif">
+  <defs>
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5"/>
+      <feOffset dx="0" dy="3" result="off"/>
+      <feFlood flood-color="#1F2329" flood-opacity="0.10"/>
+      <feComposite in2="off" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="gatewayGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <linearGradient id="cloudGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E6F6F1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ===== 画布底 ===== -->
+  <rect x="0" y="0" width="1600" height="2240" fill="#F5F7FA"/>
+
+  <!-- ===== 页眉 ===== -->
+  <rect x="0" y="0" width="1600" height="150" fill="#FFFFFF"/>
+  <rect x="0" y="150" width="1600" height="1.5" fill="#E5E8EF"/>
+  <rect x="60" y="52" width="6" height="46" rx="3" fill="#1A73E8"/>
+  <text x="84" y="86" font-size="30" font-weight="700" fill="#1F2329">AgenticX 三端架构：现状链路与云端演进</text>
+  <text x="84" y="120" font-size="15" fill="#646A73">手机 App · 桌面 Near · Web Portal —— 数据真源在哪里、网关如何连接、怎样走向集群化 ｜ 2026-10-11</text>
+
+  <!-- 图例 -->
+  <g font-size="13" fill="#3C4043">
+    <line x1="1052" y1="66" x2="1100" y2="66" stroke="#1A73E8" stroke-width="3"/>
+    <polygon points="1100,61 1110,66 1100,71" fill="#1A73E8"/>
+    <text x="1118" y="71">现网已实现链路</text>
+    <rect x="1052" y="88" width="18" height="12" rx="3" fill="#FDECC8" stroke="#E0A800" stroke-width="1.5"/>
+    <text x="1078" y="99">数据真源</text>
+    <line x1="1190" y1="94" x2="1238" y2="94" stroke="#B39DDB" stroke-width="2.5" stroke-dasharray="7 5"/>
+    <text x="1246" y="99">未打通 / 不同源</text>
+    <line x1="1052" y1="122" x2="1100" y2="122" stroke="#0F9D8C" stroke-width="3"/>
+    <polygon points="1100,117 1110,122 1100,127" fill="#0F9D8C"/>
+    <text x="1118" y="127">目标演进新增</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- SECTION 01 现状 -->
+  <!-- ============================================================ -->
+  <rect x="60" y="182" width="1480" height="46" rx="9" fill="#E8F0FE"/>
+  <rect x="60" y="182" width="6" height="46" rx="3" fill="#1A73E8"/>
+  <text x="86" y="212" font-size="18" font-weight="700" fill="#174EA6">01 ｜ 现状：设备桥接架构 —— 手机是桌面端的远程视图（已实现并联调通过）</text>
+
+  <!-- 访问端 zone -->
+  <rect x="60" y="252" width="420" height="430" rx="18" fill="#F4F8FF" stroke="#C3D4F5" stroke-width="1.5"/>
+  <text x="86" y="284" font-size="14" font-weight="700" fill="#5B6B8C">访问端</text>
+
+  <!-- 手机卡 -->
+  <rect x="88" y="300" width="364" height="158" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <rect x="116" y="330" width="40" height="68" rx="9" fill="none" stroke="#1A73E8" stroke-width="2.5"/>
+  <rect x="122" y="340" width="28" height="46" rx="3" fill="#DCE9FD"/>
+  <circle cx="136" cy="392" r="3" fill="#1A73E8"/>
+  <text x="172" y="346" font-size="17" font-weight="700" fill="#1F2329">手机 App（Expo / RN）</text>
+  <text x="172" y="372" font-size="13.5" fill="#5F6368">Android · iOS · Web 三端同构</text>
+  <text x="172" y="396" font-size="13.5" fill="#5F6368">HTTPS 轮询：状态 / 会话 / 审批</text>
+  <text x="116" y="432" font-size="12.5" font-weight="700" fill="#1A73E8">① 出站：HTTPS /api/mobile/*</text>
+
+  <!-- IM 卡 -->
+  <rect x="88" y="476" width="364" height="128" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <circle cx="138" cy="520" r="22" fill="#E8F0FE"/>
+  <path d="M126 510 h24 a4 4 0 0 1 4 4 v14 a4 4 0 0 1-4 4 h-15 l-7 7 v-7 h-2 a4 4 0 0 1-4-4 v-14 a4 4 0 0 1 4-4 z" fill="none" stroke="#1A73E8" stroke-width="2"/>
+  <text x="174" y="514" font-size="17" font-weight="700" fill="#1F2329">IM 渠道</text>
+  <text x="174" y="540" font-size="13.5" fill="#5F6368">微信 / 飞书 / QQ 机器人</text>
+  <text x="116" y="578" font-size="12.5" font-weight="700" fill="#1A73E8">② IM 消息与审批回调同走此网关</text>
+
+  <!-- v1 非目标 -->
+  <rect x="88" y="622" width="364" height="40" rx="9" fill="#FFF8E1" stroke="#F9D67A" stroke-width="1.2"/>
+  <text x="106" y="647" font-size="12.5" fill="#8A6D1B">v1 非目标：APNs/FCM 推送（App 内轮询）· 流式输出</text>
+
+  <!-- 设备网关 zone -->
+  <rect x="520" y="252" width="380" height="430" rx="18" fill="#F5F6FF" stroke="#BEC8F5" stroke-width="1.5"/>
+  <text x="546" y="284" font-size="14" font-weight="700" fill="#5B6B8C">设备可达地址（本机调试或公云均可）</text>
+
+  <rect x="548" y="300" width="324" height="240" rx="14" fill="url(#gatewayGrad)" filter="url(#cardShadow)"/>
+  <!-- 网关图标：堆叠路由 -->
+  <rect x="688" y="322" width="44" height="12" rx="4" fill="#1A73E8"/>
+  <rect x="680" y="338" width="60" height="12" rx="4" fill="#4A8FF0"/>
+  <rect x="672" y="354" width="76" height="12" rx="4" fill="#84B6F7"/>
+  <text x="710" y="392" font-size="18" font-weight="700" fill="#1F2329" text-anchor="middle">设备网关</text>
+  <text x="710" y="416" font-size="12.5" fill="#5F6368" text-anchor="middle">Python · agx gateway · :8787</text>
+  <line x1="576" y1="432" x2="844" y2="432" stroke="#E0E4EF" stroke-width="1.2"/>
+  <g font-size="13.5" fill="#3C4043">
+    <circle cx="584" cy="454" r="3" fill="#1A73E8"/><text x="596" y="459">扫码配对 / connect session</text>
+    <circle cx="584" cy="480" r="3" fill="#1A73E8"/><text x="596" y="485">mobile token 鉴权</text>
+    <circle cx="584" cy="506" r="3" fill="#1A73E8"/><text x="596" y="511">设备 RPC 桥接（sessions/messages/send）</text>
+    <circle cx="584" cy="532" r="3" fill="#1A73E8"/><text x="596" y="537">人工审批（human-in-the-loop）队列</text>
+  </g>
+
+  <rect x="548" y="560" width="324" height="96" rx="12" fill="#E6F4EA" stroke="#A8DAB5" stroke-width="1.2"/>
+  <text x="566" y="588" font-size="13.5" font-weight="700" fill="#1E6B3A">部署形态</text>
+  <text x="566" y="612" font-size="13" fill="#3C4043">uvicorn 单进程即可运行；可直接上云</text>
+  <text x="566" y="636" font-size="13" fill="#3C4043">加 HTTPS 后，桌面端出站 WS 穿透内网</text>
+
+  <!-- 员工电脑 zone -->
+  <rect x="940" y="252" width="600" height="430" rx="18" fill="#FFF9F0" stroke="#E8C98F" stroke-width="1.5"/>
+  <text x="966" y="284" font-size="14" font-weight="700" fill="#9A6E1A">员工自己的电脑（Windows / macOS）</text>
+
+  <!-- 桌面端 -->
+  <rect x="968" y="300" width="258" height="126" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="992" y="334" font-size="17" font-weight="700" fill="#1F2329">Near 桌面端</text>
+  <text x="992" y="360" font-size="13" fill="#5F6368">Electron · v0.6</text>
+  <text x="992" y="384" font-size="13" fill="#5F6368">③ WSS 出站长连 /ws/device/{id}</text>
+  <rect x="992" y="396" width="196" height="20" rx="10" fill="#F1F3F4"/>
+  <text x="1002" y="411" font-size="11.5" fill="#5F6368">device_id = damon-macbook</text>
+
+  <!-- Runtime -->
+  <rect x="1250" y="300" width="262" height="126" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="1274" y="334" font-size="17" font-weight="700" fill="#1F2329">Agent Runtime</text>
+  <text x="1274" y="360" font-size="13" fill="#5F6368">agx serve（studio/server.py）</text>
+  <text x="1274" y="384" font-size="13" fill="#5F6368">内嵌进程，非独立服务</text>
+  <text x="1274" y="408" font-size="13" fill="#5F6368">④ 本地 HTTP：127.0.0.1</text>
+
+  <!-- 真源卡 -->
+  <rect x="968" y="446" width="544" height="128" rx="14" fill="#FDECC8" stroke="#E0A800" stroke-width="2"/>
+  <polygon points="1000,470 1028,470 1014,498" fill="#E0A800"/>
+  <circle cx="1014" cy="480" r="3.5" fill="#FFFFFF"/>
+  <text x="1046" y="482" font-size="17" font-weight="700" fill="#7A5B00">数据真源（唯一）</text>
+  <text x="992" y="514" font-size="13.5" fill="#5A4708">~/.agenticx/sessions/&lt;会话id&gt;/messages.json</text>
+  <text x="992" y="540" font-size="13.5" fill="#5A4708">memory/sessions.sqlite · 附件与工作区均在本机磁盘</text>
+  <text x="992" y="564" font-size="12.5" fill="#8A6D1B">网关自身只存配对关系与 token，不存任何会话内容</text>
+
+  <!-- 本地能力 -->
+  <rect x="968" y="594" width="544" height="62" rx="12" fill="#FFFFFF" stroke="#E0E4EF" stroke-width="1.2"/>
+  <text x="992" y="622" font-size="13.5" font-weight="700" fill="#3C4043">本地能力</text>
+  <text x="992" y="645" font-size="13" fill="#5F6368">文件系统 · 本地软件操作 · 浏览器自动化 · 企业内网访问</text>
+
+  <!-- 连线 ① 手机→网关 -->
+  <polyline points="452,368 500,368 500,352 548,352" fill="none" stroke="#1A73E8" stroke-width="2.5"/>
+  <polygon points="548,346 560,352 548,358" fill="#1A73E8"/>
+
+  <!-- 连线 IM→网关 -->
+  <polyline points="452,540 500,540 500,492 548,492" fill="none" stroke="#1A73E8" stroke-width="2.5"/>
+  <polygon points="548,486 560,492 548,498" fill="#1A73E8"/>
+
+  <!-- 连线 ② 网关↔桌面（桌面主动出站） -->
+  <polyline points="872,366 920,366 920,356 968,356" fill="none" stroke="#1A73E8" stroke-width="2.5"/>
+  <polygon points="968,350 980,356 968,362" fill="#1A73E8"/>
+  <polyline points="968,378 924,378 924,388 872,388" fill="none" stroke="#80868B" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="872,382 860,388 872,394" fill="#80868B"/>
+
+  <!-- ③ 桌面→Runtime -->
+  <line x1="1226" y1="363" x2="1250" y2="363" stroke="#1A73E8" stroke-width="2.5"/>
+  <polygon points="1250,357 1262,363 1250,369" fill="#1A73E8"/>
+
+  <!-- Runtime→真源 -->
+  <line x1="1381" y1="426" x2="1381" y2="446" stroke="#1A73E8" stroke-width="2.5"/>
+  <polygon points="1375,446 1381,458 1387,446" fill="#1A73E8"/>
+  <text x="1392" y="442" font-size="12" fill="#1A73E8">读写</text>
+
+  <!-- 约束红条 -->
+  <rect x="60" y="706" width="1480" height="62" rx="12" fill="#FCE8E6" stroke="#F28B82" stroke-width="1.4"/>
+  <circle cx="100" cy="737" r="15" fill="#D93025"/>
+  <text x="100" y="743" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">!</text>
+  <text x="130" y="732" font-size="14.5" font-weight="700" fill="#9F201B">关键约束：Runtime 与数据真源都在员工电脑内</text>
+  <text x="130" y="756" font-size="13.5" fill="#9F201B">Near 退出 / 电脑关机 / 断网换网 → 手机端立即「设备离线」(HTTP 503)，无法查看历史或下发指令；数据不经过任何云</text>
+
+  <!-- Enterprise zone -->
+  <rect x="60" y="798" width="1480" height="296" rx="18" fill="#FAF7FF" stroke="#B39DDB" stroke-width="2" stroke-dasharray="10 6"/>
+  <text x="86" y="832" font-size="14" font-weight="700" fill="#6A4FB5">Enterprise 平台 —— 已存在的独立产品线（云端 SaaS）</text>
+
+  <rect x="140" y="860" width="282" height="132" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="164" y="896" font-size="16.5" font-weight="700" fill="#1F2329">Web Portal 员工门户</text>
+  <text x="164" y="924" font-size="13" fill="#5F6368">Next.js · 团队会话工作区</text>
+  <text x="164" y="948" font-size="13" fill="#5F6368">知识库 · 数字专家</text>
+  <text x="164" y="972" font-size="12.5" fill="#80868B">features/chat</text>
+
+  <rect x="452" y="860" width="282" height="132" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="476" y="896" font-size="16.5" font-weight="700" fill="#1F2329">Admin Console</text>
+  <text x="476" y="924" font-size="13" fill="#5F6368">IAM 多租户 · 部门 · 角色</text>
+  <text x="476" y="948" font-size="13" fill="#5F6368">审计日志 · 计量 · 策略配置</text>
+  <text x="476" y="972" font-size="12.5" fill="#80868B">features/iam · metering · audit</text>
+
+  <rect x="764" y="860" width="296" height="132" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="788" y="896" font-size="16.5" font-weight="700" fill="#1F2329">AI 管控网关（Go）</text>
+  <text x="788" y="924" font-size="13" fill="#5F6368">:8088 · OpenAI 兼容中转</text>
+  <text x="788" y="948" font-size="13" fill="#5F6368">PII / 敏感词策略 · 审计</text>
+  <text x="788" y="972" font-size="12.5" fill="#80868B">注意：与 Python 设备网关是两个东西</text>
+
+  <rect x="1090" y="860" width="382" height="132" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="1114" y="896" font-size="16.5" font-weight="700" fill="#1F2329">云端数据基础设施</text>
+  <text x="1114" y="924" font-size="13" fill="#5F6368">PostgreSQL 多租户（db-schema / Drizzle）</text>
+  <text x="1114" y="948" font-size="13" fill="#5F6368">对象存储 · 向量库 · ClickHouse 审计</text>
+  <text x="1114" y="972" font-size="12.5" fill="#80868B">企业账号体系（SSO / LDAP）</text>
+
+  <!-- 不同源警示 -->
+  <rect x="140" y="1016" width="1332" height="52" rx="11" fill="#F3E8FD" stroke="#B39DDB" stroke-width="1.3" stroke-dasharray="8 5"/>
+  <line x1="168" y1="1031" x2="188" y2="1053" stroke="#8E5BD1" stroke-width="3"/>
+  <line x1="188" y1="1031" x2="168" y2="1053" stroke="#8E5BD1" stroke-width="3"/>
+  <text x="204" y="1048" font-size="13.5" fill="#5B3A9E">现状：Portal 的会话存在 Enterprise Postgres，与桌面本地真源互不相通；手机端也不经过此平台 —— 三端目前不是同源</text>
+
+  <!-- 演进过渡 -->
+  <rect x="60" y="1124" width="1480" height="64" rx="32" fill="#FFFFFF"/>
+  <polygon points="780,1150 800,1170 820,1150" fill="#0F9D8C"/>
+  <polygon points="780,1164 800,1184 820,1164" fill="#0F9D8C"/>
+  <text x="760" y="1144" font-size="14" font-weight="700" fill="#0F9D8C" text-anchor="end">演进方向</text>
+  <text x="840" y="1170" font-size="13.5" fill="#5F6368">Runtime 服务化上云 · 真源上云 · 三端统一为同源客户端</text>
+
+  <!-- ============================================================ -->
+  <!-- SECTION 02 目标 -->
+  <!-- ============================================================ -->
+  <rect x="60" y="1218" width="1480" height="46" rx="9" fill="#DFF3EE"/>
+  <rect x="60" y="1218" width="6" height="46" rx="3" fill="#0F9D8C"/>
+  <text x="86" y="1248" font-size="18" font-weight="700" fill="#0B6B5F">02 ｜ 目标：云端集群化 Runtime —— 三端同源，电脑关机手机照常用（规划方向）</text>
+
+  <!-- 云端大边界 -->
+  <rect x="60" y="1290" width="1480" height="600" rx="18" fill="#F2FBF8" stroke="#7FD4BC" stroke-width="1.8"/>
+  <text x="86" y="1322" font-size="14" font-weight="700" fill="#0B6B5F">☁ 企业云（K8s / 容器集群，横向扩容）</text>
+
+  <!-- 三端 -->
+  <rect x="140" y="1340" width="400" height="104" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <rect x="168" y="1366" width="26" height="44" rx="6" fill="none" stroke="#0F9D8C" stroke-width="2.2"/>
+  <rect x="172" y="1373" width="18" height="30" rx="2" fill="#DDF2EC"/>
+  <text x="208" y="1386" font-size="16.5" font-weight="700" fill="#1F2329">手机 App</text>
+  <text x="208" y="1412" font-size="13" fill="#5F6368">同一账号 · 同一套 API</text>
+
+  <rect x="600" y="1340" width="400" height="104" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <rect x="632" y="1372" width="40" height="30" rx="4" fill="none" stroke="#0F9D8C" stroke-width="2.2"/>
+  <line x1="652" y1="1372" x2="652" y2="1402" stroke="#0F9D8C" stroke-width="2.2"/>
+  <text x="690" y="1386" font-size="16.5" font-weight="700" fill="#1F2329">桌面 Near</text>
+  <text x="690" y="1412" font-size="13" fill="#5F6368">退化为「带本地执行能力的客户端」</text>
+
+  <rect x="1060" y="1340" width="400" height="104" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <circle cx="1436" cy="1392" r="20" fill="none" stroke="#0F9D8C" stroke-width="2.2"/>
+  <line x1="1450" y1="1406" x2="1460" y2="1416" stroke="#0F9D8C" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="1116" y="1386" font-size="16.5" font-weight="700" fill="#1F2329">Web 浏览器 / Portal</text>
+  <text x="1116" y="1412" font-size="13" fill="#5F6368">与 Enterprise 平台合流</text>
+
+  <!-- 统一接入 -->
+  <rect x="380" y="1480" width="840" height="60" rx="13" fill="url(#cloudGrad)" stroke="#7FD4BC" stroke-width="1.4"/>
+  <text x="800" y="1506" font-size="15.5" font-weight="700" fill="#0B4F46" text-anchor="middle">统一接入：HTTPS / WSS · 负载均衡 · IAM 认证（SSO / LDAP / 企业目录）</text>
+  <text x="800" y="1528" font-size="12.5" fill="#3C756B" text-anchor="middle">APNs / FCM 推送在此接入（替代 App 内轮询）</text>
+
+  <!-- 三客户端→接入 -->
+  <polyline points="340,1444 340,1464 620,1464 620,1480" fill="none" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="614,1480 620,1492 626,1480" fill="#0F9D8C"/>
+  <line x1="800" y1="1444" x2="800" y2="1480" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="794,1480 800,1492 806,1480" fill="#0F9D8C"/>
+  <polyline points="1260,1444 1260,1464 980,1464 980,1480" fill="none" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="974,1480 980,1492 986,1480" fill="#0F9D8C"/>
+
+  <!-- 网关集群 -->
+  <rect x="140" y="1572" width="420" height="150" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="168" y="1608" font-size="16.5" font-weight="700" fill="#1F2329">设备网关集群</text>
+  <rect x="168" y="1624" width="10" height="10" rx="2" fill="#0F9D8C"/>
+  <rect x="186" y="1624" width="10" height="10" rx="2" fill="#0F9D8C"/>
+  <rect x="204" y="1624" width="10" height="10" rx="2" fill="#0F9D8C"/>
+  <text x="232" y="1634" font-size="13" fill="#5F6368">无状态 · 多副本横向扩容</text>
+  <text x="168" y="1666" font-size="13" fill="#5F6368">配对 / 鉴权 / 会话路由 / 推送</text>
+  <text x="168" y="1692" font-size="12.5" fill="#80868B">现 Python 网关可直接容器化</text>
+
+  <!-- Cluster Runtime -->
+  <rect x="590" y="1572" width="460" height="150" rx="14" fill="#FFFFFF" stroke="#0F9D8C" stroke-width="2" filter="url(#cardShadow)"/>
+  <text x="618" y="1608" font-size="16.5" font-weight="700" fill="#0B4F46">Cluster Agent Runtime ★</text>
+  <text x="618" y="1636" font-size="13" fill="#3C4043">agx serve 服务化：多租户会话编排</text>
+  <text x="618" y="1662" font-size="13" fill="#3C4043">Agent 执行 · 工具/MCP 调度 · 审批 · 定时任务</text>
+  <text x="618" y="1692" font-size="12.5" fill="#B06000">现状：Edge Agent 已有 MVP；Cluster Runtime 尚未建设</text>
+
+  <!-- AI 管控网关 -->
+  <rect x="1080" y="1572" width="380" height="150" rx="14" fill="#FFFFFF" filter="url(#cardShadow)"/>
+  <text x="1108" y="1608" font-size="16.5" font-weight="700" fill="#1F2329">AI 管控网关（Go）</text>
+  <text x="1108" y="1636" font-size="13" fill="#5F6368">模型中转 · 策略 / PII 审查</text>
+  <text x="1108" y="1662" font-size="13" fill="#5F6368">审计 · 多维度计量计费</text>
+  <text x="1108" y="1692" font-size="12.5" fill="#80868B">enterprise/apps/gateway（已存在）</text>
+
+  <!-- 接入→网关集群 -->
+  <polyline points="620,1540 400,1540 400,1572" fill="none" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="394,1572 400,1584 406,1572" fill="#0F9D8C"/>
+  <!-- 网关集群→Runtime -->
+  <line x1="560" y1="1647" x2="590" y2="1647" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="590,1641 602,1647 590,1653" fill="#0F9D8C"/>
+  <text x="575" y="1636" font-size="11.5" fill="#0F9D8C" text-anchor="middle">RPC</text>
+  <!-- Runtime→AI网关 -->
+  <line x1="1050" y1="1647" x2="1080" y2="1647" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="1080,1641 1092,1647 1080,1653" fill="#0F9D8C"/>
+
+  <!-- 统一数据层 -->
+  <rect x="140" y="1750" width="1320" height="128" rx="14" fill="#FDECC8" stroke="#E0A800" stroke-width="2"/>
+  <text x="218" y="1788" font-size="16.5" font-weight="700" fill="#7A5B00">统一云端数据层（唯一真源，多租户隔离）</text>
+  <text x="218" y="1816" font-size="13.5" fill="#5A4708">PostgreSQL：会话 / 消息 / 绑定关系　·　对象存储：附件与产物</text>
+  <text x="218" y="1842" font-size="13.5" fill="#5A4708">向量库：知识库　·　审计 / 计量仓库　·　多租户逻辑隔离</text>
+  <text x="218" y="1866" font-size="12.5" fill="#8A6D1B">员工在任意端登录即可见全部历史，不再依赖某台电脑在线</text>
+  <polygon points="172,1776 200,1776 186,1804" fill="#E0A800"/>
+  <circle cx="186" cy="1786" r="3.5" fill="#FFFFFF"/>
+
+  <!-- Runtime→数据层 -->
+  <line x1="820" y1="1722" x2="820" y2="1750" stroke="#0F9D8C" stroke-width="2.5"/>
+  <polygon points="814,1750 820,1762 826,1750" fill="#0F9D8C"/>
+  <line x1="1270" y1="1722" x2="1270" y2="1750" stroke="#0F9D8C" stroke-width="2.5" stroke-dasharray="2 0"/>
+  <polygon points="1264,1750 1270,1762 1276,1750" fill="#0F9D8C"/>
+
+  <!-- 四个演进收益 -->
+  <g>
+    <rect x="60" y="1916" width="356" height="92" rx="13" fill="#FFFFFF" stroke="#7FD4BC" stroke-width="1.4"/>
+    <circle cx="94" cy="1952" r="16" fill="#DFF3EE"/>
+    <text x="94" y="1958" font-size="15" font-weight="700" fill="#0B6B5F" text-anchor="middle">1</text>
+    <text x="122" y="1948" font-size="14.5" font-weight="700" fill="#1F2329">真源上云</text>
+    <text x="122" y="1974" font-size="12.5" fill="#5F6368">电脑关机也能查历史、发指令、收审批</text>
+
+    <rect x="435" y="1916" width="356" height="92" rx="13" fill="#FFFFFF" stroke="#7FD4BC" stroke-width="1.4"/>
+    <circle cx="469" cy="1952" r="16" fill="#DFF3EE"/>
+    <text x="469" y="1958" font-size="15" font-weight="700" fill="#0B6B5F" text-anchor="middle">2</text>
+    <text x="497" y="1948" font-size="14.5" font-weight="700" fill="#1F2329">三端同源</text>
+    <text x="497" y="1974" font-size="12.5" fill="#5F6368">手机 / 桌面 / Web 同账号、同会话、同历史</text>
+
+    <rect x="810" y="1916" width="356" height="92" rx="13" fill="#FFFFFF" stroke="#7FD4BC" stroke-width="1.4"/>
+    <circle cx="844" cy="1952" r="16" fill="#DFF3EE"/>
+    <text x="844" y="1958" font-size="15" font-weight="700" fill="#0B6B5F" text-anchor="middle">3</text>
+    <text x="872" y="1948" font-size="14.5" font-weight="700" fill="#1F2329">企业可管控</text>
+    <text x="872" y="1974" font-size="12.5" fill="#5F6368">权限 / 审计 / 计量 / 策略全链路纳管</text>
+
+    <rect x="1185" y="1916" width="355" height="92" rx="13" fill="#FFFFFF" stroke="#7FD4BC" stroke-width="1.4"/>
+    <circle cx="1219" cy="1952" r="16" fill="#DFF3EE"/>
+    <text x="1219" y="1958" font-size="15" font-weight="700" fill="#0B6B5F" text-anchor="middle">4</text>
+    <text x="1247" y="1948" font-size="14.5" font-weight="700" fill="#1F2329">桌面端角色转换</text>
+    <text x="1247" y="1974" font-size="12.5" fill="#5F6368">从主机变为 Edge 执行节点（本地能力）</text>
+  </g>
+
+  <!-- Edge Agent 条 -->
+  <rect x="60" y="2036" width="1480" height="128" rx="18" fill="#FFF9F0" stroke="#E8C98F" stroke-width="1.6"/>
+  <text x="86" y="2070" font-size="14" font-weight="700" fill="#9A6E1A">员工电脑（未来角色）</text>
+  <rect x="86" y="2086" width="660" height="62" rx="12" fill="#FFFFFF" stroke="#E0E4EF" stroke-width="1.2"/>
+  <text x="110" y="2113" font-size="14.5" font-weight="700" fill="#1F2329">Edge Agent（enterprise/apps/edge-agent）</text>
+  <text x="110" y="2137" font-size="12.5" fill="#5F6368">执行本地工具：文件系统 · 本地软件 · 浏览器 · 内网；会话不落地或仅作缓存</text>
+  <!-- Edge↔云 连线 -->
+  <polyline points="746,2117 930,2117 930,1890 820,1890 820,1866" fill="none" stroke="#0F9D8C" stroke-width="2.5" stroke-dasharray="8 5"/>
+  <polygon points="814,1866 820,1854 826,1866" fill="#0F9D8C"/>
+  <text x="940" y="2100" font-size="12.5" fill="#0B6B5F">无状态出站 WSS</text>
+  <text x="940" y="2122" font-size="12.5" fill="#0B6B5F">连云端 Runtime（穿透内网）</text>
+  <rect x="960" y="2086" width="552" height="62" rx="12" fill="#E6F4EA" stroke="#A8DAB5" stroke-width="1.2"/>
+  <text x="984" y="2113" font-size="13" font-weight="700" fill="#1E6B3A">建设状态（据 enterprise/README 与 mobile master plan）</text>
+  <text x="984" y="2137" font-size="12.5" fill="#3C4043">Edge Agent：MVP 已完成但非默认链路 · Cluster Runtime：待建（本图为目标蓝图）</text>
+
+  <!-- 页脚 -->
+  <text x="800" y="2206" font-size="12" fill="#9AA0A6" text-anchor="middle">AgenticX 架构蓝图 ｜ 现状链路代码：agenticx/gateway（Python 设备网关）· agenticx/studio（本地 Runtime）· mobile/（Expo）· desktop/（Electron）｜ 云平台：enterprise/</text>
+</svg>

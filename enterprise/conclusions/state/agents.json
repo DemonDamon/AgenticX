@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "agents",
-  "generation": "4e7a91d95ea048888a98142f03f366f2",
+  "generation": "1acf832518564bc68be1da39e93b65da",
   "mapping_revision": 1,
-  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
-  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
   "source_fingerprint": "sha256:d334e8726fcaa619fca6d0e9f4912c52e79594d306a95c8ccf1321c81497bf0d",
   "summary_path": "enterprise/conclusions/features/agents_conclusion.md",
   "summary_sha256": "sha256:8f448b12506229222eb1dfae9d898c769a53e074049bf8347cea6373eb4ff7a5",
-  "updated_at": "2026-07-21T07:46:51.548276+00:00"
+  "updated_at": "2026-09-17T23:53:55.654118+00:00"
 }

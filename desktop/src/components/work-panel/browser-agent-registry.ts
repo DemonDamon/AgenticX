@@ -23,11 +23,13 @@ type NearBrowserActPayload = {
 };
 
 const controllers = new Map<string, BrowserAgentController>();
+const openFallbacks = new Map<string, (url: string) => Promise<BrowserAgentResult>>();
 const takeovers = new Set<string>();
 const activityListeners = new Map<string, Set<() => void>>();
 const takeoverListeners = new Map<string, Set<(on: boolean) => void>>();
 const inFlight = new Map<string, number>();
 let browserAgentIpcWired = false;
+let controllerWaitMs = 2500;
 
 export function registerBrowserAgentController(
   sessionId: string,
@@ -39,6 +41,46 @@ export function registerBrowserAgentController(
   return () => {
     if (controllers.get(sid) === ctrl) controllers.delete(sid);
   };
+}
+
+/** Always-on opener so `near_browser_open` can reveal WorkPanel from a cold start. */
+export function registerBrowserAgentOpenFallback(
+  sessionId: string,
+  open: (url: string) => Promise<BrowserAgentResult> | BrowserAgentResult,
+): () => void {
+  const sid = sessionId.trim();
+  if (!sid) return () => undefined;
+  const wrapped = async (url: string) => open(url);
+  openFallbacks.set(sid, wrapped);
+  return () => {
+    if (openFallbacks.get(sid) === wrapped) openFallbacks.delete(sid);
+  };
+}
+
+export function _setBrowserAgentControllerWaitMsForTests(ms: number): void {
+  controllerWaitMs = Math.max(0, ms);
+}
+
+function waitForController(sessionId: string): Promise<BrowserAgentController | undefined> {
+  const existing = controllers.get(sessionId);
+  if (existing) return Promise.resolve(existing);
+  if (controllerWaitMs <= 0) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      const hit = controllers.get(sessionId);
+      if (hit) {
+        resolve(hit);
+        return;
+      }
+      if (Date.now() - started >= controllerWaitMs) {
+        resolve(undefined);
+        return;
+      }
+      window.setTimeout(tick, 50);
+    };
+    window.setTimeout(tick, 50);
+  });
 }
 
 export function setBrowserHumanTakeover(sessionId: string, on: boolean): void {
@@ -143,6 +185,7 @@ async function runAction(
   return { ok: false, error: "unknown_action" };
 }
 
+/** Must be called from App/ChatPane, not only WorkPanel — a closed workspace never mounts. */
 export function ensureBrowserAgentIpc(): void {
   if (browserAgentIpcWired) return;
   const api = window.agenticxDesktop;
@@ -174,10 +217,47 @@ export function ensureBrowserAgentIpc(): void {
       }
       const ctrl = pickController(sessionId, action);
       if (!ctrl) {
+        if (action === "open") {
+          const fallback = openFallbacks.get(sessionId);
+          const url = String(payload.url || "").trim();
+          if (!url) {
+            await reply({ ok: false, error: "missing_url" });
+            return;
+          }
+          if (fallback) {
+            markActivity(sessionId, 1);
+            try {
+              const opened = await fallback(url);
+              if (opened.ok) {
+                const late = await waitForController(sessionId);
+                if (late) {
+                  try {
+                    const again = await late.open(url);
+                    await reply(again.ok ? again : opened);
+                    return;
+                  } catch {
+                    await reply(opened);
+                    return;
+                  }
+                }
+              }
+              await reply(opened);
+            } catch (err) {
+              await reply({
+                ok: false,
+                error: "guest_not_ready",
+                hint: err instanceof Error ? err.message : String(err),
+              });
+            } finally {
+              markActivity(sessionId, -1);
+            }
+            return;
+          }
+        }
         await reply({
           ok: false,
           error: "no_browser_pane",
-          hint: "该会话未打开 WorkPanel 浏览器 tab；请先用 near_browser_open",
+          hint: "右侧工作区浏览器未就绪，请再试一次打开页面。",
         });
         return;
       }
@@ -210,9 +290,11 @@ export function ensureBrowserAgentIpc(): void {
 
 export function _resetBrowserAgentRegistryForTests(): void {
   controllers.clear();
+  openFallbacks.clear();
   takeovers.clear();
   activityListeners.clear();
   takeoverListeners.clear();
   inFlight.clear();
   browserAgentIpcWired = false;
+  controllerWaitMs = 2500;
 }

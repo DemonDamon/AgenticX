@@ -1,5 +1,5 @@
 import type { Message } from "../../store";
-import { useMemo, type ReactNode } from "react";
+import { useContext, useMemo, type ReactNode } from "react";
 import { Wrench } from "lucide-react";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
@@ -28,7 +28,12 @@ import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
+import { JevDecisionCard } from "./JevDecisionCard";
+import { isJevDecisionMessage } from "../../utils/jev-decision";
+import { useTypesafeSettings } from "../../hooks/useTypesafeSettings";
 import { InlineConfirmCard } from "./InlineConfirmCard";
+import { shouldOfferSessionRemember } from "../../utils/confirm-remember";
+import { i18n } from "../../i18n/i18n";
 import { GroupSenderRail } from "./GroupSenderRail";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
@@ -37,6 +42,7 @@ import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-me
 import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
+import { preferLiveAvatarUrl } from "../../utils/live-avatar-url";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 import { collectSessionReferences } from "../../utils/session-references";
 import {
@@ -51,6 +57,7 @@ import {
   collectSessionFileChanges,
   collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
+  shouldHoldTurnArtifactCard,
 } from "../../utils/session-artifacts";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
 import { TurnArtifactCard } from "./TurnArtifactCard";
@@ -95,6 +102,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onWebSearchMessage?: (message: Message, selectedText: string) => void;
   onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
+  onOpenScratchChat?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
@@ -102,7 +110,11 @@ type Props = {
   onEditMessage?: (message: Message, newContent: string) => void;
   selectable?: boolean;
   selected?: boolean;
-  onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+  onResolveInlineConfirm?: (
+    confirm: NonNullable<Message["inlineConfirm"]>,
+    approved: boolean,
+    remember?: "session",
+  ) => void;
   onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   omitSuggestedQuestions?: boolean;
   actionRhythmBodyTail?: boolean;
@@ -117,11 +129,15 @@ type Props = {
   /** When true, the turn-interrupted resume button is hidden (task already complete). */
   isFutileResume?: boolean;
   /** Group chat: avatar + name on each user/assistant bubble. */
+  /** Scheduled-task user queries collapse when the instruction is long. */
+  collapseLongUserQuery?: boolean;
   showSenderIdentity?: boolean;
+  clusterContinue?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
   senderAvatarId?: string;
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  presenting?: boolean;
   streamStalled?: boolean;
   streamStalledSeconds?: number;
   onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
@@ -229,7 +245,7 @@ function wrapGroupIntervention(
   return (
     <GroupSenderRail
       name={name}
-      avatarUrl={message.avatarUrl || fallbackAvatarUrl}
+      avatarUrl={preferLiveAvatarUrl(fallbackAvatarUrl, message.avatarUrl)}
       avatarId={fallbackAvatarId || message.agentId}
     >
       {children}
@@ -255,11 +271,13 @@ function assistantHandoff(
     onOpenAllArtifacts?: () => void;
     onOpenAllChanges?: () => void;
   },
+  sessionBusy = false,
 ): { paths: string[]; card: ReactNode } {
   if (
     message.role !== "assistant"
     || isStreamingAssistantId(message.id)
     || message.presentationHoldDeliverables
+    || shouldHoldTurnArtifactCard(allMessages, message.id, sessionBusy)
   ) {
     return { paths: [], card: null };
   }
@@ -282,16 +300,37 @@ function assistantHandoff(
   };
 }
 
+function HandoffMarkdownContext({
+  paths,
+  onRevealPath,
+  children,
+}: {
+  paths: string[];
+  onRevealPath?: (path: string) => void;
+  children: ReactNode;
+}) {
+  const parent = useContext(MarkdownContext);
+  const value = useMemo(
+    () => ({
+      ...parent,
+      handoffPaths: paths,
+      onRevealPath: onRevealPath ?? parent.onRevealPath,
+    }),
+    [parent, paths, onRevealPath],
+  );
+  if (paths.length === 0) return children;
+  return <MarkdownContext.Provider value={value}>{children}</MarkdownContext.Provider>;
+}
+
 function withHandoffContext(
   paths: string[],
   onRevealPath: ((path: string) => void) | undefined,
   node: ReactNode,
 ): ReactNode {
-  if (paths.length === 0) return node;
   return (
-    <MarkdownContext.Provider value={{ handoffPaths: paths, onRevealPath }}>
+    <HandoffMarkdownContext paths={paths} onRevealPath={onRevealPath}>
       {node}
-    </MarkdownContext.Provider>
+    </HandoffMarkdownContext>
   );
 }
 
@@ -300,7 +339,11 @@ export function renderToolMessageExtras(
   message: Message,
   opts: {
     onRevealPath?: (path: string) => void;
-    onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+    onResolveInlineConfirm?: (
+      confirm: NonNullable<Message["inlineConfirm"]>,
+      approved: boolean,
+      remember?: "session",
+    ) => void;
   }
 ): ReactNode {
   const inlineConfirm = message.inlineConfirm;
@@ -321,6 +364,15 @@ export function renderToolMessageExtras(
         >
           拒绝
         </button>
+        {shouldOfferSessionRemember(inlineConfirm.context) ? (
+          <button
+            type="button"
+            className="rounded border border-border bg-transparent px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+            onClick={() => opts.onResolveInlineConfirm!(inlineConfirm, true, "session")}
+          >
+            {i18n.t("confirm.rememberSession", { ns: "chat" })}
+          </button>
+        ) : null}
       </div>
     ) : null;
   const path = extractPathFromToolResult(message.content);
@@ -355,6 +407,7 @@ export function MessageRenderer({
   onQuoteMessage,
   onWebSearchMessage,
   onQuoteToNewPane,
+  onOpenScratchChat,
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
@@ -377,11 +430,14 @@ export function MessageRenderer({
   onResumeTask,
   resumeInFlight = false,
   isFutileResume = false,
+  collapseLongUserQuery = false,
   showSenderIdentity = false,
+  clusterContinue = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
   sessionBusy = false,
   isLastAssistantInPane = false,
+  presenting = false,
   streamStalled = false,
   streamStalledSeconds = 0,
   onSkillManageApply,
@@ -397,6 +453,7 @@ export function MessageRenderer({
   onContinueFromMessage,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const typesafeSettings = useTypesafeSettings();
   const resolvedReferences = useMemo(() => {
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
@@ -470,7 +527,7 @@ export function MessageRenderer({
       const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
@@ -487,7 +544,7 @@ export function MessageRenderer({
       const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
@@ -510,13 +567,11 @@ export function MessageRenderer({
             ? resolveMetaDisplayName(rawAssist)
             : assistantName
         : assistantName;
-    const mergedAssistAvatarUrl = metaLeaderRow
-      ? assistantAvatarUrl || message.avatarUrl
-      : message.avatarUrl || assistantAvatarUrl;
+    const mergedAssistAvatarUrl = preferLiveAvatarUrl(assistantAvatarUrl, message.avatarUrl);
     const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
         onOpenAllArtifacts,
         onOpenAllChanges,
-      });
+      }, sessionBusy);
     return withHandoffContext(
       handoff.paths,
       onRevealPath,
@@ -535,6 +590,7 @@ export function MessageRenderer({
         onQuoteMessage={onQuoteMessage}
         onWebSearchMessage={onWebSearchMessage}
         onQuoteToNewPane={onQuoteToNewPane}
+        onOpenScratchChat={onOpenScratchChat}
         onContinueFromMessage={onContinueFromMessage}
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}
@@ -553,11 +609,14 @@ export function MessageRenderer({
             ? shouldShowBudgetIncompleteHint(message, allMessages, budgetExceededActive)
             : false
         }
+        collapseLongUserQuery={collapseLongUserQuery}
         showSenderIdentity={showSenderIdentity}
+        clusterContinue={clusterContinue}
         senderAvatarVariant={showSenderIdentity ? senderAvatarVariant : "circle"}
         senderAvatarId={senderAvatarId ?? (showSenderIdentity && message.role === "user" ? "user-self" : undefined)}
         sessionBusy={sessionBusy}
         isLastAssistantInPane={isLastAssistantInPane}
+        presenting={presenting}
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}
@@ -570,6 +629,15 @@ export function MessageRenderer({
   if (message.role === "tool") {
     if (isNoisyToolStatusMessage(message)) {
       return null;
+    }
+    if (isJevDecisionMessage(message)) {
+      if (!typesafeSettings.show_decision_card) return null;
+      return (
+        <JevDecisionCard
+          message={message}
+          groupChatRail={showSenderIdentity}
+        />
+      );
     }
     if (message.toolName === "group_progress") {
       return <GroupProgressLine message={message} />;
@@ -622,7 +690,7 @@ export function MessageRenderer({
         <TurnInterruptionNoticeLine
           message={message}
           resumeInFlight={resumeInFlight}
-          onResume={onResumeTask}
+          onResume={presenting ? undefined : onResumeTask}
           isFutile={isFutileResume}
         />
       );

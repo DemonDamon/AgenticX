@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Eye, FolderOpen, ExternalLink } from "lucide-react";
+import { Eye, FolderOpen, ExternalLink, MessageSquare } from "lucide-react";
 import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
 import {
   artifactBaseName,
@@ -24,6 +24,7 @@ type Props = {
   onHighlightHandled?: () => void;
   /** Open / preview a path (HTML → WorkPanel browser; other previewable → WorkspaceFilePreview). */
   onOpenPath?: (path: string) => void;
+  onOpenScratch?: (path: string) => void;
 };
 
 export function SessionArtifactList({
@@ -31,6 +32,7 @@ export function SessionArtifactList({
   highlightPath,
   onHighlightHandled,
   onOpenPath,
+  onOpenScratch,
 }: Props) {
   const { t } = useTranslation("workspace");
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -152,6 +154,17 @@ export function SessionArtifactList({
               >
                 {artifactBaseName(path)}
               </button>
+              {onOpenScratch ? (
+                <button
+                  type="button"
+                  className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
+                  onClick={() => onOpenScratch(path)}
+                  aria-label={t("work.openScratch")}
+                  title={t("work.openScratch")}
+                >
+                  <MessageSquare className="h-3 w-3" strokeWidth={1.5} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"

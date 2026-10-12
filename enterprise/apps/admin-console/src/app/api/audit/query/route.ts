@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       provider: typeof body.provider === "string" ? body.provider : undefined,
       model: typeof body.model === "string" ? body.model : undefined,
       policy_hit: typeof body.policy_hit === "string" ? body.policy_hit : undefined,
+      event_type: typeof body.event_type === "string" ? body.event_type : undefined,
       cross_border: body.cross_border === true ? true : undefined,
       start: typeof body.start === "string" ? body.start : undefined,
       end: typeof body.end === "string" ? body.end : undefined,

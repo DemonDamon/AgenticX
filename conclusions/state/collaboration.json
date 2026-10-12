@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "collaboration",
-  "generation": "bfc99d48598646c6bac67e1ce7dfe80c",
+  "generation": "c433343c7e494f5fbd9c1d0f9361faae",
   "mapping_revision": 1,
-  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
-  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
+  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
   "source_fingerprint": "sha256:c40221dabae2f53ce69eb7978a942d7038e00e96f5c08f9c791b0b52eef5692a",
   "summary_path": "conclusions/collaboration_module_conclusion.md",
   "summary_sha256": "sha256:a6db5c1a0da7230e137cd9cdae928bbc4d3dc4f83ea5363be4cef62d2832cb5f",
-  "updated_at": "2026-09-01T06:08:36.162139+00:00"
+  "updated_at": "2026-09-30T00:54:06.160935+00:00"
 }

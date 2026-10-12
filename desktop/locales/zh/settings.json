@@ -9,6 +9,7 @@
     "connectors": "连接器",
     "tools": "内置工具",
     "skills": "技能配置",
+    "commands": "指令",
     "knowledge": "知识库",
     "data_sources": "数据源",
     "memory": "记忆管理",
@@ -17,6 +18,37 @@
     "favorites": "内容收藏",
     "server": "远程连接",
     "security": "安全中心"
+  },
+  "commands": {
+    "title": "指令",
+    "hint": "保存常用说明后，在输入框输入 / 即可调用。",
+    "create": "创建",
+    "createTitle": "创建指令",
+    "emptyTitle": "暂无指令",
+    "emptyHint": "保存常用说明后，在输入框输入 / 即可调用。",
+    "builtinTitle": "内置指令",
+    "builtinHint": "关闭后，输入框的 / 菜单不再显示这条指令。",
+    "available": "{{name}} 可用",
+    "unavailable": "{{name}} 不可用",
+    "name": "命令名称",
+    "description": "描述",
+    "instructions": "说明",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "subject": "主体",
+    "invalidName": "名称只能使用小写字母、数字和短横线",
+    "reservedName": "该名称已保留",
+    "instructionsRequired": "请填写说明",
+    "subjectRequired": "请选择主体",
+    "loadFailed": "加载失败",
+    "roomLogin": "登录企业账号后可管理房间指令",
+    "scope": {
+      "global": "全局",
+      "avatar": "分身",
+      "group": "群聊",
+      "room": "云房间"
+    }
   },
   "display": {
     "title": "显示",
@@ -39,7 +71,7 @@
     "accentBlue": "蓝色",
     "accentGreen": "绿色",
     "accentPink": "粉红色",
-    "accentYellow": "黄色",
+    "accentYellow": "橙色",
     "accentMono": "单色"
   },
   "commonSettings": {
@@ -103,6 +135,16 @@
     "me": "我",
     "prefUnset": "尚未设置回答偏好与沟通风格",
     "changeAvatar": "更换头像",
+    "avatarHint": "头像会显示在群聊和多人会话里，点击头像即可更换。",
+    "costumeTitle": "服装定制",
+    "costumeHint": "给 Near 换一套滑板配色",
+    "costumeShuffle": "随机一套",
+    "costumeBrand": "品牌橙",
+    "costumeGachaLabel": "抽卡提示词",
+    "costumeGachaPrompt": "干净大色，深盖浅身",
+    "costumeGachaDraw": "抽卡",
+    "costumeGachaDone": "抽到一套新皮肤。",
+    "costumeGachaInvalid": "这次没抽出可用配色，再抽一次。",
     "resetDefault": "恢复默认",
     "resetDefaultDone": "已恢复默认。",
     "nickname": "我的称呼",
@@ -142,7 +184,7 @@
   },
   "meta": {
     "title": "元智能体",
-    "intro": "管理元智能体的身份与行为原则",
+    "intro": "管理元智能体的外观、身份与行为原则",
     "identity": "身份定义",
     "identityHint": "Near 是谁，以及它在对话中的角色",
     "soul": "人格与原则",
@@ -249,6 +291,7 @@
       "minimax": "MiniMax",
       "kimi": "月之暗面",
       "deepseek": "DeepSeek",
+      "mimo": "小米 MiMo",
       "ollama": "Ollama"
     },
     "ollamaHint": "Ollama 直连（如局域网 11434）；API 地址勿带 /v1。侧栏已有内置「Ollama」时可改那边，此处用于第二实例或自定义名称。",
@@ -353,6 +396,7 @@
       "memory_append": "Memory Append",
       "memory_search": "Memory Search",
       "session_search": "Session Search",
+      "plugin_usage": "插件用量",
       "code_search": "代码搜索",
       "code_index_create": "代码索引构建",
       "code_index_status": "代码索引状态",
@@ -396,6 +440,7 @@
       "memory_append": "向工作区日记或长期 MEMORY.md 追加一条记忆（跨会话保留）。",
       "memory_search": "用全文 / 向量 / 混合模式检索已索引的工作区记忆。",
       "session_search": "按关键词检索历史会话消息，空查询则返回最近会话。",
+      "plugin_usage": "查询任意模型/插件用量：按模型名、日期范围或会话查看调用次数、超时、重试与连续失败原因。只读。",
       "code_search": "在已索引代码库上做语义/混合检索；探索阶段优先于整文件读取，精确字符串请用 grep。",
       "code_index_create": "后台为指定代码库构建语义索引。",
       "code_index_status": "查询代码索引构建进度与统计。",
@@ -504,6 +549,22 @@
     "pullFailed": "拉取失败：{{reason}}",
     "scanFailed": "扫描未通过：{{reason}}",
     "installedNamed": "已安装 \"{{name}}\"",
+    "repoInstalling": "正在从 GitHub 拉取「{{name}}」完整技能目录并做安全扫描…",
+    "repoInstallSkipped": "「{{name}}」已安装（如需更新可在终端用 --overwrite 重装）",
+    "repoInstallRejected": "安全扫描未通过，已取消安装「{{name}}」：{{reason}}",
+    "repoHighRiskTitle": "高危扫描确认",
+    "repoHighRiskBody": "安全扫描判定「{{name}}」命中高危规则。请查看下方发现列表，确认信任该技能来源后再继续安装。",
+    "repoHighRiskConfirm": "仍然安装",
+    "repoHighRiskCancel": "取消安装",
+    "uninstall": "卸载",
+    "uninstallAria": "卸载技能 {{name}}",
+    "uninstallConfirmTitle": "卸载技能",
+    "uninstallConfirmBody": "将删除「{{name}}」的本地技能目录（~/.agenticx/skills 下），此操作不可恢复。",
+    "uninstallConfirmOk": "卸载",
+    "uninstallConfirmCancel": "取消",
+    "uninstalling": "正在卸载「{{name}}」…",
+    "uninstalledNamed": "已卸载 \"{{name}}\"",
+    "uninstallFailed": "卸载失败: {{reason}}",
     "confirmThenWrite": "当前策略要求你点「确认安装」后再写入。",
     "confirmThenWriteWithScan": "{{summary}}\n\n当前策略要求你点「确认安装」后再写入。",
     "highRiskConfirm": "命中高危规则：请阅读说明后点下方按钮确认。",
@@ -681,6 +742,15 @@
     "connOk": "连接成功",
     "connFail": "连接失败",
     "feishu": "飞书集成",
+    "channelBots": "渠道机器人",
+    "restartGateway": "重新启动网关后生效",
+    "dingtalkEnable": "启用钉钉机器人",
+    "appSecret": "App Secret",
+    "signingSecret": "签名密钥",
+    "webhookSecret": "Webhook 密钥",
+    "qqBot": "QQ 机器人",
+    "qqReceiveOnly": "当前只接收消息；主动回复尚未接通。",
+    "saveChannels": "保存",
     "feishuLong": "飞书长连接（推荐）",
     "webhook": "Webhook 模式",
     "feishuLongHint": "无需公网服务器，使用飞书官方 WebSocket 长连接接收消息，Near 启动后自动在后台运行。",
@@ -1184,6 +1254,19 @@
     "stFailed": "失败",
     "cancelTitle": "取消入库",
     "stCancelled": "已取消",
+    "skippedReindex": "内容未变，已跳过重算",
+    "wikiBackfill": "为已入库资料补写 Wiki",
+    "wikiBackfillBusy": "正在排队补写",
+    "wikiQueued": "Wiki 排队",
+    "wikiRunning": "正在写 Wiki",
+    "wikiDone": "Wiki 已生成",
+    "wikiFailed": "Wiki 失败",
+    "wikiSkipped": "未写 Wiki",
+    "wikiCancel": "停止写页面",
+    "wikiModelProvider": "写页面的供应商",
+    "wikiModelName": "写页面的模型",
+    "wikiModelPick": "请选择",
+    "wikiModelHint": "只用于把资料写成 Wiki 页。改完后先保存，再补写或重新索引。",
     "depsDetectFailed": "后端依赖检测失败",
     "debugIntro": "在此验证检索质量与切片效果，不会修改已入库资料；配置变更后请先在「配置」页保存。",
     "recallTitle": "召回调试",
@@ -1299,6 +1382,7 @@
     "saved": "已保存",
     "saveFailed": "保存失败：{{reason}}",
     "wikiTitle": "Wiki 页面（只读）",
+    "wikiEmpty": "还没有文档型大脑。先在知识库里创建，并打开 Wiki 编译。",
     "loadingWiki": "加载 Wiki…",
     "noWiki": "尚无编译页。在配置中启用「Wiki 编译」并完成资料入库后会自动生成。",
     "readingPage": "读取页面…",
@@ -1361,7 +1445,11 @@
     "wecomTitle": "企业微信连接器",
     "wecomConnect": "连接",
     "wecomName": "企业微信",
-    "wecomHint": "使用企业微信官方 CLI（wecom-cli）。请先在企业微信管理后台创建 API 模式智能机器人，复制 Bot ID 与 Secret 填入下方。连接后 Near 会写入托管技能，Agent 可通过 wecom-cli 操作消息、文档、智能表格、通讯录、待办与会议。凭证由 CLI 加密保存在本机。",
+    "wecomHint": "使用企业微信官方 CLI。默认在本弹层扫码接入（二维码过期会自动换新，不会写进聊天）。也可以改填管理后台的 Bot ID / Secret。连接后 Near 写入托管技能，Agent 可操作消息、文档、智能表格、通讯录、待办与会议。",
+    "wecomModeQr": "扫码接入",
+    "wecomModeManual": "填写凭据",
+    "wecomQrHint": "点连接后在本窗口扫码。不要把登录链接发到对话里，链接很快会过期。",
+    "wecomOpenLogin": "在浏览器打开登录页",
     "botIdPh": "请输入企业微信机器人 Bot ID",
     "botSecretPh": "请输入企业微信机器人 Secret",
     "howBotCreds": "如何获取 Bot ID / Secret",
@@ -1425,6 +1513,7 @@
     "phaseConnError": "连接未完成",
     "phaseWecomInstall": "首次使用，正在下载企业微信 CLI…",
     "phaseWecomInit": "正在配置机器人凭据…",
+    "phaseWecomScan": "请用企业微信扫描本窗口二维码…",
     "phaseWecomProbe": "正在校验凭据…",
     "phaseConnOk": "连接成功",
     "phaseQqmailInstall": "首次使用，正在下载 Agent Mail CLI…",
@@ -1433,56 +1522,78 @@
     "catalog": {
       "tencent-meeting": {
         "name": "腾讯会议",
-        "description": "管理会议、录制、纪要与参会报告"
+        "description": "管理腾讯会议日程、录制回放、会议纪要与参会报告，在对话中创建会议、查询录制并汇总会后结论。"
       },
       "tapd": {
         "name": "TAPD",
-        "description": "管理需求、缺陷、任务与迭代"
+        "description": "管理 TAPD 需求、缺陷、任务与迭代，在对话中跟进研发进度、更新状态并汇总迭代交付情况。"
       },
       "github": {
         "name": "GitHub",
-        "description": "查看仓库、Issue 与 Pull Request"
+        "description": "查看 GitHub 仓库、Issue 与 Pull Request，在对话中检索代码变更、审阅讨论并跟踪开源协作进度。"
       },
       "feishu": {
         "name": "飞书",
-        "description": "消息、文档、多维表格、日历与任务"
+        "description": "飞书消息、云文档、多维表格、日历与任务：把团队协作与知识沉淀接到助手，便于催办、检索与日程安排。"
       },
       "wecom": {
         "name": "企业微信",
-        "description": "消息、文档、智能表格、通讯录、待办与会议"
+        "description": "企业微信消息、文档、智能表格、通讯录、待办与会议，把企业内部沟通与协作能力接入助手工作流。"
       },
       "qqmail": {
         "name": "Agent Mail",
-        "description": "Agent 专属邮箱：收发、搜索、回复与转发"
+        "description": "Agent 专属邮箱：收发、搜索、回复与转发邮件，让助手在隔离邮箱中处理通知、摘要与外联沟通。"
       },
       "gmail": {
         "name": "Gmail",
-        "description": "收发、搜索和整理邮件"
+        "description": "Gmail 收发、搜索与整理邮件：在对话中查找线程、起草回复并管理标签，把邮件工作流交给助手。"
       },
       "notion": {
         "name": "Notion",
-        "description": "浏览页面与数据库内容"
+        "description": "浏览与检索 Notion 页面与数据库内容，把知识库、项目笔记与结构化记录接到助手问答与摘要。"
       },
       "slack": {
         "name": "Slack",
-        "description": "读取频道并发送消息"
+        "description": "读取 Slack 频道并发送消息：汇总讨论、检索历史并代发通知，把团队即时通讯接到助手。"
       },
       "gdrive": {
         "name": "Google Drive",
-        "description": "查找与管理云端文件"
+        "description": "查找与管理 Google Drive 云端文件：搜索文档、整理目录并读取内容摘要，便于资料检索与协作。"
       },
       "airtable": {
         "name": "Airtable",
-        "description": "读取和更新表格记录"
+        "description": "读取和更新 Airtable 表格记录：查询视图、写入字段与同步业务数据，把轻量数据库接到助手。"
       },
       "supabase": {
         "name": "Supabase",
-        "description": "访问项目数据与服务"
+        "description": "访问 Supabase 项目数据与服务：查询表、调用边缘函数与管理后端资源，支撑应用数据对话操作。"
       },
       "bigquery": {
         "name": "BigQuery",
-        "description": "查询和分析数据集"
+        "description": "查询和分析 BigQuery 数据集：用自然语言发起分析、探索表结构与汇总指标，把数仓洞察带到对话里。"
       }
+    },
+    "needsReauth": "需重新授权",
+    "needsReauthHint": "对话侧 GitHub MCP 凭据失效；请重新授权或更新 Personal Access Token。",
+    "needsReauthAria": "需重新授权 {{name}}",
+    "reauthAria": "重新授权 {{name}}",
+    "githubNativeOkMcpDegraded": "GitHub CLI 已登录；对话 MCP 仍需有效 Token，已尝试同步，请确认状态。",
+    "githubMcpSynced": "已将 GitHub CLI Token 同步到 MCP",
+    "githubReauth": "重新授权",
+    "myConnections": {
+      "title": "我的连接",
+      "subtitle": "已授权的连接实例；删除会断开登录或移除本机 MCP 配置。",
+      "delete": "删除",
+      "deleteAria": "删除 {{name}}",
+      "confirmDelete": "确认删除",
+      "disconnectFail": "断开失败",
+      "empty": "暂无已连接实例",
+      "gatewayName": "连接器网关",
+      "kindRest": "REST API",
+      "kindDatabase": "数据库",
+      "readOnly": "只读",
+      "needsCredential": "待填凭证",
+      "viaGateway": "经连接器网关调用"
     }
   },
   "codeIndex": {
@@ -1902,6 +2013,7 @@
     "unknownError": "未知错误",
     "import": "导入",
     "linkOnly": "仅链接",
-    "openFile": "打开文件"
+    "openFile": "打开文件",
+    "connectionExists": "该端点与凭证已存在连接「{{name}}」，无需重复创建"
   }
 }

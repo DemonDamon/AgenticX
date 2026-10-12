@@ -21,6 +21,7 @@ import {
   supportsGlm53ReasoningEffort,
   supportsKimiK28ReasoningEffort,
   supportsKimiK3ReasoningEffort,
+  supportsQwenHybridThinking,
 } from "./model-hover-blurb";
 
 describe("describeModelForPicker", () => {
@@ -52,6 +53,13 @@ describe("describeModelForPicker", () => {
     expect(blurb.supportsReasoningEffort).toBe(false);
   });
 
+  it("exposes thinking toggle for qwen3.7-max", () => {
+    const blurb = describeModelForPicker("bailian", "qwen3.7-max", "阿里云百炼");
+    expect(blurb.supportsDeepSeekThinking).toBe(true);
+    expect(supportsQwenHybridThinking("qwen3.7-max")).toBe(true);
+    expect(supportsQwenHybridThinking("qwen-plus")).toBe(false);
+  });
+
   it("uses a distinctive blurb for DeepSeek V4", () => {
     const pro = describeModelForPicker("deepseek", "deepseek-v4-pro", "DeepSeek");
     expect(pro.description).toBe("DeepSeek 旗舰模型，支持 1M 上下文窗口");
@@ -65,6 +73,9 @@ describe("describeModelForPicker", () => {
     expect(pro.metaValue).toBe("DeepSeek");
 
     const flash = describeModelForPicker("deepseek", "deepseek-v4-flash", "DeepSeek");
+    const mimo = describeModelForPicker("mimo", "mimo-v2.6-pro", "小米 MiMo");
+    expect(mimo.description).toContain("全模态");
+    expect(mimo.metaValue).toBe("小米 MiMo");
     expect(flash.description).toBe("DeepSeek 旗舰模型，支持 1M 上下文窗口");
     expect(flash.supportsDeepSeekThinking).toBe(true);
     expect(supportsDeepSeekV4Thinking("openai/deepseek-v4-pro-0813")).toBe(true);

@@ -645,7 +645,7 @@ export function RunReplayPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-panel">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--shell-panel)]">
       {sessionRuns.length > 0 ? (
         <ReplaySummaryBar
           runs={sessionRuns}

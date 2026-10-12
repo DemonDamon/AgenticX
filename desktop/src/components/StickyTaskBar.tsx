@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Circle, CircleCheck, Loader2 } from "lucide-react";
 import type { Message } from "../store";
 import {
+  isFutileResume,
   isTodoSnapshotSuperseded,
   resolveDisplayedTodoFromMessages,
 } from "../utils/task-stall-policy";
@@ -66,7 +67,8 @@ export function StickyTaskBar({
 
   const allDone = !!parsed && parsed.total > 0 && parsed.completed === parsed.total;
   const runEnded = liveness === "idle";
-  const runIncomplete = runEnded && !allDone && executionState !== "interrupted";
+  const parkedOnUser = useMemo(() => isFutileResume(messages), [messages]);
+  const runIncomplete = runEnded && !allDone && executionState !== "interrupted" && !parkedOnUser;
 
   // Guard against ghost task cards: when the model called `todo_write` but
   // never actually advanced any item (all pending, 0 in_progress, 0 completed)
@@ -125,7 +127,7 @@ export function StickyTaskBar({
         {liveness === "stalled" && silentSeconds > 0 ? (
           <span className="text-[10px] text-amber-300/90">{t("taskBar.noResponse", { seconds: silentSeconds })}</span>
         ) : null}
-        {liveness === "stalled" && onResume ? (
+        {liveness === "stalled" && onResume && !parkedOnUser ? (
           <button
             type="button"
             className="text-[10px] font-medium text-amber-300 hover:text-amber-200"

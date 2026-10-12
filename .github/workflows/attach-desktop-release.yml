@@ -1,50 +1,53 @@
-# Attach already-built Near installers (Actions artifacts) to a GitHub Release.
-# Use this when a tag build finished but you do not want to re-download
-# hundreds of MB locally just to drag them onto the Release page.
-#
-# workflow_dispatch inputs:
-#   run_id — Actions run that uploaded near-* artifacts
-#   tag    — existing git tag / Release (create the Release notes first if needed)
+# Re-attach Near Desktop installers to an existing GitHub Release from a prior
+# Actions run's artifacts (no rebuild, no local download).
+# Example: tag=v0.6.5 artifact_run_id=<build run that uploaded near-*>
 
-name: Attach Desktop Artifacts to Release
+name: Attach Desktop Release Assets
 
 on:
   workflow_dispatch:
     inputs:
-      run_id:
-        description: Actions run ID that already uploaded near-* artifacts
-        required: true
-        type: string
       tag:
-        description: Existing git tag / GitHub Release to attach installers to
+        description: "Release tag to attach assets to (e.g. v0.6.5)"
         required: true
         type: string
-        default: v0.6.0
-
-permissions:
-  contents: write
-  actions: read
+      artifact_run_id:
+        description: "Actions run ID that has near-* artifacts"
+        required: true
+        type: string
 
 jobs:
   attach:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
-      - name: Download artifacts from the build run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p release-assets
-          gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" --dir release-assets
+      - name: Download build artifacts from prior run
+        uses: actions/download-artifact@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_run_id }}
+          pattern: near-*
+          path: release-assets
+          merge-multiple: true
 
-      - name: Upload installers to GitHub Release
+      - name: Attach installers to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           shopt -s globstar nullglob
           files=(release-assets/**/*.dmg release-assets/**/*.exe)
+          echo "Found ${#files[@]} installer(s): ${files[*]}"
           if [[ ${#files[@]} -eq 0 ]]; then
-            echo "No DMG/EXE found in run ${{ inputs.run_id }}"
+            echo "No DMG/EXE artifacts to attach"
             exit 1
           fi
-          ls -lh "${files[@]}"
-          gh release upload "${{ inputs.tag }}" "${files[@]}" --repo "${{ github.repository }}" --clobber
+          tag="${{ inputs.tag }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag does not exist"
+            exit 1
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber
+          gh release view "$tag" --json assets --jq '.assets[]|{name,size}'

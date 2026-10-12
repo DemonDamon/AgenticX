@@ -17,6 +17,8 @@
   border: none;
   box-shadow: none;
   box-sizing: border-box;
+  border-radius: 18px;
+  border-bottom-left-radius: 8px;
 }
 
 body {
@@ -37,13 +39,56 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Markdown content styles */
+/* Markdown content styles — inherit size from parent so reasoning / preview stay compact. */
 .msg-content {
-  font-size: var(--agx-chat-im-body-font-size);
   line-height: 1.625;
 }
 .msg-content p {
   margin: 0.5em 0;
+}
+
+/* Chat IM body only: larger, brighter, less dense long-form reading. */
+.agx-im-body-type {
+  font-size: var(--agx-chat-im-body-font-size);
+  line-height: var(--agx-chat-im-body-line-height);
+  font-optical-sizing: auto;
+}
+.agx-im-body-type .msg-content {
+  font-size: inherit;
+  line-height: inherit;
+}
+.agx-im-body-type .msg-content p {
+  margin: var(--agx-chat-im-body-paragraph-gap) 0;
+}
+.agx-im-body-type .msg-content > :first-child {
+  margin-top: 0;
+}
+.agx-im-body-type .msg-content > :last-child {
+  margin-bottom: 0;
+}
+.agx-im-body-type .msg-content ul,
+.agx-im-body-type .msg-content ol {
+  margin: var(--agx-chat-im-body-paragraph-gap) 0;
+  margin-left: 0;
+  padding-left: 1.35em;
+  list-style-position: outside;
+}
+.agx-im-body-type .msg-content li {
+  margin: 0.4em 0;
+}
+.agx-im-body-type .msg-content h1,
+.agx-im-body-type .msg-content h2,
+.agx-im-body-type .msg-content h3 {
+  margin-top: 1.15em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.01em;
+}
+.agx-im-body-type .msg-content h3 {
+  font-size: 1.0625em;
+  line-height: 1.45;
+}
+.agx-im-body-type .msg-content > :is(h1, h2, h3):first-child {
+  margin-top: 0;
 }
 .msg-content pre {
   @apply overflow-x-auto rounded p-3 text-[13px];
@@ -107,8 +152,8 @@ body {
   margin: 0 !important;
 }
 .agx-expert-body .msg-content :is(h1, h2, h3):first-of-type {
-  /* Match .msg-content p { margin: 0.5em 0 } so ## titles sit like “收到。” openers. */
-  margin-top: 0.5em !important;
+  /* Match chat paragraph gap so ## titles sit like “收到。” openers. */
+  margin-top: var(--agx-chat-im-body-paragraph-gap) !important;
 }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
@@ -137,6 +182,67 @@ body {
 .msg-content tbody tr:last-child td {
   border-bottom: none;
 }
+.scratch-md table {
+  width: 100%;
+}
+.scratch-md tr th:first-child,
+.scratch-md tr td:first-child {
+  border-left: 1px solid var(--border-subtle);
+}
+.scratch-md tr th:last-child,
+.scratch-md tr td:last-child {
+  border-right: 1px solid var(--border-subtle);
+}
+.scratch-md thead th {
+  border-top: 1px solid var(--border-subtle);
+}
+.scratch-md tbody tr:last-child td {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Scratch answers read as prose: open paragraphs, a quiet table, and a short fade on the line that just settled. */
+.scratch-md p {
+  margin: 0 0 1.15em;
+  line-height: 1.7;
+}
+.scratch-md p:last-child {
+  margin-bottom: 0;
+}
+.scratch-md[data-streaming="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 2.6rem);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 2.6rem);
+}
+.scratch-md .scratch-quiet-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.scratch-md .scratch-quiet-table th,
+.scratch-md .scratch-quiet-table td {
+  border: none;
+  border-bottom: 1px solid var(--border-muted);
+  padding: 0.55rem 0.2rem;
+}
+.scratch-md .scratch-quiet-table tr th:first-child,
+.scratch-md .scratch-quiet-table tr td:first-child,
+.scratch-md .scratch-quiet-table tr th:last-child,
+.scratch-md .scratch-quiet-table tr td:last-child {
+  border-left: none;
+  border-right: none;
+}
+.scratch-md .scratch-quiet-table thead th {
+  border-top: none;
+  font-weight: 560;
+}
+.scratch-md .scratch-quiet-table tbody tr:last-child td {
+  border-bottom: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scratch-md[data-streaming="true"] {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 .msg-content thead th {
   font-weight: 600;
   color: var(--text-strong);
@@ -243,44 +349,31 @@ body {
   color: rgb(37, 99, 235);
 }
 
-/* 消息元数据行：Apple 液态玻璃模型徽标 (Liquid Glass Chip) */
+/* 模型徽标：仅主题色填充，无描边、无图标 */
 .agx-liquid-glass-chip {
   width: max-content;
   max-width: none;
   min-width: max-content;
   box-sizing: border-box;
-  overflow: visible;
-  /* backdrop-filter clips descendants to the rounded mask — do not use it here */
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(192, 132, 252, 0.08) 80%, rgba(56, 189, 248, 0.06) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
-              inset 1px 0 1px 0 rgba(56, 189, 248, 0.3),
-              inset -1px -1px 1.5px 0 rgba(244, 114, 182, 0.25),
-              0 1px 3px 0 rgba(0, 0, 0, 0.35);
-  color: rgba(254, 243, 199, 0.95);
-}
-.agx-liquid-glass-chip:hover {
-  border-color: rgba(255, 255, 255, 0.28);
-}
-.agx-liquid-glass-chip .agx-chip-sparkle {
-  color: rgba(253, 230, 138, 0.9);
-  fill: rgba(253, 230, 138, 0.35);
+  border: none;
+  background: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 36%, var(--surface-popover));
+  box-shadow: none;
+  color: var(--text-strong);
+  font-weight: 400;
 }
 
 :root[data-theme="light"] .agx-liquid-glass-chip {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.75) 100%);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
-              0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  color: #1e293b;
+  background: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 16%, var(--surface-popover));
+  color: var(--text-strong);
 }
-:root[data-theme="light"] .agx-liquid-glass-chip:hover {
-  border-color: rgba(0, 0, 0, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(241, 245, 249, 0.85) 100%);
+
+:root[data-theme="light"] [data-turn-usage-arrow] {
+  color: #047857;
+  background: color-mix(in srgb, #047857 16%, transparent);
 }
-:root[data-theme="light"] .agx-liquid-glass-chip .agx-chip-sparkle {
-  color: #b45309;
-  fill: rgba(217, 119, 6, 0.2);
+
+:root[data-theme="light"] [data-turn-cache-hit] {
+  color: #047857;
 }
 
 
@@ -397,14 +490,19 @@ body {
 }
 
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
-.agx-session-history-row.agx-session-history-row--active {
-  background-color: rgba(0, 0, 0, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+.agx-session-history-row.agx-session-history-row--active,
+.agx-sidebar-nav-row.agx-sidebar-nav-row--active {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--text-strong);
+  font-weight: 500;
 }
 :root[data-theme="dark"] .agx-session-history-row.agx-session-history-row--active,
-:root[data-theme="dim"] .agx-session-history-row.agx-session-history-row--active {
-  background-color: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+:root[data-theme="dim"] .agx-session-history-row.agx-session-history-row--active,
+:root[data-theme="dark"] .agx-sidebar-nav-row.agx-sidebar-nav-row--active,
+:root[data-theme="dim"] .agx-sidebar-nav-row.agx-sidebar-nav-row--active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-strong);
+  font-weight: 500;
 }
 
 /* 历史列表滚动区：预留 scrollbar gutter，避免会话行选中底左右留白受滚动条挤压而不对称 */
@@ -695,7 +793,7 @@ body.agx-settings-nav-resizing {
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="yellow"] {
-  --theme-color-rgb: 245, 158, 11;
+  --theme-color-rgb: 249, 115, 26;
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="white"] {
@@ -707,9 +805,22 @@ body.agx-settings-nav-resizing {
   --theme-color-text: #ffffff;
 }
 
+.agx-themed-portrait {
+  display: inline-block;
+  overflow: hidden;
+  line-height: 0;
+  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+}
+.agx-themed-portrait svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 :root[data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.15);
-  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.16);
+  --chat-im-user-bg: rgb(var(--theme-color-rgb));
+  --chat-im-user-text: var(--theme-color-text);
+  --chat-im-user-border: transparent;
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --chat-im-avatar-fg: var(--theme-color-text);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
@@ -777,7 +888,7 @@ body.agx-settings-nav-resizing {
   white-space: nowrap;
 }
 
-/* 用户气泡内 @file chip：柔和 pill，避免「框套框」与重阴影 */
+/* 用户气泡内 @file chip：只跟 user-text 混色，避免实心底上叠页面浅灰 */
 .agx-im-user-bubble .agx-composer-inline-chip {
   display: inline-flex;
   align-items: center;
@@ -788,10 +899,10 @@ body.agx-settings-nav-resizing {
   padding-block: 0.12rem;
   border-radius: 0.4rem;
   font-weight: 500;
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-  border-color: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--chat-im-user-text) 16%, transparent);
+  border-color: color-mix(in srgb, var(--chat-im-user-text) 22%, transparent);
   box-shadow: none;
-  color: color-mix(in srgb, var(--chat-im-user-text) 78%, var(--text-faint) 22%);
+  color: color-mix(in srgb, var(--chat-im-user-text) 88%, transparent);
 }
 
 .agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-name {
@@ -799,7 +910,7 @@ body.agx-settings-nav-resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: color-mix(in srgb, var(--chat-im-user-text) 88%, var(--text-muted) 12%);
+  color: color-mix(in srgb, var(--chat-im-user-text) 88%, transparent);
 }
 
 .agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-sep {
@@ -830,6 +941,58 @@ body.agx-settings-nav-resizing {
   opacity: 0.55;
   background: transparent;
   padding: 0;
+}
+
+/* Solid user bubble uses theme fill; default .msg-content a is the same fill and disappears. */
+.agx-im-user-bubble .msg-content a {
+  color: var(--chat-im-user-text);
+  text-decoration-color: color-mix(in srgb, var(--chat-im-user-text) 55%, transparent);
+}
+
+/*
+ * Page markdown paints headings/strong with --text-strong and inline code with the
+ * dark-theme chip. On a white (mono) fill those tokens are light-on-light.
+ * Stay on the bubble's own text color instead.
+ */
+.agx-im-user-bubble .msg-content :is(h1, h2, h3, strong) {
+  color: inherit;
+}
+.agx-im-user-bubble .msg-content :is(h1, h2, h3) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: inherit;
+  letter-spacing: 0;
+}
+.agx-im-user-bubble .msg-content :not(pre) > code {
+  color: inherit !important;
+  background: color-mix(in srgb, var(--chat-im-user-text) 14%, transparent) !important;
+}
+.agx-im-user-bubble .msg-content ul,
+.agx-im-user-bubble .msg-content ol {
+  list-style-position: inside;
+  margin-left: 0;
+  padding-left: 0.2em;
+}
+
+/* Scheduled-task contract: one-line note, not a markdown document inside the bubble. */
+.agx-execution-contract {
+  margin-top: 0.55rem;
+  font-size: 0.86em;
+  line-height: 1.45;
+}
+.agx-execution-contract summary {
+  cursor: pointer;
+  font-weight: 600;
+  opacity: 0.82;
+  list-style: none;
+}
+.agx-execution-contract summary::-webkit-details-marker {
+  display: none;
+}
+.agx-execution-contract ul {
+  margin: 0.35rem 0 0;
+  padding-left: 0.2em;
+  list-style-position: inside;
 }
 
 /*
@@ -911,10 +1074,41 @@ body.agx-settings-nav-resizing {
   background: var(--surface-hover);
 }
 
-/* 用户气泡：纯填充、无描边（描边会在浅色主题下叠出双层边缘） */
+/* Long user query: five readable lines, with a short fade on the last line. */
+.agx-user-query-collapsed {
+  max-height: calc(var(--agx-chat-im-body-font-size) * var(--agx-chat-im-body-line-height) * 5);
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+}
+
+/* 用户气泡：实心填充胶囊；圆角只放这里，避免和 Tailwind 抢 border-radius */
 .agx-im-user-bubble {
   border: none;
   box-shadow: none;
+  border-radius: 18px;
+  border-bottom-right-radius: 8px;
+}
+
+[data-im-align="end"] + [data-im-align="end"] .agx-im-user-bubble {
+  border-top-right-radius: 8px;
+}
+
+.agx-group-thread [data-im-align="end"] + [data-im-align="end"] .agx-im-user-bubble {
+  border-top-right-radius: 18px;
+}
+
+.agx-group-thread [data-im-cluster="continue"] {
+  margin-top: -0.25rem;
+}
+
+.agx-group-thread [data-im-cluster="continue"] .agx-im-group-bubble {
+  border-top-left-radius: 8px;
+}
+
+.agx-group-thread [data-im-cluster="continue"] .agx-im-user-bubble {
+  border-top-right-radius: 8px;
 }
 
 input[type="checkbox"],
@@ -922,21 +1116,13 @@ input[type="radio"] {
   accent-color: rgb(var(--theme-color-rgb));
 }
 :root[data-theme="light"][data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.22);
-  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.14);
   --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 6%, var(--surface-card));
   --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
-:root[data-theme="dim"][data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);
-}
 
 .agx-theme-focus-ring:focus-within {
-  border-color: rgba(var(--theme-color-rgb), 0.4);
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.15);
-}
-:root[data-theme="dark"] .agx-theme-focus-ring:focus-within {
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.2);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 /* Theme-aware focus styles for form inputs in Settings and Panels */
@@ -1019,6 +1205,40 @@ input[type="radio"] {
 .agx-pdf-preview canvas {
   max-width: 100%;
   height: auto;
+}
+
+/* Marketplace UnifiedGrid: Comate-like soft elevation on hover (neutral, no blue glow). */
+.agx-market-card {
+  transition:
+    box-shadow var(--ds-dur-normal, 0.2s) var(--ds-ease-out, ease),
+    transform var(--ds-dur-normal, 0.2s) var(--ds-ease-out, ease),
+    background-color var(--ds-dur-fast, 0.15s) ease;
+}
+
+.agx-market-card:hover {
+  transform: translateY(-1px);
+  /* Dark/dim default — soft lift without accent glow */
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.42),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme="light"] .agx-market-card:hover {
+  box-shadow:
+    0 8px 28px rgba(15, 23, 42, 0.10),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+/* Filter chips (marketplace skills / connectors): selected = theme tint fill + theme text (Comate-like). */
+.agx-filter-chip-active {
+  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.22);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.16);
+  color: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 72%, var(--text-strong));
+}
+:root[data-theme="light"] .agx-filter-chip-active {
+  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.10);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.10);
+  color: color-mix(in srgb, rgb(var(--theme-color-rgb, 59, 130, 246)) 88%, #0f172a);
 }
 
 /* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */

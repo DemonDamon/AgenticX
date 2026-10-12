@@ -1,6 +1,6 @@
 # AgenticX Server 模块总结
 
-> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
+> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/server`
@@ -27,6 +27,7 @@ agenticx/server/
 ├── redis_backend.py     # Redis 共享状态后端（连接池、限流、断路器、任务持久化）
 ├── middleware.py        # 生产级中间件（RequestId/Timeout/RateLimit/CircuitBreaker）
 ├── auth.py              # JWT 认证中间件与 API-Key 验证
+├── jwt_secret.py        # JWT HS256 签名密钥解析（未配置即 fail closed）
 ├── tenant.py            # 多租户上下文（TenantContext / TenantIsolationMiddleware）
 ├── task_queue.py        # 异步任务队列（Redis 持久化）
 ├── health.py            # 深度健康检查与自愈（含 Redis 探针）
@@ -122,7 +123,20 @@ agenticx/server/
 `UserManager`（SQLite 存储）与 `get_user_manager()` 单例的默认库路径解析：
 
 - **`default_user_db_path()`**：`db_path` 缺省（`None`）时按优先级解析——`AGENTICX_USER_DB` 环境变量 > cwd 已存在的历史 `users.db`（沿用并打 warning 建议迁移）> `~/.agenticx/users.db`；不再默认写到进程 cwd，避免换目录启动后「用户凭空消失」或测试在仓库根目录残留 `users.db`
-- 密码 PBKDF2-HMAC-SHA256 加盐哈希；JWT 生成/验证走 HS256（需 PyJWT，密钥取 `AGENTICX_JWT_SECRET`）
+- 密码 PBKDF2-HMAC-SHA256 加盐哈希；JWT 生成/验证走 HS256（需 PyJWT）
+- **JWT 密钥懒解析**：构造函数只记录显式传入的 `jwt_secret`，首次签发/校验时经 `_require_jwt_secret()` 调用 `resolve_jwt_secret()` 并缓存；因此未配置密钥时 `UserManager` 仍可构造、用户 CRUD 不受影响
+- `generate_jwt()` 在密钥缺失时抛出 `RuntimeError`（PyJWT 未安装时仍返回 `None`）；`verify_jwt()` 捕获该 `RuntimeError`，记 warning 并返回 `None`（视作校验失败）
+
+### jwt_secret.py - JWT 密钥解析（fail closed）
+
+`resolve_jwt_secret(explicit=None)` 是 `auth.py` 与 `user_manager.py` 共用的唯一密钥来源，已移除旧的硬编码公开默认密钥：
+
+- **优先级**：非空 `explicit` 参数 > 非空 `AGENTICX_JWT_SECRET` 环境变量 > `AGENTICX_ALLOW_INSECURE_DEV_JWT` 为真值（`1/true/yes/on`）时使用进程内临时随机密钥（`secrets.token_urlsafe(48)`，首次生成时打 warning，重启后旧 token 失效）> 否则抛 `RuntimeError`（提示设置 `AGENTICX_JWT_SECRET` 或仅本地开启不安全开发开关）
+- `reset_ephemeral_dev_secret_for_tests()`：清空进程内临时密钥，仅供测试使用
+
+### auth.py - JWT 认证中间件
+
+- `_get_jwt_secret()` 改为委托 `resolve_jwt_secret()`；`JWTAuthMiddleware` 未显式传 `secret_key` 时在构造阶段解析密钥，缺少配置会直接抛 `RuntimeError`（挂载即失败，而非静默用默认密钥）
 
 ---
 

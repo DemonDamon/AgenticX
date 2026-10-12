@@ -2,6 +2,7 @@ export type AuditEventType =
   | "chat_call"
   | "tool_call"
   | "mcp_tool_call"
+  | "desktop_agent_action"
   | "policy_hit"
   | "auth_login"
   | "auth_logout"
@@ -83,6 +84,7 @@ export type AuditQueryInput = {
   provider?: string;
   model?: string;
   policy_hit?: string;
+  event_type?: string;
   cross_border?: boolean;
   start?: string;
   end?: string;

@@ -5,6 +5,7 @@
  */
 
 import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
+import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { artifactBaseName } from "../../utils/session-artifacts";
 import type { ArtifactChangeRow } from "../../utils/session-artifacts";
@@ -12,9 +13,10 @@ import type { ArtifactChangeRow } from "../../utils/session-artifacts";
 type Props = {
   rows: ArtifactChangeRow[];
   onOpenPath?: (path: string) => void;
+  onOpenScratch?: (path: string) => void;
 };
 
-export function SessionChangeList({ rows, onOpenPath }: Props) {
+export function SessionChangeList({ rows, onOpenPath, onOpenScratch }: Props) {
   const { t } = useTranslation("workspace");
   if (rows.length === 0) return null;
   const added = rows.reduce((sum, row) => sum + row.added, 0);
@@ -51,6 +53,27 @@ export function SessionChangeList({ rows, onOpenPath }: Props) {
                 <span className="text-text-faint">·</span>
               ) : null}
             </span>
+            {onOpenScratch ? (
+              <span
+                role="button"
+                tabIndex={0}
+                className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenScratch(row.path);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onOpenScratch(row.path);
+                  }
+                }}
+                aria-label={t("work.openScratch")}
+              >
+                <MessageSquare className="h-3 w-3" strokeWidth={1.7} />
+              </span>
+            ) : null}
           </button>
         );
       })}

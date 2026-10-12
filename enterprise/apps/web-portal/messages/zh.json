@@ -51,6 +51,12 @@
     "quotaWeek": "本周",
     "quotaMonth": "本月",
     "quotaDept": "部门",
+    "skills": {
+      "caution": "需警惕",
+      "dangerous": "高危",
+      "unscanned": "未扫描",
+      "inactive": "已停用"
+    },
     "quotaUnlimited": "不限额",
     "quotaSharedPool": "（共享池）",
     "quotaRemaining": "剩余 {amount} · {reset}",

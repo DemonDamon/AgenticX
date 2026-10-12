@@ -8,6 +8,10 @@ type NearElectronWebview = HTMLElement & {
   loadURL: (url: string) => Promise<void> | void;
   reload: () => Promise<void> | void;
   getURL: () => string;
+  canGoBack?: () => boolean;
+  canGoForward?: () => boolean;
+  goBack?: () => void;
+  goForward?: () => void;
   /** Open Chromium DevTools for this guest (Trae-style HTML/browser preview). */
   openDevTools: () => void;
   /** Run script in the guest page (used for WorkPanel browser text selection). */
@@ -123,6 +127,10 @@ type TurnArchiveConfig = {
 
 type AutomationConfig = {
   prevent_sleep: boolean;
+  open_at_login: boolean;
+  desktop_notify: boolean;
+  desktop_sound: boolean;
+  notify_bootstrapped: boolean;
 };
 
 type RuntimeConfig = {
@@ -150,7 +158,11 @@ type AutomationTaskData = {
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
-  lastRunStatus?: "success" | "error";
+  lastRunStatus?: "success" | "error" | "interrupted";
+  runningSince?: string;
+  consecutiveFailures?: number;
+  autoPausedReason?: string;
+  autoPausedAt?: string;
   fromTemplate?: string;
 };
 
@@ -202,6 +214,7 @@ type AvatarItem = {
   workspace_dir?: string;
   description?: string;
   tags?: string[];
+  portrait_style?: string;
 };
 
 type ToolStatusItem = {
@@ -239,6 +252,13 @@ type GroupItem = {
   name: string;
   avatar_ids: string[];
   routing?: string;
+  human_members?: Array<{
+    id: string;
+    platform: string;
+    external_id: string;
+    display_name: string;
+    joined_at?: string;
+  }>;
 };
 type ForwardedHistoryItem = {
   sender: string;
@@ -462,6 +482,7 @@ type RegistrySearchItem = {
   source: string;
   source_type: string;
   install_hint: string;
+  owner?: string;
 };
 type RegistrySearchResult = {
   ok: boolean;
@@ -507,6 +528,22 @@ type RegistryInstallPreviewResult = {
   scan?: SkillScanPayload;
   error?: string;
 };
+type RepoSkillInstallResult = {
+  ok: boolean;
+  name?: string;
+  installed?: string[];
+  skipped_existing?: string[];
+  errors?: string[];
+  rejected_by_guard?: Array<{ name: string; reason?: string }>;
+  scan_summary?: SkillScanPayload;
+  error?: string;
+  error_code?: string;
+};
+type SkillUninstallResult = {
+  ok: boolean;
+  name?: string;
+  error?: string;
+};
 
 declare global {
   interface Window {
@@ -547,6 +584,9 @@ declare global {
       appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
+      toggleWindowZoom: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowDragStart: () => Promise<{ ok: boolean }>;
+      windowDragEnd: () => Promise<{ ok: boolean }>;
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
       saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{
         ok: boolean;
@@ -570,6 +610,10 @@ declare global {
       }) => Promise<{ ok: boolean; restart_required?: boolean }>;
       loadFeishuConfig: () => Promise<{ enabled: boolean; appId: string; appSecret: string }>;
       saveFeishuConfig: (payload: { enabled: boolean; appId: string; appSecret: string }) => Promise<{ ok: boolean }>;
+      loadGatewayAdapters: () => Promise<import("../electron/gateway-adapter-config").GatewayAdapterForm>;
+      saveGatewayAdapters: (
+        payload: import("../electron/gateway-adapter-config").GatewayAdapterForm,
+      ) => Promise<{ ok: boolean }>;
       loadFeishuBinding: () => Promise<{ ok: boolean; bindings: Record<string, unknown> }>;
       saveFeishuDesktopBinding: (payload: {
         sessionId: string | null;
@@ -592,6 +636,17 @@ declare global {
       wechatSidecarStop: () => Promise<{ ok: boolean }>;
       wechatSidecarPort: () => Promise<{ port: number; running: boolean }>;
       wechatClearCredentials: () => Promise<{ ok: boolean }>;
+
+      /** 连接器网关（内置 sidecar） */
+      connectorRuntimeEnsure: () => Promise<
+        { ok: true; port: number; runtimeToken: string } | { ok: false; error: string }
+      >;
+      connectorRuntimeStatus: () => Promise<{ running: boolean; port: number }>;
+      connectorRuntimeAdmin: (payload: {
+        method: string;
+        path: string;
+        body?: unknown;
+      }) => Promise<{ ok: boolean; status: number; body?: unknown; error?: string }>;
 
       onOpenSettings: (cb: () => void) => void;
       onSkillsChanged: (cb: () => void) => () => void;
@@ -624,6 +679,7 @@ declare global {
         default_provider?: string;
         default_model?: string;
         workspace_dir?: string;
+        portrait_style?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       updateAvatar: (payload: {
         id: string;
@@ -640,6 +696,7 @@ declare global {
         default_provider?: string;
         default_model?: string;
         color?: string;
+        portrait_style?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
@@ -1023,7 +1080,16 @@ declare global {
       loadTurnArchiveConfig: () => Promise<{ ok: boolean; config?: TurnArchiveConfig; error?: string }>;
       saveTurnArchiveConfig: (payload: TurnArchiveConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
-      saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      saveAutomationConfig: (payload: Partial<AutomationConfig>) => Promise<{ ok: boolean; error?: string }>;
+      notifyTaskComplete: (payload: {
+        title: string;
+        body: string;
+        paneId?: string;
+        sessionId?: string;
+        showBanner: boolean;
+        playSound: boolean;
+      }) => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
+      onDesktopNotifyActivate: (cb: (payload: { paneId?: string; sessionId?: string }) => void) => () => void;
       writeWorkspacePerfLog: (payload: unknown) => Promise<{ ok: boolean; path?: string }>;
       confirmDialog: (payload: {
         title?: string;
@@ -1152,6 +1218,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorTmeetLogin: () => Promise<{
         ok: boolean;
@@ -1174,6 +1243,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorGithubLogout: () => Promise<{
         ok: boolean;
@@ -1182,6 +1254,9 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+        health?: "connected" | "degraded" | "disconnected";
+        mcpConfigured?: boolean;
+        mcpAuthOk?: boolean;
       }>;
       nativeConnectorGithubCancel: () => Promise<{
         ok: boolean;
@@ -1214,8 +1289,9 @@ declare global {
         error?: string;
       }>;
       nativeConnectorWecomLogin: (payload: {
-        botId: string;
-        botSecret: string;
+        mode?: "qrcode" | "manual";
+        botId?: string;
+        botSecret?: string;
       }) => Promise<{
         ok: boolean;
         available: boolean;
@@ -1298,7 +1374,15 @@ declare global {
       ) => () => void;
       onNativeConnectorWecomProgress: (
         callback: (payload: {
-          phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+          phase:
+            | "installing"
+            | "initializing"
+            | "waiting_scan"
+            | "probing"
+            | "success"
+            | "disconnected"
+            | "error";
+          loginUrl?: string;
         }) => void,
       ) => () => void;
       onNativeConnectorQqmailProgress: (
@@ -1324,6 +1408,14 @@ declare global {
       }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      /** MCP OAuth：server 名 → 是否已有令牌（仅布尔，令牌不出主进程）。旧主进程可能缺失。 */
+      mcpOauthState?: (payload: { names: string[] }) => Promise<{
+        ok: boolean;
+        authorized: Record<string, boolean>;
+        error?: string;
+      }>;
+      /** MCP OAuth：清除令牌以便重新授权（保留 DCR 客户端）。 */
+      mcpOauthReset?: (payload: { name: string }) => Promise<{ ok: boolean; reset?: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
       saveRunMode: (mode: "ask" | "allowlist" | "auto") => Promise<{ ok: boolean }>;
@@ -1545,6 +1637,17 @@ declare global {
         mime?: string;
         error?: string;
       }>;
+      installFromSkillHub: (args: { slug: string }) => Promise<{
+        ok: boolean;
+        name?: string;
+        slug?: string;
+        installed_path?: string;
+        source?: string;
+        error?: string;
+        error_code?: string;
+        fallback_to_agent?: boolean;
+        scan_summary?: unknown;
+      }>;
       installFromRegistry: (args: {
         source: string;
         name: string;
@@ -1552,6 +1655,16 @@ declare global {
         confirmNonHighRisk?: boolean;
       }) => Promise<RegistryInstallResult>;
       installFromRegistryPreview: (args: { source: string; name: string }) => Promise<RegistryInstallPreviewResult>;
+      /** Deterministic full-directory skill install from a GitHub repo tarball. */
+      installSkillFromRepo: (args: {
+        repo: string;
+        skill: string;
+        branch?: string;
+        overwrite?: boolean;
+        acknowledgeHighRisk?: boolean;
+      }) => Promise<RepoSkillInstallResult>;
+      /** One-click skill uninstall (only under ~/.agenticx/skills). */
+      uninstallSkill: (args: { name: string; source?: string }) => Promise<SkillUninstallResult>;
 
       terminalSpawn: (payload: {
         id: string;

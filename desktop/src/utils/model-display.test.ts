@@ -29,6 +29,7 @@ describe("provider-display", () => {
     expect(getProviderDisplayName("bailian", {})).toBe("Alibaba Cloud Bailian");
     expect(getProviderDisplayName("qianfan", {})).toBe("Baidu Qianfan");
     expect(getProviderDisplayName("kimi", {})).toBe("Moonshot AI");
+    expect(getProviderDisplayName("mimo", {})).toBe("Xiaomi MiMo");
     expect(getProviderDisplayName("openai", { baseUrl: "http://47.2.1.1/v1" })).toBe("OpenAI-compatible");
     expect(getProviderDisplayName("custom_openai_caixun", { displayName: "彩讯-外网" })).toBe("彩讯-外网");
     expect(getProviderDisplayName("zhipu", {})).not.toContain("智谱");
@@ -40,6 +41,7 @@ describe("provider-display", () => {
     expect(isProviderDisplayNameEditable("openai", { baseUrl: "https://api.openai.com/v1" })).toBe(false);
     expect(isProviderDisplayNameEditable("anthropic", {})).toBe(false);
     expect(isProviderDisplayNameEditable("deepseek", {})).toBe(false);
+    expect(isProviderDisplayNameEditable("mimo", {})).toBe(false);
   });
 
   it("allows deleting user-added vendors but not built-in slots", () => {
@@ -49,6 +51,7 @@ describe("provider-display", () => {
     expect(isProviderDeletable("anthropic")).toBe(false);
     expect(isProviderDeletable("ollama")).toBe(false);
     expect(isProviderDeletable("deepseek")).toBe(false);
+    expect(isProviderDeletable("mimo")).toBe(false);
   });
 
   it("labels built-in openai with custom base as compatible gateway", () => {
@@ -57,6 +60,7 @@ describe("provider-display", () => {
     ).toBe("OpenAI 兼容");
     expect(getProviderDisplayName("openai", { baseUrl: "https://api.openai.com/v1" })).toBe("OpenAI");
     expect(getProviderDisplayName("deepseek", {})).toBe("DeepSeek");
+    expect(getProviderDisplayName("mimo", {})).toBe("小米 MiMo");
     expect(isOfficialOpenAIBase("https://api.openai.com/v1/")).toBe(true);
   });
 });

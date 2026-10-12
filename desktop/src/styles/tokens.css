@@ -14,6 +14,14 @@
 
   --ds-spinner-dur: 0.7s;
 
-  /* IM 会话：助手/用户 Markdown 正文与窗格底栏模型选择器共用的字号，避免模型名大于气泡正文 */
-  --agx-chat-im-body-font-size: 14px;
+  /* IM 会话正文：15px / 1.625。14px 偏细密，16px 又明显偏大；与输入区同一 token。 */
+  --agx-chat-im-body-font-size: 15px;
+  --agx-chat-im-body-line-height: 1.625;
+  --agx-chat-im-body-paragraph-gap: 0.55em;
+
+  /* 群聊气泡列：相对会话线程 80%，避免长回复铺满整栏。 */
+  --agx-conversation-bubble-max: 80%;
+
+  /* 群聊直播：按词推进间隔。 */
+  --agx-stream-word-ms: 16;
 }

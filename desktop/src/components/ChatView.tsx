@@ -35,8 +35,12 @@ import {
   assistantVisibleBodyForUi,
   buildCommittedAssistantPatch,
   normalizeFinalAssistantPayload,
+  shouldReuseLastAssistantRow,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { MarkdownContext } from "./messages/markdown-components";
+import { requestChatHttpLink } from "../utils/chat-external-link";
+import { openExternalUrl } from "../utils/open-external";
 import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
@@ -53,8 +57,14 @@ import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import {
+  announceDesktopTaskComplete,
+  isDesktopWindowFocusedAndVisible,
+  shouldAnnounceTaskComplete,
+} from "../utils/desktop-task-notify";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
+import { mapStartedEvent, mapTerminalSessionPatch } from "../utils/subagent-entry-mapper";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
@@ -388,6 +398,14 @@ function MessageActions({
 
 export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarification, mode = "pro" }: Props) {
   const { t } = useTranslation("chat");
+  const chatHttpLinkMarkdown = useMemo(
+    () => ({
+      onHttpLinkClick: (url: string) => {
+        requestChatHttpLink(url, () => openExternalUrl(url));
+      },
+    }),
+    [],
+  );
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -825,7 +843,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const openDelegatedAvatarSession = useCallback(
     async (agentId: string) => {
       const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
-      const targetSessionId = (sub?.sessionId ?? "").trim();
+      // 委派卡片归属发起方会话（sessionId），跳转目标分身会话用 avatarSessionId。
+      const targetSessionId = (sub?.avatarSessionId ?? sub?.sessionId ?? "").trim();
       if (!targetSessionId) return false;
 
       const matchedAvatar = avatars.find((item) => item.name === (sub?.name ?? ""));
@@ -1399,6 +1418,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       queries: [] as string[],
     };
 
+    let full = "";
+    let receivedFinalEvent = false;
+
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
       body.keep_runtime_after_disconnect = true;
@@ -1431,12 +1453,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       const decoder = new TextDecoder();
       if (!reader) { if (isCurrentRequest()) { setStatus("idle"); setStreaming(false); } return; }
 
-      let full = "";
       let cumulativeFull = "";
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
-      let receivedFinalEvent = false;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       const syncTurnRefsSnapshot = () => {
@@ -1560,7 +1580,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   const rawArgs = JSON.stringify(toolArgs);
                   const content =
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
-                  if (toolNameStr === "request_clarification") {
+                  if (toolNameStr === "request_clarification" || toolNameStr === "present_choices") {
                     const clarifyExtras = toolCallId
                       ? buildClarificationMessageExtras(toolArgs, toolCallId, toolGroupId, sessionId)
                       : null;
@@ -1939,26 +1959,34 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const subId = payload.data?.agent_id;
               if (subId) {
                 const isDelegation = Boolean(payload.data?.delegation);
-                addSubAgent({
-                  id: subId,
-                  name: payload.data?.name ?? subId,
-                  role: payload.data?.role ?? (isDelegation ? "delegated avatar" : "worker"),
-                  provider: payload.data?.provider ?? undefined,
-                  model: payload.data?.model ?? undefined,
-                  task: payload.data?.task ?? "",
-                  sessionId: isDelegation ? sessionId : (typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined),
-                });
-                updateSubAgent(subId, {
-                  status: "running",
-                  currentAction: isDelegation ? "委派执行中" : "执行中",
-                });
-                addSubAgentEvent(
-                  subId,
-                  {
-                    type: isDelegation ? "delegation_started" : "started",
-                    content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动",
-                  }
-                );
+                // 委派运行归属发起方会话；分身会话自身流上的委派事件不重复登记。
+                const started = mapStartedEvent(payload.data, sessionId);
+                if (started) {
+                  addSubAgent({
+                    id: started.id,
+                    name: started.name,
+                    role: started.role,
+                    provider: started.provider,
+                    model: started.model,
+                    task: started.task,
+                    sessionId: started.sessionId,
+                    avatarSessionId: started.avatarSessionId,
+                    kind: started.kind,
+                  });
+                  updateSubAgent(subId, {
+                    status: "running",
+                    currentAction: started.currentAction,
+                    kind: started.kind,
+                    avatarSessionId: started.avatarSessionId,
+                  });
+                  addSubAgentEvent(
+                    subId,
+                    {
+                      type: isDelegation ? "delegation_started" : "started",
+                      content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动",
+                    }
+                  );
+                }
               }
             }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
@@ -2008,7 +2036,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   resultSummary: summary,
                   resultFile,
                   outputFiles: resolveSubAgentOutputPaths(summary, { resultFile }),
-                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, {
                   type: isDelegation ? "delegation_completed" : "completed",
@@ -2024,7 +2052,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
                   currentAction: payload.data?.text ?? "执行异常",
-                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                  ...mapTerminalSessionPatch(payload.data),
                 });
                 addSubAgentEvent(subId, {
                   type: isDelegation ? "delegation_error" : "error",
@@ -2117,7 +2145,20 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           : undefined;
       if (isCurrentRequest() && trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
-        if (mid !== null && trimmedFull === mid) {
+        const liveMessages = useAppStore.getState().messages ?? [];
+        let lastAssistantContent = "";
+        for (let i = liveMessages.length - 1; i >= 0; i -= 1) {
+          const row = liveMessages[i];
+          if (row.role === "user") break;
+          if (row.role === "assistant") {
+            lastAssistantContent = String(row.content ?? "");
+            break;
+          }
+        }
+        if (
+          (mid !== null && trimmedFull === String(mid).trim())
+          || shouldReuseLastAssistantRow(lastAssistantContent, trimmedFull)
+        ) {
           streamCommittedRef.current = true;
           if (turnExtras) {
             mergeLastMessageByRole("assistant", turnExtras);
@@ -2201,6 +2242,24 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       scrollToBottom();
       void syncSubAgents();
 
+      if (shouldAnnounceTaskComplete({
+        aborted: abortController.signal.aborted,
+        hasQueuedFollowup: Boolean(nextQueued),
+        isGroupPane: false,
+        receivedFinalEvent,
+        receivedGroupDone: false,
+        text: full,
+      })) {
+        void announceDesktopTaskComplete({
+          kind: "success",
+          label: "Near",
+          text: full,
+          paneId: liteQueueKey,
+          sessionId,
+          windowFocusedAndVisible: isDesktopWindowFocusedAndVisible(),
+          locale: i18n.language?.startsWith("en") ? "en" : "zh",
+        });
+      }
       if (nextQueued) {
         requestAnimationFrame(() => void sendChat(nextQueued.text));
       }
@@ -2666,7 +2725,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             </div>
           </div>
         )}
-        <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
+        <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[var(--agx-chat-im-body-font-size)]" : ""}`}>
           {(() => {
             const lastFlatToolGroupIdx = groupedVisibleMessages.reduce(
               (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
@@ -2680,7 +2739,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               if (row.kind === "message") {
                 const m = row.message;
                 return (
-                  <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                  <div key={m.id} className={`${isLite ? "text-[var(--agx-chat-im-body-font-size)]" : "text-sm"}`}>
+                    <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
                     <MessageRenderer
                       message={m}
                       assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
@@ -2691,10 +2751,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       noBubbleBorder={reactWorkCol}
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                       allMessages={messages}
+                      sessionBusy={streaming}
                       onFollowupClick={(t) => void send(t)}
                       onOpenClarification={onOpenClarification}
                       onSubmitClarification={onSubmitClarification}
                     />
+                    </MarkdownContext.Provider>
                     {!isLite && (
                       <MessageActions
                         msg={m}
@@ -2707,6 +2769,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 );
               }
               return (
+                <MarkdownContext.Provider value={chatHttpLinkMarkdown}>
                 <TurnToolGroupCard
                   key={`tg-${row.groupId}`}
                   messages={row.messages}
@@ -2719,6 +2782,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   omitLeadingSpacer={reactWorkCol}
                   flat={reactWorkCol}
                 />
+                </MarkdownContext.Provider>
               );
             };
 
@@ -2781,7 +2845,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <WidgetFlowRewriteStatusLine />
           ) : null}
           {streaming && !hideStreamOverlayAsDuplicate && (
-            <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
+            <div className={["!mt-1.5", isLite ? "text-[var(--agx-chat-im-body-font-size)]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (
                 <TerminalLine
                   message={streamAssistantMessage}

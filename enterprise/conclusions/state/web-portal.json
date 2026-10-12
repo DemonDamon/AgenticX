@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "web-portal",
-  "generation": "655eece169f143a2870f68976a33dd31",
+  "generation": "25f32a2bf4b44088b7eb0dccbd5e658c",
   "mapping_revision": 1,
-  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
-  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
-  "source_fingerprint": "sha256:6c9ebf7892df84aeb37421e64d4a68ad519d93649dc932ed261782cab8b236a5",
+  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
+  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "source_fingerprint": "sha256:e079c0d30bc3a7dd412985fdd56fd08367219f41317a0c82c45bf525c560e736",
   "summary_path": "enterprise/conclusions/apps/web-portal_conclusion.md",
-  "summary_sha256": "sha256:e08431c40751665eefed7f57a2cf1a00819e80a7dd1a7e04fc21810b7143dc8f",
-  "updated_at": "2026-07-21T07:36:26.633629+00:00"
+  "summary_sha256": "sha256:1b7744eb2598ab98a1a889dc6ea767fba0f27e8c8e2bc76fa784074fc9dbf62e",
+  "updated_at": "2026-09-17T23:53:53.535629+00:00"
 }

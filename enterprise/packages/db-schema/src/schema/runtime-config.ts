@@ -57,6 +57,23 @@ export const enterpriseRuntimeUserVisibleModels = pgTable(
   })
 );
 
+/** 部门默认模型。assignment_key 仅允许 `dept:<id>`。 */
+export const enterpriseRuntimeScopeDefaultModels = pgTable(
+  "enterprise_runtime_scope_default_models",
+  {
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    assignmentKey: text("assignment_key").notNull(),
+    modelId: text("model_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.tenantId, table.assignmentKey],
+      name: "enterprise_runtime_scope_default_pk",
+    }),
+  })
+);
+
 /** 租户 token 配额整包 JSON（等价原 quotas.json）。 */
 export const enterpriseRuntimeTokenQuotas = pgTable("enterprise_runtime_token_quotas", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
@@ -161,6 +178,13 @@ export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search
   apiKeyCipher: text("api_key_cipher").default("").notNull(),
   maxResults: integer("max_results").default(50).notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Tenant-level desktop agent action policy. Separate from budgets so a budget rewrite cannot drop it. */
+export const enterpriseDesktopAgentPolicies = pgTable("enterprise_desktop_agent_policies", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: jsonb("config").notNull().$type<Record<string, unknown>>(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

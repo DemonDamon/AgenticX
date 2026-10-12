@@ -13,6 +13,9 @@ from .zhipu_provider import ZhipuProvider
 from .qianfan_provider import QianfanProvider
 from .minimax_provider import MiniMaxProvider
 from .deepseek_provider import DeepSeekProvider
+from .mimo_provider import MimoProvider
+
+from agenticx.trainer.gateway import resolve_model_alias
 
 
 class LlmFactory:
@@ -31,6 +34,9 @@ class LlmFactory:
         Raises:
             ValueError: If the LLM type specified in the config is unknown.
         """
+        if getattr(config, "model", None):
+            config.model = resolve_model_alias(config.model)
+
         llm_type = config.type.lower()
 
         if llm_type == "litellm":
@@ -92,6 +98,14 @@ class LlmFactory:
             )
         elif llm_type == "deepseek":
             return DeepSeekProvider(
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+            )
+        elif llm_type == "mimo":
+            return MimoProvider(
                 model=config.model,
                 api_key=config.api_key,
                 base_url=config.base_url,

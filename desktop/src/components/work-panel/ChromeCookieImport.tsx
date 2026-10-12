@@ -166,12 +166,12 @@ export function ChromeCookieImportDialog({
       : t("work.chromeCookieDialogTitle");
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-[420px] rounded-2xl border border-border bg-surface-card p-4 shadow-xl"
+        className="w-full max-w-[420px] rounded-2xl border border-border bg-[var(--surface-base-fallback)] p-4 shadow-2xl"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-[15px] font-medium text-text-strong">{title}</div>

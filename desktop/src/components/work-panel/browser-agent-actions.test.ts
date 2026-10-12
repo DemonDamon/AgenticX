@@ -8,9 +8,11 @@ import {
 } from "./browser-agent-actions";
 import {
   _resetBrowserAgentRegistryForTests,
+  _setBrowserAgentControllerWaitMsForTests,
   ensureBrowserAgentIpc,
   isBrowserHumanTakeover,
   registerBrowserAgentController,
+  registerBrowserAgentOpenFallback,
   setBrowserHumanTakeover,
 } from "./browser-agent-registry";
 
@@ -71,6 +73,7 @@ describe("browser-agent-registry", () => {
     replies.length = 0;
     actHandler = null;
     _resetBrowserAgentRegistryForTests();
+    _setBrowserAgentControllerWaitMsForTests(0);
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
@@ -105,6 +108,52 @@ describe("browser-agent-registry", () => {
     actHandler?.({ request_id: "r1", session_id: "s1", action: "click", index: 0 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(replies[0]?.error).toBe("human_takeover");
+  });
+
+  it("wires IPC without a WorkPanel controller so cold-start open can reply", async () => {
+    expect(actHandler).not.toBeNull();
+    registerBrowserAgentOpenFallback("s-app", async (url) => ({ ok: true, url }));
+    actHandler?.({
+      request_id: "wired",
+      session_id: "s-app",
+      action: "open",
+      url: "https://example.com/in-app",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replies[0]).toMatchObject({ ok: true, url: "https://example.com/in-app" });
+  });
+
+  it("opens via session fallback when WorkPanel is not mounted", async () => {
+    const opened: string[] = [];
+    registerBrowserAgentOpenFallback("s1", async (url) => {
+      opened.push(url);
+      return { ok: true, url };
+    });
+    actHandler?.({
+      request_id: "cold",
+      session_id: "s1",
+      action: "open",
+      url: "https://mp.weixin.qq.com/s/demo",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(opened).toEqual(["https://mp.weixin.qq.com/s/demo"]);
+    expect(replies[0]).toMatchObject({
+      ok: true,
+      url: "https://mp.weixin.qq.com/s/demo",
+      request_id: "cold",
+    });
+    expect(replies[0]?.error).toBeUndefined();
+  });
+
+  it("returns no_browser_pane for open when neither controller nor fallback exists", async () => {
+    actHandler?.({
+      request_id: "missing",
+      session_id: "s-missing",
+      action: "open",
+      url: "https://example.com",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replies[0]?.error).toBe("no_browser_pane");
   });
 
   it("returns no_browser_pane after unregister", async () => {

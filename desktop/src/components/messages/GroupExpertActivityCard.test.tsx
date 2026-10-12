@@ -98,6 +98,40 @@ describe("GroupExpertActivityCard", () => {
     expect(html.split("终端").length - 1).toBe(6);
   });
 
+  it("shows allow/deny on the waiting card when a confirm is pending", () => {
+    const html = renderToStaticMarkup(
+      <GroupExpertActivityCard
+        activity={{
+          ...activity,
+          phase: "waiting",
+          summary: "等待你的确认…",
+          toolSteps: [
+            {
+              callId: "c9",
+              toolName: "bash_exec",
+              phase: "calling",
+              updatedAt: 13_000,
+              detail: "grep -n include_router app/main.py",
+            },
+          ],
+          pendingConfirm: {
+            requestId: "cfm_9",
+            question: "grep -n include_router app/main.py",
+          },
+        }}
+        now={13_000}
+        defaultExpanded
+        onResolveConfirm={() => undefined}
+      />,
+    );
+    expect(html).toContain("等待你的确认…");
+    expect(html).toContain("grep -n include_router app/main.py");
+    expect(html).toContain("同意");
+    expect(html).toContain("拒绝");
+    expect(html).toContain("等待确认");
+    expect(html).not.toContain("进行中");
+  });
+
   it("uses an amber waiting icon instead of typing dots", () => {
     const html = renderToStaticMarkup(
       <GroupExpertActivityCard
@@ -112,6 +146,8 @@ describe("GroupExpertActivityCard", () => {
     );
     expect(html).toContain("等待你的确认…");
     expect(html).toContain("text-amber-500");
+    expect(html).not.toContain("同意");
+    expect(html).not.toContain("拒绝");
     expect(html).not.toContain("animate-pulse");
     expect(html).not.toContain("agx-working-ellipsis");
     expect(html).not.toContain("agx-working-shimmer");
@@ -138,5 +174,18 @@ describe("GroupExpertActivityCard", () => {
     expect(html).toContain("agx-group-activity-status");
     expect(html).toContain("w-fit");
     expect(html).not.toMatch(/agx-group-activity-status[^"]*flex-1/);
+  });
+
+  it("hugs the copy column like the group Jev row instead of stretching a full-width card", () => {
+    const html = renderToStaticMarkup(
+      <GroupExpertActivityCard activity={activity} now={13_000} />,
+    );
+    expect(html).toContain("px-3");
+    expect(html).toContain("max-w-[520px]");
+    expect(html).toContain("w-fit max-w-full");
+    expect(html).not.toContain("max-w-[min(100%,680px)]");
+    expect(html).not.toContain("min-w-0 flex-1 rounded-xl");
+    expect(html).not.toContain("bg-surface-card/60");
+    expect(html).not.toContain("rounded-xl bg-surface-card/60 px-3 py-2");
   });
 });

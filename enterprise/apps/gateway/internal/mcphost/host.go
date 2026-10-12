@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/connectorstore"
 	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
@@ -49,6 +50,11 @@ func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.T
 			BackendEcho:    &EchoBackend{},
 			BackendOpenAPI: NewOpenAPIBackend(),
 		},
+	}
+	// 连接器 backend 依赖数据库存储（定义/连接入 PG）；无数据库时不注册。
+	if handle != nil {
+		h.backends[BackendConnector] = NewConnectorBackend(
+			connectorstore.New(handle, logger), logger, connectorAllowPrivateNetwork())
 	}
 	return h
 }
@@ -183,6 +189,23 @@ func (h *Host) invokeTool(ctx context.Context, rec *ServerRecord, identity Ident
 			return CallResult{}, "blocked", fmt.Errorf("policy:blocked")
 		}
 	}
+	// connector 阶段：动作级 allow/block（以 execute_action 的 actionId 为评估文本，
+	// 规则以 applies_to.stages 含 "connector" 生效），执行前拦截。
+	if rec.BackendType == BackendConnector && name == "execute_action" && h.policy != nil {
+		if actionID, _ := args["actionId"].(string); actionID != "" {
+			pol := h.policy(actionID, policyengine.EvalContext{
+				TenantID:   identity.TenantID,
+				UserID:     identity.UserID,
+				DeptIDs:    []string{identity.DepartmentID},
+				ClientType: "mcp",
+				Stage:      "connector",
+			})
+			if pol.Blocked {
+				h.writeToolAudit(identity, rec, name, args, textResult("policy blocked", true), "blocked", started)
+				return CallResult{}, "blocked", fmt.Errorf("policy:blocked")
+			}
+		}
+	}
 	backend, err := h.backendFor(rec)
 	if err != nil {
 		return CallResult{}, "error", err
@@ -245,6 +268,27 @@ func (h *Host) writeToolAudit(identity Identity, rec *ServerRecord, toolName str
 			PromptSummary:   summarize(string(inRaw), 120),
 			ResponseSummary: summarize(outText, 120),
 		},
+	}
+	// 连接器执行维度：动作/连接取自调用参数，executionId 与解析后的连接
+	// 取自 backend 回填的 Metadata（含策略拦截路径的兜底）。
+	if rec.BackendType == BackendConnector && toolName == "execute_action" {
+		if actionID, _ := args["actionId"].(string); actionID != "" {
+			ev.ConnectorActionID = actionID
+		}
+		if connID, _ := args["connectionId"].(string); connID != "" {
+			ev.ConnectorConnectionID = connID
+		}
+		if m := result.Metadata; m != nil {
+			if v, ok := m["connector_execution_id"].(string); ok && v != "" {
+				ev.ConnectorExecutionID = v
+			}
+			if v, ok := m["connector_action_id"].(string); ok && v != "" {
+				ev.ConnectorActionID = v
+			}
+			if v, ok := m["connector_connection_id"].(string); ok && v != "" {
+				ev.ConnectorConnectionID = v
+			}
+		}
 	}
 	_ = h.audit.Write(&ev)
 }

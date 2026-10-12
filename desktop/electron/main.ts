@@ -7,6 +7,7 @@ import {
   Menu,
   MenuItemConstructorOptions,
   nativeImage,
+  Notification,
   powerSaveBlocker,
   screen,
   session,
@@ -17,6 +18,11 @@ import {
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  mergeGatewayAdapters,
+  readGatewayAdapterForm,
+  type GatewayAdapterForm,
+} from "./gateway-adapter-config";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -43,6 +49,7 @@ import {
   closeSplash,
   configureSplashLayoutThemeReader,
   createSplashWindow,
+  focusSplashIfOpen,
   onMainWindowDidFinishLoad,
   registerSplashIpcHandlers,
   scheduleSplashForceShowFallback,
@@ -58,6 +65,21 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { flushActionAuditOnce, startActionAuditUploader } from "./action-audit-uploader";
+import {
+  buildLoginItemSettings,
+  deliverTaskCompleteNotification,
+  isMainWindowActive,
+  parseTaskCompleteNotifyPayload,
+  planTaskCompleteDelivery,
+  playCompletionSound,
+  resolveBannerTransport,
+  resolveTaskCompleteBanner,
+  showOsascriptNotification,
+  shouldStartHidden,
+  welcomeNotificationCopy,
+} from "./desktop-notify";
+import { applyRunOutcome, applyUserEnableToggle, markInterruptedOnStartup, markRunStarted } from "./automation-run-health";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
@@ -75,6 +97,7 @@ import {
   startEnterpriseDeviceAuth,
 } from "./enterprise-device-login";
 import { normalizeEnterpriseCapabilities } from "./enterprise-capabilities";
+import { normalizeAgentActionPolicy } from "./enterprise-agent-policy";
 import {
   applyEnterpriseCapabilitiesToDisk,
   digestSkillBundle,
@@ -135,11 +158,18 @@ import {
   buildTapdMcpEntry,
   extractAuthorizationUrl,
   extractFeishuDeviceFlow,
+  applyGithubMcpPatToDocument,
+  detectGithubCliLoginSuccess,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
+  githubTokenFingerprint,
+  nextGithubAuthStdin,
   extractQqmailAuthUrl,
   isTapdValidationSuccess,
+  extractWecomLoginUrl,
   isWecomProbeSuccessful,
+  wecomInitLooksExpired,
+  wecomInitLooksSuccess,
   mergeTapdMcpDocument,
   parseFeishuAuthStatus,
   parseGithubAuthStatus,
@@ -150,6 +180,7 @@ import {
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
+import { readMcpOauthAuthorized, resetMcpOauthTokens } from "./mcp-oauth-store";
 
 protocol.registerSchemesAsPrivileged([...LOCAL_MEDIA_SCHEME_PRIVILEGES]);
 
@@ -320,6 +351,7 @@ type AgxConfig = {
     device_id?: string;
     token?: string;
     studio_base_url?: string;
+    adapters?: Record<string, Record<string, unknown>>;
   };
   feishu_longconn?: {
     enabled?: boolean;
@@ -350,7 +382,13 @@ type AgxConfig = {
     learning_nudge_interval?: number;
     learning_min_tool_calls?: number;
   };
-  automation?: { prevent_sleep?: boolean };
+  automation?: {
+    prevent_sleep?: boolean;
+    open_at_login?: boolean;
+    desktop_notify?: boolean;
+    desktop_sound?: boolean;
+    notify_bootstrapped?: boolean;
+  };
   skills?: { non_high_risk_auto_install?: boolean };
   ops?: Record<string, unknown>;
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
@@ -362,6 +400,7 @@ type AgxConfig = {
     capabilities?: unknown;
     managed_mcp_servers?: string[];
     managed_skills?: string[];
+    agent_action_policy?: unknown;
     /** 上次使用/预置的门户地址；登出后保留，用于下次登录预填。 */
     default_portal_url?: string;
     /** 仅用于设置页展示当前登录者，非鉴权依据。 */
@@ -401,6 +440,10 @@ type TrinityConfig = {
 
 type AutomationConfig = {
   prevent_sleep: boolean;
+  open_at_login: boolean;
+  desktop_notify: boolean;
+  desktop_sound: boolean;
+  notify_bootstrapped: boolean;
 };
 
 type TurnArchiveConfig = {
@@ -630,6 +673,10 @@ const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
 
 const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
   prevent_sleep: false,
+  open_at_login: true,
+  desktop_notify: true,
+  desktop_sound: true,
+  notify_bootstrapped: false,
 };
 
 const TURN_ARCHIVE_CONFIG_KEYS = new Set([
@@ -662,6 +709,13 @@ function loadAutomationConfigFromAgx(cfg: AgxConfig): AutomationConfig {
   const row = raw as Record<string, unknown>;
   return {
     prevent_sleep: parseBooleanLoose(row.prevent_sleep, DEFAULT_AUTOMATION_CONFIG.prevent_sleep),
+    open_at_login: parseBooleanLoose(row.open_at_login, DEFAULT_AUTOMATION_CONFIG.open_at_login),
+    desktop_notify: parseBooleanLoose(row.desktop_notify, DEFAULT_AUTOMATION_CONFIG.desktop_notify),
+    desktop_sound: parseBooleanLoose(row.desktop_sound, DEFAULT_AUTOMATION_CONFIG.desktop_sound),
+    notify_bootstrapped: parseBooleanLoose(
+      row.notify_bootstrapped,
+      DEFAULT_AUTOMATION_CONFIG.notify_bootstrapped,
+    ),
   };
 }
 
@@ -691,6 +745,54 @@ function applyPreventSleepFromConfig(cfg: AgxConfig): void {
   }
 }
 
+function applyLoginItemFromConfig(cfg: AgxConfig): void {
+  const openAtLogin = loadAutomationConfigFromAgx(cfg).open_at_login;
+  try {
+    app.setLoginItemSettings(buildLoginItemSettings({
+      openAtLogin,
+      platform: process.platform,
+    }));
+  } catch (err) {
+    console.warn("[desktop-notify] setLoginItemSettings failed:", err);
+  }
+}
+
+function persistNotifyBootstrapped(cfg: AgxConfig): void {
+  const root = cfg as Record<string, unknown>;
+  const prev = root.automation;
+  const merged =
+    prev && typeof prev === "object" && !Array.isArray(prev)
+      ? { ...(prev as Record<string, unknown>) }
+      : {};
+  merged.notify_bootstrapped = true;
+  root.automation = merged;
+  saveAgxConfig(cfg);
+}
+
+function bootstrapWelcomeNotification(): void {
+  const copy = welcomeNotificationCopy(resolveMenuLocale() === "en" ? "en" : "zh");
+  try {
+    const via = resolveBannerTransport({
+      notificationSupported: Notification.isSupported(),
+      platform: process.platform,
+    });
+    console.warn("[desktop-notify] welcome", { via });
+    if (via === "osascript") {
+      showOsascriptNotification(execFile, copy.title, copy.body);
+      return;
+    }
+    if (via === "none") return;
+    const note = new Notification({
+      title: copy.title,
+      body: copy.body,
+      silent: true,
+    });
+    note.show();
+  } catch (err) {
+    console.warn("[desktop-notify] welcome notification failed:", err);
+  }
+}
+
 // ── Automation Tasks ──
 
 type AutomationFrequency =
@@ -712,8 +814,12 @@ interface AutomationTaskData {
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
-  lastRunStatus?: "success" | "error";
+  lastRunStatus?: "success" | "error" | "interrupted";
   lastRunError?: string;
+  runningSince?: string;
+  consecutiveFailures?: number;
+  autoPausedReason?: string;
+  autoPausedAt?: string;
   fromTemplate?: string;
 }
 
@@ -1167,9 +1273,20 @@ async function runAutomationTaskHttp(
 class AutomationScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastCheckMinute = "";
+  private running = new Set<string>();
 
   start(): void {
     if (this.timer) return;
+    const tasks = loadAutomationTasks();
+    let interruptedDirty = false;
+    for (let i = 0; i < tasks.length; i += 1) {
+      const updated = markInterruptedOnStartup(tasks[i], this.running, tasks[i].id);
+      if (updated !== tasks[i]) {
+        tasks[i] = updated;
+        interruptedDirty = true;
+      }
+    }
+    if (interruptedDirty) saveAutomationTasks(tasks);
     this.timer = setInterval(() => this.tick(), 30_000);
     this.tick();
   }
@@ -1204,6 +1321,7 @@ class AutomationScheduler {
       if (task.lastRunAt && task.lastRunAt.startsWith(minuteKey)) continue;
 
       task.lastRunAt = now.toISOString();
+      Object.assign(task, markRunStarted(task, now.toISOString()));
       dirty = true;
       // queued phase intentionally emits without sessionId:
       // a new automation session is created inside executeTask (每次触发新开 session)，
@@ -1247,6 +1365,7 @@ class AutomationScheduler {
   }
 
   private async executeTask(task: AutomationTaskData): Promise<void> {
+    this.running.add(task.id);
     try {
       const result = await runAutomationTaskHttp(task, {
         reusePersistedSession: false,
@@ -1264,13 +1383,13 @@ class AutomationScheduler {
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
-        found.lastRunStatus = result.ok ? "success" : "error";
-        found.lastRunAt = new Date().toISOString();
-        if (result.ok) {
-          delete found.lastRunError;
-        } else {
-          found.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
-        }
+        const recorded = applyRunOutcome(found, {
+          ok: result.ok,
+          error: result.ok ? undefined : (sanitizeAutomationRunError(result.error) ?? "执行失败"),
+        }, { trigger: "schedule", nowIso: new Date().toISOString() });
+        Object.assign(found, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete found.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete found.lastRunError;
         saveAutomationTasks(tasks);
       }
       emitAutomationTaskProgress({
@@ -1286,9 +1405,13 @@ class AutomationScheduler {
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
-        found.lastRunStatus = "error";
-        found.lastRunAt = new Date().toISOString();
-        found.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
+        const recorded = applyRunOutcome(found, {
+          ok: false,
+          error: sanitizeAutomationRunError(err) ?? "执行异常",
+        }, { trigger: "schedule", nowIso: new Date().toISOString() });
+        Object.assign(found, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete found.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete found.lastRunError;
         saveAutomationTasks(tasks);
       }
       emitAutomationTaskProgress({
@@ -1300,6 +1423,8 @@ class AutomationScheduler {
         message: String(err),
         ts: Date.now(),
       });
+    } finally {
+      this.running.delete(task.id);
     }
   }
 }
@@ -1322,6 +1447,7 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   minimax: "https://api.minimax.chat/v1",
   kimi: "https://api.moonshot.cn/v1",
   deepseek: "https://api.deepseek.com/v1",
+  mimo: "https://api.xiaomimimo.com/v1",
 };
 
 /** Treat UI placeholders as empty so we do not send `Bearer sk-...` to intranet gateways. */
@@ -1524,7 +1650,20 @@ const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
     "deepseek-v4-pro",
     "deepseek-v4-flash",
   ],
+  mimo: [
+    "mimo-v2.6-pro",
+    "mimo-v2.6-flash",
+  ],
 };
+
+/** ASR / TTS SKUs are not chat models. Hide them from the MiMo picker. */
+function dropMimoNonChatModels(provider: string, models: string[]): string[] {
+  if (provider !== "mimo") return models;
+  return models.filter((id) => {
+    const slug = id.toLowerCase().split("/").pop() ?? "";
+    return !(slug.includes("-asr") || slug.includes("-tts"));
+  });
+}
 
 function loadAgxConfig(): AgxConfig {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -1899,8 +2038,10 @@ function showMainWindowSafely(): void {
 
 async function revealMainWindowAfterSplash(options?: { fade?: boolean }): Promise<void> {
   await closeSplash({ fade: options?.fade ?? true });
+  if (startHidden) return;
   showMainWindowSafely();
 }
+let startHidden = false;
 let tray: Tray | null = null;
 const WIN_TITLE_BAR_OVERLAY_HEIGHT = 44;
 type WinTitleBarTheme = "dark" | "light" | "dim";
@@ -2071,12 +2212,29 @@ function notifyRendererConnectionModeChanged(): void {
   mainWindow.webContents.send("agx-connection-mode-changed");
 }
 
+function actionAuditUploaderDeps() {
+  return {
+    loadConfig: loadAgxConfig,
+    fetchImpl: proxyAwareFetch,
+    homeDir: os.homedir(),
+    now: () => Date.now(),
+  };
+}
+
+let stopActionAuditUploader: (() => void) | null = null;
+
+function ensureActionAuditUploader(): void {
+  if (stopActionAuditUploader) return;
+  stopActionAuditUploader = startActionAuditUploader(actionAuditUploaderDeps());
+}
+
 function notifyRendererStudioReady(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agx-studio-ready");
   void scheduleEnterpriseCapabilitySync().catch((error) => {
     console.warn(`[enterprise] capability sync failed: ${String(error)}`);
   });
+  ensureActionAuditUploader();
 }
 
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
@@ -2123,6 +2281,7 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
   const token = String(cfg.enterprise?.token ?? "").trim();
   const portal = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
   let capabilities = cfg.enterprise?.capabilities;
+  let agentPolicy: unknown = cfg.enterprise?.agent_action_policy;
   if (portal) {
     try {
       const resp = await proxyAwareFetch(`${portal}/api/desktop/bootstrap`, {
@@ -2130,8 +2289,13 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
         signal: AbortSignal.timeout(15_000),
       });
       if (resp.ok) {
-        const json = (await resp.json()) as { data?: { capabilities?: unknown } };
+        const json = (await resp.json()) as {
+          data?: { capabilities?: unknown; policy?: { agentActions?: unknown } };
+        };
         capabilities = json.data?.capabilities ?? capabilities;
+        if (json.data?.policy && "agentActions" in json.data.policy) {
+          agentPolicy = json.data.policy.agentActions;
+        }
       }
     } catch (error) {
       console.warn(`[enterprise] bootstrap capabilities failed: ${String(error)}`);
@@ -2157,6 +2321,7 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
     cfg.enterprise.capabilities = normalizeEnterpriseCapabilities(capabilities);
     cfg.enterprise.managed_mcp_servers = result.managedMcp;
     cfg.enterprise.managed_skills = result.managedSkills;
+    cfg.enterprise.agent_action_policy = normalizeAgentActionPolicy(agentPolicy);
     saveAgxConfig(cfg);
   }
   return { ok: true, skipped: result.skipped };
@@ -2238,7 +2403,10 @@ function markStudioReady(): void {
   notifyRendererStudioReady();
   // Only arm splash force-show after backend is ready so the main window
   // does not appear with empty avatars/sessions during cold start.
-  scheduleSplashForceShowFallback(showMainWindowSafely);
+  scheduleSplashForceShowFallback(() => {
+    if (startHidden) return;
+    showMainWindowSafely();
+  });
 }
 
 function resetStudioReady(): void {
@@ -2683,6 +2851,27 @@ function userManagedVenvPython(): string {
   return path.join(userManagedVenvBinDir(), exe);
 }
 
+function pythonForVenvDir(venvDir: string): string {
+  const sub = process.platform === "win32" ? "Scripts" : "bin";
+  const exe = process.platform === "win32" ? "python.exe" : "python";
+  return path.join(venvDir, sub, exe);
+}
+
+/**
+ * Development checkouts own their Python environment. Never repair one source
+ * tree by overwriting the shared end-user venv, otherwise another checkout's
+ * editable install can become the Desktop backend.
+ */
+function backendRepairVenvDir(): string {
+  if (!app.isPackaged) {
+    const repoBinDir = repoAdjacentVenvBinDirs()[0];
+    if (repoBinDir) return path.dirname(repoBinDir);
+    const sourceRoot = findAgenticxSourceRoot();
+    if (sourceRoot) return path.join(sourceRoot, ".venv");
+  }
+  return path.join(os.homedir(), ".agenticx", ".venv");
+}
+
 /** Find an executable by candidate names across the augmented PATH dirs. */
 function findExecOnPath(augmentedPath: string, names: string[]): string | null {
   const dirs = augmentedPath.split(pathListSeparator());
@@ -2702,12 +2891,10 @@ function findExecOnPath(augmentedPath: string, names: string[]): string | null {
 
 /**
  * Resolve the Python interpreter the backend currently uses, for dependency
- * diagnosis. Prefers the managed venv, then python next to resolved agx,
- * then python on PATH.
+ * diagnosis. Follow the resolved agx executable first so a development
+ * checkout cannot diagnose a different checkout's shared managed venv.
  */
 function resolveBackendPython(augmentedPath: string): string | null {
-  const venvPy = userManagedVenvPython();
-  if (fs.existsSync(venvPy)) return venvPy;
   const agx = findAgxBinaryOnPath(augmentedPath);
   if (agx) {
     const dir = path.dirname(agx);
@@ -2717,16 +2904,18 @@ function resolveBackendPython(augmentedPath: string): string | null {
       if (fs.existsSync(candidate)) return candidate;
     }
   }
+  const venvPy = userManagedVenvPython();
+  if (fs.existsSync(venvPy)) return venvPy;
   return findExecOnPath(augmentedPath, process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"]);
 }
 
 /**
- * Find a base Python (>=3.10) to bootstrap the managed venv. Skips the managed
- * venv itself to avoid a chicken-and-egg dependency.
+ * Find a base Python (>=3.10) to bootstrap a runtime venv. Skips the target
+ * and other internal venvs to avoid a chicken-and-egg dependency.
  */
-function findBasePython(augmentedPath: string): string | null {
-  const venvDir = userManagedVenvBinDir();
-  const dirs = augmentedPath.split(pathListSeparator()).filter((d) => path.normalize(d) !== path.normalize(venvDir));
+function findBasePython(augmentedPath: string, excludedVenvBinDirs: string[] = [userManagedVenvBinDir()]): string | null {
+  const excluded = new Set(excludedVenvBinDirs.map((dir) => path.normalize(dir)));
+  const dirs = augmentedPath.split(pathListSeparator()).filter((d) => !excluded.has(path.normalize(d)));
   const names = process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"];
   for (const dir of dirs) {
     for (const name of names) {
@@ -2778,11 +2967,14 @@ function buildAugmentedPath(): string {
   const basePath =
     process.env.PATH ?? (process.platform === "win32" ? "" : "/usr/bin:/bin");
 
-  // User-managed venv (~/.agenticx/.venv) from「一键修复」must win over repo-adjacent
-  // .venv in dev trees; otherwise repair installs PDF/KB deps but agx serve still runs
-  // from an incomplete project venv.
+  // Source checkouts must run their own repo-local backend. The shared managed
+  // venv is an end-user fallback and may contain an editable install belonging
+  // to another checkout (for example a parallel experimental repository).
   const userVenvDirs = existingUserManagedVenvBinDirs();
   const repoVenvDirs = repoAdjacentVenvBinDirs();
+  const preferredVenvDirs = app.isPackaged
+    ? [...userVenvDirs, ...repoVenvDirs]
+    : [...repoVenvDirs, ...userVenvDirs];
   let extraPaths: string[];
   let trailingPaths: string[] = [];
   if (process.platform === "win32") {
@@ -2796,8 +2988,7 @@ function buildAugmentedPath(): string {
       ? pyWinFolders.map((folder) => path.join(appDataRoaming, "Python", folder, "Scripts"))
       : [];
     extraPaths = [
-      ...userVenvDirs,
-      ...repoVenvDirs,
+      ...preferredVenvDirs,
       ...programsPythonScripts,
       ...userSiteScripts,
       path.join(home, "miniconda3", "Scripts"),
@@ -2815,8 +3006,7 @@ function buildAugmentedPath(): string {
       (v) => `${home}/Library/Python/${v}/bin`
     );
     extraPaths = [
-      ...userVenvDirs,
-      ...repoVenvDirs,
+      ...preferredVenvDirs,
       ...pyUserBins,
       ...nvmNodeBinDirs(home),
       "/opt/miniconda3/bin",
@@ -2971,6 +3161,9 @@ async function startStudioServe(): Promise<void> {
     AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
     // Override leftover shell exports so Settings → 工具 → 调查取证 wins.
     AGENTICX_OPS_TOOLS: readOpsToolsEnabled(cfg) ? "1" : "0",
+    // 连接器网关（REST 连接器登记）：Python 侧复用/按需拉起同一个 sidecar。
+    AGX_CONNECTOR_RUNTIME_BIN: getConnectorRuntimeBinaryPath(),
+    AGX_CONNECTOR_RUNTIME_DIR: connectorRuntimeDataDir(),
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
@@ -3165,6 +3358,15 @@ type NativeConnectorStatusResult = {
   label: string;
   error?: string;
   account?: string;
+  /**
+   * Agent-usable health (SSOT). For GitHub: native gh OK is not enough when
+   * mcp.json PAT is present but returns 401 — that is "degraded".
+   */
+  health?: "connected" | "degraded" | "disconnected";
+  /** Whether ~/.agenticx/mcp.json has a github server with a non-empty token slot. */
+  mcpConfigured?: boolean;
+  /** MCP PAT probe against api.github.com/user; omitted when not configured. */
+  mcpAuthOk?: boolean;
 };
 
 const TMEET_PACKAGE_VERSION = "1.0.11";
@@ -4014,6 +4216,121 @@ function removeGithubSkill(): void {
   fs.rmSync(skillDir, { recursive: true, force: true });
 }
 
+
+/** mcp.json on disk (agent GitHub tools); never log token values. */
+function readAgenticxMcpGithubTokenMeta(): { configured: boolean; token: string } {
+  try {
+    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    if (!fs.existsSync(mcpPath)) return { configured: false, token: "" };
+    const raw = JSON.parse(fs.readFileSync(mcpPath, "utf8")) as {
+      mcpServers?: Record<string, { env?: Record<string, string> }>;
+    };
+    const servers = raw.mcpServers ?? {};
+    const gh = servers.github;
+    if (!gh || typeof gh !== "object") return { configured: false, token: "" };
+    const token = String(gh.env?.GITHUB_PERSONAL_ACCESS_TOKEN ?? "").trim();
+    return { configured: token.length > 0, token };
+  } catch {
+    return { configured: false, token: "" };
+  }
+}
+
+/**
+ * Probe MCP GitHub PAT with GET /user. Returns null when no token configured.
+ * Does not log the token.
+ */
+async function probeGithubMcpPatAuth(token: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const resp = await fetch("https://api.github.com/user", {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "Near-Desktop-Connector-Health",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: controller.signal,
+    });
+    if (resp.status === 401 || resp.status === 403) return false;
+    return resp.ok;
+  } catch {
+    // Network blip: do not mark degraded as auth_invalid; treat as unknown→not ok for safety when configured
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function resolveGithubHealthLabel(input: {
+  nativeConnected: boolean;
+  mcpConfigured: boolean;
+  mcpAuthOk: boolean | null;
+  nativeLabel: string;
+}): { health: "connected" | "degraded" | "disconnected"; connected: boolean; label: string; error?: string } {
+  // `connected` = native CLI session (handshake / Disconnect 按钮).
+  // `health` = agent MCP usable (marketplace 绿标仅 connected).
+  if (input.mcpConfigured && input.mcpAuthOk === false) {
+    return {
+      health: "degraded",
+      connected: input.nativeConnected,
+      label: input.nativeConnected ? "需重新授权" : "需重新授权",
+      error:
+        "GitHub MCP 凭据无效或已过期（API 401/403）。CLI 登录正常也不能让对话工具读仓；完成浏览器授权后会尝试同步 token，若仍失败请更新 mcp.json 中的 Personal Access Token。",
+    };
+  }
+  if (input.nativeConnected || input.mcpAuthOk === true) {
+    return {
+      health: "connected",
+      connected: true,
+      label: input.nativeConnected ? input.nativeLabel : "已连接",
+    };
+  }
+  return {
+    health: "disconnected",
+    connected: false,
+    label: input.nativeLabel || "可用",
+  };
+}
+
+/**
+ * After native `gh` login succeeds, copy `gh auth token` into mcp.json github PAT
+ * so chat MCP stops 401. Never logs the token value.
+ */
+async function syncGithubMcpPatFromGhCli(): Promise<{ synced: boolean; reason?: string }> {
+  try {
+    const raw = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+    const token = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l && !l.startsWith("error") && !/\s/.test(l));
+    if (!token || token.length < 20) {
+      return { synced: false, reason: "no_token" };
+    }
+    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    if (!fs.existsSync(mcpPath)) {
+      return { synced: false, reason: "no_mcp_json" };
+    }
+    let parsed: {
+      mcpServers?: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+      [k: string]: unknown;
+    };
+    try {
+      parsed = JSON.parse(fs.readFileSync(mcpPath, "utf8")) as typeof parsed;
+    } catch {
+      return { synced: false, reason: "mcp_parse_error" };
+    }
+    const { document, updated, hadGithubServer } = applyGithubMcpPatToDocument(parsed, token);
+    if (!hadGithubServer) return { synced: false, reason: "no_github_server" };
+    if (!updated) return { synced: false, reason: "unchanged" };
+    fs.writeFileSync(mcpPath, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    return { synced: true };
+  } catch {
+    return { synced: false, reason: "sync_failed" };
+  }
+}
+
 async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
   try {
     let binaryPath = await resolveGhBinaryPath();
@@ -4021,42 +4338,61 @@ async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
     if (!binaryPath && fs.existsSync(managedSkillMarker)) {
       binaryPath = await ensureGhBinaryInstalled();
     }
+    let nativeConnected = false;
+    let nativeLabel = "可用";
+    let nativeError: string | undefined;
+    let account: string | undefined;
+    let nativeOk = true;
+
     if (!binaryPath) {
       tryPersistGithubConnectorStatus(false);
-      return {
-        ok: true,
-        available: true,
-        connected: false,
-        label: "可用",
-      };
-    }
-    const status = parseGithubAuthStatus(
-      await runGhCommand(["auth", "status", "--hostname", "github.com"]),
-    );
-    if (status.connected && binaryPath) {
-      try {
-        ensureGithubSkill(binaryPath);
-      } catch (error) {
-        tryPersistGithubConnectorStatus(false);
-        return {
-          ok: false,
-          available: true,
-          connected: false,
-          label: "连接异常",
-          error: error instanceof Error ? error.message : String(error),
-        };
+    } else {
+      const status = parseGithubAuthStatus(
+        await runGhCommand(["auth", "status", "--hostname", "github.com"]),
+      );
+      nativeConnected = Boolean(status.connected);
+      nativeLabel = status.label;
+      nativeError = status.error;
+      account = status.account;
+      nativeOk = !status.error;
+      if (status.connected && binaryPath) {
+        try {
+          ensureGithubSkill(binaryPath);
+        } catch (error) {
+          tryPersistGithubConnectorStatus(false);
+          nativeConnected = false;
+          nativeOk = false;
+          nativeLabel = "连接异常";
+          nativeError = error instanceof Error ? error.message : String(error);
+        }
+      } else if (!status.connected) {
+        removeGithubSkill();
       }
-    } else if (!status.connected) {
-      removeGithubSkill();
+      tryPersistGithubConnectorStatus(nativeConnected && !nativeError);
     }
-    tryPersistGithubConnectorStatus(status.connected && !status.error);
+
+    const mcpMeta = readAgenticxMcpGithubTokenMeta();
+    let mcpAuthOk: boolean | null = null;
+    if (mcpMeta.configured) {
+      mcpAuthOk = await probeGithubMcpPatAuth(mcpMeta.token);
+    }
+    const merged = resolveGithubHealthLabel({
+      nativeConnected,
+      mcpConfigured: mcpMeta.configured,
+      mcpAuthOk,
+      nativeLabel,
+    });
+
     return {
-      ok: !status.error,
-      available: !status.error,
-      connected: status.connected,
-      label: status.label,
-      error: status.error,
-      account: status.account,
+      ok: true,
+      available: true,
+      connected: merged.connected,
+      label: merged.label,
+      error: merged.error ?? nativeError,
+      account,
+      health: merged.health,
+      mcpConfigured: mcpMeta.configured,
+      mcpAuthOk: mcpAuthOk ?? undefined,
     };
   } catch (error) {
     tryPersistGithubConnectorStatus(false);
@@ -4066,9 +4402,11 @@ async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
       connected: false,
       label: "暂不可用",
       error: error instanceof Error ? error.message : String(error),
+      health: "disconnected",
     };
   }
 }
+
 
 function sendGithubProgress(
   phase: "installing" | "code_ready" | "opening_browser" | "waiting" | "success" | "disconnected" | "error",
@@ -4099,9 +4437,24 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
     let settled = false;
     let proc: ChildProcess | null = null;
     let timeout: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const answered = new Set<string>();
+    let beforeFingerprint = "";
+    let wasConnectedBefore = false;
+    /** True when this attempt observed login evidence (not merely a prior session). */
+    let authCompleted = false;
+
+    const stopPoll = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
     const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
       if (settled) return;
       settled = true;
+      stopPoll();
       cancelActiveGithubLogin = null;
       if (timeout) clearTimeout(timeout);
       const currentProc = proc;
@@ -4121,14 +4474,78 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
       }
       if (proc && githubAuthProcess === proc) githubAuthProcess = null;
       githubAuthBusy = false;
-      const status = result ?? (await getGithubStatus());
-      if (status.error === "已取消") {
+
+      if (result?.error === "已取消") {
         sendGithubProgress("disconnected");
-      } else {
-        sendGithubProgress(status.connected ? "success" : "error");
+        resolve(result);
+        return;
       }
-      resolve(status);
-    };
+
+      // Re-check evidence (token may have refreshed after browser success).
+      let fingerprintNow = "";
+      let nativeNow = false;
+      try {
+        const nativeOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        nativeNow = parseGithubAuthStatus(nativeOut).connected;
+        if (nativeNow) {
+          try {
+            const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+            const token = tok
+              .split("\n")
+              .map((l) => l.trim())
+              .find((l) => l && !/\s/.test(l));
+            fingerprintNow = githubTokenFingerprint(token ?? "");
+          } catch {
+            fingerprintNow = "";
+          }
+        }
+      } catch {
+        nativeNow = false;
+      }
+      const tokenChanged = Boolean(beforeFingerprint && fingerprintNow && fingerprintNow !== beforeFingerprint);
+      const newlyConnected = nativeNow && !wasConnectedBefore;
+      const evidence =
+        authCompleted ||
+        detectGithubCliLoginSuccess(output) ||
+        tokenChanged ||
+        newlyConnected ||
+        result === undefined;
+
+      if (!evidence) {
+        sendGithubProgress("error");
+        resolve(
+          result ?? {
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: "GitHub 授权未完成",
+          },
+        );
+        return;
+      }
+
+      if (nativeNow) {
+        await syncGithubMcpPatFromGhCli();
+      }
+      const status = await getGithubStatus();
+      if (status.connected || status.health === "connected" || status.health === "degraded") {
+        sendGithubProgress("success");
+        resolve(status);
+        return;
+      }
+      sendGithubProgress("error");
+      resolve(
+        result ?? {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: "GitHub 授权未完成",
+        },
+      );
+    }
+
     cancelActiveGithubLogin = (reason) => {
       void finish(
         {
@@ -4141,11 +4558,48 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
         true,
       );
     };
+
+    const tryFinishFromNativeAuth = async (force = false) => {
+      if (settled) return;
+      if (!force && !codeSent && !opened) return;
+      try {
+        const statusOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        const parsed = parseGithubAuthStatus(statusOut);
+        let fp = "";
+        try {
+          const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+          const token = tok
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l && !/\s/.test(l));
+          fp = githubTokenFingerprint(token ?? "");
+        } catch {
+          fp = "";
+        }
+        const tokenChanged = Boolean(beforeFingerprint && fp && fp !== beforeFingerprint);
+        const newlyConnected = parsed.connected && !wasConnectedBefore;
+        const outputSuccess = detectGithubCliLoginSuccess(output);
+        if (outputSuccess || tokenChanged || newlyConnected) {
+          authCompleted = true;
+          void finish(undefined, true);
+          return;
+        }
+        // Process exiting: accept existing session only if this flow showed a device code / URL.
+        if (force && parsed.connected && (codeSent || opened)) {
+          authCompleted = true;
+          void finish(undefined, true);
+        }
+      } catch {
+        // ignore poll errors
+      }
+    };
+
     const consume = (chunk: Buffer) => {
       output = `${output}${chunk.toString("utf8")}`.slice(-32768);
-      if (/Press Enter to open/i.test(output) && proc?.stdin && !proc.stdin.destroyed) {
+      const stdinChunk = nextGithubAuthStdin(output, answered);
+      if (stdinChunk && proc?.stdin && !proc.stdin.destroyed) {
         try {
-          proc.stdin.write("\n");
+          proc.stdin.write(stdinChunk);
         } catch {
           // ignore
         }
@@ -4175,73 +4629,105 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
             ),
           );
       }
+      if (detectGithubCliLoginSuccess(output)) {
+        void tryFinishFromNativeAuth(true);
+      }
     };
-    void ensureGhBinaryInstalled()
-      .then((binaryPath) => {
-        proc = spawn(
-          binaryPath,
-          ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
-          {
-            stdio: ["pipe", "pipe", "pipe"],
-            env: {
-              ...process.env,
-              NO_COLOR: "1",
-              // Prefer Near-controlled browser open when gh respects BROWSER.
-              BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
-              GH_PROMPT: "disabled",
-            },
-          },
-        );
-        githubAuthProcess = proc;
-        timeout = setTimeout(() => {
-          void finish(
+
+    void (async () => {
+      try {
+        const beforeOut = await runGhCommand(["auth", "status", "--hostname", "github.com"]);
+        wasConnectedBefore = parseGithubAuthStatus(beforeOut).connected;
+        try {
+          const tok = await runGhCommand(["auth", "token", "--hostname", "github.com"]);
+          const token = tok
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l && !/\s/.test(l));
+          beforeFingerprint = githubTokenFingerprint(token ?? "");
+        } catch {
+          beforeFingerprint = "";
+        }
+      } catch {
+        wasConnectedBefore = false;
+        beforeFingerprint = "";
+      }
+
+      void ensureGhBinaryInstalled()
+        .then((binaryPath) => {
+          proc = spawn(
+            binaryPath,
+            ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
             {
-              ok: false,
-              available: true,
-              connected: false,
-              label: "连接超时",
-              error: "浏览器授权已超时，请重试",
+              stdio: ["pipe", "pipe", "pipe"],
+              env: {
+                ...process.env,
+                NO_COLOR: "1",
+                // Prefer Near-controlled browser open when gh respects BROWSER.
+                BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
+                GH_PROMPT: "disabled",
+              },
             },
-            true,
           );
-        }, 5 * 60 * 1000);
-        proc.stdout?.on("data", consume);
-        proc.stderr?.on("data", consume);
-        proc.on("error", () => {
-          void finish(
-            {
-              ok: false,
-              available: true,
-              connected: false,
-              label: "连接失败",
-              error: "无法启动 GitHub 授权",
-            },
-            true,
-          );
-        });
-        proc.on("exit", (code) => {
-          if (code === 0) {
-            void finish();
-            return;
-          }
+          githubAuthProcess = proc;
+          timeout = setTimeout(() => {
+            void finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接超时",
+                error: "浏览器授权已超时，请重试",
+              },
+              true,
+            );
+          }, 5 * 60 * 1000);
+          // Browser can show success while `gh` stays blocked on a prompt — poll native auth.
+          pollTimer = setInterval(() => {
+            void tryFinishFromNativeAuth(false);
+          }, 2000);
+          proc.stdout?.on("data", consume);
+          proc.stderr?.on("data", consume);
+          proc.on("error", () => {
+            void finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: "无法启动 GitHub 授权",
+              },
+              true,
+            );
+          });
+          proc.on("exit", (code) => {
+            if (code === 0) {
+              void finish();
+              return;
+            }
+            // Process died but browser may have completed — prefer native status.
+            void tryFinishFromNativeAuth(true).then(() => {
+              if (settled) return;
+              void finish({
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: opened || codeSent ? "GitHub 授权未完成或已取消" : "未能获取 GitHub 授权码",
+              });
+            });
+          });
+        })
+        .catch((error) => {
           void finish({
             ok: false,
             available: true,
             connected: false,
-            label: "连接失败",
-            error: opened || codeSent ? "GitHub 授权未完成或已取消" : "未能获取 GitHub 授权码",
+            label: "安装失败",
+            error: error instanceof Error ? error.message : String(error),
           });
         });
-      })
-      .catch((error) => {
-        void finish({
-          ok: false,
-          available: true,
-          connected: false,
-          label: "安装失败",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+    })();
   });
 }
 
@@ -5307,7 +5793,7 @@ description: 使用企业微信官方 CLI (wecom-cli) 操作消息、文档、�
 
 category 取值：contact（通讯录）/ doc（文档、智能表格）/ meeting（会议）/ msg（消息）/ schedule（日程）/ todo（待办）。
 
-读取类调用（get_*、list、query）可直接执行；写操作（发消息、创建/删除文档或记录、创建/取消会议或日程、创建/更新/删除待办）必须先向用户展示参数并确认后再执行。不得输出或读取本机凭据文件。若调用返回 error 字段，引导用户前往「设置 → 连接器 → 企业微信」重新连接。
+读取类调用（get_*、list、query）可直接执行；写操作（发消息、创建/删除文档或记录、创建/取消会议或日程、创建/更新/删除待办）必须先向用户展示参数并确认后再执行。不得输出或读取本机凭据文件。若调用返回 error 字段或尚未登录，引导用户前往「设置 → 连接器 → 企业微信」扫码或填写凭据。禁止在对话里生成、粘贴或要求用户打开登录链接/二维码（链接会过期，且不应把登录过程写进聊天记录）。
 `;
   if (!directoryExists) {
     const parentDir = path.dirname(skillDir);
@@ -5405,14 +5891,21 @@ async function getWecomStatus(): Promise<NativeConnectorStatusResult> {
 type WecomProgressPhase =
   | "installing"
   | "initializing"
+  | "waiting_scan"
   | "probing"
   | "success"
   | "disconnected"
   | "error";
 
-function sendWecomProgress(phase: WecomProgressPhase): void {
+function sendWecomProgress(
+  phase: WecomProgressPhase,
+  extra?: { loginUrl?: string },
+): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("native-connector-wecom-progress", { phase });
+  mainWindow.webContents.send("native-connector-wecom-progress", {
+    phase,
+    ...extra,
+  });
 }
 
 function stripAnsiForWecom(text: string): string {
@@ -5524,10 +6017,90 @@ function runWecomInitViaPty(
   });
 }
 
-function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnectorStatusResult> {
-  const id = botId.trim();
-  const secret = botSecret.trim();
-  if (!id || !secret) {
+/**
+ * QR path: keep the first cliclack option (扫码接入). Push login URLs to the
+ * renderer so the dialog can refresh the QR without putting links in chat.
+ */
+function runWecomQrInitViaPty(
+  binaryPath: string,
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve, reject) => {
+    const ptyMod = requireNodePty();
+    if (!ptyMod) {
+      reject(new Error("本机无法启动伪终端（node-pty），无法完成企业微信扫码初始化"));
+      return;
+    }
+    let output = "";
+    let selectedQr = false;
+    let lastLoginUrl = "";
+    let settled = false;
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (wecomAuthPty === pty) wecomAuthPty = null;
+      resolve({ code, output });
+    };
+    const pty = ptyMod.spawn(binaryPath, ["init"], {
+      name: "xterm-256color",
+      cols: 100,
+      rows: 40,
+      cwd: os.homedir(),
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        TERM: "xterm-256color",
+      } as Record<string, string>,
+    });
+    wecomAuthPty = pty;
+    const timeout = setTimeout(() => {
+      try {
+        pty.kill();
+      } catch {
+        // ignore
+      }
+      if (!settled) {
+        settled = true;
+        wecomAuthPty = null;
+        reject(new Error("企业微信扫码初始化已超时，请重试"));
+      }
+    }, 8 * 60 * 1000);
+
+    pty.onData((chunk: string) => {
+      output = `${output}${chunk}`.slice(-65536);
+      const plain = stripAnsiForWecom(output);
+      if (!selectedQr && /请选择企微机器人接入方式/.test(plain)) {
+        selectedQr = true;
+        setTimeout(() => {
+          try {
+            pty.write("\r");
+          } catch {
+            // ignore
+          }
+        }, 120);
+      }
+      const loginUrl = extractWecomLoginUrl(plain);
+      if (loginUrl && loginUrl !== lastLoginUrl) {
+        lastLoginUrl = loginUrl;
+        sendWecomProgress("waiting_scan", { loginUrl });
+      }
+    });
+
+    pty.onExit(({ exitCode }) => {
+      finish(typeof exitCode === "number" ? exitCode : 1);
+    });
+  });
+}
+
+function startWecomLogin(payload: {
+  mode?: string;
+  botId?: string;
+  botSecret?: string;
+}): Promise<NativeConnectorStatusResult> {
+  const mode = payload.mode === "manual" ? "manual" : "qrcode";
+  const id = String(payload.botId || "").trim();
+  const secret = String(payload.botSecret || "").trim();
+  if (mode === "manual" && (!id || !secret)) {
     return Promise.resolve({
       ok: false,
       available: true,
@@ -5590,11 +6163,32 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
         const binaryPath = await ensureWecomCliBinaryInstalled();
         if (settled) return;
         sendWecomProgress("initializing");
-        const initResult = await runWecomInitViaPty(binaryPath, id, secret);
+        let initResult: { code: number; output: string };
+        if (mode === "manual") {
+          initResult = await runWecomInitViaPty(binaryPath, id, secret);
+        } else {
+          let attempt = 0;
+          for (;;) {
+            attempt += 1;
+            initResult = await runWecomQrInitViaPty(binaryPath);
+            if (settled) return;
+            const cyclePlain = stripAnsiForWecom(initResult.output);
+            if (wecomInitLooksSuccess(cyclePlain) && initResult.code === 0) {
+              break;
+            }
+            if (wecomInitLooksExpired(cyclePlain) && attempt < 8) {
+              sendWecomProgress("waiting_scan");
+              continue;
+            }
+            break;
+          }
+        }
         if (settled) return;
         const plain = stripAnsiForWecom(initResult.output);
         if (initResult.code !== 0 || /初始化失败/.test(plain)) {
-          clearWecomLocalCredentials();
+          if (mode === "manual") {
+            clearWecomLocalCredentials();
+          }
           await finish({
             ok: false,
             available: true,
@@ -5602,7 +6196,9 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
             label: "连接失败",
             error: /初始化失败/.test(plain)
               ? "企业微信机器人凭证验证失败，请检查 Bot ID / Secret"
-              : `企业微信初始化失败（退出码 ${initResult.code}）`,
+              : wecomInitLooksExpired(plain)
+                ? "登录二维码已过期，请重新点连接"
+                : `企业微信初始化失败（退出码 ${initResult.code}）`,
           });
           return;
         }
@@ -5615,7 +6211,9 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
         if (settled) return;
         const probeText = probe.stdout.trim() || probe.stderr.trim();
         if (!isWecomProbeSuccessful(probeText)) {
-          clearWecomLocalCredentials();
+          if (mode === "manual") {
+            clearWecomLocalCredentials();
+          }
           removeWecomSkill();
           tryPersistWecomConnectorStatus(false);
           await finish({
@@ -5623,7 +6221,10 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
             available: true,
             connected: false,
             label: "连接失败",
-            error: "企业微信凭据校验未通过，请确认 Bot ID / Secret 正确",
+            error:
+              mode === "manual"
+                ? "企业微信凭据校验未通过，请确认 Bot ID / Secret 正确"
+                : "企业微信扫码后校验未通过，请重新连接",
           });
           return;
         }
@@ -6445,6 +7046,309 @@ function stopWechatHealthCheck(): void {
   }
 }
 
+// ── Connector Runtime Sidecar（连接器网关·内置形态）──────────────
+// 按需拉起的本地连接器网关：市场安装内置形态 / 连接管理时 ensure；
+// runtime token 注入 mcp.json 供对话侧访问 /mcp，admin token 只留主进程
+// 经代理 IPC 转发管理面调用；桌面退出时回收进程。
+
+type ConnectorRuntimeEnsureResult =
+  | { ok: true; port: number; runtimeToken: string }
+  | { ok: false; error: "binary_not_found" | "health_timeout" | "start_failed" };
+
+let connectorRuntimeProcess: ChildProcess | null = null;
+let connectorRuntimePort = 0;
+let connectorRuntimeRuntimeToken = "";
+let connectorRuntimeAdminToken = "";
+let connectorRuntimeRestartCount = 0;
+const CONNECTOR_RUNTIME_MAX_RESTARTS = 3;
+let connectorRuntimeHealthTimer: ReturnType<typeof setInterval> | null = null;
+let connectorRuntimeStarting: Promise<ConnectorRuntimeEnsureResult> | null = null;
+/** 复用了同机已在运行的实例（例如由 Python 后端拉起）：不持有子进程，退出时不回收。 */
+let connectorRuntimeAdopted = false;
+
+function connectorRuntimeDataDir(): string {
+  return path.join(CONFIG_DIR, "connector-runtime");
+}
+
+/** 读取 data-dir 下 0600 token 文件（与 master.key 同信任级；由网关在启动时落盘）。 */
+function readConnectorRuntimeToken(dataDir: string, name: "runtime.token" | "admin.token"): string {
+  try {
+    return fs.readFileSync(path.join(dataDir, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** sidecar.json：网关监听后写入 {pid, addr}；用于复用实例与沿用端口（mcp.json 里的 URL 保持稳定）。 */
+function readConnectorRuntimeSidecarInfo(dataDir: string): { pid: number; port: number } | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dataDir, "sidecar.json"), "utf8")) as {
+      pid?: number;
+      addr?: string;
+    };
+    const port = Number(String(raw.addr ?? "").split(":").pop());
+    if (!Number.isInteger(port) || port <= 0) return null;
+    return { pid: Number(raw.pid) || 0, port };
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isLocalPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
+  });
+}
+
+/**
+ * 网关是 Go 进程，只认环境变量代理：把系统代理（如 Clash 127.0.0.1:7897）显式传给它，
+ * 本地目标一律直连（NO_PROXY），代理不可达时网关自身回落直连——开/关代理都不受影响。
+ */
+async function connectorRuntimeProxyEnv(): Promise<NodeJS.ProcessEnv> {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const noProxy = new Set(
+    String(env.NO_PROXY ?? env.no_proxy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  for (const h of ["localhost", "127.0.0.1", "::1", ".local"]) noProxy.add(h);
+  env.NO_PROXY = Array.from(noProxy).join(",");
+  if (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy) return env;
+  try {
+    const rule = await session.defaultSession.resolveProxy("https://example.com");
+    const m = /^(?:PROXY|HTTPS)\s+([^\s;]+)/i.exec(rule.trim());
+    if (m) {
+      const proxyUrl = rule.trim().toUpperCase().startsWith("HTTPS") ? `https://${m[1]}` : `http://${m[1]}`;
+      env.HTTPS_PROXY = proxyUrl;
+      env.HTTP_PROXY = proxyUrl;
+    }
+  } catch {
+    /* no system proxy info: direct */
+  }
+  return env;
+}
+
+/** 复用已在运行的网关实例（Python 后端或上次桌面会话拉起）。 */
+async function tryAdoptConnectorRuntime(dataDir: string): Promise<ConnectorRuntimeEnsureResult | null> {
+  const info = readConnectorRuntimeSidecarInfo(dataDir);
+  if (!info || !isPidAlive(info.pid)) return null;
+  const runtimeToken = readConnectorRuntimeToken(dataDir, "runtime.token");
+  const adminToken = readConnectorRuntimeToken(dataDir, "admin.token");
+  if (!runtimeToken || !adminToken) return null;
+  if (!(await waitForConnectorRuntimeHealth(info.port, 1_500))) return null;
+  connectorRuntimePort = info.port;
+  connectorRuntimeRuntimeToken = runtimeToken;
+  connectorRuntimeAdminToken = adminToken;
+  connectorRuntimeAdopted = true;
+  console.info("[connector-runtime] adopted running instance on port", info.port);
+  return { ok: true, port: info.port, runtimeToken };
+}
+
+/** 二进制位置：打包后在 resources/sidecar/（electron-builder extraResources），开发态用 stage 目录。 */
+function getConnectorRuntimeBinaryPath(): string {
+  const exe = process.platform === "win32" ? "connector-runtime.exe" : "connector-runtime";
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "sidecar", exe);
+  }
+  const archDir = process.platform === "win32" ? "win-amd64" : process.arch === "x64" ? "x64" : "arm64";
+  // dist-electron/main.js → ../bundled-sidecar/<arch>/ （再多一层 .. 会落到仓库根，开发态找不到二进制）
+  return path.join(__dirname, "..", "bundled-sidecar", archDir, exe);
+}
+
+async function ensureConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
+  if (connectorRuntimeProcess && !connectorRuntimeProcess.killed && connectorRuntimePort) {
+    return { ok: true, port: connectorRuntimePort, runtimeToken: connectorRuntimeRuntimeToken };
+  }
+  if (connectorRuntimeAdopted && connectorRuntimePort) {
+    if (await waitForConnectorRuntimeHealth(connectorRuntimePort, 1_500)) {
+      return { ok: true, port: connectorRuntimePort, runtimeToken: connectorRuntimeRuntimeToken };
+    }
+    connectorRuntimeAdopted = false;
+    connectorRuntimePort = 0;
+  }
+  if (!connectorRuntimeStarting) {
+    connectorRuntimeStarting = startConnectorRuntime().finally(() => {
+      connectorRuntimeStarting = null;
+    });
+  }
+  return connectorRuntimeStarting;
+}
+
+async function startConnectorRuntime(): Promise<ConnectorRuntimeEnsureResult> {
+  const binaryPath = getConnectorRuntimeBinaryPath();
+  if (!fs.existsSync(binaryPath)) {
+    console.info("[connector-runtime] binary not found:", binaryPath);
+    return { ok: false, error: "binary_not_found" };
+  }
+  try {
+    const dataDir = connectorRuntimeDataDir();
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const adopted = await tryAdoptConnectorRuntime(dataDir);
+    if (adopted) return adopted;
+    // 沿用上次端口与 token：已写入 mcp.json 的网关条目跨重启保持可用。
+    const prev = readConnectorRuntimeSidecarInfo(dataDir);
+    const port = prev && (await isLocalPortFree(prev.port)) ? prev.port : await findFreePort();
+    const runtimeToken =
+      readConnectorRuntimeToken(dataDir, "runtime.token") || crypto.randomBytes(24).toString("hex");
+    const adminToken =
+      readConnectorRuntimeToken(dataDir, "admin.token") || crypto.randomBytes(24).toString("hex");
+    const args = [
+      "serve",
+      "--addr", `127.0.0.1:${port}`,
+      "--runtime-token", runtimeToken,
+      "--admin-token", adminToken,
+      "--data-dir", dataDir,
+    ];
+    console.info("[connector-runtime] spawn", { binaryPath, port });
+    connectorRuntimeProcess = spawn(binaryPath, args, {
+      cwd: os.homedir(),
+      stdio: ["ignore", "pipe", "pipe"],
+      env: await connectorRuntimeProxyEnv(),
+    });
+    connectorRuntimePort = port;
+    connectorRuntimeRuntimeToken = runtimeToken;
+    connectorRuntimeAdminToken = adminToken;
+    connectorRuntimeProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.info("[connector-runtime]", line);
+    });
+    connectorRuntimeProcess.stderr?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.warn("[connector-runtime:err]", line);
+    });
+    connectorRuntimeProcess.on("exit", (code) => {
+      if (!isQuitting) {
+        console.info(`[connector-runtime] exited (code=${String(code)})`);
+        if (connectorRuntimeRestartCount < CONNECTOR_RUNTIME_MAX_RESTARTS) {
+          connectorRuntimeRestartCount++;
+          console.info(
+            `[connector-runtime] auto-restart attempt ${connectorRuntimeRestartCount}/${CONNECTOR_RUNTIME_MAX_RESTARTS}`,
+          );
+          setTimeout(() => void ensureConnectorRuntime(), 2000);
+        }
+      }
+      connectorRuntimeProcess = null;
+      connectorRuntimePort = 0;
+      connectorRuntimeRuntimeToken = "";
+      connectorRuntimeAdminToken = "";
+    });
+    // 等待 /healthz 就绪再放行（安装流程要立即写入可用的 mcp.json）。
+    const ready = await waitForConnectorRuntimeHealth(port, 10_000);
+    if (!ready) {
+      stopConnectorRuntime();
+      return { ok: false, error: "health_timeout" };
+    }
+    startConnectorRuntimeHealthCheck();
+    connectorRuntimeRestartCount = 0;
+    console.info("[connector-runtime] started on port", port);
+    return { ok: true, port, runtimeToken };
+  } catch (err) {
+    console.error("[connector-runtime] start failed:", err);
+    return { ok: false, error: "start_failed" };
+  }
+}
+
+async function waitForConnectorRuntimeHealth(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+      const resp = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (resp.ok) return true;
+    } catch { /* not ready yet */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+function startConnectorRuntimeHealthCheck(): void {
+  stopConnectorRuntimeHealthCheck();
+  connectorRuntimeHealthTimer = setInterval(async () => {
+    if (!connectorRuntimePort || !connectorRuntimeProcess) return;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(`http://127.0.0.1:${connectorRuntimePort}/healthz`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error(`health check: ${resp.status}`);
+    } catch {
+      console.warn("[connector-runtime] health check failed");
+    }
+  }, 30_000);
+}
+
+function stopConnectorRuntimeHealthCheck(): void {
+  if (connectorRuntimeHealthTimer) {
+    clearInterval(connectorRuntimeHealthTimer);
+    connectorRuntimeHealthTimer = null;
+  }
+}
+
+function stopConnectorRuntime(): void {
+  stopConnectorRuntimeHealthCheck();
+  connectorRuntimeAdopted = false;
+  if (!connectorRuntimeProcess) return;
+  try { connectorRuntimeProcess.kill("SIGTERM"); } catch { /* noop */ }
+  connectorRuntimeProcess = null;
+  connectorRuntimePort = 0;
+  connectorRuntimeRuntimeToken = "";
+  connectorRuntimeAdminToken = "";
+}
+
+type ConnectorRuntimeAdminResult = {
+  ok: boolean;
+  status: number;
+  body?: unknown;
+  error?: string;
+};
+
+/** 管理面代理：admin token 只驻留主进程，渲染层只发 method/path/body。 */
+async function connectorRuntimeAdmin(req: {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  body?: unknown;
+}): Promise<ConnectorRuntimeAdminResult> {
+  const ensure = await ensureConnectorRuntime();
+  if (!ensure.ok) return { ok: false, status: 0, error: ensure.error };
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const resp = await fetch(`http://127.0.0.1:${connectorRuntimePort}${req.path}`, {
+      method: req.method,
+      headers: {
+        Authorization: `Bearer ${connectorRuntimeAdminToken}`,
+        ...(req.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const text = await resp.text();
+    let body: unknown = text;
+    try { body = text ? JSON.parse(text) : null; } catch { /* keep raw text */ }
+    return { ok: resp.ok, status: resp.status, body };
+  } catch {
+    return { ok: false, status: 0, error: "request_failed" };
+  }
+}
+
 type PtyTerminalSession = {
   kind: "pty";
   pty: import("node-pty").IPty;
@@ -6564,9 +7468,28 @@ function shouldRouteToInAppBrowser(targetUrl: string, appUrl: string): boolean {
  * WorkPanel remote browser uses <webview> (not iframe) so sites with
  * X-Frame-Options / CSP frame-ancestors still load. Guest window.open /
  * target=_blank stays inside the same webview instead of system Chrome.
+ *
+ * Electron also asks the `openExternal` permission for those navigations and,
+ * if granted, opens the OS browser (often twice). Deny it for this partition.
  */
+function denyWebviewOpenExternal(partition: string): void {
+  const browserSession = session.fromPartition(partition);
+  browserSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === "openExternal") return false;
+    return true;
+  });
+  browserSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === "openExternal") {
+      callback(false);
+      return;
+    }
+    callback(true);
+  });
+}
+
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
+  denyWebviewOpenExternal("persist:near-workpanel-browser");
   contents.setWindowOpenHandler(({ url }) => {
     if (!parseHttpUrl(url)) return { action: "deny" };
     // Single navigation path: tell renderer to update the WorkPanel tab + loadURL
@@ -6594,6 +7517,7 @@ function createWindow(): void {
   // still visible. That's the "two Near windows on DMG launch" bug.
   // Bail out early when a live main window already exists.
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (startHidden) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
@@ -6819,7 +7743,11 @@ function createWindow(): void {
       mainWindow?.hide();
     }
   });
-  startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+  if (typeof startNearBrowserBridge === "function") {
+    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+  } else {
+    console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
+  }
 }
 
 function trayLabels(locale?: AppLocale): { toggleWindow: string; settings: string; quit: string } {
@@ -6891,6 +7819,60 @@ function createTray(): void {
  */
 function registerEarlyIpc(): void {
   registerChromeCookieImportIpc();
+  ipcMain.handle("notify-task-complete", async (_event, raw: unknown) => {
+    const parsed = parseTaskCompleteNotifyPayload(raw);
+    if (!parsed.ok) return parsed;
+    const cfg = loadAutomationConfigFromAgx(loadAgxConfig());
+    const osFocused = BrowserWindow.getFocusedWindow() != null;
+    const windowActive = osFocused && !parsed.showBanner;
+    const showBanner = resolveTaskCompleteBanner({
+      desktopNotify: cfg.desktop_notify,
+      windowActive,
+    });
+    const playSound = parsed.playSound;
+    if (!showBanner && !playSound) return { ok: true, skipped: true };
+    const delivery = planTaskCompleteDelivery({ showBanner, playSound });
+    const via = resolveBannerTransport({
+      notificationSupported: Notification.isSupported(),
+      platform: process.platform,
+    });
+    console.warn("[desktop-notify] deliver", {
+      showBanner,
+      playSound,
+      osFocused,
+      rendererWantsBanner: parsed.showBanner,
+      via,
+    });
+    if (delivery.useNotification) {
+      try {
+        if (via === "osascript") {
+          showOsascriptNotification(execFile, parsed.title, parsed.body);
+        } else if (via === "electron") {
+          deliverTaskCompleteNotification({
+            NotificationCtor: Notification,
+            payload: parsed,
+            silent: delivery.notificationSilent,
+            onClick: () => {
+              showMainWindowSafely();
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("desktop-notify:activate", {
+                  paneId: parsed.paneId,
+                  sessionId: parsed.sessionId,
+                });
+              }
+            },
+          });
+        }
+      } catch (err) {
+        console.warn("[desktop-notify] notification failed:", err);
+        return { ok: false, error: String(err) };
+      }
+    }
+    if (delivery.playStandaloneSound) {
+      playCompletionSound(execFile, process.platform);
+    }
+    return { ok: true };
+  });
   ipcMain.handle("open-external", async (_event, url: unknown) => {
     const href = String(url ?? "").trim();
     if (!/^https?:\/\//i.test(href)) {
@@ -7123,6 +8105,66 @@ function registerEarlyIpc(): void {
     const mode: WinTitleBarTheme =
       theme === "light" || theme === "dim" || theme === "dark" ? theme : "dark";
     applyWinTitleBarOverlay(mode);
+    return { ok: true };
+  });
+
+  // macOS + transparent windows do not zoom when the title-bar drag region is
+  // double-clicked. The renderer asks us to fill or restore the whole window.
+  let windowDragStop: (() => void) | null = null;
+  const stopWindowDrag = () => {
+    const stop = windowDragStop;
+    windowDragStop = null;
+    stop?.();
+  };
+  ipcMain.handle("window-toggle-zoom", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    if (win.isMaximized()) {
+      win.unmaximize();
+      return { ok: true, maximized: false };
+    }
+    win.maximize();
+    return { ok: true, maximized: true };
+  });
+  ipcMain.handle("window-drag-start", (event) => {
+    stopWindowDrag();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || focusModeActive) return { ok: false };
+    const cursorNow = screen.getCursorScreenPoint();
+    if (win.isMaximized()) {
+      const maxBounds = win.getBounds();
+      const normal = win.getNormalBounds();
+      const ratio = (cursorNow.x - maxBounds.x) / Math.max(1, maxBounds.width);
+      win.unmaximize();
+      win.setBounds({
+        x: Math.round(cursorNow.x - normal.width * Math.min(1, Math.max(0, ratio))),
+        y: Math.round(cursorNow.y - 18),
+        width: normal.width,
+        height: normal.height,
+      });
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const [winX, winY] = win.getPosition();
+    const offsetX = cursor.x - winX;
+    const offsetY = cursor.y - winY;
+    const timer = setInterval(() => {
+      if (win.isDestroyed()) {
+        stopWindowDrag();
+        return;
+      }
+      const point = screen.getCursorScreenPoint();
+      win.setPosition(Math.round(point.x - offsetX), Math.round(point.y - offsetY));
+    }, 16);
+    const onBlur = () => stopWindowDrag();
+    win.on("blur", onBlur);
+    windowDragStop = () => {
+      clearInterval(timer);
+      if (!win.isDestroyed()) win.removeListener("blur", onBlur);
+    };
+    return { ok: true };
+  });
+  ipcMain.handle("window-drag-end", () => {
+    stopWindowDrag();
     return { ok: true };
   });
 
@@ -7800,6 +8842,16 @@ function registerIpc(): void {
     return { ok: true };
   });
 
+  ipcMain.handle("load-gateway-adapters", async () => {
+    return readGatewayAdapterForm(loadAgxConfig());
+  });
+
+  ipcMain.handle("save-gateway-adapters", async (_event, form: GatewayAdapterForm) => {
+    const merged = mergeGatewayAdapters(loadAgxConfig(), form);
+    saveAgxConfig(merged);
+    return { ok: true };
+  });
+
   ipcMain.handle("load-feishu-binding", async () => {
     try {
       const raw = fs.readFileSync(FEISHU_BINDING_PATH, "utf-8");
@@ -8057,9 +9109,13 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "native-connector-wecom-login",
-    async (_event, payload: { botId?: string; botSecret?: string }) => {
+    async (_event, payload: { mode?: string; botId?: string; botSecret?: string }) => {
       try {
-        return await startWecomLogin(String(payload?.botId || ""), String(payload?.botSecret || ""));
+        return await startWecomLogin({
+          mode: payload?.mode,
+          botId: String(payload?.botId || ""),
+          botSecret: String(payload?.botSecret || ""),
+        });
       } catch (error) {
         return {
           ok: false,
@@ -8210,6 +9266,38 @@ function registerIpc(): void {
     }
   });
 
+  // ── Connector Runtime Sidecar IPC ─────────────────────────────
+
+  ipcMain.handle("connector-runtime-ensure", async () => {
+    const r = await ensureConnectorRuntime();
+    return r.ok
+      ? { ok: true, port: r.port, runtimeToken: r.runtimeToken }
+      : { ok: false, error: r.error };
+  });
+
+  ipcMain.handle("connector-runtime-status", async () => {
+    return {
+      running: (!!connectorRuntimeProcess && !connectorRuntimeProcess.killed) || connectorRuntimeAdopted,
+      port: connectorRuntimePort,
+    };
+  });
+
+  ipcMain.handle(
+    "connector-runtime-admin",
+    async (
+      _event,
+      payload: { method?: string; path?: string; body?: unknown },
+    ): Promise<ConnectorRuntimeAdminResult> => {
+      const method = String(payload?.method ?? "GET").toUpperCase();
+      const reqPath = String(payload?.path ?? "");
+      if (!reqPath.startsWith("/admin/")) return { ok: false, status: 0, error: "forbidden_path" };
+      if (method !== "GET" && method !== "POST" && method !== "PUT" && method !== "DELETE") {
+        return { ok: false, status: 0, error: "forbidden_method" };
+      }
+      return await connectorRuntimeAdmin({ method, path: reqPath, body: payload?.body });
+    },
+  );
+
   ipcMain.handle("load-wechat-binding", async () => {
     try {
       const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
@@ -8325,6 +9413,7 @@ function registerIpc(): void {
     default_provider?: string;
     default_model?: string;
     workspace_dir?: string;
+    portrait_style?: string;
   }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -8444,8 +9533,9 @@ function registerIpc(): void {
 
   ipcMain.handle("repair-backend-deps", async (event) => {
     const augmentedPath = buildAugmentedPath();
-    const venvDir = path.join(os.homedir(), ".agenticx", ".venv");
-    const venvPy = userManagedVenvPython();
+    const venvDir = backendRepairVenvDir();
+    const venvPy = pythonForVenvDir(venvDir);
+    const venvBinDir = path.dirname(venvPy);
     const send = (phase: string, line?: string, pct?: number) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send("backend-deps-progress", { phase, line, pct });
@@ -8463,7 +9553,7 @@ function registerIpc(): void {
 
     try {
       if (!fs.existsSync(venvPy)) {
-        const basePy = findBasePython(augmentedPath);
+        const basePy = findBasePython(augmentedPath, [userManagedVenvBinDir(), venvBinDir]);
         if (!basePy) {
           send("error", "未找到 Python 3.10+，无法创建虚拟环境。请先安装 Python。");
           return { ok: false, error: "no base python found" };
@@ -8528,6 +9618,7 @@ function registerIpc(): void {
     default_provider?: string;
     default_model?: string;
     color?: string;
+    portrait_style?: string;
   }) => {
     const { id, ...body } = payload;
     try {
@@ -9379,25 +10470,34 @@ function registerIpc(): void {
 
   ipcMain.handle("save-automation-config", async (_event, payload: unknown) => {
     if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
-    const p = payload as { prevent_sleep?: unknown };
-    let preventSleep: boolean;
-    try {
-      preventSleep = parseBooleanStrict(p.prevent_sleep, "prevent_sleep");
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
+    const p = payload as Record<string, unknown>;
+    const keys = [
+      "prevent_sleep",
+      "open_at_login",
+      "desktop_notify",
+      "desktop_sound",
+      "notify_bootstrapped",
+    ] as const;
     try {
       const cfg = loadAgxConfig();
       const root = cfg as Record<string, unknown>;
+      const loaded = loadAutomationConfigFromAgx(cfg);
+      const merged: AutomationConfig = { ...loaded };
+      for (const key of keys) {
+        if (p[key] !== undefined) {
+          merged[key] = parseBooleanStrict(p[key], key);
+        }
+      }
       const prev = root.automation;
-      const merged =
-        prev && typeof prev === "object" && !Array.isArray(prev)
-          ? { ...(prev as Record<string, unknown>) }
-          : {};
-      merged.prevent_sleep = preventSleep;
-      root.automation = merged;
+      root.automation = {
+        ...(prev && typeof prev === "object" && !Array.isArray(prev)
+          ? (prev as Record<string, unknown>)
+          : {}),
+        ...merged,
+      };
       saveAgxConfig(cfg);
       applyPreventSleepFromConfig(cfg);
+      applyLoginItemFromConfig(cfg);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -9998,7 +11098,7 @@ function registerIpc(): void {
       const tasks = loadAutomationTasks();
       const idx = tasks.findIndex((t) => t.id === task.id);
       if (idx >= 0) {
-        tasks[idx] = task;
+        tasks[idx] = applyUserEnableToggle(tasks[idx], task);
       } else {
         tasks.unshift(task);
       }
@@ -10129,13 +11229,13 @@ function registerIpc(): void {
         },
       });
 
-      task.lastRunAt = new Date().toISOString();
-      task.lastRunStatus = result.ok ? "success" : "error";
-      if (result.ok) {
-        delete task.lastRunError;
-      } else {
-        task.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
-      }
+      const recorded = applyRunOutcome(task, {
+        ok: result.ok,
+        error: result.ok ? undefined : (sanitizeAutomationRunError(result.error) ?? "执行失败"),
+      }, { trigger: "manual", nowIso: new Date().toISOString() });
+      Object.assign(task, recorded);
+      if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete task.runningSince;
+      if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete task.lastRunError;
       saveAutomationTasks(tasks);
       emitAutomationTaskProgress({
         taskId: task.id,
@@ -10155,9 +11255,13 @@ function registerIpc(): void {
       const tasks = loadAutomationTasks();
       const task = tasks.find((t) => t.id === taskId);
       if (task) {
-        task.lastRunStatus = "error";
-        task.lastRunAt = new Date().toISOString();
-        task.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
+        const recorded = applyRunOutcome(task, {
+          ok: false,
+          error: sanitizeAutomationRunError(err) ?? "执行异常",
+        }, { trigger: "manual", nowIso: new Date().toISOString() });
+        Object.assign(task, recorded);
+        if (!Object.prototype.hasOwnProperty.call(recorded, "runningSince")) delete task.runningSince;
+        if (!Object.prototype.hasOwnProperty.call(recorded, "lastRunError")) delete task.lastRunError;
         saveAutomationTasks(tasks);
       }
       const sidFromTask = task ? resolveAutomationSessionId(task, sessionOverride) : "";
@@ -10307,6 +11411,28 @@ function registerIpc(): void {
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
       }
       return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // MCP OAuth（官方远程 MCP + DCR）：只回传「是否已授权」布尔值，令牌不出主进程。
+  ipcMain.handle("mcp-oauth-state", async (_event, payload: { names?: unknown }) => {
+    try {
+      const names = Array.isArray(payload?.names)
+        ? payload.names.map((n) => String(n ?? "").trim()).filter(Boolean).slice(0, 200)
+        : [];
+      return { ok: true, authorized: readMcpOauthAuthorized(names) };
+    } catch (err) {
+      return { ok: false, error: String(err), authorized: {} };
+    }
+  });
+
+  ipcMain.handle("mcp-oauth-reset", async (_event, payload: { name?: unknown }) => {
+    const name = String(payload?.name ?? "").trim();
+    if (!name) return { ok: false, error: "name is required" };
+    try {
+      return { ok: true, reset: resetMcpOauthTokens(name) };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
@@ -11111,7 +12237,7 @@ function registerIpc(): void {
         const body = await resp.text().catch(() => "");
         const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
         if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
-          return { ok: true, models: mergeCatalogExtras(fallback) };
+          return { ok: true, models: dropMimoNonChatModels(payload.provider, mergeCatalogExtras(fallback)) };
         }
         if (catalogExtras.length > 0) {
           // Even if the catalog endpoint fails, expose known extras so users can configure them.
@@ -11139,7 +12265,10 @@ function registerIpc(): void {
       const models = (data.data ?? [])
         .map((m) => String(m.id ?? m.model ?? m.name ?? "").trim())
         .filter(Boolean);
-      return { ok: true, models: mergeCatalogExtras(models).sort() };
+      return {
+        ok: true,
+        models: dropMimoNonChatModels(payload.provider, mergeCatalogExtras(models)).sort(),
+      };
     } catch (err) {
       return { ok: false, models: [], error: String(err) };
     }
@@ -11551,6 +12680,52 @@ function registerIpc(): void {
       const resp = await fetch(`${studioUrl}/api/bundles/${encodeURIComponent(args.name)}`, {
         method: "DELETE",
         headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "install-repo-skill",
+    async (
+      _event,
+      args: { repo: string; skill: string; branch?: string; overwrite?: boolean; acknowledgeHighRisk?: boolean },
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/install-repo-skill`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify({
+            repo: args.repo,
+            skill: args.skill,
+            branch: args.branch,
+            overwrite: args.overwrite,
+            acknowledge_high_risk: args.acknowledgeHighRisk,
+          }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("uninstall-skill", async (_event, args: { name: string; source?: string }) => {
+    const studioUrl = getStudioUrl();
+    try {
+      const resp = await fetch(`${studioUrl}/api/skills/uninstall`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ name: args.name, source: args.source }),
       });
       return await resp.json();
     } catch (err) {
@@ -12254,6 +13429,28 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(
+    "install-from-skillhub",
+    async (
+      _event,
+      args: {
+        slug: string;
+      }
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/skillhub/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+          body: JSON.stringify({ slug: args.slug }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err), fallback_to_agent: true };
+      }
+    }
+  );
+
+  ipcMain.handle(
     "install-from-registry",
     async (
       _event,
@@ -12521,6 +13718,7 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    if (focusSplashIfOpen()) return;
     if (mainWindow) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
@@ -12570,10 +13768,28 @@ if (!gotTheLock) {
         return theme === "light" ? "light" : "dark";
       });
       registerSplashIpcHandlers({
-        showMainWindow: showMainWindowSafely,
+        showMainWindow: () => {
+          if (startHidden) return;
+          showMainWindowSafely();
+        },
         quitApp: () => app.quit(),
       });
-      createSplashWindow();
+      const presence = loadAutomationConfigFromAgx(loadAgxConfig());
+      const loginInfo = app.getLoginItemSettings();
+      startHidden = shouldStartHidden({
+        argv: process.argv,
+        wasOpenedAtLogin: Boolean(loginInfo.wasOpenedAtLogin),
+        wasOpenedAsHidden: Boolean((loginInfo as { wasOpenedAsHidden?: boolean }).wasOpenedAsHidden),
+        isPackaged: app.isPackaged,
+      });
+      applyLoginItemFromConfig(loadAgxConfig());
+      if (!presence.notify_bootstrapped) {
+        bootstrapWelcomeNotification();
+        persistNotifyBootstrapped(loadAgxConfig());
+      }
+      if (!startHidden) {
+        createSplashWindow();
+      }
 
       // Register basic IPC handlers immediately so the renderer never hits
       // "No handler registered" errors during the agx serve startup delay.
@@ -12718,6 +13934,7 @@ if (!gotTheLock) {
       // renderer can't hit "No handler registered" when `app.on("activate")`
       // races with the studio-serve cold start.
       applyPreventSleepFromConfig(loadAgxConfig());
+      applyLoginItemFromConfig(loadAgxConfig());
       // HA mode: server 侧调度器启用时，Electron 侧不再启动，避免双触发。
       if (!isServerAutomationScheduler(loadAgxConfig())) {
         automationScheduler.start();
@@ -12743,6 +13960,7 @@ if (!gotTheLock) {
   });
 
   app.on("activate", () => {
+    if (focusSplashIfOpen()) return;
     // Avoid creating the window before backend mode is resolved — otherwise
     // preload argv bakes in stale remote scope until a full reload.
     if (!studioReady) return;
@@ -12756,6 +13974,7 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     isQuitting = true;
+    void flushActionAuditOnce(actionAuditUploaderDeps()).catch(() => null);
     automationScheduler.stop();
     stopSkillsDirWatcher();
     killAllTerminalSessions();
@@ -12765,6 +13984,7 @@ if (!gotTheLock) {
       tmeetAuthProcess = null;
     }
     stopWechatSidecar();
+    stopConnectorRuntime();
     stopStudioServe();
     stopNearBrowserBridge();
   });

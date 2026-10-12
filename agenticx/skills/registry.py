@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -430,13 +431,14 @@ class SkillRegistryClient:
             skill_dir.relative_to(install_root)
         except ValueError as exc:
             raise ValueError("Resolved uninstall path escapes target directory") from exc
+        if skill_dir.is_dir():
+            try:
+                shutil.rmtree(skill_dir)
+            except OSError:
+                return False
+            return True
         md_path = skill_dir / "SKILL.md"
         if md_path.exists():
             md_path.unlink()
-        if skill_dir.exists() and skill_dir.is_dir():
-            try:
-                skill_dir.rmdir()
-            except OSError:
-                return False
             return True
         return False

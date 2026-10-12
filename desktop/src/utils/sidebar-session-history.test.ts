@@ -15,10 +15,11 @@ import {
   sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
+  notifySidebarSessionCatalogChangedForAutomationProgress,
 } from "./sidebar-session-history";
 
 describe("sidebar-session-history utils", () => {
-  it("normalizes and drops automation + archived", () => {
+  it("keeps automation runs in global history while dropping archived rows", () => {
     const rows = normalizeSidebarSessionRows([
       {
         session_id: "a",
@@ -41,8 +42,46 @@ describe("sidebar-session-history utils", () => {
         archived: true,
       },
     ]);
-    expect(rows.map((r) => r.session_id)).toEqual(["a"]);
-    expect(sidebarSessionLabel(rows[0]!)).toBe("你好世界");
+    expect(rows.map((r) => r.session_id)).toEqual(["b", "a"]);
+    expect(rows.find((r) => r.session_id === "b")?.avatar_id).toBe("automation:t1");
+    expect(sidebarSessionLabel(rows.find((r) => r.session_id === "a")!)).toBe("你好世界");
+  });
+
+  it("keeps automation history opens on the task pane identity", () => {
+    const panes = [
+      { id: "meta", sessionId: "run-1", avatarId: null },
+      { id: "automation-old", sessionId: "run-old", avatarId: "automation:t1" },
+      { id: "automation", sessionId: "run-1", avatarId: "automation:t1" },
+    ];
+    const found = findPaneForSidebarSession(panes, {
+      session_id: "run-1",
+      avatar_id: "automation:t1",
+    });
+    expect(found?.id).toBe("automation");
+    expect(
+      findPaneForSidebarSession([{ id: "meta", sessionId: "run-1", avatarId: null }], {
+        session_id: "run-1",
+        avatar_id: "automation:t1",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("bumps the global history catalog for durable automation events", () => {
+    const bumps: string[] = [];
+    expect(
+      notifySidebarSessionCatalogChangedForAutomationProgress(
+        { sessionId: "run-1" },
+        () => bumps.push("bump"),
+      ),
+    ).toBe(true);
+    expect(bumps).toEqual(["bump"]);
+    expect(
+      notifySidebarSessionCatalogChangedForAutomationProgress(
+        { sessionId: "" },
+        () => bumps.push("unexpected"),
+      ),
+    ).toBe(false);
+    expect(bumps).toEqual(["bump"]);
   });
 
   it("buckets pinned / today / earlier and skips special ids", () => {
@@ -200,12 +239,15 @@ describe("sidebar-session-history utils", () => {
   });
 
   it("only fetches loop-review for visible ids not already fetched", () => {
-    const already = new Set(["a", "c"]);
+    // The component passes fetched + pending ids together, so a slow request
+    // is not duplicated when the visible page changes before it settles.
+    const already = new Set(["a", "c", "pending"]);
     expect(sidebarLoopReviewFetchIds(["a", "b", "b", "", "c", "d"], already)).toEqual([
       "b",
       "d",
     ]);
     expect(sidebarLoopReviewFetchIds(["a", "c"], already)).toEqual([]);
+    expect(sidebarLoopReviewFetchIds(["a", "pending", "c"], already)).toEqual([]);
   });
 
   it("nests continue-from children under the parent session", () => {

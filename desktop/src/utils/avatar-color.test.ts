@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expertLabelChipStyle } from "./avatar-color";
+import { expertLabelChipStyle, resolveAvatarPaletteKey } from "./avatar-color";
 
 describe("expertLabelChipStyle", () => {
   it("uses theme accent for meta / empty id", () => {
@@ -20,5 +20,19 @@ describe("expertLabelChipStyle", () => {
     const a = expertLabelChipStyle("expert-a", null, "light");
     const b = expertLabelChipStyle("expert-b", null, "light");
     expect(a.color).not.toBe(b.color);
+  });
+});
+
+describe("resolveAvatarPaletteKey", () => {
+  it("prefers an explicit palette color", () => {
+    expect(resolveAvatarPaletteKey("any-id", "rose")).toBe("rose");
+  });
+
+  it("ignores invalid leftovers such as blue and hashes the id", () => {
+    const hashed = resolveAvatarPaletteKey("6d80f22b6daa", "");
+    expect(hashed).toBe(resolveAvatarPaletteKey("6d80f22b6daa", "blue"));
+    expect(["cyan", "violet", "rose", "amber", "emerald", "fuchsia", "sky", "orange"]).toContain(
+      hashed,
+    );
   });
 });

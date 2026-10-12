@@ -1068,6 +1068,96 @@ def test_group_chat_hydrates_document_before_router_turn(monkeypatch, tmp_path) 
     assert seen_context.get(str(pdf)) == "GROUP_HYDRATED"
 
 
+def test_group_chat_persists_user_echo_to_disk_before_first_reply(monkeypatch) -> None:
+    """Desktop polls messages.json; IM-owned group turns must flush the user row
+    before the first group_reply (which can arrive minutes later)."""
+    import asyncio
+    import threading
+
+    from agenticx.runtime.group_router import GroupReply
+    from agenticx.studio import server as server_module
+
+    tiny_png = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcJS"
+        "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _FakeGroupRouter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def pick_targets(self, **_kwargs):
+            return ["meta"]
+
+        def _plain_targets_in_text(self, *_args, **_kwargs):
+            return []
+
+        async def run_group_turn(self, **kwargs):
+            entered.set()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: release.wait(8))
+            yield GroupReply(
+                agent_id="meta",
+                avatar_name="Machi",
+                avatar_url="",
+                content="group done",
+                skipped=False,
+                event_type="group_reply",
+            )
+
+    monkeypatch.setattr(server_module, "GroupChatRouter", _FakeGroupRouter)
+
+    app = create_studio_app()
+    client = TestClient(app)
+    manager = app.state.session_manager
+    avatar_registry = app.state.avatar_registry
+    group_registry = app.state.group_registry
+    session_id = client.get("/api/session").json()["session_id"]
+    avatar = avatar_registry.create_avatar(name="测试成员", role="Engineer")
+    group = group_registry.create_group(name="测试群", avatar_ids=[avatar.id], routing="intelligent")
+
+    def _consume_stream() -> None:
+        with client.stream(
+            "POST",
+            "/api/chat",
+            json={
+                "session_id": session_id,
+                "group_id": group.id,
+                "user_input": "把这个论文发给我",
+                "image_inputs": [
+                    {
+                        "name": "shot.jpg",
+                        "data_url": tiny_png,
+                        "mime_type": "image/jpeg",
+                        "size": 70,
+                    }
+                ],
+            },
+        ) as resp:
+            assert resp.status_code == 200
+            list(resp.iter_lines())
+
+    worker = threading.Thread(target=_consume_stream, daemon=True)
+    worker.start()
+    assert entered.wait(8), "group router never started"
+    disk = Path(manager._sessions_root) / session_id / "messages.json"
+    assert disk.is_file(), "messages.json missing before first group reply"
+    rows = json.loads(disk.read_text(encoding="utf-8"))
+    user_rows = [row for row in rows if row.get("role") == "user"]
+    assert user_rows, "Desktop disk snapshot missing inbound user row"
+    assert "把这个论文发给我" in str(user_rows[-1].get("content") or "")
+    atts = user_rows[-1].get("attachments") or []
+    assert atts, "inbound image must persist on the user row"
+    assert str(atts[0].get("name") or "") in {"shot.jpg", "image.jpg", "image.jpeg", "image.png"}
+    release.set()
+    worker.join(8)
+    assert not worker.is_alive()
+
+
 def test_group_chat_forwards_image_inputs_to_router(monkeypatch) -> None:
     from agenticx.runtime.group_router import GroupReply
     from agenticx.studio import server as server_module

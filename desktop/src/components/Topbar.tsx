@@ -2,6 +2,7 @@ import { ArrowLeft, Gauge, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
+import { ApprovalInboxButton } from "./ApprovalInbox";
 import { ThemeToggleButton, TopbarLeftControls } from "./TopbarLeftControls";
 import { SidebarCreateButton } from "./quick-compose/SidebarCreateButton";
 
@@ -49,9 +50,11 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           </button>
         ) : null}
       </div>
+      <div className="no-drag min-w-6 flex-1 self-stretch" data-window-zoom="" aria-hidden />
       {sidebarCollapsed ? (
         <div className="agx-topbar-right">
           <ThemeToggleButton />
+          <ApprovalInboxButton />
           <button
             className="agx-topbar-btn agx-topbar-btn--icon-only"
             type="button"

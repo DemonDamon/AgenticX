@@ -146,3 +146,16 @@ admin-console 是 gateway 运行时配置的**唯一写入源**，热加载有�
 - **`/api/internal/*` 仅供 gateway**（Bearer token 保护），是控制平面与数据面解耦的关键边界
 - **主题 bootstrap** 以 inline script 跑在 `layout.tsx`，避免 FOUC
 - **双方言**：`iam-core` 的 `resolveDatabaseConfig()` 按 `DATABASE_DIALECT` + `DATABASE_URL` 在 postgresql / mysql 间切换，stores 在 `db-stores/{mysql,postgresql}/` 下成对实现
+
+
+## 增量（8ebec3b5 → 30e57496）
+
+新增管理面（均双方言 store 或只读查询）：
+
+- **能力包**：`capability-packs-store`（PG/MySQL）+ `capability-pack-form` + `/admin` capabilities UI（`use-capability-catalog`）。
+- **用户组**：`user-groups-store` + `UserGroupsPanel`。
+- **Portal 请求日志**：`portal-logs-query` / `portal-logs-session-query`。
+- **Trace 会话**：`trace-timeline` + `TraceTimelineTree` / `TraceConversationPanel` / `deep-research-trace-query`。
+- **技能扫描**：`skill-registry-scan.ts` 调独立 skill-registry 服务。
+- **MCP 后端配置**：`mcp-backend-config-crypto.ts` 信封加解密。
+- 审计查询过滤器补 `trace_id`。

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isPeerHumanSpeakerId } from "./peer-human-speaker";
 import {
   continueMessageIdForRequest,
   mapLoadedSessionMessage,
@@ -77,6 +78,32 @@ describe("branch lineage messages", () => {
   });
 });
 
+describe("jev decision history rows", () => {
+  it("restores toolName jev from metadata.kind", () => {
+    const mapped = mapLoadedSessionMessage(
+      {
+        role: "tool",
+        content: "Jev（jev-1.13.0）→ 派给成员 财务 · 90% · 自动",
+        agent_id: "__jev__",
+        avatar_name: "Jev",
+        tool_name: "jev",
+        metadata: {
+          kind: "jev_decision",
+          source: "jev",
+          action: "route_to",
+          target_ids: ["fin"],
+        },
+      },
+      "sess-1",
+      3,
+    );
+    expect(mapped.toolName).toBe("jev");
+    expect(mapped.agentId).toBe("__jev__");
+    expect(mapped.avatarName).toBe("Jev");
+    expect((mapped.metadata as { kind?: string } | undefined)?.kind).toBe("jev_decision");
+  });
+});
+
 describe("conversation lineage messages", () => {
   it("recognizes persisted conversation lineage metadata", () => {
     const mapped = mapLoadedSessionMessage(
@@ -152,5 +179,33 @@ describe("continueMessageIdForRequest", () => {
       { id: "live-uid-user", role: "user", content: "你好" },
       assistant,
     ], assistant)).toBe(`${sid}-i1`);
+  });
+});
+
+describe("mapLoadedSessionMessage peer speaker", () => {
+  it("maps group peer human sender onto Message", () => {
+    const mapped = mapLoadedSessionMessage(
+      {
+        role: "user",
+        content: "进度如何",
+        sender_id: "human:feishu:ou_1",
+        sender_name: "甲",
+      },
+      "sess-g",
+      0,
+    );
+    expect(mapped.role).toBe("user");
+    expect(mapped.speakerUserId).toBe("human:feishu:ou_1");
+    expect(mapped.speakerName).toBe("甲");
+  });
+
+  it("leaves owner user rows without peer speaker id", () => {
+    const mapped = mapLoadedSessionMessage(
+      { role: "user", content: "hello", sender_id: "user", sender_name: "我" },
+      "sess-1",
+      1,
+    );
+    expect(mapped.speakerUserId).toBe("user");
+    expect(isPeerHumanSpeakerId(mapped.speakerUserId)).toBe(false);
   });
 });

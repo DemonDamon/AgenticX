@@ -8,6 +8,7 @@ const mockOnConflictDoNothing = vi.fn();
 const mockWhereDelete = vi.fn();
 
 vi.mock("@agenticx/iam-core", () => ({
+  resolveDatabaseConfig: () => ({ dialect: "postgresql" }),
   getIamDb: () => ({
     select: mockSelect,
     delete: mockDelete,
@@ -47,6 +48,7 @@ describe("dept-models-store", () => {
     mockValues.mockReset();
     mockOnConflictDoNothing.mockReset();
     process.env.DEFAULT_TENANT_ID = "01J00000000000000000000001";
+    mockSelect.mockImplementation(() => selectChain([]));
     mockDelete.mockReturnValue({ where: mockWhereDelete.mockResolvedValue(undefined) });
     mockInsert.mockReturnValue({ values: mockValues });
     mockValues.mockReturnValue({ onConflictDoNothing: mockOnConflictDoNothing.mockResolvedValue(undefined) });
@@ -103,5 +105,15 @@ describe("dept-models-store", () => {
     const payload = await readDeptEditPayload("dept-frontend");
     expect(payload.parentAllowedIds.sort()).toEqual(["a/b", "c/d"]);
     expect(payload.modelIds).toEqual(["a/b"]);
+    expect(payload.defaultModelId).toBeNull();
+  });
+
+  it("applyDeptModelSave rejects a default outside the saved allow-list without writing", async () => {
+    const { applyDeptModelSave } = await import("../dept-models-store");
+    await expect(applyDeptModelSave("dept-frontend", ["a/b"], "e/f")).rejects.toThrow(
+      "default model is not in the department allow-list",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 });

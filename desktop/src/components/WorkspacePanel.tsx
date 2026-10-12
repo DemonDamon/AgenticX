@@ -24,7 +24,9 @@ import { createResizeRafScheduler } from "../utils/resize-raf";
 import { ContextMenu, type ContextMenuAnchorRect } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import { pickPreferredSessionId } from "../utils/group-pane-open";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
+import { scratchHistoryBlocklist } from "../utils/scratch-chat";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
 import { mountModeSwitchForEntry } from "../utils/workspace-mount-mode";
 import {
@@ -145,6 +147,7 @@ type Props = {
   /** WorkPanel 嵌入时：开终端后让父级切到顶栏 terminal tab */
   onFocusTerminalTab?: () => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  onOpenScratchSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
@@ -178,34 +181,9 @@ type OpenTerminalEventDetail = {
   command?: string;
 };
 
-function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
-  const targetAvatarId = (avatarId ?? "").trim();
-  const itemAvatarId = String(item.avatar_id ?? "").trim();
-  if (!targetAvatarId) return itemAvatarId.length === 0;
-  return itemAvatarId === targetAvatarId;
-}
-
-function pickMostRecentSessionId(
-  sessions: SessionListItem[],
-  avatarId?: string | null
-): string | undefined {
-  const sorted = [...sessions]
-    .filter((item) => {
-      const sid = String(item.session_id ?? "").trim();
-      if (!sid) return false;
-      if (item.archived === true) return false;
-      return isSessionAvatarMatch(item, avatarId);
-    })
-    .sort((a, b) => {
-      const ua = Number.isFinite(a.updated_at) ? a.updated_at : 0;
-      const ub = Number.isFinite(b.updated_at) ? b.updated_at : 0;
-      if (ub !== ua) return ub - ua;
-      const ca = Number.isFinite(a.created_at ?? Number.NaN) ? (a.created_at as number) : 0;
-      const cb = Number.isFinite(b.created_at ?? Number.NaN) ? (b.created_at as number) : 0;
-      return cb - ca;
-    });
-  const sid = sorted[0]?.session_id;
-  return sid ? String(sid).trim() : undefined;
+function scratchBlocklistNow() {
+  const state = useAppStore.getState();
+  return scratchHistoryBlocklist(state.panes, state.hiddenScratchSessionIds);
 }
 
 function taskspaceReferenceLabel(taskspace: Taskspace): string {
@@ -246,6 +224,7 @@ export function WorkspacePanel({
   tintColor,
   onFocusTerminalTab,
   onQuotePreviewSnippet,
+  onOpenScratchSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
@@ -667,16 +646,12 @@ export function WorkspacePanel({
         setWorkspaceLoadedOnce(true);
         return;
       }
-      const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        listed.sessions.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, paneAvatarId)
-        );
-      const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const preferredSid = pickPreferredSessionId({
+        sessions: listed.sessions,
+        avatarId: paneAvatarId,
+        rememberedSid: getRememberedSessionForAvatar(paneAvatarId),
+        blockedIds: scratchBlocklistNow(),
+      });
       if (cancelled) return;
       if (!preferredSid) {
         setWorkspaceLoadedOnce(true);
@@ -813,16 +788,12 @@ export function WorkspacePanel({
         setWorkspaceLoadedOnce(true);
         return;
       }
-      const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
-      const rememberedValid =
-        !!rememberedSid &&
-        listed.sessions.some(
-          (item) =>
-            String(item.session_id ?? "").trim() === rememberedSid &&
-            isSessionAvatarMatch(item, paneAvatarId)
-        );
-      const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
-      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      const preferredSid = pickPreferredSessionId({
+        sessions: listed.sessions,
+        avatarId: paneAvatarId,
+        rememberedSid: getRememberedSessionForAvatar(paneAvatarId),
+        blockedIds: scratchBlocklistNow(),
+      });
       if (cancelled) return;
       if (!preferredSid) {
         // No recoverable session for this pane: end the skeleton and let the
@@ -1508,7 +1479,7 @@ export function WorkspacePanel({
         useSidebarSurface
           ? "bg-surface-sidebar"
           : useWorkPanelSurface
-            ? "bg-surface-panel"
+            ? "bg-transparent"
             : "bg-surface-card"
       }`}
       style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}
@@ -2007,6 +1978,7 @@ export function WorkspacePanel({
           }}
           initialLineRange={previewFocusLineRange ?? undefined}
           onQuoteSnippet={onQuotePreviewSnippet}
+          onOpenScratchSnippet={onOpenScratchSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
           taskspaceRoot={previewTaskspaceRoot}

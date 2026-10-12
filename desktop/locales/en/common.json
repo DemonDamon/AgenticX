@@ -38,6 +38,7 @@
   "policyUseAllowlist": "On-demand confirm (ask only for risky actions)",
   "policyRunEverything": "Allow all (do not ask again)",
   "chatPanes": "Chat panes",
+  "closePane": "Close pane",
   "protectedReasonHigh": "this action is marked high risk",
   "protectedReasonDestructive": "this action would delete or overwrite existing content",
   "protectedReasonComputerUse": "this action would read or control the desktop",

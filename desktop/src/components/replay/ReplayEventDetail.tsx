@@ -59,7 +59,7 @@ export function ReplayEventDetail({
   const { t } = useTranslation("workspace");
   if (!event) {
     return (
-      <aside className="w-[min(34%,280px)] shrink-0 border-l border-border bg-surface-card px-3 py-3">
+      <aside className="w-[min(34%,280px)] shrink-0 border-l border-border bg-[var(--shell-panel)] px-3 py-3">
         <h3 className="text-[11px] font-medium text-text-strong">{t("replay.eventDetail")}</h3>
         <p className="mt-2 text-[10px] leading-relaxed text-text-faint">{t("replay.selectEvent")}</p>
       </aside>
@@ -84,7 +84,7 @@ export function ReplayEventDetail({
   };
 
   return (
-    <aside className="w-[min(36%,300px)] shrink-0 overflow-y-auto border-l border-border bg-surface-card px-3 py-3">
+    <aside className="w-[min(36%,300px)] shrink-0 overflow-y-auto border-l border-border bg-[var(--shell-panel)] px-3 py-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-[11px] font-medium text-text-strong">{t("replay.eventDetail")}</h3>
         <span className="font-mono text-[10px] text-text-faint">#{event.seq}</span>

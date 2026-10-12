@@ -1,0 +1,36 @@
+{
+  "code": 4,
+  "data": {
+    "to": "check",
+    "metadata": {
+      "width": 0,
+      "height": 0,
+      "nodeCount": 193,
+      "connectorCount": 20
+    },
+    "check": {
+      "errors": 1,
+      "warnings": 1,
+      "summary": {
+        "textOverflow": 1,
+        "nodeOverlap": 1,
+        "textOcclusion": 0
+      },
+      "issues": [
+        {
+          "type": "text-overflow",
+          "severity": "error",
+          "nodeId": "a001:90",
+          "message": "text \"PostgreSQL：会话 / 消息 / 绑定关…\" overflows container d001:33 by 382px (right)"
+        },
+        {
+          "type": "node-overlap",
+          "severity": "warn",
+          "nodeId": "o001:2",
+          "message": "overlaps o001:3 (67% of smaller node)"
+        }
+      ]
+    }
+  },
+  "error": "1 check error(s), 1 warning(s)"
+}
