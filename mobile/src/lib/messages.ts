@@ -137,16 +137,22 @@ export function applyStreamDelta(
 }
 
 /**
- * streaming 气泡的可见文本：token 流是模型原始输出，含 <thinking> 块
- * 原文（终态由结构化替换渲染思考折叠，streaming 阶段只外显答案部分）。
- * 完整闭合块、流式进行中的未闭合尾部、以及被 delta 分片截断的标签前缀
- * （尾部 "<" / "<thi" 等）一并剥除——截断前缀只会让该字符晚一帧出现，
- * 不会丢失。
+ * streaming 气泡的可见文本：token 流里的思考段有两种形态——
+ * ① 后端 safe_stream 规范化的 ` Mattis`/` Mattis/`（模型输出 `< think >`
+ *   等非规范变体时被规范成 Mattis 下发）；② parser 不识别的变体
+ * （`<thinking>`）原文透传。两种都要剥除，终态由结构化替换渲染思考
+ * 折叠，streaming 阶段只外显答案部分。完整闭合块、流式进行中的未闭合
+ * 尾部、以及被 delta 分片截断的标签前缀（尾部 "<" / "<thi" 等）一并
+ * 剥除——截断前缀只会让该字符晚一帧出现，不会丢失。
  */
+const THINK_BLOCK_RE = /<(think|thinking)>[\s\S]*?(?:<\/\1>|$)/g;
+const THINK_OPEN_PREFIXES = ["<think>", "<thinking>"];
+
 export function visibleStreamText(text: string): string {
-  let visible = text.replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/g, "");
+  let visible = text.replace(THINK_BLOCK_RE, "");
   for (let n = Math.min(9, visible.length); n > 0; n -= 1) {
-    if (visible.endsWith("<thinking>".slice(0, n))) {
+    const tail = visible.slice(-n);
+    if (THINK_OPEN_PREFIXES.some((p) => p.slice(0, n) === tail)) {
       visible = visible.slice(0, -n);
       break;
     }

@@ -6577,11 +6577,18 @@ class AgentRuntime:
                 elif parsed.malformed:
                     # Tag noise on the retry must not erase the earlier draft.
                     # A malformed turn that still has a visible body stays hidden.
-                    reasoning_text = (
-                        reasoning_before_nudge
-                        if not parsed.visible_body.strip()
-                        else ""
-                    )
+                    if not parsed.visible_body.strip():
+                        reasoning_text = reasoning_before_nudge
+                    else:
+                        # 标签变体（如 ``< think >``）触发的 malformed 仍能提取
+                        # 思考内容（parser 已识别为 think 段）：优先保留本轮
+                        # 思考，避免变体轮思考整段丢失（手机端思考折叠消失）。
+                        reasoning_text = (
+                            parsed.reasoning
+                            or _streamed_reasoning
+                            or _nonstream_reasoning
+                            or reasoning_before_nudge
+                        )
                 else:
                     reasoning_text = (
                         parsed.reasoning

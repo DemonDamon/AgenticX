@@ -128,19 +128,28 @@ describe("visibleStreamText", () => {
     expect(visibleStreamText("<thinking>想一下</thinking>答案是1")).toBe("答案是1");
   });
 
+  it("剥除协议规范的 Mattis 块（safe_stream 规范形态）", () => {
+    expect(visibleStreamText("<think>想一下</think>答案是1")).toBe("答案是1");
+  });
+
   it("剥除流式进行中的未闭合尾部", () => {
     expect(visibleStreamText("<thinking>想")).toBe("");
+    expect(visibleStreamText("<think>想")).toBe("");
     expect(visibleStreamText("<thinking>想一下</thinking>答<thinking>继续想")).toBe("答");
+    expect(visibleStreamText("<think>想一下</think>答<think>继续想")).toBe("答");
   });
 
   it("剥除被分片截断的标签前缀", () => {
     expect(visibleStreamText("答案")).toBe("答案");
     expect(visibleStreamText("答案<thi")).toBe("答案");
+    expect(visibleStreamText("答案<t")).toBe("答案");
     expect(visibleStreamText("<")).toBe("");
   });
 
   it("多轮 thinking 块全部剥除，答案间内容保留", () => {
     const text = "<thinking>a</thinking>第一段<thinking>b</thinking>第二段";
     expect(visibleStreamText(text)).toBe("第一段第二段");
+    const thinkText = "<think>a</think>第一段<think>b</think>第二段";
+    expect(visibleStreamText(thinkText)).toBe("第一段第二段");
   });
 });
