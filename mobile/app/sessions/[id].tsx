@@ -222,8 +222,16 @@ export default function SessionMessagesScreen() {
       if (text === "" || sending || client === null) return false;
       setSending(true);
       const pendingKey = `local-pending-${Date.now()}`;
+      // 乐观回显：发送瞬间即上屏用户消息，不等服务端落盘/回合结束才显示。
+      // 轮询 caughtUp 后的快照重建会含真实 user 消息，乐观条目不在保留
+      // 列表里、被自然顶替；send 失败时随 pending 一并撤回。
+      const localUserKey = `local-user-${Date.now()}`;
       const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
-      setEntries((prev) => [...(prev ?? []), pendingEntry]);
+      setEntries((prev) => [
+        ...(prev ?? []),
+        { kind: "user", key: localUserKey, text },
+        pendingEntry,
+      ]);
       // 打字机平滑：网络帧（桌面侧 120ms 节流聚合）较粗，直接上屏是
       // 10+ 字一帧的跳变。这里把增量拆成字符入队，按 ~45ms/帧 匀速消费
       // 呈现逐字打字机效果；仅当积压严重（模型产出远快于播放）才升速
@@ -341,8 +349,13 @@ export default function SessionMessagesScreen() {
         return true;
       } catch (err) {
         stopSmooth();
+        polling = false;
+        clearInterval(pollTimer);
         setEntries((prev) =>
-          (prev ?? []).filter((e) => e.key !== pendingKey && e.kind !== "streaming"),
+          (prev ?? []).filter(
+            (e) =>
+              e.key !== pendingKey && e.key !== localUserKey && e.kind !== "streaming",
+          ),
         );
         if (!(err instanceof ApiError && err.status === 401)) {
           // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
