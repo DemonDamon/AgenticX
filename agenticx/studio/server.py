@@ -8912,10 +8912,10 @@ def create_studio_app() -> FastAPI:
 
     # --- Registry / Marketplace API ---
 
-    # Short-lived in-memory cache: maps "source:name" -> (content, expiry_ts).
-    # preview fetches SKILL.md and stores it here; install reuses it to avoid
+    # Short-lived in-memory cache: maps "source:owner:name" -> (skill_md, files, expiry_ts).
+    # preview fetches the package and stores it here; install reuses it to avoid
     # a second round of ClawHub HTTP requests (which can trigger rate limits).
-    _registry_preview_cache: dict[str, tuple[str, float]] = {}
+    _registry_preview_cache: dict[str, tuple[str, dict[str, bytes], float]] = {}
     _REGISTRY_CACHE_TTL = 120.0  # seconds
 
     @app.get("/api/registry/search")
@@ -8976,22 +8976,27 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
+        owner = str(payload.get("owner") or "").strip()
         if not source_name or not skill_name:
             raise HTTPException(status_code=400, detail="source and name are required")
         try:
             import time as _time
-            from agenticx.extensions.registry_hub import RegistryHub
-            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+            from agenticx.extensions.registry_hub import RegistryHub, scan_skill_package
+            from agenticx.skills.guard import scan_result_to_payload
 
             hub = RegistryHub.from_config()
-            content, err = hub.fetch_skill_markdown(source_name, skill_name)
+            content, files, err = hub.fetch_skill_package(source_name, skill_name, owner=owner)
             if err or content is None:
                 return {"ok": False, "error": err or "fetch failed"}
 
-            cache_key = f"{source_name}:{skill_name}"
-            _registry_preview_cache[cache_key] = (content, _time.monotonic() + _REGISTRY_CACHE_TTL)
+            cache_key = f"{source_name}:{owner}:{skill_name}"
+            _registry_preview_cache[cache_key] = (
+                content,
+                files,
+                _time.monotonic() + _REGISTRY_CACHE_TTL,
+            )
 
-            sr = scan_skill_markdown_text(content)
+            sr = scan_skill_package(content, files)
             one = scan_result_to_payload(sr, skill_name)
             return {
                 "ok": True,
@@ -9041,27 +9046,29 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
+        owner = str(payload.get("owner") or "").strip()
         if not source_name or not skill_name:
             raise HTTPException(status_code=400, detail="source and name are required")
         try:
             import time as _time
-            from agenticx.extensions.registry_hub import RegistryHub
-            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+            from agenticx.extensions.registry_hub import RegistryHub, scan_skill_package
+            from agenticx.skills.guard import scan_result_to_payload
 
             hub = RegistryHub.from_config()
 
-            cache_key = f"{source_name}:{skill_name}"
+            cache_key = f"{source_name}:{owner}:{skill_name}"
             cached = _registry_preview_cache.get(cache_key)
-            if cached and _time.monotonic() < cached[1]:
-                content = cached[0]
+            files: dict[str, bytes] = {}
+            if cached and _time.monotonic() < cached[2]:
+                content, files = cached[0], cached[1]
                 err = ""
             else:
-                content, err = hub.fetch_skill_markdown(source_name, skill_name)
+                content, files, err = hub.fetch_skill_package(source_name, skill_name, owner=owner)
 
             if err or content is None:
                 return {"ok": False, "error": err or "fetch failed"}
 
-            sr = scan_skill_markdown_text(content)
+            sr = scan_skill_package(content, files)
             summary = {
                 "overall": sr.verdict,
                 "skills": [scan_result_to_payload(sr, skill_name)],
@@ -9085,7 +9092,7 @@ def create_studio_app() -> FastAPI:
                     "scan_summary": summary,
                 }
 
-            md_path = hub.write_registry_skill(skill_name, content)
+            md_path = hub.write_registry_skill_package(skill_name, content, files)
             from agenticx.studio.skills_list_api import invalidate_skills_list_cache
 
             invalidate_skills_list_cache()

@@ -126,11 +126,11 @@ class _FakeHub:
         self.fetched: list[tuple[str, str]] = []
         self.written: list[str] = []
 
-    def fetch_skill_markdown(self, source: str, name: str):
+    def fetch_skill_package(self, source: str, name: str, *, owner: str = ""):
         self.fetched.append((source, name))
-        return self._content, self._err
+        return self._content, {}, self._err
 
-    def write_registry_skill(self, name: str, content: str):
+    def write_registry_skill_package(self, name: str, content: str, files=None):
         self.written.append(name)
         return f"/tmp/registry/{name}/SKILL.md"
 

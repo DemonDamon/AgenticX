@@ -79,14 +79,139 @@ def split_clawhub_ref(raw: str) -> Tuple[Optional[str], str]:
     return None, ref
 
 
+def format_clawhub_conflict(status_code: int, payload: Any) -> str:
+    """Readable 409 text when several publishers share one slug.
+
+    Returns an empty string for any other status.
+    """
+    if status_code != 409:
+        return ""
+    refs: List[str] = []
+    detail = ""
+    if isinstance(payload, dict):
+        detail = str(payload.get("message") or "").strip()
+        matches = payload.get("matches")
+        if isinstance(matches, list):
+            for match in matches:
+                if not isinstance(match, dict):
+                    continue
+                ref = str(match.get("ref") or "").strip()
+                if not ref:
+                    handle = str(match.get("ownerHandle") or "").strip()
+                    slug = str(match.get("slug") or "").strip()
+                    if handle and slug:
+                        ref = f"@{handle}/{slug}"
+                if ref and ref not in refs:
+                    refs.append(ref)
+    if refs:
+        return (
+            "ClawHub slug is shared by multiple publishers: "
+            + ", ".join(refs)
+            + ". Install must include the publisher handle."
+        )
+    if detail:
+        return f"ClawHub conflict: {detail}"
+    return "ClawHub returned 409 Conflict for this skill slug."
+
+
+_PACKAGE_MAX_FILES = 500
+_PACKAGE_MAX_TOTAL_BYTES = 50 * 1024 * 1024
+_PACKAGE_MAX_FILE_BYTES = 5 * 1024 * 1024
+# Registry bookkeeping inside ClawHub archives, not part of the skill itself.
+_PACKAGE_SKIP_NAMES = frozenset({"_meta.json"})
+
+
+def _extract_skill_package_zip(data: bytes) -> Tuple[Optional[str], Dict[str, bytes], str]:
+    """Split a skill package zip into SKILL.md text and its remaining files.
+
+    The shallowest ``SKILL.md`` defines the package root; members outside it,
+    absolute paths, ``..`` segments, dotfiles and ``__MACOSX`` are dropped.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        return None, {}, f"Downloaded package is not a valid zip: {exc}"
+    with zf:
+        members = [m for m in zf.infolist() if not m.is_dir()]
+        skill_candidates = sorted(
+            (m.filename for m in members if m.filename.rsplit("/", 1)[-1].upper() == "SKILL.MD"),
+            key=lambda name: name.count("/"),
+        )
+        if not skill_candidates:
+            return None, {}, "Downloaded package zip does not contain SKILL.md"
+        skill_member = skill_candidates[0]
+        prefix = skill_member[: -len("SKILL.md")]
+
+        skill_md = ""
+        files: Dict[str, bytes] = {}
+        total = 0
+        for member in members:
+            name = member.filename
+            if prefix and not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            parts = [p for p in rel.split("/") if p]
+            if not parts or rel.startswith("/") or any(p in {".", ".."} for p in parts):
+                continue
+            if parts[0] == "__MACOSX" or any(p.startswith(".") for p in parts):
+                continue
+            if member.file_size > _PACKAGE_MAX_FILE_BYTES:
+                return None, {}, f"File too large in skill package: {rel}"
+            total += member.file_size
+            if total > _PACKAGE_MAX_TOTAL_BYTES:
+                return None, {}, "Skill package exceeds size limit"
+            if name == skill_member:
+                skill_md = zf.read(member).decode("utf-8", errors="replace")
+                continue
+            if len(parts) == 1 and parts[0] in _PACKAGE_SKIP_NAMES:
+                continue
+            files["/".join(parts)] = zf.read(member)
+            if len(files) > _PACKAGE_MAX_FILES:
+                return None, {}, f"Skill package has too many files (max {_PACKAGE_MAX_FILES})"
+    if not skill_md.strip():
+        return None, {}, "Downloaded SKILL.md content is empty"
+    return skill_md, files, ""
+
+
+def _stage_skill_package(dest: Path, skill_md: str, files: Dict[str, bytes]) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    root = dest.resolve()
+    for rel, blob in files.items():
+        target = (dest / rel).resolve()
+        target.relative_to(root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(blob)
+
+
+def scan_skill_package(skill_md: str, files: Optional[Dict[str, bytes]] = None) -> Any:
+    """Guard-scan a downloaded package: SKILL.md alone, or every file when present."""
+    from agenticx.skills.guard import scan_skill, scan_skill_markdown_text
+
+    if not files:
+        return scan_skill_markdown_text(skill_md)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        staged = Path(td) / "_skill"
+        _stage_skill_package(staged, skill_md, files)
+        return scan_skill(staged, source="community")
+
+
 def _clawhub_owner_and_author(item: Dict[str, Any]) -> Tuple[str, str]:
-    """Owner handle (install key) and a readable author label from a ClawHub record."""
-    owner = ""
+    """Owner handle (install key) and a readable author label from a ClawHub record.
+
+    Catalog ``GET /v1/skills`` puts the publisher on top-level ``ownerHandle``.
+    Search records use ``install.reference`` and nested ``owner`` / ``publisher``.
+    """
+    owner = str(item.get("ownerHandle") or "").strip()
     install = item.get("install")
     if isinstance(install, dict):
-        owner, _ = split_clawhub_ref(str(install.get("reference") or ""))
-        owner = owner or ""
+        parsed, _ = split_clawhub_ref(str(install.get("reference") or ""))
+        owner = parsed or owner
     native = item.get("native") if isinstance(item.get("native"), dict) else {}
+    if isinstance(native, dict):
+        owner = owner or str(native.get("ownerHandle") or "").strip()
     candidates = [native.get("owner"), item.get("owner"), item.get("publisher"), item.get("author")]
     label = ""
     for cand in candidates:
@@ -409,8 +534,17 @@ class RegistryHub:
         except Exception as exc:
             return InstallResult(success=False, name=skill_name, error=str(exc))
 
-    def fetch_skill_markdown(self, source_name: str, skill_name: str) -> Tuple[Optional[str], str]:
+    def fetch_skill_markdown(
+        self,
+        source_name: str,
+        skill_name: str,
+        *,
+        owner: str = "",
+    ) -> Tuple[Optional[str], str]:
         """Download SKILL.md body without writing to the skills registry.
+
+        ``owner`` is the ClawHub publisher handle. Required when several
+        publishers share ``skill_name`` (otherwise the versions API returns 409).
 
         Returns:
             Tuple of (content or None, error message — empty string on success).
@@ -430,10 +564,48 @@ class RegistryHub:
             if reg_type == "agx":
                 return self._fetch_agx_markdown(reg_url, skill_name)
             if reg_type == "clawhub":
-                return self._fetch_clawhub_markdown(reg_url, skill_name)
+                return self._fetch_clawhub_markdown(reg_url, skill_name, owner=owner)
             return None, f"Fetch not supported for registry type '{reg_type}'"
         except Exception as exc:
             return None, str(exc)
+
+    def fetch_skill_package(
+        self,
+        source_name: str,
+        skill_name: str,
+        *,
+        owner: str = "",
+    ) -> Tuple[Optional[str], Dict[str, bytes], str]:
+        """Download a skill's SKILL.md plus every other file in its package.
+
+        Multi-file skills (``cli.js``, ``scripts/``, ``src/`` …) only work when the
+        whole package lands on disk. AGX registries serve SKILL.md only, so their
+        file map is always empty.
+
+        Returns:
+            Tuple of (SKILL.md text or None, ``{relative_path: bytes}`` for the
+            non-SKILL.md files, error message — empty string on success).
+        """
+        reg = next(
+            (r for r in self._registries if r.get("name") == source_name), None
+        )
+        if reg is None:
+            return None, {}, f"Registry '{source_name}' not found in configuration"
+
+        reg_type = str(reg.get("type", "agx")).lower()
+        reg_url = str(reg.get("url", "")).rstrip("/")
+        if not reg_url:
+            return None, {}, "Registry URL is empty"
+
+        try:
+            if reg_type == "agx":
+                content, err = self._fetch_agx_markdown(reg_url, skill_name)
+                return content, {}, err
+            if reg_type == "clawhub":
+                return self._fetch_clawhub_package(reg_url, skill_name, owner=owner)
+            return None, {}, f"Fetch not supported for registry type '{reg_type}'"
+        except Exception as exc:
+            return None, {}, str(exc)
 
     def _fetch_agx_markdown(self, url: str, skill_name: str) -> Tuple[Optional[str], str]:
         from agenticx.skills.registry import SkillRegistryClient
@@ -445,7 +617,23 @@ class RegistryHub:
             return None, "Empty skill content from registry"
         return text, ""
 
-    def _fetch_clawhub_markdown(self, url: str, skill_name: str) -> Tuple[Optional[str], str]:
+    def _fetch_clawhub_markdown(
+        self,
+        url: str,
+        skill_name: str,
+        *,
+        owner: str = "",
+    ) -> Tuple[Optional[str], str]:
+        content, _files, err = self._fetch_clawhub_package(url, skill_name, owner=owner)
+        return content, err
+
+    def _fetch_clawhub_package(
+        self,
+        url: str,
+        skill_name: str,
+        *,
+        owner: str = "",
+    ) -> Tuple[Optional[str], Dict[str, bytes], str]:
         import httpx
 
         def _compute_429_wait(resp: httpx.Response) -> float:
@@ -497,8 +685,18 @@ class RegistryHub:
             assert last_resp is not None
             return None, _rate_limited_err(last_resp)
 
-        owner, skill_name = split_clawhub_ref(skill_name)
-        owner_params: Dict[str, Any] = {"ownerHandle": owner} if owner else {}
+        parsed_owner, skill_name = split_clawhub_ref(skill_name)
+        resolved_owner = str(owner or parsed_owner or "").strip()
+        owner_params: Dict[str, Any] = {"ownerHandle": resolved_owner} if resolved_owner else {}
+
+        def _reject_conflict(resp: httpx.Response) -> str:
+            if resp.status_code != 409:
+                return ""
+            try:
+                payload: Any = resp.json()
+            except Exception:
+                payload = None
+            return format_clawhub_conflict(resp.status_code, payload)
 
         # Step 1: Fetch version list to get the latest version tag.
         # The /v1/skills/{slug} detail endpoint only returns metadata (no SKILL.md content),
@@ -510,26 +708,32 @@ class RegistryHub:
                 timeout=15.0,
             )
             if limited_err:
-                return None, limited_err
+                return None, {}, limited_err
             assert versions_resp is not None
+            conflict = _reject_conflict(versions_resp)
+            if conflict:
+                return None, {}, conflict
             versions_resp.raise_for_status()
             versions_payload = versions_resp.json()
             versions = versions_payload.get("items") or []
             if not isinstance(versions, list) or not versions:
-                return None, "No package versions returned from ClawHub API"
+                return None, {}, "No package versions returned from ClawHub API"
             latest_version = str((versions[0] or {}).get("version") or "").strip()
             if not latest_version:
-                return None, "Missing latest version in ClawHub package metadata"
+                return None, {}, "Missing latest version in ClawHub package metadata"
 
-            # Step 2: Fetch the specific version detail to get the SKILL.md file hash.
+            # Step 2: Fetch the version detail; its file list must contain SKILL.md.
             version_resp, limited_err = _get_with_retry(
                 f"{url}/v1/packages/{skill_name}/versions/{latest_version}",
                 params=owner_params or None,
                 timeout=15.0,
             )
             if limited_err:
-                return None, limited_err
+                return None, {}, limited_err
             assert version_resp is not None
+            conflict = _reject_conflict(version_resp)
+            if conflict:
+                return None, {}, conflict
             version_resp.raise_for_status()
             version_payload = version_resp.json()
             files = (version_payload.get("version") or {}).get("files") or []
@@ -544,34 +748,34 @@ class RegistryHub:
                     skill_file_hash = str(f.get("sha256") or "").strip()
                     break
             if not skill_file_hash:
-                return None, "SKILL.md hash not found in ClawHub package files"
+                return None, {}, "SKILL.md hash not found in ClawHub package files"
 
-            # Step 3: Download the SKILL.md (ClawHub returns a zip archive).
+            # Step 3: Download the whole package. Passing ``file=SKILL.md`` here
+            # would drop cli.js / scripts / src that multi-file skills execute.
             download_resp, limited_err = _get_with_retry(
                 f"{url}/v1/download",
-                params={"slug": skill_name, "hash": skill_file_hash, "file": "SKILL.md", **owner_params},
-                timeout=20.0,
+                params={"slug": skill_name, "version": latest_version, **owner_params},
+                timeout=30.0,
             )
             if limited_err:
-                return None, limited_err
+                return None, {}, limited_err
             assert download_resp is not None
+            conflict = _reject_conflict(download_resp)
+            if conflict:
+                return None, {}, conflict
             download_resp.raise_for_status()
 
             content_type = str(download_resp.headers.get("content-type", "")).lower()
             if "zip" in content_type or download_resp.content.startswith(b"PK\x03\x04"):
-                with zipfile.ZipFile(io.BytesIO(download_resp.content)) as zf:
-                    for member in zf.namelist():
-                        if member.strip().upper().endswith("SKILL.MD"):
-                            return zf.read(member).decode("utf-8", errors="replace"), ""
-                return None, "Downloaded package zip does not contain SKILL.md"
+                return _extract_skill_package_zip(download_resp.content)
 
             # Fallback: some deployments may return raw markdown/plain text directly.
             text = download_resp.text
             if text.strip():
-                return text, ""
-            return None, "Downloaded SKILL.md content is empty"
+                return text, {}, ""
+            return None, {}, "Downloaded SKILL.md content is empty"
         except Exception as exc:
-            return None, f"Failed to fetch skill from ClawHub: {exc}"
+            return None, {}, f"Failed to fetch skill from ClawHub: {exc}"
 
     def write_registry_skill(
         self,
@@ -637,6 +841,24 @@ class RegistryHub:
         write_skill_provenance(skill_dir, source, extra={"name": validated})
         return md_path
 
+    def write_registry_skill_package(
+        self,
+        skill_name: str,
+        skill_md: str,
+        files: Optional[Dict[str, bytes]] = None,
+        *,
+        source: str = "registry",
+    ) -> Path:
+        """Install SKILL.md plus package files under ~/.agenticx/skills/registry/<name>/."""
+        if not files:
+            return self.write_registry_skill(skill_name, skill_md, source=source)
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            staged = Path(td) / "_skill"
+            _stage_skill_package(staged, skill_md, files)
+            return self.write_registry_skill_dir(skill_name, staged, source=source)
+
     def _install_agx(self, url: str, skill_name: str) -> InstallResult:
         """Install from an AGX native registry via SkillRegistryClient."""
         content, err = self._fetch_agx_markdown(url, skill_name)
@@ -650,11 +872,12 @@ class RegistryHub:
         )
 
     def _install_clawhub(self, url: str, skill_name: str) -> InstallResult:
-        """Install a ClawHub skill by fetching its SKILL.md content."""
-        content, err = self._fetch_clawhub_markdown(url, skill_name)
+        """Install a ClawHub skill with every file in its package."""
+        content, files, err = self._fetch_clawhub_package(url, skill_name)
         if err or content is None:
             return InstallResult(success=False, name=skill_name, error=err or "fetch failed")
-        md_path = self.write_registry_skill(skill_name, content)
+        _, bare_name = split_clawhub_ref(skill_name)
+        md_path = self.write_registry_skill_package(bare_name, content, files)
         return InstallResult(
             success=True,
             name=skill_name,

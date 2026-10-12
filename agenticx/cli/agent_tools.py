@@ -452,6 +452,10 @@ def _session_workspace_root_sets(
     except Exception:
         pass
 
+    skill_dir_keys = {str(p) for p in _activated_skill_dirs(session)}
+    for skill_key in sorted(skill_dir_keys):
+        _add(skill_key, writable=False)
+
     default_keys: set[str] = set()
     for p in default_paths:
         try:
@@ -475,7 +479,13 @@ def _session_workspace_root_sets(
 
     def _prefer_dir(path: Path) -> None:
         key = str(path)
-        if not key or key in seen_preferred or key in default_keys or key == desktop_use_key:
+        if (
+            not key
+            or key in seen_preferred
+            or key in default_keys
+            or key == desktop_use_key
+            or key in skill_dir_keys
+        ):
             return
         try:
             if not path.is_dir():
@@ -510,6 +520,47 @@ def _session_workspace_root_sets(
     from agenticx.runtime.isolate_run import apply_isolate_roots
 
     return apply_isolate_roots(read_roots, write_roots, session)
+
+
+def _activated_skill_dirs(session: Optional[StudioSession]) -> List[Path]:
+    """Existing base dirs of skills activated in this session via skill_use."""
+    if session is None:
+        return []
+    raw = getattr(session, "activated_skill_dirs", None)
+    if not isinstance(raw, list):
+        return []
+    out: List[Path] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        try:
+            path = Path(text).expanduser().resolve(strict=False)
+            if not path.is_dir():
+                continue
+        except OSError:
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _resolve_bash_cwd(cwd_arg: str, session: Optional[StudioSession]) -> Path:
+    """Writable root, or the dir of a skill activated this session (read-only)."""
+    try:
+        return _resolve_workspace_path(cwd_arg, session, for_write=True)
+    except ValueError as write_exc:
+        try:
+            resolved = _resolve_workspace_path(cwd_arg, session)
+        except ValueError:
+            raise write_exc from None
+        if any(_is_path_under_root(resolved, root) for root in _activated_skill_dirs(session)):
+            return resolved
+        raise write_exc from None
 
 
 def _default_bash_cwd(session: Optional[StudioSession]) -> Optional[Path]:
@@ -5992,7 +6043,7 @@ async def _bash_exec_prepare(
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
-            cwd = _resolve_workspace_path(str(cwd_arg), session, for_write=True)
+            cwd = _resolve_bash_cwd(str(cwd_arg), session)
         except ValueError as exc:
             return f"ERROR: {exc}"
     else:
@@ -8854,6 +8905,28 @@ async def _tool_connector_manage(
     return _dump({"ok": False, "error": f"unknown action: {action}"})
 
 
+_SKILL_ENTRY_SCRIPT_RE = re.compile(
+    r"\b(?:node|python3?|bash|sh|bun|deno(?:\s+run)?|tsx)\s+"
+    r"(?:\./)?([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:js|mjs|cjs|ts|py|sh))\b"
+)
+
+
+def _missing_skill_entry_scripts(base_dir: Path) -> List[str]:
+    """Relative scripts SKILL.md tells the agent to run that are absent on disk."""
+    try:
+        text = (base_dir / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    missing: List[str] = []
+    for match in _SKILL_ENTRY_SCRIPT_RE.finditer(text):
+        rel = match.group(1)
+        if rel in missing or ".." in Path(rel).parts:
+            continue
+        if not (base_dir / rel).is_file():
+            missing.append(rel)
+    return missing
+
+
 def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     name = str(arguments.get("name", "")).strip()
     if not name:
@@ -8866,8 +8939,6 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
         session.context_files, name, bound_avatar_id=bound, quiet=True
     )
     if not ok:
-        from pathlib import Path
-
         hint = (
             f"Skill '{name}' was not found in the skill index. "
             "Common causes: SKILL.md missing YAML `name:` (only `title:` is not enough), "
@@ -8894,13 +8965,30 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     if meta is None:
         return (
             f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
-            "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
+            "请直接使用，不要再用 file_read 读取 SKILL.md。"
+        )
+    base_dir = Path(meta.base_dir).expanduser().resolve(strict=False)
+    dirs = getattr(session, "activated_skill_dirs", None)
+    if isinstance(dirs, list) and str(base_dir) not in dirs:
+        dirs.append(str(base_dir))
+    head = (
+        f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
+        "不要再用 file_read 读取 SKILL.md。"
+        f" source={meta.source}, location={meta.location}, base_dir={base_dir}。"
+    )
+    missing = _missing_skill_entry_scripts(base_dir)
+    if missing:
+        listed = "、".join(missing)
+        return (
+            f"{head}\n"
+            f"WARNING: 技能包不完整，SKILL.md 引用的脚本不存在：{listed}。"
+            "不要再用 bash_exec 重试运行这些脚本；请告诉用户在市场里重新安装该技能。"
         )
     return (
-        f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
-        "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
-        f" source={meta.source}, location={meta.location}, "
-        f"base_dir={meta.base_dir}（该目录在工作区之外，不可读）。"
+        f"{head}\n"
+        "技能目录本会话只读可用：脚本请用绝对路径运行（如 "
+        f"`node {base_dir}/cli.js ...`），或把 bash_exec 的 cwd 设为 {base_dir}；"
+        "该目录不可写，产物请写到会话工作区。"
     )
 
 
@@ -11434,8 +11522,8 @@ def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSes
     name = str(arguments.get("name") or "").strip()
     if not name:
         return "ERROR: name is required, e.g. 'archify'"
-    from agenticx.extensions.registry_hub import RegistryHub, split_clawhub_ref
-    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+    from agenticx.extensions.registry_hub import RegistryHub, scan_skill_package, split_clawhub_ref
+    from agenticx.skills.guard import scan_result_to_payload
 
     _, bare_name = split_clawhub_ref(name)
     hub = RegistryHub.from_config()
@@ -11454,7 +11542,7 @@ def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSes
             {"ok": False, "name": name, "error": "no ClawHub registry configured"},
             ensure_ascii=False,
         )
-    content, err = hub.fetch_skill_markdown(source, name)
+    content, files, err = hub.fetch_skill_package(source, name)
     if err or content is None:
         return json.dumps(
             {
@@ -11469,7 +11557,7 @@ def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSes
             },
             ensure_ascii=False,
         )
-    scan = scan_skill_markdown_text(content)
+    scan = scan_skill_package(content, files)
     risk_key = "clawhub:" + bare_name
     ack = bool(arguments.get("acknowledge_high_risk")) and _high_risk_ack_allowed(session, risk_key)
     if scan.verdict == "dangerous" and not ack:
@@ -11485,7 +11573,7 @@ def _tool_clawhub_install(arguments: Dict[str, Any], session: Optional[StudioSes
             },
             ensure_ascii=False,
         )
-    md_path = hub.write_registry_skill(bare_name, content)
+    md_path = hub.write_registry_skill_package(bare_name, content, files)
     _refresh_skill_catalog_after_install()
     return json.dumps(
         {

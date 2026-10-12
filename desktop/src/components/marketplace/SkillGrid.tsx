@@ -43,8 +43,9 @@ export function SkillGrid({
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => {
-        const isInstalling = installingKey === `${item.source}:${item.name}`;
-        const isQueued = queuedKeys.includes(`${item.source}:${item.name}`);
+        const skillKey = `${item.source}:${item.owner ?? ""}:${item.name}`;
+        const isInstalling = installingKey === skillKey;
+        const isQueued = queuedKeys.includes(skillKey);
         const isOfficialSite = item.cta === "official_site";
         return (
           <div

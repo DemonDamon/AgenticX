@@ -13457,6 +13457,7 @@ function registerIpc(): void {
       args: {
         source: string;
         name: string;
+        owner?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
       }
@@ -13469,6 +13470,7 @@ function registerIpc(): void {
           body: JSON.stringify({
             source: args.source,
             name: args.name,
+            owner: args.owner ?? "",
             acknowledge_high_risk: Boolean(args.acknowledgeHighRisk),
             confirm_non_high_risk: Boolean(args.confirmNonHighRisk),
           }),
@@ -13480,13 +13482,13 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string }) => {
+  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string; owner?: string }) => {
     const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/registry/install-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
-        body: JSON.stringify({ source: args.source, name: args.name }),
+        body: JSON.stringify({ source: args.source, name: args.name, owner: args.owner ?? "" }),
       });
       return await resp.json();
     } catch (err) {

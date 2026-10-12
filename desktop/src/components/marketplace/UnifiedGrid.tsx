@@ -107,7 +107,7 @@ export function UnifiedGrid({
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {items.map((item) => {
-        const skillKey = `${item.source}:${item.name}`;
+        const skillKey = `${item.source}:${item.owner ?? ""}:${item.name}`;
         const isInstalling = item.kind === "skill" && installingKey === skillKey;
         const isQueued = item.kind === "skill" && queuedKeys.includes(skillKey);
         const isOfficialSite = item.kind === "skill" && item.cta === "official_site";

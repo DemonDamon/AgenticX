@@ -73,6 +73,17 @@ describe("buildSkillItems", () => {
     expect(officecli?.origin).toBe("recommended");
   });
 
+  it("keeps the ClawHub publisher handle on registry cards", () => {
+    const items = buildSkillItems(
+      [],
+      [{ ...registryItems[0], name: "xhs-dpt", owner: "cuiyunhai" }],
+      new Set(),
+    );
+    expect(items[0]?.owner).toBe("cuiyunhai");
+    const unified = buildUnifiedItems([], items, [], [], new Set());
+    expect(unified.find((it) => it.name === "xhs-dpt")?.owner).toBe("cuiyunhai");
+  });
+
   it("dedupes registry entries that collide with recommended names", () => {
     const registryOfficecli = items.filter((it) => it.origin === "registry" && normalizeSkillName(it.name) === "officecli");
     expect(registryOfficecli).toHaveLength(0);
