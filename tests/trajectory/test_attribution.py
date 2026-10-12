@@ -83,6 +83,16 @@ def test_heldout_trajectory_rejected():
             ("skill_select", "skill:a@1", "1")]))
 
 
+def test_heldout_rejected_with_path_prefix():
+    """harbor task_name 带 terminal-bench/ 前缀，守卫必须归一化匹配（T3 实测 bug）。"""
+    from agenticx.trainer.heldout import HeldoutViolation
+    led = AttributionLedger(heldout_tasks={"biped-contact-dynamics"})
+    with pytest.raises(HeldoutViolation):
+        credit_trajectory(led, traj("pass", 1.0, [
+            ("skill_select", "skill:a@1", "1")],
+            task_id="terminal-bench/biped-contact-dynamics"))
+
+
 def test_ledger_persistence_roundtrip(tmp_path):
     led = AttributionLedger()
     credit_trajectory(led, traj("pass", 1.0, [

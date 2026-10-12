@@ -36,20 +36,27 @@ def load_pool_tasks(path: Path | None = None) -> set[str]:
     return {t["task_id"] for t in data.get("tasks", [])}
 
 
+def normalize_task_id(task_id: str) -> str:
+    """任务 ID 归一化：取路径最后一段（harbor task_name 带 terminal-bench/ 前缀，
+    split 名单是裸名——SP30 T3 实测发现前缀导致 held-out 守卫漏配）。"""
+    return (task_id or "").rstrip("/").split("/")[-1]
+
+
 def is_eval_task(task_name: str, split: dict) -> bool:
-    return task_name in split["heldout"]
+    return normalize_task_id(task_name) in split["heldout"]
 
 
 def assert_trainable_task(task_name: str, split: dict) -> None:
     pool = load_pool_tasks()
-    in_pool = task_name in pool
+    in_pool = task_name in pool or normalize_task_id(task_name) in pool
+    norm = normalize_task_id(task_name)
     all_tasks = set(split["train"]) | set(split["heldout"])
-    if task_name not in all_tasks and not in_pool:
+    if norm not in all_tasks and not in_pool:
         raise ValueError(
             f"task '{task_name}' 不在任务名单（TB 66 题拆分 seed={split['seed']}"
             f"或多域任务池 {len(pool)} 题）——先确认任务来源, 或重新生成"
             f"datasets/task_split.json / datasets/task_pool.json")
-    if task_name in all_tasks and is_eval_task(task_name, split):
+    if norm in all_tasks and is_eval_task(task_name, split):
         # 复用 P0 的评测隔离异常语义
         from agenticx.trainer.heldout import HeldoutViolation
         raise HeldoutViolation(

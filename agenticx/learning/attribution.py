@@ -20,6 +20,7 @@ from pathlib import Path
 from agenticx.trainer.heldout import HeldoutViolation
 
 from .trajectory.schema import ROUTING_KINDS, RSITrajectory
+from .trajectory.task_split import normalize_task_id
 
 _SUPPORT_FLOOR = 5      # support 低于此值，报告标灰「证据不足」
 
@@ -53,7 +54,8 @@ class AttributionLedger:
     """路由事件 × 结局 的累积账本。内存累计，save/load 落 JSON。"""
 
     def __init__(self, heldout_tasks: set[str] | None = None):
-        self.heldout_tasks = set(heldout_tasks or ())
+        # 归一化到裸名（harbor task_name 带 terminal-bench/ 前缀，名单是裸名）
+        self.heldout_tasks = {normalize_task_id(t) for t in (heldout_tasks or ())}
         self.rows: list[CreditRow] = []
         self._index: dict[str, CreditRow] = {}
 
@@ -61,7 +63,7 @@ class AttributionLedger:
 
     def credit(self, traj: RSITrajectory) -> int:
         """一条轨迹计入账本，返回实际计票的 ref 数。"""
-        if traj.task_id in self.heldout_tasks:
+        if normalize_task_id(traj.task_id) in self.heldout_tasks:
             raise HeldoutViolation(
                 f"task '{traj.task_id}' 在 held-out 考试集，禁止进入归因账本")
         label = traj.reward.label
