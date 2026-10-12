@@ -1375,6 +1375,20 @@ def create_studio_app() -> FastAPI:
         unattended: bool = False,
     ) -> Any:
         if unattended:
+            from agenticx.runtime.confirm import ParkedApprovalConfirmGate
+            from agenticx.runtime.parked_approvals import (
+                approval_parking_enabled,
+                approval_timeout_seconds,
+            )
+
+            if approval_parking_enabled():
+                return ParkedApprovalConfirmGate(
+                    managed.get_confirm_gate(agent_id),
+                    session_id=str(getattr(managed, "session_id", "") or ""),
+                    agent_id=agent_id or "meta",
+                    timeout_seconds=approval_timeout_seconds(),
+                    label=str(getattr(managed, "avatar_id", "") or ""),
+                )
             return RiskAwareAutoConfirmGate(unattended=True)
         managed_gate = managed.get_confirm_gate(agent_id)
         if _global_auto_confirm_enabled():
@@ -2713,6 +2727,15 @@ def create_studio_app() -> FastAPI:
             "scope": "turn",
             "durable_jobs_cancelled": False,
         }
+
+    @app.get("/api/approvals/pending")
+    async def get_pending_approvals(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.parked_approvals import list_pending
+
+        return {"ok": True, "items": list_pending()}
 
     @app.post("/api/confirm")
     async def post_confirm(

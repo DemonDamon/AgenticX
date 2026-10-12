@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
@@ -111,6 +112,10 @@ def confirm_denial_note(gate: Any, request_id: str) -> str:
     if isinstance(last, dict) and last.get("id") == request_id:
         if last.get("decision") == "blocked_unattended":
             return "无人值守运行不批准受保护操作"
+        if last.get("decision") == "parked_timeout":
+            seconds = float(last.get("timeout_seconds") or 0)
+            minutes = max(1, round(seconds / 60))
+            return f"无人值守等待审批超时（{minutes} 分钟）"
     timeout_info = getattr(gate, "last_timeout_info", None)
     if (
         isinstance(timeout_info, dict)
@@ -201,7 +206,13 @@ class AsyncConfirmGate(ConfirmGate):
             else _resolve_confirm_timeout_seconds()
         )
 
-    async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
+    async def request_confirm(
+        self,
+        question: str,
+        context: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> bool:
         payload = dict(context or {})
         request_id = str(payload.get("request_id") or uuid.uuid4())
         payload["request_id"] = request_id
@@ -214,8 +225,13 @@ class AsyncConfirmGate(ConfirmGate):
             "question": question,
             "context": payload,
         }
+        effective_timeout = (
+            timeout_seconds
+            if timeout_seconds and timeout_seconds > 0
+            else self.timeout_seconds
+        )
         try:
-            return await asyncio.wait_for(future, timeout=self.timeout_seconds)
+            return await asyncio.wait_for(future, timeout=effective_timeout)
         except asyncio.TimeoutError:
             effective_action = (
                 "reject" if is_protected_confirm(payload) else self.timeout_action
@@ -227,11 +243,11 @@ class AsyncConfirmGate(ConfirmGate):
                 "action_taken": effective_action,
                 "configured_action": self.timeout_action,
                 "approved": approved,
-                "timeout_seconds": self.timeout_seconds,
+                "timeout_seconds": effective_timeout,
             }
             _log.warning(
                 "Confirm gate timed out after %.1fs for request %s, action=%s",
-                self.timeout_seconds,
+                effective_timeout,
                 request_id,
                 effective_action,
             )
@@ -359,6 +375,108 @@ class RiskAwareAutoConfirmGate(ConfirmGate):
         if self.delegate is None:
             return False
         return self.delegate.resolve(request_id, approved)
+
+
+class ParkedApprovalConfirmGate(ConfirmGate):
+    """Unattended gate that waits (bounded) for a human on protected requests.
+
+    Low-risk requests are auto-approved exactly like the unattended
+    RiskAwareAutoConfirmGate. Protected requests are registered in
+    ``agenticx.runtime.parked_approvals`` and awaited on the session's
+    managed AsyncConfirmGate so ``POST /api/confirm`` can resolve them.
+    """
+
+    def __init__(
+        self,
+        delegate: AsyncConfirmGate,
+        *,
+        session_id: str,
+        agent_id: str,
+        timeout_seconds: float,
+        label: str = "",
+    ) -> None:
+        self.delegate = delegate
+        self.session_id = session_id
+        self.agent_id = agent_id
+        self.timeout_seconds = timeout_seconds
+        self.label = label
+        self._pending = getattr(delegate, "_pending", {})
+        self._pending_meta = getattr(delegate, "_pending_meta", {})
+        self.last_request: Optional[Dict[str, Any]] = None
+
+    async def request_confirm(
+        self,
+        question: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        payload = dict(context or {})
+        if not is_protected_confirm(payload):
+            self.last_request = None
+            return True
+
+        request_id = str(payload.get("request_id") or uuid.uuid4())
+        payload["request_id"] = request_id
+        from agenticx.runtime import parked_approvals
+
+        now = time.time()
+        parked_approvals.register(
+            parked_approvals.ParkedApproval(
+                request_id=request_id,
+                session_id=self.session_id,
+                agent_id=self.agent_id,
+                question=question,
+                tool=str(payload.get("tool") or ""),
+                risk=str(payload.get("risk") or ""),
+                protected_reason=protected_confirm_reason(payload),
+                label=self.label,
+                created_at=now,
+                expires_at=now + self.timeout_seconds,
+            )
+        )
+        try:
+            approved = await self.delegate.request_confirm(
+                question,
+                payload,
+                timeout_seconds=self.timeout_seconds,
+            )
+        finally:
+            parked_approvals.remove(request_id)
+
+        info = getattr(self.delegate, "last_timeout_info", None)
+        if (
+            isinstance(info, dict)
+            and info.get("request_id") == request_id
+            and not approved
+        ):
+            self.last_request = {
+                "id": request_id,
+                "question": question,
+                "context": payload,
+                "decision": "parked_timeout",
+                "timeout_seconds": self.timeout_seconds,
+            }
+        else:
+            self.last_request = {
+                "id": request_id,
+                "question": question,
+                "context": payload,
+            }
+        return approved
+
+    def should_emit_prompt(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        return is_protected_confirm(context)
+
+    def is_service_mode(self) -> bool:
+        return True
+
+    def resolve(self, request_id: str, approved: bool) -> bool:
+        return self.delegate.resolve(request_id, approved)
+
+    def export_state(self) -> Dict[str, Any]:
+        return self.delegate.export_state()
+
+    def restore_state(self, state: Dict[str, Any]) -> None:
+        self.delegate.restore_state(state)
 
 
 class AutoApproveConfirmGate(ConfirmGate):
