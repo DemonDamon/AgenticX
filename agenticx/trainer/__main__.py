@@ -19,6 +19,30 @@ from .heldout import heldout_split
 from .quality import score_trajectory
 from .exporters import export_llama_factory, write_card
 from .registry import ModelRegistry
+from .adapters import AdapterRegistry
+
+
+def _cmd_adapter_registry(args) -> int:
+    reg = AdapterRegistry(Path(args.adapter_registry))
+    tenant = args.tenant
+    if args.action == "adapter-register":
+        lineage = json.loads(args.lineage_json) if args.lineage_json else {}
+        vid = reg.register(args.alias, base_model=args.base_model,
+                           adapter_uri=args.uri,
+                           skill_tags=[t for t in args.tags.split(",") if t],
+                           tenant=tenant, lineage=lineage)
+        print(json.dumps({"registered": vid}))
+    elif args.action == "adapter-promote":
+        print(json.dumps({"promoted": reg.promote(args.alias, args.version_id,
+                                                 tenant=tenant)}))
+    elif args.action == "adapter-rollback":
+        print(json.dumps({"rollback_to": reg.rollback(args.alias, tenant=tenant)}))
+    elif args.action == "adapter-resolve":
+        print(json.dumps(reg.resolve(args.alias, tenant=tenant),
+                         ensure_ascii=False))
+    elif args.action == "adapter-list":
+        print(json.dumps(reg.list(), ensure_ascii=False, indent=2))
+    return 0
 
 def _cmd_collect(args) -> int:
     store = TrajectoryStore(Path(args.store))
@@ -51,6 +75,8 @@ def _make_reg(path: str) -> ModelRegistry:
     return ModelRegistry(Path(path))
 
 def _cmd_registry(args) -> int:
+    if args.action.startswith("adapter-"):
+        return _cmd_adapter_registry(args)
     reg = _make_reg(args.registry)
     if args.action == "register":
         vid = reg.register(args.alias, model_spec=args.model, backend=args.backend)
@@ -81,11 +107,23 @@ def main(argv=None) -> int:
     b.add_argument("--min-quality", type=float, default=0.5)
     b.set_defaults(func=_cmd_build)
     r = sub.add_parser("registry")
-    r.add_argument("action", choices=["register", "promote", "rollback", "resolve", "list"])
+    r.add_argument("action", choices=[
+        "register", "promote", "rollback", "resolve", "list",
+        "adapter-register", "adapter-promote", "adapter-rollback",
+        "adapter-resolve", "adapter-list"])
     r.add_argument("alias", nargs="?", default=None)
     r.add_argument("--model", default="")
     r.add_argument("--backend", default="")
     r.add_argument("--registry", default=str(Path.home() / ".agenticx/registry/models.json"))
+    # adapter 子动词（SP30 T6）
+    r.add_argument("--base-model", default="")
+    r.add_argument("--uri", default="")
+    r.add_argument("--tags", default="")
+    r.add_argument("--tenant", default="")
+    r.add_argument("--version-id", default="")
+    r.add_argument("--lineage-json", default="")
+    r.add_argument("--adapter-registry",
+                   default=str(Path.home() / ".agenticx/registry/adapters.json"))
     r.set_defaults(func=_cmd_registry)
     args = ap.parse_args(argv)
     return args.func(args)
