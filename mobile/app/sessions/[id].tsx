@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../../src/api/client";
+import type { SessionContextUsage } from "../../src/api/types";
 import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
 import { ReasoningBlock } from "../../src/components/ReasoningBlock";
 import { ToolGroupCard } from "../../src/components/ToolGroupCard";
@@ -53,6 +54,49 @@ function AssistantBlock({ text, reasoning }: { text: string; reasoning?: string 
           <AssistantMarkdown text={text} />
         )}
       </View>
+    </View>
+  );
+}
+
+function fmtTokenCount(n: number): string {
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)} 亿`;
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** 会话信息卡：上下文占用条 + 累计 Token（点击 metaBar 展开） */
+function SessionUsageCard({ usage }: { usage: SessionContextUsage }) {
+  const cache = usage.cache ?? {};
+  const total = Number(cache.session_total_tokens ?? 0);
+  const input = Number(cache.session_input_tokens ?? 0);
+  const output = Number(cache.session_output_tokens ?? 0);
+  const requests = Number(cache.requests ?? 0);
+  const pct = Math.max(0, Math.min(100, usage.percent));
+  return (
+    <View style={styles.usageCard}>
+      <View style={styles.usageRow}>
+        <Text style={styles.usageLabel}>上下文占用</Text>
+        <Text style={styles.usageValue}>
+          {fmtTokenCount(usage.used_tokens)} / {fmtTokenCount(usage.max_tokens)}（{pct}%）
+        </Text>
+      </View>
+      <View style={styles.usageBarBg}>
+        <View style={[styles.usageBarFill, { width: `${pct}%` as const }]} />
+      </View>
+      <View style={styles.usageRow}>
+        <Text style={styles.usageLabel}>累计 Token</Text>
+        <Text style={styles.usageValue}>
+          输入 {fmtTokenCount(input)} · 输出 {fmtTokenCount(output)} · 合计{" "}
+          {fmtTokenCount(total)}
+        </Text>
+      </View>
+      {requests > 0 ? (
+        <View style={styles.usageRow}>
+          <Text style={styles.usageLabel}>请求数</Text>
+          <Text style={styles.usageValue}>{requests} 次</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -227,11 +271,24 @@ export default function SessionMessagesScreen() {
     setEntries(buildChatEntries(resp.messages));
   }, [client, id]);
 
+  // 会话上下文/Token 用量：进入时拉一次，回合结束后随 fetchMessages 刷新
+  const [usage, setUsage] = useState<SessionContextUsage | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const refreshUsage = useCallback(async () => {
+    if (client === null) return;
+    try {
+      setUsage(await client.getSessionContextUsage(id));
+    } catch {
+      // 用量是辅助信息，失败静默（不影响消息流）
+    }
+  }, [client, id]);
+
   useEffect(() => {
     void fetchMessages().catch((err: unknown) => {
       setLoadError(describeError(err));
     });
-  }, [fetchMessages]);
+    void refreshUsage();
+  }, [fetchMessages, refreshUsage]);
 
   // 审批决策完成（全局卡 approve/deny）→ 立即刷新本会话消息
   useEffect(
@@ -361,6 +418,7 @@ export default function SessionMessagesScreen() {
         // 整体替换本地 pending / streaming 条目
         try {
           await fetchMessages();
+          void refreshUsage();
           // 延迟补拉 ×2：长回合的收尾消息可能在 send 返回后才落盘
           // （桌面 SSE 先关流、summary 后写盘），+5s/+15s 兜底补齐
           setTimeout(() => {
@@ -462,16 +520,25 @@ export default function SessionMessagesScreen() {
         </View>
       ) : (
         <View style={styles.flex}>
-          {(model !== undefined && model !== "") || sending ? (
-            <View style={styles.metaBar}>
-              {model !== undefined && model !== "" ? (
-                <Text style={styles.metaText} numberOfLines={1}>
-                  模型 {model}
-                </Text>
-              ) : null}
-              {sending ? <Text style={styles.metaText}> · 回合进行中</Text> : null}
-            </View>
+          {(model !== undefined && model !== "") || usage !== null || sending ? (
+            <Pressable
+              style={styles.metaBar}
+              onPress={() => {
+                setUsageOpen(!usageOpen);
+              }}
+            >
+              <Text style={styles.metaText} numberOfLines={1}>
+                {[
+                  model !== undefined && model !== "" ? `模型 ${model}` : "",
+                  usage !== null ? `上下文 ${usage.percent}%` : "",
+                  sending ? "回合进行中" : "",
+                ]
+                  .filter((s) => s !== "")
+                  .join(" · ")}
+              </Text>
+            </Pressable>
           ) : null}
+          {usageOpen && usage !== null ? <SessionUsageCard usage={usage} /> : null}
           <FlatList<ChatEntry>
             ref={listRef}
             data={displayData}
@@ -601,6 +668,37 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption,
     color: color.textMuted,
   },
+  usageCard: {
+    backgroundColor: color.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  usageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  usageLabel: { fontSize: fontSize.caption, color: color.textMuted },
+  usageValue: {
+    fontSize: fontSize.caption,
+    color: color.textPrimary,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  usageBarBg: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: color.bg,
+    overflow: "hidden",
+  },
+  usageBarFill: { height: 6, borderRadius: 3, backgroundColor: brand.primary },
   thinkingLive: {
     backgroundColor: brand.cream,
     borderRadius: radius.sm + 2,
