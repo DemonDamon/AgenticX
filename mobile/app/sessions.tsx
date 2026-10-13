@@ -106,7 +106,7 @@ export default function SessionsScreen() {
             <Pressable
               style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}
               onPress={() => {
-                router.push("/");
+                router.dismissAll();
               }}
             >
               <Text style={styles.plusText}>＋</Text>

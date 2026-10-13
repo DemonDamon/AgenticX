@@ -52,7 +52,7 @@ export default function Index() {
     setCreating(true);
     try {
       const resp = await client.createSession({});
-      router.replace({
+      router.push({
         pathname: "/sessions/[id]",
         params: { id: resp.session_id, title: text.slice(0, 20), initialText: text },
       });
