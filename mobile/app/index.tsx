@@ -12,16 +12,17 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CapabilityCard } from "../src/components/CapabilityCard";
 import { useGateway } from "../src/hooks/useGateway";
 import { describeError } from "../src/lib/errors";
 import type { MobileStatus } from "../src/api/types";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../src/ui/theme";
 
 /**
- * 首页（对标 Trae 手机端）：打开 APP 直达对话起始页。
- * - 大标语 + 底部输入卡；首条消息发出时懒创建会话（不产生垃圾会话）
- * - 左上角入口 → 「全部任务」列表
- * - 未绑定 → pair；绑定读取中先展示标语骨架
+ * 首页（对标 Trae / Claude 手机端）：打开 APP 直达对话起始页。
+ * - 大标语 + 底部输入卡（动作行：＋能力速览 / 模型 pill / 发送）+ 设备上下文 pill 行
+ * - 首条消息发出时懒创建会话；左上角入口 → 「全部任务」列表
+ * - 未绑定 → pair；绑定读取中先展示轻量分发
  */
 export default function Index() {
   const insets = useSafeAreaInsets();
@@ -29,9 +30,11 @@ export default function Index() {
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<MobileStatus | null>(null);
+  const [model, setModel] = useState<string | null>(null);
+  const [capsOpen, setCapsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // 拉一次桌面状态（桌面名 / 在线），失败静默降级
+  // 拉桌面状态（在线/桌面名）+ 最近会话的模型（动作行 pill），失败静默降级
   useEffect(() => {
     if (client === null) return;
     let cancelled = false;
@@ -39,6 +42,15 @@ export default function Index() {
       .getStatus()
       .then((s) => {
         if (!cancelled) setStatus(s);
+      })
+      .catch(() => {});
+    void client
+      .getSessions()
+      .then((resp) => {
+        const first = resp.sessions[0];
+        if (!cancelled && first !== undefined && typeof first.model === "string") {
+          setModel(first.model);
+        }
       })
       .catch(() => {});
     return () => {
@@ -67,7 +79,7 @@ export default function Index() {
 
   const canSend = creating || draft.trim() === "";
 
-  // 未绑定 / 绑定读取失败：保持轻量分发（真正 UI 是配对页）
+  // 未绑定 / 绑定读取失败：轻量分发（真正 UI 是配对页）
   if (binding === null) {
     return (
       <View style={styles.center}>
@@ -89,6 +101,7 @@ export default function Index() {
   }
 
   const desktopName = status?.desktop_name ?? "桌面端";
+  const online = status?.online === true;
 
   return (
     <View style={styles.page}>
@@ -112,22 +125,28 @@ export default function Index() {
         {/* 大标语 */}
         <View style={styles.hero}>
           <Text style={styles.heroTitle}>Hey，我是 Near</Text>
-          <Text style={styles.heroTitle}>代码开发，</Text>
-          <Text style={styles.heroTitle}>从这里开始</Text>
+          <Text style={styles.heroSub}>桌面智能体，随时待命</Text>
           <View style={styles.heroStatus}>
             <View
               style={[
                 styles.statusDot,
-                status === null ? styles.statusDotMuted : status.online ? styles.statusDotOnline : styles.statusDotOffline,
+                status === null ? styles.statusDotMuted : online ? styles.statusDotOnline : styles.statusDotOffline,
               ]}
             />
             <Text style={styles.heroStatusText}>
-              {status === null ? "正在连接桌面端…" : `${desktopName} · ${status.online ? "在线" : "离线"}`}
+              {status === null ? "正在连接桌面端…" : `${desktopName} · ${online ? "在线" : "离线"}`}
             </Text>
           </View>
         </View>
 
-        {/* 底部输入卡 */}
+        {/* ＋ 展开：能力速览 */}
+        {capsOpen ? (
+          <View style={styles.capsWrap}>
+            <CapabilityCard client={client} />
+          </View>
+        ) : null}
+
+        {/* 底部输入卡（对标 Trae/Claude 层次：输入区 → 动作行） */}
         <View style={styles.inputCard}>
           <TextInput
             style={styles.input}
@@ -138,10 +157,26 @@ export default function Index() {
             onChangeText={setDraft}
             editable={!creating}
           />
-          <View style={styles.inputFooter}>
-            <Text style={styles.desktopHint} numberOfLines={1}>
-              {desktopName}
-            </Text>
+          <View style={styles.actionRow}>
+            <Pressable
+              style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}
+              onPress={() => {
+                setCapsOpen((v) => !v);
+              }}
+              hitSlop={6}
+            >
+              <Ionicons name={capsOpen ? "close" : "add"} size={22} color={color.textSecondary} />
+            </Pressable>
+            {model !== null ? (
+              <View style={styles.modelPill}>
+                <Ionicons name="sparkles" size={12} color={brand.primary} />
+                <Text style={styles.modelPillText} numberOfLines={1}>
+                  {model}
+                </Text>
+                <Ionicons name="chevron-down" size={12} color={color.textMuted} />
+              </View>
+            ) : null}
+            <View style={styles.spacer} />
             <Pressable
               style={({ pressed }) => [
                 styles.sendButton,
@@ -160,6 +195,34 @@ export default function Index() {
               )}
             </Pressable>
           </View>
+        </View>
+
+        {/* 设备上下文 pill 行 */}
+        <View style={styles.contextRow}>
+          <Pressable
+            style={({ pressed }) => [styles.contextPill, pressed && styles.contextPillPressed]}
+            onPress={() => {
+              router.push("/settings");
+            }}
+          >
+            <Ionicons name="desktop-outline" size={14} color={color.textSecondary} />
+            <Text style={styles.contextPillText} numberOfLines={1}>
+              {desktopName}
+            </Text>
+            <Ionicons name="chevron-down" size={12} color={color.textMuted} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.contextPill, pressed && styles.contextPillPressed]}
+            onPress={() => {
+              router.push("/sessions");
+            }}
+          >
+            <Ionicons name="folder-outline" size={14} color={color.textSecondary} />
+            <Text style={styles.contextPillText} numberOfLines={1}>
+              AgenticX
+            </Text>
+            <Ionicons name="chevron-down" size={12} color={color.textMuted} />
+          </Pressable>
         </View>
         <View style={{ height: Math.max(insets.bottom, spacing.sm) }} />
       </KeyboardAvoidingView>
@@ -226,9 +289,14 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 34,
-    lineHeight: 46,
+    lineHeight: 44,
     fontWeight: fontWeight.bold,
     color: color.textPrimary,
+  },
+  heroSub: {
+    fontSize: fontSize.bodyLg,
+    color: color.textMuted,
+    marginTop: spacing.xs,
   },
   heroStatus: {
     flexDirection: "row",
@@ -248,13 +316,17 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     color: color.textSecondary,
   },
+  capsWrap: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
   inputCard: {
     marginHorizontal: spacing.lg,
     backgroundColor: "#FFFFFF",
     borderRadius: radius.lg + 4,
     borderWidth: 1,
     borderColor: color.border,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
@@ -267,26 +339,74 @@ const styles = StyleSheet.create({
     color: color.textPrimary,
     lineHeight: 22,
     textAlignVertical: "top",
+    paddingHorizontal: spacing.xs,
   },
-  inputFooter: {
+  actionRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: spacing.sm,
   },
-  desktopHint: {
-    flex: 1,
+  iconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: color.bg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconPressed: { backgroundColor: brand.cream },
+  modelPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: brand.cream,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    height: 32,
+    maxWidth: 200,
+  },
+  modelPillText: {
     fontSize: fontSize.caption,
-    color: color.textMuted,
+    fontWeight: fontWeight.medium,
+    color: color.textPrimary,
+    flexShrink: 1,
   },
+  spacer: { flex: 1 },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: brand.primary,
     alignItems: "center",
     justifyContent: "center",
   },
   sendPressed: { backgroundColor: brand.primaryPressed },
   sendDisabled: { backgroundColor: color.borderStrong },
+  contextRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  contextPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    maxWidth: "48%",
+  },
+  contextPillPressed: { backgroundColor: brand.cream },
+  contextPillText: {
+    fontSize: fontSize.caption,
+    color: color.textSecondary,
+    flexShrink: 1,
+  },
   toast: {
     position: "absolute",
     bottom: 140,
