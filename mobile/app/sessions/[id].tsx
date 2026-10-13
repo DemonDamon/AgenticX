@@ -15,8 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../../src/api/client";
 import type { SessionContextUsage } from "../../src/api/types";
 import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
-import { ReasoningBlock } from "../../src/components/ReasoningBlock";
-import { ToolGroupCard } from "../../src/components/ToolGroupCard";
+import { TurnProcessCard } from "../../src/components/TurnProcessCard";
 import { useGateway } from "../../src/hooks/useGateway";
 import { notifyConfirmsChanged, onConfirmsChanged } from "../../src/lib/events";
 import { describeError } from "../../src/lib/errors";
@@ -26,34 +25,26 @@ import {
   splitStreamThinking,
   type ChatEntry,
 } from "../../src/lib/messages";
-import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
+import { brand, color, fontSize, fontWeight, radius, spacing } from "../../src/ui/theme";
 
 function PendingBubble() {
   return (
-    <View style={[styles.bubble, styles.bubbleAssistant]}>
-      <View style={styles.pendingRow}>
-        <ActivityIndicator size="small" color={brand.primary} />
-        <Text style={styles.pendingText}>正在执行…</Text>
-      </View>
+    <View style={styles.pendingPlain}>
+      <ActivityIndicator size="small" color={brand.primary} />
+      <Text style={styles.pendingText}>正在执行…</Text>
     </View>
   );
 }
 
-function AssistantBlock({ text, reasoning }: { text: string; reasoning?: string }) {
+/** 助手正文：Trae/Claude 式纯文本全宽排版（无气泡），过程收进 turnProcess 卡 */
+function AssistantBlock({ text }: { text: string }) {
   return (
-    <View style={styles.bubbleColumn}>
-      {reasoning !== undefined ? (
-        <View style={styles.reasoningWrap}>
-          <ReasoningBlock text={reasoning} />
-        </View>
-      ) : null}
-      <View style={[styles.bubble, styles.bubbleAssistant]}>
-        {text.trim() === "" ? (
-          <Text style={styles.bubbleAssistantText}>（无文本回复）</Text>
-        ) : (
-          <AssistantMarkdown text={text} />
-        )}
-      </View>
+    <View style={styles.assistantPlain}>
+      {text.trim() === "" ? (
+        <Text style={styles.bubbleAssistantText}>（无文本回复）</Text>
+      ) : (
+        <AssistantMarkdown text={text} />
+      )}
     </View>
   );
 }
@@ -113,35 +104,35 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
         </View>
       );
     case "assistant":
-      return <AssistantBlock text={entry.text} reasoning={entry.reasoning} />;
+      return <AssistantBlock text={entry.text} />;
     case "system":
       return (
         <View style={styles.systemWrap}>
           <Text style={styles.systemText}>{entry.text}</Text>
         </View>
       );
-    case "toolGroup":
+    case "turnProcess":
       return (
-        <View style={styles.toolGroupWrap}>
-          <ToolGroupCard steps={entry.steps} />
-        </View>
+        <TurnProcessCard
+          steps={entry.steps}
+          durationMs={entry.durationMs}
+          running={entry.running}
+        />
       );
     case "pending":
       return <PendingBubble />;
     case "streaming": {
-      // 思考链实时渲染：思考增量实时上屏（观感对齐终态 ReasoningBlock），
-      // 正文增量照旧轻量 Text 打字机；回合结束由 fetchMessages 结构化替换。
+      // 思考链实时渲染：思考增量实时上屏，正文增量轻量 Text 打字机；
+      // 回合结束由 fetchMessages 重建为「任务过程卡 + 纯文本正文」。
       // 思考未闭合时「思考中…」转圈 + 思考文本逐字增长；闭合后正文开始，
       // 思考区标题转为「思考过程」静态收尾。
       const { thinking, visible } = splitStreamThinking(entry.text);
       const bodyLive = visible.trim() !== "";
       if (thinking === "" && !bodyLive) {
         return (
-          <View style={[styles.bubble, styles.bubbleAssistant]}>
-            <View style={styles.pendingRow}>
-              <ActivityIndicator size="small" color={brand.primary} />
-              <Text style={styles.pendingText}>思考中…</Text>
-            </View>
+          <View style={styles.pendingPlain}>
+            <ActivityIndicator size="small" color={brand.primary} />
+            <Text style={styles.pendingText}>思考中…</Text>
           </View>
         );
       }
@@ -163,7 +154,7 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
             </View>
           ) : null}
           {bodyLive ? (
-            <View style={[styles.bubble, styles.bubbleAssistant]}>
+            <View style={styles.assistantPlain}>
               <Text style={styles.bubbleAssistantText}>{visible}</Text>
             </View>
           ) : null}
@@ -607,41 +598,38 @@ const styles = StyleSheet.create({
     color: color.textMuted,
     textAlign: "center",
   },
-  bubbleColumn: {
-    maxWidth: "84%",
-    marginVertical: spacing.xs,
-  },
   bubbleColumnUser: {
     alignSelf: "flex-end",
     alignItems: "flex-end",
     maxWidth: "84%",
     marginVertical: spacing.xs,
   },
-  reasoningWrap: {
+  /** 助手纯文本容器：全宽无气泡（Trae/Claude 式排版） */
+  assistantPlain: {
     alignSelf: "stretch",
-    maxWidth: "100%",
-    marginBottom: spacing.xs,
+    marginVertical: spacing.xs,
   },
-  toolGroupWrap: { maxWidth: "92%", alignSelf: "flex-start" },
+  /** 进行中占位：轻量行式（无气泡边框） */
+  pendingPlain: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginVertical: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
   bubble: {
     borderRadius: radius.lg,
     paddingHorizontal: spacing.lg - 2,
     paddingVertical: spacing.sm + 2,
   },
   bubbleUser: {
-    backgroundColor: brand.primary,
-    borderBottomRightRadius: 4,
-    ...shadow.card,
-  },
-  bubbleAssistant: {
-    backgroundColor: color.bubbleAssistant,
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: color.border,
+    backgroundColor: "#F0EBE3",
+    borderRadius: radius.lg + 4,
+    borderBottomRightRadius: 6,
   },
   bubbleUserText: {
     fontSize: fontSize.bodyLg,
-    color: "#FFFFFF",
+    color: color.textPrimary,
     lineHeight: 22,
   },
   bubbleAssistantText: {
