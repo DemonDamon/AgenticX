@@ -1,6 +1,7 @@
-import Markdown from "react-native-markdown-display";
+import Markdown, { type MarkdownIt, type RenderRules } from "react-native-markdown-display";
 import { Platform, StyleSheet } from "react-native";
 import { brand, color, fontSize, radius, spacing } from "../ui/theme";
+import { CodeBlock } from "./CodeBlock";
 
 /** AI 回复 Markdown 主题：代码块暖色深底，链接/列表点用品牌橙 */
 const mdStyles = StyleSheet.create({
@@ -37,9 +38,9 @@ const mdStyles = StyleSheet.create({
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
     fontSize: fontSize.body - 1,
   },
+  // fence 由自定义 renderRules 渲染成 CodeBlock（语言标签/着色/复制/展开），
+  // 这里仅兜底未被规则命中的场景
   fence: {
-    // markdown-display 7.x 的 fence 内容直接用 fence 样式渲染（fence_text
-    // 不参与），文字颜色必须显式给出，否则继承 body 深灰与深底同色不可见
     backgroundColor: "#2B2620",
     color: "#F5EFE6",
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
@@ -49,12 +50,6 @@ const mdStyles = StyleSheet.create({
     padding: spacing.sm + 2,
     borderWidth: 0,
     marginVertical: spacing.xs,
-  },
-  fence_text: {
-    color: "#F5EFE6",
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
-    fontSize: fontSize.caption + 1,
-    lineHeight: 18,
   },
   blockquote: {
     backgroundColor: brand.cream,
@@ -67,7 +62,19 @@ const mdStyles = StyleSheet.create({
   hr: { backgroundColor: color.border },
 });
 
+/** fence → CodeBlock：sourceInfo 是 ```语言 标识，content 是代码原文 */
+const renderRules: RenderRules = {
+  fence: (node) => (
+    <CodeBlock
+      key={node.key}
+      code={(node.content ?? "").replace(/\n$/, "")}
+      // ASTNode 类型未声明 sourceInfo，markdown-it 运行时一定带（```语言 标识）
+      language={((node as { sourceInfo?: string }).sourceInfo ?? "").trim()}
+    />
+  ),
+};
+
 /** AI 回复 Markdown 渲染（用户气泡保持纯文本，勿用于 user role） */
 export function AssistantMarkdown({ text }: { text: string }) {
-  return <Markdown style={mdStyles}>{text}</Markdown>;
+  return <Markdown style={mdStyles} rules={renderRules}>{text}</Markdown>;
 }
