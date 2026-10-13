@@ -196,7 +196,12 @@ export default function SessionsScreen() {
             onPress={() => {
               router.push({
                 pathname: "/sessions/[id]",
-                params: { id: item.id, title: item.title },
+                params: {
+                  id: item.id,
+                  title: item.title,
+                  model: item.model ?? "",
+                  sessionMode: item.session_mode ?? "",
+                },
               });
             }}
           >

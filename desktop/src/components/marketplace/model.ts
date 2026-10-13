@@ -18,6 +18,8 @@ export type MarketRegistrySkill = {
   source: string;
   source_type?: string;
   install_hint?: string;
+  /** ClawHub publisher handle. Required when several publishers share `name`. */
+  owner?: string;
 };
 
 export type MarketSkillOrigin = "recommended" | "registry";
@@ -52,6 +54,8 @@ export type MarketSkillItem = {
   origin: MarketSkillOrigin;
   /** registry 安装来源(如 clawhub);推荐位走 Meta-Agent 安装提示词。 */
   source?: string;
+  /** ClawHub 发布者 handle,安装时作为 ownerHandle 传给版本接口。 */
+  owner?: string;
   version?: string;
   cta?: RecommendedSkillCta;
   installed: boolean;
@@ -217,6 +221,8 @@ export type MarketplaceItem = {
   id?: string;
   /** kind=skill:registry 安装来源(扫描安装链路)。 */
   source?: string;
+  /** kind=skill:ClawHub 发布者 handle。 */
+  owner?: string;
   origin?: MarketSkillOrigin;
   cta?: RecommendedSkillCta;
   officialUrl?: string;
@@ -299,12 +305,13 @@ export function buildSkillItems(
   const registrySkillItems: MarketSkillItem[] = registryItems
     .filter((r) => r.name && !recommendedNames.has(normalizeSkillName(r.name)))
     .map((r) => ({
-      key: `reg:${r.source}:${r.name}`,
+      key: `reg:${r.source}:${r.owner ?? ""}:${r.name}`,
       name: r.name,
       description: r.description,
       provider: r.author,
       origin: "registry",
       source: r.source,
+      owner: r.owner,
       version: r.version,
       tier: "third_party",
       cta: "install",
@@ -448,6 +455,7 @@ function toUnifiedSkillItem(item: MarketSkillItem): MarketplaceItem {
     iconSrc: item.iconSrc,
     id: item.id,
     source: item.source,
+    owner: item.owner,
     origin: item.origin,
     cta: item.cta,
     officialUrl: item.officialUrl,

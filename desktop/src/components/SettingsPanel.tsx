@@ -3189,6 +3189,7 @@ function SkillsTab() {
       const res = await window.agenticxDesktop.installFromRegistry({
         source: pending.source,
         name: pending.name,
+        owner: pending.owner,
         confirmNonHighRisk: kind === "non_high",
         acknowledgeHighRisk: kind === "high",
       });

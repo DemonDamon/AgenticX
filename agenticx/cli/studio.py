@@ -89,6 +89,9 @@ class StudioSession:
     # Low-risk tools the user chose to stop being asked about for this session
     # (in-memory only; protected tools are never added).
     sticky_allowed_tools: Set[str] = field(default_factory=set)
+    # Base dirs of skills activated via skill_use. Read-only roots so bundled
+    # scripts (cli.js, scripts/*.py) can be read and run as bash cwd.
+    activated_skill_dirs: List[str] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # MCP read-through properties → GlobalMcpManager

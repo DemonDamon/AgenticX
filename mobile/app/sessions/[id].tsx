@@ -13,41 +13,81 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../../src/api/client";
+import type { SessionContextUsage } from "../../src/api/types";
 import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
-import { ReasoningBlock } from "../../src/components/ReasoningBlock";
-import { ToolGroupCard } from "../../src/components/ToolGroupCard";
+import { TurnProcessCard } from "../../src/components/TurnProcessCard";
 import { useGateway } from "../../src/hooks/useGateway";
 import { notifyConfirmsChanged, onConfirmsChanged } from "../../src/lib/events";
 import { describeError } from "../../src/lib/errors";
-import { buildChatEntries, applyStreamDelta, type ChatEntry } from "../../src/lib/messages";
-import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../../src/ui/theme";
+import {
+  buildChatEntries,
+  applyStreamDelta,
+  splitStreamThinking,
+  type ChatEntry,
+} from "../../src/lib/messages";
+import { brand, color, fontSize, fontWeight, radius, spacing } from "../../src/ui/theme";
 
 function PendingBubble() {
   return (
-    <View style={[styles.bubble, styles.bubbleAssistant]}>
-      <View style={styles.pendingRow}>
-        <ActivityIndicator size="small" color={brand.primary} />
-        <Text style={styles.pendingText}>正在执行…</Text>
-      </View>
+    <View style={styles.pendingPlain}>
+      <ActivityIndicator size="small" color={brand.primary} />
+      <Text style={styles.pendingText}>正在执行…</Text>
     </View>
   );
 }
 
-function AssistantBlock({ text, reasoning }: { text: string; reasoning?: string }) {
+/** 助手正文：Trae/Claude 式纯文本全宽排版（无气泡），过程收进 turnProcess 卡 */
+function AssistantBlock({ text }: { text: string }) {
   return (
-    <View style={styles.bubbleColumn}>
-      {reasoning !== undefined ? (
-        <View style={styles.reasoningWrap}>
-          <ReasoningBlock text={reasoning} />
+    <View style={styles.assistantPlain}>
+      {text.trim() === "" ? (
+        <Text style={styles.bubbleAssistantText}>（无文本回复）</Text>
+      ) : (
+        <AssistantMarkdown text={text} />
+      )}
+    </View>
+  );
+}
+
+function fmtTokenCount(n: number): string {
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)} 亿`;
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** 会话信息卡：上下文占用条 + 累计 Token（点击 metaBar 展开） */
+function SessionUsageCard({ usage }: { usage: SessionContextUsage }) {
+  const cache = usage.cache ?? {};
+  const total = Number(cache.session_total_tokens ?? 0);
+  const input = Number(cache.session_input_tokens ?? 0);
+  const output = Number(cache.session_output_tokens ?? 0);
+  const requests = Number(cache.requests ?? 0);
+  const pct = Math.max(0, Math.min(100, usage.percent));
+  return (
+    <View style={styles.usageCard}>
+      <View style={styles.usageRow}>
+        <Text style={styles.usageLabel}>上下文占用</Text>
+        <Text style={styles.usageValue}>
+          {fmtTokenCount(usage.used_tokens)} / {fmtTokenCount(usage.max_tokens)}（{pct}%）
+        </Text>
+      </View>
+      <View style={styles.usageBarBg}>
+        <View style={[styles.usageBarFill, { width: `${pct}%` as const }]} />
+      </View>
+      <View style={styles.usageRow}>
+        <Text style={styles.usageLabel}>累计 Token</Text>
+        <Text style={styles.usageValue}>
+          输入 {fmtTokenCount(input)} · 输出 {fmtTokenCount(output)} · 合计{" "}
+          {fmtTokenCount(total)}
+        </Text>
+      </View>
+      {requests > 0 ? (
+        <View style={styles.usageRow}>
+          <Text style={styles.usageLabel}>请求数</Text>
+          <Text style={styles.usageValue}>{requests} 次</Text>
         </View>
       ) : null}
-      <View style={[styles.bubble, styles.bubbleAssistant]}>
-        {text.trim() === "" ? (
-          <Text style={styles.bubbleAssistantText}>（无文本回复）</Text>
-        ) : (
-          <AssistantMarkdown text={text} />
-        )}
-      </View>
     </View>
   );
 }
@@ -64,29 +104,63 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
         </View>
       );
     case "assistant":
-      return <AssistantBlock text={entry.text} reasoning={entry.reasoning} />;
+      return <AssistantBlock text={entry.text} />;
     case "system":
       return (
         <View style={styles.systemWrap}>
           <Text style={styles.systemText}>{entry.text}</Text>
         </View>
       );
-    case "toolGroup":
+    case "turnProcess":
       return (
-        <View style={styles.toolGroupWrap}>
-          <ToolGroupCard steps={entry.steps} />
-        </View>
+        <TurnProcessCard
+          steps={entry.steps}
+          durationMs={entry.durationMs}
+          running={entry.running}
+        />
       );
     case "pending":
       return <PendingBubble />;
-    case "streaming":
-      // 回合进行中的 token 增量：纯 Text 轻量渲染（避免 Markdown 高频重解析），
-      // 回合结束由 fetchMessages 的结构化终态替换
+    case "streaming": {
+      // 思考链实时渲染：思考增量实时上屏，正文增量轻量 Text 打字机；
+      // 回合结束由 fetchMessages 重建为「任务过程卡 + 纯文本正文」。
+      // 思考未闭合时「思考中…」转圈 + 思考文本逐字增长；闭合后正文开始，
+      // 思考区标题转为「思考过程」静态收尾。
+      const { thinking, visible } = splitStreamThinking(entry.text);
+      const bodyLive = visible.trim() !== "";
+      if (thinking === "" && !bodyLive) {
+        return (
+          <View style={styles.pendingPlain}>
+            <ActivityIndicator size="small" color={brand.primary} />
+            <Text style={styles.pendingText}>思考中…</Text>
+          </View>
+        );
+      }
       return (
-        <View style={[styles.bubble, styles.bubbleAssistant]}>
-          <Text style={styles.bubbleAssistantText}>{entry.text}</Text>
+        <View>
+          {thinking !== "" ? (
+            <View style={styles.thinkingLive}>
+              <View style={styles.pendingRow}>
+                {bodyLive ? null : (
+                  <ActivityIndicator size="small" color={brand.primary} />
+                )}
+                <Text style={styles.thinkingLiveTitle}>
+                  {bodyLive ? "思考过程" : "思考中…"}
+                </Text>
+              </View>
+              <Text style={styles.thinkingLiveText} numberOfLines={8}>
+                {thinking}
+              </Text>
+            </View>
+          ) : null}
+          {bodyLive ? (
+            <View style={styles.assistantPlain}>
+              <Text style={styles.bubbleAssistantText}>{visible}</Text>
+            </View>
+          ) : null}
         </View>
       );
+    }
   }
 });
 
@@ -152,10 +226,12 @@ function Composer({
  * - initialText：懒创建链路（new-task 页 replace 携带）自动发送首条消息
  */
 export default function SessionMessagesScreen() {
-  const { id, title, initialText } = useLocalSearchParams<{
+  const { id, title, initialText, model, sessionMode } = useLocalSearchParams<{
     id: string;
     title?: string;
     initialText?: string;
+    model?: string;
+    sessionMode?: string;
   }>();
   const { client } = useGateway();
 
@@ -164,6 +240,7 @@ export default function SessionMessagesScreen() {
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<FlatList<ChatEntry> | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -185,11 +262,24 @@ export default function SessionMessagesScreen() {
     setEntries(buildChatEntries(resp.messages));
   }, [client, id]);
 
+  // 会话上下文/Token 用量：进入时拉一次，回合结束后随 fetchMessages 刷新
+  const [usage, setUsage] = useState<SessionContextUsage | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const refreshUsage = useCallback(async () => {
+    if (client === null) return;
+    try {
+      setUsage(await client.getSessionContextUsage(id));
+    } catch {
+      // 用量是辅助信息，失败静默（不影响消息流）
+    }
+  }, [client, id]);
+
   useEffect(() => {
     void fetchMessages().catch((err: unknown) => {
       setLoadError(describeError(err));
     });
-  }, [fetchMessages]);
+    void refreshUsage();
+  }, [fetchMessages, refreshUsage]);
 
   // 审批决策完成（全局卡 approve/deny）→ 立即刷新本会话消息
   useEffect(
@@ -207,13 +297,69 @@ export default function SessionMessagesScreen() {
       if (text === "" || sending || client === null) return false;
       setSending(true);
       const pendingKey = `local-pending-${Date.now()}`;
+      // 乐观回显：发送瞬间即上屏用户消息，不等服务端落盘/回合结束才显示。
+      // 轮询 caughtUp 后的快照重建会含真实 user 消息，乐观条目不在保留
+      // 列表里、被自然顶替；send 失败时随 pending 一并撤回。
+      const localUserKey = `local-user-${Date.now()}`;
       const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
-      setEntries((prev) => [...(prev ?? []), pendingEntry]);
-      // 真流式：订阅回合 token 流（WS turn_delta），收到增量即打字机上屏；
+      setEntries((prev) => [
+        ...(prev ?? []),
+        { kind: "user", key: localUserKey, text },
+        pendingEntry,
+      ]);
+      // 视口可能停在历史区：发送后滚回最新（inverted 列表 offset 0 即最新端）
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      // 打字机平滑：网络帧（桌面侧 120ms 节流聚合）较粗，直接上屏是
+      // 10+ 字一帧的跳变。这里把增量拆成字符入队，按 ~45ms/帧 匀速消费
+      // 呈现逐字打字机效果；仅当积压严重（模型产出远快于播放）才升速
+      // 追赶，短回复始终保有可感知的打字节奏。回合结束不 flush 余量，
+      // 而是等队列播空（waitSmoothDrain）再做终态替换，避免终局跳变。
+      const smoothBuf: string[] = [];
+      let smoothTimer: ReturnType<typeof setInterval> | null = null;
+      let smoothDoneResolve: (() => void) | null = null;
+      const consumeSmooth = () => {
+        if (smoothBuf.length === 0) {
+          if (smoothTimer !== null) {
+            clearInterval(smoothTimer);
+            smoothTimer = null;
+          }
+          if (smoothDoneResolve !== null) {
+            const resolve = smoothDoneResolve;
+            smoothDoneResolve = null;
+            resolve();
+          }
+          return;
+        }
+        const take =
+          smoothBuf.length > 150 ? 4 : smoothBuf.length > 60 ? 3 : smoothBuf.length > 25 ? 2 : 1;
+        const piece = smoothBuf.splice(0, take).join("");
+        setEntries((prev) => applyStreamDelta(prev, pendingKey, piece));
+      };
+      const stopSmooth = () => {
+        if (smoothTimer !== null) {
+          clearInterval(smoothTimer);
+          smoothTimer = null;
+        }
+        smoothDoneResolve = null;
+      };
+      const waitSmoothDrain = () =>
+        new Promise<void>((resolve) => {
+          if (smoothTimer === null && smoothBuf.length === 0) {
+            resolve();
+            return;
+          }
+          smoothDoneResolve = resolve;
+          // 兜底：队列异常播不空（不应发生）时强制放行，避免 sending 卡死
+          setTimeout(resolve, 30_000);
+        });
+      // 真流式：订阅回合 token 流（WS turn_delta），增量入队平滑上屏；
       // 连接失败静默降级为下面的轮询伪流式，不影响回合本身
       const streamHandle = client.openTurnStream(id, {
         onDelta: (delta) => {
-          setEntries((prev) => applyStreamDelta(prev, pendingKey, delta));
+          smoothBuf.push(...delta);
+          if (smoothTimer === null) {
+            smoothTimer = setInterval(consumeSmooth, 45);
+          }
         },
       });
       // 伪流式：回合进行中每 2s 拉一次消息。桌面端在工具调用之间会增量落盘
@@ -254,6 +400,8 @@ export default function SessionMessagesScreen() {
         const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
         polling = false;
         clearInterval(pollTimer);
+        // 回合结束：打字机余量按节奏播完（不 flush 跳变），再做终态结构化替换
+        await waitSmoothDrain();
         if (resp.pending_confirm !== null) {
           notifyConfirmsChanged();
         }
@@ -261,6 +409,7 @@ export default function SessionMessagesScreen() {
         // 整体替换本地 pending / streaming 条目
         try {
           await fetchMessages();
+          void refreshUsage();
           // 延迟补拉 ×2：长回合的收尾消息可能在 send 返回后才落盘
           // （桌面 SSE 先关流、summary 后写盘），+5s/+15s 兜底补齐
           setTimeout(() => {
@@ -277,8 +426,14 @@ export default function SessionMessagesScreen() {
         }
         return true;
       } catch (err) {
+        stopSmooth();
+        polling = false;
+        clearInterval(pollTimer);
         setEntries((prev) =>
-          (prev ?? []).filter((e) => e.key !== pendingKey && e.kind !== "streaming"),
+          (prev ?? []).filter(
+            (e) =>
+              e.key !== pendingKey && e.key !== localUserKey && e.kind !== "streaming",
+          ),
         );
         if (!(err instanceof ApiError && err.status === 401)) {
           // 401 已由 useGateway 的 onUnauthorized 统一处理（清绑定 + 跳配对页）
@@ -288,6 +443,7 @@ export default function SessionMessagesScreen() {
       } finally {
         polling = false;
         clearInterval(pollTimer);
+        stopSmooth();
         streamHandle?.close();
         setSending(false);
       }
@@ -354,13 +510,35 @@ export default function SessionMessagesScreen() {
           <Text style={styles.emptySubText}>在下方输入框发条指令试试</Text>
         </View>
       ) : (
-        <FlatList<ChatEntry>
-          data={displayData}
-          inverted
-          keyExtractor={(item) => item.key}
-          contentContainerStyle={styles.listContent}
-          renderItem={renderItem}
-        />
+        <View style={styles.flex}>
+          {(model !== undefined && model !== "") || usage !== null || sending ? (
+            <Pressable
+              style={styles.metaBar}
+              onPress={() => {
+                setUsageOpen(!usageOpen);
+              }}
+            >
+              <Text style={styles.metaText} numberOfLines={1}>
+                {[
+                  model !== undefined && model !== "" ? `模型 ${model}` : "",
+                  usage !== null ? `上下文 ${usage.percent}%` : "",
+                  sending ? "回合进行中" : "",
+                ]
+                  .filter((s) => s !== "")
+                  .join(" · ")}
+              </Text>
+            </Pressable>
+          ) : null}
+          {usageOpen && usage !== null ? <SessionUsageCard usage={usage} /> : null}
+          <FlatList<ChatEntry>
+            ref={listRef}
+            data={displayData}
+            inverted
+            keyExtractor={(item) => item.key}
+            contentContainerStyle={styles.listContent}
+            renderItem={renderItem}
+          />
+        </View>
       )}
 
       {entries !== null ? (
@@ -420,41 +598,38 @@ const styles = StyleSheet.create({
     color: color.textMuted,
     textAlign: "center",
   },
-  bubbleColumn: {
-    maxWidth: "84%",
-    marginVertical: spacing.xs,
-  },
   bubbleColumnUser: {
     alignSelf: "flex-end",
     alignItems: "flex-end",
     maxWidth: "84%",
     marginVertical: spacing.xs,
   },
-  reasoningWrap: {
+  /** 助手纯文本容器：全宽无气泡（Trae/Claude 式排版） */
+  assistantPlain: {
     alignSelf: "stretch",
-    maxWidth: "100%",
-    marginBottom: spacing.xs,
+    marginVertical: spacing.xs,
   },
-  toolGroupWrap: { maxWidth: "92%", alignSelf: "flex-start" },
+  /** 进行中占位：轻量行式（无气泡边框） */
+  pendingPlain: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginVertical: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
   bubble: {
     borderRadius: radius.lg,
     paddingHorizontal: spacing.lg - 2,
     paddingVertical: spacing.sm + 2,
   },
   bubbleUser: {
-    backgroundColor: brand.primary,
-    borderBottomRightRadius: 4,
-    ...shadow.card,
-  },
-  bubbleAssistant: {
-    backgroundColor: color.bubbleAssistant,
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: color.border,
+    backgroundColor: "#F0EBE3",
+    borderRadius: radius.lg + 4,
+    borderBottomRightRadius: 6,
   },
   bubbleUserText: {
     fontSize: fontSize.bodyLg,
-    color: "#FFFFFF",
+    color: color.textPrimary,
     lineHeight: 22,
   },
   bubbleAssistantText: {
@@ -466,6 +641,73 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+  },
+  flex: { flex: 1 },
+  metaBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border,
+    backgroundColor: color.bg,
+  },
+  metaText: {
+    fontSize: fontSize.caption,
+    color: color.textMuted,
+  },
+  usageCard: {
+    backgroundColor: color.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  usageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  usageLabel: { fontSize: fontSize.caption, color: color.textMuted },
+  usageValue: {
+    fontSize: fontSize.caption,
+    color: color.textPrimary,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  usageBarBg: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: color.bg,
+    overflow: "hidden",
+  },
+  usageBarFill: { height: 6, borderRadius: 3, backgroundColor: brand.primary },
+  thinkingLive: {
+    backgroundColor: brand.cream,
+    borderRadius: radius.sm + 2,
+    borderWidth: 1,
+    borderColor: color.border,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    marginBottom: spacing.xs,
+    alignSelf: "stretch",
+  },
+  thinkingLiveTitle: {
+    fontSize: fontSize.caption,
+    color: brand.primaryDark,
+    fontWeight: fontWeight.medium,
+  },
+  thinkingLiveText: {
+    fontSize: fontSize.caption,
+    color: color.textSecondary,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+    fontFamily: "Menlo",
   },
   pendingText: {
     fontSize: fontSize.body,

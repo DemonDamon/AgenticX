@@ -58,6 +58,12 @@ describe("capability ids", () => {
   it("refuses a non-ULID row id rather than storing an id nothing can resolve", () => {
     expect(() => mcpCapabilityId("market-data")).toThrow();
   });
+
+  it("accepts the connector gateway's legacy std-base32 server id", () => {
+    expect(mcpCapabilityId("JIAHGIWLGRVNU42IBEQ7HGYMP4")).toBe(
+      "mcp:JIAHGIWLGRVNU42IBEQ7HGYMP4",
+    );
+  });
 });
 
 describe("member diagnostics", () => {

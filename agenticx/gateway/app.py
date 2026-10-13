@@ -535,12 +535,23 @@ def create_gateway_app(
         return JSONResponse({"servers": reply.get("data")})
 
     @app.get("/api/mobile/sessions/{session_id}/messages")
-    async def api_mobile_session_messages(session_id: str, request: Request) -> JSONResponse:
+    async def api_mobile_session_messages(request: Request) -> JSONResponse:
+        sid = request.path_params["session_id"]
         did = _require_mobile_auth(request)
-        reply = await _bridge_device_rpc(did, "session.messages", {"session_id": session_id})
+        reply = await _bridge_device_rpc(did, "session.messages", {"session_id": sid})
         if not reply.get("ok"):
             raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
         return JSONResponse({"messages": reply.get("data")})
+
+    @app.get("/api/mobile/sessions/{session_id}/context_usage")
+    async def api_mobile_session_context_usage(request: Request) -> JSONResponse:
+        """会话上下文/Token 用量（手机端会话信息卡）。"""
+        sid = request.path_params["session_id"]
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "session.context_usage", {"session_id": sid})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse(reply.get("data"))
 
     @app.post("/api/mobile/sessions/{session_id}/send")
     async def api_mobile_session_send(session_id: str, request: Request) -> JSONResponse:

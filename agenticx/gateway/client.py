@@ -619,6 +619,8 @@ class GatewayClient:
             return await self._rpc_sessions_list()
         if method == "session.messages":
             return await self._rpc_session_messages(params)
+        if method == "session.context_usage":
+            return await self._rpc_session_context_usage(params)
         if method == "session.send":
             return await self._rpc_session_send(params, ws=ws)
         if method == "confirm.pending":
@@ -632,6 +634,26 @@ class GatewayClient:
         if method == "mcp.servers":
             return await self._rpc_mcp_servers(params)
         raise ValueError(f"unknown rpc method: {method}")
+
+    async def _rpc_session_context_usage(self, params: Dict[str, Any]) -> Any:
+        """GET /api/session/context_usage 会话上下文/Token 用量（手机端会话信息卡）。"""
+        session_id = str((params or {}).get("session_id") or "")
+        if not session_id:
+            raise RuntimeError("session.context_usage requires session_id")
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/session/context_usage",
+                params={"session_id": session_id},
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"context usage failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            if not isinstance(payload, dict) or "used_tokens" not in payload:
+                raise RuntimeError("context usage reply missing usage fields")
+            return payload
 
     async def _rpc_sessions_list(self) -> Any:
         headers = {"x-agx-desktop-token": self._settings.desktop_token}

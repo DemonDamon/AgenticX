@@ -1651,10 +1651,11 @@ declare global {
       installFromRegistry: (args: {
         source: string;
         name: string;
+        owner?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
       }) => Promise<RegistryInstallResult>;
-      installFromRegistryPreview: (args: { source: string; name: string }) => Promise<RegistryInstallPreviewResult>;
+      installFromRegistryPreview: (args: { source: string; name: string; owner?: string }) => Promise<RegistryInstallPreviewResult>;
       /** Deterministic full-directory skill install from a GitHub repo tarball. */
       installSkillFromRepo: (args: {
         repo: string;

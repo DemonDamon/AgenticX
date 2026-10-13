@@ -561,8 +561,8 @@ If AgenticX is interesting/useful to you, please scroll up and give the repo a s
 
 <a href="https://github.com/DemonDamon/AgenticX">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark.svg" />
-    <img alt="Star history for DemonDamon/AgenticX, from launch to 219 stars" src="assets/star-history-light.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark-388.svg" />
+    <img alt="Star history for DemonDamon/AgenticX, from launch to 388 stars" src="assets/star-history-light-388.svg" width="100%" />
   </picture>
 </a>
 

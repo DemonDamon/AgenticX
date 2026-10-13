@@ -25,6 +25,13 @@ describe("formatCapabilityId", () => {
     expect(() => formatCapabilityId("mcp", "")).toThrow();
     expect(() => formatCapabilityId("nope" as "mcp", ULID_A)).toThrow();
   });
+
+  it("accepts a legacy std-base32 mcp_servers id", () => {
+    // 连接器网关曾用 RFC 4648 base32 写主键（含 I/L/O/U）。这已是行主键，不是可改的名字。
+    const legacy = "JIAHGIWLGRVNU42IBEQ7HGYMP4";
+    expect(formatCapabilityId("mcp", legacy.toLowerCase())).toBe(`mcp:${legacy}`);
+    expect(parseCapabilityId(`mcp:${legacy}`)).toEqual({ kind: "mcp", rowId: legacy });
+  });
 });
 
 describe("parseCapabilityId", () => {

@@ -269,7 +269,7 @@ export function MarketplaceView() {
   const installUnifiedItem = useCallback(
     (item: MarketplaceItem) => {
       if (item.origin === "registry") {
-        void install({ source: item.source ?? "", name: item.name });
+        void install({ source: item.source ?? "", name: item.name, owner: item.owner });
       } else {
         onInstallRecommended(item.id);
       }
@@ -592,7 +592,7 @@ export function MarketplaceView() {
               queuedKeys={installStatus.queuedKeys}
               promptBusy={promptBusy}
               onInstallRegistry={(item) =>
-                void install({ source: item.source ?? "", name: item.name })
+                void install({ source: item.source ?? "", name: item.name, owner: item.owner })
               }
               onInstallRecommended={(item) => onInstallRecommended(item.id)}
               onUse={(item) => newMetaTask(t("useDraft", { name: item.name }))}

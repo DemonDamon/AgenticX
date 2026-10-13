@@ -928,3 +928,67 @@ def test_skill_use_success_does_not_expose_skill_md_path(monkeypatch) -> None:
     result = agent_tools._tool_skill_use({"name": "demo"}, session)
     assert "skill_md=" not in result
     assert "不要再用 file_read" in result
+
+
+def _activate_skill(monkeypatch, session: StudioSession, skill_dir: Path) -> str:
+    monkeypatch.setattr(
+        agent_tools, "skill_is_allowed_for_session", lambda *_a, **_k: (True, None)
+    )
+    monkeypatch.setattr(agent_tools, "studio_skill_use", lambda *_a, **_k: True)
+
+    class _Meta:
+        source = "registry"
+        location = "user"
+        base_dir = str(skill_dir)
+
+    monkeypatch.setattr(
+        agent_tools.SkillBundleLoader, "get_skill", lambda self, name: _Meta()
+    )
+    return agent_tools._tool_skill_use({"name": skill_dir.name}, session)
+
+
+def test_skill_use_grants_read_only_root_and_bash_cwd(monkeypatch, tmp_path: Path) -> None:
+    session = _workspace_session(tmp_path)
+    skill_dir = tmp_path / "skills" / "registry" / "xhs-comments"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Run `node cli.js quota`.\n", encoding="utf-8")
+    (skill_dir / "cli.js").write_text("console.log(1)\n", encoding="utf-8")
+
+    with_err = agent_tools._resolve_bash_cwd
+    try:
+        with_err(str(skill_dir), session)
+        raise AssertionError("cwd must be rejected before skill_use")
+    except ValueError as exc:
+        assert "path escapes workspace" in str(exc)
+
+    result = _activate_skill(monkeypatch, session, skill_dir)
+    assert "WARNING" not in result
+    assert str(skill_dir.resolve()) in result
+
+    assert agent_tools._resolve_bash_cwd(str(skill_dir), session) == skill_dir.resolve()
+    assert agent_tools._resolve_workspace_path(str(skill_dir / "cli.js"), session) == (
+        skill_dir / "cli.js"
+    ).resolve()
+    try:
+        agent_tools._resolve_workspace_path(str(skill_dir / "out.txt"), session, for_write=True)
+        raise AssertionError("skill dir must stay read-only")
+    except ValueError as exc:
+        assert "read-only" in str(exc)
+
+    read_roots, write_roots = agent_tools._session_workspace_root_sets(session)
+    assert read_roots[0] == Path(session.workspace_dir or "").resolve()
+    assert skill_dir.resolve() not in write_roots
+
+
+def test_skill_use_warns_when_entry_script_missing(monkeypatch, tmp_path: Path) -> None:
+    session = _workspace_session(tmp_path)
+    skill_dir = tmp_path / "skills" / "registry" / "xhs-comments"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "1. `node cli.js start --url x`\n2. `python scripts/run.py`\n",
+        encoding="utf-8",
+    )
+    result = _activate_skill(monkeypatch, session, skill_dir)
+    assert "技能包不完整" in result
+    assert "cli.js" in result
+    assert "scripts/run.py" in result

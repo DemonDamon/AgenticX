@@ -30,6 +30,10 @@ export interface MobileSession {
   /** 归一化后的毫秒时间戳 */
   updated_at: number;
   running?: boolean;
+  /** studio sessions.list 透传：模型/供应商（老数据缺省 → 不展示） */
+  model?: string;
+  provider?: string;
+  session_mode?: string;
   [key: string]: unknown;
 }
 
@@ -61,6 +65,23 @@ export interface SendResponse {
   reply: string;
   progress: string[];
   pending_confirm: PendingConfirm | null;
+}
+
+/** 会话上下文/Token 用量（studio context_usage 估算 + provider 实测累计） */
+export interface SessionContextUsage {
+  model?: string;
+  used_tokens: number;
+  max_tokens: number;
+  percent: number;
+  categories?: Record<string, number>;
+  cache?: {
+    session_input_tokens?: number;
+    session_output_tokens?: number;
+    session_total_tokens?: number;
+    requests?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 export interface MobileConfirm {

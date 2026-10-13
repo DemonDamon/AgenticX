@@ -75,8 +75,12 @@ function formatSkillScanSummary(scan: ScanSummary, t: TFunction): string {
   return lines.join("\n");
 }
 
-/** 安装机只需要这两个字段(完整条目由调用方持有)。 */
-export type SkillInstallTarget = { source: string; name: string };
+/** 安装机需要的字段(完整条目由调用方持有)。owner 是 ClawHub 发布者 handle。 */
+export type SkillInstallTarget = { source: string; name: string; owner?: string };
+
+function installKey(item: SkillInstallTarget): string {
+  return `${item.source}:${item.owner ?? ""}:${item.name}`;
+}
 
 export type SkillInstallStatus = {
   busy: boolean;
@@ -117,7 +121,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
   /** 安装一个 registry 技能;忙时点击 = 加入队列(与设置页行为一致)。 */
   const install = useCallback(
     async (item: SkillInstallTarget) => {
-      const key = `${item.source}:${item.name}`;
+      const key = installKey(item);
       if (busyRef.current && installingKeyRef.current && installingKeyRef.current !== key) {
         if (!queueRef.current.some((q) => q.source === item.source && q.name === item.name)) {
           queueRef.current.push(item);
@@ -125,7 +129,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
         }
         patch({
           message: t("skills.installQueued", {
-            current: installingKeyRef.current.split(":")[1] ?? "",
+            current: installingKeyRef.current.split(":").pop() ?? "",
             queued: item.name,
           }),
           messageKind: "info",
@@ -153,6 +157,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
         const prev = await window.agenticxDesktop.installFromRegistryPreview({
           source: item.source,
           name: item.name,
+          owner: item.owner,
         });
         if (!prev.ok) {
           const rawErr = String(prev.error ?? t("commonSettings.unknownError"));
@@ -166,6 +171,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
             const retry = await window.agenticxDesktop.installFromRegistryPreview({
               source: item.source,
               name: item.name,
+              owner: item.owner,
             });
             if (!retry.ok) {
               patch({
@@ -192,6 +198,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
         const res = await window.agenticxDesktop.installFromRegistry({
           source: item.source,
           name: item.name,
+          owner: item.owner,
         });
         if (res.ok) {
           patch({
@@ -249,7 +256,7 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
         patch({ busy: false, installingKey: null });
         if (!pauseQueue && queueRef.current.length > 0) {
           const next = queueRef.current.shift()!;
-          const nextKey = `${next.source}:${next.name}`;
+          const nextKey = installKey(next);
           setStatus((s) => ({ ...s, queuedKeys: s.queuedKeys.filter((k) => k !== nextKey) }));
           setTimeout(() => {
             void install(next);
@@ -267,12 +274,13 @@ export function useSkillInstall(onInstalled?: (name: string) => void) {
       const pending = pendingRef.current;
       if (!pending) return;
       busyRef.current = true;
-      installingKeyRef.current = `${pending.source}:${pending.name}`;
-      patch({ busy: true, installingKey: `${pending.source}:${pending.name}` });
+      installingKeyRef.current = installKey(pending);
+      patch({ busy: true, installingKey: installKey(pending) });
       try {
         const res = await window.agenticxDesktop.installFromRegistry({
           source: pending.source,
           name: pending.name,
+          owner: pending.owner,
           confirmNonHighRisk: kind === "non_high",
           acknowledgeHighRisk: kind === "high",
         });

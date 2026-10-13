@@ -11,6 +11,7 @@ import type {
   MobileStatus,
   SendRequest,
   SendResponse,
+  SessionContextUsage,
   SessionsResponse,
   ToolsResponse,
   UnbindResponse,
@@ -168,6 +169,14 @@ export class GatewayClient {
         .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
         .map(normalizeMessage),
     };
+  }
+
+  /** 会话上下文/Token 用量（会话信息卡数据源） */
+  async getSessionContextUsage(sessionId: string): Promise<SessionContextUsage> {
+    return await this.request<SessionContextUsage>(
+      "GET",
+      `/api/mobile/sessions/${encodeURIComponent(sessionId)}/context_usage`,
+    );
   }
 
   async sendMessage(sessionId: string, body: SendRequest): Promise<SendResponse> {

@@ -557,8 +557,8 @@ OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也
 
 <a href="https://github.com/DemonDamon/AgenticX">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark.svg" />
-    <img alt="DemonDamon/AgenticX 的 Star 增长，目前 219 stars" src="assets/star-history-light.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark-388.svg" />
+    <img alt="DemonDamon/AgenticX 的 Star 增长，目前 388 stars" src="assets/star-history-light-388.svg" width="100%" />
   </picture>
 </a>
 
