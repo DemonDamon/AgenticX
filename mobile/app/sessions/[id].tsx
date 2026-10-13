@@ -191,10 +191,12 @@ function Composer({
  * - initialText：懒创建链路（new-task 页 replace 携带）自动发送首条消息
  */
 export default function SessionMessagesScreen() {
-  const { id, title, initialText } = useLocalSearchParams<{
+  const { id, title, initialText, model, sessionMode } = useLocalSearchParams<{
     id: string;
     title?: string;
     initialText?: string;
+    model?: string;
+    sessionMode?: string;
   }>();
   const { client } = useGateway();
 
@@ -203,6 +205,7 @@ export default function SessionMessagesScreen() {
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<FlatList<ChatEntry> | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -256,6 +259,8 @@ export default function SessionMessagesScreen() {
         { kind: "user", key: localUserKey, text },
         pendingEntry,
       ]);
+      // 视口可能停在历史区：发送后滚回最新（inverted 列表 offset 0 即最新端）
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
       // 打字机平滑：网络帧（桌面侧 120ms 节流聚合）较粗，直接上屏是
       // 10+ 字一帧的跳变。这里把增量拆成字符入队，按 ~45ms/帧 匀速消费
       // 呈现逐字打字机效果；仅当积压严重（模型产出远快于播放）才升速
@@ -456,13 +461,26 @@ export default function SessionMessagesScreen() {
           <Text style={styles.emptySubText}>在下方输入框发条指令试试</Text>
         </View>
       ) : (
-        <FlatList<ChatEntry>
-          data={displayData}
-          inverted
-          keyExtractor={(item) => item.key}
-          contentContainerStyle={styles.listContent}
-          renderItem={renderItem}
-        />
+        <View style={styles.flex}>
+          {(model !== undefined && model !== "") || sending ? (
+            <View style={styles.metaBar}>
+              {model !== undefined && model !== "" ? (
+                <Text style={styles.metaText} numberOfLines={1}>
+                  模型 {model}
+                </Text>
+              ) : null}
+              {sending ? <Text style={styles.metaText}> · 回合进行中</Text> : null}
+            </View>
+          ) : null}
+          <FlatList<ChatEntry>
+            ref={listRef}
+            data={displayData}
+            inverted
+            keyExtractor={(item) => item.key}
+            contentContainerStyle={styles.listContent}
+            renderItem={renderItem}
+          />
+        </View>
       )}
 
       {entries !== null ? (
@@ -568,6 +586,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+  },
+  flex: { flex: 1 },
+  metaBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border,
+    backgroundColor: color.bg,
+  },
+  metaText: {
+    fontSize: fontSize.caption,
+    color: color.textMuted,
   },
   thinkingLive: {
     backgroundColor: brand.cream,

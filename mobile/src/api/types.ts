@@ -30,6 +30,10 @@ export interface MobileSession {
   /** 归一化后的毫秒时间戳 */
   updated_at: number;
   running?: boolean;
+  /** studio sessions.list 透传：模型/供应商（老数据缺省 → 不展示） */
+  model?: string;
+  provider?: string;
+  session_mode?: string;
   [key: string]: unknown;
 }
 

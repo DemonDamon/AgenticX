@@ -16,7 +16,8 @@ export function ToolGroupCard({ steps }: { steps: ToolStep[] }) {
           setOpen(!open);
         }}
       >
-        <Text style={styles.headerText}>执行 {steps.length} 个步骤</Text>
+        <Text style={styles.headerIcon}>⚙</Text>
+        <Text style={styles.headerText}>已使用 {steps.length} 个工具</Text>
         {errCount > 0 ? <Text style={styles.errBadge}>{errCount} 失败</Text> : null}
         <Text style={styles.chevron}>{open ? "⌄" : "›"}</Text>
       </Pressable>
@@ -30,7 +31,14 @@ export function ToolGroupCard({ steps }: { steps: ToolStep[] }) {
                 {s.status === "error" ? "✕" : "✓"}
               </Text>
               <View style={styles.stepBody}>
-                <Text style={styles.toolName}>{s.toolName}</Text>
+                <View style={styles.stepTitleRow}>
+                  <Text style={styles.toolName}>{s.toolName}</Text>
+                  <Text
+                    style={[styles.stepState, s.status === "error" ? styles.stepStateErr : null]}
+                  >
+                    {s.status === "error" ? "失败" : "完成"}
+                  </Text>
+                </View>
                 {s.detail !== "" ? (
                   <Text style={styles.detail} numberOfLines={6}>
                     {s.detail}
@@ -67,6 +75,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
   },
+  headerIcon: { fontSize: fontSize.body, color: brand.primaryDark },
   headerText: {
     fontSize: fontSize.body,
     fontWeight: fontWeight.semibold,
@@ -93,11 +102,20 @@ const styles = StyleSheet.create({
   statusIcon: { fontSize: fontSize.body, color: color.online, marginTop: 1 },
   statusError: { color: color.danger },
   stepBody: { flexShrink: 1, flex: 1, gap: 2 },
+  stepTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
   toolName: {
     fontSize: fontSize.caption,
     fontWeight: fontWeight.semibold,
     color: brand.primaryDark,
+    flexShrink: 1,
   },
+  stepState: { fontSize: 11, color: color.textMuted },
+  stepStateErr: { color: color.danger },
   detail: {
     fontSize: fontSize.caption,
     color: color.textPrimary,
