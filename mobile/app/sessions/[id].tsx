@@ -122,10 +122,11 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
     case "pending":
       return <PendingBubble />;
     case "streaming": {
-      // 思考链实时渲染：思考增量实时上屏，正文增量轻量 Text 打字机；
-      // 回合结束由 fetchMessages 重建为「任务过程卡 + 纯文本正文」。
-      // 思考未闭合时「思考中…」转圈 + 思考文本逐字增长；闭合后正文开始，
-      // 思考区标题转为「思考过程」静态收尾。
+      // 思考链实时渲染：思考增量实时上屏；正文增量实时过 Markdown
+      // 增量渲染（对标 Claude/Trae：流式全程 MD，而非完成后批量渲染）。
+      // 打字机 45ms/帧节奏天然节流，避免 MD 全量重解析压垮 JS 线程；
+      // 未闭合的语法（半截代码块等）按普通文本呈现，闭合后自然成样式。
+      // 回合结束由 fetchMessages 重建为「任务过程卡 + Markdown 正文」。
       const { thinking, visible } = splitStreamThinking(entry.text);
       const bodyLive = visible.trim() !== "";
       if (thinking === "" && !bodyLive) {
@@ -155,7 +156,7 @@ const MessageItem = memo(function MessageItem({ entry }: { entry: ChatEntry }) {
           ) : null}
           {bodyLive ? (
             <View style={styles.assistantPlain}>
-              <Text style={styles.bubbleAssistantText}>{visible}</Text>
+              <AssistantMarkdown text={visible} />
             </View>
           ) : null}
         </View>
