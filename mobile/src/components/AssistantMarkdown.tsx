@@ -1,5 +1,5 @@
 import Markdown from "react-native-markdown-display";
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import { brand, color, fontSize, radius, spacing } from "../ui/theme";
 
 /** AI 回复 Markdown 主题：代码块暖色深底，链接/列表点用品牌橙 */
@@ -34,11 +34,17 @@ const mdStyles = StyleSheet.create({
   code_inline: {
     backgroundColor: brand.creamDeep,
     color: brand.primaryDark,
-    fontFamily: "Menlo",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
     fontSize: fontSize.body - 1,
   },
   fence: {
+    // markdown-display 7.x 的 fence 内容直接用 fence 样式渲染（fence_text
+    // 不参与），文字颜色必须显式给出，否则继承 body 深灰与深底同色不可见
     backgroundColor: "#2B2620",
+    color: "#F5EFE6",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontSize: fontSize.caption + 1,
+    lineHeight: 18,
     borderRadius: radius.sm + 2,
     padding: spacing.sm + 2,
     borderWidth: 0,
@@ -46,7 +52,7 @@ const mdStyles = StyleSheet.create({
   },
   fence_text: {
     color: "#F5EFE6",
-    fontFamily: "Menlo",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
     fontSize: fontSize.caption + 1,
     lineHeight: 18,
   },
