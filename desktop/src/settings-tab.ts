@@ -19,6 +19,7 @@ export const SETTINGS_TAB_IDS = [
   "security",
   "provider",
   "mcp",
+  "credentials",
   "connectors",
   "tools",
   "skills",

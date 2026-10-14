@@ -49,6 +49,7 @@ import {
   X,
   TriangleAlert,
   ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
@@ -123,6 +124,7 @@ import {
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
+import { CredentialsTab } from "./settings/credentials/CredentialsTab";
 import { GatewayAdaptersPanel } from "./settings/server/GatewayAdaptersPanel";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
@@ -1091,6 +1093,7 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "general", icon: Settings2 },
   { id: "provider", icon: Cpu },
   { id: "mcp", icon: Plug },
+  { id: "credentials", icon: KeyRound },
   { id: "connectors", icon: Link2 },
   { id: "tools", icon: Wrench },
   { id: "skills", icon: SkillPuzzleIcon },
@@ -8971,6 +8974,8 @@ export function SettingsPanel({
               </div>
               );
             })()}
+
+            {tab === "credentials" && <CredentialsTab />}
 
             {tab === "connectors" && (
               <ConnectorsSettingsPage sessionId={sessionId} onRefreshMcp={onRefreshMcp} />
