@@ -6,6 +6,9 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from agenticx.llms.vision import (
     is_vision_capable,
     strip_nonvision_multimodal_messages,
@@ -93,3 +96,10 @@ def test_strip_nonvision_multimodal_messages_keeps_vision_models() -> None:
     out = strip_nonvision_multimodal_messages(messages, "bailian", "qwen-vl-max")
     assert isinstance(out[0]["content"], list)
     assert out[0]["content"][1]["type"] == "image_url"
+
+
+def test_vision_catalog_matches_python() -> None:
+    path = Path(__file__).resolve().parents[1] / "agenticx" / "llms" / "vision_cases.json"
+    cases = json.loads(path.read_text(encoding="utf-8"))
+    for case in cases:
+        assert is_vision_capable(case["provider"], case["model"]) is case["vision"], case

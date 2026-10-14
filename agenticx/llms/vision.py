@@ -81,15 +81,25 @@ def _bailian_qwen_text_no_vision(model_name: str) -> bool:
     return raw.startswith("qwen")
 
 
+_KNOWN_TEXT_ONLY_RE = re.compile(
+    r"gpt-3\.5|gpt-35|text-embedding|embedding-3|whisper|davinci|babbage|"
+    r"deepseek-chat|deepseek-coder|deepseek-reasoner",
+    re.IGNORECASE,
+)
+
+
 def is_vision_capable(provider_name: str, model_name: str) -> bool:
     """Return True when the provider/model pair should accept image_url inputs.
 
     Known text-only families are detected by model slug regardless of provider,
     so OpenAI-compatible gateways (custom_openai_*) serving glm-5.x / qwen text
     SKUs are also treated as text-only. Unknown slugs stay vision-permissive.
+    The case list in ``vision_cases.json`` is the shared contract with Desktop.
     ``provider_name`` is kept for API compatibility and logging only.
     """
     model = str(model_name or "").strip()
+    if model and _KNOWN_TEXT_ONLY_RE.search(model):
+        return False
     if _minimax_m2_family_no_vision(model):
         return False
     if _zhipu_text_only_family(model):

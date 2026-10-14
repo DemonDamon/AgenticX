@@ -9,10 +9,20 @@ function minimaxM2TextOnlySlug(slug: string): boolean {
   return false;
 }
 
-function zhipuGlm5TextOnlySlug(slug: string): boolean {
+/** Zhipu GLM text SKUs (no digit+"v" / GLM-5.3 multimodal line) reject image input. */
+function zhipuTextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
-  if (/vl|vision|4v|5v/.test(s)) return false;
-  return s === "glm-5" || /^glm-5([.\-_]|$)/.test(s);
+  if (/\dv|vision|vl/.test(s)) return false;
+  if (s.startsWith("glm-5.3")) return false;
+  return /^glm-(5|4\.6|4\.5|4|z1|zero)/.test(s);
+}
+
+/** MiMo speech SKUs and the text-only v2.5-pro line reject image input. */
+function mimoTextOnlySlug(slug: string): boolean {
+  const s = slug.toLowerCase();
+  if (!s.startsWith("mimo-")) return false;
+  if (s.includes("-asr") || s.includes("-tts")) return true;
+  return s === "mimo-v2.5-pro" || s.startsWith("mimo-v2.5-pro-");
 }
 
 function bailianQwenTextOnlySlug(slug: string): boolean {
@@ -30,9 +40,11 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
   const slug = modelLower.includes("/") ? (modelLower.split("/").pop() ?? modelLower) : modelLower;
 
   if (KNOWN_TEXT_ONLY_RE.test(combined) || KNOWN_TEXT_ONLY_RE.test(modelLower)) return true;
-  if (p === "minimax" && minimaxM2TextOnlySlug(slug)) return true;
-  if (p === "zhipu" && zhipuGlm5TextOnlySlug(slug)) return true;
-  if ((p === "bailian" || p === "dashscope") && bailianQwenTextOnlySlug(slug)) return true;
+  // Same slug rules as agenticx/llms/vision.py. Provider name does not exempt a known text-only SKU.
+  if (minimaxM2TextOnlySlug(slug)) return true;
+  if (zhipuTextOnlySlug(slug)) return true;
+  if (bailianQwenTextOnlySlug(slug)) return true;
+  if (mimoTextOnlySlug(slug)) return true;
   return false;
 }
 

@@ -1,18 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isKnownNonVisionChatModel, modelSupportsVision } from "./model-vision";
+import { isKnownNonVisionChatModel } from "./model-vision";
 
-describe("model-vision", () => {
-  it("treats zhipu GLM-5.1 as text-only", () => {
-    expect(isKnownNonVisionChatModel("zhipu", "GLM-5.1")).toBe(true);
-    expect(modelSupportsVision("zhipu", "GLM-5.1")).toBe(false);
-  });
+type VisionCase = { provider: string; model: string; vision: boolean };
 
-  it("treats zhipu glm-4v as vision-capable", () => {
-    expect(isKnownNonVisionChatModel("zhipu", "glm-4v")).toBe(false);
-    expect(modelSupportsVision("zhipu", "glm-4v")).toBe(true);
-  });
-
-  it("respects explicit vision capability flag", () => {
-    expect(modelSupportsVision("zhipu", "GLM-5.1", ["vision"])).toBe(true);
+describe("portal chat vision catalog", () => {
+  it("matches the shared vision catalog", () => {
+    const raw = readFileSync(
+      new URL("../../../../../agenticx/llms/vision_cases.json", import.meta.url),
+      "utf8",
+    );
+    const cases = JSON.parse(raw) as VisionCase[];
+    for (const item of cases) {
+      expect(isKnownNonVisionChatModel(item.provider, item.model)).toBe(!item.vision);
+    }
   });
 });
