@@ -151,9 +151,7 @@ Out of scope（本轮不做）：Go 网关内的 Agent Loop；Agent 级配额执
 ## 6. 待办（需单独开计划）
 
 - Agent 级 Token 配额：网关 `quota.Tracker` 增加 agent 维度，门户把 `x-agenticx-agent-id` 透传给网关。
-- 用户级配额套餐不进共享池（`poolScopeForAssignment` 在 `scopeType === "user"` 时直接 return）。
-- `GET /api/metering/quota` 返回的 `file` 仍指向遗留 `quotas.json`。
 - context-service 接入门户，做成 Agent 可绑定的知识库连接。
 - 模型能力目录统一（Python `is_vision_capable` 与 Desktop `model-vision.ts` 两份启发式）。
 - 会话级工作目录隔离与出站域名白名单。
-- 设置页 `email`、`workspace` 两个 tab 有渲染分支但左侧导航点不到（`SETTINGS_TAB_IDS` 与 `TAB_DEFS` 不一致）。
+- 设置页 `workspace`、`hooks` 在 `SETTINGS_TAB_IDS` 里，但没有对应面板，不能加进左侧导航。`email` 已有面板，导航入口见 acp-09。

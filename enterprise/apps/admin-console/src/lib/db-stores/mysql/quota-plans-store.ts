@@ -16,6 +16,7 @@ import {
   type PlanScopeType,
   type QuotaRule,
 } from "../../token-quota-store";
+import { poolScopeForAssignment } from "../quota-pool-scope";
 
 export type { PlanScopeType };
 
@@ -402,12 +403,6 @@ export async function archiveQuotaPlan(planId: string, tid?: string): Promise<Qu
   }
   await rebuildQuotaMappingFromPlans(tenant);
   return (await getQuotaPlan(planId, tenant))!;
-}
-
-function poolScopeForAssignment(scopeType: PlanScopeType, tenant: string, scopeId: string) {
-  if (scopeType === "dept") return { scopeType: "dept" as const, scopeId };
-  if (scopeType === "user") return { scopeType: "dept" as const, scopeId };
-  return { scopeType: "tenant" as const, scopeId: tenant };
 }
 
 async function resetPoolUsageForAssignment(
