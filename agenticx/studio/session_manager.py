@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.runtime.credential_store import CredentialStore, default_store, redact_text
 from agenticx.runtime.isolate_run import save_isolate_state
+from agenticx.runtime.session_boundary import ensure_session_workdir
 from agenticx.runtime.replay_ledger.contracts import ContextCheckpoint
 from agenticx.runtime.replay_ledger.recorder import recorder_for_session
 from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
@@ -708,6 +709,8 @@ class SessionManager:
     ) -> ManagedSession:
         sid = (session_id or "").strip() or str(uuid.uuid4())
         studio_session = StudioSession(provider_name=provider, model_name=model)
+        studio_session.session_id = sid
+        ensure_session_workdir(sid)
         self._restore_persisted_state(sid, studio_session)
         managed = ManagedSession(
             session_id=sid,

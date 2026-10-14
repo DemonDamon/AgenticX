@@ -70,6 +70,7 @@ class StudioSession:
     last_agent_events: List[Dict[str, object]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
     workspace_dir: Optional[str] = None
+    session_id: str = ""
     # Harness mode: code_dev (4-layer context) vs daily_office (default).
     session_mode: str = "daily_office"
     # Per-server latest operation state for Desktop MCP cards.

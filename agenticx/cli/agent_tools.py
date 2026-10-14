@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.session_boundary import foreign_session_denial
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
 from agenticx.cli.studio_mcp import (
     import_mcp_config,
@@ -5256,6 +5257,10 @@ def _path_allowed_without_confirm(
 def _raise_if_path_denied(
     path: Path, session: Optional[StudioSession] = None
 ) -> None:
+    session_id = str(getattr(session, "session_id", "") or "") if session is not None else ""
+    foreign = foreign_session_denial(path, session_id)
+    if foreign:
+        raise ValueError(foreign)
     rule_deny = _path_denied_by_rules(path, session)
     if rule_deny:
         raise ValueError(rule_deny)

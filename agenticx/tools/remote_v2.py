@@ -26,6 +26,7 @@ import anyio  # type: ignore
 from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 from agenticx.runtime.credential_store import MissingCredentialError, resolve_mapping
+from agenticx.runtime.session_boundary import configured_egress_allowlist, egress_denial
 
 try:
     import mcp.types as mcp_types  # type: ignore
@@ -328,6 +329,9 @@ class MCPClientV2:
                 )
                 read_stream, write_stream = stdio_transport
             elif transport == "streamable_http":
+                blocked = egress_denial(str(self.server_config.url or ""), configured_egress_allowlist())
+                if blocked:
+                    raise RuntimeError(blocked)
                 if streamablehttp_client is None:
                     raise RuntimeError(
                         "streamable-http transport unavailable: "
@@ -350,6 +354,9 @@ class MCPClientV2:
                 # streamablehttp_client returns (read, write, get_session_id_callback)
                 read_stream, write_stream = streams[0], streams[1]
             elif transport == "sse":
+                blocked = egress_denial(str(self.server_config.url or ""), configured_egress_allowlist())
+                if blocked:
+                    raise RuntimeError(blocked)
                 if sse_client is None:
                     raise RuntimeError(
                         "sse transport unavailable: `mcp.client.sse` import failed."
