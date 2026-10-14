@@ -20,6 +20,7 @@ const agent: EnterpriseAgent = {
   runtime: "cloud",
   capabilityIds: ["mcp:01ARZ3NDEKTSV4RRFFQ69G5FAV"],
   assignmentKeys: ["all"],
+  workerKeys: [],
   status: "active",
   metadata: {},
   createdAt: "2026-10-14T00:00:00.000Z",

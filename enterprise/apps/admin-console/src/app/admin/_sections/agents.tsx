@@ -57,6 +57,7 @@ type AgentRecord = {
   runtime: AgentRuntime;
   capabilityIds: string[];
   assignmentKeys: string[];
+  workerKeys: string[];
   status: AgentStatus;
 };
 
@@ -72,6 +73,7 @@ type FormState = {
   systemPrompt: string;
   capabilityIds: string[];
   assignment: AssignmentDraft;
+  workerAssignment: AssignmentDraft;
   enabled: boolean;
 };
 
@@ -79,6 +81,13 @@ type EditorState = { mode: "create" | "edit"; id?: string };
 
 const EMPTY_ASSIGNMENT: AssignmentDraft = {
   allMembers: true,
+  deptIds: [],
+  groupIds: [],
+  userIds: [],
+};
+
+const EMPTY_WORKER_ASSIGNMENT: AssignmentDraft = {
+  allMembers: false,
   deptIds: [],
   groupIds: [],
   userIds: [],
@@ -93,6 +102,7 @@ const EMPTY_FORM: FormState = {
   systemPrompt: "",
   capabilityIds: [],
   assignment: EMPTY_ASSIGNMENT,
+  workerAssignment: EMPTY_WORKER_ASSIGNMENT,
   enabled: true,
 };
 
@@ -246,6 +256,7 @@ export default function AgentsSection() {
       systemPrompt: agent.systemPrompt ?? "",
       capabilityIds: [...agent.capabilityIds],
       assignment: fromAssignmentKeys(agent.assignmentKeys),
+      workerAssignment: fromAssignmentKeys(agent.workerKeys ?? []),
       enabled: agent.status !== "disabled",
     });
     setFormError("");
@@ -264,6 +275,7 @@ export default function AgentsSection() {
       systemPrompt: form.systemPrompt,
       capabilityIds: form.capabilityIds,
       assignmentKeys: toAssignmentKeys(form.assignment),
+      workerKeys: toAssignmentKeys(form.workerAssignment),
       status: (form.enabled ? "active" : "disabled") satisfies AgentStatus,
     };
     try {
@@ -508,6 +520,18 @@ export default function AgentsSection() {
                   users={directory.users}
                 />
               </div>
+              {form.runtime === "desktop_worker" ? (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">{t("form.workers")}</div>
+                  <AssignmentScopeEditor
+                    value={form.workerAssignment}
+                    onChange={(workerAssignment) => setForm({ ...form, workerAssignment })}
+                    depts={directory.depts}
+                    groups={directory.groups}
+                    users={directory.users}
+                  />
+                </div>
+              ) : null}
               <label className="flex items-center gap-2 text-sm">
                 <Switch
                   checked={form.enabled}

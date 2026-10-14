@@ -26,6 +26,7 @@ const agent: EnterpriseAgent = {
   runtime: "cloud",
   capabilityIds: [],
   assignmentKeys: ["all"],
+  workerKeys: [],
   status: "active",
   metadata: {},
   createdAt: "2026-10-14T00:00:00.000Z",
@@ -123,9 +124,66 @@ describe("dispatchAgentMention", () => {
     );
   });
 
-  it("writes a system notice for a desktop worker", async () => {
+  it("queues a desktop worker task and notices when nobody is online", async () => {
     const fetchImpl = vi.fn();
     const append = vi.fn();
+    const enqueueAgentTask = vi.fn(async () => ({ id: "task-1" }));
+    const hasOnlineWorker = vi.fn(async () => false);
+    await dispatchAgentMention(
+      { tenantId: session.tenantId, userId: session.userId },
+      ROOM,
+      session,
+      { ...agent, runtime: "desktop_worker" },
+      trigger,
+      {
+        listMessages: async () => [
+          msg({
+            seq: 1,
+            content: "上一句",
+            sender_type: "agent",
+            sender_id: agent.id,
+            sender_name: agent.displayName,
+          }),
+          trigger,
+        ],
+        appendMessage: append,
+        getAccessToken: async () => "tok",
+        gatewayUrl: "http://gateway.test/v1/chat/completions",
+        fetchImpl,
+        enqueueAgentTask,
+        hasOnlineWorker,
+      },
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(enqueueAgentTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: session.tenantId,
+        agentId: agent.id,
+        roomId: ROOM,
+        triggerMessageId: trigger.id,
+        requestedBy: session.userId,
+        input: {
+          instruction: trigger.content,
+          messages: [
+            { role: "assistant", name: agent.displayName, content: "上一句" },
+            { role: "user", name: "Alice", content: trigger.content },
+          ],
+        },
+      }),
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      ROOM,
+      expect.objectContaining({
+        senderType: "system",
+        content: "当前没有在线的桌面执行端，任务已排队",
+      }),
+    );
+  });
+
+  it("does not write a queue notice when a desktop worker is online", async () => {
+    const append = vi.fn();
+    const enqueueAgentTask = vi.fn(async () => ({ id: "task-1" }));
     await dispatchAgentMention(
       { tenantId: session.tenantId, userId: session.userId },
       ROOM,
@@ -137,18 +195,13 @@ describe("dispatchAgentMention", () => {
         appendMessage: append,
         getAccessToken: async () => "tok",
         gatewayUrl: "http://gateway.test/v1/chat/completions",
-        fetchImpl,
+        fetchImpl: vi.fn(),
+        enqueueAgentTask,
+        hasOnlineWorker: async () => true,
       },
     );
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(append).toHaveBeenCalledWith(
-      expect.anything(),
-      ROOM,
-      expect.objectContaining({
-        senderType: "system",
-        content: "智能体「验收助手」需要员工桌面执行，桌面执行通道尚未接入",
-      }),
-    );
+    expect(enqueueAgentTask).toHaveBeenCalledTimes(1);
+    expect(append).not.toHaveBeenCalled();
   });
 
   it("stores tool step summaries when the cloud agent calls a bound tool", async () => {

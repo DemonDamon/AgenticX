@@ -171,6 +171,47 @@ describe("admin agents routes", () => {
     expect(createdBody.data?.agent?.slug).toBe("report-bot");
   });
 
+  it("POST forwards workerKeys and rejects a blank entry", async () => {
+    const blank = await POST(
+      jsonRequest({
+        slug: "report-bot",
+        displayName: "报告助手",
+        model: "openai/gpt-4o",
+        workerKeys: [" "],
+      }),
+    );
+    expect(blank.status).toBe(400);
+    expect(createAgentMock).not.toHaveBeenCalled();
+
+    createAgentMock.mockResolvedValueOnce({ id: "a1", slug: "report-bot" });
+    const created = await POST(
+      jsonRequest({
+        slug: "report-bot",
+        displayName: "报告助手",
+        model: "openai/gpt-4o",
+        workerKeys: ["all", "all"],
+      }),
+    );
+    expect(created.status).toBe(200);
+    expect(createAgentMock).toHaveBeenCalledWith(
+      "tenant_test",
+      expect.objectContaining({ workerKeys: ["all"] }),
+    );
+  });
+
+  it("PATCH forwards workerKeys", async () => {
+    updateAgentMock.mockResolvedValueOnce({ id: "a1" });
+    const response = await PATCH(jsonRequest({ workerKeys: ["01USERAAAAAAAAAAAAAAAAAAAA"] }), {
+      params: Promise.resolve({ agentId: "a1" }),
+    });
+    expect(response.status).toBe(200);
+    expect(updateAgentMock).toHaveBeenCalledWith(
+      "tenant_test",
+      "a1",
+      expect.objectContaining({ workerKeys: ["01USERAAAAAAAAAAAAAAAAAAAA"] }),
+    );
+  });
+
   it("item routes map a missing agent to 404", async () => {
     const { AgentNotFoundError } = await import("@agenticx/iam-core");
     getAgentMock.mockRejectedValue(new AgentNotFoundError());

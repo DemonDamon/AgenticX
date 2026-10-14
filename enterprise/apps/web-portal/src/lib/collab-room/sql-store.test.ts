@@ -383,4 +383,38 @@ describe("SqlCollabRoomStore", () => {
     expect(normalize(messageCall?.sql ?? "")).toContain("seq >");
     expect(messageCall?.params[2]).toBe(7);
   });
+
+  it("appendAgentMessageAsSystem writes an agent message without a membership check", async () => {
+    const client = createFakeClient((sql) => {
+      if (sql.includes("select id from enterprise_collab_rooms")) {
+        return { rows: [{ id: ROOM }], rowCount: 1 };
+      }
+      if (sql.includes("coalesce(max(seq)")) {
+        return { rows: [{ max_seq: 2 }], rowCount: 1 };
+      }
+      if (sql.startsWith("insert into enterprise_collab_room_messages")) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.startsWith("update enterprise_collab_rooms")) {
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`unhandled sql: ${sql}`);
+    });
+    const store = new SqlCollabRoomStore("postgresql", client);
+    const message = await store.appendAgentMessageAsSystem(TENANT, ROOM, {
+      senderType: "agent",
+      senderId: "01AGENT0AAAAAAAAAAAAAAAA",
+      senderName: "桌面助手",
+      content: "桌面已执行完成",
+      metadata: { runtime: "desktop_worker" },
+    });
+    expect(message.sender_type).toBe("agent");
+    expect(message.seq).toBe(3);
+    expect(client.calls.some((call) => normalize(call.sql).includes("enterprise_collab_room_members"))).toBe(false);
+    const insert = client.calls.find((call) =>
+      normalize(call.sql).startsWith("insert into enterprise_collab_room_messages"),
+    );
+    expect(insert?.params[4]).toBe("agent");
+    expect(insert?.inTransaction).toBe(true);
+  });
 });

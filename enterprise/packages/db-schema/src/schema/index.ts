@@ -34,3 +34,4 @@ export * from "./user-opt-outs";
 export * from "./user-groups";
 export * from "./collab-rooms";
 export * from "./agents";
+export * from "./agent-tasks";

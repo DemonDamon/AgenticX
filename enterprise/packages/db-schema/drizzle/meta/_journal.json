@@ -372,6 +372,13 @@
       "when": 1787100000000,
       "tag": "0053_enterprise_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787200000000,
+      "tag": "0054_enterprise_agent_tasks",
+      "breakpoints": true
     }
   ]
 }

@@ -100,5 +100,18 @@ export interface CollabRoomStore {
       metadata?: Record<string, unknown>;
     },
   ): Promise<CollabRoomMessage>;
+  /** 服务端代写房间消息，不要求调用者是房间成员。 */
+  appendAgentMessageAsSystem(
+    tenantId: string,
+    roomId: string,
+    input: {
+      senderType: CollabSenderType;
+      senderId: string;
+      senderName: string;
+      content: string;
+      model?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<CollabRoomMessage>;
   resetForTests(): void | Promise<void>;
 }

@@ -44,4 +44,18 @@ describe("validateAgentInput", () => {
   it("accepts a legal input", () => {
     expect(() => validateAgentInput(valid)).not.toThrow();
   });
+
+  it("accepts an empty workerKeys array", () => {
+    expect(() => validateAgentInput({ ...valid, workerKeys: [] })).not.toThrow();
+  });
+
+  it("rejects a blank workerKeys entry", () => {
+    expect(() => validateAgentInput({ ...valid, workerKeys: ["  "] })).toThrow(AgentValidationError);
+  });
+
+  it("rejects a non-array workerKeys", () => {
+    expect(() => validateAgentInput({ ...valid, workerKeys: "all" as unknown as string[] })).toThrow(
+      AgentValidationError,
+    );
+  });
 });

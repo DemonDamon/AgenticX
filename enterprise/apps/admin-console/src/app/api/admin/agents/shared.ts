@@ -80,6 +80,18 @@ function readMetadata(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function readWorkerKeys(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new AgentValidationError("可承接执行的员工不合法");
+  const keys: string[] = [];
+  for (const raw of value) {
+    const key = String(raw ?? "").trim();
+    if (!key) throw new AgentValidationError("可承接执行的员工不合法");
+    keys.push(key);
+  }
+  return normalizeAssignmentKeys(keys);
+}
+
 function checkedCapabilityIds(ids: readonly string[]): string[] {
   try {
     return assertCapabilityIds(ids);
@@ -106,6 +118,7 @@ export async function prepareCreateInput(request: Request): Promise<AgentInput> 
     runtime: readRuntime(body.runtime),
     capabilityIds: Array.isArray(body.capabilityIds) ? body.capabilityIds.map(String) : undefined,
     assignmentKeys: Array.isArray(body.assignmentKeys) ? body.assignmentKeys.map(String) : undefined,
+    workerKeys: readWorkerKeys(body.workerKeys),
     status: readStatus(body.status),
     metadata: readMetadata(body.metadata),
   };
@@ -113,7 +126,7 @@ export async function prepareCreateInput(request: Request): Promise<AgentInput> 
   const capabilityIds = checkedCapabilityIds(input.capabilityIds ?? []);
   const assignmentKeys = normalizeAssignmentKeys(input.assignmentKeys ?? ["all"]);
   if (assignmentKeys.length === 0) throw new AgentValidationError("可见范围不能为空");
-  return { ...input, capabilityIds, assignmentKeys };
+  return { ...input, capabilityIds, assignmentKeys, workerKeys: input.workerKeys ?? [] };
 }
 
 export async function preparePatchInput(request: Request): Promise<Partial<AgentInput>> {
@@ -136,6 +149,9 @@ export async function preparePatchInput(request: Request): Promise<Partial<Agent
     const keys = normalizeAssignmentKeys(body.assignmentKeys.map(String));
     if (keys.length === 0) throw new AgentValidationError("可见范围不能为空");
     patch.assignmentKeys = keys;
+  }
+  if (body.workerKeys !== undefined) {
+    patch.workerKeys = readWorkerKeys(body.workerKeys) ?? [];
   }
   return patch;
 }

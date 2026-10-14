@@ -34,6 +34,7 @@ export type EnterpriseAgent = {
   runtime: AgentRuntime;
   capabilityIds: string[];
   assignmentKeys: string[];
+  workerKeys: string[];
   status: AgentStatus;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -49,6 +50,7 @@ export type AgentInput = {
   runtime?: AgentRuntime;
   capabilityIds?: string[];
   assignmentKeys?: string[];
+  workerKeys?: string[];
   status?: AgentStatus;
   metadata?: Record<string, unknown>;
 };
@@ -91,6 +93,7 @@ type AgentRow = {
   runtime: string;
   capabilityIds: unknown;
   assignmentKeys: unknown;
+  workerKeys: unknown;
   status: string;
   metadata: unknown;
   createdAt: unknown;
@@ -166,6 +169,7 @@ function mapAgent(row: AgentRow): EnterpriseAgent {
     runtime: asRuntime(row.runtime),
     capabilityIds: asStringArray(row.capabilityIds),
     assignmentKeys: asStringArray(row.assignmentKeys),
+    workerKeys: asStringArray(row.workerKeys),
     status: asStatus(row.status),
     metadata: asMetadata(row.metadata),
     createdAt: iso(row.createdAt),
@@ -228,6 +232,12 @@ export function validateAgentInput(input: AgentInput): void {
     const cleaned = input.assignmentKeys.map((key) => String(key ?? "").trim()).filter(Boolean);
     if (cleaned.length === 0) throw new AgentValidationError("可见范围不能为空");
   }
+  if (input.workerKeys !== undefined) {
+    if (!Array.isArray(input.workerKeys)) throw new AgentValidationError("可承接执行的员工不合法");
+    for (const raw of input.workerKeys) {
+      if (!String(raw ?? "").trim()) throw new AgentValidationError("可承接执行的员工不合法");
+    }
+  }
 }
 
 function normalizeForWrite(input: AgentInput) {
@@ -240,6 +250,7 @@ function normalizeForWrite(input: AgentInput) {
     runtime: input.runtime ?? "cloud",
     capabilityIds: dedupe(input.capabilityIds ?? []),
     assignmentKeys: dedupe(input.assignmentKeys ?? ["all"]),
+    workerKeys: dedupe(input.workerKeys ?? []),
     status: input.status ?? "active",
     metadata: asMetadata(input.metadata),
   };
@@ -328,6 +339,7 @@ export async function updateAgent(
     runtime: patch.runtime ?? existing.runtime,
     capabilityIds: patch.capabilityIds ?? existing.capabilityIds,
     assignmentKeys: patch.assignmentKeys ?? existing.assignmentKeys,
+    workerKeys: patch.workerKeys ?? existing.workerKeys,
     status: patch.status ?? existing.status,
     metadata: patch.metadata ?? existing.metadata,
   };

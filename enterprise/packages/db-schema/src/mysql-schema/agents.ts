@@ -1,7 +1,7 @@
 /**
  * 企业 Agent 注册表（MySQL）。
  *
- * `capability_ids` / `assignment_keys` 在此方言下落为 json，写法同
+ * `capability_ids` / `assignment_keys` / `worker_keys` 在此方言下落为 json，写法同
  * `enterprise_skills.required_capabilities`。
  *
  * `model` 与门户模型选择器同一格式：`<providerId>/<modelName>`
@@ -27,6 +27,8 @@ export const enterpriseAgents = mysqlTable(
     runtime: varchar("runtime", { length: 24 }).notNull().default("cloud"),
     capabilityIds: json("capability_ids").$type<string[]>().notNull().default([]),
     assignmentKeys: json("assignment_keys").$type<string[]>().notNull().default(["all"]),
+    /** 可承接桌面执行的员工，键格式同 assignment_keys。空数组表示没有人能承接。 */
+    workerKeys: json("worker_keys").$type<string[]>().notNull().default([]),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     metadata: json("metadata").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,

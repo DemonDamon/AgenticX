@@ -39,6 +39,7 @@ const visible: EnterpriseAgent = {
   runtime: "cloud",
   capabilityIds: [],
   assignmentKeys: ["all"],
+  workerKeys: [],
   status: "active",
   metadata: {},
   createdAt: "2026-10-14T00:00:00.000Z",

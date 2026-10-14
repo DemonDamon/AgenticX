@@ -197,6 +197,7 @@
           "noSkill": "No skills registered yet",
           "noMcp": "No MCP servers available",
           "visibility": "Visibility",
+          "workers": "Employees who can run this agent",
           "enabled": "Enabled",
           "mcp": "MCP",
           "skill": "Skill"

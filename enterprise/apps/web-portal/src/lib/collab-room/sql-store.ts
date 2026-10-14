@@ -541,6 +541,85 @@ export class SqlCollabRoomStore implements CollabRoomStore {
     throw lastError instanceof Error ? lastError : new Error("unreachable");
   }
 
+  public async appendAgentMessageAsSystem(
+    tenantId: string,
+    roomId: string,
+    input: {
+      senderType: CollabSenderType;
+      senderId: string;
+      senderName: string;
+      content: string;
+      model?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<CollabRoomMessage> {
+    if (!input.content?.trim()) throw new CollabRoomBadRequestError("content required");
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.client.transaction(async (tx) => {
+          const room = await tx.query(
+            `select id from enterprise_collab_rooms
+              where id = ${this.p ? "$1" : "?"} and tenant_id = ${this.p ? "$2" : "?"} limit 1`,
+            [roomId, tenantId],
+          );
+          if (!room.rows[0]) throw new CollabRoomNotFoundError();
+          const maxRow = await tx.query(
+            `select coalesce(max(seq), 0) as max_seq from enterprise_collab_room_messages
+              where room_id = ${this.p ? "$1" : "?"}`,
+            [roomId],
+          );
+          const nextSeq = Number(maxRow.rows[0]?.max_seq ?? 0) + 1;
+          const id = ulid();
+          const now = new Date();
+          await tx.query(
+            `insert into enterprise_collab_room_messages
+              (id, room_id, tenant_id, seq, sender_type, sender_id, sender_name,
+               content, model, metadata, created_at, updated_at)
+             values (${this.placeholders(12)})`,
+            [
+              id,
+              roomId,
+              tenantId,
+              nextSeq,
+              input.senderType,
+              input.senderId,
+              input.senderName,
+              input.content,
+              input.model ?? null,
+              input.metadata ? JSON.stringify(input.metadata) : null,
+              now,
+              now,
+            ],
+          );
+          await tx.query(
+            `update enterprise_collab_rooms set updated_at = ${this.p ? "$1" : "?"}
+              where id = ${this.p ? "$2" : "?"}`,
+            [now, roomId],
+          );
+          return {
+            id,
+            room_id: roomId,
+            tenant_id: tenantId,
+            seq: nextSeq,
+            sender_type: input.senderType,
+            sender_id: input.senderId,
+            sender_name: input.senderName,
+            content: input.content,
+            model: input.model,
+            metadata: input.metadata,
+            created_at: now.toISOString(),
+          };
+        });
+      } catch (error) {
+        lastError = error;
+        if (error instanceof CollabRoomNotFoundError) throw error;
+        if (attempt === 2 || !isUniqueViolation(error)) throw error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("unreachable");
+  }
+
   public async resetForTests(): Promise<void> {
     await this.client.close();
   }

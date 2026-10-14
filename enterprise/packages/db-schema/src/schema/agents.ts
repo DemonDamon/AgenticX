@@ -31,6 +31,8 @@ export const enterpriseAgents = pgTable(
     runtime: varchar("runtime", { length: 24 }).notNull().default("cloud"),
     capabilityIds: text("capability_ids").array().notNull().default([]),
     assignmentKeys: text("assignment_keys").array().notNull().default(["all"]),
+    /** 可承接桌面执行的员工，键格式同 assignment_keys。空数组表示没有人能承接。 */
+    workerKeys: text("worker_keys").array().notNull().default([]),
     /** `active` / `disabled`。 */
     status: varchar("status", { length: 16 }).notNull().default("active"),
     metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),

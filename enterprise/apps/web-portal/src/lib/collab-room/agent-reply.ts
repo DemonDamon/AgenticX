@@ -3,6 +3,8 @@ import type { AuthContext } from "@agenticx/auth";
 import type { EnterpriseAgent } from "@agenticx/iam-core";
 import { resolveGatewayMcpBase } from "../gateway-mcp-client";
 import { runCloudAgentLoop } from "./agent-executor";
+import { enqueueAgentTask, hasOnlineWorker } from "../worker-tasks";
+import type { TaskInput } from "../worker-tasks/types";
 import type { CollabRoomContext, CollabRoomMessage, CollabRoomStore, CollabSenderType } from "./types";
 import { requestMetaReply } from "./meta-reply";
 
@@ -17,6 +19,15 @@ export type AgentReplyDeps = {
     tenantId: string,
     capabilityIds: readonly string[],
   ) => Promise<Array<{ id: string; name: string }>>;
+  enqueueAgentTask?: (input: {
+    tenantId: string;
+    agentId: string;
+    roomId: string;
+    triggerMessageId: string;
+    requestedBy: string;
+    input: TaskInput;
+  }) => Promise<unknown>;
+  hasOnlineWorker?: (tenantId: string, agentId: string, withinSeconds?: number) => Promise<boolean>;
 };
 
 const CONTENT_LIMIT = 4000;
@@ -34,9 +45,7 @@ function unavailable(name: string): string {
   return `智能体「${name}」暂时不可用，请稍后再试`;
 }
 
-function desktopPending(name: string): string {
-  return `智能体「${name}」需要员工桌面执行，桌面执行通道尚未接入`;
-}
+const DESKTOP_QUEUE_NOTICE = "当前没有在线的桌面执行端，任务已排队";
 
 function gatewayStatus(error: unknown): number | null {
   if (!(error instanceof Error)) return null;
@@ -66,6 +75,55 @@ function buildCloudAgentPrompt(
     messages.push({ role: "user", content: `${name}：${clipContent(item.content)}` });
   }
   return messages;
+}
+
+function buildDesktopTaskInput(
+  agent: EnterpriseAgent,
+  history: CollabRoomMessage[],
+  trigger: CollabRoomMessage,
+): TaskInput {
+  const ordered = history.slice().sort((left, right) => left.seq - right.seq).slice(-30);
+  const messages: TaskInput["messages"] = [];
+  for (const item of ordered) {
+    if (item.sender_type === "agent" && item.sender_id === agent.id) {
+      messages.push({
+        role: "assistant",
+        name: item.sender_name?.trim() || agent.displayName,
+        content: clipContent(item.content),
+      });
+      continue;
+    }
+    messages.push({
+      role: "user",
+      name: item.sender_name?.trim() || item.sender_id,
+      content: clipContent(item.content),
+    });
+  }
+  return { messages, instruction: trigger.content };
+}
+
+async function enqueueDesktopWorkerTask(
+  ctx: CollabRoomContext,
+  roomId: string,
+  session: AuthContext,
+  agent: EnterpriseAgent,
+  triggerMessage: CollabRoomMessage,
+  deps: AgentReplyDeps,
+): Promise<void> {
+  const history = await deps.listMessages(ctx, roomId, { limit: 30 });
+  const queued = deps.enqueueAgentTask ?? enqueueAgentTask;
+  const online = deps.hasOnlineWorker ?? hasOnlineWorker;
+  await queued({
+    tenantId: ctx.tenantId,
+    agentId: agent.id,
+    roomId,
+    triggerMessageId: triggerMessage.id,
+    requestedBy: session.userId,
+    input: buildDesktopTaskInput(agent, history, triggerMessage),
+  });
+  if (!(await online(ctx.tenantId, agent.id))) {
+    await appendSystemNotice(ctx, roomId, DESKTOP_QUEUE_NOTICE, deps.appendMessage);
+  }
 }
 
 async function appendSystemNotice(
@@ -104,6 +162,8 @@ async function resolveAgentReplyDeps(overrides?: Partial<AgentReplyDeps>): Promi
       "http://127.0.0.1:8088/v1/chat/completions",
     fetchImpl: overrides?.fetchImpl,
     loadMcpServers: overrides?.loadMcpServers,
+    enqueueAgentTask: overrides?.enqueueAgentTask,
+    hasOnlineWorker: overrides?.hasOnlineWorker,
   };
 }
 
@@ -221,7 +281,7 @@ export async function dispatchAgentMention(
       await triggerCloudAgentReply(ctx, roomId, session, agent, triggerMessage, deps);
       return;
     case "desktop_worker":
-      await appendSystemNotice(ctx, roomId, desktopPending(agent.displayName), deps.appendMessage);
+      await enqueueDesktopWorkerTask(ctx, roomId, session, agent, triggerMessage, deps);
       return;
     default: {
       const _never: never = agent.runtime;

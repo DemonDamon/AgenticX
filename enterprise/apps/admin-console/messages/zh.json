@@ -197,6 +197,7 @@
           "noSkill": "还没有登记 Skill",
           "noMcp": "还没有可选的 MCP",
           "visibility": "可见范围",
+          "workers": "可承接执行的员工",
           "enabled": "启用",
           "mcp": "MCP",
           "skill": "Skill"

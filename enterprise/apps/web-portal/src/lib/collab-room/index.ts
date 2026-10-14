@@ -107,6 +107,21 @@ export function appendMessage(
   return store().appendMessage(ctx, roomId, input);
 }
 
+export function appendAgentMessageAsSystem(
+  tenantId: string,
+  roomId: string,
+  input: {
+    senderType: CollabSenderType;
+    senderId: string;
+    senderName: string;
+    content: string;
+    model?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<CollabRoomMessage> {
+  return store().appendAgentMessageAsSystem(tenantId, roomId, input);
+}
+
 export function resetForTests(): void | Promise<void> {
   return store().resetForTests();
 }
