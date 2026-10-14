@@ -50,6 +50,7 @@ import {
   TriangleAlert,
   ShieldCheck,
   KeyRound,
+  Mail,
 } from "lucide-react";
 import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
@@ -1104,6 +1105,7 @@ const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "memory", icon: Network },
   { id: "automation", icon: AutomationTaskIcon },
   { id: "voice", icon: Mic },
+  { id: "email", icon: Mail },
   { id: "favorites", icon: Bookmark },
   { id: "server", icon: Globe },
   { id: "security", icon: ShieldCheck },
