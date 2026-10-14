@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Stack, router } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -9,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MobileSession, MobileStatus } from "../src/api/types";
 import { useGateway } from "../src/hooks/useGateway";
 import { usePolling } from "../src/hooks/usePolling";
@@ -24,6 +26,7 @@ import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../
  * - 点击行进消息流（带 title）
  */
 export default function SessionsScreen() {
+  const insets = useSafeAreaInsets();
   const { client, binding, loadError } = useGateway();
   const [status, setStatus] = useState<MobileStatus | null>(null);
   const [sessions, setSessions] = useState<MobileSession[] | null>(null);
@@ -100,20 +103,7 @@ export default function SessionsScreen() {
 
   return (
     <View style={styles.page}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable
-              style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}
-              onPress={() => {
-                router.push("/new-task");
-              }}
-            >
-              <Text style={styles.plusText}>＋</Text>
-            </Pressable>
-          ),
-        }}
-      />
+      <Stack.Screen options={{}} />
       <FlatList
         data={sessions ?? []}
         keyExtractor={(item) => item.id}
@@ -229,6 +219,20 @@ export default function SessionsScreen() {
           </Pressable>
         }
       />
+
+      {/* 右下角悬浮 FAB：新建任务（回起始页） */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          { bottom: insets.bottom + spacing.lg },
+          pressed && styles.fabPressed,
+        ]}
+        onPress={() => {
+          router.dismissAll();
+        }}
+      >
+        <Ionicons name="add" size={30} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 }
@@ -420,20 +424,16 @@ const styles = StyleSheet.create({
     color: color.danger,
     textAlign: "center",
   },
-  plusButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: brand.creamDeep,
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: brand.primary,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.sm,
+    ...shadow.floating,
   },
-  plusPressed: { backgroundColor: brand.primaryLight },
-  plusText: {
-    fontSize: 20,
-    lineHeight: 24,
-    color: brand.primaryDark,
-    fontWeight: fontWeight.bold,
-  },
+  fabPressed: { backgroundColor: brand.primaryPressed },
 });

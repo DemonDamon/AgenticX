@@ -12,6 +12,7 @@ const KEY_INSTALL_ID = "agx.install_id";
 const KEY_GATEWAY_BASE = "agx.gateway_base";
 const KEY_DEVICE_ID = "agx.device_id";
 const KEY_MOBILE_TOKEN = "agx.mobile_token";
+const KEY_PREFERRED_WORKSPACE = "agx.preferred_workspace";
 
 export interface Binding {
   gateway_base: string;
@@ -89,4 +90,19 @@ export async function clearBinding(): Promise<void> {
     kvDelete(KEY_DEVICE_ID),
     kvDelete(KEY_MOBILE_TOKEN),
   ]);
+}
+
+/** 手机端「当前活跃项目」选择：下次新建任务时使用的工作目录。 */
+export async function getPreferredWorkspace(): Promise<string | null> {
+  const value = await kvGet(KEY_PREFERRED_WORKSPACE);
+  return value !== null && value.length > 0 ? value : null;
+}
+
+export async function setPreferredWorkspace(path: string): Promise<void> {
+  const trimmed = path.trim();
+  if (trimmed === "") {
+    await kvDelete(KEY_PREFERRED_WORKSPACE);
+    return;
+  }
+  await kvSet(KEY_PREFERRED_WORKSPACE, trimmed);
 }

@@ -140,7 +140,7 @@ export default function PairScreen() {
       });
       // 通知 _layout 等处重建 GatewayClient（启动全局审批轮询）
       notifyBindingChanged();
-      router.replace("/sessions");
+      router.replace("/");
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {

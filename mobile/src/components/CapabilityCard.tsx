@@ -15,21 +15,26 @@ export function CapabilityCard({ client }: { client: GatewayClient | null }) {
   useEffect(() => {
     if (client === null) return;
     let alive = true;
-    void Promise.all([client.getToolsRegistry(), client.getMcpServers()])
-      .then(([t, m]) => {
+    void Promise.allSettled([client.getToolsRegistry(), client.getMcpServers()]).then(
+      ([toolsRes, mcpsRes]) => {
         if (!alive) return;
-        setTools(t.tools);
-        setMcps(m.servers);
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
+        if (toolsRes.status === "fulfilled") setTools(toolsRes.value.tools);
+        if (mcpsRes.status === "fulfilled") setMcps(mcpsRes.value.servers);
+        // tools 不可得才整卡隐藏；mcp 单独失败只省略该区块
+        if (toolsRes.status === "rejected" && mcpsRes.status === "rejected") setFailed(true);
+        else if (toolsRes.status === "rejected") {
+          setTools([]);
+          setFailed(true);
+        }
+      },
+    );
     return () => {
       alive = false;
     };
   }, [client]);
 
-  if (failed) return null;
+  if (failed && tools === null) return null;
+  if (failed && tools !== null && tools.length === 0) return null;
   if (tools === null && mcps === null) {
     return (
       <View style={styles.wrap}>

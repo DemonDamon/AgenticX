@@ -633,6 +633,12 @@ class GatewayClient:
             return await self._rpc_tools_registry()
         if method == "mcp.servers":
             return await self._rpc_mcp_servers(params)
+        if method == "models.list":
+            return await self._rpc_models_list()
+        if method == "model.set_active":
+            return await self._rpc_model_set_active(params)
+        if method == "workspaces.list":
+            return await self._rpc_workspaces_list()
         raise ValueError(f"unknown rpc method: {method}")
 
     async def _rpc_session_context_usage(self, params: Dict[str, Any]) -> Any:
@@ -726,6 +732,101 @@ class GatewayClient:
             if not isinstance(rows, list):
                 raise RuntimeError("mcp servers reply missing 'servers' array")
             return rows
+
+    async def _rpc_models_list(self) -> Any:
+        """GET /api/config/providers 模型清单（手机端模型选择器数据源）。
+
+        仅透传展示所需字段——``api_key`` / ``base_url`` 等凭据绝不离开桌面端。
+        """
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/config/providers",
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"models list failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("providers"), dict):
+                raise RuntimeError("models reply missing 'providers' map")
+            providers: dict[str, Any] = {}
+            for name, entry in payload["providers"].items():
+                if not isinstance(entry, dict):
+                    continue
+                safe: dict[str, Any] = {}
+                for key in ("displayName", "display_name", "enabled", "models", "model"):
+                    if key in entry:
+                        safe[key] = entry[key]
+                providers[str(name)] = safe
+            return {
+                "ok": bool(payload.get("ok", True)),
+                "defaultProvider": payload.get("defaultProvider", ""),
+                "providers": providers,
+                "activeProvider": payload.get("activeProvider", ""),
+                "activeModel": payload.get("activeModel", ""),
+            }
+
+    async def _rpc_model_set_active(self, params: Dict[str, Any]) -> Any:
+        """PUT /api/config/active-model 切换全局活动模型（手机端模型选择器写入）。"""
+        provider = str((params or {}).get("provider") or "").strip()
+        model = str((params or {}).get("model") or "").strip()
+        if not model:
+            raise ValueError("model required")
+        body: Dict[str, Any] = {"model": model}
+        if provider:
+            body["provider"] = provider
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.put(
+                f"{self._settings.studio_base_url}/api/config/active-model",
+                headers=headers,
+                json=body,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"model set failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            if not isinstance(payload, dict) or payload.get("ok") is not True:
+                raise RuntimeError("model set reply not ok")
+            return {"provider": provider, "model": model}
+
+    async def _rpc_workspaces_list(self) -> Any:
+        """GET /api/sessions → 去重 workspace_dir，手机端「当前活跃项目」列表。
+
+        AgenticX 的项目是会话级概念，没有全局项目注册表；这里用最近会话用过的
+        工作目录去重成候选列表（名称取目录 basename + 完整绝对路径）。
+        """
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/sessions",
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"workspaces list failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+            rows = payload.get("sessions") if isinstance(payload, dict) else payload
+            if not isinstance(rows, list):
+                raise RuntimeError("workspaces reply missing 'sessions' array")
+        seen: set[str] = set()
+        out: list[Dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("workspace_dir") or "").strip()
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            label = os.path.basename(path.rstrip("/")) or path
+            # 桌面端的默认 taskspace 目录名恒为 default / 会话 uuid，用会话名更可读
+            if "/.agenticx/taskspaces/" in path:
+                session_name = str(row.get("session_name") or "").strip()
+                if session_name:
+                    label = session_name
+            out.append({"name": label, "path": path})
+        return out
 
     async def _rpc_session_messages(self, params: Dict[str, Any]) -> Any:
         session_id = str(params.get("session_id") or "").strip()

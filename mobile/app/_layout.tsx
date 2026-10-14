@@ -28,7 +28,7 @@ export default function RootLayout() {
           name="pair"
           options={{ headerShown: false, contentStyle: { backgroundColor: brand.cream } }}
         />
-        <Stack.Screen name="sessions" options={{ title: "Near" }} />
+        <Stack.Screen name="sessions" options={{ title: "全部任务" }} />
         <Stack.Screen name="sessions/[id]" options={{ title: "会话" }} />
         <Stack.Screen name="settings" options={{ title: "绑定与设置" }} />
       </Stack>
