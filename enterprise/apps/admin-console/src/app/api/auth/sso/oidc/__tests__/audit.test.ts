@@ -43,6 +43,12 @@ vi.mock("../../../../../../lib/admin-pg-auth", () => ({
 vi.mock("../../../../../../lib/admin-session", () => ({
   ADMIN_SESSION_COOKIE: "agx_admin_session",
   createAdminSessionToken: () => "stub-admin-token",
+  isAdminCookieSecure: () => {
+    const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+    if (configured === "true") return true;
+    if (configured === "false") return false;
+    return process.env.NODE_ENV === "production";
+  },
 }));
 
 vi.mock("../../../../../../lib/admin-sso-runtime", () => ({

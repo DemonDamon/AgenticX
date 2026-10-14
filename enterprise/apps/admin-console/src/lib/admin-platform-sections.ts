@@ -1,5 +1,6 @@
 /** 平台配置下除 /policy 外的 /admin/* 页，共用同一条动态路由以免 webpack 每项都 Compiling。 */
 export const PLATFORM_SECTION_IDS = [
+  "agents",
   "models",
   "channels",
   "cache",

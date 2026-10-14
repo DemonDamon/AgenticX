@@ -49,6 +49,7 @@
         "billingSplit": "Billing Split",
         "agentTraces": "Agent Traces",
         "policy": "Policy Rules",
+        "agents": "Agents",
         "models": "Model Services",
         "channels": "Channel Management",
         "cache": "AI Cache",
@@ -150,6 +151,70 @@
         "viewCrossBorderAudit": "View cross-border audit →",
         "toastSaved": "Compliance settings saved",
         "toastSaveFailed": "Save failed"
+      },
+      "agents": {
+        "title": "Agents",
+        "description": "Register agents that can join collaboration rooms, including model, prompt, capabilities, and visibility.",
+        "create": "New agent",
+        "emptyTitle": "No agents yet",
+        "emptyDescription": "Create one to make it available to people in its visibility scope.",
+        "columns": {
+          "name": "Name",
+          "slug": "Slug",
+          "runtime": "Runtime",
+          "model": "Model",
+          "capabilities": "Capabilities",
+          "visibility": "Visibility",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "runtime": {
+          "cloud": "Cloud",
+          "desktop_worker": "Employee desktop"
+        },
+        "visibility": {
+          "all": "Everyone",
+          "count": "{count} scopes"
+        },
+        "status": {
+          "active": "Enabled",
+          "disabled": "Disabled"
+        },
+        "form": {
+          "createTitle": "New agent",
+          "editTitle": "Edit agent",
+          "name": "Name",
+          "slug": "Slug",
+          "slugHint": "Lowercase letters, digits, or hyphens, 2–63 characters, starting with a letter or digit.",
+          "description": "Description",
+          "model": "Model",
+          "modelPlaceholder": "Choose an enabled model",
+          "modelEmpty": "No enabled models yet",
+          "runtime": "Runtime",
+          "systemPrompt": "System prompt",
+          "capabilities": "Capabilities",
+          "capabilitiesHint": "Bind registered skills and MCP servers.",
+          "noSkill": "No skills registered yet",
+          "noMcp": "No MCP servers available",
+          "visibility": "Visibility",
+          "enabled": "Enabled",
+          "mcp": "MCP",
+          "skill": "Skill"
+        },
+        "delete": {
+          "title": "Delete agent",
+          "description": "Delete “{name}”? This cannot be undone.",
+          "confirm": "Delete"
+        },
+        "toast": {
+          "created": "Agent created",
+          "saved": "Saved",
+          "deleted": "Deleted"
+        },
+        "actions": {
+          "edit": "Edit",
+          "delete": "Delete"
+        }
       },
       "capabilities": {
         "title": "Capability Packs",

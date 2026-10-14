@@ -36,6 +36,7 @@ import {
   Activity,
   BarChart3,
   Bell,
+  Bot,
   Boxes,
   Building2,
   ChevronRight,
@@ -119,6 +120,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "platform",
     items: [
       { href: "/policy", labelKey: "policy", icon: Shield },
+      { href: "/admin/agents", labelKey: "agents", icon: Bot },
       { href: "/admin/models", labelKey: "models", icon: Package },
       { href: "/admin/channels", labelKey: "channels", icon: Activity },
       { href: "/admin/cache", labelKey: "cache", icon: Database },

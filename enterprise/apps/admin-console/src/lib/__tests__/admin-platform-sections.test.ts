@@ -4,6 +4,7 @@ import { isPlatformSection, PLATFORM_SECTION_IDS } from "../admin-platform-secti
 describe("isPlatformSection", () => {
   it("accepts the platform slugs that share /admin/[section]", () => {
     expect(PLATFORM_SECTION_IDS).toEqual([
+      "agents",
       "models",
       "channels",
       "cache",

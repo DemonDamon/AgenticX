@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { isPlatformSection } from "../../../lib/admin-platform-sections";
+import AgentsSection from "../_sections/agents";
 import ApiTokensSection from "../_sections/api-tokens";
 import CacheSection from "../_sections/cache";
 import CapabilitiesSection from "../_sections/capabilities";
@@ -10,6 +11,7 @@ import ModelsSection from "../_sections/models";
 import PluginsSection from "../_sections/plugins";
 
 const PLATFORM_SECTION_PAGES = {
+  agents: AgentsSection,
   models: ModelsSection,
   channels: ChannelsSection,
   cache: CacheSection,

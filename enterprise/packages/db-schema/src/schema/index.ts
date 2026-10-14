@@ -33,3 +33,4 @@ export * from "./capability-packs";
 export * from "./user-opt-outs";
 export * from "./user-groups";
 export * from "./collab-rooms";
+export * from "./agents";
