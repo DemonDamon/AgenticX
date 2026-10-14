@@ -76,6 +76,11 @@ export interface CollabRoomStore {
     roomId: string,
     input: { userId: string; displayName: string; role?: CollabRoomRole },
   ): Promise<CollabRoomMember>;
+  addAgentMember(
+    ctx: CollabRoomContext,
+    roomId: string,
+    input: { agentId: string; displayName: string },
+  ): Promise<CollabRoomMember>;
   removeMember(ctx: CollabRoomContext, roomId: string, memberId: string): Promise<void>;
   leaveRoom(ctx: CollabRoomContext, roomId: string): Promise<void>;
   listMessages(

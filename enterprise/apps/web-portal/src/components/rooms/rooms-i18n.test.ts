@@ -51,6 +51,11 @@ const REQUIRED_ROOMS_KEYS = [
   "leaveConfirm",
   "removeMemberTitle",
   "removeConfirm",
+  "agentBadge",
+  "addAgentSection",
+  "addAgentFailed",
+  "loadAgentsFailed",
+  "noAgentsAvailable",
 ] as const;
 
 describe("rooms i18n", () => {

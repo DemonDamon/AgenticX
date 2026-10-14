@@ -335,6 +335,74 @@ export class SqlCollabRoomStore implements CollabRoomStore {
     };
   }
 
+  public async addAgentMember(
+    ctx: CollabRoomContext,
+    roomId: string,
+    input: { agentId: string; displayName: string },
+  ): Promise<CollabRoomMember> {
+    await this.requireActiveMember(this.client, ctx, roomId);
+    const agentId = input.agentId.trim();
+    const displayName = input.displayName.trim();
+    if (!agentId) throw new CollabRoomBadRequestError("agent required");
+    if (!displayName) throw new CollabRoomBadRequestError("displayName required");
+
+    const existing = await this.client.query(
+      `select * from enterprise_collab_room_members
+        where room_id = ${this.p ? "$1" : "?"}
+          and member_type = 'agent'
+          and member_id = ${this.p ? "$2" : "?"}
+        limit 1`,
+      [roomId, agentId],
+    );
+    const existingRow = existing.rows[0];
+    if (existingRow && existingRow.left_at == null) {
+      return mapMember(existingRow);
+    }
+
+    const now = new Date();
+    if (existingRow) {
+      await this.client.query(
+        `update enterprise_collab_room_members
+            set left_at = null,
+                display_name = ${this.p ? "$1" : "?"},
+                room_role = 'member',
+                updated_at = ${this.p ? "$2" : "?"}
+          where room_id = ${this.p ? "$3" : "?"}
+            and member_type = 'agent'
+            and member_id = ${this.p ? "$4" : "?"}`,
+        [displayName, now, roomId, agentId],
+      );
+      const refreshed = await this.client.query(
+        `select * from enterprise_collab_room_members
+          where room_id = ${this.p ? "$1" : "?"}
+            and member_type = 'agent'
+            and member_id = ${this.p ? "$2" : "?"}
+          limit 1`,
+        [roomId, agentId],
+      );
+      if (!refreshed.rows[0]) throw new CollabRoomNotFoundError();
+      return mapMember(refreshed.rows[0]);
+    }
+
+    const id = ulid();
+    await this.client.query(
+      `insert into enterprise_collab_room_members
+        (id, room_id, tenant_id, member_type, member_id, display_name, room_role,
+         joined_at, left_at, created_at, updated_at)
+       values (${this.placeholders(11)})`,
+      [id, roomId, ctx.tenantId, "agent", agentId, displayName, "member", now, null, now, now],
+    );
+    return {
+      id,
+      room_id: roomId,
+      member_type: "agent",
+      member_id: agentId,
+      display_name: displayName,
+      room_role: "member",
+      joined_at: now.toISOString(),
+    };
+  }
+
   public async removeMember(ctx: CollabRoomContext, roomId: string, memberId: string): Promise<void> {
     await this.requireActiveMember(this.client, ctx, roomId);
     const now = new Date();

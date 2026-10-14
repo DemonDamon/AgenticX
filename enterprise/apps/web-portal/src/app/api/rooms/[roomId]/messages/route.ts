@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
+import type { AuthContext } from "@agenticx/auth";
+import { getAgent, type EnterpriseAgent } from "@agenticx/iam-core";
 import { isValidUlid } from "../../../../../lib/chat-history";
-import { appendMessage, listMessages } from "../../../../../lib/collab-room";
+import {
+  appendMessage,
+  listMembers,
+  listMessages,
+  type CollabRoomContext,
+  type CollabRoomMessage,
+} from "../../../../../lib/collab-room";
+import { findMentionedAgents } from "../../../../../lib/collab-room/agent-mentions";
+import { dispatchAgentMention } from "../../../../../lib/collab-room/agent-reply";
 import { mentionsMeta, triggerMetaReply } from "../../../../../lib/collab-room/meta-reply";
 import {
   collabRoomBadRequest,
@@ -17,6 +27,46 @@ type Params = Promise<{ roomId: string }>;
 const CONTENT_MAX = 8000;
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
+
+async function replyToAgentMentions(
+  ctx: CollabRoomContext,
+  roomId: string,
+  session: AuthContext,
+  content: string,
+  trigger: CollabRoomMessage,
+): Promise<void> {
+  const members = await listMembers(ctx, roomId);
+  const slugById = new Map<string, string>();
+  const agents = new Map<string, EnterpriseAgent>();
+  for (const member of members) {
+    if (member.member_type !== "agent" || member.left_at) continue;
+    try {
+      const agent = await getAgent(session.tenantId, member.member_id);
+      slugById.set(member.member_id, agent.slug);
+      agents.set(member.member_id, agent);
+    } catch (error) {
+      log("error", {
+        event: "room.agent_reply.failed",
+        room_id: roomId,
+        error_message: String(error),
+      });
+    }
+  }
+  const mentioned = findMentionedAgents(content, members, slugById);
+  for (const member of mentioned) {
+    const agent = agents.get(member.member_id);
+    if (!agent) continue;
+    try {
+      await dispatchAgentMention(ctx, roomId, session, agent, trigger);
+    } catch (error) {
+      log("error", {
+        event: "room.agent_reply.failed",
+        room_id: roomId,
+        error_message: String(error),
+      });
+    }
+  }
+}
 
 export async function GET(request: Request, segmentData: { params: Params }) {
   const session = await getSessionFromCookies();
@@ -87,6 +137,13 @@ export async function POST(request: Request, segmentData: { params: Params }) {
         });
       });
     }
+    await replyToAgentMentions(ctx, roomId, session, content, created).catch((error) => {
+      log("error", {
+        event: "room.agent_reply.failed",
+        room_id: roomId,
+        error_message: String(error),
+      });
+    });
     return NextResponse.json({ code: "00000", message: "ok", data: { message: created } });
   } catch (error) {
     return collabRoomErrorResponse(error);

@@ -12,6 +12,7 @@ vi.mock("../../../../../lib/collab-room", async (importOriginal) => {
     ...actual,
     appendMessage: vi.fn(),
     listMessages: vi.fn(),
+    listMembers: vi.fn(async () => []),
   };
 });
 

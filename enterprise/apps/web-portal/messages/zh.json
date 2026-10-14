@@ -312,7 +312,7 @@
     "me": "我",
     "member": "成员",
     "sending": "发送中…",
-    "inputPlaceholder": "输入消息，@Meta 可点名助手",
+    "inputPlaceholder": "输入消息，@Meta 可点名助手，@ 名称 点名智能体",
     "send": "发送",
     "membersTitle": "成员",
     "metaAssistant": "Meta（助手）",
@@ -330,6 +330,11 @@
     "leaveRoom": "离开房间",
     "leaveConfirm": "离开后将无法继续看到这个房间，除非再次被加入。",
     "removeMemberTitle": "移出成员",
-    "removeConfirm": "确定将 {name} 移出该房间？"
+    "removeConfirm": "确定将 {name} 移出该房间？",
+    "agentBadge": "智能体",
+    "addAgentSection": "添加智能体",
+    "addAgentFailed": "添加智能体失败",
+    "loadAgentsFailed": "智能体列表加载失败",
+    "noAgentsAvailable": "没有可添加的智能体"
   }
 }

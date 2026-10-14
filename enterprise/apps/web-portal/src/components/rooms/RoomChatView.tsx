@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Bot } from "lucide-react";
 import { Button, Input } from "@agenticx/ui";
 import type { CollabRoom, CollabRoomMember, CollabRoomMessage } from "../../lib/collab-room/types";
 import { RoomMembersPanel } from "./RoomMembersPanel";
@@ -15,9 +16,13 @@ type RoomChatViewProps = {
 
 type Envelope<T> = { data?: T; error?: { message?: string } };
 
-function bubbleAlign(message: CollabRoomMessage, currentUserId: string): "self" | "other" | "meta" | "system" {
+function bubbleAlign(
+  message: CollabRoomMessage,
+  currentUserId: string,
+): "self" | "other" | "meta" | "system" | "agent" {
   if (message.sender_type === "system") return "system";
   if (message.sender_type === "meta") return "meta";
+  if (message.sender_type === "agent") return "agent";
   if (message.sender_id === currentUserId || message.sender_id === "self") return "self";
   return "other";
 }
@@ -111,7 +116,7 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1">
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {loadError && loadError !== "revoked" ? (
+            {loadError === "openFailed" ? (
               <p className="px-4 py-2 text-sm text-destructive">{t(loadError)}</p>
             ) : null}
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -132,13 +137,23 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
                         "max-w-[80%] rounded-2xl px-3 py-2 text-sm",
                         mine
                           ? "bg-primary text-primary-foreground"
-                          : kind === "meta"
-                            ? "border border-border bg-muted"
-                            : "bg-card text-card-foreground shadow-sm",
+                          : kind === "agent"
+                            ? "border border-primary/40 bg-muted text-foreground"
+                            : kind === "meta"
+                              ? "border border-border bg-muted"
+                              : "bg-card text-card-foreground shadow-sm",
                       ].join(" ")}
                     >
-                      <div className="mb-1 text-[11px] opacity-80">
-                        {kind === "meta" ? "Meta" : mine ? t("me") : message.sender_name || t("member")}
+                      <div className="mb-1 flex items-center gap-1 text-[11px] opacity-80">
+                        {kind === "agent" ? (
+                          <>
+                            <Bot className="h-3 w-3" aria-hidden />
+                            <span>{message.sender_name || t("agentBadge")}</span>
+                            <span>{t("agentBadge")}</span>
+                          </>
+                        ) : (
+                          <span>{kind === "meta" ? "Meta" : mine ? t("me") : message.sender_name || t("member")}</span>
+                        )}
                       </div>
                       <div className="whitespace-pre-wrap break-words">{visibleMessageContent(message.content)}</div>
                     </div>

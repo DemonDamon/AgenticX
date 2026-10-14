@@ -1,9 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Bot } from "lucide-react";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from "@agenticx/ui";
 import type { CollabRoomMember } from "../../lib/collab-room/types";
+
+type PortalAgent = {
+  id: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  runtime: string;
+  model: string;
+};
 
 type RoomMembersPanelProps = {
   roomId: string;
@@ -22,9 +32,42 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
   const [userId, setUserId] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
+  const [agents, setAgents] = useState<PortalAgent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [agentsError, setAgentsError] = useState("");
+  const [agentError, setAgentError] = useState("");
+  const [addingAgentId, setAddingAgentId] = useState("");
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CollabRoomMember | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/me/agents", { cache: "no-store" });
+        const body = (await res.json()) as {
+          data?: { agents?: PortalAgent[] };
+          error?: { message?: string };
+        };
+        if (!res.ok) throw new Error(body.error?.message || t("loadAgentsFailed"));
+        if (!cancelled) {
+          setAgents(body.data?.agents ?? []);
+          setAgentsError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAgentsError(err instanceof Error ? err.message : t("loadAgentsFailed"));
+        }
+      } finally {
+        if (!cancelled) setAgentsLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   const addMember = async () => {
     const target = userId.trim();
@@ -83,9 +126,34 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
     }
   };
 
+  const addAgent = async (agentId: string) => {
+    setAddingAgentId(agentId);
+    setAgentError("");
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/members`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent_id: agentId }),
+      });
+      const body = (await res.json()) as { error?: { message?: string } };
+      if (!res.ok) throw new Error(body.error?.message || t("addAgentFailed"));
+      onChanged();
+    } catch (err) {
+      setAgentError(err instanceof Error ? err.message : t("addAgentFailed"));
+    } finally {
+      setAddingAgentId("");
+    }
+  };
+
   const humans = members.filter((item) => item.member_type === "human");
   const others = members.filter((item) => item.member_type !== "human");
   const metaLabel = t("metaAssistant");
+  const joinedAgentIds = new Set(
+    members
+      .filter((member) => member.member_type === "agent" && !member.left_at)
+      .map((member) => member.member_id),
+  );
+  const availableAgents = agents.filter((agent) => !joinedAgentIds.has(agent.id));
 
   return (
     <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-card/40 p-4">
@@ -96,10 +164,14 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
       <ul className="space-y-2 text-sm">
         {[...others, ...humans].map((member) => (
           <li key={`${member.member_type}:${member.member_id}`} className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate">
-              {memberLabel(member, metaLabel)}
+            <span className="flex min-w-0 items-center gap-1">
+              {member.member_type === "agent" ? <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+              <span className="truncate">{memberLabel(member, metaLabel)}</span>
+              {member.member_type === "agent" ? (
+                <span className="shrink-0 text-xs text-muted-foreground">{t("agentBadge")}</span>
+              ) : null}
               {member.room_role === "owner" ? (
-                <span className="ml-1 text-xs text-muted-foreground">{t("owner")}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{t("owner")}</span>
               ) : null}
             </span>
             {member.member_type === "human" && member.member_id !== currentUserId ? (
@@ -121,6 +193,36 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
         </Button>
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <div className="space-y-2">
+        <h3 className="flex items-center gap-1 text-sm font-semibold">
+          <Bot className="h-3.5 w-3.5" aria-hidden />
+          {t("addAgentSection")}
+        </h3>
+        {agentsLoading ? <p className="text-xs text-muted-foreground">{t("loading")}</p> : null}
+        {agentsError ? <p className="text-xs text-destructive">{agentsError}</p> : null}
+        {agentError ? <p className="text-xs text-destructive">{agentError}</p> : null}
+        {!agentsLoading && !agentsError && availableAgents.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("noAgentsAvailable")}</p>
+        ) : null}
+        <ul className="space-y-1">
+          {availableAgents.map((agent) => (
+            <li key={agent.id}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto w-full justify-start py-2"
+                disabled={addingAgentId === agent.id}
+                onClick={() => void addAgent(agent.id)}
+              >
+                <span className="flex min-w-0 flex-col items-start">
+                  <span className="truncate">{agent.displayName}</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">@{agent.slug}</span>
+                </span>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </div>
       <Button variant="outline" onClick={() => setLeaveOpen(true)}>
         {t("leaveRoom")}
       </Button>

@@ -68,6 +68,14 @@ export function addHumanMember(
   return store().addHumanMember(ctx, roomId, input);
 }
 
+export function addAgentMember(
+  ctx: CollabRoomContext,
+  roomId: string,
+  input: { agentId: string; displayName: string },
+): Promise<CollabRoomMember> {
+  return store().addAgentMember(ctx, roomId, input);
+}
+
 export function removeMember(ctx: CollabRoomContext, roomId: string, memberId: string): Promise<void> {
   return store().removeMember(ctx, roomId, memberId);
 }

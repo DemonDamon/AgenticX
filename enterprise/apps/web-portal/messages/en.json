@@ -312,7 +312,7 @@
     "me": "Me",
     "member": "Member",
     "sending": "Sending…",
-    "inputPlaceholder": "Type a message. @Meta to mention the assistant",
+    "inputPlaceholder": "Type a message. @Meta to mention the assistant. Use @ name to mention an agent",
     "send": "Send",
     "membersTitle": "Members",
     "metaAssistant": "Meta (assistant)",
@@ -330,6 +330,11 @@
     "leaveRoom": "Leave room",
     "leaveConfirm": "After leaving, you will not see this room unless you are added again.",
     "removeMemberTitle": "Remove member",
-    "removeConfirm": "Remove {name} from this room?"
+    "removeConfirm": "Remove {name} from this room?",
+    "agentBadge": "Agent",
+    "addAgentSection": "Add an agent",
+    "addAgentFailed": "Failed to add the agent",
+    "loadAgentsFailed": "Failed to load agents",
+    "noAgentsAvailable": "No agents available to add"
   }
 }
