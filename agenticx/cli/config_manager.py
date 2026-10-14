@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
+from agenticx.runtime.credential_store import resolve_refs
+
 
 SUPPORTED_PROVIDERS: Dict[str, Dict[str, Any]] = {
     "openai": {"required": ["api_key"], "default_model": "gpt-4o"},
@@ -217,16 +219,22 @@ class AgxConfig:
         """Get provider config by name or default provider."""
         provider_name = (name or self.default_provider or "openai").lower()
         raw = dict(self.providers.get(provider_name, {}))
+        api_key = raw.pop("api_key", None)
+        secret_key = raw.pop("secret_key", None)
+        if isinstance(api_key, str):
+            api_key = resolve_refs(api_key)
+        if isinstance(secret_key, str):
+            secret_key = resolve_refs(secret_key)
         return ProviderConfig(
             name=provider_name,
-            api_key=raw.pop("api_key", None),
+            api_key=api_key,
             model=raw.pop(
                 "model",
                 SUPPORTED_PROVIDERS.get(provider_name, {}).get("default_model", ""),
             ),
             base_url=raw.pop("base_url", None),
             endpoint_id=raw.pop("endpoint_id", None),
-            secret_key=raw.pop("secret_key", None),
+            secret_key=secret_key,
             group_id=raw.pop("group_id", None),
             drop_params=raw.pop("drop_params", None),
             extra_body=raw.pop("extra_body", None) or None,

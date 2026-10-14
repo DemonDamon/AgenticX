@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.credential_store import CredentialStore, default_store, redact_text
 from agenticx.runtime.isolate_run import save_isolate_state
 from agenticx.runtime.replay_ledger.contracts import ContextCheckpoint
 from agenticx.runtime.replay_ledger.recorder import recorder_for_session
@@ -2575,104 +2576,139 @@ class SessionManager:
                 session_id,
             )
 
-        critical_ok = self._persist_core_snapshots(
-            session_id,
-            session,
-            default_timestamp_ms=int(metadata_updated_at * 1000),
-        )
+        def _disk_copy(messages: list | None, creds: CredentialStore) -> list:
+            copied: list = []
+            for item in messages or []:
+                if not isinstance(item, dict):
+                    copied.append(item)
+                    continue
+                cloned = dict(item)
+                content = cloned.get("content")
+                if isinstance(content, str):
+                    cloned["content"] = redact_text(content, creds)
+                copied.append(cloned)
+            return copied
 
+        def _stamp_back(original: list | None, stamped: list) -> None:
+            if not original:
+                return
+            for src, dst in zip(original, stamped):
+                if not isinstance(src, dict) or not isinstance(dst, dict):
+                    continue
+                if not src.get("timestamp") and dst.get("timestamp"):
+                    src["timestamp"] = dst["timestamp"]
+
+        original_chat = session.chat_history
+        original_agent = getattr(session, "agent_messages", None)
+        creds = default_store()
+        disk_chat = _disk_copy(original_chat, creds)
+        disk_agent = _disk_copy(original_agent, creds)
+        session.chat_history = disk_chat
+        session.agent_messages = disk_agent
         try:
-            self._session_store._save_todos_sync(
+            critical_ok = self._persist_core_snapshots(
                 session_id,
-                session.todo_manager.to_payload(),
-            )
-        except Exception:
-            _log.exception(
-                "session persist auxiliary failure session=%s stage=todos",
-                session_id,
+                session,
+                default_timestamp_ms=int(metadata_updated_at * 1000),
             )
 
-        try:
-            scratchpad = dict(getattr(session, "scratchpad", {}) or {})
-            self._session_store._save_scratchpad_sync(session_id, scratchpad)
-        except Exception:
-            _log.exception(
-                "session persist auxiliary failure session=%s stage=scratchpad",
-                session_id,
-            )
-
-        if critical_ok:
             try:
-                summary = self._build_session_summary(session)
-                last_activity_at = self._resolve_list_activity_at(
-                    chat_history=getattr(session, "chat_history", None),
-                    metadata_updated_at=metadata_updated_at,
-                    metadata_created_at=metadata_created_at,
-                )
-                metadata = {
-                    "provider": session.provider_name or "",
-                    "model": session.model_name or "",
-                    "chat_messages": len(session.chat_history),
-                    "artifacts": len(session.artifacts),
-                    "session_name": getattr(managed_ref, "session_name", None),
-                    "avatar_id": getattr(managed_ref, "avatar_id", None),
-                    "avatar_name": getattr(managed_ref, "avatar_name", None),
-                    "session_kind": getattr(managed_ref, "session_kind", None),
-                    "delegation_id": getattr(managed_ref, "delegation_id", None),
-                    "parent_owner_session_id": getattr(
-                        managed_ref, "parent_owner_session_id", None
-                    ),
-                    "created_at": metadata_created_at,
-                    "updated_at": metadata_updated_at,
-                    "last_activity_at": last_activity_at,
-                    "pinned": bool(getattr(managed_ref, "pinned", False)),
-                    "archived": bool(getattr(managed_ref, "archived", False)),
-                    "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
-                    "execution_state": getattr(managed_ref, "execution_state", "idle"),
-                    "session_mode": normalize_session_mode(
-                        getattr(session, "session_mode", None)
-                    ),
-                    **_harness_list_fields(session),
-                }
-                parent_sid = self._conversation_parent_session_id(session)
-                if parent_sid:
-                    metadata["parent_session_id"] = parent_sid
-                self._session_store._save_session_summary_sync(
+                self._session_store._save_todos_sync(
                     session_id,
-                    summary,
-                    metadata,
+                    session.todo_manager.to_payload(),
                 )
             except Exception:
                 _log.exception(
-                    "session persist auxiliary failure session=%s stage=summary",
+                    "session persist auxiliary failure session=%s stage=todos",
                     session_id,
                 )
 
             try:
-                self._session_store._index_session_messages_sync(
-                    session_id,
-                    session.chat_history or [],
-                )
+                scratchpad = dict(getattr(session, "scratchpad", {}) or {})
+                self._session_store._save_scratchpad_sync(session_id, scratchpad)
             except Exception:
                 _log.exception(
-                    "session persist auxiliary failure session=%s stage=fts",
+                    "session persist auxiliary failure session=%s stage=scratchpad",
                     session_id,
                 )
-        else:
-            _log.error(
-                "session persist skipped metadata session=%s because critical snapshots failed",
-                session_id,
-            )
 
-        try:
-            self._save_context_refs(session_id, session)
-        except Exception:
-            _log.exception(
-                "session persist auxiliary failure session=%s stage=context_refs",
-                session_id,
-            )
+            if critical_ok:
+                try:
+                    summary = self._build_session_summary(session)
+                    last_activity_at = self._resolve_list_activity_at(
+                        chat_history=getattr(session, "chat_history", None),
+                        metadata_updated_at=metadata_updated_at,
+                        metadata_created_at=metadata_created_at,
+                    )
+                    metadata = {
+                        "provider": session.provider_name or "",
+                        "model": session.model_name or "",
+                        "chat_messages": len(session.chat_history),
+                        "artifacts": len(session.artifacts),
+                        "session_name": getattr(managed_ref, "session_name", None),
+                        "avatar_id": getattr(managed_ref, "avatar_id", None),
+                        "avatar_name": getattr(managed_ref, "avatar_name", None),
+                        "session_kind": getattr(managed_ref, "session_kind", None),
+                        "delegation_id": getattr(managed_ref, "delegation_id", None),
+                        "parent_owner_session_id": getattr(
+                            managed_ref, "parent_owner_session_id", None
+                        ),
+                        "created_at": metadata_created_at,
+                        "updated_at": metadata_updated_at,
+                        "last_activity_at": last_activity_at,
+                        "pinned": bool(getattr(managed_ref, "pinned", False)),
+                        "archived": bool(getattr(managed_ref, "archived", False)),
+                        "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
+                        "execution_state": getattr(managed_ref, "execution_state", "idle"),
+                        "session_mode": normalize_session_mode(
+                            getattr(session, "session_mode", None)
+                        ),
+                        **_harness_list_fields(session),
+                    }
+                    parent_sid = self._conversation_parent_session_id(session)
+                    if parent_sid:
+                        metadata["parent_session_id"] = parent_sid
+                    self._session_store._save_session_summary_sync(
+                        session_id,
+                        summary,
+                        metadata,
+                    )
+                except Exception:
+                    _log.exception(
+                        "session persist auxiliary failure session=%s stage=summary",
+                        session_id,
+                    )
 
-        return critical_ok
+                try:
+                    self._session_store._index_session_messages_sync(
+                        session_id,
+                        session.chat_history or [],
+                    )
+                except Exception:
+                    _log.exception(
+                        "session persist auxiliary failure session=%s stage=fts",
+                        session_id,
+                    )
+            else:
+                _log.error(
+                    "session persist skipped metadata session=%s because critical snapshots failed",
+                    session_id,
+                )
+
+            try:
+                self._save_context_refs(session_id, session)
+            except Exception:
+                _log.exception(
+                    "session persist auxiliary failure session=%s stage=context_refs",
+                    session_id,
+                )
+
+            return critical_ok
+        finally:
+            _stamp_back(original_chat, disk_chat)
+            _stamp_back(original_agent, disk_agent)
+            session.chat_history = original_chat
+            session.agent_messages = original_agent
 
     def _messages_path(self, session_id: str) -> str:
         return os.path.join(self._sessions_root, session_id, "messages.json")

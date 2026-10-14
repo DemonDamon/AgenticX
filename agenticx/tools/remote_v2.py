@@ -19,11 +19,13 @@ import logging
 import os
 from contextlib import AsyncExitStack
 from datetime import timedelta
-from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Set, Type, Union
 from urllib.parse import urlparse
 
 import anyio  # type: ignore
 from pydantic import BaseModel, Field, model_validator  # type: ignore
+
+from agenticx.runtime.credential_store import MissingCredentialError, resolve_mapping
 
 try:
     import mcp.types as mcp_types  # type: ignore
@@ -160,6 +162,29 @@ class MCPServerConfig(BaseModel):
         return self
 
 
+def _resolve_mcp_mapping(server_name: str, mapping: Mapping[str, str] | None) -> dict[str, str]:
+    """Resolve ``${cred:NAME}`` in an MCP env or header map."""
+
+    if not mapping:
+        return {}
+    try:
+        return resolve_mapping(dict(mapping))
+    except MissingCredentialError as err:
+        raise RuntimeError(
+            f"MCP 服务「{server_name}」引用了未定义的凭证 {err.name}，请在设置 → 凭证中添加"
+        ) from err
+
+
+def build_stdio_env(server_config: Any) -> dict[str, str]:
+    """Copy the process environment and overlay the server env with refs resolved."""
+
+    env = dict(os.environ)
+    raw_env = getattr(server_config, "env", None) or {}
+    name = str(getattr(server_config, "name", "") or "")
+    env.update(_resolve_mcp_mapping(name, raw_env))
+    return env
+
+
 class MCPToolInfo(BaseModel):
     """MCP 工具信息"""
     name: str
@@ -291,8 +316,7 @@ class MCPClientV2:
                         "stdio transport unavailable: `mcp.client.stdio` import failed."
                     )
                 # 构建环境变量
-                env = dict(os.environ)
-                env.update(self.server_config.env)
+                env = build_stdio_env(self.server_config)
                 server_params = StdioServerParameters(
                     command=self.server_config.command,
                     args=self.server_config.args,
@@ -312,7 +336,10 @@ class MCPClientV2:
                     )
                 http_cm = streamablehttp_client(
                     url=self.server_config.url,
-                    headers=dict(self.server_config.headers) or None,
+                    headers=_resolve_mcp_mapping(
+                        self.server_config.name,
+                        dict(self.server_config.headers),
+                    ) or None,
                     timeout=timedelta(seconds=float(self.server_config.timeout)),
                     # Central proxy policy: loopback/LAN direct, remote via
                     # proxy when reachable, direct fallback when it is dead.
@@ -329,7 +356,10 @@ class MCPClientV2:
                     )
                 sse_cm = sse_client(
                     url=self.server_config.url,
-                    headers=dict(self.server_config.headers) or None,
+                    headers=_resolve_mcp_mapping(
+                        self.server_config.name,
+                        dict(self.server_config.headers),
+                    ) or None,
                     httpx_client_factory=mcp_httpx_client_factory,
                     **self._mcp_auth_kwargs(),
                 )

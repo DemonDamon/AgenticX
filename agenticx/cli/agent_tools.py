@@ -48,6 +48,7 @@ from agenticx.runtime.plan_artifacts import (
     create_plan_artifact,
     update_plan_artifact,
 )
+from agenticx.runtime.credential_store import redact_text
 from agenticx.runtime.plan_mode import turn_intent_denial_message
 from agenticx.runtime.tool_result_budget import recall_tool_observation
 from agenticx.memory.session_store import SessionStore
@@ -12422,6 +12423,34 @@ async def dispatch_tool_async(
     runtime_tool_context: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
+    result = await _dispatch_tool_async_unredacted(
+        name,
+        arguments,
+        session,
+        confirm_gate=confirm_gate,
+        event_callback=event_callback,
+        team_manager=team_manager,
+        clarify_gate=clarify_gate,
+        is_unattended=is_unattended,
+        runtime_tool_context=runtime_tool_context,
+    )
+    if isinstance(result, str):
+        return redact_text(result)
+    return result
+
+
+async def _dispatch_tool_async_unredacted(
+    name: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: Optional[ConfirmGate] = None,
+    event_callback: Optional[Any] = None,
+    team_manager: Optional[Any] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    is_unattended: bool = False,
+    runtime_tool_context: Optional[Any] = None,
+) -> str:
     policy_denial = tool_denied_by_session_permissions(name)
     if policy_denial:
         return f"ERROR: {policy_denial}"

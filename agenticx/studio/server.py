@@ -112,6 +112,7 @@ from agenticx.studio.continuation import (
     live_reattach_enabled,
     prepare_continue,
 )
+from agenticx.studio.credentials_routes import register_credentials_routes
 from agenticx.studio.session_event_hub import BufferedEvent
 from agenticx.studio.session_manager import (
     SessionManager,
@@ -1505,6 +1506,7 @@ def create_studio_app() -> FastAPI:
     from agenticx.studio.command_routes import register_command_routes
 
     register_command_routes(app, _check_token)
+    register_credentials_routes(app, _check_token)
 
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
