@@ -17,6 +17,9 @@ type ChatMessage struct {
 	Role             string          `json:"role"`
 	Content          json.RawMessage `json:"content"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	// ToolCalls is kept verbatim so a relayed tool-call turn is not stripped.
+	// The gateway does not run tools itself.
+	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	CacheControl     json.RawMessage `json:"__cache_control,omitempty"`
