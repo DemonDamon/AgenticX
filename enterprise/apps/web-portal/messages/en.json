@@ -335,6 +335,10 @@
     "addAgentSection": "Add an agent",
     "addAgentFailed": "Failed to add the agent",
     "loadAgentsFailed": "Failed to load agents",
-    "noAgentsAvailable": "No agents available to add"
+    "noAgentsAvailable": "No agents available to add",
+    "toolStepsSummary": "Called {count} tools",
+    "toolStepOk": "Succeeded",
+    "toolStepFailed": "Failed",
+    "toolStepLine": "{server} · {tool} · {status} · {ms} ms"
   }
 }

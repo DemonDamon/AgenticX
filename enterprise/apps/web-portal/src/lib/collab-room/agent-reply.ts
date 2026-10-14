@@ -1,6 +1,8 @@
 import { ulid } from "ulid";
 import type { AuthContext } from "@agenticx/auth";
 import type { EnterpriseAgent } from "@agenticx/iam-core";
+import { resolveGatewayMcpBase } from "../gateway-mcp-client";
+import { runCloudAgentLoop } from "./agent-executor";
 import type { CollabRoomContext, CollabRoomMessage, CollabRoomStore, CollabSenderType } from "./types";
 import { requestMetaReply } from "./meta-reply";
 
@@ -11,6 +13,10 @@ export type AgentReplyDeps = {
   getAccessToken: () => Promise<string | null>;
   gatewayUrl: string;
   fetchImpl?: typeof fetch;
+  loadMcpServers?: (
+    tenantId: string,
+    capabilityIds: readonly string[],
+  ) => Promise<Array<{ id: string; name: string }>>;
 };
 
 const CONTENT_LIMIT = 4000;
@@ -97,7 +103,20 @@ async function resolveAgentReplyDeps(overrides?: Partial<AgentReplyDeps>): Promi
       process.env.GATEWAY_COMPLETIONS_URL ??
       "http://127.0.0.1:8088/v1/chat/completions",
     fetchImpl: overrides?.fetchImpl,
+    loadMcpServers: overrides?.loadMcpServers,
   };
+}
+
+function hasMcpCapability(capabilityIds: readonly string[]): boolean {
+  return capabilityIds.some((id) => id.trim().startsWith("mcp:"));
+}
+
+async function defaultLoadMcpServers(
+  tenantId: string,
+  capabilityIds: readonly string[],
+): Promise<Array<{ id: string; name: string }>> {
+  const { loadActiveMcpServers } = await import("./agent-mcp-servers");
+  return loadActiveMcpServers(tenantId, capabilityIds);
 }
 
 async function triggerCloudAgentReply(
@@ -116,36 +135,69 @@ async function triggerCloudAgentReply(
   }
   const [providerId, ...rest] = agent.model.split("/");
   const modelName = rest.join("/") || agent.model;
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${accessToken}`,
+    "x-tenant-id": session.tenantId,
+    "x-user-id": session.userId,
+    "x-dept-id": session.deptId ?? "",
+    "x-user-email": session.email,
+    "x-session-id": session.sessionId,
+    "x-agenticx-trace-id": ulid().toLowerCase(),
+    "x-agenticx-trace-step": "1",
+    "x-agenticx-trace-stage": "room.agent",
+    "x-agenticx-agent-id": agent.id,
+    ...(providerId ? { "x-agenticx-provider": providerId } : {}),
+  };
   try {
-    const reply = await deps.requestReply(buildCloudAgentPrompt(agent, history), {
-      gatewayUrl: deps.gatewayUrl,
+    const mcpServers = hasMcpCapability(agent.capabilityIds)
+      ? await (deps.loadMcpServers ?? defaultLoadMcpServers)(session.tenantId, agent.capabilityIds)
+      : [];
+    if (mcpServers.length === 0) {
+      const reply = await deps.requestReply(buildCloudAgentPrompt(agent, history), {
+        gatewayUrl: deps.gatewayUrl,
+        model: modelName,
+        fetchImpl: deps.fetchImpl,
+        headers,
+      });
+      await deps.appendMessage(ctx, roomId, {
+        senderType: "agent",
+        senderId: agent.id,
+        senderName: agent.displayName,
+        content: reply,
+        model: agent.model,
+        metadata: {
+          agent_slug: agent.slug,
+          runtime: "cloud",
+          reply_to: triggerMessage.id,
+        },
+      });
+      return;
+    }
+    const loop = await runCloudAgentLoop({
+      agent,
+      messages: buildCloudAgentPrompt(agent, history),
+      modelHeaders: headers,
       model: modelName,
-      fetchImpl: deps.fetchImpl,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
-        "x-tenant-id": session.tenantId,
-        "x-user-id": session.userId,
-        "x-dept-id": session.deptId ?? "",
-        "x-user-email": session.email,
-        "x-session-id": session.sessionId,
-        "x-agenticx-trace-id": ulid().toLowerCase(),
-        "x-agenticx-trace-step": "1",
-        "x-agenticx-trace-stage": "room.agent",
-        "x-agenticx-agent-id": agent.id,
-        ...(providerId ? { "x-agenticx-provider": providerId } : {}),
+      mcpServers,
+      deps: {
+        fetchImpl: deps.fetchImpl,
+        gatewayCompletionsUrl: deps.gatewayUrl,
+        gatewayMcpBase: resolveGatewayMcpBase(deps.gatewayUrl, process.env.GATEWAY_INTERNAL_BASE_URL),
+        requestReply: deps.requestReply,
       },
     });
     await deps.appendMessage(ctx, roomId, {
       senderType: "agent",
       senderId: agent.id,
       senderName: agent.displayName,
-      content: reply,
+      content: loop.content,
       model: agent.model,
       metadata: {
         agent_slug: agent.slug,
         runtime: "cloud",
         reply_to: triggerMessage.id,
+        ...(loop.steps.length > 0 ? { tool_steps: loop.steps } : {}),
       },
     });
   } catch (error) {

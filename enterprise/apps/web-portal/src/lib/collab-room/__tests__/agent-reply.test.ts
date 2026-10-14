@@ -83,6 +83,7 @@ describe("dispatchAgentMention", () => {
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.model).toBe("reply-model");
+    expect(body).not.toHaveProperty("tools");
     expect(body.messages[0]?.role).toBe("system");
     expect(body.messages[0]?.content).toContain(agent.systemPrompt);
     expect(body.messages[0]?.content).toContain("协作房间里的智能体「验收助手」");
@@ -148,5 +149,83 @@ describe("dispatchAgentMention", () => {
         content: "智能体「验收助手」需要员工桌面执行，桌面执行通道尚未接入",
       }),
     );
+  });
+
+  it("stores tool step summaries when the cloud agent calls a bound tool", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as {
+            method?: string;
+            tools?: unknown;
+            messages?: Array<{ role?: string }>;
+          })
+        : {};
+      if (url.includes("/streamable-http") && body.method === "tools/list") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: { tools: [{ name: "echo", inputSchema: { type: "object", properties: {} } }] },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/streamable-http") && body.method === "tools/call") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            result: { content: [{ type: "text", text: "hello-acp05" }] },
+          }),
+          { status: 200 },
+        );
+      }
+      const hasTool = body.messages?.some((item) => item.role === "tool") ?? false;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: hasTool
+                ? { content: "回显 hello-acp05" }
+                : {
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "call-1",
+                        type: "function",
+                        function: { name: "diag-echo__echo", arguments: "{\"message\":\"hello-acp05\"}" },
+                      },
+                    ],
+                  },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const append = vi.fn();
+    await dispatchAgentMention(
+      { tenantId: session.tenantId, userId: session.userId },
+      ROOM,
+      session,
+      { ...agent, capabilityIds: ["mcp:01ARZ3NDEKTSV4RRFFQ69G5FAV"] },
+      trigger,
+      {
+        listMessages: async () => [trigger],
+        appendMessage: append,
+        getAccessToken: async () => "tok",
+        gatewayUrl: "http://gateway.test/v1/chat/completions",
+        fetchImpl,
+        loadMcpServers: async () => [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", name: "diag-echo" }],
+      },
+    );
+    const saved = append.mock.calls[0]?.[2] as { content?: string; metadata?: Record<string, unknown> };
+    expect(saved.content).toBe("回显 hello-acp05");
+    const steps = saved.metadata?.tool_steps as Array<Record<string, unknown>>;
+    expect(steps).toHaveLength(1);
+    expect(Object.keys(steps[0] ?? {}).sort()).toEqual(["durationMs", "ok", "server", "tool"]);
+    expect(steps[0]).toMatchObject({ tool: "echo", server: "diag-echo", ok: true });
+    expect(JSON.stringify(saved.metadata)).not.toContain("hello-acp05");
   });
 });

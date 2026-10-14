@@ -34,6 +34,47 @@ function visibleMessageContent(content: string): string {
 
 type LoadErrorKey = "" | "revoked" | "openFailed";
 
+type AgentToolStep = { tool: string; server: string; ok: boolean; durationMs: number };
+
+function readAgentToolSteps(metadata: Record<string, unknown> | undefined): AgentToolStep[] {
+  const raw = metadata?.tool_steps;
+  if (!Array.isArray(raw)) return [];
+  const steps: AgentToolStep[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.tool !== "string" || typeof row.server !== "string") continue;
+    const duration = typeof row.durationMs === "number" && Number.isFinite(row.durationMs) ? row.durationMs : 0;
+    steps.push({ tool: row.tool, server: row.server, ok: row.ok === true, durationMs: duration });
+  }
+  return steps;
+}
+
+function AgentToolSteps({ metadata }: { metadata?: Record<string, unknown> }) {
+  const t = useTranslations("rooms");
+  const steps = readAgentToolSteps(metadata);
+  if (steps.length === 0) return null;
+  return (
+    <details className="mt-2 border-t border-border/70 pt-1">
+      <summary className="cursor-pointer text-[11px] opacity-80">
+        {t("toolStepsSummary", { count: steps.length })}
+      </summary>
+      <ul className="mt-1 space-y-0.5 text-[11px] opacity-80">
+        {steps.map((step, index) => (
+          <li key={`${step.server}:${step.tool}:${index}`}>
+            {t("toolStepLine", {
+              server: step.server,
+              tool: step.tool,
+              status: step.ok ? t("toolStepOk") : t("toolStepFailed"),
+              ms: step.durationMs,
+            })}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
   const t = useTranslations("rooms");
   const { messages, status, send } = useRoomStream(roomId);
@@ -156,6 +197,7 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
                         )}
                       </div>
                       <div className="whitespace-pre-wrap break-words">{visibleMessageContent(message.content)}</div>
+                      {kind === "agent" ? <AgentToolSteps metadata={message.metadata} /> : null}
                     </div>
                   </div>
                 );

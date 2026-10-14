@@ -335,6 +335,10 @@
     "addAgentSection": "添加智能体",
     "addAgentFailed": "添加智能体失败",
     "loadAgentsFailed": "智能体列表加载失败",
-    "noAgentsAvailable": "没有可添加的智能体"
+    "noAgentsAvailable": "没有可添加的智能体",
+    "toolStepsSummary": "调用了 {count} 个工具",
+    "toolStepOk": "成功",
+    "toolStepFailed": "失败",
+    "toolStepLine": "{server} · {tool} · {status} · {ms} 毫秒"
   }
 }

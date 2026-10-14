@@ -56,6 +56,10 @@ const REQUIRED_ROOMS_KEYS = [
   "addAgentFailed",
   "loadAgentsFailed",
   "noAgentsAvailable",
+  "toolStepsSummary",
+  "toolStepOk",
+  "toolStepFailed",
+  "toolStepLine",
 ] as const;
 
 describe("rooms i18n", () => {
