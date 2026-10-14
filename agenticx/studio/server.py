@@ -70,6 +70,7 @@ from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAuto
 from agenticx.runtime.confirm import is_protected_confirm
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.checkpoint import CheckpointStore
+from agenticx.runtime.enterprise_worker import EnterpriseWorker
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import (
@@ -113,6 +114,7 @@ from agenticx.studio.continuation import (
     prepare_continue,
 )
 from agenticx.studio.credentials_routes import register_credentials_routes
+from agenticx.studio.enterprise_worker_routes import register_enterprise_worker_routes
 from agenticx.studio.session_event_hub import BufferedEvent
 from agenticx.studio.session_manager import (
     SessionManager,
@@ -1172,6 +1174,21 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("resume_interrupted_sessions not started: %s", exc)
 
+        enterprise_worker_task: asyncio.Task[None] | None = None
+        try:
+            serve_port = os.environ.get("AGX_SERVE_PORT", "8000")
+            enterprise_worker = EnterpriseWorker(
+                local_base_url=f"http://127.0.0.1:{serve_port}",
+                desktop_token=os.environ.get("AGX_DESKTOP_TOKEN"),
+            )
+            enterprise_worker_task = asyncio.create_task(
+                enterprise_worker.run_forever()
+            )
+            app.state.enterprise_worker = enterprise_worker
+            app.state.enterprise_worker_task = enterprise_worker_task
+        except Exception as exc:
+            logger.warning("enterprise worker not started: %s", exc)
+
         yield
 
         # HA Plan D: graceful drain before shutdown — stop accepting new turns
@@ -1205,6 +1222,15 @@ def create_studio_app() -> FastAPI:
                 pass
             except Exception as exc:
                 logger.debug("resume task shutdown error: %s", exc)
+
+        if enterprise_worker_task is not None and not enterprise_worker_task.done():
+            enterprise_worker_task.cancel()
+            try:
+                await enterprise_worker_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.debug("enterprise worker shutdown error: %s", exc)
 
         if longrun_bg is not None:
             longrun_bg.cancel()
@@ -1507,6 +1533,7 @@ def create_studio_app() -> FastAPI:
 
     register_command_routes(app, _check_token)
     register_credentials_routes(app, _check_token)
+    register_enterprise_worker_routes(app, _check_token)
 
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
