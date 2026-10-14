@@ -15,6 +15,7 @@ const (
 	headerTraceStage    = "X-AgenticX-Trace-Stage"
 	headerSessionID     = "X-AgenticX-Session-Id"
 	headerDeploymentID  = "X-AgenticX-Deployment-Id"
+	headerAgentID       = "X-Agenticx-Agent-Id"
 	maxTraceStageLen    = 64
 	maxCorrelationIDLen = 128
 )
@@ -41,6 +42,7 @@ func enrichTraceFromRequest(identity requestIdentity, r *http.Request) requestId
 	if strings.TrimSpace(identity.SessionID) == "" {
 		identity.SessionID = sanitizeCorrelationID(r.Header.Get(headerSessionID))
 	}
+	identity.AgentID = sanitizeCorrelationID(r.Header.Get(headerAgentID))
 	return identity
 }
 

@@ -1477,6 +1477,7 @@ type requestIdentity struct {
 	TraceStep     int
 	TraceStage    string
 	DeploymentID  string
+	AgentID       string
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1489,6 +1490,7 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		UserID:     identity.UserID,
 		DeptID:     identity.DepartmentID,
 		APITokenID: apiTokenID,
+		AgentID:    identity.AgentID,
 		Role:       roleFromScopes(identity.Scopes),
 		Model:      model,
 	}

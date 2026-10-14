@@ -22,6 +22,7 @@ type RequestContext struct {
 	UserID     string
 	DeptID     string
 	APITokenID string
+	AgentID    string
 	Role       string
 	Model      string
 }
@@ -198,6 +199,9 @@ func selectRuleExtended(cfg Config, ctx RequestContext) Rule {
 		if v, ok := cfg.APITokens[ctx.APITokenID]; ok {
 			return sanitizeRuleExtended(v)
 		}
+	}
+	if agentRule, _, ok := appliedAgentRule(cfg, ctx); ok {
+		return sanitizeRuleExtended(agentRule)
 	}
 	if v, ok := cfg.Users[ctx.UserID]; ok {
 		return sanitizeRuleExtended(v)

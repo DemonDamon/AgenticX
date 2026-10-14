@@ -47,6 +47,7 @@ type Config struct {
 	Users       map[string]Rule `json:"users"`
 	Departments map[string]Rule `json:"departments"`
 	APITokens   map[string]Rule `json:"apiTokens"`
+	Agents      map[string]Rule `json:"agents"`
 }
 
 type usageRow struct {
@@ -141,6 +142,10 @@ func (t *Tracker) CheckAndAddContext(ctx RequestContext, tokens int64, ledgerEve
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cfg := t.loadConfig()
+	if agentRule, subject, ok := appliedAgentRule(cfg, ctx); ok && agentRule.MonthlyTokens > 0 {
+		month := time.Now().UTC().Format("2006-01")
+		return t.checkAndAddUserLocked(agentRule, subject, month, tokens)
+	}
 	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
 	if rule.MonthlyTokens <= 0 {
 		return Decision{Allowed: true, Rule: rule, Description: "no quota"}
@@ -273,6 +278,10 @@ func (t *Tracker) RollbackContext(ctx RequestContext, tokens int64) bool {
 		return true
 	}
 	cfg := t.loadConfig()
+	if agentRule, subject, ok := appliedAgentRule(cfg, ctx); ok && agentRule.MonthlyTokens > 0 {
+		month := time.Now().UTC().Format("2006-01")
+		return t.rollbackUserLocked(subject, month, tokens)
+	}
 	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
 	month := time.Now().UTC().Format("2006-01")
 	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
@@ -424,7 +433,22 @@ func (t *Tracker) normalizeConfig(cfg Config) Config {
 	if cfg.APITokens == nil {
 		cfg.APITokens = map[string]Rule{}
 	}
+	if cfg.Agents == nil {
+		cfg.Agents = map[string]Rule{}
+	}
 	return cfg
+}
+
+func appliedAgentRule(cfg Config, ctx RequestContext) (Rule, string, bool) {
+	id := strings.TrimSpace(ctx.AgentID)
+	if id == "" || cfg.Agents == nil {
+		return Rule{}, "", false
+	}
+	rule, ok := cfg.Agents[id]
+	if !ok {
+		return Rule{}, "", false
+	}
+	return sanitizeRule(rule), "agent:" + id, true
 }
 
 func selectRule(cfg Config, userID, deptID, role, model string) Rule {

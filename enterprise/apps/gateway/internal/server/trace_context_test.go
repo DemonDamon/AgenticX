@@ -25,9 +25,13 @@ func TestEnrichTraceFromRequest(t *testing.T) {
 	req.Header.Set(headerTraceID, "trace_demo")
 	req.Header.Set(headerTraceStep, "3")
 	req.Header.Set(headerTraceStage, "dr.lane.expand")
+	req.Header.Set("x-agenticx-agent-id", "01M4WAPX70878QWYQB0J4570A8")
 	id := enrichTraceFromRequest(requestIdentity{TenantID: "t1"}, req)
 	if id.TraceID != "trace_demo" || id.TraceStep != 3 || id.TraceStage != "dr.lane.expand" {
 		t.Fatalf("unexpected trace context: %+v", id)
+	}
+	if id.AgentID != "01M4WAPX70878QWYQB0J4570A8" {
+		t.Fatalf("agent id not read from header: %+v", id)
 	}
 }
 
