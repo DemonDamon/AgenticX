@@ -22,6 +22,7 @@ import {
   StatePill,
 } from "../src/components/PickerSheet";
 import { useGateway } from "../src/hooks/useGateway";
+import { AnimatedBrandMark } from "../src/ui/AnimatedBrandMark";
 import { describeError } from "../src/lib/errors";
 import type { MobileStatus, MobileWorkspace, ModelsResponse } from "../src/api/types";
 import { getPreferredWorkspace, setPreferredWorkspace } from "../src/store";
@@ -144,6 +145,13 @@ export default function Index() {
       .getWorkspaces()
       .then((resp) => {
         if (!cancelled) setWorkspaces(resp.workspaces);
+      })
+      .catch(() => {});
+    // 模型清单也静默拉一次，让 pill 直接显示当前活动模型（失败静默）
+    void client
+      .getModels()
+      .then((resp) => {
+        if (!cancelled) setModels(resp);
       })
       .catch(() => {});
     return () => {
@@ -282,7 +290,10 @@ export default function Index() {
 
         {/* 大标语 */}
         <View style={styles.hero}>
-          <Text style={styles.heroTitle}>Hey，我是 Near</Text>
+          <AnimatedBrandMark size={116} style={styles.heroLogo} />
+          <Text style={styles.heroTitle} numberOfLines={1}>
+            Hey，我是 Near
+          </Text>
           <Text style={styles.heroSub}>桌面智能体，随时待命</Text>
           <View style={styles.heroStatus}>
             <View
@@ -529,14 +540,19 @@ const styles = StyleSheet.create({
   hero: {
     flex: 1,
     justifyContent: "center",
-    paddingHorizontal: spacing.xl + 4,
+    alignItems: "center",
+    paddingHorizontal: spacing.lg + 4,
     gap: spacing.xs,
+  },
+  heroLogo: {
+    marginBottom: spacing.md,
   },
   heroTitle: {
     fontSize: 34,
     lineHeight: 44,
     fontWeight: fontWeight.bold,
     color: color.textPrimary,
+    textAlign: "center",
   },
   heroSub: {
     fontSize: fontSize.bodyLg,
