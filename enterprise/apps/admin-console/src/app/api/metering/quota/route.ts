@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../lib/admin-auth";
-import { getQuotaConfig, quotaFilePath, setQuotaConfig } from "../../../../lib/token-quota-store";
+import { getQuotaConfig, setQuotaConfig } from "../../../../lib/token-quota-store";
 
 export async function GET() {
   const guard = await requireAdminScope(["metering:read"]);
@@ -8,7 +8,7 @@ export async function GET() {
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { quota: await getQuotaConfig(), file: quotaFilePath() },
+    data: { quota: await getQuotaConfig() },
   });
 }
 
@@ -25,6 +25,6 @@ export async function PUT(request: Request) {
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { quota, file: quotaFilePath() },
+    data: { quota },
   });
 }
