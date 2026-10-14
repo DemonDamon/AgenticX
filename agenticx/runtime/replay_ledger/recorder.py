@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from agenticx.runtime.agent_runtime import _tool_result_status
+from agenticx.runtime.enterprise_trace import enqueue_completed_run
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.replay_ledger.contracts import (
     EVENT_TYPES,
@@ -572,6 +573,12 @@ class ReplayLedgerRecorder:
                 session=self._last_session,
             )
             self.store.close_run(self.current_run_id, status, time.time())
+            run_id = self.current_run_id
+            if run_id is not None:
+                try:
+                    enqueue_completed_run(self.store, run_id)
+                except Exception:
+                    logger.debug("enterprise trace enqueue failed", exc_info=True)
             self._finished = True
         except Exception:
             self._degrade("recorder_finish_failed")
