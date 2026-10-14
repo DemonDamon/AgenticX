@@ -58,4 +58,13 @@ describe("validateAgentInput", () => {
       AgentValidationError,
     );
   });
+
+  it("accepts an http knowledge search address and rejects other schemes", () => {
+    expect(() =>
+      validateAgentInput({ ...valid, metadata: { knowledgeSearchUrl: "https://kb.example/search" } }),
+    ).not.toThrow();
+    expect(() =>
+      validateAgentInput({ ...valid, metadata: { knowledgeSearchUrl: "file:///tmp/notes" } }),
+    ).toThrow(AgentValidationError);
+  });
 });

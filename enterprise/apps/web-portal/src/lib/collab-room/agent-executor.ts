@@ -5,6 +5,7 @@ import {
   type GatewayMcpCallResult,
   type GatewayMcpTool,
 } from "../gateway-mcp-client";
+import { KNOWLEDGE_TOOL, knowledgeSearchUrl, searchKnowledge } from "./agent-knowledge";
 import { requestMetaReply } from "./meta-reply";
 
 export const MAX_TOOL_ROUNDS = 6;
@@ -30,7 +31,12 @@ type ChatTool = {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 };
 
-type BoundTool = { server: string; tool: string; client: GatewayMcpClient };
+type BoundTool = {
+  server: string;
+  tool: string;
+  client: GatewayMcpClient | null;
+  knowledgeUrl?: string;
+};
 
 type ParsedToolCall = { id: string; name: string; arguments: string };
 
@@ -85,6 +91,27 @@ export async function runCloudAgentLoop(params: {
     resolveGatewayMcpBase(completionsUrl, process.env.GATEWAY_INTERNAL_BASE_URL);
   const reply = params.deps?.requestReply ?? requestMetaReply;
   const { tools, registry } = await collectTools(params.mcpServers, gatewayBase, params.modelHeaders, fetchImpl);
+  const knowledgeUrl = knowledgeSearchUrl(params.agent);
+  if (knowledgeUrl) {
+    registry.set(KNOWLEDGE_TOOL, {
+      server: "knowledge",
+      tool: KNOWLEDGE_TOOL,
+      client: null,
+      knowledgeUrl,
+    });
+    tools.push({
+      type: "function",
+      function: {
+        name: KNOWLEDGE_TOOL,
+        description: "检索这个智能体绑定的知识库",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    });
+  }
   if (tools.length === 0) {
     const content = await reply(params.messages, {
       gatewayUrl: completionsUrl,
@@ -126,7 +153,7 @@ export async function runCloudAgentLoop(params: {
       })),
     });
     for (const call of turn.toolCalls) {
-      const outcome = await runToolCall(call, registry);
+      const outcome = await runToolCall(call, registry, fetchImpl);
       steps.push(outcome.step);
       messages.push({ role: "tool", content: outcome.text, tool_call_id: call.id });
     }
@@ -195,6 +222,7 @@ async function collectTools(
 async function runToolCall(
   call: ParsedToolCall,
   registry: Map<string, BoundTool>,
+  fetchImpl: typeof fetch,
 ): Promise<{ step: AgentStep; text: string }> {
   const bound = registry.get(call.name);
   const started = Date.now();
@@ -205,8 +233,13 @@ async function runToolCall(
     const parsed = parseToolArguments(call.arguments);
     if (!parsed.ok) {
       result = { ok: false, text: INVALID_ARGS };
-    } else {
+    } else if (bound.knowledgeUrl) {
+      const query = typeof parsed.value.query === "string" ? parsed.value.query : "";
+      result = await searchKnowledge(bound.knowledgeUrl, query, fetchImpl);
+    } else if (bound.client) {
       result = await bound.client.callTool(bound.tool, parsed.value);
+    } else {
+      result = { ok: false, text: UNKNOWN_TOOL };
     }
   }
   return {

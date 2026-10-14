@@ -59,6 +59,7 @@ type AgentRecord = {
   assignmentKeys: string[];
   workerKeys: string[];
   status: AgentStatus;
+  metadata?: Record<string, unknown>;
 };
 
 type ModelOption = { id: string; label: string };
@@ -71,6 +72,8 @@ type FormState = {
   model: string;
   runtime: AgentRuntime;
   systemPrompt: string;
+  knowledgeSearchUrl: string;
+  metadata: Record<string, unknown>;
   capabilityIds: string[];
   assignment: AssignmentDraft;
   workerAssignment: AssignmentDraft;
@@ -100,6 +103,8 @@ const EMPTY_FORM: FormState = {
   model: "",
   runtime: "cloud",
   systemPrompt: "",
+  knowledgeSearchUrl: "",
+  metadata: {},
   capabilityIds: [],
   assignment: EMPTY_ASSIGNMENT,
   workerAssignment: EMPTY_WORKER_ASSIGNMENT,
@@ -254,6 +259,9 @@ export default function AgentsSection() {
       model: agent.model,
       runtime: isRuntime(agent.runtime) ? agent.runtime : "cloud",
       systemPrompt: agent.systemPrompt ?? "",
+      knowledgeSearchUrl:
+        typeof agent.metadata?.knowledgeSearchUrl === "string" ? agent.metadata.knowledgeSearchUrl : "",
+      metadata: { ...(agent.metadata ?? {}) },
       capabilityIds: [...agent.capabilityIds],
       assignment: fromAssignmentKeys(agent.assignmentKeys),
       workerAssignment: fromAssignmentKeys(agent.workerKeys ?? []),
@@ -273,6 +281,10 @@ export default function AgentsSection() {
       model: form.model,
       runtime: form.runtime,
       systemPrompt: form.systemPrompt,
+      metadata: {
+        ...form.metadata,
+        knowledgeSearchUrl: form.knowledgeSearchUrl.trim(),
+      },
       capabilityIds: form.capabilityIds,
       assignmentKeys: toAssignmentKeys(form.assignment),
       workerKeys: toAssignmentKeys(form.workerAssignment),
@@ -486,6 +498,15 @@ export default function AgentsSection() {
                   maxLength={16000}
                   value={form.systemPrompt}
                   onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="agent-knowledge">{t("form.knowledgeSearchUrl")}</Label>
+                <Input
+                  id="agent-knowledge"
+                  value={form.knowledgeSearchUrl}
+                  placeholder="https://"
+                  onChange={(event) => setForm({ ...form, knowledgeSearchUrl: event.target.value })}
                 />
               </div>
               <div className="space-y-2">

@@ -192,6 +192,7 @@
           "modelEmpty": "No enabled models yet",
           "runtime": "Runtime",
           "systemPrompt": "System prompt",
+          "knowledgeSearchUrl": "Knowledge search URL",
           "capabilities": "Capabilities",
           "capabilitiesHint": "Bind registered skills and MCP servers.",
           "noSkill": "No skills registered yet",

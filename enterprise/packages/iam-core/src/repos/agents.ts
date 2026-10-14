@@ -238,6 +238,23 @@ export function validateAgentInput(input: AgentInput): void {
       if (!String(raw ?? "").trim()) throw new AgentValidationError("可承接执行的员工不合法");
     }
   }
+  assertKnowledgeSearchUrl(input.metadata);
+}
+
+function assertKnowledgeSearchUrl(metadata: unknown): void {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return;
+  const raw = (metadata as Record<string, unknown>).knowledgeSearchUrl;
+  if (raw === undefined || raw === null || raw === "") return;
+  if (typeof raw !== "string") throw new AgentValidationError("知识库地址不合法");
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    throw new AgentValidationError("知识库地址不合法");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new AgentValidationError("知识库地址不合法");
+  }
 }
 
 function normalizeForWrite(input: AgentInput) {

@@ -192,6 +192,7 @@
           "modelEmpty": "还没有已启用的模型",
           "runtime": "运行方式",
           "systemPrompt": "系统提示词",
+          "knowledgeSearchUrl": "知识库地址",
           "capabilities": "能力",
           "capabilitiesHint": "可绑定已登记的 Skill 与 MCP。",
           "noSkill": "还没有登记 Skill",

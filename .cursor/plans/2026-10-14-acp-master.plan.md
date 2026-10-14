@@ -150,5 +150,4 @@ Out of scope（本轮不做）：Go 网关内的 Agent Loop；Agent 级配额执
 
 ## 6. 待办（需单独开计划）
 
-- context-service 接入门户，做成 Agent 可绑定的知识库连接。
 - 设置页 `workspace`、`hooks` 在 `SETTINGS_TAB_IDS` 里，但没有对应面板，不能加进左侧导航。`email` 已有面板，导航入口见 acp-09。
