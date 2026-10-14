@@ -100,8 +100,8 @@ Once up:
 
 Login accounts (passwords set interactively by `bootstrap.sh`, stored in `.env.local`):
 
-- Admin: `owner@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
-- Portal: `owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
+- Admin: `admin@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
+- Portal: `admin@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
   - `staff@agenticx.local` returns `Invalid credentials` by default — that user is not in the seed; create it in admin or via signup first
 
 > Default `owner` already has `workspace:chat`. Older seed environments may auto-heal this on HMR; no manual DB edit is usually required.

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../lib/admin-auth";
 import { fetchGatewayPlugins, reloadGatewayPlugins } from "../../../../lib/gateway-ops-store";
 import { requireGatewayInternalToken } from "../../../../lib/gateway-internal-token";
+import { gatewayInternalBase } from "../../../../lib/gateway-internal-base";
 
 export async function GET() {
   const auth = await requireAdminScope(["provider:read"]);
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     if (!name) {
       return NextResponse.json({ code: "40000", message: "name required" }, { status: 400 });
     }
-    const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+    const base = gatewayInternalBase();
     const token = requireGatewayInternalToken();
     const upstream = new FormData();
     upstream.set("name", name);

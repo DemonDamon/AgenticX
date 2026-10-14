@@ -9,6 +9,7 @@ import { ulid } from "ulid";
 
 import { decryptProviderApiKey, encryptProviderApiKey } from "../../provider-api-key-crypto";
 import { getGatewayInternalToken, requireGatewayInternalToken } from "../../gateway-internal-token";
+import { gatewayInternalBase } from "../../gateway-internal-base";
 
 export type ChannelStatus = "active" | "disabled";
 
@@ -229,7 +230,7 @@ export async function deleteChannel(id: string): Promise<void> {
 }
 
 export async function fetchGatewayKeypoolStats(channelId: string, keyRefs: string[]): Promise<unknown[]> {
-  const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+  const base = gatewayInternalBase();
   const token = getGatewayInternalToken();
   if (!token || !channelId) return [];
   const qs = new URLSearchParams({ channel_id: channelId, key_refs: keyRefs.join(",") });
@@ -243,7 +244,7 @@ export async function fetchGatewayKeypoolStats(channelId: string, keyRefs: strin
 }
 
 export async function resetGatewayKeypoolCooldown(channelId: string, keyRef: string): Promise<void> {
-  const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+  const base = gatewayInternalBase();
   const token = requireGatewayInternalToken();
   const res = await fetch(`${base.replace(/\/$/, "")}/internal/keypool/reset`, {
     method: "POST",
@@ -254,7 +255,7 @@ export async function resetGatewayKeypoolCooldown(channelId: string, keyRef: str
 }
 
 export async function fetchGatewayChannelStats(): Promise<Record<string, unknown>> {
-  const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+  const base = gatewayInternalBase();
   const token = getGatewayInternalToken();
   if (!token) return {};
   const res = await fetch(`${base.replace(/\/$/, "")}/internal/channel-stats`, {

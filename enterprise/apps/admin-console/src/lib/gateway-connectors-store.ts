@@ -4,8 +4,9 @@
  */
 
 import { requireGatewayInternalToken } from "./gateway-internal-token";
+import { gatewayInternalBase } from "./gateway-internal-base";
 
-const base = () => process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+const base = () => gatewayInternalBase();
 
 function requiredTenantId(): string {
   const t = process.env.DEFAULT_TENANT_ID?.trim();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { evictCachePrefix, readCacheConfig, writeCacheConfig, type GatewayCacheConfig } from "../../../../lib/gateway-cache-store";
 import { requireAdminScope } from "../../../../lib/admin-auth";
 import { getGatewayInternalToken } from "../../../../lib/gateway-internal-token";
+import { gatewayInternalBase } from "../../../../lib/gateway-internal-base";
 
 export async function GET() {
   const guard = await requireAdminScope(["provider:read"]);
@@ -24,7 +25,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
   await writeCacheConfig(body);
-  const gatewayBase = process.env.GATEWAY_INTERNAL_URL?.trim() || "http://127.0.0.1:8080";
+  const gatewayBase = gatewayInternalBase();
   const token = getGatewayInternalToken();
   if (token) {
     await fetch(`${gatewayBase}/internal/cache/reload`, {

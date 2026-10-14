@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { requireGatewayInternalToken } from "./gateway-internal-token";
+import { gatewayInternalBase } from "./gateway-internal-base";
 
 export type GatewayCacheConfig = {
   l1_enabled: boolean;
@@ -47,7 +48,7 @@ export async function writeCacheConfig(config: GatewayCacheConfig): Promise<void
 }
 
 export async function evictCachePrefix(prefix: string): Promise<void> {
-  const gatewayBase = process.env.GATEWAY_INTERNAL_URL?.trim() || "http://127.0.0.1:8080";
+  const gatewayBase = gatewayInternalBase();
   const token = requireGatewayInternalToken();
   const res = await fetch(`${gatewayBase}/internal/cache/evict`, {
     method: "POST",

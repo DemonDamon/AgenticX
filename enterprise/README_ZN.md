@@ -98,8 +98,8 @@ bash scripts/start-dev.sh
 
 登录账号（`bootstrap.sh` 交互设置的密码，落在 `.env.local`）：
 
-- 后台：`owner@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
-- 前台：`owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
+- 后台：`admin@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
+- 前台：`admin@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
   - 如果输入 `staff@agenticx.local` 会报 `Invalid credentials` —— 默认种子里没有这个人，需要先在后台或注册页创建
 
 > 默认 `owner` 已自带 `workspace:chat` 权限；旧种子环境若 HMR 命中也会被自动补齐，无需手动改库。
