@@ -44,6 +44,12 @@ vi.mock("../../../../../../lib/auth-runtime", () => ({
 vi.mock("../../../../../../lib/session", () => ({
   ACCESS_COOKIE: "agx_access",
   REFRESH_COOKIE: "agx_refresh",
+  isAuthCookieSecure: () => {
+    const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+    if (configured === "true") return true;
+    if (configured === "false") return false;
+    return process.env.NODE_ENV === "production";
+  },
 }));
 
 const ENV_BACKUP = { ...process.env };
