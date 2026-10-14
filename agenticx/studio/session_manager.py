@@ -1356,6 +1356,8 @@ class SessionManager:
                 ),
                 "provider": str(getattr(managed.studio_session, "provider_name", "") or ""),
                 "model": str(getattr(managed.studio_session, "model_name", "") or ""),
+                # 手机端「当前活跃项目」列表数据源：会话级工作目录
+                "workspace_dir": str(getattr(managed.studio_session, "workspace_dir", "") or ""),
                 "session_mode": normalize_session_mode(
                     getattr(managed.studio_session, "session_mode", None)
                 ),
@@ -2612,6 +2614,8 @@ class SessionManager:
                 metadata = {
                     "provider": session.provider_name or "",
                     "model": session.model_name or "",
+                    # 手机端「当前活跃项目」：磁盘恢复的会话也要带上工作目录
+                    "workspace_dir": str(getattr(session, "workspace_dir", "") or ""),
                     "chat_messages": len(session.chat_history),
                     "artifacts": len(session.artifacts),
                     "session_name": getattr(managed_ref, "session_name", None),
@@ -3433,6 +3437,7 @@ class SessionManager:
                 "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
                 "provider": str(metadata.get("provider", "") or ""),
                 "model": str(metadata.get("model", "") or ""),
+                "workspace_dir": str(metadata.get("workspace_dir", "") or ""),
             }
             parent_sid = self._resolve_listed_parent_session_id(sid, metadata)
             if parent_sid:
@@ -3502,6 +3507,7 @@ class SessionManager:
                     "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
                     "provider": str(fs_meta.get("provider", "") or ""),
                     "model": str(fs_meta.get("model", "") or ""),
+                    "workspace_dir": str(fs_meta.get("workspace_dir", "") or ""),
                 }
                 parent_sid = self._resolve_listed_parent_session_id(sid, fs_meta)
                 if parent_sid:
@@ -3749,8 +3755,15 @@ class SessionManager:
         managed: ManagedSession,
         *,
         avatar_workspace_dir: str | None = None,
+        explicit_workspace_dir: str | None = None,
     ) -> None:
-        """Set session workspace_dir from avatar override, group share, or Meta default."""
+        """Set session workspace_dir from an explicit pick, avatar override, group share, or Meta default."""
+        explicit_raw = (explicit_workspace_dir or "").strip()
+        if explicit_raw:
+            # 手机端「当前活跃项目」显式选择：优先级最高，直接落到指定目录
+            managed.studio_session.workspace_dir = str(Path(explicit_raw).expanduser())
+            self.rebind_default_taskspace_to_workspace(managed)
+            return
         avatar_raw = (avatar_workspace_dir or "").strip()
         avatar_id_raw = str(getattr(managed, "avatar_id", "") or "").strip()
         if avatar_raw:

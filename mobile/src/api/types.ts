@@ -126,6 +126,39 @@ export interface CreateSessionResponse {
   [key: string]: unknown;
 }
 
+/** provider 配置条目（studio /api/config/providers 透传，弱类型兜底） */
+export interface ProviderCatalogEntry {
+  displayName?: string;
+  /** 桌面端配置里的下划线写法（display_name） */
+  display_name?: string;
+  enabled?: boolean;
+  /** 可见模型短名列表 */
+  models?: string[];
+  /** 单模型厂商的 legacy 字段 */
+  model?: string;
+  [key: string]: unknown;
+}
+
+/** 模型清单 + 当前活动模型（手机端模型选择器） */
+export interface ModelsResponse {
+  ok?: boolean;
+  providers: Record<string, ProviderCatalogEntry>;
+  defaultProvider?: string;
+  activeProvider?: string;
+  activeModel?: string;
+  [key: string]: unknown;
+}
+
+/** 候选工作目录（手机端「当前活跃项目」选择器） */
+export interface MobileWorkspace {
+  name: string;
+  path: string;
+}
+
+export interface WorkspacesResponse {
+  workspaces: MobileWorkspace[];
+}
+
 export interface ToolRegistryItem {
   name: string;
   description: string;

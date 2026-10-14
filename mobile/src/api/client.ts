@@ -9,12 +9,14 @@ import type {
   MobileMessage,
   MobileSession,
   MobileStatus,
+  ModelsResponse,
   SendRequest,
   SendResponse,
   SessionContextUsage,
   SessionsResponse,
   ToolsResponse,
   UnbindResponse,
+  WorkspacesResponse,
 } from "./types";
 
 /** 非 2xx 统一错误：status 供调用方分类（409/404/401...），detail 给用户看。 */
@@ -274,6 +276,40 @@ export class GatewayClient {
   /** MCP server 连接状态（只读）。 */
   async getMcpServers(): Promise<McpServersResponse> {
     return await this.request<McpServersResponse>("GET", "/api/mobile/mcp");
+  }
+
+  /** 模型清单 + 当前活动模型（模型选择器数据源）。 */
+  async getModels(): Promise<ModelsResponse> {
+    const resp = await this.request<ModelsResponse>("GET", "/api/mobile/models");
+    const providers =
+      resp !== null && typeof resp === "object" && typeof resp.providers === "object"
+        ? resp.providers
+        : {};
+    return { ...resp, providers };
+  }
+
+  /** 切换活动模型（写入桌面端配置，影响后续新建会话）。 */
+  async setActiveModel(provider: string, model: string): Promise<{ ok: boolean }> {
+    return await this.request<{ ok: boolean }>("PUT", "/api/mobile/models/active", {
+      provider,
+      model,
+    });
+  }
+
+  /** 候选工作目录列表（「当前活跃项目」选择器数据源）。 */
+  async getWorkspaces(): Promise<WorkspacesResponse> {
+    const resp = await this.request<WorkspacesResponse>("GET", "/api/mobile/workspaces");
+    const rows = (resp as { workspaces?: unknown[] }).workspaces ?? [];
+    const workspaces = rows
+      .filter(
+        (w): w is { name?: unknown; path: string } =>
+          typeof w === "object" && w !== null && typeof (w as { path?: unknown }).path === "string",
+      )
+      .map((w) => ({
+        name: typeof w.name === "string" && w.name.length > 0 ? w.name : w.path,
+        path: w.path,
+      }));
+    return { workspaces };
   }
 
   private async request<T>(

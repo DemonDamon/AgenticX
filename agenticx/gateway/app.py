@@ -534,6 +534,51 @@ def create_gateway_app(
             raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
         return JSONResponse({"servers": reply.get("data")})
 
+    @app.get("/api/mobile/models")
+    async def api_mobile_models(request: Request) -> JSONResponse:
+        """模型清单 + 当前活动模型（手机端模型选择器）。"""
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "models.list", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        data = reply.get("data")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="models reply not an object")
+        return JSONResponse(data)
+
+    @app.put("/api/mobile/models/active")
+    async def api_mobile_models_set_active(request: Request) -> JSONResponse:
+        """切换活动模型（手机端模型选择器写入）。"""
+        did = _require_mobile_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid json")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        reply = await _bridge_device_rpc(
+            did,
+            "model.set_active",
+            {
+                "provider": str(body.get("provider") or "").strip(),
+                "model": str(body.get("model") or "").strip(),
+            },
+        )
+        if not reply.get("ok"):
+            raise HTTPException(
+                status_code=400, detail=str(reply.get("error") or "mobile rpc failed")
+            )
+        return JSONResponse({"ok": True, **(reply.get("data") or {})})
+
+    @app.get("/api/mobile/workspaces")
+    async def api_mobile_workspaces(request: Request) -> JSONResponse:
+        """候选工作目录列表（手机端「当前活跃项目」选择器）。"""
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "workspaces.list", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"workspaces": reply.get("data")})
+
     @app.get("/api/mobile/sessions/{session_id}/messages")
     async def api_mobile_session_messages(request: Request) -> JSONResponse:
         sid = request.path_params["session_id"]

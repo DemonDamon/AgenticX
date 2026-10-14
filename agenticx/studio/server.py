@@ -6220,6 +6220,7 @@ def create_studio_app() -> FastAPI:
         avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
         provider_override = str(payload.get("provider", "") or "").strip() or None
         model_override = str(payload.get("model", "") or "").strip() or None
+        workspace_override = str(payload.get("workspace_dir", "") or "").strip()
         provider = (
             provider_override
             if provider_override
@@ -6254,7 +6255,13 @@ def create_studio_app() -> FastAPI:
             if isinstance(scratch, dict) and PHASE_SCRATCH_KEY not in scratch:
                 scratch[PHASE_SCRATCH_KEY] = PHASE_EXPLORE
             ensure_code_dev_workflow_skill(managed.studio_session)
-        if avatar_cfg and avatar_cfg.workspace_dir:
+        if workspace_override:
+            # 手机端「当前活跃项目」显式选择：直接落到指定工作目录
+            manager.apply_session_workspace_dir(
+                managed,
+                explicit_workspace_dir=workspace_override,
+            )
+        elif avatar_cfg and avatar_cfg.workspace_dir:
             manager.apply_session_workspace_dir(
                 managed,
                 avatar_workspace_dir=avatar_cfg.workspace_dir,
