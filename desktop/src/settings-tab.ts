@@ -27,11 +27,9 @@ export const SETTINGS_TAB_IDS = [
   "knowledge",
   "data_sources",
   "memory",
-  "hooks",
   "automation",
   "voice",
   "email",
-  "workspace",
   "favorites",
   "server",
 ] as const;
