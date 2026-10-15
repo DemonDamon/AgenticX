@@ -11,9 +11,13 @@ import { AccessibilityInfo, Animated, Easing, StyleProp, View, ViewStyle } from 
 // 桌面端标定的脸部坐标（viewBox 160×160），两只眼睛中心点
 const FACE_LEFT = { cx: 106, cy: 104 } as const;
 const FACE_RIGHT = { cx: 128, cy: 92 } as const;
-// restSoft 眼型
-const EYE_RX = 5.8;
-const EYE_RY = 11.6;
+// 眼型：圆短椭圆，随立方体右侧面透视左倾（左眼更斜）
+const EYE_RX = 6.0;
+const EYE_RY = 10.2;
+const EYES = [
+  { face: FACE_LEFT, rotate: -14 },
+  { face: FACE_RIGHT, rotate: -6 },
+] as const;
 // 无眼脸 PNG 在 viewBox 中的摆放盒（与桌面 LOGO_MARK_BOX 一致）
 const MARK_BOX = { x: 13.4, y: 8, width: 133.2, height: 144 } as const;
 
@@ -139,10 +143,10 @@ export function AnimatedBrandMark({
     };
   }, [still, gazeX, gazeY]);
 
-  const eye = (face: { cx: number; cy: number }) => ({
+  const eye = (eyeSpec: (typeof EYES)[number]) => ({
     position: "absolute" as const,
-    left: (face.cx - EYE_RX) * k,
-    top: (face.cy - EYE_RY) * k,
+    left: (eyeSpec.face.cx - EYE_RX) * k,
+    top: (eyeSpec.face.cy - EYE_RY) * k,
     width: EYE_RX * 2 * k,
     height: EYE_RY * 2 * k,
     borderRadius: EYE_RX * k,
@@ -191,20 +195,21 @@ export function AnimatedBrandMark({
           resizeMode: "contain",
         }}
       />
-      {[FACE_LEFT, FACE_RIGHT].map((face, index) => (
+      {EYES.map((eyeSpec, index) => (
         <Animated.View
           key={index}
           style={[
-            eye(face),
-            still
-              ? null
-              : {
-                  transform: [
+            eye(eyeSpec),
+            {
+              transform: still
+                ? [{ rotate: `${eyeSpec.rotate}deg` }]
+                : [
                     { translateX: gazeX },
                     { translateY: gazeY },
+                    { rotate: `${eyeSpec.rotate}deg` },
                     { scaleY: lid },
                   ],
-                },
+            },
           ]}
         />
       ))}
