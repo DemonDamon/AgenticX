@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../../src/api/client";
-import type { SessionContextUsage } from "../../src/api/types";
+import type { SendRequest, SessionContextUsage } from "../../src/api/types";
 import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
 import { TurnProcessCard } from "../../src/components/TurnProcessCard";
 import { useGateway } from "../../src/hooks/useGateway";
@@ -25,6 +25,7 @@ import {
   splitStreamThinking,
   type ChatEntry,
 } from "../../src/lib/messages";
+import { takePendingSend, type PendingSend } from "../../src/store";
 import { brand, color, fontSize, fontWeight, radius, spacing } from "../../src/ui/theme";
 
 function PendingBubble() {
@@ -294,8 +295,14 @@ export default function SessionMessagesScreen() {
   );
 
   const handleSend = useCallback(
-    async (text: string): Promise<boolean> => {
-      if (text === "" || sending || client === null) return false;
+    async (text: string, extra?: PendingSend | null): Promise<boolean> => {
+      const hasExtra =
+        extra !== undefined &&
+        extra !== null &&
+        (extra.image_inputs.length > 0 ||
+          extra.skill_slugs.length > 0 ||
+          extra.doc_refs.length > 0);
+      if ((text === "" && !hasExtra) || sending || client === null) return false;
       setSending(true);
       const pendingKey = `local-pending-${Date.now()}`;
       // 乐观回显：发送瞬间即上屏用户消息，不等服务端落盘/回合结束才显示。
@@ -305,7 +312,15 @@ export default function SessionMessagesScreen() {
       const pendingEntry: ChatEntry = { kind: "pending", key: pendingKey };
       setEntries((prev) => [
         ...(prev ?? []),
-        { kind: "user", key: localUserKey, text },
+        {
+          kind: "user",
+          key: localUserKey,
+          text: text === ""
+            ? extra !== undefined && extra !== null && extra.image_inputs.length > 0
+              ? "（图片）"
+              : "（文档）"
+            : text,
+        },
         pendingEntry,
       ]);
       // 视口可能停在历史区：发送后滚回最新（inverted 列表 offset 0 即最新端）
@@ -398,7 +413,13 @@ export default function SessionMessagesScreen() {
           });
       }, 2000);
       try {
-        const resp = await client.sendMessage(id, { text, sender_name: "Near 手机" });
+        const payload: SendRequest = { text, sender_name: "Near 手机" };
+        if (hasExtra) {
+          if (extra.image_inputs.length > 0) payload.image_inputs = extra.image_inputs;
+          if (extra.skill_slugs.length > 0) payload.skill_slugs = extra.skill_slugs;
+          if (extra.doc_refs.length > 0) payload.doc_refs = extra.doc_refs;
+        }
+        const resp = await client.sendMessage(id, payload);
         polling = false;
         clearInterval(pollTimer);
         // 回合结束：打字机余量按节奏播完（不 flush 跳变），再做终态结构化替换
@@ -452,18 +473,17 @@ export default function SessionMessagesScreen() {
     [sending, client, id, showToast, fetchMessages],
   );
 
-  // 懒创建链路收口：new-task 页 replace 过来时带 initialText 自动发送首条消息
+  // 懒创建链路收口：new-task 页 replace 过来时带 initialText 自动发送首条消息。
+  // 首页加号面板选的图片/技能以内存载荷透传（见 store.setPendingSend），
+  // 因此可能出现「只有图片、没有文字」的首条消息。
   const autoSentRef = useRef(false);
   useEffect(() => {
-    if (
-      typeof initialText === "string" &&
-      initialText.trim() !== "" &&
-      !autoSentRef.current &&
-      client !== null
-    ) {
-      autoSentRef.current = true;
-      void handleSend(initialText.trim());
-    }
+    if (autoSentRef.current || client === null) return;
+    const text = typeof initialText === "string" ? initialText.trim() : "";
+    const extra = takePendingSend();
+    if (text === "" && extra === null) return;
+    autoSentRef.current = true;
+    void handleSend(text, extra);
   }, [initialText, client, handleSend]);
 
   // inverted 列表：数据倒序 + 容器翻转 = 视觉正序、最新贴底

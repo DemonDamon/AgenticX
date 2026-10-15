@@ -579,6 +579,25 @@ def create_gateway_app(
             raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
         return JSONResponse({"workspaces": reply.get("data")})
 
+    @app.get("/api/mobile/skills")
+    async def api_mobile_skills(request: Request) -> JSONResponse:
+        """可用技能清单（手机端「添加到对话 → 技能」选择器）。"""
+        did = _require_mobile_auth(request)
+        reply = await _bridge_device_rpc(did, "skills.list", {})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"skills": reply.get("data")})
+
+    @app.get("/api/mobile/docs")
+    async def api_mobile_docs(request: Request) -> JSONResponse:
+        """飞书文档搜索（手机端「添加到对话 → 飞书文档」选择器）。"""
+        did = _require_mobile_auth(request)
+        query = request.query_params.get("q", "")
+        reply = await _bridge_device_rpc(did, "docs.search", {"query": query})
+        if not reply.get("ok"):
+            raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
+        return JSONResponse({"docs": reply.get("data")})
+
     @app.get("/api/mobile/sessions/{session_id}/messages")
     async def api_mobile_session_messages(request: Request) -> JSONResponse:
         sid = request.path_params["session_id"]
@@ -610,18 +629,27 @@ def create_gateway_app(
             raise HTTPException(status_code=400, detail="invalid body")
         text = str(body.get("text") or "").strip()
         sender_name = str(body.get("sender_name") or "").strip()
-        if not text:
+        images = body.get("image_inputs")
+        has_images = isinstance(images, list) and len(images) > 0
+        skill_slugs = body.get("skill_slugs")
+        has_skills = isinstance(skill_slugs, list) and len(skill_slugs) > 0
+        doc_refs = body.get("doc_refs")
+        has_docs = isinstance(doc_refs, list) and len(doc_refs) > 0
+        if not text and not has_images and not has_docs:
             raise HTTPException(status_code=400, detail="text required")
-        reply = await _bridge_device_rpc(
-            did,
-            "session.send",
-            {
-                "session_id": session_id,
-                "text": text,
-                "sender_name": sender_name,
-                "install_id": install_id,
-            },
-        )
+        rpc_params: Dict[str, Any] = {
+            "session_id": session_id,
+            "text": text,
+            "sender_name": sender_name,
+            "install_id": install_id,
+        }
+        if has_images:
+            rpc_params["image_inputs"] = images
+        if has_skills:
+            rpc_params["skill_slugs"] = skill_slugs
+        if has_docs:
+            rpc_params["doc_refs"] = doc_refs
+        reply = await _bridge_device_rpc(did, "session.send", rpc_params)
         if not reply.get("ok"):
             raise HTTPException(status_code=502, detail=str(reply.get("error") or "rpc failed"))
         return JSONResponse(reply.get("data"))

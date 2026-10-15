@@ -4,6 +4,7 @@ import type {
   ConfirmDecision,
   ConfirmResponse,
   CreateSessionResponse,
+  DocsResponse,
   McpServersResponse,
   MessagesResponse,
   MobileMessage,
@@ -14,6 +15,7 @@ import type {
   SendResponse,
   SessionContextUsage,
   SessionsResponse,
+  SkillsResponse,
   ToolsResponse,
   UnbindResponse,
   WorkspacesResponse,
@@ -310,6 +312,41 @@ export class GatewayClient {
         path: w.path,
       }));
     return { workspaces };
+  }
+
+  /** 可用技能清单（「添加到对话 → 技能」数据源）。 */
+  async getSkills(): Promise<SkillsResponse> {
+    const resp = await this.request<SkillsResponse>("GET", "/api/mobile/skills");
+    const rows = (resp as { skills?: unknown[] }).skills ?? [];
+    const skills = rows
+      .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null)
+      .map((s) => ({
+        name: String(s.name ?? ""),
+        description: String(s.description ?? ""),
+        source: String(s.source ?? ""),
+      }))
+      .filter((s) => s.name !== "");
+    return { skills };
+  }
+
+  /** 飞书文档搜索（「添加到对话 → 飞书文档」数据源，桌面端连接器用户身份）。 */
+  async searchDocs(query: string): Promise<DocsResponse> {
+    const path = `/api/mobile/docs?q=${encodeURIComponent(query)}`;
+    const resp = await this.request<DocsResponse>("GET", path);
+    const rows = (resp as { docs?: unknown[] }).docs ?? [];
+    const docs = rows
+      .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
+      .map((d) => ({
+        token: String(d.token ?? ""),
+        title: String(d.title ?? ""),
+        entity_type: String(d.entity_type ?? ""),
+        doc_types: String(d.doc_types ?? ""),
+        url: String(d.url ?? ""),
+        owner_name: String(d.owner_name ?? ""),
+        update_time_iso: String(d.update_time_iso ?? ""),
+      }))
+      .filter((d) => d.token !== "" && d.title !== "");
+    return { docs };
   }
 
   private async request<T>(

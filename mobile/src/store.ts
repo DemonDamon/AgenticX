@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import type { SendDocRef, SendImageInput } from "./api/types";
 
 /**
  * 绑定态持久化（expo-secure-store）。
@@ -105,4 +106,29 @@ export async function setPreferredWorkspace(path: string): Promise<void> {
     return;
   }
   await kvSet(KEY_PREFERRED_WORKSPACE, trimmed);
+}
+
+/**
+ * 首页 → 会话页的一次性发送载荷（图片 / 技能 / 飞书文档）。
+ *
+ * 图片以 base64 data URL 承载，体积可达数 MB，塞进路由参数会撑爆栈，
+ * 因此用内存透传：首页创建会话后写入，会话页挂载时取走一次即失效。
+ */
+export interface PendingSend {
+  image_inputs: SendImageInput[];
+  skill_slugs: string[];
+  doc_refs: SendDocRef[];
+}
+
+let pendingSend: PendingSend | null = null;
+
+export function setPendingSend(payload: PendingSend): void {
+  pendingSend = payload;
+}
+
+/** 取走并清空，避免下次进入会话页重复发送。 */
+export function takePendingSend(): PendingSend | null {
+  const payload = pendingSend;
+  pendingSend = null;
+  return payload;
 }

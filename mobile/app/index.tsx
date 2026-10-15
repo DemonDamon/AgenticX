@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -12,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CapabilityCard } from "../src/components/CapabilityCard";
+import { AddToChatSheet } from "../src/components/AddToChatSheet";
 import {
   Chip,
   OptionRow,
@@ -24,8 +25,15 @@ import {
 import { useGateway } from "../src/hooks/useGateway";
 import { AnimatedBrandMark } from "../src/ui/AnimatedBrandMark";
 import { describeError } from "../src/lib/errors";
-import type { MobileStatus, MobileWorkspace, ModelsResponse } from "../src/api/types";
-import { getPreferredWorkspace, setPreferredWorkspace } from "../src/store";
+import type {
+  MobileDoc,
+  MobileSkill,
+  MobileStatus,
+  MobileWorkspace,
+  ModelsResponse,
+  SendImageInput,
+} from "../src/api/types";
+import { getPreferredWorkspace, setPendingSend, setPreferredWorkspace } from "../src/store";
 import { brand, color, fontSize, fontWeight, radius, shadow, spacing } from "../src/ui/theme";
 
 /** 取路径末段作为项目/目录展示名（兼容结尾斜杠与根路径）。 */
@@ -91,7 +99,10 @@ export default function Index() {
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<MobileStatus | null>(null);
   const [model, setModel] = useState<string | null>(null);
-  const [capsOpen, setCapsOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [pickedImages, setPickedImages] = useState<SendImageInput[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<MobileSkill[]>([]);
+  const [selectedDocs, setSelectedDocs] = useState<MobileDoc[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   // 三个底部选择面板（对标 Trae：模型 / 当前活跃项目 / 运行位置）
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -109,6 +120,68 @@ export default function Index() {
     setTimeout(() => {
       setToast(null);
     }, 2_500);
+  }, []);
+
+  // 「添加到对话 → 拍照/相册」：选完即转为 studio 期望的 base64 data URL
+  const handlePickImage = useCallback(
+    async (source: "camera" | "library") => {
+      try {
+        const perm =
+          source === "camera"
+            ? await ImagePicker.requestCameraPermissionsAsync()
+            : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          showToast(source === "camera" ? "没有相机权限" : "没有相册权限");
+          return;
+        }
+        const result =
+          source === "camera"
+            ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 })
+            : await ImagePicker.launchImageLibraryAsync({
+                base64: true,
+                quality: 0.7,
+                mediaTypes: ["images"],
+                allowsMultipleSelection: true,
+                selectionLimit: 4,
+              });
+        if (result.canceled) return;
+        const next: SendImageInput[] = [];
+        for (const asset of result.assets) {
+          const base64 = asset.base64;
+          if (base64 === undefined || base64 === null || base64 === "") continue;
+          const mime = asset.mimeType ?? "image/jpeg";
+          next.push({
+            name: asset.fileName ?? `image-${Date.now()}.jpg`,
+            data_url: `data:${mime};base64,${base64}`,
+            mime_type: mime,
+            size: Math.floor((base64.length * 3) / 4),
+          });
+        }
+        if (next.length === 0) return;
+        setPickedImages((prev) => [...prev, ...next].slice(0, 4));
+      } catch (err) {
+        showToast(`添加图片失败：${describeError(err)}`);
+      }
+    },
+    [showToast],
+  );
+
+  const handleToggleSkill = useCallback((skill: MobileSkill) => {
+    setSelectedSkills((prev) =>
+      prev.some((s) => s.name === skill.name)
+        ? prev.filter((s) => s.name !== skill.name)
+        : [...prev, skill],
+    );
+    setAddOpen(false);
+  }, []);
+
+  const handleToggleDoc = useCallback((doc: MobileDoc) => {
+    setSelectedDocs((prev) =>
+      prev.some((d) => d.token === doc.token)
+        ? prev.filter((d) => d.token !== doc.token)
+        : [...prev, doc],
+    );
+    setAddOpen(false);
   }, []);
 
   // 拉桌面状态（在线/桌面名）+ 最近会话（模型兜底 / 工作目录），失败静默降级
@@ -214,16 +287,35 @@ export default function Index() {
 
   const handleStart = useCallback(async () => {
     const text = draft.trim();
-    if (text === "" || creating || client === null) return;
+    if ((text === "" && pickedImages.length === 0 && selectedDocs.length === 0) || creating || client === null) return;
     setCreating(true);
     try {
       const resp = await client.createSession(
         activeWorkspace !== null ? { workspace_dir: activeWorkspace } : {},
       );
+      // 图片/技能/文档体积大且不必进路由参数：内存透传交给会话页发首条消息
+      if (pickedImages.length > 0 || selectedSkills.length > 0 || selectedDocs.length > 0) {
+        setPendingSend({
+          image_inputs: pickedImages,
+          skill_slugs: selectedSkills.map((s) => s.name),
+          doc_refs: selectedDocs.map((d) => ({ token: d.token, title: d.title })),
+        });
+      }
       router.push({
         pathname: "/sessions/[id]",
-        params: { id: resp.session_id, title: text.slice(0, 20), initialText: text },
+        params: {
+          id: resp.session_id,
+          title: text === "" ? (pickedImages.length > 0 ? "图片" : "文档") : text.slice(0, 20),
+          initialText: text,
+        },
       });
+      // 首页会留在导航栈里：送出后清空草稿/附件并解除 creating，
+      // 否则返回首页时发送键仍锁在 loading 态
+      setDraft("");
+      setPickedImages([]);
+      setSelectedSkills([]);
+      setSelectedDocs([]);
+      setCreating(false);
     } catch (err) {
       setToast(`创建任务失败：${describeError(err)}`);
       setCreating(false);
@@ -231,9 +323,9 @@ export default function Index() {
         setToast(null);
       }, 2_500);
     }
-  }, [draft, creating, client, activeWorkspace]);
+  }, [draft, creating, client, activeWorkspace, pickedImages, selectedSkills, selectedDocs]);
 
-  const canSend = creating || draft.trim() === "";
+  const canSend = creating || (draft.trim() === "" && pickedImages.length === 0 && selectedDocs.length === 0);
 
   // 未绑定 / 绑定读取失败：轻量分发（真正 UI 是配对页）
   if (binding === null) {
@@ -308,15 +400,57 @@ export default function Index() {
           </View>
         </View>
 
-        {/* ＋ 展开：能力速览 */}
-        {capsOpen ? (
-          <View style={styles.capsWrap}>
-            <CapabilityCard client={client} />
-          </View>
-        ) : null}
-
-        {/* 底部输入卡（对标 Trae/Claude 层次：输入区 → 动作行） */}
+        {/* 底部输入卡（对标 Trae/Claude 层次：附件行 → 输入区 → 动作行） */}
         <View style={styles.inputCard}>
+          {pickedImages.length > 0 || selectedSkills.length > 0 || selectedDocs.length > 0 ? (
+            <View style={styles.attachRow}>
+              {selectedDocs.map((doc) => (
+                <Pressable
+                  key={`doc-${doc.token}`}
+                  style={({ pressed }) => [styles.attachChip, pressed && styles.attachChipPressed]}
+                  onPress={() => {
+                    setSelectedDocs((prev) => prev.filter((d) => d.token !== doc.token));
+                  }}
+                >
+                  <Ionicons name="document-text-outline" size={13} color={brand.primary} />
+                  <Text style={styles.attachChipText} numberOfLines={1}>
+                    {doc.title}
+                  </Text>
+                  <Ionicons name="close" size={13} color={color.textMuted} />
+                </Pressable>
+              ))}
+              {selectedSkills.map((skill) => (
+                <Pressable
+                  key={`skill-${skill.name}`}
+                  style={({ pressed }) => [styles.attachChip, pressed && styles.attachChipPressed]}
+                  onPress={() => {
+                    setSelectedSkills((prev) => prev.filter((s) => s.name !== skill.name));
+                  }}
+                >
+                  <Ionicons name="book-outline" size={13} color={brand.primary} />
+                  <Text style={styles.attachChipText} numberOfLines={1}>
+                    {skill.name}
+                  </Text>
+                  <Ionicons name="close" size={13} color={color.textMuted} />
+                </Pressable>
+              ))}
+              {pickedImages.map((img, index) => (
+                <Pressable
+                  key={`img-${index}-${img.name}`}
+                  style={({ pressed }) => [styles.attachChip, pressed && styles.attachChipPressed]}
+                  onPress={() => {
+                    setPickedImages((prev) => prev.filter((_, i) => i !== index));
+                  }}
+                >
+                  <Ionicons name="image-outline" size={13} color={brand.primary} />
+                  <Text style={styles.attachChipText} numberOfLines={1}>
+                    {img.name}
+                  </Text>
+                  <Ionicons name="close" size={13} color={color.textMuted} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           <TextInput
             style={styles.input}
             multiline
@@ -330,11 +464,11 @@ export default function Index() {
             <Pressable
               style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}
               onPress={() => {
-                setCapsOpen((v) => !v);
+                setAddOpen(true);
               }}
               hitSlop={6}
             >
-              <Ionicons name={capsOpen ? "close" : "add"} size={22} color={color.textSecondary} />
+              <Ionicons name="add" size={22} color={color.textSecondary} />
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.modelPill, pressed && styles.modelPillPressed]}
@@ -483,6 +617,18 @@ export default function Index() {
         <SheetNote text="AgenticX 目前在一台桌面端上运行；「云端」运行位置暂未开放。" />
       </PickerSheet>
 
+      {/* 添加到对话（输入框加号） */}
+      <AddToChatSheet
+        visible={addOpen}
+        onClose={() => setAddOpen(false)}
+        client={client}
+        onPickImage={handlePickImage}
+        onSelectSkill={handleToggleSkill}
+        selectedSkills={selectedSkills.map((s) => s.name)}
+        onSelectDoc={handleToggleDoc}
+        selectedDocs={selectedDocs.map((d) => d.token)}
+      />
+
       {toast !== null ? (
         <View style={styles.toast} pointerEvents="none">
           <Text style={styles.toastText}>{toast}</Text>
@@ -577,10 +723,24 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     color: color.textSecondary,
   },
-  capsWrap: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
+  attachRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
+  attachChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "70%",
+    backgroundColor: brand.cream,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  attachChipPressed: { backgroundColor: brand.creamDeep },
+  attachChipText: { fontSize: fontSize.caption + 1, color: color.textPrimary, flexShrink: 1 },
   inputCard: {
     marginHorizontal: spacing.lg,
     backgroundColor: "#FFFFFF",

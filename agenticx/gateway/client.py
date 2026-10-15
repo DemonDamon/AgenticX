@@ -45,6 +45,97 @@ except ImportError:
     WebSocketClientProtocol = Any  # type: ignore
 
 
+# ---------------------------------------------------------------------------
+# 飞书连接器（lark-cli）辅助：手机端「添加到对话 → 飞书文档」数据源。
+# 只使用 AgenticX 自管（~/.agenticx/connectors/feishu/*/bin）或系统固定路径
+# 安装的 lark-cli，并剥离外部注入的 LARKSUITE_* 环境凭证，确保读取的是
+# 桌面端连接器的用户登录态；查 PATH 的做法会命中宿主环境自带凭证的副本，
+# 属于错误身份，禁止。
+# ---------------------------------------------------------------------------
+
+_LARK_CONNECTORS_DIR = os.path.expanduser("~/.agenticx/connectors/feishu")
+_LARK_DOC_MAX_CHARS = 80_000
+
+
+def _lark_cli_binary() -> Optional[str]:
+    try:
+        versions = os.listdir(_LARK_CONNECTORS_DIR)
+    except OSError:
+        versions = []
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for ver in versions:
+        binary = os.path.join(_LARK_CONNECTORS_DIR, ver, "bin", "lark-cli")
+        if not os.path.isfile(binary):
+            continue
+        try:
+            key = tuple(int(p) for p in ver.split(".") if p.isdigit())
+        except ValueError:
+            continue
+        candidates.append((key, binary))
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+    home = os.path.expanduser("~")
+    for path in (
+        "/opt/homebrew/bin/lark-cli",
+        "/usr/local/bin/lark-cli",
+        "/usr/bin/lark-cli",
+        os.path.join(home, ".npm-global", "bin", "lark-cli"),
+    ):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _lark_env() -> Dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LARKSUITE_")}
+    env["NO_COLOR"] = "1"
+    return env
+
+
+async def _run_lark_cli(args: list[str], timeout_sec: float) -> str:
+    binary = _lark_cli_binary()
+    if not binary:
+        raise RuntimeError("飞书连接器未安装：请先在桌面端「设置 → 连接器 → 飞书」完成连接")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_lark_env(),
+        )
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+    except (OSError, asyncio.TimeoutError) as exc:
+        raise RuntimeError(f"飞书连接器执行失败：{exc}") from exc
+    return (out or b"").decode("utf-8", "replace").strip()
+
+
+def _parse_lark_json(output: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"飞书连接器返回异常：{output[:160]}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("飞书连接器返回结构异常")
+    return payload
+
+
+def _strip_lark_highlight(text: str) -> str:
+    """搜索接口的 <h>…</h> 高亮标记转纯文本。"""
+    return text.replace("<h>", "").replace("</h>", "").strip()
+
+
+async def _lark_require_user_identity() -> None:
+    """确保 lark-cli 用户身份可用（文档搜索/读取仅支持 user 身份）。"""
+    payload = _parse_lark_json(await _run_lark_cli(["auth", "status"], timeout_sec=15.0))
+    identities = payload.get("identities")
+    user = identities.get("user") if isinstance(identities, dict) else None
+    if not (isinstance(user, dict) and user.get("available") is True):
+        raise RuntimeError(
+            "飞书连接器未登录用户身份：请先在桌面端「设置 → 连接器 → 飞书」完成授权"
+        )
+
+
 @dataclass
 class GatewayClientSettings:
     enabled: bool
@@ -639,6 +730,10 @@ class GatewayClient:
             return await self._rpc_model_set_active(params)
         if method == "workspaces.list":
             return await self._rpc_workspaces_list()
+        if method == "skills.list":
+            return await self._rpc_skills_list()
+        if method == "docs.search":
+            return await self._rpc_docs_search(params)
         raise ValueError(f"unknown rpc method: {method}")
 
     async def _rpc_session_context_usage(self, params: Dict[str, Any]) -> Any:
@@ -828,6 +923,135 @@ class GatewayClient:
             out.append({"name": label, "path": path})
         return out
 
+    async def _rpc_skills_list(self) -> Any:
+        """GET /api/skills 可用技能清单（手机端「添加到对话 → 技能」数据源）。
+
+        仅透传展示所需字段（name/description/source），并剔除全局禁用技能；
+        location/base_dir 等桌面端内部路径不下发。
+        """
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(
+                f"{self._settings.studio_base_url}/api/skills",
+                headers=headers,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"skills list failed: {r.status_code} {r.text[:200]}")
+            payload = r.json()
+        rows = payload.get("items") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            raise RuntimeError("skills reply missing 'items' array")
+        out: list[Dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("globally_disabled") is True:
+                continue
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            out.append(
+                {
+                    "name": name,
+                    "description": str(row.get("description") or ""),
+                    "source": str(row.get("source") or ""),
+                }
+            )
+        out.sort(key=lambda item: item["name"])
+        return out
+
+    async def _rpc_docs_search(self, params: Dict[str, Any]) -> Any:
+        """飞书文档搜索（手机端「添加到对话 → 飞书文档」数据源）。
+
+        走桌面端飞书连接器（lark-cli）的用户身份；只透传展示与回传所需的
+        字段（token/title/url 等），不下发 owner_id 等内部标识。
+        """
+        query = str(params.get("query") or "").strip()
+        if not query:
+            return []
+        await _lark_require_user_identity()
+        payload = _parse_lark_json(
+            await _run_lark_cli(
+                [
+                    "docs",
+                    "+search",
+                    "--as",
+                    "user",
+                    "--query",
+                    query,
+                    "--page-size",
+                    "20",
+                    "--format",
+                    "json",
+                ],
+                timeout_sec=30.0,
+            )
+        )
+        if payload.get("ok") is not True:
+            error = payload.get("error")
+            message = error.get("message") if isinstance(error, dict) else None
+            raise RuntimeError(f"飞书文档搜索失败：{str(message or '未知错误')[:160]}")
+        results = (payload.get("data") or {}).get("results") or []
+        if not isinstance(results, list):
+            return []
+        docs: list[Dict[str, str]] = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            meta = item.get("result_meta") if isinstance(item.get("result_meta"), dict) else {}
+            token = str(meta.get("token") or "").strip()
+            title = _strip_lark_highlight(str(item.get("title_highlighted") or ""))
+            if not token or not title:
+                continue
+            docs.append(
+                {
+                    "token": token,
+                    "title": title,
+                    "entity_type": str(item.get("entity_type") or ""),
+                    "doc_types": str(meta.get("doc_types") or ""),
+                    "url": str(meta.get("url") or ""),
+                    "owner_name": str(meta.get("owner_name") or ""),
+                    "update_time_iso": str(meta.get("update_time_iso") or ""),
+                }
+            )
+        return docs
+
+    async def _lark_fetch_doc_markdown(self, token: str) -> str:
+        """拉取一篇飞书文档的 Markdown 正文（发送时注入 context_files）。"""
+        await _lark_require_user_identity()
+        payload = _parse_lark_json(
+            await _run_lark_cli(
+                [
+                    "docs",
+                    "+fetch",
+                    "--as",
+                    "user",
+                    "--doc",
+                    token,
+                    "--doc-format",
+                    "markdown",
+                    "--scope",
+                    "full",
+                    "--format",
+                    "json",
+                ],
+                timeout_sec=60.0,
+            )
+        )
+        if payload.get("ok") is not True:
+            error = payload.get("error")
+            message = error.get("message") if isinstance(error, dict) else None
+            raise RuntimeError(f"飞书文档读取失败：{str(message or '未知错误')[:160]}")
+        content = str(
+            ((payload.get("data") or {}).get("document") or {}).get("content") or ""
+        ).strip()
+        if not content:
+            raise RuntimeError("飞书文档内容为空")
+        if len(content) > _LARK_DOC_MAX_CHARS:
+            content = content[:_LARK_DOC_MAX_CHARS] + "\n\n（内容过长，已截断）"
+        return content
+
     async def _rpc_session_messages(self, params: Dict[str, Any]) -> Any:
         session_id = str(params.get("session_id") or "").strip()
         if not session_id:
@@ -856,17 +1080,51 @@ class GatewayClient:
         text = str(params.get("text") or "")
         sender_name = str(params.get("sender_name") or "").strip()
         install_id = str(params.get("install_id") or "").strip()
+        images = params.get("image_inputs")
+        has_images = isinstance(images, list) and len(images) > 0
+        skill_slugs = params.get("skill_slugs")
+        has_skills = isinstance(skill_slugs, list) and len(skill_slugs) > 0
+        doc_refs = params.get("doc_refs")
+        has_docs = isinstance(doc_refs, list) and len(doc_refs) > 0
         if not session_id:
             raise ValueError("session_id required")
         if not install_id:
             raise ValueError("install_id required")
-        if not text.strip():
+        if not text.strip() and not has_images and not has_docs:
             raise ValueError("text required")
-        body = {
+        body: Dict[str, Any] = {
             "session_id": session_id,
             "user_input": text,
             "user_display_name": sender_name or install_id,
         }
+        if has_images:
+            body["image_inputs"] = images
+        if has_skills:
+            body["skill_slugs"] = skill_slugs
+        if not text.strip():
+            # studio /api/chat 要求 user_input 至少 1 字符，纯附件消息补占位文案
+            if has_images:
+                body["user_input"] = "（图片）"
+            elif has_docs:
+                body["user_input"] = "（文档）"
+        if has_docs:
+            # 飞书文档：发送前经连接器拉取 Markdown 正文，注入为本回合 context_files，
+            # 与技能注入共用同一落盘/摘要管线（context_files_refs.json 可追溯）。
+            refs: list[Dict[str, str]] = []
+            for raw in doc_refs[:3]:
+                if not isinstance(raw, dict):
+                    continue
+                token = str(raw.get("token") or "").strip()
+                title = str(raw.get("title") or "").strip() or token
+                if token:
+                    refs.append({"token": token, "title": title})
+            context_files: Dict[str, str] = {}
+            for ref in refs:
+                context_files[f"feishu-doc:{ref['title']}"] = await self._lark_fetch_doc_markdown(
+                    ref["token"]
+                )
+            if context_files:
+                body["context_files"] = context_files
         timeout = httpx.Timeout(600.0, connect=30.0)
         # 手机真流式：token 增量经 WS 实时转发到网关 → 订阅该会话的手机端
         forwarder = TurnProgressForwarder(ws, session_id) if ws is not None else None

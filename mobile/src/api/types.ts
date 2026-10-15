@@ -56,15 +56,60 @@ export interface PendingConfirm {
   question: string;
 }
 
+/** 随消息一起发出的图片（studio 期望 data URL 形式的 image_inputs） */
+export interface SendImageInput {
+  name: string;
+  data_url: string;
+  mime_type: string;
+  size: number;
+}
+
 export interface SendRequest {
   text: string;
   sender_name?: string;
+  image_inputs?: SendImageInput[];
+  /** 本轮注入的技能 slug（studio 注入到会话上下文） */
+  skill_slugs?: string[];
+  /** 本轮附带的飞书文档（桌面端经连接器拉正文后注入 context_files） */
+  doc_refs?: SendDocRef[];
 }
 
 export interface SendResponse {
   reply: string;
   progress: string[];
   pending_confirm: PendingConfirm | null;
+}
+
+/** 「添加到对话 → 技能」列表项 */
+export interface MobileSkill {
+  name: string;
+  description: string;
+  source: string;
+}
+
+export interface SkillsResponse {
+  skills: MobileSkill[];
+}
+
+/** 「添加到对话 → 飞书文档」列表项（桌面端连接器搜索结果） */
+export interface MobileDoc {
+  token: string;
+  title: string;
+  entity_type: string;
+  doc_types?: string;
+  url?: string;
+  owner_name?: string;
+  update_time_iso?: string;
+}
+
+export interface DocsResponse {
+  docs: MobileDoc[];
+}
+
+/** 随消息下发的文档引用（桌面端据 token 拉取正文） */
+export interface SendDocRef {
+  token: string;
+  title: string;
 }
 
 /** 会话上下文/Token 用量（studio context_usage 估算 + provider 实测累计） */
