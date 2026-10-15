@@ -22,6 +22,8 @@ import {
 
 export type AgentRuntime = "cloud" | "desktop_worker";
 export type AgentStatus = "active" | "disabled";
+export type AgentLifecycle = "draft" | "published" | "recalled";
+export type AgentOrigin = "enterprise" | "employee";
 
 export type EnterpriseAgent = {
   id: string;
@@ -36,6 +38,10 @@ export type EnterpriseAgent = {
   assignmentKeys: string[];
   workerKeys: string[];
   status: AgentStatus;
+  lifecycle: AgentLifecycle;
+  origin: AgentOrigin;
+  ownerUserId: string | null;
+  localAvatarId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -52,6 +58,10 @@ export type AgentInput = {
   assignmentKeys?: string[];
   workerKeys?: string[];
   status?: AgentStatus;
+  lifecycle?: AgentLifecycle;
+  origin?: AgentOrigin;
+  ownerUserId?: string | null;
+  localAvatarId?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -95,6 +105,10 @@ type AgentRow = {
   assignmentKeys: unknown;
   workerKeys: unknown;
   status: string;
+  lifecycle?: string;
+  origin?: string;
+  ownerUserId?: string | null;
+  localAvatarId?: string | null;
   metadata: unknown;
   createdAt: unknown;
   updatedAt: unknown;
@@ -142,6 +156,19 @@ function asStatus(value: string): AgentStatus {
   return value === "disabled" ? "disabled" : "active";
 }
 
+function asLifecycle(value: string | undefined): AgentLifecycle {
+  if (value === "draft" || value === "recalled") return value;
+  return "published";
+}
+
+function asOrigin(value: string | undefined): AgentOrigin {
+  return value === "employee" ? "employee" : "enterprise";
+}
+
+export function isVisibleToEmployees(agent: Pick<EnterpriseAgent, "status" | "lifecycle">): boolean {
+  return agent.status !== "disabled" && agent.lifecycle === "published";
+}
+
 function dedupe(values: readonly string[]): string[] {
   const out: string[] = [];
   for (const raw of values) {
@@ -171,6 +198,10 @@ function mapAgent(row: AgentRow): EnterpriseAgent {
     assignmentKeys: asStringArray(row.assignmentKeys),
     workerKeys: asStringArray(row.workerKeys),
     status: asStatus(row.status),
+    lifecycle: asLifecycle(row.lifecycle),
+    origin: asOrigin(row.origin),
+    ownerUserId: row.ownerUserId ?? null,
+    localAvatarId: row.localAvatarId ?? null,
     metadata: asMetadata(row.metadata),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
@@ -215,6 +246,14 @@ export function validateAgentInput(input: AgentInput): void {
   const status = input.status as string | undefined;
   if (status !== undefined && status !== "active" && status !== "disabled") {
     throw new AgentValidationError("状态不合法");
+  }
+  const lifecycle = input.lifecycle as string | undefined;
+  if (lifecycle !== undefined && lifecycle !== "draft" && lifecycle !== "published" && lifecycle !== "recalled") {
+    throw new AgentValidationError("生命周期不合法");
+  }
+  const origin = input.origin as string | undefined;
+  if (origin !== undefined && origin !== "enterprise" && origin !== "employee") {
+    throw new AgentValidationError("来源不合法");
   }
   if (input.systemPrompt !== undefined && input.systemPrompt.length > SYSTEM_PROMPT_MAX) {
     throw new AgentValidationError("系统提示词不能超过 16000 字");
@@ -269,6 +308,10 @@ function normalizeForWrite(input: AgentInput) {
     assignmentKeys: dedupe(input.assignmentKeys ?? ["all"]),
     workerKeys: dedupe(input.workerKeys ?? []),
     status: input.status ?? "active",
+    lifecycle: input.lifecycle ?? "draft",
+    origin: input.origin ?? "enterprise",
+    ownerUserId: input.ownerUserId ?? null,
+    localAvatarId: input.localAvatarId ?? null,
     metadata: asMetadata(input.metadata),
   };
 }
@@ -358,6 +401,10 @@ export async function updateAgent(
     assignmentKeys: patch.assignmentKeys ?? existing.assignmentKeys,
     workerKeys: patch.workerKeys ?? existing.workerKeys,
     status: patch.status ?? existing.status,
+    lifecycle: patch.lifecycle ?? existing.lifecycle,
+    origin: patch.origin ?? existing.origin,
+    ownerUserId: patch.ownerUserId !== undefined ? patch.ownerUserId : existing.ownerUserId,
+    localAvatarId: patch.localAvatarId !== undefined ? patch.localAvatarId : existing.localAvatarId,
     metadata: patch.metadata ?? existing.metadata,
   };
   validateAgentInput(merged);
@@ -386,7 +433,56 @@ export async function deleteAgent(tenantId: string, id: string): Promise<void> {
       .where(and(eq(pgAgents.tenantId, tenantId), eq(pgAgents.id, existing.id)));
 }
 
-/** 门户用：status=active 且 assignment_keys 与 keys 有交集。 */
+function employeeSlug(localAvatarId: string): string {
+  const compact = localAvatarId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
+  const slug = `e${compact}`;
+  return slug.length >= 2 ? slug.slice(0, 63) : "employee-agent";
+}
+
+/** 员工在桌面创建或更新数字专家时登记到企业。回收后的记录不会被这次同步重新发布。 */
+export async function registerEmployeeAgent(input: {
+  tenantId: string;
+  ownerUserId: string;
+  localAvatarId: string;
+  displayName: string;
+  systemPrompt?: string;
+  model?: string;
+  description?: string | null;
+}): Promise<EnterpriseAgent> {
+  const localAvatarId = input.localAvatarId.trim();
+  if (!localAvatarId) throw new AgentValidationError("本机分身标识不能为空");
+  const agents = await listAgents(input.tenantId);
+  const existing = agents.find(
+    (agent) =>
+      agent.origin === "employee" &&
+      agent.ownerUserId === input.ownerUserId &&
+      agent.localAvatarId === localAvatarId,
+  );
+  if (existing) {
+    return updateAgent(input.tenantId, existing.id, {
+      displayName: input.displayName,
+      systemPrompt: input.systemPrompt ?? existing.systemPrompt,
+      model: input.model?.trim() || existing.model,
+      description: input.description,
+    });
+  }
+  return createAgent(input.tenantId, {
+    slug: employeeSlug(localAvatarId),
+    displayName: input.displayName,
+    systemPrompt: input.systemPrompt ?? "",
+    model: input.model?.trim() || "local/default",
+    description: input.description,
+    runtime: "desktop_worker",
+    assignmentKeys: [input.ownerUserId],
+    workerKeys: [input.ownerUserId],
+    lifecycle: "published",
+    origin: "employee",
+    ownerUserId: input.ownerUserId,
+    localAvatarId,
+  });
+}
+
+/** 门户和桌面用：已发布、未停用，且 assignment_keys 与 keys 有交集。 */
 export async function listAgentsVisibleToKeys(
   tenantId: string,
   keys: string[],
@@ -394,5 +490,7 @@ export async function listAgentsVisibleToKeys(
   const wanted = new Set(keys.map((key) => key.trim()).filter(Boolean));
   if (wanted.size === 0) return [];
   const agents = await listAgents(tenantId, { status: "active" });
-  return agents.filter((agent) => agent.assignmentKeys.some((key) => wanted.has(key)));
+  return agents.filter(
+    (agent) => isVisibleToEmployees(agent) && agent.assignmentKeys.some((key) => wanted.has(key)),
+  );
 }

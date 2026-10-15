@@ -19,6 +19,7 @@ import { useDisplayedMetaAvatarUrl } from "../../hooks/useDisplayedMetaAvatarUrl
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { UserCubeColorwayPicker } from "../settings/UserCubeColorwayPicker";
 import { EmptyStateHeaderFigures } from "../brand/EmptyStateCornerLotties";
+import { studioFetch } from "../../utils/studio-fetch";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -62,12 +63,46 @@ export function AvatarGalleryView() {
   const openSettings = useAppStore((s) => s.openSettings);
   const [nearSettingsOpen, setNearSettingsOpen] = useState(false);
 
+  const [enterpriseAgents, setEnterpriseAgents] = useState<
+    Array<{ id: string; displayName: string; runtime: string }>
+  >([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsAvatarId, setSettingsAvatarId] = useState<string | null>(null);
   const [cardMenu, setCardMenu] = useState<CardMenuState>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
 
   const avatarsLoaded = corePreloadAttempted || avatars.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = (await window.agenticxDesktop.getApiAuthToken()) || "";
+        const response = await studioFetch("/api/enterprise-agents", {
+          headers: token ? { "x-agx-desktop-token": token } : {},
+        });
+        if (!response.ok) return;
+        const body = (await response.json()) as {
+          agents?: Array<{ id?: string; displayName?: string; runtime?: string }>;
+        };
+        if (cancelled) return;
+        setEnterpriseAgents(
+          (body.agents ?? [])
+            .filter((item) => item.id && item.displayName)
+            .map((item) => ({
+              id: String(item.id),
+              displayName: String(item.displayName),
+              runtime: String(item.runtime ?? ""),
+            })),
+        );
+      } catch {
+        if (!cancelled) setEnterpriseAgents([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sortedAvatars = useMemo(() => {
     return [...avatars].sort((a, b) => {
@@ -189,6 +224,22 @@ export function AvatarGalleryView() {
             <p className="mt-1 text-sm text-text-muted">
               {t("gallery.subtitle")}
             </p>
+            {enterpriseAgents.length > 0 ? (
+              <div className="mt-3">
+                <p className="text-xs text-text-muted">企业已发布</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {enterpriseAgents.map((agent) => (
+                    <span
+                      key={agent.id}
+                      className="rounded-full border border-border px-2.5 py-1 text-xs text-text-strong"
+                    >
+                      {agent.displayName}
+                      {agent.runtime === "desktop_worker" ? " · 本机执行" : " · 云端执行"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <ExpertPortraitStyleControl
                 avatars={avatars}

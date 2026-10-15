@@ -145,6 +145,7 @@ describe("mysql baseline migration inventory", () => {
       "0026_enterprise_desktop_agent_policy.sql",
       "0027_enterprise_agents.sql",
       "0028_enterprise_agent_tasks.sql",
+      "0029_enterprise_agent_lifecycle.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -191,6 +192,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 26, tag: "0026_enterprise_desktop_agent_policy" }),
       expect.objectContaining({ idx: 27, tag: "0027_enterprise_agents" }),
       expect.objectContaining({ idx: 28, tag: "0028_enterprise_agent_tasks" }),
+      expect.objectContaining({ idx: 29, tag: "0029_enterprise_agent_lifecycle" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

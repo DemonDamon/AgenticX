@@ -15,7 +15,11 @@ export async function listEligibleDesktopWorkerAgents(identity: {
   const wanted = new Set(keys.map((key) => key.trim()).filter(Boolean));
   const agents = await listAgents(identity.tenantId, { status: "active" });
   return agents.filter(
-    (agent) => agent.runtime === "desktop_worker" && agent.workerKeys.some((key) => wanted.has(key.trim())),
+    (agent) =>
+      agent.status !== "disabled" &&
+      agent.lifecycle === "published" &&
+      agent.runtime === "desktop_worker" &&
+      agent.workerKeys.some((key) => wanted.has(key.trim())),
   );
 }
 

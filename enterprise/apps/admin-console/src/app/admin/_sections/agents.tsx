@@ -46,6 +46,7 @@ import {
 
 type AgentRuntime = "cloud" | "desktop_worker";
 type AgentStatus = "active" | "disabled";
+type AgentLifecycle = "draft" | "published" | "recalled";
 
 type AgentRecord = {
   id: string;
@@ -59,6 +60,8 @@ type AgentRecord = {
   assignmentKeys: string[];
   workerKeys: string[];
   status: AgentStatus;
+  lifecycle?: AgentLifecycle;
+  origin?: "enterprise" | "employee";
   metadata?: Record<string, unknown>;
 };
 
@@ -289,6 +292,7 @@ export default function AgentsSection() {
       assignmentKeys: toAssignmentKeys(form.assignment),
       workerKeys: toAssignmentKeys(form.workerAssignment),
       status: (form.enabled ? "active" : "disabled") satisfies AgentStatus,
+      ...(editor.mode === "create" ? { lifecycle: "draft" as const } : {}),
     };
     try {
       const res = await adminFetch(editor.mode === "create" ? "/api/admin/agents" : `/api/admin/agents/${editor.id}`, {
@@ -309,6 +313,21 @@ export default function AgentsSection() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function setLifecycle(agent: AgentRecord, lifecycle: AgentLifecycle) {
+    const res = await adminFetch(`/api/admin/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lifecycle }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { message?: string };
+    if (!res.ok) {
+      toast.error(json.message || tc("toast.saveFailed"));
+      return;
+    }
+    toast.success(lifecycle === "published" ? t("toast.published") : t("toast.recalled"));
+    await load();
   }
 
   async function confirmDelete() {
@@ -380,12 +399,21 @@ export default function AgentsSection() {
                     : t("visibility.count", { count: agent.assignmentKeys.length })}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={agent.status === "disabled" ? "secondary" : "default"}>
-                    {isStatus(agent.status) && agent.status === "disabled" ? t("status.disabled") : t("status.active")}
+                  <Badge variant={agent.lifecycle === "published" && agent.status !== "disabled" ? "default" : "secondary"}>
+                    {t(`lifecycle.${agent.lifecycle === "published" || agent.lifecycle === "recalled" ? agent.lifecycle : "draft"}`)}
                   </Badge>
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
+                    {agent.lifecycle !== "published" ? (
+                      <Button size="sm" variant="outline" onClick={() => void setLifecycle(agent, "published")}>
+                        {t("actions.publish")}
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => void setLifecycle(agent, "recalled")}>
+                        {t("actions.recall")}
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => openEdit(agent)}>
                       {t("actions.edit")}
                     </Button>

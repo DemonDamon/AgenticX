@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AgentValidationError, validateAgentInput, type AgentInput, type AgentRuntime } from "../agents";
+import { AgentValidationError, isVisibleToEmployees, validateAgentInput, type AgentInput, type AgentRuntime } from "../agents";
 
 const valid: AgentInput = {
   slug: "report-bot",
@@ -57,6 +57,13 @@ describe("validateAgentInput", () => {
     expect(() => validateAgentInput({ ...valid, workerKeys: "all" as unknown as string[] })).toThrow(
       AgentValidationError,
     );
+  });
+
+  it("hides drafts and recalled agents from employees", () => {
+    expect(isVisibleToEmployees({ status: "active", lifecycle: "draft" })).toBe(false);
+    expect(isVisibleToEmployees({ status: "active", lifecycle: "recalled" })).toBe(false);
+    expect(isVisibleToEmployees({ status: "disabled", lifecycle: "published" })).toBe(false);
+    expect(isVisibleToEmployees({ status: "active", lifecycle: "published" })).toBe(true);
   });
 
   it("accepts an http knowledge search address and rejects other schemes", () => {

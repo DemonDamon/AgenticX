@@ -30,6 +30,11 @@ export const enterpriseAgents = mysqlTable(
     /** 可承接桌面执行的员工，键格式同 assignment_keys。空数组表示没有人能承接。 */
     workerKeys: json("worker_keys").$type<string[]>().notNull().default([]),
     status: varchar("status", { length: 16 }).notNull().default("active"),
+    /** `draft` / `published` / `recalled`。已有行默认 published，新建由应用写成 draft。 */
+    lifecycle: varchar("lifecycle", { length: 16 }).notNull().default("published"),
+    origin: varchar("origin", { length: 16 }).notNull().default("enterprise"),
+    ownerUserId: varchar("owner_user_id", { length: 26 }),
+    localAvatarId: varchar("local_avatar_id", { length: 64 }),
     metadata: json("metadata").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },
