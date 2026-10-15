@@ -42,8 +42,6 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
-  FileText,
-  FileWarning,
   Gauge,
   History,
   KeyRound,
@@ -105,14 +103,12 @@ const NAV_GROUPS: NavGroup[] = [
     id: "ops",
     label: "ops",
     items: [
-      { href: "/audit", labelKey: "audit", icon: FileWarning },
-      { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
+      { href: "/ops/logs", labelKey: "logObserve", icon: Activity },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/quota", labelKey: "quota", icon: Sliders },
       { href: "/metering/plans", labelKey: "quotaPlans", icon: Package },
       { href: "/metering/split", labelKey: "billingSplit", icon: Gauge },
-      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Activity },
     ],
   },
   {
@@ -129,14 +125,6 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/connectors", labelKey: "connectors", icon: Cable },
       { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
-    ],
-  },
-  {
-    id: "observability",
-    label: "observability",
-    items: [
-      { href: "/admin/errors", labelKey: "errors", icon: FileWarning },
-      { href: "/admin/perf", labelKey: "perf", icon: Activity },
     ],
   },
 ];

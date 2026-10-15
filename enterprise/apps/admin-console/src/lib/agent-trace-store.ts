@@ -12,6 +12,9 @@ function implementation(): typeof postgresql {
 export const listAgentTraceIds: typeof postgresql.listAgentTraceIds = (...args: Parameters<typeof postgresql.listAgentTraceIds>) =>
   implementation().listAgentTraceIds(...args);
 
+export const listRecentAgentSpans: typeof postgresql.listRecentAgentSpans = (...args: Parameters<typeof postgresql.listRecentAgentSpans>) =>
+  implementation().listRecentAgentSpans(...args);
+
 export const getAgentTrace: typeof postgresql.getAgentTrace = (...args: Parameters<typeof postgresql.getAgentTrace>) =>
   implementation().getAgentTrace(...args);
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Upload one completed replay turn to the enterprise agent-trace inbox.
 
-Spans carry step metadata only: kind, status, timing, and token counts.
-Message text, tool arguments, and tool results are never copied into the
-outbox or the HTTP body.
+Spans carry the run trajectory: who spoke, which model or tool ran, status,
+timing, and token counts. The user message and the assistant reply preview
+are copied, clipped to 500 characters. Tool arguments, tool results, and
+subagent task text are never copied into the outbox or the HTTP body.
 
 The outbox file is ``~/.agenticx/enterprise_trace/outbox.jsonl``. The path is
 resolved at call time through :func:`agenticx.utils.agx_home.agx_home`, the
@@ -34,6 +35,7 @@ MAX_OUTBOX_LINES = 2000
 _UPLOAD_BATCH = 200
 _TRACE_BODY_LIMIT = 120
 _ERROR_LIMIT = 500
+_NARRATIVE_LIMIT = 500
 _MODEL_LIMIT = 128
 _PROVIDER_LIMIT = 64
 _NAME_LIMIT = 128
@@ -115,7 +117,8 @@ def build_spans(run: ReplayRunRecord, events: list[RunEvent]) -> list[dict[str, 
       and ``terminal_reason`` on that event. The FINAL blob stores
       ``usage_metadata``; :func:`enqueue_completed_run` copies those numeric
       keys onto the in-memory payload before this function runs. The blob's
-      ``text`` / ``reasoning`` are not copied.
+      The blob's ``text`` is not copied. A clipped ``reasoning`` preview is
+      copied onto the model span as ``metadata.thought``.
     * Otherwise the same keys on the round's ``context_stats`` payload.
       Live ``context_stats`` rows carry ``prompt_tokens_approx`` and
       tool-result estimates. Those are not provider usage and are ignored.
@@ -137,7 +140,11 @@ def build_spans(run: ReplayRunRecord, events: list[RunEvent]) -> list[dict[str, 
       then ``text`` on an error span only.
     * The final ``run`` span maps run status ``completed`` -> ok,
       ``failed`` -> error, ``cancelled`` / ``interrupted`` -> cancelled.
-      ``metadata`` is ``agent_id`` and ``event_count``.
+      ``metadata`` is ``agent_id``, ``event_count``, and ``user_text`` when
+      a ``user_message`` event has text.
+    * A model span copies ``assistant_output_completed`` ``text_preview``
+      into ``metadata.reply``, and the FINAL blob's ``reasoning`` into
+      ``metadata.thought``. Both are clipped to 500 characters.
     """
 
     ordered = sorted(events, key=lambda item: (item.ts, item.seq, item.event_id))
@@ -199,7 +206,33 @@ def build_spans(run: ReplayRunRecord, events: list[RunEvent]) -> list[dict[str, 
     spans.append(_run_span(run, ordered, trace_id, model, provider))
     for index, span in enumerate(spans, start=1):
         span["step_no"] = index
+    _link_span_parents(spans)
     return spans
+
+
+def _link_span_parents(spans: list[dict[str, Any]]) -> None:
+    """Hang model and subagent spans under the run, and tool spans under the open model span."""
+
+    run_step = next((span["step_no"] for span in spans if span.get("step_kind") == "run"), None)
+    if not isinstance(run_step, int):
+        return
+    open_model: int | None = None
+    for span in spans:
+        kind = span.get("step_kind")
+        if kind == "run":
+            continue
+        metadata = span.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            span["metadata"] = metadata
+        if kind == "model":
+            metadata["parent_step_no"] = run_step
+            step_no = span.get("step_no")
+            open_model = step_no if isinstance(step_no, int) else None
+        elif kind == "tool":
+            metadata["parent_step_no"] = open_model if open_model is not None else run_step
+        else:
+            metadata["parent_step_no"] = run_step
 
 
 def enqueue_completed_run(store: ReplayLedgerStore, run_id: str) -> None:
@@ -299,6 +332,36 @@ def _ms(delta_seconds: float) -> int:
 
 def _clip_text(value: str, limit: int = _ERROR_LIMIT) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def _user_text(events: list[RunEvent]) -> str:
+    for event in events:
+        if event.type != "user_message":
+            continue
+        text = _payload(event).get("text")
+        if isinstance(text, str) and text.strip():
+            return _clip_text(text, _NARRATIVE_LIMIT)
+    return ""
+
+
+def _reply_text(events: list[RunEvent]) -> str:
+    for event in events:
+        if event.type != "assistant_output_completed":
+            continue
+        preview = _payload(event).get("text_preview")
+        if isinstance(preview, str) and preview.strip():
+            return _clip_text(preview, _NARRATIVE_LIMIT)
+    return ""
+
+
+def _thought_text(events: list[RunEvent]) -> str:
+    for event in events:
+        if event.type != "assistant_output_completed":
+            continue
+        preview = _payload(event).get("reasoning_preview")
+        if isinstance(preview, str) and preview.strip():
+            return _clip_text(preview, _NARRATIVE_LIMIT)
+    return ""
 
 
 def _usage_from_payload(payload: Any) -> dict[str, int] | None:
@@ -447,6 +510,13 @@ def _model_draft(
             if summary:
                 error_message = summary
     ts, seq = _anchor(events)
+    metadata: dict[str, Any] = {}
+    reply = _reply_text(events)
+    thought = _thought_text(events)
+    if reply:
+        metadata["reply"] = reply
+    if thought:
+        metadata["thought"] = thought
     span = _base_span(
         trace_id=trace_id,
         step_kind="model",
@@ -456,6 +526,7 @@ def _model_draft(
         model=model,
         provider=provider,
         error_message=error_message,
+        metadata=metadata or None,
     )
     return ts, seq, span
 
@@ -598,6 +669,13 @@ def _run_span(
             error_message = _clip_text(run.gap_reason)
     end = run.completed_at if run.completed_at is not None else run.updated_at
     event_count = run.event_count if run.event_count > 0 else len(events)
+    metadata: dict[str, Any] = {
+        "agent_id": run.agent_id or "meta",
+        "event_count": event_count,
+    }
+    user_text = _user_text(events)
+    if user_text:
+        metadata["user_text"] = user_text
     return _base_span(
         trace_id=trace_id,
         step_kind="run",
@@ -606,7 +684,7 @@ def _run_span(
         model=model,
         provider=provider,
         error_message=error_message,
-        metadata={"agent_id": run.agent_id or "meta", "event_count": event_count},
+        metadata=metadata,
     )
 
 
@@ -640,18 +718,17 @@ def _load_events(store: ReplayLedgerStore, run_id: str) -> list[RunEvent]:
 
 
 def _hydrate_usage_from_blobs(store: ReplayLedgerStore, events: list[RunEvent]) -> None:
-    """Copy numeric FINAL-blob usage onto the event payload.
+    """Copy token counts and a clipped reasoning preview from the FINAL blob.
 
-    The recorder keeps ``usage_metadata`` in the content-addressed blob, not
-    on the ``assistant_output_completed`` payload. Only token keys are copied.
+    The recorder keeps ``usage_metadata`` and ``reasoning`` in the blob, not
+    on the ``assistant_output_completed`` payload. The assistant ``text`` in
+    that blob is left untouched.
     """
 
     for event in events:
         if event.type != "assistant_output_completed":
             continue
         payload = _payload(event)
-        if _usage_from_payload(payload) is not None:
-            continue
         ref = str(event.payload_ref or "").strip()
         if not ref:
             continue
@@ -662,17 +739,24 @@ def _hydrate_usage_from_blobs(store: ReplayLedgerStore, events: list[RunEvent]) 
             continue
         if not isinstance(blob, dict):
             continue
-        usage = blob.get("usage_metadata")
-        if not isinstance(usage, dict):
-            usage = blob.get("usage")
-        if not isinstance(usage, dict):
-            continue
-        copied = {key: usage[key] for key in _USAGE_COPY_KEYS if key in usage}
-        if not copied:
-            continue
         merged = dict(payload)
-        merged["usage_metadata"] = copied
-        event.payload = merged
+        changed = False
+        if _usage_from_payload(payload) is None:
+            usage = blob.get("usage_metadata")
+            if not isinstance(usage, dict):
+                usage = blob.get("usage")
+            if isinstance(usage, dict):
+                copied = {key: usage[key] for key in _USAGE_COPY_KEYS if key in usage}
+                if copied:
+                    merged["usage_metadata"] = copied
+                    changed = True
+        if not str(payload.get("reasoning_preview") or "").strip():
+            reasoning = blob.get("reasoning")
+            if isinstance(reasoning, str) and reasoning.strip():
+                merged["reasoning_preview"] = _clip_text(reasoning, _NARRATIVE_LIMIT)
+                changed = True
+        if changed:
+            event.payload = merged
 
 
 def _append_outbox(spans: list[dict[str, Any]]) -> None:

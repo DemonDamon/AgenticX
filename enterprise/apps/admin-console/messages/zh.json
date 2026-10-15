@@ -40,6 +40,7 @@
         "userGroups": "用户组",
         "roles": "角色",
         "bulkImport": "批量导入",
+        "logObserve": "运行观测",
         "audit": "审计日志",
         "portalLogs": "Portal 日志",
         "compliance": "合规留存",
@@ -47,7 +48,7 @@
         "quota": "额度控制",
         "quotaPlans": "Token 套餐",
         "billingSplit": "分账结算",
-        "agentTraces": "词元追踪",
+        "agentTraces": "观测中心",
         "policy": "策略规则",
         "agents": "智能体",
         "models": "模型服务",
@@ -203,6 +204,11 @@
           "mcp": "MCP",
           "skill": "Skill"
         },
+        "lifecycle": {
+          "draft": "草稿",
+          "published": "已发布",
+          "recalled": "已回收"
+        },
         "delete": {
           "title": "删除智能体",
           "description": "确认删除「{name}」？删除后不可恢复。",
@@ -211,11 +217,15 @@
         "toast": {
           "created": "已创建智能体",
           "saved": "已保存",
-          "deleted": "已删除"
+          "deleted": "已删除",
+          "published": "已发布，命中范围的员工可以在桌面和房间里使用",
+          "recalled": "已回收，员工侧不再可用"
         },
         "actions": {
           "edit": "编辑",
-          "delete": "删除"
+          "delete": "删除",
+          "publish": "发布",
+          "recall": "回收"
         }
       },
       "capabilities": {
@@ -688,6 +698,7 @@
       "title": "企业总览",
       "descriptionLoading": "正在加载...",
       "descriptionUpdated": "最近更新：{time} · 每 {seconds} 秒轮询",
+      "viewRuntime": "运行观测",
       "viewAudit": "查看审计",
       "viewMetering": "四维消耗",
       "welcomeBadge": "欢迎回来",
@@ -738,6 +749,55 @@
         "emptyDescription": "近 24 小时无事件记录",
         "hit": "命中",
         "compliant": "合规"
+      },
+      "runtime": {
+        "title": "运行观测",
+        "description": "近 24 小时的智能体调用，涨跌对比再往前 24 小时。数字来自已上报的调用记录。可按用户 ID、用户名、服务名、智能体、模型和来源筛选。服务名优先用上报的服务字段，没有时用模型供应商。",
+        "refresh": "刷新",
+        "loading": "正在汇总近 24 小时的调用…",
+        "loadFailed": "运行观测加载失败",
+        "empty": "这段时间没有记录",
+        "noBaseline": "上一时段没有记录，不显示涨跌",
+        "versusPrevious": "对比前 24 小时",
+        "registered": "当前注册智能体 {count} 个",
+        "filters": {
+          "all": "全部",
+          "userId": "用户 ID",
+          "userName": "用户名",
+          "agent": "智能体",
+          "model": "模型",
+          "service": "服务名",
+          "source": "来源",
+          "desktop": "桌面",
+          "web": "Web"
+        },
+        "cards": {
+          "agents": "有调用的智能体",
+          "requests": "请求数",
+          "modelCalls": "模型调用次数",
+          "inputTokens": "输入 Token",
+          "outputTokens": "输出 Token",
+          "totalTokens": "Token 总量",
+          "modelErrors": "模型调用错误数"
+        },
+        "charts": {
+          "requestTrend": "请求数 / 错误数",
+          "modelCallTrend": "模型调用次数",
+          "requestsByAgent": "请求数（按智能体）",
+          "callsByAgent": "模型调用次数（按智能体 + 模型）",
+          "tpsByModel": "每秒输出 Token（按模型）",
+          "tps": "Token/秒",
+          "tpsHint": "输出 Token 除以模型调用耗时",
+          "tokenBuckets": "Token 总量分布",
+          "modelErrors": "模型调用错误数",
+          "tokensByModel": "Token 总量（按模型）",
+          "lastDay": "按小时，东八区",
+          "top10": "前 10",
+          "bucketHint": "按单次请求的 Token 合计分桶",
+          "requests": "请求数",
+          "errors": "错误数",
+          "modelCalls": "调用次数"
+        }
       }
     },
     "login": {
@@ -1689,8 +1749,14 @@
       },
       "agentTraces": {
         "breadcrumbMetering": "四维消耗",
-        "title": "智能体词元追踪",
-        "description": "按 agent step 展示沙箱任务中的词元消耗路径与累计成本",
+        "title": "观测中心",
+        "description": "Web 前台和桌面的运行记录在同一处：总览、调用链、会话。",
+        "backToList": "返回列表",
+        "tabs": { "overview": "总览", "traces": "调用链", "sessions": "会话" },
+        "source": { "desktop": "桌面", "web": "Web" },
+        "filter": { "all": "全部", "errors": "仅错误", "search": "搜索 Trace、会话或输入", "clearSession": "清除会话筛选" },
+        "columns": { "status": "状态", "time": "时间", "source": "来源", "operation": "操作", "model": "模型", "input": "输入", "duration": "耗时", "session": "会话", "traces": "轮次", "tokens": "Tokens" },
+        "overview": { "traces": "调用次数", "errors": "错误次数", "modelCalls": "模型调用", "toolCalls": "工具调用", "tokens": "Token 总量", "p50": "耗时 P50", "p90": "耗时 P90", "avg": "平均耗时", "topModels": "模型 Token Top" },
         "recentTraces": "最近 Trace",
         "recentTracesHint": "来自网关计量与 edge-agent 上报的 trace",
         "traceDetail": "Trace 详情",
@@ -1702,13 +1768,30 @@
         "selectTrace": "选择或输入 trace_id 查看详情",
         "step": "步骤",
         "kind": "类型",
+        "tool": "工具",
         "status": "状态",
         "model": "模型",
         "tokens": "Tokens",
         "costUsd": "成本 (USD)",
         "duration": "耗时",
         "totalTokens": "总 Tokens",
-        "inputTokens": "Input Tokens"
+        "inputTokens": "Input Tokens",
+        "trajectory": "运行轨迹",
+        "userSaid": "用户",
+        "reply": "回复",
+        "kindLabel": {
+          "model": "调用模型",
+          "tool": "调用工具",
+          "subagent": "子智能体",
+          "run": "本轮运行",
+          "thought": "思考"
+        },
+        "operationCount": "本次包含 {count} 个操作",
+        "session": "会话",
+        "runId": "运行",
+        "input": "输入",
+        "output": "输出",
+        "selectNode": "点击左侧操作查看输入和输出"
       },
       "quota": {
         "breadcrumbQuota": "额度控制",

@@ -66,6 +66,7 @@ describe("POST /api/desktop/worker/heartbeat", () => {
         model: "demo/coder",
         runtime: "desktop_worker",
         status: "active",
+        lifecycle: "published",
         workerKeys: ["dept:other"],
       },
       {

@@ -65,6 +65,12 @@ function readStatus(value: unknown): AgentStatus | undefined {
   throw new AgentValidationError("状态不合法");
 }
 
+function readLifecycle(value: unknown): "draft" | "published" | "recalled" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "draft" || value === "published" || value === "recalled") return value;
+  throw new AgentValidationError("生命周期不合法");
+}
+
 function readDescription(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -120,6 +126,7 @@ export async function prepareCreateInput(request: Request): Promise<AgentInput> 
     assignmentKeys: Array.isArray(body.assignmentKeys) ? body.assignmentKeys.map(String) : undefined,
     workerKeys: readWorkerKeys(body.workerKeys),
     status: readStatus(body.status),
+    lifecycle: readLifecycle(body.lifecycle) ?? "draft",
     metadata: readMetadata(body.metadata),
   };
   validateAgentInput(input);
@@ -139,6 +146,7 @@ export async function preparePatchInput(request: Request): Promise<Partial<Agent
   if (typeof body.model === "string") patch.model = body.model;
   if (body.runtime !== undefined) patch.runtime = readRuntime(body.runtime);
   if (body.status !== undefined) patch.status = readStatus(body.status);
+  if (body.lifecycle !== undefined) patch.lifecycle = readLifecycle(body.lifecycle);
   if (body.metadata !== undefined) patch.metadata = readMetadata(body.metadata);
   if (body.capabilityIds !== undefined) {
     if (!Array.isArray(body.capabilityIds)) throw new AgentValidationError("能力标识不合法");

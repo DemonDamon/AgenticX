@@ -204,6 +204,13 @@
       "when": 1787200000001,
       "tag": "0028_enterprise_agent_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1787300000001,
+      "tag": "0029_enterprise_agent_lifecycle",
+      "breakpoints": true
     }
   ]
 }

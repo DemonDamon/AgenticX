@@ -29,6 +29,7 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  Gauge,
   DollarSign,
   Inbox,
   RefreshCcw,
@@ -225,6 +226,12 @@ export default function DashboardPage() {
         }
         actions={
           <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/ops/logs">
+                <Gauge />
+                {t("viewRuntime")}
+              </Link>
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <Link href="/audit">
                 <Activity />

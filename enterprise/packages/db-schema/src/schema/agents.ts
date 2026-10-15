@@ -33,8 +33,14 @@ export const enterpriseAgents = pgTable(
     assignmentKeys: text("assignment_keys").array().notNull().default(["all"]),
     /** 可承接桌面执行的员工，键格式同 assignment_keys。空数组表示没有人能承接。 */
     workerKeys: text("worker_keys").array().notNull().default([]),
-    /** `active` / `disabled`。 */
+    /** `active` / `disabled`。停用后即使已发布也不可见。 */
     status: varchar("status", { length: 16 }).notNull().default("active"),
+    /** `draft` 仅管理台可见；`published` 才下发给命中范围的员工；`recalled` 为回收。 */
+    lifecycle: varchar("lifecycle", { length: 16 }).notNull().default("published"),
+    /** `enterprise` 为管理台创建；`employee` 为员工桌面登记。 */
+    origin: varchar("origin", { length: 16 }).notNull().default("enterprise"),
+    ownerUserId: varchar("owner_user_id", { length: 26 }),
+    localAvatarId: varchar("local_avatar_id", { length: 64 }),
     metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },

@@ -40,6 +40,7 @@
         "userGroups": "User groups",
         "roles": "Roles",
         "bulkImport": "Bulk Import",
+        "logObserve": "Runtime",
         "audit": "Audit Logs",
         "portalLogs": "Portal Logs",
         "compliance": "Compliance",
@@ -47,7 +48,7 @@
         "quota": "Quota Control",
         "quotaPlans": "Token Plans",
         "billingSplit": "Billing Split",
-        "agentTraces": "Agent Traces",
+        "agentTraces": "Observability",
         "policy": "Policy Rules",
         "agents": "Agents",
         "models": "Model Services",
@@ -203,6 +204,11 @@
           "mcp": "MCP",
           "skill": "Skill"
         },
+        "lifecycle": {
+          "draft": "Draft",
+          "published": "Published",
+          "recalled": "Recalled"
+        },
         "delete": {
           "title": "Delete agent",
           "description": "Delete “{name}”? This cannot be undone.",
@@ -211,11 +217,15 @@
         "toast": {
           "created": "Agent created",
           "saved": "Saved",
-          "deleted": "Deleted"
+          "deleted": "Deleted",
+          "published": "Published. Employees in scope can use it on the desktop and in rooms",
+          "recalled": "Recalled. Employees can no longer use it"
         },
         "actions": {
           "edit": "Edit",
-          "delete": "Delete"
+          "delete": "Delete",
+          "publish": "Publish",
+          "recall": "Recall"
         }
       },
       "capabilities": {
@@ -688,6 +698,7 @@
       "title": "Enterprise overview",
       "descriptionLoading": "Loading...",
       "descriptionUpdated": "Last updated: {time} · polling every {seconds}s",
+      "viewRuntime": "Runtime",
       "viewAudit": "View audit",
       "viewMetering": "Metering",
       "welcomeBadge": "Welcome back",
@@ -738,6 +749,55 @@
         "emptyDescription": "No events in the last 24 hours",
         "hit": "Hit",
         "compliant": "Compliant"
+      },
+      "runtime": {
+        "title": "Runtime",
+        "description": "Agent calls in the last 24 hours, compared with the previous 24 hours. Figures come from reported traces. Filter by user ID, user name, service, agent, model, and source. Service uses the reported service field, or the model provider when that field is absent.",
+        "refresh": "Refresh",
+        "loading": "Summarizing the last 24 hours…",
+        "loadFailed": "Failed to load runtime metrics",
+        "empty": "No records in this window",
+        "noBaseline": "No records in the previous window",
+        "versusPrevious": "Versus the previous 24 hours",
+        "registered": "{count} registered agents",
+        "filters": {
+          "all": "All",
+          "userId": "User ID",
+          "userName": "User name",
+          "agent": "Agent",
+          "model": "Model",
+          "service": "Service",
+          "source": "Source",
+          "desktop": "Desktop",
+          "web": "Web"
+        },
+        "cards": {
+          "agents": "Agents with calls",
+          "requests": "Requests",
+          "modelCalls": "Model calls",
+          "inputTokens": "Input tokens",
+          "outputTokens": "Output tokens",
+          "totalTokens": "Total tokens",
+          "modelErrors": "Model call errors"
+        },
+        "charts": {
+          "requestTrend": "Requests / errors",
+          "modelCallTrend": "Model calls",
+          "requestsByAgent": "Requests by agent",
+          "callsByAgent": "Model calls by agent and model",
+          "tpsByModel": "Output tokens per second by model",
+          "tps": "Tokens/s",
+          "tpsHint": "Output tokens divided by model-call duration",
+          "tokenBuckets": "Token distribution",
+          "modelErrors": "Model call errors",
+          "tokensByModel": "Tokens by model",
+          "lastDay": "Hourly, UTC+8",
+          "top10": "Top 10",
+          "bucketHint": "Bucketed by tokens per request",
+          "requests": "Requests",
+          "errors": "Errors",
+          "modelCalls": "Calls"
+        }
       }
     },
     "login": {
@@ -1689,8 +1749,14 @@
       },
       "agentTraces": {
         "breadcrumbMetering": "Metering",
-        "title": "Agent token traces",
-        "description": "Step-by-step token usage path and cumulative cost for sandbox agent runs",
+        "title": "Observability",
+        "description": "Web and desktop runs in one place: overview, traces, and sessions.",
+        "backToList": "Back to list",
+        "tabs": { "overview": "Overview", "traces": "Traces", "sessions": "Sessions" },
+        "source": { "desktop": "Desktop", "web": "Web" },
+        "filter": { "all": "All", "errors": "Errors", "search": "Search trace, session, or input", "clearSession": "Clear session filter" },
+        "columns": { "status": "Status", "time": "Time", "source": "Source", "operation": "Operation", "model": "Model", "input": "Input", "duration": "Duration", "session": "Session", "traces": "Turns", "tokens": "Tokens" },
+        "overview": { "traces": "Runs", "errors": "Errors", "modelCalls": "Model calls", "toolCalls": "Tool calls", "tokens": "Tokens", "p50": "Duration P50", "p90": "Duration P90", "avg": "Avg duration", "topModels": "Token use by model" },
         "recentTraces": "Recent traces",
         "recentTracesHint": "From gateway metering and edge-agent ingest",
         "traceDetail": "Trace detail",
@@ -1702,13 +1768,30 @@
         "selectTrace": "Select or enter a trace_id to inspect",
         "step": "Step",
         "kind": "Kind",
+        "tool": "Tool",
         "status": "Status",
         "model": "Model",
         "tokens": "Tokens",
         "costUsd": "Cost (USD)",
         "duration": "Duration",
         "totalTokens": "Total tokens",
-        "inputTokens": "Input tokens"
+        "inputTokens": "Input tokens",
+        "trajectory": "Run trajectory",
+        "userSaid": "User",
+        "reply": "Reply",
+        "kindLabel": {
+          "model": "Model call",
+          "tool": "Tool call",
+          "subagent": "Subagent",
+          "run": "Agent run",
+          "thought": "Thought"
+        },
+        "operationCount": "{count} operations",
+        "session": "Session",
+        "runId": "Run",
+        "input": "Input",
+        "output": "Output",
+        "selectNode": "Select an operation to see its input and output"
       },
       "quota": {
         "breadcrumbQuota": "Quota control",

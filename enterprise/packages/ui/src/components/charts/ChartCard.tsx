@@ -165,6 +165,8 @@ export interface BarChartCardProps {
   xKey: string;
   series: ChartSeries[];
   stacked?: boolean;
+  /** 类目在纵轴，数值在横轴，适合名称较长的 Top 列表。 */
+  horizontal?: boolean;
   height?: number;
   className?: string;
   hideLegend?: boolean;
@@ -179,6 +181,7 @@ export function BarCard({
   xKey,
   series,
   stacked,
+  horizontal,
   height = 260,
   className,
   hideLegend,
@@ -191,27 +194,50 @@ export function BarCard({
           <ChartEmpty label={emptyLabel} />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke={chartColors.grid} strokeDasharray="4 4" vertical={false} />
-              <XAxis dataKey={xKey} stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
-              <YAxis stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
-              {renderTooltip()}
-              {!hideLegend ? <Legend iconType="circle" wrapperStyle={chartLegendWrapperStyle} /> : null}
-              {series.map((s, index) => {
-                const color = s.color ?? chartPalette[index % chartPalette.length];
-                return (
-                  <Bar
-                    key={s.key}
-                    dataKey={s.key}
-                    name={s.label ?? s.key}
-                    stackId={stacked ? "stack" : undefined}
-                    fill={color}
-                    radius={[4, 4, 0, 0]}
-                    animationDuration={700}
-                  />
-                );
-              })}
-            </BarChart>
+            {horizontal ? (
+              <BarChart layout="vertical" data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+                <CartesianGrid stroke={chartColors.grid} strokeDasharray="4 4" horizontal={false} />
+                <XAxis type="number" stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey={xKey} width={148} stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
+                {renderTooltip()}
+                {!hideLegend ? <Legend iconType="circle" wrapperStyle={chartLegendWrapperStyle} /> : null}
+                {series.map((s, index) => {
+                  const color = s.color ?? chartPalette[index % chartPalette.length];
+                  return (
+                    <Bar
+                      key={s.key}
+                      dataKey={s.key}
+                      name={s.label ?? s.key}
+                      fill={color}
+                      radius={[0, 4, 4, 0]}
+                      animationDuration={700}
+                    />
+                  );
+                })}
+              </BarChart>
+            ) : (
+              <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke={chartColors.grid} strokeDasharray="4 4" vertical={false} />
+                <XAxis dataKey={xKey} stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
+                <YAxis stroke={chartColors.axis} tick={chartAxisTickProps} axisLine={false} tickLine={false} />
+                {renderTooltip()}
+                {!hideLegend ? <Legend iconType="circle" wrapperStyle={chartLegendWrapperStyle} /> : null}
+                {series.map((s, index) => {
+                  const color = s.color ?? chartPalette[index % chartPalette.length];
+                  return (
+                    <Bar
+                      key={s.key}
+                      dataKey={s.key}
+                      name={s.label ?? s.key}
+                      stackId={stacked ? "stack" : undefined}
+                      fill={color}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={700}
+                    />
+                  );
+                })}
+              </BarChart>
+            )}
           </ResponsiveContainer>
         )}
       </div>

@@ -92,7 +92,7 @@ function modeLabel(
   return t("modeChat");
 }
 
-function PortalLogsPageContent() {
+function PortalLogsPageContent({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("pages.ops.portalLogs");
   const tRuntime = useTranslations("pages.ops.traceRuntime");
   const ts = useTranslations("shell");
@@ -405,7 +405,7 @@ function PortalLogsPageContent() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-6">
-      <Breadcrumb>
+      {embedded ? null : <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
@@ -417,11 +417,11 @@ function PortalLogsPageContent() {
             <BreadcrumbPage>{t("breadcrumb")}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
-      </Breadcrumb>
+      </Breadcrumb>}
 
       <PageHeader
-        title={t("title")}
-        description={t("description", { count: displayTotal })}
+        title={embedded ? null : t("title")}
+        description={embedded ? undefined : t("description", { count: displayTotal })}
         actions={
           <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
@@ -941,7 +941,7 @@ function DetailRow({ label, value }: { label: string; value: string | number }) 
   );
 }
 
-export default function PortalLogsPage() {
+export default function PortalLogsPage({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("pages.ops.portalLogs");
   return (
     <Suspense
@@ -949,7 +949,7 @@ export default function PortalLogsPage() {
         <div className="p-8 text-center text-muted-foreground">{t("emptyLoadingTitle")}</div>
       }
     >
-      <PortalLogsPageContent />
+      <PortalLogsPageContent embedded={embedded} />
     </Suspense>
   );
 }

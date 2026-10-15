@@ -362,6 +362,7 @@ class AvatarRegistry:
         )
         self._write_config(config)
         self._ensure_avatar_workspace(config)
+        self._sync_enterprise(config)
         return config
 
     def update_avatar(self, avatar_id: str, patch: Dict[str, Any]) -> Optional[AvatarConfig]:
@@ -445,6 +446,7 @@ class AvatarRegistry:
             config.portrait_style = PORTRAIT_STYLE
         config.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_config(config)
+        self._sync_enterprise(config)
         return config
 
     def delete_avatar(self, avatar_id: str) -> bool:
@@ -460,6 +462,14 @@ class AvatarRegistry:
         except OSError:
             return False
         return True
+
+    def _sync_enterprise(self, config: AvatarConfig) -> None:
+        try:
+            from agenticx.runtime.enterprise_agent_sync import sync_local_avatar
+
+            sync_local_avatar(config)
+        except Exception:
+            return
 
     def _ensure_avatar_workspace(self, config: AvatarConfig) -> Path:
         """Create workspace directory with default identity files."""
