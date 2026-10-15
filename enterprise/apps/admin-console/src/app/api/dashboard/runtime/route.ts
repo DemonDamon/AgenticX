@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     userId: url.searchParams.get("user_id")?.trim() || undefined,
     agentId: url.searchParams.get("agent_id")?.trim() || undefined,
     model: url.searchParams.get("model")?.trim() || undefined,
-    provider: url.searchParams.get("provider")?.trim() || undefined,
+    service: url.searchParams.get("service")?.trim() || undefined,
     source: sourceOf(url.searchParams.get("source")),
   };
 
@@ -48,6 +48,7 @@ export async function GET(request: Request) {
         input_tokens: span.input_tokens,
         output_tokens: span.output_tokens,
         total_tokens: span.total_tokens,
+        duration_ms: span.duration_ms,
         created_at: span.created_at.toISOString(),
         metadata: span.metadata,
       })),

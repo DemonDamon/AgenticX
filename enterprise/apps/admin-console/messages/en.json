@@ -40,7 +40,7 @@
         "userGroups": "User groups",
         "roles": "Roles",
         "bulkImport": "Bulk Import",
-        "logObserve": "Log observability",
+        "logObserve": "Runtime",
         "audit": "Audit Logs",
         "portalLogs": "Portal Logs",
         "compliance": "Compliance",
@@ -698,6 +698,7 @@
       "title": "Enterprise overview",
       "descriptionLoading": "Loading...",
       "descriptionUpdated": "Last updated: {time} · polling every {seconds}s",
+      "viewRuntime": "Runtime",
       "viewAudit": "View audit",
       "viewMetering": "Metering",
       "welcomeBadge": "Welcome back",
@@ -751,7 +752,7 @@
       },
       "runtime": {
         "title": "Runtime",
-        "description": "Agent calls in the last 24 hours, compared with the previous 24 hours. Figures come from reported traces. Traces have no separate enterprise field; filter by user, agent, model, provider, and source.",
+        "description": "Agent calls in the last 24 hours, compared with the previous 24 hours. Figures come from reported traces. Filter by user ID, user name, service, agent, model, and source. Service uses the reported service field, or the model provider when that field is absent.",
         "refresh": "Refresh",
         "loading": "Summarizing the last 24 hours…",
         "loadFailed": "Failed to load runtime metrics",
@@ -761,10 +762,11 @@
         "registered": "{count} registered agents",
         "filters": {
           "all": "All",
-          "user": "User",
+          "userId": "User ID",
+          "userName": "User name",
           "agent": "Agent",
           "model": "Model",
-          "provider": "Provider",
+          "service": "Service",
           "source": "Source",
           "desktop": "Desktop",
           "web": "Web"
@@ -775,12 +777,17 @@
           "modelCalls": "Model calls",
           "inputTokens": "Input tokens",
           "outputTokens": "Output tokens",
-          "totalTokens": "Total tokens"
+          "totalTokens": "Total tokens",
+          "modelErrors": "Model call errors"
         },
         "charts": {
           "requestTrend": "Requests / errors",
           "modelCallTrend": "Model calls",
+          "requestsByAgent": "Requests by agent",
           "callsByAgent": "Model calls by agent and model",
+          "tpsByModel": "Output tokens per second by model",
+          "tps": "Tokens/s",
+          "tpsHint": "Output tokens divided by model-call duration",
           "tokenBuckets": "Token distribution",
           "modelErrors": "Model call errors",
           "tokensByModel": "Tokens by model",

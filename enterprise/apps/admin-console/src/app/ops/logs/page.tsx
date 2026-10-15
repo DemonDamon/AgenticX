@@ -4,6 +4,7 @@ import { Button } from "@agenticx/ui";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { RuntimeObserve } from "../../../components/RuntimeObserve";
 
 const ObservePage = dynamic(() => import("../../metering/agent-traces/page"), { ssr: false });
 const AuditPage = dynamic(() => import("../../audit/page"), { ssr: false });
@@ -45,7 +46,7 @@ function LogObserve() {
 
   const open = (next: TabId) => {
     setTab(next);
-    if (isObserveTab(next)) setObserveSection(next);
+    if (next === "traces" || next === "sessions") setObserveSection(next);
     setVisited((current) => {
       if (current.has(next)) return current;
       const nextVisited = new Set(current);
@@ -72,8 +73,11 @@ function LogObserve() {
           </Button>
         ))}
       </div>
-      <div className={isObserveTab(tab) ? undefined : "hidden"}>
-        <ObservePage embedded section={observeSection} onSection={open} />
+      <div className={tab === "overview" ? "px-6 pt-6" : "hidden"}>
+        <RuntimeObserve />
+      </div>
+      <div className={tab === "traces" || tab === "sessions" ? undefined : "hidden"}>
+        <ObservePage embedded section={observeSection === "sessions" ? "sessions" : "traces"} onSection={open} />
       </div>
       {visited.has("audit") ? (
         <div className={tab === "audit" ? undefined : "hidden"}>

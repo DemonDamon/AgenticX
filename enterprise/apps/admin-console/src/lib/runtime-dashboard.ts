@@ -7,6 +7,7 @@ export type RuntimeSpan = {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  duration_ms: number;
   created_at: string;
   metadata: Record<string, unknown> | null;
 };
@@ -28,7 +29,7 @@ export type RuntimeDashboardQuery = {
   userId?: string;
   agentId?: string;
   model?: string;
-  provider?: string;
+  service?: string;
   source?: "desktop" | "web" | "";
 };
 
@@ -49,20 +50,23 @@ export type RuntimeDashboard = {
     input_tokens: RuntimeMetric;
     output_tokens: RuntimeMetric;
     total_tokens: RuntimeMetric;
+    model_errors: RuntimeMetric;
   };
   filters: {
     users: Array<{ id: string; label: string }>;
     agents: Array<{ id: string; label: string }>;
     models: string[];
-    providers: string[];
+    services: string[];
     sources: Array<"desktop" | "web">;
   };
   request_trend: Array<{ bucket: string; requests: number; errors: number }>;
   model_call_trend: Array<{ bucket: string; calls: number }>;
+  requests_by_agent: Array<{ name: string; requests: number }>;
   calls_by_agent_model: Array<{ name: string; calls: number }>;
   token_buckets: Array<{ bucket: string; traces: number }>;
   model_error_trend: Array<{ bucket: string; errors: number }>;
   tokens_by_model: Array<{ name: string; tokens: number }>;
+  tps_by_model: Array<{ name: string; tps: number }>;
 };
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -144,6 +148,10 @@ function bundleSpans(spans: RuntimeSpan[]): TraceBundle[] {
   });
 }
 
+function serviceOf(span: RuntimeSpan): string {
+  return textOf(span.metadata, "service_name") || textOf(span.metadata, "service") || span.provider?.trim() || "";
+}
+
 function agentLabel(agentId: string, agents: RuntimeAgent[]): string {
   if (!agentId || agentId === "meta") return "元智能体";
   const found = agents.find((agent) => agent.id === agentId || agent.localAvatarId === agentId || agent.slug === agentId);
@@ -160,7 +168,7 @@ function matches(trace: TraceBundle, query: RuntimeDashboardQuery): boolean {
   if (query.agentId && trace.agentId !== query.agentId) return false;
   if (query.source && trace.source !== query.source) return false;
   if (query.model && !trace.spans.some((span) => span.step_kind === "model" && span.model === query.model)) return false;
-  if (query.provider && !trace.spans.some((span) => span.step_kind === "model" && span.provider === query.provider)) return false;
+  if (query.service && !trace.spans.some((span) => serviceOf(span) === query.service)) return false;
   return true;
 }
 
@@ -168,7 +176,7 @@ function countedModelSpans(trace: TraceBundle, query: RuntimeDashboardQuery): Ru
   return trace.spans.filter((span) => {
     if (span.step_kind !== "model") return false;
     if (query.model && span.model !== query.model) return false;
-    if (query.provider && span.provider !== query.provider) return false;
+    if (query.service && serviceOf(span) !== query.service) return false;
     return true;
   });
 }
@@ -211,10 +219,13 @@ export function buildRuntimeDashboard(
   let previousTotal = 0;
   let modelCalls = 0;
   let previousModelCalls = 0;
+  let modelErrors = 0;
+  let previousModelErrors = 0;
   const callTrend = new Map<number, number>(hours.map((hour) => [hour, 0]));
   const errorTrend = new Map<number, number>(hours.map((hour) => [hour, 0]));
   const callsByAgentModel = new Map<string, number>();
   const tokensByModel = new Map<string, number>();
+  const tpsByModel = new Map<string, { output: number; duration: number }>();
   const bucketCounts = new Map(TOKEN_BUCKETS.map((item) => [item.bucket, 0]));
 
   const consume = (rows: TraceBundle[], current: boolean) => {
@@ -236,16 +247,26 @@ export function buildRuntimeDashboard(
           traceTokens += span.total_tokens;
           const hour = hourKey(at);
           if (callTrend.has(hour)) callTrend.set(hour, (callTrend.get(hour) ?? 0) + 1);
-          if (span.status === "error" && errorTrend.has(hour)) errorTrend.set(hour, (errorTrend.get(hour) ?? 0) + 1);
+          if (span.status === "error") {
+            modelErrors += 1;
+            if (errorTrend.has(hour)) errorTrend.set(hour, (errorTrend.get(hour) ?? 0) + 1);
+          }
           const name = `${agentLabel(trace.agentId, agents)} · ${span.model || "未知模型"}`;
           callsByAgentModel.set(name, (callsByAgentModel.get(name) ?? 0) + 1);
           const modelName = span.model || "未知模型";
           tokensByModel.set(modelName, (tokensByModel.get(modelName) ?? 0) + span.total_tokens);
+          if (span.duration_ms > 0) {
+            const pace = tpsByModel.get(modelName) ?? { output: 0, duration: 0 };
+            pace.output += span.output_tokens;
+            pace.duration += span.duration_ms;
+            tpsByModel.set(modelName, pace);
+          }
         } else {
           previousInput += span.input_tokens;
           previousOutput += span.output_tokens;
           previousTotal += span.total_tokens;
           previousModelCalls += 1;
+          if (span.status === "error") previousModelErrors += 1;
         }
       }
       if (current) {
@@ -268,19 +289,25 @@ export function buildRuntimeDashboard(
     if (trace.error) slot.errors += 1;
   }
 
+  const requestsByAgent = new Map<string, number>();
+  for (const trace of currentTraces) {
+    const name = trace.agentId ? agentLabel(trace.agentId, agents) : "未标注";
+    requestsByAgent.set(name, (requestsByAgent.get(name) ?? 0) + 1);
+  }
+
   const usersSeen = new Map<string, string>();
   const agentsSeen = new Map<string, string>();
   const models = new Set<string>();
-  const providers = new Set<string>();
+  const services = new Set<string>();
   const sources = new Set<"desktop" | "web">();
   for (const trace of traces) {
     if (trace.userId) usersSeen.set(trace.userId, userLabel(trace.userId, users));
     if (trace.agentId) agentsSeen.set(trace.agentId, agentLabel(trace.agentId, agents));
     sources.add(trace.source);
     for (const span of trace.spans) {
-      if (span.step_kind !== "model") continue;
       if (span.model) models.add(span.model);
-      if (span.provider) providers.add(span.provider);
+      const service = serviceOf(span);
+      if (service) services.add(service);
     }
   }
 
@@ -294,12 +321,13 @@ export function buildRuntimeDashboard(
       input_tokens: metric(inputTokens, previousInput),
       output_tokens: metric(outputTokens, previousOutput),
       total_tokens: metric(totalTokens, previousTotal),
+      model_errors: metric(modelErrors, previousModelErrors),
     },
     filters: {
       users: [...usersSeen.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
       agents: [...agentsSeen.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
       models: [...models].sort(),
-      providers: [...providers].sort(),
+      services: [...services].sort(),
       sources: [...sources].sort(),
     },
     request_trend: hours.map((hour) => ({
@@ -308,6 +336,7 @@ export function buildRuntimeDashboard(
       errors: requestTrend.get(hour)?.errors ?? 0,
     })),
     model_call_trend: hours.map((hour) => ({ bucket: formatBucket(hour), calls: callTrend.get(hour) ?? 0 })),
+    requests_by_agent: topCounts(requestsByAgent, 10).map(({ name, calls }) => ({ name, requests: calls })),
     calls_by_agent_model: topCounts(callsByAgentModel, 10),
     token_buckets: TOKEN_BUCKETS.map((item) => ({ bucket: item.bucket, traces: bucketCounts.get(item.bucket) ?? 0 })),
     model_error_trend: hours.map((hour) => ({ bucket: formatBucket(hour), errors: errorTrend.get(hour) ?? 0 })),
@@ -315,5 +344,9 @@ export function buildRuntimeDashboard(
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 10)
       .map(([name, tokens]) => ({ name, tokens })),
+    tps_by_model: [...tpsByModel.entries()]
+      .map(([name, stat]) => ({ name, tps: Math.round((stat.output / (stat.duration / 1000)) * 10) / 10 }))
+      .sort((a, b) => b.tps - a.tps || a.name.localeCompare(b.name))
+      .slice(0, 10),
   };
 }

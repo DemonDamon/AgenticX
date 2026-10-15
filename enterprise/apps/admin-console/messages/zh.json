@@ -40,7 +40,7 @@
         "userGroups": "用户组",
         "roles": "角色",
         "bulkImport": "批量导入",
-        "logObserve": "日志观测",
+        "logObserve": "运行观测",
         "audit": "审计日志",
         "portalLogs": "Portal 日志",
         "compliance": "合规留存",
@@ -698,6 +698,7 @@
       "title": "企业总览",
       "descriptionLoading": "正在加载...",
       "descriptionUpdated": "最近更新：{time} · 每 {seconds} 秒轮询",
+      "viewRuntime": "运行观测",
       "viewAudit": "查看审计",
       "viewMetering": "四维消耗",
       "welcomeBadge": "欢迎回来",
@@ -751,7 +752,7 @@
       },
       "runtime": {
         "title": "运行观测",
-        "description": "近 24 小时的智能体调用，涨跌对比再往前 24 小时。数字来自已上报的调用记录。调用记录没有单独的企业字段，筛选使用用户、智能体、模型、供应商和来源。",
+        "description": "近 24 小时的智能体调用，涨跌对比再往前 24 小时。数字来自已上报的调用记录。可按用户 ID、用户名、服务名、智能体、模型和来源筛选。服务名优先用上报的服务字段，没有时用模型供应商。",
         "refresh": "刷新",
         "loading": "正在汇总近 24 小时的调用…",
         "loadFailed": "运行观测加载失败",
@@ -761,10 +762,11 @@
         "registered": "当前注册智能体 {count} 个",
         "filters": {
           "all": "全部",
-          "user": "用户",
+          "userId": "用户 ID",
+          "userName": "用户名",
           "agent": "智能体",
           "model": "模型",
-          "provider": "供应商",
+          "service": "服务名",
           "source": "来源",
           "desktop": "桌面",
           "web": "Web"
@@ -775,12 +777,17 @@
           "modelCalls": "模型调用次数",
           "inputTokens": "输入 Token",
           "outputTokens": "输出 Token",
-          "totalTokens": "Token 总量"
+          "totalTokens": "Token 总量",
+          "modelErrors": "模型调用错误数"
         },
         "charts": {
           "requestTrend": "请求数 / 错误数",
           "modelCallTrend": "模型调用次数",
+          "requestsByAgent": "请求数（按智能体）",
           "callsByAgent": "模型调用次数（按智能体 + 模型）",
+          "tpsByModel": "每秒输出 Token（按模型）",
+          "tps": "Token/秒",
+          "tpsHint": "输出 Token 除以模型调用耗时",
           "tokenBuckets": "Token 总量分布",
           "modelErrors": "模型调用错误数",
           "tokensByModel": "Token 总量（按模型）",

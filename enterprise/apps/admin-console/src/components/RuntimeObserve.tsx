@@ -33,8 +33,9 @@ export function RuntimeObserve() {
   const [userId, setUserId] = useState("");
   const [agentId, setAgentId] = useState("");
   const [model, setModel] = useState("");
-  const [provider, setProvider] = useState("");
+  const [service, setService] = useState("");
   const [source, setSource] = useState("");
+  const [trend, setTrend] = useState<"requests" | "errors">("requests");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,7 +44,7 @@ export function RuntimeObserve() {
     if (userId) query.set("user_id", userId);
     if (agentId) query.set("agent_id", agentId);
     if (model) query.set("model", model);
-    if (provider) query.set("provider", provider);
+    if (service) query.set("service", service);
     if (source) query.set("source", source);
     try {
       const response = await adminFetch(`/api/dashboard/runtime?${query.toString()}`, { cache: "no-store" });
@@ -57,7 +58,7 @@ export function RuntimeObserve() {
     } finally {
       setLoading(false);
     }
-  }, [agentId, model, provider, source, t, userId]);
+  }, [agentId, model, service, source, t, userId]);
 
   useEffect(() => {
     void load();
@@ -80,7 +81,12 @@ export function RuntimeObserve() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <FilterSelect label={t("filters.user")} value={userId} onChange={setUserId} allLabel={t("filters.all")}>
+        <FilterSelect label={t("filters.userId")} value={userId} onChange={setUserId} allLabel={t("filters.all")}>
+          {(data?.filters.users ?? []).map((user) => (
+            <option key={user.id} value={user.id}>{user.id}</option>
+          ))}
+        </FilterSelect>
+        <FilterSelect label={t("filters.userName")} value={userId} onChange={setUserId} allLabel={t("filters.all")}>
           {(data?.filters.users ?? []).map((user) => (
             <option key={user.id} value={user.id}>{user.label}</option>
           ))}
@@ -95,8 +101,8 @@ export function RuntimeObserve() {
             <option key={item} value={item}>{item}</option>
           ))}
         </FilterSelect>
-        <FilterSelect label={t("filters.provider")} value={provider} onChange={setProvider} allLabel={t("filters.all")}>
-          {(data?.filters.providers ?? []).map((item) => (
+        <FilterSelect label={t("filters.service")} value={service} onChange={setService} allLabel={t("filters.all")}>
+          {(data?.filters.services ?? []).map((item) => (
             <option key={item} value={item}>{item}</option>
           ))}
         </FilterSelect>
@@ -115,19 +121,24 @@ export function RuntimeObserve() {
         <StatCard label={t("cards.inputTokens")} value={formatCount(cards?.input_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.input_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.input_tokens)}</span>} />
         <StatCard label={t("cards.outputTokens")} value={formatCount(cards?.output_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.output_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.output_tokens)}</span>} />
         <StatCard label={t("cards.totalTokens")} value={formatCount(cards?.total_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.total_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.total_tokens)}</span>} />
+        <StatCard label={t("cards.modelErrors")} value={formatCount(cards?.model_errors.value ?? 0, locale)} icon={<Cpu />} delta={cards ? deltaOf(cards.model_errors) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.model_errors)}</span>} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <LineCard
           title={t("charts.requestTrend")}
           description={t("charts.lastDay")}
+          actions={
+            <div className="flex gap-1">
+              <Button type="button" size="sm" variant={trend === "requests" ? "default" : "outline"} onClick={() => setTrend("requests")}>{t("charts.requests")}</Button>
+              <Button type="button" size="sm" variant={trend === "errors" ? "default" : "outline"} onClick={() => setTrend("errors")}>{t("charts.errors")}</Button>
+            </div>
+          }
           data={data?.request_trend ?? []}
           xKey="bucket"
-          series={[
-            { key: "requests", label: t("charts.requests"), color: chartPalette[0] },
-            { key: "errors", label: t("charts.errors"), color: chartPalette[3] },
-          ]}
+          series={[{ key: trend, label: trend === "requests" ? t("charts.requests") : t("charts.errors"), color: trend === "requests" ? chartPalette[0] : chartPalette[3] }]}
           height={280}
+          hideLegend
         />
         <LineCard
           title={t("charts.modelCallTrend")}
@@ -141,6 +152,17 @@ export function RuntimeObserve() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <BarCard
+          title={t("charts.requestsByAgent")}
+          description={t("charts.top10")}
+          data={data?.requests_by_agent ?? []}
+          xKey="name"
+          series={[{ key: "requests", label: t("charts.requests"), color: chartPalette[0] }]}
+          horizontal
+          hideLegend
+          height={320}
+          emptyLabel={t("empty")}
+        />
         <BarCard
           title={t("charts.callsByAgent")}
           description={t("charts.top10")}
@@ -180,6 +202,17 @@ export function RuntimeObserve() {
           data={data?.tokens_by_model ?? []}
           xKey="name"
           series={[{ key: "tokens", label: t("cards.totalTokens"), color: chartPalette[0] }]}
+          horizontal
+          hideLegend
+          height={280}
+          emptyLabel={t("empty")}
+        />
+        <BarCard
+          title={t("charts.tpsByModel")}
+          description={t("charts.tpsHint")}
+          data={data?.tps_by_model ?? []}
+          xKey="name"
+          series={[{ key: "tps", label: t("charts.tps"), color: chartPalette[0] }]}
           horizontal
           hideLegend
           height={280}

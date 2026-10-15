@@ -20,6 +20,7 @@ function span(partial: Partial<RuntimeSpan> & Pick<RuntimeSpan, "trace_id" | "st
     input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
+    duration_ms: 0,
     created_at: CURRENT,
     metadata: null,
     ...partial,
@@ -43,6 +44,7 @@ describe("buildRuntimeDashboard", () => {
         input_tokens: 1000,
         output_tokens: 500,
         total_tokens: 1500,
+        duration_ms: 2000,
         metadata: { user_id: "user-1" },
       }),
       span({
@@ -54,6 +56,7 @@ describe("buildRuntimeDashboard", () => {
         input_tokens: 20000,
         output_tokens: 5000,
         total_tokens: 25000,
+        duration_ms: 10000,
         metadata: { user_id: "user-2" },
       }),
       span({
@@ -87,6 +90,14 @@ describe("buildRuntimeDashboard", () => {
     expect(dashboard.token_buckets.find((row) => row.bucket === "1K-5K")?.traces).toBe(1);
     expect(dashboard.token_buckets.find((row) => row.bucket === ">20K")?.traces).toBe(1);
     expect(dashboard.tokens_by_model[0]).toEqual({ name: "glm-5.3-flash", tokens: 26500 });
+    expect(dashboard.cards.model_errors).toEqual({ value: 1, previous: 0, delta_pct: null });
+    expect(dashboard.requests_by_agent).toHaveLength(2);
+    expect(dashboard.requests_by_agent).toEqual(expect.arrayContaining([
+      { name: "未标注", requests: 1 },
+      { name: "桌面编码", requests: 1 },
+    ]));
+    expect(dashboard.tps_by_model).toEqual([{ name: "glm-5.3-flash", tps: 458.3 }]);
+    expect(dashboard.filters.services).toEqual(["zhipu"]);
     expect(dashboard.model_error_trend.some((row) => row.errors === 1)).toBe(true);
     expect(dashboard.request_trend.some((row) => row.requests === 2 && row.errors === 1)).toBe(true);
     expect(dashboard.filters.users).toEqual([
