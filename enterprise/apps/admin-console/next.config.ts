@@ -19,6 +19,15 @@ const config: NextConfig = {
     maxInactiveAge: 30 * 60 * 1000,
     pagesBufferLength: 16,
   },
+  async redirects() {
+    return [
+      { source: "/audit", destination: "/ops/logs?tab=audit", permanent: false },
+      { source: "/portal-logs", destination: "/ops/logs?tab=portal", permanent: false },
+      { source: "/metering/agent-traces", destination: "/ops/logs?tab=observe", permanent: false },
+      { source: "/admin/errors", destination: "/ops/logs?tab=errors", permanent: false },
+      { source: "/admin/perf", destination: "/ops/logs?tab=perf", permanent: false },
+    ];
+  },
   transpilePackages: [
     "@agenticx/ui",
     "@agenticx/branding",

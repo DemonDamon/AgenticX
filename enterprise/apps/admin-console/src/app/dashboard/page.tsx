@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { RuntimeObserve } from "../../components/RuntimeObserve";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -244,6 +245,8 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      <RuntimeObserve />
 
       {/* Welcome banner */}
       <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary-soft via-card to-card">

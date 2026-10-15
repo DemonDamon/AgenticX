@@ -41,6 +41,35 @@ export type AgentTraceDetail = {
   status: string;
 };
 
+export async function listRecentAgentSpans(limit = 2000): Promise<AgentTraceSpanRow[]> {
+  const db = getAdminMysqlDb();
+  const tenantId = resolveTenantId();
+  const rows = await db
+    .select()
+    .from(agentTokenTraces)
+    .where(eq(agentTokenTraces.tenantId, tenantId))
+    .orderBy(desc(agentTokenTraces.createdAt))
+    .limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    trace_id: row.traceId,
+    step_no: row.stepNo,
+    step_kind: row.stepKind,
+    status: row.status,
+    model: row.model,
+    provider: row.provider,
+    input_tokens: row.inputTokens,
+    output_tokens: row.outputTokens,
+    reasoning_tokens: row.reasoningTokens,
+    total_tokens: row.totalTokens,
+    cost_usd: String(row.costUsd ?? "0"),
+    duration_ms: row.durationMs,
+    error_message: row.errorMessage,
+    metadata: (row.metadata as Record<string, unknown> | null) ?? null,
+    created_at: row.createdAt,
+  }));
+}
+
 export async function listAgentTraceIds(limit = 50): Promise<string[]> {
   const db = getAdminMysqlDb();
   const tenantId = resolveTenantId();

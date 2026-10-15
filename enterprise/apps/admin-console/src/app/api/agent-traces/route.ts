@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAgentTrace, listAgentTraceIds } from "../../../lib/agent-trace-store";
+import { getAgentTrace, listAgentTraceIds, listRecentAgentSpans } from "../../../lib/agent-trace-store";
+import { buildObservationCenter } from "../../../lib/observation-center";
 import { requireAdminScope } from "../../../lib/admin-auth";
 
 export async function GET(request: Request) {
@@ -15,6 +16,10 @@ export async function GET(request: Request) {
         return NextResponse.json({ code: "40401", message: "trace not found" }, { status: 404 });
       }
       return NextResponse.json({ code: "00000", message: "ok", data: trace });
+    }
+    if (url.searchParams.get("catalog") === "1") {
+      const spans = await listRecentAgentSpans(2000);
+      return NextResponse.json({ code: "00000", message: "ok", data: buildObservationCenter(spans) });
     }
     const limit = Number(url.searchParams.get("limit") ?? "50");
     const ids = await listAgentTraceIds(Number.isFinite(limit) ? limit : 50);

@@ -79,7 +79,7 @@ type TracePanelState =
   | { status: "error"; message: string }
   | { status: "ok"; spans: TraceSpanRow[] };
 
-function AuditPageContent() {
+function AuditPageContent({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("pages.ops.audit");
   const ts = useTranslations("shell");
   const tc = useTranslations("common");
@@ -398,6 +398,7 @@ function AuditPageContent() {
     <div className="space-y-5">
       <PageHeader
         breadcrumb={
+          embedded ? undefined : (
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem>
@@ -411,9 +412,10 @@ function AuditPageContent() {
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
+          )
         }
-        title={t("title")}
-        description={headerDescription}
+        title={embedded ? null : t("title")}
+        description={embedded ? undefined : headerDescription}
         actions={
           <>
             <Badge variant={headerChainOk ? (headerChainPartial ? "warning" : "success") : "destructive"} className="gap-1">
@@ -811,7 +813,7 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-export default function AuditPage() {
+export default function AuditPage({ embedded = false }: { embedded?: boolean }) {
   const t = useTranslations("pages.ops.audit");
   return (
     <Suspense
@@ -819,7 +821,7 @@ export default function AuditPage() {
         <div className="p-8 text-center text-muted-foreground">{t("emptyLoadingTitle")}</div>
       }
     >
-      <AuditPageContent />
+      <AuditPageContent embedded={embedded} />
     </Suspense>
   );
 }

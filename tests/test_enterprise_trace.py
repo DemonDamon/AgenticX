@@ -37,13 +37,11 @@ _FORBIDDEN_KEYS = {
     "reasoning",
 }
 _SECRET_MARKERS = (
-    "SECRET_USER",
     "SECRET_ARG",
     "SECRET_RESULT",
     "SECRET_PREVIEW",
     "SECRET_TASK",
     "SECRET_SUMMARY",
-    "SECRET_BODY",
 )
 
 
@@ -251,9 +249,10 @@ def test_build_spans_maps_rounds_tools_and_subagent() -> None:
     ]
     assert [span["step_no"] for span in spans] == [1, 2, 3, 4, 5, 6]
     assert spans[1]["status"] == "ok"
-    assert spans[1]["metadata"] == {"tool_name": "bash_exec"}
+    assert spans[0]["metadata"] == {"parent_step_no": 6}
+    assert spans[1]["metadata"] == {"tool_name": "bash_exec", "parent_step_no": 1}
     assert spans[3]["status"] == "error"
-    assert spans[3]["metadata"] == {"tool_name": "file_read"}
+    assert spans[3]["metadata"] == {"tool_name": "file_read", "parent_step_no": 3}
     assert "error_message" not in spans[3]
     assert spans[0]["input_tokens"] == 10
     assert spans[0]["output_tokens"] == 4
@@ -264,6 +263,7 @@ def test_build_spans_maps_rounds_tools_and_subagent() -> None:
     assert spans[2]["output_tokens"] == 8
     assert spans[2]["reasoning_tokens"] == 3
     assert spans[2]["total_tokens"] == 28
+    assert spans[2]["metadata"] == {"reply": "SECRET_BODY", "parent_step_no": 6}
     assert spans[0]["model"] == "gpt-test"
     assert spans[0]["provider"] == "openai"
     assert spans[0]["duration_ms"] == 1000
@@ -271,10 +271,14 @@ def test_build_spans_maps_rounds_tools_and_subagent() -> None:
     assert spans[1]["duration_ms"] == 1000
     assert spans[3]["duration_ms"] == 1000
     assert spans[4]["status"] == "ok"
-    assert spans[4]["metadata"] == {"subagent_name": "researcher"}
+    assert spans[4]["metadata"] == {"subagent_name": "researcher", "parent_step_no": 6}
     assert spans[4]["duration_ms"] == 2000
     assert spans[5]["status"] == "ok"
-    assert spans[5]["metadata"] == {"agent_id": "meta", "event_count": len(events)}
+    assert spans[5]["metadata"] == {
+        "agent_id": "meta",
+        "event_count": len(events),
+        "user_text": "SECRET_USER",
+    }
     assert spans[5]["duration_ms"] == 19000
     assert all(span["trace_id"] == "near:sess1:run1" for span in spans)
     assert set(_keys(spans)).isdisjoint(_FORBIDDEN_KEYS)
@@ -448,7 +452,7 @@ def test_enqueue_copies_blob_usage_without_message_text(
         run.run_id,
         {
             "text": "SECRET_BODY",
-            "reasoning": "SECRET_BODY",
+            "reasoning": "visible thought",
             "usage_metadata": {
                 "input_tokens": 7,
                 "output_tokens": 3,
@@ -463,7 +467,7 @@ def test_enqueue_copies_blob_usage_without_message_text(
             0,
             2.0,
             "assistant_output_completed",
-            payload={"text_preview": "SECRET_BODY", "terminal_reason": "model_final"},
+            payload={"text_preview": "visible reply", "terminal_reason": "model_final"},
             payload_ref=blob_ref,
         ),
     )
@@ -473,6 +477,8 @@ def test_enqueue_copies_blob_usage_without_message_text(
     encoded = json.dumps(spans)
     assert "SECRET_BODY" not in encoded
     model = next(span for span in spans if span["step_kind"] == "model")
+    assert model["metadata"]["reply"] == "visible reply"
+    assert model["metadata"]["thought"] == "visible thought"
     assert model["input_tokens"] == 7
     assert model["output_tokens"] == 3
     assert model["reasoning_tokens"] == 1
