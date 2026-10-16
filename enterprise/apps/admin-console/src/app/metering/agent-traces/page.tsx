@@ -196,6 +196,25 @@ type TraceDetail = {
 
 type CenterTab = "overview" | "traces" | "sessions";
 
+type ErrorKind = "tool" | "model" | "subagent" | "run";
+type LedgerRange = "1d" | "7d" | "all";
+type RangeValue = { min: string; max: string };
+const EMPTY_RANGE: RangeValue = { min: "", max: "" };
+
+function matchRange(value: number, range: RangeValue): boolean {
+  const minText = range.min.trim();
+  const maxText = range.max.trim();
+  if (minText) {
+    const min = Number(minText);
+    if (Number.isFinite(min) && value < min) return false;
+  }
+  if (maxText) {
+    const max = Number(maxText);
+    if (Number.isFinite(max) && value > max) return false;
+  }
+  return true;
+}
+
 type TraceSummary = {
   trace_id: string;
   session_id: string;
@@ -211,8 +230,8 @@ type TraceSummary = {
   output_tokens?: number;
   total_tokens: number;
   cost_usd?: number;
-  error_kind: string | null;
-  error_labels?: Array<"tool" | "model" | "run">;
+  error_kind: ErrorKind | null;
+  error_labels?: ErrorKind[];
 };
 
 type SpanObservation = {
@@ -221,13 +240,15 @@ type SpanObservation = {
   session_id: string;
   status: string;
   step_kind: string;
-  error_kind: "tool" | "model" | "run" | null;
+  error_kind: ErrorKind | null;
   started_at: string;
   operation: string;
   model: string | null;
   input_preview: string;
   output_preview: string;
   duration_ms: number;
+  input_tokens?: number;
+  output_tokens?: number;
   total_tokens: number;
   cost_usd: number;
 };
@@ -238,8 +259,13 @@ type SessionSummary = {
   trace_count: number;
   started_at: string;
   duration_ms: number;
+  models?: string[];
+  input_tokens?: number;
+  output_tokens?: number;
   total_tokens: number;
+  cost_usd?: number;
   input_preview: string;
+  output_preview?: string;
   status: string;
 };
 
@@ -280,8 +306,8 @@ export default function AgentTracesPage({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [overview, setOverview] = useState<ObservationOverview | null>(null);
   const [sessionFilter, setSessionFilter] = useState("");
-  const [queryId, setQueryId] = useState("");
   const [detail, setDetail] = useState<TraceDetail | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const loadIds = useCallback(async () => {
@@ -321,7 +347,6 @@ export default function AgentTracesPage({
     if (typeof window !== "undefined") {
       const param = new URLSearchParams(window.location.search).get("trace_id");
       if (param) {
-        setQueryId(param);
         void loadDetail(param);
       }
     }
@@ -330,6 +355,21 @@ export default function AgentTracesPage({
   const activeSummary = useMemo(
     () => (detail ? traces.find((item) => item.trace_id === detail.trace_id) ?? null : null),
     [detail, traces]
+  );
+
+  const activeSession = useMemo(
+    () => (selectedSessionId ? sessions.find((item) => item.session_id === selectedSessionId) ?? null : null),
+    [selectedSessionId, sessions]
+  );
+
+  const activeSessionTraces = useMemo(
+    () =>
+      selectedSessionId
+        ? traces
+            .filter((item) => item.session_id === selectedSessionId)
+            .sort((a, b) => a.started_at.localeCompare(b.started_at))
+        : [],
+    [selectedSessionId, traces]
   );
 
   return (
@@ -371,9 +411,10 @@ export default function AgentTracesPage({
       {tab === "overview" ? (
         <OverviewPanel overview={overview} />
       ) : tab === "sessions" ? (
-        <SessionTable
-          sessions={sessions.filter((session) => !queryId.trim() || session.session_id.includes(queryId.trim()))}
-          onOpen={(sessionId) => { setSessionFilter(sessionId); setTab("traces"); }}
+        <SessionLedger
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          onOpen={(sessionId) => setSelectedSessionId(sessionId)}
         />
       ) : (
         <TraceLedger
@@ -394,6 +435,24 @@ export default function AgentTracesPage({
             <TraceExplorer
               detail={detail}
               summary={activeSummary}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={Boolean(selectedSessionId && activeSession)} onOpenChange={(open) => { if (!open) setSelectedSessionId(null); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[960px] lg:max-w-[1080px]">
+          <SheetTitle className="sr-only">{t("ledger.sessionDetail")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("traceDetailHint")}</SheetDescription>
+          {activeSession ? (
+            <SessionExplorer
+              session={activeSession}
+              sessionTraces={activeSessionTraces}
+              onFilterInTraces={(sessionId) => {
+                setSelectedSessionId(null);
+                setSessionFilter(sessionId);
+                setTab("traces");
+              }}
             />
           ) : null}
         </SheetContent>
@@ -448,9 +507,6 @@ function OverviewPanel({ overview }: { overview: ObservationOverview | null }) {
   );
 }
 
-type ErrorKind = "tool" | "model" | "run";
-type LedgerRange = "1d" | "7d" | "all";
-
 function withinRange(iso: string, range: LedgerRange, now: number): boolean {
   if (range === "all") return true;
   const at = Date.parse(iso);
@@ -467,6 +523,7 @@ function shortId(value: string): string {
 function errorText(kind: string | null, translate: (key: string) => string): string {
   if (kind === "tool") return translate("errors.tool");
   if (kind === "model") return translate("errors.model");
+  if (kind === "subagent") return translate("errors.subagent");
   if (kind === "run") return translate("errors.run");
   return "—";
 }
@@ -527,13 +584,20 @@ function TraceLedger({
   const [range, setRange] = useState<LedgerRange>("1d");
   const [showOk, setShowOk] = useState(true);
   const [showError, setShowError] = useState(true);
-  const [kinds, setKinds] = useState<Record<ErrorKind, boolean>>({ tool: true, model: true, run: true });
+  const [kinds, setKinds] = useState<Record<ErrorKind, boolean>>({
+    tool: true,
+    model: true,
+    subagent: true,
+    run: true,
+  });
   const [keyword, setKeyword] = useState("");
   const [traceQuery, setTraceQuery] = useState("");
   const [sessionQuery, setSessionQuery] = useState(sessionFilter);
-  const [maxDuration, setMaxDuration] = useState("");
-  const [maxTokens, setMaxTokens] = useState("");
-  const [maxCost, setMaxCost] = useState("");
+  const [durationRange, setDurationRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [inputTokenRange, setInputTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [outputTokenRange, setOutputTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [totalTokenRange, setTotalTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [costRange, setCostRange] = useState<RangeValue>(EMPTY_RANGE);
   const [page, setPage] = useState(0);
   const pageSize = 20;
 
@@ -543,12 +607,8 @@ function TraceLedger({
 
   const now = Date.now();
   const inWindow = traces.filter((trace) => withinRange(trace.started_at, range, now));
-  const labelsOf = (trace: TraceSummary): ErrorKind[] => (trace.error_labels ?? (trace.error_kind ? [trace.error_kind as ErrorKind] : []));
+  const labelsOf = (trace: TraceSummary): ErrorKind[] => (trace.error_labels ?? (trace.error_kind ? [trace.error_kind] : []));
   const kindCount = (kind: ErrorKind) => inWindow.filter((trace) => labelsOf(trace).includes(kind)).length;
-  const underCap = (value: number, raw: string) => {
-    const cap = Number(raw);
-    return !raw.trim() || !Number.isFinite(cap) || value <= cap;
-  };
   const q = keyword.trim().toLowerCase();
   const filteredTraces = inWindow.filter((trace) => {
     if (trace.status === "ok" && !showOk) return false;
@@ -566,9 +626,11 @@ function TraceLedger({
         (trace.model ?? "").toLowerCase().includes(q);
       if (!hit) return false;
     }
-    if (!underCap(trace.duration_ms, maxDuration)) return false;
-    if (!underCap(trace.total_tokens, maxTokens)) return false;
-    if (!underCap(trace.cost_usd ?? 0, maxCost)) return false;
+    if (!matchRange(trace.duration_ms, durationRange)) return false;
+    if (!matchRange(trace.input_tokens ?? 0, inputTokenRange)) return false;
+    if (!matchRange(trace.output_tokens ?? 0, outputTokenRange)) return false;
+    if (!matchRange(trace.total_tokens, totalTokenRange)) return false;
+    if (!matchRange(trace.cost_usd ?? 0, costRange)) return false;
     return true;
   });
   const filteredObservations = observations.filter((row) => {
@@ -587,9 +649,11 @@ function TraceLedger({
         row.output_preview.toLowerCase().includes(q);
       if (!hit) return false;
     }
-    if (!underCap(row.duration_ms, maxDuration)) return false;
-    if (!underCap(row.total_tokens, maxTokens)) return false;
-    if (!underCap(row.cost_usd, maxCost)) return false;
+    if (!matchRange(row.duration_ms, durationRange)) return false;
+    if (!matchRange(row.input_tokens ?? 0, inputTokenRange)) return false;
+    if (!matchRange(row.output_tokens ?? 0, outputTokenRange)) return false;
+    if (!matchRange(row.total_tokens, totalTokenRange)) return false;
+    if (!matchRange(row.cost_usd, costRange)) return false;
     return true;
   });
   const rows = mode === "traces" ? filteredTraces : filteredObservations;
@@ -658,6 +722,12 @@ function TraceLedger({
               onChange={(checked) => setKinds((current) => ({ ...current, model: checked }))}
             />
             <CheckRow
+              label={<span className="text-xs">{t("errors.subagent")}</span>}
+              count={kindCount("subagent")}
+              checked={kinds.subagent}
+              onChange={(checked) => setKinds((current) => ({ ...current, subagent: checked }))}
+            />
+            <CheckRow
               label={<span className="text-xs">{t("errors.run")}</span>}
               count={kindCount("run")}
               checked={kinds.run}
@@ -683,17 +753,11 @@ function TraceLedger({
             />
           </FilterGroup>
 
-          <FilterGroup title={t("ledger.maxDuration")}>
-            <Input value={maxDuration} onChange={(event) => setMaxDuration(event.target.value)} placeholder="ms" className="h-8 text-xs" />
-          </FilterGroup>
-
-          <FilterGroup title={t("ledger.maxTokens")}>
-            <Input value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="tokens" className="h-8 text-xs" />
-          </FilterGroup>
-
-          <FilterGroup title={t("ledger.maxCost")}>
-            <Input value={maxCost} onChange={(event) => setMaxCost(event.target.value)} placeholder="0.00" className="h-8 text-xs" />
-          </FilterGroup>
+          <RangeFilterGroup title={t("ledger.maxDuration")} value={durationRange} onChange={(next) => { setDurationRange(next); setPage(0); }} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.inputTokens")} value={inputTokenRange} onChange={(next) => { setInputTokenRange(next); setPage(0); }} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.outputTokens")} value={outputTokenRange} onChange={(next) => { setOutputTokenRange(next); setPage(0); }} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.maxTokens")} value={totalTokenRange} onChange={(next) => { setTotalTokenRange(next); setPage(0); }} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.maxCost")} value={costRange} onChange={(next) => { setCostRange(next); setPage(0); }} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
         </div>
       </aside>
 
@@ -916,36 +980,196 @@ function CheckRow({
   );
 }
 
-function SessionTable({ sessions, onOpen }: { sessions: SessionSummary[]; onOpen: (sessionId: string) => void }) {
-  const t = useTranslations("pages.ops.agentTraces");
-  if (sessions.length === 0) return <EmptyState title={t("empty")} />;
+function RangeFilterGroup({
+  title,
+  value,
+  onChange,
+  minLabel,
+  maxLabel,
+}: {
+  title: string;
+  value: RangeValue;
+  onChange: (next: RangeValue) => void;
+  minLabel: string;
+  maxLabel: string;
+}) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-            <tr>
-              <th className="px-3.5 py-2.5 font-medium">{t("columns.session")}</th>
-              <th className="px-3.5 py-2.5 font-medium">{t("columns.source")}</th>
-              <th className="px-3.5 py-2.5 font-medium">{t("columns.traces")}</th>
-              <th className="px-3.5 py-2.5 font-medium">{t("columns.input")}</th>
-              <th className="px-3.5 py-2.5 text-right font-medium">{t("columns.tokens")}</th>
-              <th className="px-3.5 py-2.5 font-medium">{t("columns.status")}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {sessions.map((session) => (
-              <tr key={session.session_id} className="cursor-pointer transition-colors hover:bg-muted/60" onClick={() => onOpen(session.session_id)}>
-                <td className="max-w-[220px] truncate px-3.5 py-2.5 font-mono text-xs" title={session.session_id}>{shortTraceId(session.session_id)}</td>
-                <td className="px-3.5 py-2.5 text-xs">{session.source === "desktop" ? t("source.desktop") : t("source.web")}</td>
-                <td className="px-3.5 py-2.5 font-mono text-xs">{session.trace_count}</td>
-                <td className="max-w-[260px] truncate px-3.5 py-2.5 text-xs">{session.input_preview || "—"}</td>
-                <td className="px-3.5 py-2.5 text-right font-mono text-xs">{session.total_tokens.toLocaleString()}</td>
-                <td className="px-3.5 py-2.5"><StatusPill status={session.status} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <FilterGroup title={title}>
+      <div className="grid grid-cols-2 gap-1.5">
+        <Input
+          value={value.min}
+          onChange={(event) => onChange({ ...value, min: event.target.value })}
+          placeholder={minLabel}
+          className="h-8 text-xs"
+        />
+        <Input
+          value={value.max}
+          onChange={(event) => onChange({ ...value, max: event.target.value })}
+          placeholder={maxLabel}
+          className="h-8 text-xs"
+        />
+      </div>
+    </FilterGroup>
+  );
+}
+
+function SessionLedger({
+  sessions,
+  selectedSessionId,
+  onOpen,
+}: {
+  sessions: SessionSummary[];
+  selectedSessionId: string | null;
+  onOpen: (sessionId: string) => void;
+}) {
+  const t = useTranslations("pages.ops.agentTraces");
+  const [range, setRange] = useState<LedgerRange>("all");
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [durationRange, setDurationRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [tracesRange, setTracesRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [inputTokenRange, setInputTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [outputTokenRange, setOutputTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [totalTokenRange, setTotalTokenRange] = useState<RangeValue>(EMPTY_RANGE);
+  const [costRange, setCostRange] = useState<RangeValue>(EMPTY_RANGE);
+
+  const now = Date.now();
+  const filtered = sessions.filter((session) => {
+    if (!withinRange(session.started_at, range, now)) return false;
+    if (sessionQuery.trim() && !session.session_id.toLowerCase().includes(sessionQuery.trim().toLowerCase())) return false;
+    if (!matchRange(session.duration_ms, durationRange)) return false;
+    if (!matchRange(session.trace_count, tracesRange)) return false;
+    if (!matchRange(session.input_tokens ?? 0, inputTokenRange)) return false;
+    if (!matchRange(session.output_tokens ?? 0, outputTokenRange)) return false;
+    if (!matchRange(session.total_tokens, totalTokenRange)) return false;
+    if (!matchRange(session.cost_usd ?? 0, costRange)) return false;
+    return true;
+  });
+
+  return (
+    <div className="grid items-start gap-4 lg:grid-cols-[248px_minmax(0,1fr)]">
+      <aside className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border px-3.5 py-2.5">
+          <span className="text-xs font-semibold tracking-wide text-foreground">{t("ledger.filters")}</span>
+        </div>
+        <div className="divide-y divide-border text-sm">
+          <div className="space-y-2 p-3.5">
+            <div className="text-xs font-medium text-muted-foreground">{t("ledger.range")}</div>
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-0.5">
+              {(["1d", "7d", "all"] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={[
+                    "h-7 rounded-md px-1.5 text-xs transition-colors",
+                    range === item ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                  onClick={() => setRange(item)}
+                >
+                  {item === "1d" ? t("ledger.dayShort") : item === "7d" ? t("ledger.weekShort") : t("ledger.allShort")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <FilterGroup title={t("columns.session")} defaultOpen>
+            <Input
+              value={sessionQuery}
+              onChange={(event) => setSessionQuery(event.target.value)}
+              placeholder="session id..."
+              className="h-8 text-xs"
+            />
+          </FilterGroup>
+
+          <RangeFilterGroup title={t("ledger.sessionDuration")} value={durationRange} onChange={setDurationRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.tracesCount")} value={tracesRange} onChange={setTracesRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.inputTokens")} value={inputTokenRange} onChange={setInputTokenRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.outputTokens")} value={outputTokenRange} onChange={setOutputTokenRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.maxTokens")} value={totalTokenRange} onChange={setTotalTokenRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+          <RangeFilterGroup title={t("ledger.maxCost")} value={costRange} onChange={setCostRange} minLabel={t("ledger.min")} maxLabel={t("ledger.max")} />
+        </div>
+      </aside>
+
+      <div className="min-w-0 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="relative w-64 sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={sessionQuery}
+              onChange={(event) => setSessionQuery(event.target.value)}
+              placeholder={t("filter.search")}
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          <span className="text-xs text-muted-foreground">{t("ledger.count", { count: filtered.length })}</span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState title={t("empty")} />
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-left text-sm">
+                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.session")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.createdAt")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("columns.duration")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.model")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("columns.traces")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.input")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("columns.tokens")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("costUsd")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.status")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filtered.map((session) => {
+                    const active = selectedSessionId === session.session_id;
+                    const modelLabel = session.models && session.models.length > 0 ? session.models.join(", ") : "—";
+                    return (
+                      <tr
+                        key={session.session_id}
+                        className={[
+                          "cursor-pointer transition-colors hover:bg-muted/60",
+                          active ? "bg-primary-soft/40" : "",
+                        ].join(" ")}
+                        onClick={() => onOpen(session.session_id)}
+                      >
+                        <td className="max-w-[200px] truncate px-3.5 py-2.5 font-mono text-xs text-foreground" title={session.session_id}>
+                          {shortTraceId(session.session_id)}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                          {formatWhen(session.started_at)}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                          {formatDuration(session.duration_ms)}
+                        </td>
+                        <td className="max-w-[180px] truncate px-3.5 py-2.5 font-mono text-xs text-muted-foreground" title={modelLabel}>
+                          {modelLabel}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs">
+                          {session.trace_count}
+                        </td>
+                        <td className="max-w-[240px] truncate px-3.5 py-2.5 text-xs" title={session.input_preview}>
+                          {session.input_preview || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs">
+                          {`${(session.input_tokens ?? 0).toLocaleString()} → ${(session.output_tokens ?? 0).toLocaleString()} (Σ ${session.total_tokens.toLocaleString()})`}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                          ${(session.cost_usd ?? 0).toFixed(4)}
+                        </td>
+                        <td className="whitespace-nowrap px-3.5 py-2.5">
+                          <StatusPill status={session.status} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -999,6 +1223,7 @@ function TraceExplorer({
   const parts = traceParts(traceId);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
 
   const fallback = fullTree.find((node) => node.span.step_kind === "run") ?? fullTree[0] ?? null;
   const selected = findNode(fullTree, selectedKey) ?? fallback;
@@ -1014,6 +1239,18 @@ function TraceExplorer({
   const runSpan = spans.find((span) => span.step_kind === "run");
   const totalDuration = summary?.duration_ms ?? runSpan?.duration_ms ?? Math.max(0, ...spans.map((span) => span.duration_ms));
   const startedAt = summary?.started_at ?? spans[0]?.created_at ?? "";
+
+  const tags = useMemo(() => {
+    const list: string[] = [];
+    list.push(traceId.startsWith("near:") ? "desktop" : "web");
+    if (spans.some((span) => span.step_kind === "tool")) list.push("has-tools");
+    if (spans.some((span) => span.step_kind === "subagent")) list.push("has-subagent");
+    if (spans.some((span) => Boolean(metaText(span, "thought")))) list.push("has-reasoning");
+    if (parts.session) list.push("with-session");
+    return list;
+  }, [parts.session, spans, traceId]);
+
+  const errorSpans = useMemo(() => spans.filter((span) => span.status !== "ok"), [spans]);
 
   const copyTraceId = () => {
     void navigator.clipboard?.writeText(traceId);
@@ -1099,15 +1336,23 @@ function TraceExplorer({
                 ) : null}
               </div>
 
-              {selected.span.status !== "ok" || selected.span.error_message ? (
+              {status !== "ok" && errorSpans.length > 0 ? (
                 <div className="flex items-start gap-2.5 rounded-lg border border-danger/35 bg-danger-soft/40 p-3 text-xs text-danger">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="font-semibold">
-                      {errorText(
-                        selected.span.step_kind === "tool" || selected.span.step_kind === "model" ? selected.span.step_kind : "run",
-                        t
-                      )}
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="font-semibold">{t("ledger.errorSource")}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {errorSpans.map((errSpan) => (
+                        <button
+                          key={errSpan.step_no}
+                          type="button"
+                          onClick={() => setSelectedKey(`step-${errSpan.step_no}`)}
+                          className="inline-flex items-center gap-1 rounded border border-danger/40 bg-background/70 px-2 py-0.5 font-mono text-[11px] hover:bg-background"
+                        >
+                          <span>#{errSpan.step_no}</span>
+                          <span>{spanTitle(errSpan, kindLabel)}</span>
+                        </button>
+                      ))}
                     </div>
                     {selected.span.error_message ? (
                       <div className="whitespace-pre-wrap break-words font-mono text-[11px] opacity-90">
@@ -1147,6 +1392,39 @@ function TraceExplorer({
                 </div>
               </div>
 
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-muted-foreground">{t("ledger.tags")}:</span>
+                  {tags.map((tag) => (
+                    <span key={tag} className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <div className="inline-flex rounded-md border border-border bg-muted/50 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("formatted")}
+                    className={[
+                      "rounded px-2 py-0.5 text-[11px] font-medium",
+                      viewMode === "formatted" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {t("ledger.formatted")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("json")}
+                    className={[
+                      "rounded px-2 py-0.5 text-[11px] font-medium",
+                      viewMode === "json" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {t("ledger.json")}
+                  </button>
+                </div>
+              </div>
+
               {selected.span.step_kind !== "thought" && selected.span.total_tokens > 0 ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
@@ -1161,8 +1439,16 @@ function TraceExplorer({
                 </div>
               ) : null}
 
-              <IoBlock label={t("input")} text={io.input} />
-              <IoBlock label={t("output")} text={io.output} />
+              {viewMode === "json" ? (
+                <pre className="max-h-[32rem] overflow-auto rounded-lg border border-border bg-muted/25 p-3.5 font-mono text-xs leading-5">
+                  {JSON.stringify(selected.span, null, 2)}
+                </pre>
+              ) : (
+                <>
+                  <IoBlock label={t("input")} text={io.input} />
+                  <IoBlock label={t("output")} text={io.output} />
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1259,6 +1545,190 @@ function IoBlock({ label, text }: { label: string; text: string }) {
       </div>
       <div className="max-h-[26rem] overflow-auto rounded-lg border border-border bg-muted/25 p-3.5 text-sm">
         <ConversationMarkdown text={asMarkdown(text)} className="text-sm leading-6" />
+      </div>
+    </div>
+  );
+}
+
+function SessionExplorer({
+  session,
+  sessionTraces,
+  onFilterInTraces,
+}: {
+  session: SessionSummary;
+  sessionTraces: TraceSummary[];
+  onFilterInTraces: (sessionId: string) => void;
+}) {
+  const t = useTranslations("pages.ops.agentTraces");
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(sessionTraces[0]?.trace_id ?? null);
+  const [traceDetail, setTraceDetail] = useState<TraceDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const target = selectedTraceId ?? sessionTraces[0]?.trace_id ?? null;
+    if (!target) {
+      setTraceDetail(null);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    void adminFetch(`/api/agent-traces?trace_id=${encodeURIComponent(target)}`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: TraceDetail } | null) => {
+        if (!active) return;
+        setTraceDetail(json?.data ?? null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTraceId, sessionTraces]);
+
+  const activeTraceSummary = sessionTraces.find((item) => item.trace_id === (selectedTraceId ?? sessionTraces[0]?.trace_id)) ?? null;
+  const tree = useMemo(() => (traceDetail ? buildTraceTree(traceDetail.spans) : []), [traceDetail]);
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
+  const fallbackNode = tree.find((node) => node.span.step_kind === "run") ?? tree[0] ?? null;
+  const selectedNode = findNode(tree, selectedNodeKey) ?? fallbackNode;
+
+  const kindLabel = (kind: string) => {
+    if (kind === "model" || kind === "tool" || kind === "subagent" || kind === "run" || kind === "thought") {
+      return t(`kindLabel.${kind}`);
+    }
+    return kind;
+  };
+
+  const io = selectedNode && traceDetail ? spanIo(selectedNode.span, traceDetail.spans) : { input: "", output: "" };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border bg-card px-5 py-3.5 pr-12">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Session ID:</span>
+            <code className="max-w-[46ch] truncate font-mono text-sm font-semibold text-foreground" title={session.session_id}>
+              {session.session_id}
+            </code>
+            <StatusPill status={session.status} />
+          </div>
+          <Button type="button" size="xs" variant="outline" onClick={() => onFilterInTraces(session.session_id)}>
+            在 Traces 中过滤此会话
+          </Button>
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+          <MetaBadge icon={<Clock className="h-3 w-3" />} text={formatWhen(session.started_at)} />
+          <MetaBadge icon={<Clock className="h-3 w-3" />} text={formatDuration(session.duration_ms)} />
+          <MetaBadge icon={<Layers className="h-3 w-3" />} text={`${session.trace_count} Traces`} />
+          <MetaBadge
+            icon={<Coins className="h-3 w-3" />}
+            text={`${(session.input_tokens ?? 0).toLocaleString()} → ${(session.output_tokens ?? 0).toLocaleString()} (Σ ${session.total_tokens.toLocaleString()} tokens)`}
+          />
+          <MetaBadge text={`$${(session.cost_usd ?? 0).toFixed(4)}`} />
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 divide-y divide-border lg:grid-cols-[320px_minmax(0,1fr)] lg:divide-x lg:divide-y-0">
+        <div className="flex min-h-0 flex-col bg-muted/15">
+          <div className="border-b border-border px-3.5 py-2.5 text-xs font-semibold text-foreground">
+            会话调用树 ({sessionTraces.length})
+          </div>
+          <div className="flex-1 divide-y divide-border overflow-y-auto">
+            {sessionTraces.map((trace, idx) => {
+              const isCurrent = trace.trace_id === (selectedTraceId ?? sessionTraces[0]?.trace_id);
+              return (
+                <div key={trace.trace_id} className="py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTraceId(trace.trace_id);
+                      setSelectedNodeKey(null);
+                    }}
+                    className={[
+                      "flex w-full items-start justify-between gap-2 px-3.5 py-2 text-left transition-colors hover:bg-muted/60",
+                      isCurrent ? "bg-primary-soft/40" : "",
+                    ].join(" ")}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="soft" className="font-mono text-[10px]">
+                          {t("ledger.round", { index: idx + 1 })}
+                        </Badge>
+                        <span className="truncate font-mono text-xs font-medium">{shortId(trace.trace_id)}</span>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-muted-foreground">{trace.input_preview || trace.operation}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <StatusPill status={trace.status} />
+                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">{formatDuration(trace.duration_ms)}</div>
+                    </div>
+                  </button>
+                  {isCurrent && tree.length > 0 ? (
+                    <div className="border-t border-border/60 bg-background/50 py-1">
+                      {tree.map((node) => (
+                        <TraceTreeRow
+                          key={node.key}
+                          node={node}
+                          depth={1}
+                          selectedKey={selectedNode?.key ?? null}
+                          onSelect={setSelectedNodeKey}
+                          kindLabel={kindLabel}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="min-h-0 overflow-y-auto p-5">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">正在加载会话节点详情…</p>
+          ) : !selectedNode ? (
+            <p className="text-sm text-muted-foreground">{t("selectNode")}</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <KindIcon kind={selectedNode.span.step_kind} />
+                  <span className="text-base font-semibold text-foreground">{spanTitle(selectedNode.span, kindLabel)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {activeTraceSummary?.model ? (
+                    <Badge variant="soft" className="font-mono text-xs">
+                      {activeTraceSummary.model}
+                    </Badge>
+                  ) : null}
+                  <StatusPill status={selectedNode.span.status} />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                  {formatDuration(selectedNode.span.duration_ms)}
+                </span>
+                <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                  Input: {selectedNode.span.input_tokens.toLocaleString()}
+                </span>
+                <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                  Output: {selectedNode.span.output_tokens.toLocaleString()}
+                </span>
+                <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                  Σ {selectedNode.span.total_tokens.toLocaleString()} tokens
+                </span>
+                <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                  ${Number(selectedNode.span.cost_usd || 0).toFixed(4)}
+                </span>
+              </div>
+
+              <IoBlock label={t("input")} text={io.input} />
+              <IoBlock label={t("output")} text={io.output} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

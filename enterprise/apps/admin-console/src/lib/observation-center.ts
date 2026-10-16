@@ -1,6 +1,7 @@
 import type { AgentTraceSpanRow } from "./db-stores/postgresql/agent-trace-store";
 
 export type TraceSource = "desktop" | "web";
+export type TraceErrorKind = "tool" | "model" | "subagent" | "run";
 
 export type TraceSummary = {
   trace_id: string;
@@ -17,8 +18,8 @@ export type TraceSummary = {
   output_tokens: number;
   total_tokens: number;
   cost_usd: number;
-  error_kind: string | null;
-  error_labels: Array<"tool" | "model" | "run">;
+  error_kind: TraceErrorKind | null;
+  error_labels: TraceErrorKind[];
 };
 
 export type SpanObservation = {
@@ -27,13 +28,15 @@ export type SpanObservation = {
   session_id: string;
   status: string;
   step_kind: string;
-  error_kind: "tool" | "model" | "run" | null;
+  error_kind: TraceErrorKind | null;
   started_at: string;
   operation: string;
   model: string | null;
   input_preview: string;
   output_preview: string;
   duration_ms: number;
+  input_tokens: number;
+  output_tokens: number;
   total_tokens: number;
   cost_usd: number;
 };
@@ -44,8 +47,13 @@ export type SessionSummary = {
   trace_count: number;
   started_at: string;
   duration_ms: number;
+  models: string[];
+  input_tokens: number;
+  output_tokens: number;
   total_tokens: number;
+  cost_usd: number;
   input_preview: string;
+  output_preview: string;
   status: string;
 };
 
@@ -93,9 +101,10 @@ function percentile(values: number[], p: number): number {
   return sorted[index] ?? 0;
 }
 
-function errorLabelOf(stepKind: string): "tool" | "model" | "run" {
+function errorLabelOf(stepKind: string): TraceErrorKind {
   if (stepKind === "tool") return "tool";
   if (stepKind === "model") return "model";
+  if (stepKind === "subagent") return "subagent";
   return "run";
 }
 
@@ -135,9 +144,10 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
     );
     const errorLabels = [...new Set(ordered.filter((item) => item.status !== "ok").map((item) => errorLabelOf(item.step_kind)))];
     const reply = ordered.find((item) => item.step_kind === "model" && textOf(item.metadata, "reply"));
+    const metaSessionId = ordered.map((item) => textOf(item.metadata, "session_id")).find(Boolean) ?? "";
     return {
       trace_id: traceId,
-      session_id: sessionOf(traceId),
+      session_id: sessionOf(traceId) || metaSessionId,
       source: sourceOf(traceId),
       status: failed?.status ?? "ok",
       started_at: started.toISOString(),
@@ -159,16 +169,23 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
   const observations: SpanObservation[] = spans.map((span) => ({
     id: span.id,
     trace_id: span.trace_id,
-    session_id: sessionOf(span.trace_id),
+    session_id: sessionOf(span.trace_id) || textOf(span.metadata, "session_id"),
     status: span.status,
     step_kind: span.step_kind,
     error_kind: span.status === "ok" ? null : errorLabelOf(span.step_kind),
     started_at: span.created_at.toISOString(),
-    operation: span.step_kind === "tool" ? textOf(span.metadata, "tool_name") || "tool" : span.step_kind,
+    operation:
+      span.step_kind === "tool"
+        ? textOf(span.metadata, "tool_name") || "tool"
+        : span.step_kind === "subagent"
+          ? textOf(span.metadata, "subagent_name") || "subagent"
+          : span.step_kind,
     model: span.model,
     input_preview: span.step_kind === "run" ? textOf(span.metadata, "user_text") : "",
     output_preview: span.step_kind === "model" ? textOf(span.metadata, "reply") : "",
     duration_ms: span.duration_ms,
+    input_tokens: span.input_tokens,
+    output_tokens: span.output_tokens,
     total_tokens: span.total_tokens,
     cost_usd: moneyOf(span.cost_usd),
   }));
@@ -185,18 +202,32 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
         trace_count: 1,
         started_at: trace.started_at,
         duration_ms: trace.duration_ms,
+        models: trace.model ? [trace.model] : [],
+        input_tokens: trace.input_tokens,
+        output_tokens: trace.output_tokens,
         total_tokens: trace.total_tokens,
+        cost_usd: trace.cost_usd,
         input_preview: trace.input_preview,
+        output_preview: trace.output_preview,
         status: trace.status,
       });
       continue;
     }
     current.trace_count += 1;
+    current.input_tokens += trace.input_tokens;
+    current.output_tokens += trace.output_tokens;
     current.total_tokens += trace.total_tokens;
+    current.cost_usd += trace.cost_usd;
     current.duration_ms += trace.duration_ms;
+    if (trace.model && !current.models.includes(trace.model)) {
+      current.models.push(trace.model);
+    }
     if (trace.started_at < current.started_at) {
       current.started_at = trace.started_at;
-      if (!current.input_preview) current.input_preview = trace.input_preview;
+      if (trace.input_preview) current.input_preview = trace.input_preview;
+    }
+    if (!current.output_preview && trace.output_preview) {
+      current.output_preview = trace.output_preview;
     }
     if (trace.status !== "ok") current.status = trace.status;
   }
