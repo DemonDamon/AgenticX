@@ -149,6 +149,40 @@ GIT_READ_ONLY_SUBCOMMANDS: frozenset[str] = frozenset({
     "cat-file", "check-ignore", "for-each-ref",
 })
 
+#: Official native connector CLI binary names (lowercased).
+_NATIVE_CONNECTOR_CLI_NAMES: frozenset[str] = frozenset({
+    "tmeet",
+    "tmeet.exe",
+    "tmeet-macos-applesilicon",
+    "tmeet-macos-intel",
+    "tmeet-linux-arm64",
+    "tmeet-linux-x86_64",
+    "tmeet-windows-x86_64.exe",
+    "lark-cli",
+    "lark-cli.exe",
+    "lark-cli.cmd",
+    "agently-cli",
+    "agently-cli.exe",
+    "agently-cli.cmd",
+    "wecom-cli",
+    "wecom-cli.exe",
+    "wecom-cli.cmd",
+})
+
+_TMEET_READ_ONLY_ACTIONS: frozenset[str] = frozenset({
+    "list",
+    "list-ended",
+    "get",
+    "invitees-list",
+    "search",
+    "lookup-by-email",
+    "lookup-by-phone",
+    "address",
+    "transcript-get",
+    "transcript-search",
+    "participants",
+})
+
 #: Discard devices. Shells depend on them (``2>/dev/null``) and writes there have no persisted effect.
 #: Sandbox backends usually punch a hole for these sinks as well.
 DISCARD_SINKS: frozenset[str] = frozenset({
@@ -354,12 +388,49 @@ def _risk_evidence(name: str, category: str, parts: Sequence[str]) -> str:
     return text or f"{name} 需要你判断这次的用途"
 
 
+def _classify_native_connector_cli(name: str, parts: Sequence[str]) -> Optional[SafetyVerdict]:
+    """Return a verdict when ``name`` is a Near native connector CLI, else None."""
+    lower = name.lower()
+    if lower not in _NATIVE_CONNECTOR_CLI_NAMES:
+        return None
+    tokens = [str(tok) for tok in parts[1:]]
+    if not tokens or any(
+        tok in {"--help", "-h", "--version", "-V", "help", "version", "--dry-run"}
+        for tok in tokens
+    ):
+        return SafetyVerdict(contained=True)
+    positionals: List[str] = []
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx]
+        if tok in {"--format"}:
+            idx += 2
+            continue
+        if tok.startswith("-"):
+            idx += 1
+            continue
+        positionals.append(tok)
+        idx += 1
+    if positionals[:2] == ["auth", "status"] or positionals[:1] in (["+me"], ["schema"]):
+        return SafetyVerdict(contained=True)
+    if lower.startswith("tmeet"):
+        if positionals[:1] == ["contact"]:
+            return SafetyVerdict(contained=True)
+        if (
+            len(positionals) >= 2
+            and positionals[0] in {"meeting", "record", "report"}
+            and positionals[1] in _TMEET_READ_ONLY_ACTIONS
+        ):
+            return SafetyVerdict(contained=True)
+    return None
+
+
 def classify_simple_command(parts: Sequence[str]) -> SafetyVerdict:
     """Classify one simple command (no pipes, no redirects)."""
     parts = _strip_env_assignments(parts)
     if not parts:
         return SafetyVerdict(contained=True)
-    name = parts[0].rsplit("/", 1)[-1]
+    name = parts[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
 
     if name in DELEGATING_COMMANDS:
         return _classify_delegating(name, parts)
@@ -367,6 +438,9 @@ def classify_simple_command(parts: Sequence[str]) -> SafetyVerdict:
         return _classify_guarded(name, parts)
     if name in READ_ONLY_COMMANDS:
         return SafetyVerdict(contained=True)
+    connector_verdict = _classify_native_connector_cli(name, parts)
+    if connector_verdict is not None:
+        return connector_verdict
     category = COMMAND_RISK_CATEGORIES.get(name)
     if category is not None:
         return SafetyVerdict(

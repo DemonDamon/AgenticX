@@ -289,3 +289,64 @@ def test_sandboxed_git_credential_fill_uses_store_not_keychain(tmp_path: Path) -
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "sandbox-user" in proc.stdout
     assert "sandbox-token" in proc.stdout
+
+
+def test_native_connector_cli_grants_config_dir_and_blocks_piggyback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / "Library" / "Application Support").mkdir(parents=True)
+    (home / "Library" / "Keychains").mkdir(parents=True)
+    (home / "Library" / "Preferences").mkdir(parents=True)
+    tmeet_bin = (
+        home
+        / ".agenticx"
+        / "connectors"
+        / "tencent-meeting"
+        / "1.0.11"
+        / "dist"
+        / "tmeet-macOS-AppleSilicon"
+    )
+    tmeet_bin.parent.mkdir(parents=True)
+    tmeet_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tmeet_bin.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    # Direct invocation grants ~/.tmeet and Application Support/tmeet
+    plan = build_command_sandbox_plan(
+        [str(tmeet_bin), "--format", "json", "meeting", "list"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    profile = " ".join(plan.argv)
+    assert str((home / ".tmeet").resolve()) in profile
+    assert str((home / "Library" / "Application Support" / "tmeet").resolve()) in profile
+    assert str((home / "Library" / "Keychains").resolve()) in profile
+
+    # Shell-wrapped pipeline with pathless head filter also gets connector grant
+    pipe_plan = build_command_sandbox_plan(
+        ["/bin/sh", "-c", f'"{tmeet_bin}" --help 2>&1 | head -60'],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    assert str((home / ".tmeet").resolve()) in " ".join(pipe_plan.argv)
+
+    # Piggybacked cat ~/.tmeet/config.json is rejected and receives no connector grant
+    piggyback_plan = build_command_sandbox_plan(
+        ["/bin/sh", "-c", f'"{tmeet_bin}" --help && cat ~/.tmeet/config.json'],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        platform_name="darwin",
+    )
+    assert str((home / ".tmeet").resolve()) not in " ".join(piggyback_plan.argv)
+

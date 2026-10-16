@@ -3612,13 +3612,24 @@ description: 使用腾讯会议官方 CLI 查询和管理会议、录制、纪�
 
 # 腾讯会议
 
-仅在用户要求操作腾讯会议时使用。通过 bash_exec 调用以下官方 CLI：
+仅在用户要求操作腾讯会议时使用。通过 bash_exec 直接调用以下官方 CLI（本技能目录下无 cli.js 等脚本，勿调用 node）：
 
 \`\`\`bash
-"${quotedBinary}" --format json <command> [arguments]
+# 查询待开始/进行中的会议
+"${quotedBinary}" --format json meeting list
+
+# 查询会议详情（按 meeting-id 或 meeting-code）
+"${quotedBinary}" --format json meeting get --meeting-code "<会议号>"
+
+# 创建会议（注意：子命令是单数 meeting；必填 --subject、--start、--end，均为 ISO 8601 格式，无 --duration 或 --start-time 参数）
+"${quotedBinary}" --format json meeting create --subject "<会议主题>" --start "2026-10-17T21:00:00+08:00" --end "2026-10-17T22:00:00+08:00"
+
+# 更新或取消会议
+"${quotedBinary}" --format json meeting update --meeting-id "<id>" --subject "<新主题>" --start "2026-10-17T21:00:00+08:00" --end "2026-10-17T22:00:00+08:00"
+"${quotedBinary}" --format json meeting cancel --meeting-id "<id>"
 \`\`\`
 
-常用命令可先执行 \`"${quotedBinary}" --help\` 查看。读取操作可以直接执行；创建、更新、取消会议以及导出录制等写入或敏感操作，必须先向用户展示参数并确认。不得输出或读取腾讯会议本地凭证文件。若命令提示未登录，引导用户前往「设置 → 连接器 → 腾讯会议」扫码连接。
+其他子命令（\`record\`、\`report\`、\`contact\`、\`control\`）可先执行 \`"${quotedBinary}" <subcommand> --help\` 查看。读取操作可以直接执行；创建、更新、取消会议以及导出录制等写入或敏感操作，若用户尚未给出明确参数则先向用户展示参数并确认，若用户已在对话中明确给出主题与时间并要求立即创建则可直接执行。不得输出或读取腾讯会议本地凭证文件。若命令提示未登录，引导用户前往「设置 → 连接器 → 腾讯会议」扫码连接。
 `;
   if (!directoryExists) {
     const parentDir = path.dirname(skillDir);

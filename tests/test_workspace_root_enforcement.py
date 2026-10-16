@@ -557,3 +557,45 @@ def test_outside_absolute_path_still_escapes_workspace(
     outside.write_text("nope", encoding="utf-8")
     with pytest.raises(ValueError, match="escapes workspace"):
         at._resolve_workspace_path(str(outside), session, for_write=True)
+
+
+def test_activated_skill_dir_allows_script_exec_and_cp_source_blocks_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    skill_dir = tmp_path / "skills" / "demo-skill"
+    skill_dir.mkdir(parents=True)
+    cli_js = skill_dir / "cli.js"
+    cli_js.write_text("console.log('hi')\n", encoding="utf-8")
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = _default_session(ws)
+    session.activated_skill_dirs = [str(skill_dir.resolve())]
+
+    # Running a script or copying FROM the read-only skill dir into workspace must be allowed.
+    assert (
+        at._ensure_bash_write_targets_allowed(
+            f"node {cli_js} --help 2>&1 | head -50", session, ws
+        )
+        is None
+    )
+    assert (
+        at._ensure_bash_write_targets_allowed(
+            f"cp {cli_js} ./tm-cli.js && node tm-cli.js --help", session, ws
+        )
+        is None
+    )
+
+    # Writing/copying/removing INTO the read-only skill dir must still be blocked.
+    cp_into_err = at._ensure_bash_write_targets_allowed(
+        f"cp ./tm-cli.js {skill_dir / 'out.js'}", session, ws
+    )
+    assert cp_into_err is not None and "read-only" in cp_into_err
+    rm_err = at._ensure_bash_write_targets_allowed(f"rm {cli_js}", session, ws)
+    assert rm_err is not None and "read-only" in rm_err
+    inline_err = at._ensure_bash_write_targets_allowed(
+        f"python3 -c \"open('{cli_js}', 'w').write('x')\"", session, ws
+    )
+    assert inline_err is not None and "read-only" in inline_err
+

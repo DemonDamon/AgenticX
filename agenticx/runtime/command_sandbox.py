@@ -250,17 +250,20 @@ def build_command_sandbox_plan(
     )
 
     temp_dir = _private_temp_dir(scope_id)
-    allowed_roots = _normalize_writable_roots((*roots, temp_dir))
     base_env["TMPDIR"] = str(temp_dir)
 
     host = (platform_name or sys.platform).strip().lower()
     # Confined git must not talk to the macOS login keychain. The system
     # gitconfig from Xcode CLT registers ``osxkeychain`` first; seatbelt
-    # cannot reach ``login``, so the host pops「找不到钥匙串」and the
-    # command hangs. Force the store helper onto a file inside this
+    # cannot reach ``login``, so the host pops a missing-keychain dialog and
+    # the command hangs. Force the store helper onto a file inside this
     # invocation's temp dir (already writable) and never prompt.
     if _argv_is_git_invocation(raw_argv):
         _apply_sandboxed_git_auth(base_env, temp_dir, host=host)
+    connector_write_roots, connector_read_roots, connector_read_files = (
+        _native_connector_sandbox_grants(raw_argv, base_env, host=host)
+    )
+    allowed_roots = _normalize_writable_roots((*roots, *connector_write_roots, temp_dir))
     # Readable set = session read mounts + toolchain/system dirs. Workspace
     # roots are not listed here because they are writable; each backend
     # expresses "writable implies readable". Home is not included -- that
@@ -268,7 +271,7 @@ def build_command_sandbox_plan(
     #
     # Read-only uses the same set: the tier refuses writes, it does not
     # grant reading other repos or ~/.ssh.
-    allowed_read_roots = _normalize_writable_roots(readable_roots)
+    allowed_read_roots = _normalize_writable_roots((*readable_roots, *connector_read_roots))
     toolchain_read_roots = _toolchain_read_roots(base_env, raw_argv, host=host)
     toolchain_read_files = _toolchain_read_files(base_env)
     # SSH keys: only when this invocation is git running inside a writable
@@ -290,7 +293,7 @@ def build_command_sandbox_plan(
     confined_read_roots = _normalize_writable_roots(
         (*allowed_read_roots, *toolchain_read_roots)
     )
-    confined_read_files = (*toolchain_read_files, *git_credential_paths)
+    confined_read_files = (*toolchain_read_files, *git_credential_paths, *connector_read_files)
     # Roots walked when enumerating deny paths.
     #
     # Using only ``allowed_roots`` (workspace + temp) misses read-only
@@ -299,10 +302,11 @@ def build_command_sandbox_plan(
     # succeed on Linux. macOS does not have this gap because it sinks
     # regex. Path-only backends must widen the walk themselves.
     #
-    # Do not include toolchain/system prefixes. Walking ``/usr`` on every
-    # command is too slow and immediately hits the 512-path cap, crowding
-    # out workspace matches -- the protected surface would shrink.
-    deny_scan_roots = _normalize_writable_roots((*allowed_roots, *allowed_read_roots))
+    # Do not include toolchain/system prefixes or connector system roots.
+    # Walking ``/usr`` or ``/private/var/folders`` on every command is too
+    # slow and immediately hits the 512-path cap, crowding out workspace
+    # matches -- the protected surface would shrink.
+    deny_scan_roots = _normalize_writable_roots((*roots, *readable_roots, temp_dir))
     if host == "darwin":
         executable = Path("/usr/bin/sandbox-exec")
         if not executable.is_file() or not os.access(executable, os.X_OK):
@@ -908,6 +912,233 @@ def _git_credential_read_paths(environ: Mapping[str, str]) -> tuple[Path, ...]:
             seen.add(key)
             out.append(path)
     return tuple(out)
+
+
+_NATIVE_CONNECTOR_CONFIG_DIRS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "tencent-meeting": (
+        (".tmeet",),
+        ("Library", "Application Support", "tmeet"),
+        (".config", "tmeet"),
+    ),
+    "feishu": (
+        (".lark-cli",),
+        ("Library", "Application Support", "lark-cli"),
+        (".config", "lark-cli"),
+    ),
+    "qqmail": (
+        (".agently-cli",),
+        ("Library", "Application Support", "agently-cli"),
+        (".config", "agently-cli"),
+    ),
+    "wecom": (
+        (".config", "wecom"),
+        ("Library", "Application Support", "wecom"),
+    ),
+    "github": (
+        (".config", "gh"),
+        ("Library", "Application Support", "gh"),
+    ),
+}
+
+_NATIVE_CONNECTOR_BINARY_MAP: dict[str, str] = {
+    "tmeet": "tencent-meeting",
+    "tmeet.exe": "tencent-meeting",
+    "tmeet-macos-applesilicon": "tencent-meeting",
+    "tmeet-macos-intel": "tencent-meeting",
+    "tmeet-linux-arm64": "tencent-meeting",
+    "tmeet-linux-x86_64": "tencent-meeting",
+    "tmeet-windows-x86_64.exe": "tencent-meeting",
+    "lark-cli": "feishu",
+    "lark-cli.exe": "feishu",
+    "lark-cli.cmd": "feishu",
+    "agently-cli": "qqmail",
+    "agently-cli.exe": "qqmail",
+    "agently-cli.cmd": "qqmail",
+    "wecom-cli": "wecom",
+    "wecom-cli.exe": "wecom",
+    "wecom-cli.cmd": "wecom",
+    "gh": "github",
+    "gh.exe": "github",
+}
+
+_CONNECTOR_PIPE_FILTER_COMMANDS: frozenset[str] = frozenset(
+    {
+        "head",
+        "tail",
+        "wc",
+        "jq",
+        "yq",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "echo",
+        "printf",
+        "true",
+    }
+)
+
+
+def _identify_native_connector_segment(
+    token: str,
+    home: Path,
+    environ: Mapping[str, str],
+) -> tuple[Optional[str], Optional[Path]]:
+    """Return ``(connector_id, resolved_binary_path)`` if ``token`` is a Near native connector CLI."""
+    raw = str(token or "").strip()
+    if not raw:
+        return None, None
+    candidate: Optional[Path] = None
+    try:
+        if Path(raw).is_absolute() or "/" in raw or "\\" in raw or raw.startswith("~"):
+            candidate = Path(raw).expanduser().resolve(strict=False)
+        else:
+            found = shutil.which(raw, path=str(environ.get("PATH", "") or ""))
+            candidate = Path(found).resolve(strict=False) if found else Path(raw)
+    except (OSError, RuntimeError, ValueError):
+        candidate = Path(raw)
+
+    connectors_root = home / ".agenticx" / "connectors"
+    if candidate is not None and candidate.is_absolute():
+        for cid in _NATIVE_CONNECTOR_CONFIG_DIRS:
+            try:
+                if _path_is_within(candidate, (connectors_root / cid).resolve(strict=False)):
+                    return cid, candidate
+            except (OSError, RuntimeError, ValueError):
+                continue
+
+    base_name = Path(raw).name.lower()
+    cid = _NATIVE_CONNECTOR_BINARY_MAP.get(base_name)
+    if cid is None and candidate is not None:
+        cid = _NATIVE_CONNECTOR_BINARY_MAP.get(candidate.name.lower())
+    if cid is None:
+        return None, None
+    return cid, candidate if (candidate is not None and candidate.is_absolute()) else None
+
+
+def _is_safe_connector_pipe_filter(parts: Sequence[str]) -> bool:
+    """True when ``parts`` is a pathless output filter (e.g. ``head -60`` or ``jq .``)."""
+    if not parts:
+        return False
+    cmd = Path(str(parts[0])).name.lower()
+    if cmd not in _CONNECTOR_PIPE_FILTER_COMMANDS:
+        return False
+    if cmd in {"echo", "printf", "true"}:
+        return True
+    for arg in parts[1:]:
+        text = str(arg or "")
+        if "/" in text or "\\" in text or text.startswith("~") or ".." in text:
+            return False
+        if cmd in {"head", "tail", "wc", "sort", "uniq"}:
+            if not (text.startswith("-") or text.isdigit()):
+                return False
+    return True
+
+
+def _native_connector_sandbox_grants(
+    argv: Sequence[str],
+    environ: Mapping[str, str],
+    *,
+    host: str,
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
+    """Return ``(writable_roots, readable_roots, readable_files)`` for Near native connector CLIs.
+
+    Native connector CLIs (``tmeet``, ``lark-cli``, ``agently-cli``, ``wecom-cli``, ``gh``)
+    read and update their own local config directories (e.g. ``~/.tmeet`` and
+    ``~/Library/Application Support/tmeet``) and, on macOS, query the login Keychain
+    via ``Security.framework`` / ``/usr/bin/security -i``. Blocking those paths inside
+    ``sandbox-exec`` either aborts with ``operation not permitted`` or causes
+    ``tmeet`` to assume ``master.key`` is missing and invoke
+    ``SecKeychainItemCreateFromContent``, which triggers the macOS GUI alert
+    asking to reset the ``login`` keychain.
+
+    Grants are issued only when every command segment is either a recognized
+    native connector CLI or a pathless output filter (such as ``head -60`` or ``jq``),
+    so arbitrary shell commands cannot piggyback on connector invocations.
+    """
+    if not argv:
+        return (), (), ()
+    home_text = str(environ.get("HOME") or environ.get("USERPROFILE") or "").strip()
+    try:
+        home = Path(home_text).expanduser().resolve(strict=False) if home_text else Path.home().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return (), (), ()
+
+    from agenticx.runtime.command_safety import _strip_env_assignments, split_simple_commands
+
+    first_name = Path(str(argv[0])).name.lower()
+    if first_name in {"sh", "bash", "zsh", "dash"} and len(argv) >= 3 and argv[1] == "-c":
+        parsed_segments = split_simple_commands(str(argv[2]))
+        if not parsed_segments:
+            return (), (), ()
+        segments: list[list[str]] = parsed_segments
+    else:
+        segments = [list(str(part) for part in argv)]
+
+    matched_connectors: list[str] = []
+    binary_paths: list[Path] = []
+    for raw_seg in segments:
+        seg = _strip_env_assignments(raw_seg)
+        if not seg:
+            continue
+        cid, bin_path = _identify_native_connector_segment(seg[0], home, environ)
+        if cid is not None:
+            if cid not in matched_connectors:
+                matched_connectors.append(cid)
+            if bin_path is not None:
+                binary_paths.append(bin_path)
+            continue
+        if not _is_safe_connector_pipe_filter(seg):
+            return (), (), ()
+
+    if not matched_connectors:
+        return (), (), ()
+
+    write_roots: list[Path] = []
+    read_roots: list[Path] = []
+    read_files: list[Path] = []
+
+    for bin_path in binary_paths:
+        read_roots.append(bin_path.parent)
+        if bin_path.parent.name in {"bin", "dist"}:
+            read_roots.append(bin_path.parent.parent)
+
+    for cid in matched_connectors:
+        install_root = home / ".agenticx" / "connectors" / cid
+        if install_root.is_dir():
+            read_roots.append(install_root)
+        rel_tuples = _NATIVE_CONNECTOR_CONFIG_DIRS.get(cid, ())
+        for idx, rel_parts in enumerate(rel_tuples):
+            cfg_dir = home.joinpath(*rel_parts)
+            if idx == 0 or (
+                host == "darwin"
+                and len(rel_parts) >= 2
+                and rel_parts[0] == "Library"
+                and (home / "Library" / "Application Support").is_dir()
+            ):
+                try:
+                    cfg_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                except OSError:
+                    pass
+            if cfg_dir.is_dir():
+                write_roots.append(cfg_dir)
+
+    if host == "darwin":
+        keychains_dir = home / "Library" / "Keychains"
+        if keychains_dir.is_dir():
+            write_roots.append(keychains_dir)
+        darwin_var_folders = Path("/private/var/folders")
+        if darwin_var_folders.is_dir():
+            write_roots.append(darwin_var_folders)
+        prefs_dir = home / "Library" / "Preferences"
+        if prefs_dir.is_dir():
+            read_roots.append(prefs_dir)
+
+    return tuple(write_roots), tuple(read_roots), tuple(read_files)
 
 
 def _macos_profile(

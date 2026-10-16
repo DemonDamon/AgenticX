@@ -5532,6 +5532,87 @@ _BASH_CD_SEGMENT_RE = re.compile(
 _BASH_ABS_PATH_TOKEN_RE = re.compile(
     r"(?:/(?:Users|home|tmp|var|opt|private|Volumes)[^\s'\"|;&<>]+|~/[^\s'\"|;&<>]+)"
 )
+_BASH_INLINE_WRITE_HINT_RE = re.compile(
+    r"\b(?:open|write_text|write_bytes|writeFileSync|appendFileSync|writeFile)\s*\("
+    r"|\b(?:shutil\.(?:copy|copy2|copytree|move|rmtree)"
+    r"|os\.(?:remove|unlink|rename|replace|makedirs|mkdir)"
+    r"|fs\.(?:unlink|unlinkSync|rm|rmSync|rename|renameSync|copyFile|copyFileSync))\b"
+)
+
+
+def _extract_bash_non_redirect_write_candidates(command: str) -> List[str]:
+    """Extract destination paths for non-redirect file-mutating shell commands."""
+    if not command or not command.strip():
+        return []
+    if _BASH_INLINE_WRITE_HINT_RE.search(command):
+        return [m.group(0) for m in _BASH_ABS_PATH_TOKEN_RE.finditer(command)]
+
+    from agenticx.runtime.command_safety import split_simple_commands
+
+    segments = split_simple_commands(command)
+    if not segments:
+        try:
+            single = shlex.split(command)
+            segments = [single] if single else []
+        except ValueError:
+            return []
+
+    candidates: List[str] = []
+    for raw_seg in segments:
+        seg = _peel_to_inner_command(list(raw_seg))
+        if not seg:
+            continue
+        cmd = Path(seg[0]).name.lower()
+        args = seg[1:]
+        if cmd in {
+            "rm",
+            "rmdir",
+            "unlink",
+            "touch",
+            "mkdir",
+            "chmod",
+            "chown",
+            "chgrp",
+            "truncate",
+            "mv",
+        }:
+            for tok in args:
+                if not tok.startswith("-"):
+                    candidates.append(tok)
+        elif cmd == "sed":
+            inplace = any(
+                tok == "--in-place"
+                or tok.startswith("--in-place=")
+                or (tok.startswith("-") and not tok.startswith("--") and "i" in tok[1:])
+                for tok in args
+            )
+            if inplace:
+                non_opts = [tok for tok in args if not tok.startswith("-")]
+                # First non-option after flags is the sed script unless -e/-f was given.
+                has_expr_flag = any(tok in {"-e", "-f"} for tok in args)
+                file_args = non_opts if has_expr_flag else non_opts[1:]
+                candidates.extend(file_args)
+        elif cmd in {"cp", "ln", "install", "rsync"}:
+            pos_args: List[str] = []
+            idx = 0
+            while idx < len(args):
+                tok = args[idx]
+                if tok in {"-t", "--target-directory"} and idx + 1 < len(args):
+                    candidates.append(args[idx + 1])
+                    idx += 2
+                    continue
+                if tok.startswith("--target-directory="):
+                    candidates.append(tok.split("=", 1)[1])
+                    idx += 1
+                    continue
+                if tok.startswith("-"):
+                    idx += 1
+                    continue
+                pos_args.append(tok)
+                idx += 1
+            if len(pos_args) >= 2:
+                candidates.append(pos_args[-1])
+    return candidates
 
 
 def _extract_bash_write_target_paths(command: str) -> List[str]:
@@ -5600,8 +5681,6 @@ def _ensure_bash_write_targets_allowed(
         if expanded.is_absolute():
             out.append(str(expanded))
             return out
-        if cwd is not None:
-            out.append(str((cwd / raw).expanduser()))
         for base in cd_bases:
             try:
                 base_path = Path(base).expanduser()
@@ -5610,6 +5689,8 @@ def _ensure_bash_write_targets_allowed(
                 out.append(str(base_path / raw))
             except Exception:
                 continue
+        if cwd is not None and not cd_bases:
+            out.append(str((cwd / raw).expanduser()))
         out.append(raw)
         return out
 
@@ -5637,14 +5718,16 @@ def _ensure_bash_write_targets_allowed(
         if not any_ok and last_err:
             return last_err
 
-    # No redirect/tee target parsed (e.g. python -c open(...)): still block
-    # absolute paths that land on reference mounts. Skip when redirects were
-    # already checked so `cat <ref> && echo >> <writable>` stays allowed.
+    # No redirect/tee target parsed (e.g. python -c open(...) or cp/mv/rm/sed -i):
+    # still block destination paths that land on reference mounts, without false-flagging
+    # read-only script invocations (e.g. `node <skill_dir>/cli.js --help | head`) or
+    # `cp <skill_dir>/file ./local_copy`.
     if not targets:
-        for match in _BASH_ABS_PATH_TOKEN_RE.finditer(command or ""):
-            err = _deny_if_readonly(match.group(0))
-            if err is not None and "read-only" in err:
-                return err
+        for raw in _extract_bash_non_redirect_write_candidates(command or ""):
+            for cand in _candidates_for(raw):
+                err = _deny_if_readonly(cand)
+                if err is not None and "read-only" in err:
+                    return err
 
     return None
 
@@ -6075,7 +6158,8 @@ async def _bash_exec_prepare(
     if cwd is None:
         cwd = _default_bash_cwd(session)
 
-    command_name = Path(parts[0]).name
+    inner_parts = _peel_to_inner_command(parts)
+    command_name = Path((inner_parts or parts)[0]).name
     if command_name.startswith("firecrawl_"):
         return (
             f"ERROR: '{command_name}' is an MCP tool name, not a shell command. "
@@ -8968,10 +9052,17 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
             record_use(skill_dir, session_id=sid)
     except Exception:
         pass
+    skill_body = str(session.context_files.get(f"skill:{name}", "") or "").strip()
+    body_block = (
+        f"\n\n<skill_content name=\"{name}\">\n{skill_body}\n</skill_content>"
+        if skill_body
+        else ""
+    )
     if meta is None:
         return (
             f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
             "请直接使用，不要再用 file_read 读取 SKILL.md。"
+            f"{body_block}"
         )
     base_dir = Path(meta.base_dir).expanduser().resolve(strict=False)
     dirs = getattr(session, "activated_skill_dirs", None)
@@ -8989,13 +9080,37 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
             f"{head}\n"
             f"WARNING: 技能包不完整，SKILL.md 引用的脚本不存在：{listed}。"
             "不要再用 bash_exec 重试运行这些脚本；请告诉用户在市场里重新安装该技能。"
+            f"{body_block}"
         )
-    return (
-        f"{head}\n"
-        "技能目录本会话只读可用：脚本请用绝对路径运行（如 "
-        f"`node {base_dir}/cli.js ...`），或把 bash_exec 的 cwd 设为 {base_dir}；"
-        "该目录不可写，产物请写到会话工作区。"
-    )
+    script_files: List[str] = []
+    if base_dir.is_dir():
+        try:
+            script_files = sorted(
+                p.name
+                for p in base_dir.iterdir()
+                if p.is_file()
+                and p.suffix.lower() in {".js", ".mjs", ".cjs", ".ts", ".py", ".sh"}
+            )
+        except OSError:
+            script_files = []
+    if script_files:
+        example_script = script_files[0]
+        runner = (
+            "python3"
+            if example_script.endswith(".py")
+            else ("bash" if example_script.endswith(".sh") else "node")
+        )
+        footer = (
+            "技能目录本会话只读可用：脚本请用绝对路径运行（如 "
+            f"`{runner} {base_dir}/{example_script} ...`），或把 bash_exec 的 cwd 设为 {base_dir}；"
+            "该目录不可写，产物请写到会话工作区。"
+        )
+    else:
+        footer = (
+            f"技能目录（{base_dir}）下无脚本文件（如 cli.js），请直接按下方 SKILL.md 正文中的命令与参数说明执行，"
+            "不要尝试运行该目录下不存在的脚本。"
+        )
+    return f"{head}\n{footer}{body_block}"
 
 
 def _tool_skill_list(session: StudioSession) -> str:

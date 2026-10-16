@@ -110,3 +110,16 @@ def test_proxy_execution_is_host_full_access() -> None:
 def test_command_risk_categories_cover_never_auto_approved() -> None:
     emitted = set(COMMAND_RISK_CATEGORIES.values())
     assert emitted >= NEVER_AUTO_APPROVED_CATEGORIES
+
+
+def test_native_connector_cli_readonly_vs_write() -> None:
+    tmeet = '"/Users/demo/.agenticx/connectors/tencent-meeting/1.0.11/dist/tmeet-macOS-AppleSilicon"'
+    assert assess_command(f"{tmeet} --help 2>&1 | head -60").is_contained
+    assert assess_command(f"{tmeet} auth status").is_contained
+    assert assess_command(f"{tmeet} --format json meeting list").is_contained
+    assert assess_command(f"{tmeet} --format json meeting get --meeting-code 123").is_contained
+    assert not assess_command(
+        f'{tmeet} --format json meeting create --subject "Demo" --start "2026-10-17T21:00:00+08:00" --end "2026-10-17T22:00:00+08:00"'
+    ).is_contained
+    assert not assess_command(f"{tmeet} --format json meeting cancel --meeting-id 123").is_contained
+

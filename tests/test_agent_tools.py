@@ -992,3 +992,39 @@ def test_skill_use_warns_when_entry_script_missing(monkeypatch, tmp_path: Path) 
     assert "技能包不完整" in result
     assert "cli.js" in result
     assert "scripts/run.py" in result
+
+
+def test_skill_use_inlines_skill_content_and_omits_cli_js_when_no_scripts(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session = _workspace_session(tmp_path)
+    skill_dir = tmp_path / "skills" / "near-connectors" / "tencent-meeting"
+    skill_dir.mkdir(parents=True)
+    skill_md_text = (
+        "---\nname: tencent-meeting\n---\n"
+        'Run `"/path/to/tmeet-macOS-AppleSilicon" --format json meeting create`\n'
+    )
+    (skill_dir / "SKILL.md").write_text(skill_md_text, encoding="utf-8")
+
+    def _fake_studio_skill_use(cf, name, **_kw):
+        cf[f"skill:{name}"] = skill_md_text
+        return True
+
+    monkeypatch.setattr(
+        agent_tools, "skill_is_allowed_for_session", lambda *_a, **_k: (True, None)
+    )
+    monkeypatch.setattr(agent_tools, "studio_skill_use", _fake_studio_skill_use)
+
+    class _Meta:
+        source = "agenticx"
+        location = "global"
+        base_dir = str(skill_dir)
+
+    monkeypatch.setattr(
+        agent_tools.SkillBundleLoader, "get_skill", lambda self, name: _Meta()
+    )
+    result = agent_tools._tool_skill_use({"name": "tencent-meeting"}, session)
+    assert "<skill_content name=\"tencent-meeting\">" in result
+    assert "tmeet-macOS-AppleSilicon" in result
+    assert f"node {skill_dir.resolve()}/cli.js" not in result
+
