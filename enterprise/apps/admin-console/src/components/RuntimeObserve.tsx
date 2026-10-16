@@ -1,14 +1,28 @@
 "use client";
 
-import { BarCard, Button, Card, CardContent, LineCard, StatCard, chartPalette } from "@agenticx/ui";
-import { Bot, Coins, Cpu, RefreshCcw } from "lucide-react";
+import {
+  BarCard,
+  Button,
+  Card,
+  CardContent,
+  LineCard,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  StatCard,
+  chartPalette,
+} from "@agenticx/ui";
+import { Activity, AlertTriangle, ArrowDownLeft, ArrowUpRight, Bot, Coins, Cpu, RefreshCcw, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { adminFetch } from "../lib/admin-client-auth";
 import type { RuntimeDashboard, RuntimeMetric } from "../lib/runtime-dashboard";
 
 const EMPTY_METRIC: RuntimeMetric = { value: 0, previous: 0, delta_pct: 0 };
+const ALL_VALUE = "__all__";
 
 function formatCount(value: number, locale: string): string {
   if (locale.startsWith("zh")) {
@@ -36,6 +50,16 @@ export function RuntimeObserve() {
   const [service, setService] = useState("");
   const [source, setSource] = useState("");
   const [trend, setTrend] = useState<"requests" | "errors">("requests");
+
+  const hasActiveFilter = Boolean(userId || agentId || model || service || source);
+
+  const resetFilters = () => {
+    setUserId("");
+    setAgentId("");
+    setModel("");
+    setService("");
+    setSource("");
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,57 +95,130 @@ export function RuntimeObserve() {
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">{t("title")}</h2>
+          <h2 className="text-lg font-semibold tracking-tight">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-          <RefreshCcw />
-          {t("refresh")}
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasActiveFilter ? (
+            <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              {t("filters.all")}
+            </Button>
+          ) : null}
+          <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+            <RefreshCcw className={loading ? "animate-spin" : undefined} />
+            {t("refresh")}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <FilterSelect label={t("filters.userId")} value={userId} onChange={setUserId} allLabel={t("filters.all")}>
-          {(data?.filters.users ?? []).map((user) => (
-            <option key={user.id} value={user.id}>{user.id}</option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label={t("filters.userName")} value={userId} onChange={setUserId} allLabel={t("filters.all")}>
-          {(data?.filters.users ?? []).map((user) => (
-            <option key={user.id} value={user.id}>{user.label}</option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label={t("filters.agent")} value={agentId} onChange={setAgentId} allLabel={t("filters.all")}>
-          {(data?.filters.agents ?? []).map((agent) => (
-            <option key={agent.id} value={agent.id}>{agent.label}</option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label={t("filters.model")} value={model} onChange={setModel} allLabel={t("filters.all")}>
-          {(data?.filters.models ?? []).map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label={t("filters.service")} value={service} onChange={setService} allLabel={t("filters.all")}>
-          {(data?.filters.services ?? []).map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label={t("filters.source")} value={source} onChange={setSource} allLabel={t("filters.all")}>
-          <option value="desktop">{t("filters.desktop")}</option>
-          <option value="web">{t("filters.web")}</option>
-        </FilterSelect>
+      <div className="grid gap-3 rounded-xl border border-border bg-card p-3.5 shadow-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <FilterSelect
+          label={t("filters.userId")}
+          value={userId}
+          onChange={setUserId}
+          allLabel={t("filters.all")}
+          options={(data?.filters.users ?? []).map((user) => ({ value: user.id, label: user.id }))}
+        />
+        <FilterSelect
+          label={t("filters.userName")}
+          value={userId}
+          onChange={setUserId}
+          allLabel={t("filters.all")}
+          options={(data?.filters.users ?? []).map((user) => ({ value: user.id, label: user.label }))}
+        />
+        <FilterSelect
+          label={t("filters.agent")}
+          value={agentId}
+          onChange={setAgentId}
+          allLabel={t("filters.all")}
+          options={(data?.filters.agents ?? []).map((agent) => ({ value: agent.id, label: agent.label }))}
+        />
+        <FilterSelect
+          label={t("filters.model")}
+          value={model}
+          onChange={setModel}
+          allLabel={t("filters.all")}
+          options={(data?.filters.models ?? []).map((item) => ({ value: item, label: item }))}
+        />
+        <FilterSelect
+          label={t("filters.service")}
+          value={service}
+          onChange={setService}
+          allLabel={t("filters.all")}
+          options={(data?.filters.services ?? []).map((item) => ({ value: item, label: item }))}
+        />
+        <FilterSelect
+          label={t("filters.source")}
+          value={source}
+          onChange={setSource}
+          allLabel={t("filters.all")}
+          options={[
+            { value: "desktop", label: t("filters.desktop") },
+            { value: "web", label: t("filters.web") },
+          ]}
+        />
       </div>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <StatCard label={t("cards.agents")} value={formatCount(cards?.agents.value ?? 0, locale)} icon={<Bot />} delta={cards ? deltaOf(cards.agents) : deltaOf(EMPTY_METRIC)} footer={<span className="text-xs text-muted-foreground">{compare(cards?.agents)} · {t("registered", { count: data?.registered_agents ?? 0 })}</span>} />
-        <StatCard label={t("cards.requests")} value={formatCount(cards?.requests.value ?? 0, locale)} icon={<Cpu />} delta={cards ? deltaOf(cards.requests) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.requests)}</span>} />
-        <StatCard label={t("cards.modelCalls")} value={formatCount(cards?.model_calls.value ?? 0, locale)} icon={<Cpu />} delta={cards ? deltaOf(cards.model_calls) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.model_calls)}</span>} />
-        <StatCard label={t("cards.inputTokens")} value={formatCount(cards?.input_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.input_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.input_tokens)}</span>} />
-        <StatCard label={t("cards.outputTokens")} value={formatCount(cards?.output_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.output_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.output_tokens)}</span>} />
-        <StatCard label={t("cards.totalTokens")} value={formatCount(cards?.total_tokens.value ?? 0, locale)} icon={<Coins />} delta={cards ? deltaOf(cards.total_tokens) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.total_tokens)}</span>} />
-        <StatCard label={t("cards.modelErrors")} value={formatCount(cards?.model_errors.value ?? 0, locale)} icon={<Cpu />} delta={cards ? deltaOf(cards.model_errors) : undefined} footer={<span className="text-xs text-muted-foreground">{compare(cards?.model_errors)}</span>} />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label={t("cards.agents")}
+          value={formatCount(cards?.agents.value ?? 0, locale)}
+          icon={<Bot />}
+          accentClassName="bg-primary"
+          delta={cards ? deltaOf(cards.agents) : deltaOf(EMPTY_METRIC)}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.agents)} · {t("registered", { count: data?.registered_agents ?? 0 })}</span>}
+        />
+        <StatCard
+          label={t("cards.requests")}
+          value={formatCount(cards?.requests.value ?? 0, locale)}
+          icon={<Activity />}
+          accentClassName="bg-chart-2"
+          delta={cards ? deltaOf(cards.requests) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.requests)}</span>}
+        />
+        <StatCard
+          label={t("cards.modelCalls")}
+          value={formatCount(cards?.model_calls.value ?? 0, locale)}
+          icon={<Cpu />}
+          accentClassName="bg-chart-3"
+          delta={cards ? deltaOf(cards.model_calls) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.model_calls)}</span>}
+        />
+        <StatCard
+          label={t("cards.modelErrors")}
+          value={formatCount(cards?.model_errors.value ?? 0, locale)}
+          icon={<AlertTriangle />}
+          accentClassName="bg-danger"
+          delta={cards ? deltaOf(cards.model_errors) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.model_errors)}</span>}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label={t("cards.inputTokens")}
+          value={formatCount(cards?.input_tokens.value ?? 0, locale)}
+          icon={<ArrowDownLeft />}
+          delta={cards ? deltaOf(cards.input_tokens) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.input_tokens)}</span>}
+        />
+        <StatCard
+          label={t("cards.outputTokens")}
+          value={formatCount(cards?.output_tokens.value ?? 0, locale)}
+          icon={<ArrowUpRight />}
+          delta={cards ? deltaOf(cards.output_tokens) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.output_tokens)}</span>}
+        />
+        <StatCard
+          label={t("cards.totalTokens")}
+          value={formatCount(cards?.total_tokens.value ?? 0, locale)}
+          icon={<Coins />}
+          delta={cards ? deltaOf(cards.total_tokens) : undefined}
+          footer={<span className="text-xs text-muted-foreground">{compare(cards?.total_tokens)}</span>}
+        />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -229,25 +326,30 @@ function FilterSelect({
   value,
   onChange,
   allLabel,
-  children,
+  options,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   allLabel: string;
-  children: ReactNode;
+  options: Array<{ value: string; label: string }>;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-      {label}
-      <select
-        className="h-9 rounded-md border border-border bg-card px-2 pr-8 text-sm text-foreground"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{allLabel}</option>
-        {children}
-      </select>
-    </label>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <Select value={value || ALL_VALUE} onValueChange={(next) => onChange(next === ALL_VALUE ? "" : next)}>
+        <SelectTrigger className="h-9 w-full bg-background/60">
+          <SelectValue placeholder={allLabel} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_VALUE}>{allLabel}</SelectItem>
+          {options.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
