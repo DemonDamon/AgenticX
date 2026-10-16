@@ -14,7 +14,7 @@ import {
   StatCard,
   chartPalette,
 } from "@agenticx/ui";
-import { Activity, AlertTriangle, ArrowDownLeft, ArrowUpRight, Bot, Coins, Cpu, RefreshCcw, RotateCcw } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownLeft, ArrowUpRight, Bot, Coins, Cpu, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -38,7 +38,7 @@ function deltaOf(metric: RuntimeMetric): { value: string; trend: "up" | "down" |
   return { value: Math.abs(metric.delta_pct).toFixed(1), trend, suffix: "%" };
 }
 
-export function RuntimeObserve() {
+export function RuntimeObserve({ reloadToken = 0 }: { reloadToken?: number }) {
   const t = useTranslations("pages.dashboard.runtime");
   const locale = useLocale();
   const [data, setData] = useState<RuntimeDashboard | null>(null);
@@ -82,7 +82,7 @@ export function RuntimeObserve() {
     } finally {
       setLoading(false);
     }
-  }, [agentId, model, service, source, t, userId]);
+  }, [agentId, model, reloadToken, service, source, t, userId]);
 
   useEffect(() => {
     void load();
@@ -98,18 +98,12 @@ export function RuntimeObserve() {
           <h2 className="text-lg font-semibold tracking-tight">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          {hasActiveFilter ? (
-            <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              {t("filters.all")}
-            </Button>
-          ) : null}
-          <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCcw className={loading ? "animate-spin" : undefined} />
-            {t("refresh")}
+        {hasActiveFilter ? (
+          <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            {t("filters.all")}
           </Button>
-        </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 rounded-xl border border-border bg-card p-3.5 shadow-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">

@@ -12,10 +12,30 @@ export type TraceSummary = {
   model: string | null;
   operation: string;
   input_preview: string;
+  output_preview: string;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  cost_usd: number;
   error_kind: string | null;
+  error_labels: Array<"tool" | "model" | "run">;
+};
+
+export type SpanObservation = {
+  id: string;
+  trace_id: string;
+  session_id: string;
+  status: string;
+  step_kind: string;
+  error_kind: "tool" | "model" | "run" | null;
+  started_at: string;
+  operation: string;
+  model: string | null;
+  input_preview: string;
+  output_preview: string;
+  duration_ms: number;
+  total_tokens: number;
+  cost_usd: number;
 };
 
 export type SessionSummary = {
@@ -73,9 +93,21 @@ function percentile(values: number[], p: number): number {
   return sorted[index] ?? 0;
 }
 
+function errorLabelOf(stepKind: string): "tool" | "model" | "run" {
+  if (stepKind === "tool") return "tool";
+  if (stepKind === "model") return "model";
+  return "run";
+}
+
+function moneyOf(value: string): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
   traces: TraceSummary[];
   sessions: SessionSummary[];
+  observations: SpanObservation[];
   overview: ObservationOverview;
 } {
   const grouped = new Map<string, AgentTraceSpanRow[]>();
@@ -96,14 +128,13 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
         acc.input += item.input_tokens;
         acc.output += item.output_tokens;
         acc.total += item.total_tokens;
+        acc.cost += moneyOf(item.cost_usd);
         return acc;
       },
-      { input: 0, output: 0, total: 0 },
+      { input: 0, output: 0, total: 0, cost: 0 },
     );
-    let errorKind: string | null = null;
-    if (failed?.step_kind === "tool") errorKind = "tool";
-    else if (failed?.step_kind === "model") errorKind = "model";
-    else if (failed) errorKind = "run";
+    const errorLabels = [...new Set(ordered.filter((item) => item.status !== "ok").map((item) => errorLabelOf(item.step_kind)))];
+    const reply = ordered.find((item) => item.step_kind === "model" && textOf(item.metadata, "reply"));
     return {
       trace_id: traceId,
       session_id: sessionOf(traceId),
@@ -114,13 +145,34 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
       model: modelSpan?.model ?? null,
       operation: run ? "本轮运行" : ordered[0]?.step_kind ?? "run",
       input_preview: textOf(run?.metadata ?? null, "user_text"),
+      output_preview: textOf(reply?.metadata ?? null, "reply"),
       input_tokens: tokens.input,
       output_tokens: tokens.output,
       total_tokens: tokens.total,
-      error_kind: errorKind,
+      cost_usd: tokens.cost,
+      error_kind: errorLabels[0] ?? null,
+      error_labels: errorLabels,
     };
   });
   traces.sort((a, b) => b.started_at.localeCompare(a.started_at));
+
+  const observations: SpanObservation[] = spans.map((span) => ({
+    id: span.id,
+    trace_id: span.trace_id,
+    session_id: sessionOf(span.trace_id),
+    status: span.status,
+    step_kind: span.step_kind,
+    error_kind: span.status === "ok" ? null : errorLabelOf(span.step_kind),
+    started_at: span.created_at.toISOString(),
+    operation: span.step_kind === "tool" ? textOf(span.metadata, "tool_name") || "tool" : span.step_kind,
+    model: span.model,
+    input_preview: span.step_kind === "run" ? textOf(span.metadata, "user_text") : "",
+    output_preview: span.step_kind === "model" ? textOf(span.metadata, "reply") : "",
+    duration_ms: span.duration_ms,
+    total_tokens: span.total_tokens,
+    cost_usd: moneyOf(span.cost_usd),
+  }));
+  observations.sort((a, b) => b.started_at.localeCompare(a.started_at));
 
   const sessions = new Map<string, SessionSummary>();
   for (const trace of traces) {
@@ -184,6 +236,7 @@ export function buildObservationCenter(spans: AgentTraceSpanRow[]): {
   return {
     traces,
     sessions: [...sessions.values()].sort((a, b) => b.started_at.localeCompare(a.started_at)),
+    observations,
     overview,
   };
 }

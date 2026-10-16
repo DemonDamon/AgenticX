@@ -1,26 +1,45 @@
 "use client";
 
 import { adminFetch } from "../../../lib/admin-client-auth";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
+  Badge,
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
   Button,
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
+  Checkbox,
   EmptyState,
   Input,
   PageHeader,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
 } from "@agenticx/ui";
-import { RefreshCcw } from "lucide-react";
+import {
+  AlertCircle,
+  Bot,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Coins,
+  Copy,
+  Cpu,
+  Layers,
+  RefreshCcw,
+  Search,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ConversationMarkdown } from "../../../components/conversation-md";
 
@@ -37,6 +56,7 @@ type TraceSpan = {
   cost_usd: string;
   duration_ms: number;
   error_message: string | null;
+  created_at?: string;
   metadata?: {
     tool_name?: string;
     subagent_name?: string;
@@ -79,7 +99,7 @@ function parentStep(span: TraceSpan): number | null {
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1000) return `${durationMs}ms`;
-  return `${(durationMs / 1000).toFixed(1)}s`;
+  return `${(durationMs / 1000).toFixed(2)}s`;
 }
 
 function traceParts(traceId: string): { session: string; run: string } {
@@ -143,6 +163,24 @@ function findNode(nodes: TraceNode[], key: string | null): TraceNode | null {
   return null;
 }
 
+function filterTreeNodes(nodes: TraceNode[], query: string): TraceNode[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return nodes;
+  const out: TraceNode[] = [];
+  for (const node of nodes) {
+    const filteredChildren = filterTreeNodes(node.children, q);
+    const hitSelf =
+      node.span.step_kind.toLowerCase().includes(q) ||
+      (node.span.model ?? "").toLowerCase().includes(q) ||
+      metaText(node.span, "tool_name").toLowerCase().includes(q) ||
+      metaText(node.span, "subagent_name").toLowerCase().includes(q);
+    if (hitSelf || filteredChildren.length > 0) {
+      out.push({ ...node, children: filteredChildren });
+    }
+  }
+  return out;
+}
+
 type TraceDetail = {
   trace_id: string;
   status: string;
@@ -168,8 +206,30 @@ type TraceSummary = {
   model: string | null;
   operation: string;
   input_preview: string;
+  output_preview?: string;
+  input_tokens?: number;
+  output_tokens?: number;
   total_tokens: number;
+  cost_usd?: number;
   error_kind: string | null;
+  error_labels?: Array<"tool" | "model" | "run">;
+};
+
+type SpanObservation = {
+  id: string;
+  trace_id: string;
+  session_id: string;
+  status: string;
+  step_kind: string;
+  error_kind: "tool" | "model" | "run" | null;
+  started_at: string;
+  operation: string;
+  model: string | null;
+  input_preview: string;
+  output_preview: string;
+  duration_ms: number;
+  total_tokens: number;
+  cost_usd: number;
 };
 
 type SessionSummary = {
@@ -201,10 +261,12 @@ export default function AgentTracesPage({
   embedded = false,
   section,
   onSection,
+  reloadToken = 0,
 }: {
   embedded?: boolean;
   section?: CenterTab;
   onSection?: (section: CenterTab) => void;
+  reloadToken?: number;
 }) {
   const t = useTranslations("pages.ops.agentTraces");
   const [internalTab, setInternalTab] = useState<CenterTab>(section ?? "overview");
@@ -214,9 +276,9 @@ export default function AgentTracesPage({
     onSection?.(next);
   };
   const [traces, setTraces] = useState<TraceSummary[]>([]);
+  const [observations, setObservations] = useState<SpanObservation[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [overview, setOverview] = useState<ObservationOverview | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"all" | "error">("all");
   const [sessionFilter, setSessionFilter] = useState("");
   const [queryId, setQueryId] = useState("");
   const [detail, setDetail] = useState<TraceDetail | null>(null);
@@ -227,9 +289,10 @@ export default function AgentTracesPage({
     try {
       const res = await adminFetch("/api/agent-traces?catalog=1", { cache: "no-store" });
       const json = (await res.json()) as {
-        data?: { traces?: TraceSummary[]; sessions?: SessionSummary[]; overview?: ObservationOverview };
+        data?: { traces?: TraceSummary[]; sessions?: SessionSummary[]; observations?: SpanObservation[]; overview?: ObservationOverview };
       };
       setTraces(json.data?.traces ?? []);
+      setObservations(json.data?.observations ?? []);
       setSessions(json.data?.sessions ?? []);
       setOverview(json.data?.overview ?? null);
     } finally {
@@ -248,7 +311,6 @@ export default function AgentTracesPage({
       }
       const json = (await res.json()) as { data?: TraceDetail };
       setDetail(json.data ?? null);
-      setTab("traces");
     } finally {
       setLoading(false);
     }
@@ -256,7 +318,6 @@ export default function AgentTracesPage({
 
   useEffect(() => {
     void loadIds();
-    // 支持 /metering/agent-traces?trace_id=xxx 直达（从 metering trace 下钻跳转）
     if (typeof window !== "undefined") {
       const param = new URLSearchParams(window.location.search).get("trace_id");
       if (param) {
@@ -264,10 +325,15 @@ export default function AgentTracesPage({
         void loadDetail(param);
       }
     }
-  }, [loadIds, loadDetail]);
+  }, [loadIds, loadDetail, reloadToken]);
+
+  const activeSummary = useMemo(
+    () => (detail ? traces.find((item) => item.trace_id === detail.trace_id) ?? null : null),
+    [detail, traces]
+  );
 
   return (
-    <div className={embedded ? "flex flex-col gap-6 px-6 pb-6" : "flex flex-col gap-6 p-6"}>
+    <div className={embedded ? "flex flex-col gap-5 px-6 pt-4 pb-6" : "flex flex-col gap-6 p-6"}>
       {embedded ? null : (
         <PageHeader
           title={t("title")}
@@ -285,21 +351,14 @@ export default function AgentTracesPage({
           }
           actions={
             <Button variant="outline" size="sm" onClick={() => void loadIds()} disabled={loading}>
-              <RefreshCcw className="mr-2 h-4 w-4" />
+              <RefreshCcw className={loading ? "animate-spin" : undefined} />
               {t("refresh")}
             </Button>
           }
         />
       )}
 
-      {embedded ? (
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={() => void loadIds()} disabled={loading}>
-            <RefreshCcw className="mr-2 h-4 w-4" />
-            {t("refresh")}
-          </Button>
-        </div>
-      ) : (
+      {embedded ? null : (
         <div className="flex gap-2">
           {(["overview", "traces", "sessions"] as const).map((item) => (
             <Button key={item} type="button" size="sm" variant={tab === item ? "default" : "outline"} onClick={() => { setTab(item); setDetail(null); }}>
@@ -309,17 +368,7 @@ export default function AgentTracesPage({
         </div>
       )}
 
-      {detail ? (
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle className="text-base">{t("traceDetail")}</CardTitle>
-            <Button type="button" size="sm" variant="outline" onClick={() => setDetail(null)}>{t("backToList")}</Button>
-          </CardHeader>
-          <CardContent>
-            <TraceExplorer traceId={detail.trace_id} status={detail.status} spans={detail.spans} />
-          </CardContent>
-        </Card>
-      ) : tab === "overview" ? (
+      {tab === "overview" ? (
         <OverviewPanel overview={overview} />
       ) : tab === "sessions" ? (
         <SessionTable
@@ -327,23 +376,28 @@ export default function AgentTracesPage({
           onOpen={(sessionId) => { setSessionFilter(sessionId); setTab("traces"); }}
         />
       ) : (
-        <TraceTable
-          traces={traces.filter((trace) => {
-            if (statusFilter === "error" && trace.status === "ok") return false;
-            if (sessionFilter && trace.session_id !== sessionFilter) return false;
-            const q = queryId.trim();
-            if (!q) return true;
-            return trace.trace_id.includes(q) || trace.session_id.includes(q) || trace.input_preview.includes(q);
-          })}
-          onOpen={(traceId) => void loadDetail(traceId)}
-          statusFilter={statusFilter}
-          onStatusFilter={setStatusFilter}
-          queryId={queryId}
-          onQueryId={setQueryId}
+        <TraceLedger
+          traces={traces}
+          observations={observations}
+          selectedTraceId={detail?.trace_id ?? null}
           sessionFilter={sessionFilter}
           onClearSession={() => setSessionFilter("")}
+          onOpen={(traceId) => void loadDetail(traceId)}
         />
       )}
+
+      <Sheet open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[960px] lg:max-w-[1080px]">
+          <SheetTitle className="sr-only">{t("traceDetail")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("traceDetailHint")}</SheetDescription>
+          {detail ? (
+            <TraceExplorer
+              detail={detail}
+              summary={activeSummary}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -351,7 +405,7 @@ export default function AgentTracesPage({
 function formatWhen(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function OverviewPanel({ overview }: { overview: ObservationOverview | null }) {
@@ -394,65 +448,471 @@ function OverviewPanel({ overview }: { overview: ObservationOverview | null }) {
   );
 }
 
-function TraceTable({
+type ErrorKind = "tool" | "model" | "run";
+type LedgerRange = "1d" | "7d" | "all";
+
+function withinRange(iso: string, range: LedgerRange, now: number): boolean {
+  if (range === "all") return true;
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return false;
+  const windowMs = range === "1d" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  return at >= now - windowMs;
+}
+
+function shortId(value: string): string {
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
+function errorText(kind: string | null, translate: (key: string) => string): string {
+  if (kind === "tool") return translate("errors.tool");
+  if (kind === "model") return translate("errors.model");
+  if (kind === "run") return translate("errors.run");
+  return "—";
+}
+
+function StatusPill({ status }: { status: string }) {
+  const ok = status === "ok";
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide",
+        ok ? "bg-success-soft text-success" : "bg-danger-soft text-danger",
+      ].join(" ")}
+    >
+      {ok ? "OK" : "ERROR"}
+    </span>
+  );
+}
+
+function ErrorTypeBadges({
+  labels,
+  translate,
+}: {
+  labels: ErrorKind[];
+  translate: (key: string) => string;
+}) {
+  if (labels.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="inline-flex items-center rounded border border-danger/35 bg-danger-soft/50 px-1.5 py-0.5 text-[11px] font-medium text-danger">
+        {errorText(labels[0] ?? null, translate)}
+      </span>
+      {labels.length > 1 ? (
+        <span className="inline-flex items-center rounded border border-danger/35 bg-danger-soft/40 px-1 py-0.5 font-mono text-[10px] font-medium text-danger">
+          +{labels.length - 1}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function TraceLedger({
   traces,
-  onOpen,
-  statusFilter,
-  onStatusFilter,
-  queryId,
-  onQueryId,
+  observations,
+  selectedTraceId,
   sessionFilter,
   onClearSession,
+  onOpen,
 }: {
   traces: TraceSummary[];
-  onOpen: (traceId: string) => void;
-  statusFilter: "all" | "error";
-  onStatusFilter: (value: "all" | "error") => void;
-  queryId: string;
-  onQueryId: (value: string) => void;
+  observations: SpanObservation[];
+  selectedTraceId: string | null;
   sessionFilter: string;
   onClearSession: () => void;
+  onOpen: (traceId: string) => void;
 }) {
   const t = useTranslations("pages.ops.agentTraces");
+  const [mode, setMode] = useState<"traces" | "observations">("traces");
+  const [range, setRange] = useState<LedgerRange>("1d");
+  const [showOk, setShowOk] = useState(true);
+  const [showError, setShowError] = useState(true);
+  const [kinds, setKinds] = useState<Record<ErrorKind, boolean>>({ tool: true, model: true, run: true });
+  const [keyword, setKeyword] = useState("");
+  const [traceQuery, setTraceQuery] = useState("");
+  const [sessionQuery, setSessionQuery] = useState(sessionFilter);
+  const [maxDuration, setMaxDuration] = useState("");
+  const [maxTokens, setMaxTokens] = useState("");
+  const [maxCost, setMaxCost] = useState("");
+  const [page, setPage] = useState(0);
+  const pageSize = 20;
+
+  useEffect(() => {
+    setSessionQuery(sessionFilter);
+  }, [sessionFilter]);
+
+  const now = Date.now();
+  const inWindow = traces.filter((trace) => withinRange(trace.started_at, range, now));
+  const labelsOf = (trace: TraceSummary): ErrorKind[] => (trace.error_labels ?? (trace.error_kind ? [trace.error_kind as ErrorKind] : []));
+  const kindCount = (kind: ErrorKind) => inWindow.filter((trace) => labelsOf(trace).includes(kind)).length;
+  const underCap = (value: number, raw: string) => {
+    const cap = Number(raw);
+    return !raw.trim() || !Number.isFinite(cap) || value <= cap;
+  };
+  const q = keyword.trim().toLowerCase();
+  const filteredTraces = inWindow.filter((trace) => {
+    if (trace.status === "ok" && !showOk) return false;
+    if (trace.status !== "ok" && !showError) return false;
+    const present = labelsOf(trace);
+    if (present.length > 0 && !present.some((label) => kinds[label])) return false;
+    if (traceQuery.trim() && !trace.trace_id.toLowerCase().includes(traceQuery.trim().toLowerCase())) return false;
+    if (sessionQuery.trim() && !trace.session_id.toLowerCase().includes(sessionQuery.trim().toLowerCase())) return false;
+    if (q) {
+      const hit =
+        trace.trace_id.toLowerCase().includes(q) ||
+        trace.session_id.toLowerCase().includes(q) ||
+        trace.input_preview.toLowerCase().includes(q) ||
+        (trace.output_preview ?? "").toLowerCase().includes(q) ||
+        (trace.model ?? "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    if (!underCap(trace.duration_ms, maxDuration)) return false;
+    if (!underCap(trace.total_tokens, maxTokens)) return false;
+    if (!underCap(trace.cost_usd ?? 0, maxCost)) return false;
+    return true;
+  });
+  const filteredObservations = observations.filter((row) => {
+    if (!withinRange(row.started_at, range, now)) return false;
+    if (row.status === "ok" && !showOk) return false;
+    if (row.status !== "ok" && !showError) return false;
+    if (row.error_kind && !kinds[row.error_kind]) return false;
+    if (traceQuery.trim() && !row.trace_id.toLowerCase().includes(traceQuery.trim().toLowerCase())) return false;
+    if (sessionQuery.trim() && !row.session_id.toLowerCase().includes(sessionQuery.trim().toLowerCase())) return false;
+    if (q) {
+      const hit =
+        row.trace_id.toLowerCase().includes(q) ||
+        row.session_id.toLowerCase().includes(q) ||
+        row.operation.toLowerCase().includes(q) ||
+        row.input_preview.toLowerCase().includes(q) ||
+        row.output_preview.toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    if (!underCap(row.duration_ms, maxDuration)) return false;
+    if (!underCap(row.total_tokens, maxTokens)) return false;
+    if (!underCap(row.cost_usd, maxCost)) return false;
+    return true;
+  });
+  const rows = mode === "traces" ? filteredTraces : filteredObservations;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const visible = rows.slice(safePage * pageSize, safePage * pageSize + pageSize);
+
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" variant={statusFilter === "all" ? "default" : "outline"} onClick={() => onStatusFilter("all")}>{t("filter.all")}</Button>
-        <Button type="button" size="sm" variant={statusFilter === "error" ? "default" : "outline"} onClick={() => onStatusFilter("error")}>{t("filter.errors")}</Button>
-        <Input value={queryId} onChange={(event) => onQueryId(event.target.value)} placeholder={t("filter.search")} className="max-w-sm" />
-        {sessionFilter ? <Button type="button" size="sm" variant="outline" onClick={onClearSession}>{t("filter.clearSession")}</Button> : null}
-      </div>
-      {traces.length === 0 ? <EmptyState title={t("empty")} /> : (
-        <div className="overflow-auto rounded-md border">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">{t("columns.status")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.time")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.source")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.operation")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.model")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.input")}</th>
-                <th className="px-3 py-2 font-medium">{t("columns.duration")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {traces.map((trace) => (
-                <tr key={trace.trace_id} className="cursor-pointer border-b last:border-0 hover:bg-muted" onClick={() => onOpen(trace.trace_id)}>
-                  <td className="px-3 py-2">{trace.status === "ok" ? "OK" : trace.error_kind ?? trace.status}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{formatWhen(trace.started_at)}</td>
-                  <td className="px-3 py-2">{trace.source === "desktop" ? t("source.desktop") : t("source.web")}</td>
-                  <td className="px-3 py-2">{trace.operation}</td>
-                  <td className="px-3 py-2">{trace.model ?? "—"}</td>
-                  <td className="max-w-[240px] truncate px-3 py-2" title={trace.input_preview}>{trace.input_preview || "—"}</td>
-                  <td className="px-3 py-2">{formatDuration(trace.duration_ms)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="grid items-start gap-4 lg:grid-cols-[248px_minmax(0,1fr)]">
+      <aside className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="flex items-center justify-between border-b border-border px-3.5 py-2.5">
+          <span className="text-xs font-semibold tracking-wide text-foreground">{t("ledger.filters")}</span>
+          {sessionFilter ? (
+            <button type="button" onClick={onClearSession} className="text-xs text-primary hover:underline">
+              {t("filter.clearSession")}
+            </button>
+          ) : null}
         </div>
-      )}
+
+        <div className="divide-y divide-border text-sm">
+          <div className="space-y-2 p-3.5">
+            <div className="text-xs font-medium text-muted-foreground">{t("ledger.range")}</div>
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-0.5">
+              {(["1d", "7d", "all"] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={[
+                    "h-7 rounded-md px-1.5 text-xs transition-colors",
+                    range === item ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                  onClick={() => { setRange(item); setPage(0); }}
+                >
+                  {item === "1d" ? t("ledger.dayShort") : item === "7d" ? t("ledger.weekShort") : t("ledger.allShort")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <FilterGroup title={t("columns.status")} defaultOpen>
+            <CheckRow
+              label={<StatusPill status="ok" />}
+              count={inWindow.filter((trace) => trace.status === "ok").length}
+              checked={showOk}
+              onChange={setShowOk}
+            />
+            <CheckRow
+              label={<StatusPill status="error" />}
+              count={inWindow.filter((trace) => trace.status !== "ok").length}
+              checked={showError}
+              onChange={setShowError}
+            />
+          </FilterGroup>
+
+          <FilterGroup title={t("columns.errorType")} defaultOpen>
+            <CheckRow
+              label={<span className="text-xs">{t("errors.tool")}</span>}
+              count={kindCount("tool")}
+              checked={kinds.tool}
+              onChange={(checked) => setKinds((current) => ({ ...current, tool: checked }))}
+            />
+            <CheckRow
+              label={<span className="text-xs">{t("errors.model")}</span>}
+              count={kindCount("model")}
+              checked={kinds.model}
+              onChange={(checked) => setKinds((current) => ({ ...current, model: checked }))}
+            />
+            <CheckRow
+              label={<span className="text-xs">{t("errors.run")}</span>}
+              count={kindCount("run")}
+              checked={kinds.run}
+              onChange={(checked) => setKinds((current) => ({ ...current, run: checked }))}
+            />
+          </FilterGroup>
+
+          <FilterGroup title={t("traceId")} defaultOpen>
+            <Input
+              value={traceQuery}
+              onChange={(event) => { setTraceQuery(event.target.value); setPage(0); }}
+              placeholder="near:..."
+              className="h-8 text-xs"
+            />
+          </FilterGroup>
+
+          <FilterGroup title={t("columns.session")} defaultOpen>
+            <Input
+              value={sessionQuery}
+              onChange={(event) => { setSessionQuery(event.target.value); setPage(0); }}
+              placeholder="session id..."
+              className="h-8 text-xs"
+            />
+          </FilterGroup>
+
+          <FilterGroup title={t("ledger.maxDuration")}>
+            <Input value={maxDuration} onChange={(event) => setMaxDuration(event.target.value)} placeholder="ms" className="h-8 text-xs" />
+          </FilterGroup>
+
+          <FilterGroup title={t("ledger.maxTokens")}>
+            <Input value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="tokens" className="h-8 text-xs" />
+          </FilterGroup>
+
+          <FilterGroup title={t("ledger.maxCost")}>
+            <Input value={maxCost} onChange={(event) => setMaxCost(event.target.value)} placeholder="0.00" className="h-8 text-xs" />
+          </FilterGroup>
+        </div>
+      </aside>
+
+      <div className="min-w-0 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5">
+              <button
+                type="button"
+                onClick={() => { setMode("traces"); setPage(0); }}
+                className={[
+                  "h-7 rounded-md px-3 text-xs font-medium transition-colors",
+                  mode === "traces" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                {t("ledger.traces")}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode("observations"); setPage(0); }}
+                className={[
+                  "h-7 rounded-md px-3 text-xs font-medium transition-colors",
+                  mode === "observations" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                {t("ledger.observations")}
+              </button>
+            </div>
+            <div className="relative w-64 sm:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={keyword}
+                onChange={(event) => { setKeyword(event.target.value); setPage(0); }}
+                placeholder={t("filter.search")}
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground">{t("ledger.count", { count: rows.length })}</span>
+        </div>
+
+        {visible.length === 0 ? (
+          <EmptyState title={t("empty")} />
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.status")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.errorType")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.time")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("traceId")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.operation")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.model")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.input")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 font-medium">{t("columns.output")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("columns.duration")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("columns.tokens")}</th>
+                    <th className="whitespace-nowrap px-3.5 py-2.5 text-right font-medium">{t("costUsd")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {mode === "traces"
+                    ? (visible as TraceSummary[]).map((row) => {
+                        const labels = labelsOf(row);
+                        const active = selectedTraceId === row.trace_id;
+                        return (
+                          <tr
+                            key={row.trace_id}
+                            className={[
+                              "cursor-pointer transition-colors hover:bg-muted/60",
+                              row.status === "ok" ? "" : "bg-danger-soft/20",
+                              active ? "bg-primary-soft/40" : "",
+                            ].join(" ")}
+                            onClick={() => onOpen(row.trace_id)}
+                          >
+                            <td className="whitespace-nowrap px-3.5 py-2.5">
+                              <StatusPill status={row.status} />
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5">
+                              <ErrorTypeBadges labels={labels} translate={t} />
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                              {formatWhen(row.started_at)}
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-foreground" title={row.trace_id}>
+                              {shortId(row.trace_id)}
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 text-xs font-medium">{row.operation}</td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                              {row.model ?? "—"}
+                            </td>
+                            <td className="max-w-[200px] truncate px-3.5 py-2.5 text-xs" title={row.input_preview}>
+                              {row.input_preview || "—"}
+                            </td>
+                            <td className="max-w-[220px] truncate px-3.5 py-2.5 text-xs text-muted-foreground" title={row.output_preview}>
+                              {row.output_preview || "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                              {formatDuration(row.duration_ms)}
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs">
+                              {row.total_tokens.toLocaleString()}
+                            </td>
+                            <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                              ${(row.cost_usd ?? 0).toFixed(4)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    : (visible as SpanObservation[]).map((row) => (
+                        <tr
+                          key={row.id}
+                          className={[
+                            "cursor-pointer transition-colors hover:bg-muted/60",
+                            row.status === "ok" ? "" : "bg-danger-soft/20",
+                          ].join(" ")}
+                          onClick={() => onOpen(row.trace_id)}
+                        >
+                          <td className="whitespace-nowrap px-3.5 py-2.5">
+                            <StatusPill status={row.status} />
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5">
+                            <ErrorTypeBadges labels={row.error_kind ? [row.error_kind] : []} translate={t} />
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                            {formatWhen(row.started_at)}
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-foreground" title={row.trace_id}>
+                            {shortId(row.trace_id)}
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 text-xs font-medium">{row.operation}</td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                            {row.model ?? "—"}
+                          </td>
+                          <td className="max-w-[200px] truncate px-3.5 py-2.5 text-xs" title={row.input_preview}>
+                            {row.input_preview || "—"}
+                          </td>
+                          <td className="max-w-[220px] truncate px-3.5 py-2.5 text-xs text-muted-foreground" title={row.output_preview}>
+                            {row.output_preview || "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                            {formatDuration(row.duration_ms)}
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs">
+                            {row.total_tokens.toLocaleString()}
+                          </td>
+                          <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs text-muted-foreground">
+                            ${row.cost_usd.toFixed(4)}
+                          </td>
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-border bg-muted/20 px-3.5 py-2 text-xs text-muted-foreground">
+              <span>{t("ledger.count", { count: rows.length })}</span>
+              <div className="flex items-center gap-2">
+                <Button type="button" size="xs" variant="outline" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                  {t("ledger.prev")}
+                </Button>
+                <span className="font-mono">{safePage + 1} / {pageCount}</span>
+                <Button type="button" size="xs" variant="outline" disabled={safePage + 1 >= pageCount} onClick={() => setPage(safePage + 1)}>
+                  {t("ledger.next")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function FilterGroup({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="p-3.5">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between text-xs font-medium text-foreground"
+      >
+        <span>{title}</span>
+        {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+      </button>
+      {open ? <div className="mt-2.5 space-y-2">{children}</div> : null}
+    </div>
+  );
+}
+
+function CheckRow({
+  label,
+  count,
+  checked,
+  onChange,
+}: {
+  label: ReactNode;
+  count: number;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-2 text-xs">
+      <span className="flex items-center gap-2">
+        <Checkbox checked={checked} onCheckedChange={(state) => onChange(Boolean(state))} />
+        {label}
+      </span>
+      <span className="font-mono text-xs text-muted-foreground">{count}</span>
+    </label>
   );
 }
 
@@ -460,37 +920,39 @@ function SessionTable({ sessions, onOpen }: { sessions: SessionSummary[]; onOpen
   const t = useTranslations("pages.ops.agentTraces");
   if (sessions.length === 0) return <EmptyState title={t("empty")} />;
   return (
-    <div className="overflow-auto rounded-md border">
-      <table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="border-b text-xs text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 font-medium">{t("columns.session")}</th>
-            <th className="px-3 py-2 font-medium">{t("columns.source")}</th>
-            <th className="px-3 py-2 font-medium">{t("columns.traces")}</th>
-            <th className="px-3 py-2 font-medium">{t("columns.input")}</th>
-            <th className="px-3 py-2 font-medium">{t("columns.tokens")}</th>
-            <th className="px-3 py-2 font-medium">{t("columns.status")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map((session) => (
-            <tr key={session.session_id} className="cursor-pointer border-b last:border-0 hover:bg-muted" onClick={() => onOpen(session.session_id)}>
-              <td className="max-w-[220px] truncate px-3 py-2 font-mono text-xs" title={session.session_id}>{shortTraceId(session.session_id)}</td>
-              <td className="px-3 py-2">{session.source === "desktop" ? t("source.desktop") : t("source.web")}</td>
-              <td className="px-3 py-2">{session.trace_count}</td>
-              <td className="max-w-[240px] truncate px-3 py-2">{session.input_preview || "—"}</td>
-              <td className="px-3 py-2">{session.total_tokens}</td>
-              <td className="px-3 py-2">{session.status === "ok" ? "OK" : session.status}</td>
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3.5 py-2.5 font-medium">{t("columns.session")}</th>
+              <th className="px-3.5 py-2.5 font-medium">{t("columns.source")}</th>
+              <th className="px-3.5 py-2.5 font-medium">{t("columns.traces")}</th>
+              <th className="px-3.5 py-2.5 font-medium">{t("columns.input")}</th>
+              <th className="px-3.5 py-2.5 text-right font-medium">{t("columns.tokens")}</th>
+              <th className="px-3.5 py-2.5 font-medium">{t("columns.status")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {sessions.map((session) => (
+              <tr key={session.session_id} className="cursor-pointer transition-colors hover:bg-muted/60" onClick={() => onOpen(session.session_id)}>
+                <td className="max-w-[220px] truncate px-3.5 py-2.5 font-mono text-xs" title={session.session_id}>{shortTraceId(session.session_id)}</td>
+                <td className="px-3.5 py-2.5 text-xs">{session.source === "desktop" ? t("source.desktop") : t("source.web")}</td>
+                <td className="px-3.5 py-2.5 font-mono text-xs">{session.trace_count}</td>
+                <td className="max-w-[260px] truncate px-3.5 py-2.5 text-xs">{session.input_preview || "—"}</td>
+                <td className="px-3.5 py-2.5 text-right font-mono text-xs">{session.total_tokens.toLocaleString()}</td>
+                <td className="px-3.5 py-2.5"><StatusPill status={session.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
 function spanTitle(span: TraceSpan, kindLabel: (kind: string) => string): string {
-  return metaText(span, "tool_name") || metaText(span, "subagent_name") || kindLabel(span.step_kind);
+  return metaText(span, "tool_name") || metaText(span, "subagent_name") || span.model || kindLabel(span.step_kind);
 }
 
 function spanIo(span: TraceSpan, spans: TraceSpan[]): { input: string; output: string } {
@@ -502,7 +964,8 @@ function spanIo(span: TraceSpan, spans: TraceSpan[]): { input: string; output: s
     return { input: "", output: metaText(span, "thought") };
   }
   if (span.step_kind === "model") {
-    return { input: "", output: metaText(span, "reply") };
+    const run = spans.find((item) => item.step_kind === "run");
+    return { input: metaText(run ?? span, "user_text"), output: metaText(span, "reply") };
   }
   if (span.step_kind === "tool") {
     return { input: metaText(span, "tool_name"), output: span.status };
@@ -513,40 +976,99 @@ function spanIo(span: TraceSpan, spans: TraceSpan[]): { input: string; output: s
   return { input: "", output: span.error_message ?? "" };
 }
 
+function KindIcon({ kind }: { kind: string }) {
+  if (kind === "run") return <Bot className="h-3.5 w-3.5 text-primary" />;
+  if (kind === "model") return <Sparkles className="h-3.5 w-3.5 text-chart-3" />;
+  if (kind === "tool") return <Wrench className="h-3.5 w-3.5 text-warning" />;
+  if (kind === "thought") return <Brain className="h-3.5 w-3.5 text-info" />;
+  return <Cpu className="h-3.5 w-3.5 text-muted-foreground" />;
+}
+
 function TraceExplorer({
-  traceId,
-  status,
-  spans,
+  detail,
+  summary,
 }: {
-  traceId: string;
-  status: string;
-  spans: TraceSpan[];
+  detail: TraceDetail;
+  summary: TraceSummary | null;
 }) {
   const t = useTranslations("pages.ops.agentTraces");
-  const tree = buildTraceTree(spans);
+  const { trace_id: traceId, status, spans, total_usage: totalUsage } = detail;
+  const fullTree = useMemo(() => buildTraceTree(spans), [spans]);
+  const [treeSearch, setTreeSearch] = useState("");
+  const tree = useMemo(() => filterTreeNodes(fullTree, treeSearch), [fullTree, treeSearch]);
   const parts = traceParts(traceId);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const fallback = tree.find((node) => node.span.step_kind === "run") ?? tree[0] ?? null;
-  const selected = findNode(tree, selectedKey) ?? fallback;
+  const [copied, setCopied] = useState(false);
+
+  const fallback = fullTree.find((node) => node.span.step_kind === "run") ?? fullTree[0] ?? null;
+  const selected = findNode(fullTree, selectedKey) ?? fallback;
+
   const kindLabel = (kind: string) => {
     if (kind === "model" || kind === "tool" || kind === "subagent" || kind === "run" || kind === "thought") {
       return t(`kindLabel.${kind}`);
     }
     return kind;
   };
+
   const io = selected ? spanIo(selected.span, spans) : { input: "", output: "" };
+  const runSpan = spans.find((span) => span.step_kind === "run");
+  const totalDuration = summary?.duration_ms ?? runSpan?.duration_ms ?? Math.max(0, ...spans.map((span) => span.duration_ms));
+  const startedAt = summary?.started_at ?? spans[0]?.created_at ?? "";
+
+  const copyTraceId = () => {
+    void navigator.clipboard?.writeText(traceId);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 text-xs">
-        <Chip label={t("status")} value={status} />
-        <Chip label={t("session")} value={shortTraceId(parts.session)} title={parts.session} />
-        {parts.run ? <Chip label={t("runId")} value={shortTraceId(parts.run)} title={parts.run} /> : null}
+    <div className="flex h-full min-h-0 flex-col">
+      {/* 抽屉顶部信息栏（对标图 2 头部） */}
+      <div className="border-b border-border bg-card px-5 py-3.5 pr-12">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Trace ID:</span>
+          <code className="max-w-[52ch] truncate font-mono text-sm font-semibold text-foreground" title={traceId}>
+            {traceId}
+          </code>
+          <button
+            type="button"
+            onClick={copyTraceId}
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="复制 Trace ID"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+          <StatusPill status={status} />
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+          {startedAt ? <MetaBadge icon={<Clock className="h-3 w-3" />} text={formatWhen(startedAt)} /> : null}
+          <MetaBadge icon={<Clock className="h-3 w-3" />} text={formatDuration(totalDuration)} />
+          <MetaBadge icon={<Layers className="h-3 w-3" />} text={`${countNodes(fullTree)} Steps`} />
+          <MetaBadge
+            icon={<Coins className="h-3 w-3" />}
+            text={`${totalUsage.input_tokens.toLocaleString()} → ${totalUsage.output_tokens.toLocaleString()} (Σ ${totalUsage.total_tokens.toLocaleString()} tokens)`}
+          />
+          <MetaBadge text={`$${totalUsage.cost_usd.toFixed(4)}`} />
+          {parts.session ? <MetaBadge text={`Session: ${shortTraceId(parts.session)}`} title={parts.session} /> : null}
+        </div>
       </div>
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
-        <div className="min-w-0">
-          <div className="mb-2 text-sm text-muted-foreground">{t("operationCount", { count: countNodes(tree) })}</div>
-          <div className="rounded-md border">
+
+      {/* 左右分栏：左侧调用树，右侧详情面板 */}
+      <div className="grid min-h-0 flex-1 divide-y divide-border lg:grid-cols-[310px_minmax(0,1fr)] lg:divide-x lg:divide-y-0">
+        <div className="flex min-h-0 flex-col bg-muted/15">
+          <div className="border-b border-border p-2.5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={treeSearch}
+                onChange={(event) => setTreeSearch(event.target.value)}
+                placeholder={t("filter.search")}
+                className="h-8 bg-background pl-8 text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1.5">
             {tree.map((node) => (
               <TraceTreeRow
                 key={node.key}
@@ -559,32 +1081,105 @@ function TraceExplorer({
             ))}
           </div>
         </div>
-        <div className="min-w-0 rounded-md border p-3">
+
+        <div className="min-h-0 overflow-y-auto p-5">
           {!selected ? (
             <p className="text-sm text-muted-foreground">{t("selectNode")}</p>
           ) : (
             <div className="space-y-4">
-              <div>
-                <div className="text-sm font-medium">{spanTitle(selected.span, kindLabel)}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {selected.span.status}
-                  {selected.span.step_kind === "thought" ? "" : ` · ${formatDuration(selected.span.duration_ms)}`}
-                  {selected.span.step_kind !== "thought" && selected.span.model ? ` · ${selected.span.model}` : ""}
-                  {selected.span.step_kind !== "thought" && selected.span.total_tokens > 0
-                    ? ` · ${selected.span.total_tokens} tokens`
-                    : ""}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <KindIcon kind={selected.span.step_kind} />
+                  <span className="text-base font-semibold text-foreground">{spanTitle(selected.span, kindLabel)}</span>
+                </div>
+                {selected.span.model ? (
+                  <Badge variant="soft" className="font-mono text-xs">
+                    {selected.span.model}
+                  </Badge>
+                ) : null}
+              </div>
+
+              {selected.span.status !== "ok" || selected.span.error_message ? (
+                <div className="flex items-start gap-2.5 rounded-lg border border-danger/35 bg-danger-soft/40 p-3 text-xs text-danger">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="font-semibold">
+                      {errorText(
+                        selected.span.step_kind === "tool" || selected.span.step_kind === "model" ? selected.span.step_kind : "run",
+                        t
+                      )}
+                    </div>
+                    {selected.span.error_message ? (
+                      <div className="whitespace-pre-wrap break-words font-mono text-[11px] opacity-90">
+                        {selected.span.error_message}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{t("kind")}</div>
+                  <div className="mt-1 flex items-center gap-1.5 text-sm font-medium">
+                    <KindIcon kind={selected.span.step_kind} />
+                    <span>{kindLabel(selected.span.step_kind)}</span>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{t("duration")}</div>
+                  <div className="mt-1 font-mono text-sm font-semibold">
+                    {selected.span.step_kind === "thought" ? "—" : formatDuration(selected.span.duration_ms)}
+                  </div>
+                </div>
+                <div
+                  className={[
+                    "rounded-lg border p-3",
+                    selected.span.status === "ok"
+                      ? "border-border bg-muted/20"
+                      : "border-danger/40 bg-danger-soft/30",
+                  ].join(" ")}
+                >
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{t("status")}</div>
+                  <div className="mt-1">
+                    <StatusPill status={selected.span.status} />
+                  </div>
                 </div>
               </div>
+
+              {selected.span.step_kind !== "thought" && selected.span.total_tokens > 0 ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                    Input: {selected.span.input_tokens.toLocaleString()}
+                  </span>
+                  <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                    Output: {selected.span.output_tokens.toLocaleString()}
+                  </span>
+                  <span className="rounded border border-border bg-muted/30 px-2 py-0.5 font-mono">
+                    Σ {selected.span.total_tokens.toLocaleString()} tokens
+                  </span>
+                </div>
+              ) : null}
+
               <IoBlock label={t("input")} text={io.input} />
               <IoBlock label={t("output")} text={io.output} />
-              {selected.span.step_kind !== "thought" && selected.span.error_message ? (
-                <p className="whitespace-pre-wrap break-words text-sm text-destructive">{selected.span.error_message}</p>
-              ) : null}
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function MetaBadge({ icon, text, title }: { icon?: ReactNode; text: string; title?: string }) {
+  return (
+    <span
+      title={title ?? text}
+      className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+    >
+      {icon}
+      <span className="truncate">{text}</span>
+    </span>
   );
 }
 
@@ -602,18 +1197,39 @@ function TraceTreeRow({
   kindLabel: (kind: string) => string;
 }) {
   const selected = node.key === selectedKey;
+  const span = node.span;
   return (
     <>
       <button
         type="button"
         onClick={() => onSelect(node.key)}
-        className={`flex w-full min-w-0 items-center gap-2 border-l py-2 pr-3 text-left text-sm hover:bg-muted ${selected ? "border-l-primary bg-muted" : "border-l-transparent"}`}
-        style={{ paddingLeft: 12 + depth * 20 }}
+        className={[
+          "flex w-full min-w-0 items-start gap-2 border-l-2 py-2 pr-3 text-left transition-colors hover:bg-muted/70",
+          selected ? "border-l-primary bg-primary-soft/50" : "border-l-transparent",
+        ].join(" ")}
+        style={{ paddingLeft: 12 + depth * 18 }}
       >
-        <span className="min-w-0 flex-1 truncate">{spanTitle(node.span, kindLabel)}</span>
-        {node.span.step_kind === "thought" ? null : (
-          <span className="shrink-0 text-xs text-muted-foreground">{formatDuration(node.span.duration_ms)}</span>
-        )}
+        <span className="mt-0.5 shrink-0">
+          <KindIcon kind={span.step_kind} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-xs font-medium text-foreground">{spanTitle(span, kindLabel)}</span>
+            {span.status !== "ok" ? (
+              <span className="rounded bg-danger-soft px-1 py-0.2 font-mono text-[10px] font-semibold text-danger">
+                ERROR
+              </span>
+            ) : null}
+          </span>
+          {span.step_kind !== "thought" ? (
+            <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+              {formatDuration(span.duration_ms)}
+              {span.total_tokens > 0
+                ? ` · ${span.input_tokens.toLocaleString()}→${span.output_tokens.toLocaleString()} (Σ ${span.total_tokens.toLocaleString()})`
+                : ""}
+            </span>
+          ) : null}
+        </span>
       </button>
       {node.children.map((child) => (
         <TraceTreeRow
@@ -629,15 +1245,6 @@ function TraceTreeRow({
   );
 }
 
-function Chip({ label, value, title }: { label: string; value: string; title?: string }) {
-  return (
-    <span title={title ?? value} className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="truncate font-mono">{value}</span>
-    </span>
-  );
-}
-
 function asMarkdown(text: string): string {
   if (!text || text.includes("\n")) return text;
   return text.replace(/ \*\*/g, "\n\n**").replace(/ - /g, "\n- ");
@@ -645,12 +1252,14 @@ function asMarkdown(text: string): string {
 
 function IoBlock({ label, text }: { label: string; text: string }) {
   return (
-    <div className="space-y-1">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="max-h-[28rem] overflow-auto rounded-md border bg-muted/30 p-3 text-sm">
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+        <span className="h-3 w-0.5 rounded-full bg-primary" />
+        <span>{label}</span>
+      </div>
+      <div className="max-h-[26rem] overflow-auto rounded-lg border border-border bg-muted/25 p-3.5 text-sm">
         <ConversationMarkdown text={asMarkdown(text)} className="text-sm leading-6" />
       </div>
     </div>
   );
 }
-
