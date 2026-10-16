@@ -701,6 +701,14 @@
       }
     },
     "recommended": {
+      "agenticx-agent-obs": {
+        "description": "为 Near 桌面端、Python/Go 智能体、LangChain/LangGraph 与 OpenAI 兼容应用一键打通运行观测（调用链、步骤与会话），并在对话中排查异常与慢请求。",
+        "category": "研发监控"
+      },
+      "diagram-design": {
+        "description": "编辑级 HTML+SVG 图表（架构图、时序图、飞轮、象限等 40+ 类型），自包含无依赖；支持从 draw.io / Mermaid / Excalidraw 重绘。点安装后从 GitHub 拉取完整技能目录并做安全扫描。",
+        "category": "架构可视化"
+      },
       "officecli": {
         "description": "Agent 创建/编辑 Word、Excel、PowerPoint（无需安装 Microsoft Office）；点安装后由 Meta-Agent 拉取技能并检测本机 officecli 二进制。",
         "category": "Office 创作"

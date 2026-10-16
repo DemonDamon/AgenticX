@@ -3093,6 +3093,25 @@ function SkillsTab() {
   };
 
   const onRecommendedSkillInstall = (skillId: string) => {
+    const rec = RECOMMENDED_SKILLS.find((s) => s.id === skillId);
+    if (rec?.skillhub_slug) {
+      const installFn = window.agenticxDesktop?.installFromSkillHub;
+      if (typeof installFn === "function") {
+        setInstallPromptBusy(true);
+        void installFn
+          .call(window.agenticxDesktop, { slug: rec.skillhub_slug })
+          .then(async (res) => {
+            if (res?.ok) {
+              setSkillhubMsg(`已安装 ${rec.name} → ${res.installed_path || "registry/" + rec.id}`);
+              await reloadSkillsAfterMarketInstall(rec.id);
+            } else {
+              setSkillhubMsg(res?.error || t("skills.searchFailed"));
+            }
+          })
+          .finally(() => setInstallPromptBusy(false));
+        return;
+      }
+    }
     const prompt =
       skillId === "officecli"
         ? buildOfficeCliInstallPrompt()

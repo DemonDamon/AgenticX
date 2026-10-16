@@ -9,6 +9,7 @@ import tencentMeetingIcon from "../assets/recommended/tencent-meeting.svg";
 import officecliIcon from "../assets/recommended/officecli.svg";
 import archscribeIcon from "../assets/recommended/archscribe.svg";
 import diagramDesignIcon from "../assets/recommended/diagram-design.svg";
+import agenticxObsIcon from "../assets/recommended/agenticx-obs.svg";
 
 /** 推荐位来源档：企业官方（Near 背书）vs 第三方（外部厂商/开源）。 */
 export type RecommendedSkillTier = "enterprise" | "third_party";
@@ -33,6 +34,8 @@ export type RecommendedSkill = {
     skill: string;
     branch?: string;
   };
+  /** SkillHub 确定性直装标识（如 @user_c1a09b5e/agenticx-agent-obs）。 */
+  skillhub_slug?: string;
 };
 
 export const RECOMMENDED_TIER_LABEL: Record<RecommendedSkillTier, string> = {
@@ -41,6 +44,19 @@ export const RECOMMENDED_TIER_LABEL: Record<RecommendedSkillTier, string> = {
 };
 
 export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
+  {
+    id: "agenticx-agent-obs",
+    name: "AgenticX 可观测助手",
+    provider: "AgenticX",
+    description:
+      "为 Near 桌面端、Python/Go 智能体、LangChain/LangGraph 与 OpenAI 兼容应用一键打通运行观测（调用链、步骤与会话），并在对话中排查异常与慢请求。",
+    icon_src: agenticxObsIcon,
+    official_url: "https://skillhub.cn/skills/user_c1a09b5e/agenticx-agent-obs",
+    category: "研发监控",
+    tier: "enterprise",
+    cta: "install",
+    skillhub_slug: "@user_c1a09b5e/agenticx-agent-obs",
+  },
   {
     id: "diagram-design",
     name: "Diagram Design",

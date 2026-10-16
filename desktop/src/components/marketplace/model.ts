@@ -148,7 +148,7 @@ export function mapMcpCategories(rawCategories: readonly string[] | undefined): 
 /** 技能中文 category → 场景分类的关键词映射。 */
 const SKILL_CATEGORY_KEYWORDS: { category: MarketCategory; keywords: string[] }[] = [
   { category: "content_creation", keywords: ["office", "文档", "创作", "ppt", "演示", "图文", "图片", "视频"] },
-  { category: "dev_tools", keywords: ["架构", "代码", "开发", "cli", "工具集"] },
+  { category: "dev_tools", keywords: ["架构", "代码", "开发", "cli", "工具集", "监控", "可观测"] },
   { category: "research", keywords: ["知识库", "笔记", "检索", "搜索", "研究"] },
   { category: "efficiency", keywords: ["会议", "日程", "协作"] },
 ];

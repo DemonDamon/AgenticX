@@ -36,6 +36,41 @@ SKILLHUB_DOWNLOAD_URL_TEMPLATE = os.environ.get(
 
 _HTTP_STATUS_RE = re.compile(r"HTTP\s+(\d{3})", re.I)
 
+BUILTIN_SKILLHUB_CATALOG: List[Dict[str, Any]] = [
+    {
+        "slug": "agenticx-agent-obs",
+        "name": "AgenticX 可观测助手",
+        "description": "为 Near 桌面端、AgenticX Python/Go、LangChain/LangGraph 与 OpenAI 兼容应用一键打通运行观测（Traces / Observations / Sessions），并支持在对话中诊断慢请求与异常调用链。",
+        "version": "1.0.0",
+        "author": "AgenticX",
+        "namespace": "user_c1a09b5e",
+        "canonical": "@user_c1a09b5e/agenticx-agent-obs",
+    }
+]
+
+
+def _builtin_skill_src_dir(slug: str) -> Optional[Path]:
+    bare = str(slug or "").strip()
+    if bare != "agenticx-agent-obs":
+        return None
+    candidate = Path(__file__).resolve().parent.parent / "skills" / bare
+    if (candidate / "SKILL.md").is_file():
+        return candidate
+    return None
+
+
+def _match_builtin_catalog(query: str) -> List[Dict[str, Any]]:
+    q = (query or "").strip().lower()
+    if not q:
+        return [dict(item) for item in BUILTIN_SKILLHUB_CATALOG]
+    keywords = ("obs", "trace", "session", "可观测", "调用链", "监控", "agenticx", "agent-obs")
+    matched: List[Dict[str, Any]] = []
+    for item in BUILTIN_SKILLHUB_CATALOG:
+        haystack = f"{item['slug']} {item['name']} {item['description']}".lower()
+        if q in haystack or any(k in q for k in keywords):
+            matched.append(dict(item))
+    return matched
+
 
 def parse_skillhub_ref(raw: str) -> Tuple[Optional[str], str]:
     """Parse ``@ns/slug``, ``ns/slug``, or bare ``slug`` → ``(namespace|None, slug)``.
@@ -298,24 +333,35 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
         Dict with keys: ok, items (list of skill dicts), source, optional hint/error.
     """
     q = (query or "").strip()
+    builtin_hits = _match_builtin_catalog(q)
+
+    def _merge_builtin(remote_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen = {str(it.get("slug") or "") for it in builtin_hits}
+        merged = list(builtin_hits)
+        for it in remote_items:
+            if str(it.get("slug") or "") not in seen:
+                merged.append(it)
+        return merged
 
     # Prefer HTTP API: CLI JSON strips namespace.handle which install needs.
     api_items = _search_via_skillhub_api(q)
     if api_items:
+        merged = _merge_builtin(api_items)
         return {
             "ok": True,
-            "items": api_items,
-            "count": len(api_items),
+            "items": merged,
+            "count": len(merged),
             "source": "skillhub_api",
             "hint": "",
         }
 
     cli_items = _search_via_skillhub_cli(q)
     if cli_items:
+        merged = _merge_builtin(cli_items)
         return {
             "ok": True,
-            "items": cli_items,
-            "count": len(cli_items),
+            "items": merged,
+            "count": len(merged),
             "source": "skillhub_cli",
             "hint": "",
         }
@@ -350,6 +396,7 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
             }
         )
 
+    items = _merge_builtin(items)
     hint = ""
     if not items and not results:
         hint = (
@@ -479,8 +526,46 @@ def install_skillhub_skill(slug: str, *, acknowledge_high_risk: bool = False) ->
             "error_code": "skillhub_slug_required",
         }
 
+    from agenticx.extensions.registry_hub import RegistryHub
+    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+
+    def _install_from_local_bundle(src_dir: Path, ns_label: str) -> Dict[str, Any]:
+        skill_md = src_dir / "SKILL.md"
+        content = skill_md.read_text(encoding="utf-8")
+        sr = scan_skill_markdown_text(content)
+        summary = {
+            "overall": sr.verdict,
+            "skills": [scan_result_to_payload(sr, bare)],
+        }
+        if sr.verdict == "dangerous" and not acknowledge_high_risk:
+            return {
+                "ok": False,
+                "error": "high_risk_confirm_required",
+                "error_code": "high_risk_confirm_required",
+                "scan_summary": summary,
+                "fallback_to_agent": False,
+                "slug": bare,
+                "namespace": ns_label,
+            }
+        hub = RegistryHub.from_config()
+        md_path = hub.write_registry_skill_dir(bare, src_dir, source="skillhub")
+        return {
+            "ok": True,
+            "name": bare,
+            "slug": bare,
+            "namespace": ns_label,
+            "canonical": f"@{ns_label}/{bare}",
+            "installed_path": str(md_path),
+            "source": "skillhub",
+            "scan_summary": summary,
+        }
+
+    builtin_src = _builtin_skill_src_dir(bare)
+
     namespace, resolve_err = resolve_skillhub_namespace(bare, parsed_ns)
     if not namespace:
+        if builtin_src is not None:
+            return _install_from_local_bundle(builtin_src, parsed_ns or "user_c1a09b5e")
         short = resolve_err or f"namespace unresolved for {bare}"
         return {
             "ok": False,
@@ -490,13 +575,12 @@ def install_skillhub_skill(slug: str, *, acknowledge_high_risk: bool = False) ->
             "slug": bare,
         }
 
-    from agenticx.extensions.registry_hub import RegistryHub
-    from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
-
     with tempfile.TemporaryDirectory(prefix="agx-skillhub-") as tmp:
         tmp_path = Path(tmp)
         ok, err, err_code = _install_via_skillhub_cli(bare, tmp_path, namespace=namespace)
         if not ok:
+            if builtin_src is not None:
+                return _install_from_local_bundle(builtin_src, namespace)
             return {
                 "ok": False,
                 "error": (err or "skillhub install failed")[:200],

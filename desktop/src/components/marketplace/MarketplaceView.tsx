@@ -248,6 +248,24 @@ export function MarketplaceView() {
   const onInstallRecommended = useCallback(
     (itemId: string | undefined) => {
       if (!itemId) return;
+      const rec = RECOMMENDED_SKILLS.find((s) => s.id === itemId);
+      if (rec?.skillhub_slug && typeof window.agenticxDesktop?.installFromSkillHub === "function") {
+        setPromptMsg("");
+        setPromptBusy(true);
+        void window.agenticxDesktop
+          .installFromSkillHub({ slug: rec.skillhub_slug })
+          .then(async (res) => {
+            if (res?.ok) {
+              setPromptMsg(ts("skills.installedNamed", { name: rec.name }));
+              await reloadSkills();
+            } else {
+              setPromptMsg(ts("skills.installFailedReason", { reason: res?.error ?? "unknown" }));
+            }
+          })
+          .catch((e) => setPromptMsg(ts("skills.installFailedReason", { reason: String(e) })))
+          .finally(() => setPromptBusy(false));
+        return;
+      }
       if (RECOMMENDED_SKILLS.some((s) => s.id === itemId && s.repo_install)) {
         void installRecommendedFromRepo(itemId);
         return;

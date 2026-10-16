@@ -701,6 +701,14 @@
       }
     },
     "recommended": {
+      "agenticx-agent-obs": {
+        "description": "Connect Near desktop, Python/Go agents, LangChain/LangGraph, and OpenAI-compatible apps to Runtime Observability (traces, steps, sessions) and diagnose slow or failed runs in chat.",
+        "category": "Observability"
+      },
+      "diagram-design": {
+        "description": "Editorial HTML+SVG diagrams (architecture, sequence, flywheel, quadrant, 40+ types) with zero dependencies. Install fetches the full skill directory from GitHub with security scanning.",
+        "category": "Architecture visuals"
+      },
       "officecli": {
         "description": "Create/edit Word, Excel, and PowerPoint without Microsoft Office. Install lets Meta-Agent fetch the skill and check the local officecli binary.",
         "category": "Office authoring"
