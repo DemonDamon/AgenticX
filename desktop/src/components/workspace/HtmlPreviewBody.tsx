@@ -13,6 +13,15 @@ import {
   type HtmlInspectParentMessage,
 } from "../../utils/html-preview-inspect";
 import {
+  CANVAS_EDITOR_BRIDGE_VERSION,
+  CANVAS_EDITOR_MSG,
+  injectCanvasEditorBridge,
+  isCanvasEditorChildMessage,
+  type CanvasEditorParentMessage,
+  type CanvasEditorSelectPayload,
+  type CanvasEditorStyleMap,
+} from "../../utils/canvas-visual-editor";
+import {
   DEFAULT_HTML_PREVIEW_VIEWPORT,
   isFixedViewport,
   type HtmlPreviewViewport,
@@ -40,6 +49,14 @@ type HtmlPreviewBodyProps = {
   clearSelectionKey?: number;
   /** Bump to force iframe remount (refresh). */
   reloadKey?: number;
+  /** Canvas visual editor (Trae ⌥3): enable element pick + live style editing. */
+  visualEditorEnabled?: boolean;
+  /** Pending style edits (cssPath -> props) replayed into the frame. */
+  visualEditorStyles?: CanvasEditorStyleMap;
+  /** cssPath of the element selected in this frame; null clears the overlay. */
+  visualEditorSelectedPath?: string | null;
+  /** Element selected / cleared (escape, select-missing) in the editor bridge. */
+  onVisualEditorSelect?: (payload: CanvasEditorSelectPayload | null) => void;
 };
 
 /**
@@ -59,12 +76,18 @@ export function HtmlPreviewBody({
   onElementHitChange,
   clearSelectionKey = 0,
   reloadKey = 0,
+  visualEditorEnabled = false,
+  visualEditorStyles,
+  visualEditorSelectedPath = null,
+  onVisualEditorSelect,
 }: HtmlPreviewBodyProps) {
   const appTheme = useAppStore((s) => s.theme);
   const [baseSrcDoc, setBaseSrcDoc] = useState(content);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onHitRef = useRef(onElementHitChange);
   onHitRef.current = onElementHitChange;
+  const onVeSelectRef = useRef(onVisualEditorSelect);
+  onVeSelectRef.current = onVisualEditorSelect;
   const lastHitRef = useRef<HtmlPreviewElementHit | null>(null);
 
   useEffect(() => {
@@ -84,15 +107,42 @@ export function HtmlPreviewBody({
 
   const srcDoc = useMemo(
     () =>
-      injectHtmlInspectBridge(
-        injectHtmlPreviewStorageBridge(injectHtmlPreviewTheme(baseSrcDoc, appTheme)),
+      injectCanvasEditorBridge(
+        injectHtmlInspectBridge(
+          injectHtmlPreviewStorageBridge(injectHtmlPreviewTheme(baseSrcDoc, appTheme)),
+        ),
       ),
-    [baseSrcDoc, appTheme, HTML_INSPECT_BRIDGE_VERSION],
+    [baseSrcDoc, appTheme, HTML_INSPECT_BRIDGE_VERSION, CANVAS_EDITOR_BRIDGE_VERSION],
   );
 
-  const postToFrame = (msg: HtmlInspectParentMessage) => {
+  const postToFrame = (msg: HtmlInspectParentMessage | CanvasEditorParentMessage) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   };
+
+  const veStylesJson = useMemo(() => JSON.stringify(visualEditorStyles ?? {}), [visualEditorStyles]);
+
+  // Visual editor: enable/disable bridge.
+  useEffect(() => {
+    postToFrame({ type: CANVAS_EDITOR_MSG, action: "set-enabled", enabled: visualEditorEnabled });
+  }, [visualEditorEnabled, srcDoc]);
+
+  // Visual editor: replay pending style edits (also after iframe reloads).
+  useEffect(() => {
+    if (!visualEditorEnabled) return;
+    postToFrame({
+      type: CANVAS_EDITOR_MSG,
+      action: "sync-styles",
+      styles: JSON.parse(veStylesJson) as CanvasEditorStyleMap,
+    });
+  }, [veStylesJson, visualEditorEnabled, srcDoc]);
+
+  // Visual editor: selection moved elsewhere / cleared parent-side.
+  useEffect(() => {
+    if (!visualEditorEnabled) return;
+    if (visualEditorSelectedPath == null) {
+      postToFrame({ type: CANVAS_EDITOR_MSG, action: "clear-selection" });
+    }
+  }, [visualEditorSelectedPath, visualEditorEnabled]);
 
   useEffect(() => {
     postToFrame({
@@ -135,9 +185,19 @@ export function HtmlPreviewBody({
     };
 
     const onMessage = (ev: MessageEvent) => {
-      if (!isHtmlInspectChildMessage(ev.data)) return;
       const iframe = iframeRef.current;
       if (!iframe?.contentWindow || ev.source !== iframe.contentWindow) return;
+      if (isCanvasEditorChildMessage(ev.data)) {
+        const d = ev.data;
+        if (d.action === "select") {
+          onVeSelectRef.current?.(d.payload);
+        } else {
+          // escape | select-missing
+          onVeSelectRef.current?.(null);
+        }
+        return;
+      }
+      if (!isHtmlInspectChildMessage(ev.data)) return;
       const data = ev.data;
       if (data.action === "escape") {
         lastHitRef.current = null;
@@ -248,6 +308,25 @@ export function HtmlPreviewBody({
           action: "set-enabled",
           enabled: inspectEnabled,
         });
+        postToFrame({
+          type: CANVAS_EDITOR_MSG,
+          action: "set-enabled",
+          enabled: visualEditorEnabled,
+        });
+        if (visualEditorEnabled) {
+          postToFrame({
+            type: CANVAS_EDITOR_MSG,
+            action: "sync-styles",
+            styles: JSON.parse(veStylesJson) as CanvasEditorStyleMap,
+          });
+          if (visualEditorSelectedPath) {
+            postToFrame({
+              type: CANVAS_EDITOR_MSG,
+              action: "reselect",
+              cssPath: visualEditorSelectedPath,
+            });
+          }
+        }
       }}
     />
   );

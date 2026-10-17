@@ -30,6 +30,8 @@ type Props = {
   placement?: Placement;
   /** Extra classes on the hover target wrapper (e.g. `w-full min-w-0` for block text). */
   className?: string;
+  /** `dark` renders the black bubble used over colored canvas controls. */
+  tone?: "surface" | "dark";
   children: ReactNode;
 };
 
@@ -40,6 +42,7 @@ export function HoverTip({
   tooltipAlign = "center",
   placement = "above",
   className,
+  tone = "surface",
   children,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -89,7 +92,11 @@ export function HoverTip({
       ? createPortal(
           <div
             role="tooltip"
-            className="pointer-events-none fixed z-[100] w-max max-w-[min(360px,calc(100vw-24px))] break-all rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-left text-[11px] leading-snug text-text-primary shadow-lg backdrop-blur-xl"
+            className={`pointer-events-none fixed w-max max-w-[min(360px,calc(100vw-24px))] break-all rounded-md px-2.5 py-1.5 text-left text-[11px] leading-snug shadow-lg ${
+              tone === "dark"
+                ? "z-[140] border border-transparent bg-neutral-900 text-white"
+                : "z-[100] border border-border bg-surface-panel text-text-primary backdrop-blur-xl"
+            }`}
             style={{
               left: coords.x,
               top: coords.y,

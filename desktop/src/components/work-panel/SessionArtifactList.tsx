@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Eye, FolderOpen, ExternalLink, MessageSquare } from "lucide-react";
+import { Eye, FolderOpen, ExternalLink, Frame, MessageSquare } from "lucide-react";
 import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
 import {
   artifactBaseName,
@@ -25,6 +25,8 @@ type Props = {
   /** Open / preview a path (HTML → WorkPanel browser; other previewable → WorkspaceFilePreview). */
   onOpenPath?: (path: string) => void;
   onOpenScratch?: (path: string) => void;
+  /** Add an HTML artifact to the design canvas as a frame. */
+  onAddToCanvas?: (path: string) => void;
 };
 
 export function SessionArtifactList({
@@ -33,6 +35,7 @@ export function SessionArtifactList({
   onHighlightHandled,
   onOpenPath,
   onOpenScratch,
+  onAddToCanvas,
 }: Props) {
   const { t } = useTranslation("workspace");
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -154,6 +157,17 @@ export function SessionArtifactList({
               >
                 {artifactBaseName(path)}
               </button>
+              {onAddToCanvas && isInAppHtmlPreviewPath(path) ? (
+                <button
+                  type="button"
+                  className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
+                  onClick={() => onAddToCanvas(path)}
+                  aria-label={t("work.canvas.tabCanvas")}
+                  title={t("work.canvas.tabCanvas")}
+                >
+                  <Frame className="h-3 w-3" strokeWidth={1.5} />
+                </button>
+              ) : null}
               {onOpenScratch ? (
                 <button
                   type="button"

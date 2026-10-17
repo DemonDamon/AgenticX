@@ -867,7 +867,7 @@ declare global {
       addTaskspace: (payload: { sessionId: string; path?: string; label?: string }) => Promise<{ ok: boolean; workspace?: TaskspaceItem; error?: string }>;
       removeTaskspace: (payload: { sessionId: string; taskspaceId: string }) => Promise<{ ok: boolean; error?: string }>;
       chooseDirectory: () => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
-      chooseFiles: () => Promise<{ ok: boolean; paths?: string[]; canceled?: boolean; error?: string }>;
+      chooseFiles: (options?: { filters?: { name: string; extensions: string[] }[] }) => Promise<{ ok: boolean; paths?: string[]; canceled?: boolean; error?: string }>;
       getPathForFile: (file: File) => string;
       listTaskspaceFiles: (payload: { sessionId: string; taskspaceId: string; path?: string }) => Promise<{
         ok: boolean;
@@ -1521,6 +1521,20 @@ declare global {
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
       searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
       loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+      exportCanvasFrameImage: (payload: {
+        html: string;
+        width: number;
+        height: number;
+        format: "png" | "jpeg";
+        scale: number;
+        baseName: string;
+        savePath?: string;
+      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
+      exportCanvasZip: (payload: {
+        files: { path: string }[];
+        baseName: string;
+        savePath?: string;
+      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       writeLocalTextFile: (payload: {
         path: string;
         content: string;

@@ -414,7 +414,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       }),
     }),
   chooseDirectory: async () => ipcRenderer.invoke("choose-directory"),
-  chooseFiles: async () => ipcRenderer.invoke("choose-files"),
+  chooseFiles: async (options?: { filters?: { name: string; extensions: string[] }[] }) =>
+    ipcRenderer.invoke("choose-files", options),
   getPathForFile: (file: File): string => {
     try {
       return webUtils.getPathForFile(file) || "";
@@ -890,6 +891,17 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
   searchSkillHub: async (args: { q: string }) => ipcRenderer.invoke("search-skillhub", args),
   loadLocalImageDataUrl: async (path: string) => ipcRenderer.invoke("load-local-image-data-url", path),
+  exportCanvasFrameImage: async (payload: {
+    html: string;
+    width: number;
+    height: number;
+    format: "png" | "jpeg";
+    scale: number;
+    baseName: string;
+    savePath?: string;
+  }) => ipcRenderer.invoke("export-canvas-frame-image", payload),
+  exportCanvasZip: async (payload: { files: { path: string }[]; baseName: string; savePath?: string }) =>
+    ipcRenderer.invoke("export-canvas-zip", payload),
   writeLocalTextFile: async (payload: {
     path: string;
     content: string;

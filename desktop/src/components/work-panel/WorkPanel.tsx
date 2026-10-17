@@ -20,6 +20,7 @@ import {
   FileDiff,
   FileText,
   FolderOpen,
+  Frame as CanvasFrameIcon,
   Globe,
   ListTodo,
   Maximize2,
@@ -106,6 +107,7 @@ import {
   type HtmlPreviewViewport,
 } from "../workspace/html-preview-device";
 import { SessionArtifactList } from "./SessionArtifactList";
+import { DesignCanvasPanel, type CanvasFrame } from "./DesignCanvasPanel";
 import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
@@ -668,7 +670,8 @@ export type WorkPanelTabKind =
   | "preview"
   | "graph"
   | "timeline"
-  | "scratch";
+  | "scratch"
+  | "canvas";
 
 export type { SummarySectionId } from "./summary-sections";
 
@@ -702,6 +705,8 @@ export type WorkPanelFocus =
       eventId?: string;
     }
   | { kind: "scratch"; chatId: string }
+  /** Trae-style design canvas; optional HTML path is added as a frame. */
+  | { kind: "canvas"; absolutePath?: string; title?: string }
   | null;
 
 type BrowserHistoryEntry = {
@@ -854,6 +859,12 @@ type Props = {
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
   onEnsureSessionForWorkspace?: () => Promise<string | null>;
+  /** Canvas green bar「添加到对话」: inject the frame's file into the chat composer. */
+  onAddCanvasFrameToChat?: (payload: {
+    absolutePath: string;
+    title: string;
+    kind?: "html" | "image";
+  }) => boolean | Promise<boolean>;
   subAgents: SubAgent[];
   selectedSubAgent: string | null;
   onCancelSubAgent: (agentId: string) => void;
@@ -981,6 +992,13 @@ function EmptyBlock({
   );
 }
 
+/**
+ * Canvas frames are session-scoped, but WorkPanel unmounts when the right-side
+ * panel is toggled away. Keep a per-session module cache so closing the tab /
+ * panel and reopening the canvas keeps the user's frame layout.
+ */
+const canvasFramesBySession = new Map<string, CanvasFrame[]>();
+
 export function WorkPanel({
   paneId,
   sessionId,
@@ -1004,6 +1022,7 @@ export function WorkPanel({
   previewOpenRequest,
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
+  onAddCanvasFrameToChat,
   subAgents,
   selectedSubAgent,
   onCancelSubAgent,
@@ -1074,6 +1093,10 @@ export function WorkPanel({
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
+  const [canvasTabOpen, setCanvasTabOpen] = useState(false);
+  const [canvasFrames, setCanvasFrames] = useState<CanvasFrame[]>(() =>
+    canvasFramesBySession.get(String(sessionId || "")) ? [...(canvasFramesBySession.get(String(sessionId || "")) ?? [])] : [],
+  );
   const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
   const [pendingDismissParked, setPendingDismissParked] = useState<ScratchChat | null>(null);
   const [pendingClearHost, setPendingClearHost] = useState(false);
@@ -1157,9 +1180,19 @@ export function WorkPanel({
     setPinnedSummarySectionState(section);
   };
 
-  // Drop stale disk paths immediately on history/session switch. When summary
-  // is closed, resync is disabled — without this clear, prior session paths
-  // linger and get auto-mounted into the newly selected session.
+  // Canvas frames are session-scoped and cached across panel remounts.
+  const canvasSessionRef = useRef(String(sessionId || ""));
+  useEffect(() => {
+    const sid = String(sessionId || "");
+    if (sid !== canvasSessionRef.current) {
+      canvasSessionRef.current = sid;
+      setCanvasFrames(canvasFramesBySession.get(sid) ? [...(canvasFramesBySession.get(sid) ?? [])] : []);
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    canvasFramesBySession.set(String(sessionId || ""), canvasFrames);
+  }, [canvasFrames, sessionId]);
+
   useEffect(() => {
     const sid = String(sessionId || "").trim();
     const prevSid = diskArtifactSessionRef.current;
@@ -1451,6 +1484,7 @@ export function WorkPanel({
     workspaceTabOpen ||
     graphTabOpen ||
     timelineTabOpen ||
+    canvasTabOpen ||
     terminalTabs.length > 0 ||
     browserTabs.length > 0 ||
     previewTabs.length > 0 ||
@@ -1465,6 +1499,7 @@ export function WorkPanel({
     excludeBrowserId?: string;
     excludePreviewId?: string;
     excludeScratchId?: string;
+    excludeCanvas?: boolean;
   }): WorkPanelTabKind | null => {
     const remainingScratch = scratchChats.find((chat) => chat.id !== opts?.excludeScratchId);
     if (opts?.excludeScratchId && remainingScratch) {
@@ -1480,6 +1515,7 @@ export function WorkPanel({
       return "preview";
     }
     if (!opts?.excludeWorkspace && workspaceTabOpen) return "workspace";
+    if (!opts?.excludeCanvas && canvasTabOpen) return "canvas";
     const nextTerminal = terminalTabs.find((t) => t.id !== opts?.excludeTerminalId);
     if (nextTerminal) return "terminal";
     const nextBrowser = browserTabs.find((t) => t.id !== opts?.excludeBrowserId);
@@ -1914,6 +1950,33 @@ export function WorkPanel({
     } else if (focusRequest.kind === "scratch") {
       setActiveScratchId(resolveScratchFocusId(scratchChats, focusRequest.chatId, activeScratchId));
       setActiveKind("scratch");
+    } else if (focusRequest.kind === "canvas") {
+      setCanvasTabOpen(true);
+      setActiveKind("canvas");
+      const canvasPath = String(focusRequest.absolutePath || "").trim();
+      if (canvasPath) {
+        setCanvasFrames((prev) => {
+          if (prev.some((frame) => frame.absolutePath === canvasPath)) return prev;
+          const index = prev.length;
+          const col = index % 3;
+          const row = Math.floor(index / 3);
+          return [
+            ...prev,
+            {
+              id: uid(),
+              title:
+                String(focusRequest.title || "").trim() ||
+                artifactBaseName(canvasPath) ||
+                i18n.t("work.canvas.emptyTitle", { ns: "workspace" }),
+              absolutePath: canvasPath,
+              device: "desktop",
+              x: 80 + col * 1560,
+              y: 80 + row * 1020,
+              reloadNonce: 0,
+            },
+          ];
+        });
+      }
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab, scratchChats, activeScratchId]);
@@ -2060,6 +2123,91 @@ export function WorkPanel({
     setWorkspaceTabOpen(true);
     setActiveKind("workspace");
     closePlus();
+  };
+
+  const openCanvasTab = () => {
+    setCanvasTabOpen(true);
+    setActiveKind("canvas");
+    closePlus();
+  };
+
+  /** Add a local HTML file as a canvas frame (de-duped by absolute path). */
+  const addCanvasFrame = (absPathRaw: string) => {
+    const path = String(absPathRaw || "").trim();
+    if (!path) return;
+    setCanvasTabOpen(true);
+    setActiveKind("canvas");
+    setCanvasFrames((prev) => {
+      if (prev.some((frame) => frame.absolutePath === path)) return prev;
+      const index = prev.length;
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      const frame: CanvasFrame = {
+        id: uid(),
+        title: artifactBaseName(path) || t("work.canvas.emptyTitle"),
+        absolutePath: path,
+        device: "desktop",
+        x: 80 + col * 1560,
+        y: 80 + row * 1020,
+        reloadNonce: 0,
+      };
+      return [...prev, frame];
+    });
+  };
+
+  /** Trae「导入图片素材」对标：本地图片以图片画框上画布（按路径去重）。 */
+  const addCanvasImageFrame = (absPathRaw: string) => {
+    const path = String(absPathRaw || "").trim();
+    if (!path) return;
+    setCanvasTabOpen(true);
+    setActiveKind("canvas");
+    setCanvasFrames((prev) => {
+      if (prev.some((frame) => frame.absolutePath === path)) return prev;
+      const index = prev.length;
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      const frame: CanvasFrame = {
+        id: uid(),
+        title: artifactBaseName(path) || t("work.canvas.emptyTitle"),
+        absolutePath: path,
+        kind: "image",
+        device: "desktop",
+        x: 80 + col * 1560,
+        y: 80 + row * 1020,
+        reloadNonce: 0,
+      };
+      return [...prev, frame];
+    });
+  };
+
+  const closeCanvasTab = () => {
+    setCanvasTabOpen(false);
+    if (activeKind === "canvas") {
+      setActiveKind(resolveFallbackKind({ excludeCanvas: true }));
+    }
+  };
+
+  const pickCanvasLocalFiles = () => {
+    void (async () => {
+      const result = await window.agenticxDesktop?.chooseFiles?.();
+      if (!result?.ok || !Array.isArray(result.paths)) return;
+      const htmlPaths = result.paths.filter((p) => /\.html?$/i.test(p));
+      htmlPaths.forEach(addCanvasFrame);
+    })();
+  };
+
+  /** 图片素材导入：原生面板按扩展名过滤（png/jpg/jpeg/gif/webp/svg）。 */
+  const pickCanvasImageFiles = () => {
+    void (async () => {
+      const result = await window.agenticxDesktop?.chooseFiles?.({
+        filters: [
+          { name: t("work.canvas.imageFilterName"), extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"] },
+        ],
+      });
+      if (!result?.ok || !Array.isArray(result.paths)) return;
+      const imagePaths = result.paths.filter((p) => /\.(png|jpe?g|gif|webp|svg)$/i.test(p));
+      imagePaths.forEach(addCanvasImageFrame);
+    })();
   };
 
   const openTerminalTab = () => {
@@ -2367,6 +2515,7 @@ export function WorkPanel({
             {plusItem("scratch", <ScratchChatIcon className="h-4 w-4 text-text-subtle" />, t("work.tabScratch"), openScratchFromPlus)}
             {plusItem("changes", <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabChanges"), openChangesTab)}
             {plusItem("browser", <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabBrowser"), openBrowserTab)}
+            {plusItem("canvas", <CanvasFrameIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.canvas.tabCanvas"), openCanvasTab)}
             {plusItem("graph", <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabGraph"), openGraphTab)}
             {plusItem("timeline", <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTimeline"), openTimelineTab)}
             {plusItem("terminal", <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />, t("work.tabTerminal"), openTerminalTab)}
@@ -2404,6 +2553,13 @@ export function WorkPanel({
       title: t("work.tabBrowser"),
       subtitle: t("work.subtitleBrowser"),
       onClick: openBrowserTab,
+    },
+    {
+      key: "canvas",
+      icon: <CanvasFrameIcon className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: t("work.canvas.tabCanvas"),
+      subtitle: t("work.canvas.subtitleCanvas"),
+      onClick: openCanvasTab,
     },
     {
       key: "graph",
@@ -2519,6 +2675,40 @@ export function WorkPanel({
                 }
               }}
               aria-label={t("work.closeWorkspaceTab")}
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ) : null}
+
+        {canvasTabOpen ? (
+          <button
+            type="button"
+            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "canvas"
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setActiveKind("canvas")}
+          >
+            <CanvasFrameIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">{t("work.canvas.tabCanvas")}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeCanvasTab();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeCanvasTab();
+                }
+              }}
+              aria-label={t("work.canvas.closeCanvasTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -2965,6 +3155,7 @@ export function WorkPanel({
                     }
                     void window.agenticxDesktop?.shellOpenPath?.(path);
                   }}
+                  onAddToCanvas={(path) => addCanvasFrame(path)}
                 />
               )}
             </Section>
@@ -3276,6 +3467,24 @@ export function WorkPanel({
             previewOpenRequest={previewOpenRequest}
             onPreviewOpenRequestHandled={onPreviewOpenRequestHandled}
             onEnsureSessionForWorkspace={onEnsureSessionForWorkspace}
+          />
+        ) : null}
+
+        {hasAnyTab && activeKind === "canvas" && canvasTabOpen ? (
+          <DesignCanvasPanel
+            frames={canvasFrames}
+            setFrames={setCanvasFrames}
+            artifactCandidates={presentArtifactPaths}
+            onAddPath={addCanvasFrame}
+            onPickLocalFiles={pickCanvasLocalFiles}
+            onPickImageFiles={pickCanvasImageFiles}
+            onAddFrameToChat={(frame: CanvasFrame) =>
+              onAddCanvasFrameToChat?.({
+                absolutePath: frame.absolutePath,
+                title: frame.title,
+                kind: frame.kind ?? "html",
+              }) ?? false
+            }
           />
         ) : null}
 

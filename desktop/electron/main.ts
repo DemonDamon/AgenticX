@@ -44,6 +44,7 @@ import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
 import { extract as extractTar } from "tar";
+import { writeStoreZip } from "./zip-store";
 import { isAppLocale, localeFromOsTag, type AppLocale } from "./app-locale";
 import {
   closeSplash,
@@ -10159,15 +10160,27 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("choose-files", async () => {
+  ipcMain.handle("choose-files", async (_event, options?: { filters?: { name?: unknown; extensions?: unknown }[] }) => {
     if (remoteConfig) {
       return { ok: false, error: "远程模式不支持本地文件选择" };
     }
+    const filters = Array.isArray(options?.filters)
+      ? options.filters
+          .map((filter) => ({
+            name: String(filter?.name ?? "").trim(),
+            extensions: (Array.isArray(filter?.extensions) ? filter.extensions : [])
+              .map((ext) => String(ext).trim().replace(/^\./, ""))
+              .filter(Boolean),
+          }))
+          .filter((filter) => filter.name && filter.extensions.length > 0)
+      : [];
+    const dialogOptions: Electron.OpenDialogOptions = { properties: ["openFile", "multiSelections"] };
+    if (filters.length > 0) dialogOptions.filters = filters;
     const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
     try {
       const result = focused
-        ? await dialog.showOpenDialog(focused, { properties: ["openFile", "multiSelections"] })
-        : await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"] });
+        ? await dialog.showOpenDialog(focused, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
       if (result.canceled || result.filePaths.length === 0) {
         return { ok: false, canceled: true, paths: [] as string[] };
       }
@@ -12801,6 +12814,163 @@ function registerIpc(): void {
                 ? "image/webp"
                 : "application/octet-stream";
       return { ok: true, dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  /** Strip characters that are unsafe in a save-dialog default file name. */
+  const sanitizeExportBaseName = (value: unknown): string => {
+    const raw = typeof value === "string" ? value.trim() : "";
+    return raw.replace(/[\\/:*?"<>|]+/g, "-").replace(/^\.+/, "").slice(0, 80);
+  };
+
+  /**
+   * Design-canvas frame export: rasterize the frame's prepared HTML in a hidden
+   * off-screen window at 1X/2X/3X and write a PNG/JPEG. `savePath` skips the
+   * native save dialog (used by automation; the dialog path is the UX default).
+   */
+  ipcMain.handle("export-canvas-frame-image", async (_event, payload: {
+    html?: unknown;
+    width?: unknown;
+    height?: unknown;
+    format?: unknown;
+    scale?: unknown;
+    baseName?: unknown;
+    savePath?: unknown;
+  }) => {
+    let exportWin: BrowserWindow | null = null;
+    let tempFile = "";
+    try {
+      const html = typeof payload?.html === "string" ? payload.html : "";
+      if (!html) return { ok: false, error: "empty html" };
+      const width = Math.min(8192, Math.max(16, Math.round(Number(payload?.width) || 0)));
+      const height = Math.min(8192, Math.max(16, Math.round(Number(payload?.height) || 0)));
+      const scale = Math.min(4, Math.max(0.5, Number(payload?.scale) || 1));
+      const format = payload?.format === "jpeg" ? "jpeg" : "png";
+      const baseName = sanitizeExportBaseName(payload?.baseName) || "canvas-frame";
+
+      let target = typeof payload?.savePath === "string" ? String(payload.savePath).trim() : "";
+      if (!target) {
+        const ext = format === "jpeg" ? "jpg" : "png";
+        const scaleTag = scale === 1 ? "" : `@${scale}x`;
+        const dialogOptions: Electron.SaveDialogOptions = {
+          defaultPath: path.join(app.getPath("downloads"), `${baseName}${scaleTag}.${ext}`),
+          filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+        };
+        const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+        const picked = focused
+          ? await dialog.showSaveDialog(focused, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+        if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+        target = picked.filePath;
+      }
+
+      const pixelWidth = Math.round(width * scale);
+      const pixelHeight = Math.round(height * scale);
+      exportWin = new BrowserWindow({
+        show: false,
+        frame: false,
+        transparent: format === "png",
+        backgroundColor: format === "jpeg" ? "#ffffff" : "#00000000",
+        width: pixelWidth,
+        height: pixelHeight,
+        enableLargerThanScreen: true,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          backgroundThrottling: false,
+        },
+      });
+      tempFile = path.join(os.tmpdir(), `agx-canvas-export-${process.pid}-${Date.now()}.html`);
+      await fs.promises.writeFile(tempFile, html, "utf8");
+      await exportWin.loadFile(tempFile);
+      // Wait for fonts + images so the raster matches the on-canvas preview.
+      await exportWin.webContents.executeJavaScript(
+        `(async () => {
+          try { await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 4000))]); } catch (e) {}
+          var imgs = Array.prototype.slice.call(document.images || []);
+          await Promise.race([
+            Promise.all(imgs.map(function (img) {
+              if (img.complete) return Promise.resolve();
+              return new Promise(function (resolve) {
+                img.addEventListener("load", resolve, { once: true });
+                img.addEventListener("error", resolve, { once: true });
+              });
+            })),
+            new Promise(function (r) { setTimeout(r, 6000); }),
+          ]);
+          return true;
+        })()`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      exportWin.webContents.setZoomFactor(scale);
+      const image = await exportWin.webContents.capturePage();
+      let normalized = image;
+      const captured = image.getSize();
+      if (captured.width !== pixelWidth || captured.height !== pixelHeight) {
+        normalized = image.resize({ width: pixelWidth, height: pixelHeight, quality: "good" });
+      }
+      const buf = format === "jpeg" ? normalized.toJPEG(92) : normalized.toPNG();
+      await fs.promises.writeFile(target, buf);
+      return { ok: true, path: target };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    } finally {
+      if (exportWin && !exportWin.isDestroyed()) exportWin.destroy();
+      if (tempFile) void fs.promises.unlink(tempFile).catch(() => undefined);
+    }
+  });
+
+  /** Design-canvas「Design ZIP」export: bundle all frame source files into one flat zip. */
+  ipcMain.handle("export-canvas-zip", async (_event, payload: {
+    files?: unknown;
+    baseName?: unknown;
+    savePath?: unknown;
+  }) => {
+    try {
+      const rawFiles = Array.isArray(payload?.files) ? payload.files : [];
+      const filePaths = rawFiles
+        .map((item) => String((item as { path?: unknown })?.path ?? "").trim())
+        .filter(Boolean);
+      if (filePaths.length === 0) return { ok: false, error: "empty file list" };
+      const baseName = sanitizeExportBaseName(payload?.baseName) || "design";
+
+      let target = typeof payload?.savePath === "string" ? String(payload.savePath).trim() : "";
+      if (!target) {
+        const dialogOptions: Electron.SaveDialogOptions = {
+          defaultPath: path.join(app.getPath("downloads"), `${baseName}.zip`),
+          filters: [{ name: "ZIP", extensions: ["zip"] }],
+        };
+        const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+        const picked = focused
+          ? await dialog.showSaveDialog(focused, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+        if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+        target = picked.filePath;
+      }
+
+      const usedNames = new Map<string, number>();
+      const entries: { name: string; data: Buffer; mtime: Date }[] = [];
+      for (const filePath of filePaths) {
+        const normalized = normalizeLocalFsPath(filePath);
+        if (!normalized || !fs.existsSync(normalized)) continue;
+        const stat = await fs.promises.stat(normalized);
+        if (!stat.isFile()) continue;
+        const data = await fs.promises.readFile(normalized);
+        let name = path.basename(normalized);
+        const seen = usedNames.get(name.toLowerCase()) ?? 0;
+        usedNames.set(name.toLowerCase(), seen + 1);
+        if (seen > 0) {
+          const ext = path.extname(name);
+          name = `${name.slice(0, name.length - ext.length)}-${seen + 1}${ext}`;
+        }
+        entries.push({ name, data, mtime: stat.mtime });
+      }
+      if (entries.length === 0) return { ok: false, error: "no readable files" };
+      await writeStoreZip(target, entries);
+      return { ok: true, path: target };
     } catch (err) {
       return { ok: false, error: String(err) };
     }

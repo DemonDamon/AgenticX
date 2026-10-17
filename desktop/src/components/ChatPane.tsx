@@ -9851,6 +9851,74 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }));
   }, [chatProvider, chatModel, notifyImageAttach, visionAttachBlocked]);
 
+  /**
+   * Design canvas green bar「添加到对话」: attach a frame's backing local file
+   * (HTML as text, image as data URL) to the composer + append an @mention token.
+   * Keyed by absolute path so repeat clicks don't duplicate the chip.
+   */
+  const insertCanvasFrameAttachment = useCallback(
+    async (payload: { absolutePath: string; title: string; kind?: "html" | "image" }): Promise<boolean> => {
+      const abs = String(payload.absolutePath || "").trim();
+      const desktop = window.agenticxDesktop;
+      if (!abs || !desktop) return false;
+      const name = String(payload.title || abs.split(/[\\/]/).pop() || "file").trim() || "file";
+      // Same file already attached: don't duplicate chip / token, just refocus.
+      if (contextFilesRef.current[abs]?.status === "ready") {
+        focusComposerEnd();
+        return true;
+      }
+      if (payload.kind === "image") {
+        if (isKnownNonVisionChatModel(chatProvider, chatModel)) {
+          notifyImageAttach();
+          if (visionAttachBlocked) return false;
+        }
+        const resp = await desktop.loadLocalImageDataUrl(abs);
+        if (!resp.ok || !resp.dataUrl) return false;
+        const mime = /^data:([^;,]+)/.exec(resp.dataUrl)?.[1] || "image/*";
+        setContextFiles((prev) => ({
+          ...prev,
+          [abs]: {
+            name,
+            size: 0,
+            mimeType: mime,
+            status: "ready",
+            content: `[图片: ${name}]`,
+            dataUrl: resp.dataUrl,
+            sourcePath: abs,
+          },
+        }));
+      } else {
+        const resp = await desktop.readLocalTextFile(abs);
+        if (!resp.ok || resp.content === undefined) return false;
+        const text = resp.content;
+        setContextFiles((prev) => ({
+          ...prev,
+          [abs]: {
+            name,
+            size: resp.size ?? text.length,
+            mimeType: "text/plain",
+            status: "ready",
+            content: text.slice(0, TEXT_ATTACHMENT_LIMIT),
+            sourcePath: abs,
+          },
+        }));
+      }
+      const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), name);
+      setComposerText(next, { tokenNames, refSourcePaths: { [name]: abs } });
+      focusComposerEnd();
+      return true;
+    },
+    [
+      chatProvider,
+      chatModel,
+      visionAttachBlocked,
+      notifyImageAttach,
+      extractComposerText,
+      setComposerText,
+      focusComposerEnd,
+    ]
+  );
+
   useEffect(() => {
     if (!voiceInputHint) return;
     const t = window.setTimeout(() => setVoiceInputHint(""), 4200);
@@ -15557,6 +15625,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             previewOpenRequest={pendingWorkspacePreviewRequest}
             onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
             onEnsureSessionForWorkspace={materializeLazySession}
+            onAddCanvasFrameToChat={insertCanvasFrameAttachment}
             subAgents={paneSubAgents}
             selectedSubAgent={selectedSubAgent}
             onCancelSubAgent={(agentId) => void cancelPaneSubAgent(agentId)}
