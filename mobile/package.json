@@ -10,7 +10,7 @@
     "expo-constants": "~57.0.21",
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.12",
-    "expo-router": "~57.0.25",
+    "expo-router": "~58.0.23",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "punycode": "^2.3.1",
