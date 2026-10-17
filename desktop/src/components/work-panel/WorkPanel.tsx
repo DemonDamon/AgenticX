@@ -94,6 +94,7 @@ import {
   pathToFileUrl,
   selectSessionDeliverablePaths,
 } from "../../utils/session-artifacts";
+import { findRunIncompleteInMessages } from "../../utils/run-incomplete";
 import { collectFileChangeHighlight } from "../../utils/session-change-highlights";
 import {
   nextPreviewHighlightMode,
@@ -1328,6 +1329,12 @@ export function WorkPanel({
     [paneMessages, subAgents, extraArtifactPaths, diskArtifactPaths, sessionId],
   );
 
+  /** Latest run ended incomplete (token/rounds death) — drives artifact + canvas badges. */
+  const runIncomplete = useMemo(
+    () => findRunIncompleteInMessages(paneMessages),
+    [paneMessages],
+  );
+
   const changeRows = useMemo(
     () => collectSessionFileChanges(paneMessages),
     [paneMessages],
@@ -2150,6 +2157,7 @@ export function WorkPanel({
         x: 80 + col * 1560,
         y: 80 + row * 1020,
         reloadNonce: 0,
+        incomplete: runIncomplete !== null,
       };
       return [...prev, frame];
     });
@@ -3156,6 +3164,7 @@ export function WorkPanel({
                     void window.agenticxDesktop?.shellOpenPath?.(path);
                   }}
                   onAddToCanvas={(path) => addCanvasFrame(path)}
+                  incomplete={runIncomplete !== null}
                 />
               )}
             </Section>

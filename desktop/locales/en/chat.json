@@ -605,7 +605,7 @@
     "healthStuck": "stuck",
     "healthSlow": "slow",
     "unattendedContinue": "Unattended · continue {{count}}/{{max}}",
-    "budgetCap": "Budget reached · continue will not help",
+    "budgetCap": "Run budget exhausted · send a message to continue",
     "unattendedOn": "Unattended for this chat: on",
     "unattendedOff": "Unattended for this chat: off",
     "backgroundRunning": "Running in background",
@@ -799,11 +799,16 @@
     "confirmContinue": "Confirm and continue"
   },
   "budget": {
-    "title": "This chat has reached the token budget",
-    "body": "Used {{current}} / cap {{max}} (about {{pct}}%, source={{source}}). Unattended continue cannot bypass this. Start a new chat to continue the task.",
+    "title": "This run exhausted its token budget",
+    "body": "Used {{current}} / cap {{max}} (about {{pct}}%, source={{source}}). The budget resets with each new message — just send a follow-up to continue with current progress.",
+    "resumeDraft": "Continue unfinished work",
     "newSession": "Continue in a new chat",
     "adjust": "Adjust budget cap",
-    "copySession": "Copy session_id"
+    "adjustRounds": "Adjust round limit",
+    "copySession": "Copy session_id",
+    "roundsTitle": "Reached the max execution rounds ({{rounds}}/{{max}})",
+    "roundsBody": "Automatic execution stopped; deliverables may be incomplete. Rounds and budget reset with each new message — send a follow-up to continue.",
+    "lastRoundHint": "This reply was produced in the final round ({{rounds}}/{{max}}) and may be incomplete"
   },
   "tokenDash": {
     "title": "Token usage",

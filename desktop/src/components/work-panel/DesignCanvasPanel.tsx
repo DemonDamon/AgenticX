@@ -83,6 +83,8 @@ export type CanvasFrame = {
   y: number;
   /** Bump to remount the iframe (manual refresh / external file change). */
   reloadNonce: number;
+  /** Artifact came from a run that ended incomplete (budget/rounds exhausted). */
+  incomplete?: boolean;
 };
 
 const DEVICE_SIZE: Record<CanvasDevice, { width: number; height: number }> = {
@@ -1552,6 +1554,14 @@ export function DesignCanvasPanel({
                       {frame.title}
                     </span>
                   )}
+                  {frame.incomplete ? (
+                    <span
+                      className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[9.5px] font-medium leading-none text-amber-500"
+                      title={t("work.canvas.frameIncomplete")}
+                    >
+                      {t("work.canvas.frameIncomplete")}
+                    </span>
+                  ) : null}
                   <HoverTip label={t("work.canvas.refreshFrame")}>
                     <button
                       type="button"

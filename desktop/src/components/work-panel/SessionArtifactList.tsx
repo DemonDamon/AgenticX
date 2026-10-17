@@ -27,6 +27,8 @@ type Props = {
   onOpenScratch?: (path: string) => void;
   /** Add an HTML artifact to the design canvas as a frame. */
   onAddToCanvas?: (path: string) => void;
+  /** Latest run ended incomplete (budget/rounds exhausted) — badge artifacts as unfinished drafts. */
+  incomplete?: boolean;
 };
 
 export function SessionArtifactList({
@@ -36,6 +38,7 @@ export function SessionArtifactList({
   onOpenPath,
   onOpenScratch,
   onAddToCanvas,
+  incomplete,
 }: Props) {
   const { t } = useTranslation("workspace");
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -157,6 +160,14 @@ export function SessionArtifactList({
               >
                 {artifactBaseName(path)}
               </button>
+              {incomplete ? (
+                <span
+                  className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[9.5px] font-medium leading-none text-amber-500"
+                  title={t("work.artifactIncomplete")}
+                >
+                  {t("work.artifactIncomplete")}
+                </span>
+              ) : null}
               {onAddToCanvas && isInAppHtmlPreviewPath(path) ? (
                 <button
                   type="button"

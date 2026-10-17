@@ -6770,6 +6770,21 @@ class AgentRuntime:
                             if reasoning_field_final_recovered
                             else {}
                         ),
+                        # Honest truncation marker: this final reply was produced
+                        # in the last allowed round after tool usage — the run
+                        # ended under round pressure and the deliverable may be
+                        # incomplete. UI renders a soft hint + artifact badges.
+                        **(
+                            {
+                                "rounds_exhausted": True,
+                                "round": round_idx,
+                                "max_rounds": self.max_tool_rounds,
+                            }
+                            if round_idx >= self.max_tool_rounds
+                            and executed_tool_names
+                            and agent_id == "meta"
+                            else {}
+                        ),
                     },
                 )
                 return
@@ -8056,6 +8071,9 @@ class AgentRuntime:
                     "text": message,
                     "round": self.max_tool_rounds,
                     "max_rounds": self.max_tool_rounds,
+                    "rounds_exhausted": True,
+                    "detector": "rounds_exhausted",
+                    "unattended_useless": True,
                 },
                 agent_id=agent_id,
             )

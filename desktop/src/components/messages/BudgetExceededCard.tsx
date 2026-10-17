@@ -4,17 +4,33 @@ import type { BudgetExceededInfo } from "../../utils/budget-exceeded";
 import { budgetExceededPercent } from "../../utils/budget-exceeded";
 
 type Props = {
-  info: BudgetExceededInfo;
+  /** token = budget-exceeded card; rounds = rounds-exhausted truncation card (same treatment). */
+  kind?: "token" | "rounds";
+  /** Token budget numbers (kind="token"). */
+  info?: BudgetExceededInfo;
+  /** Round numbers (kind="rounds"). */
+  rounds?: { round: number; maxRounds: number };
+  /** Primary CTA: inject the resume draft into the current session's composer. */
+  onResumeDraft: () => void;
+  /** Secondary: continue in a brand-new session with the draft. */
   onResumeInNewSession: () => void;
   onOpenSettings?: () => void;
 };
 
-export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings }: Props) {
+export function BudgetExceededCard({
+  kind = "token",
+  info,
+  rounds,
+  onResumeDraft,
+  onResumeInNewSession,
+  onOpenSettings,
+}: Props) {
   const { t } = useTranslation("chat");
-  const pct = budgetExceededPercent(info);
+  const isRounds = kind === "rounds";
+  const pct = info ? budgetExceededPercent(info) : 0;
 
   const copySessionId = async () => {
-    const sid = String(info.sessionId ?? "").trim();
+    const sid = String(info?.sessionId ?? "").trim();
     if (!sid) return;
     try {
       await navigator.clipboard.writeText(sid);
@@ -23,30 +39,58 @@ export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings 
     }
   };
 
+  const title = isRounds
+    ? t("budget.roundsTitle", {
+        rounds: rounds?.round ?? rounds?.maxRounds ?? "?",
+        max: rounds?.maxRounds ?? rounds?.round ?? "?",
+      })
+    : t("budget.title");
+  const body = isRounds ? t("budget.roundsBody") : null;
+
   return (
     <div className="flex min-w-0 items-start gap-2">
       <div className="flex min-w-0 flex-1 justify-start gap-2">
         <div className="flex min-w-0 flex-1 flex-row gap-2">
           <div className="flex min-w-0 flex-1 flex-col items-start">
-            <div className="w-full min-w-0 overflow-hidden rounded-lg border border-rose-500/45 bg-surface-card text-[15px] leading-relaxed">
+            <div
+              className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-[15px] leading-relaxed ${
+                isRounds
+                  ? "border-amber-500/45"
+                  : "border-rose-500/45"
+              }`}
+            >
               <div className="flex items-start gap-3 px-4 py-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" aria-hidden />
+                <AlertTriangle
+                  className={`mt-0.5 h-4 w-4 shrink-0 ${isRounds ? "text-amber-400" : "text-rose-400"}`}
+                  aria-hidden
+                />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-medium text-text-strong">{t("budget.title")}</p>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {t("budget.body", {
-                      current: info.current.toLocaleString(),
-                      max: info.maxAllowed.toLocaleString(),
-                      pct,
-                      source: info.source,
-                    })}
-                  </p>
+                  <p className="text-[15px] font-medium text-text-strong">{title}</p>
+                  {isRounds ? (
+                    body ? <p className="mt-1 text-xs text-text-muted">{body}</p> : null
+                  ) : info ? (
+                    <p className="mt-1 text-xs text-text-muted">
+                      {t("budget.body", {
+                        current: info.current.toLocaleString(),
+                        max: info.maxAllowed.toLocaleString(),
+                        pct,
+                        source: info.source,
+                      })}
+                    </p>
+                  ) : null}
 
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={onResumeInNewSession}
+                      onClick={onResumeDraft}
                       className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                    >
+                      {t("budget.resumeDraft")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onResumeInNewSession}
+                      className="rounded-md border border-border bg-surface-hover px-3 py-1 text-xs font-medium text-text-strong transition hover:bg-surface-card"
                     >
                       {t("budget.newSession")}
                     </button>
@@ -55,9 +99,9 @@ export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings 
                       onClick={() => onOpenSettings?.()}
                       className="rounded-md border border-border bg-surface-hover px-3 py-1 text-xs font-medium text-text-strong transition hover:bg-surface-card"
                     >
-                      {t("budget.adjust")}
+                      {isRounds ? t("budget.adjustRounds") : t("budget.adjust")}
                     </button>
-                    {info.sessionId ? (
+                    {!isRounds && info?.sessionId ? (
                       <button
                         type="button"
                         onClick={() => void copySessionId()}

@@ -674,6 +674,135 @@ describe("mergeSessionMessagesTail", () => {
     expect(out[1].provider).toBe("zhipu");
   });
 
+  it("dedupes the backend turn-interruption notice when the live notice row already exists", () => {
+    // Budget death: live error-branch row (structured fields) + backend's
+    // persisted turn-interruption row arrive via disk merge — keep one card.
+    const existing: Message[] = [
+      uidMsg("user", "写 HTML", "uid-u"),
+      {
+        id: "uid-budget",
+        role: "tool",
+        content:
+          "Token budget exceeded (500908/500000, source=session). Stopping to preserve results.",
+        agentId: "meta",
+        noticeKind: "budget_exceeded",
+        budgetSource: "session",
+        budgetCurrent: 500908,
+        budgetMax: 500000,
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      diskRow("user", "写 HTML"),
+      diskRow(
+        "tool",
+        "模型调用失败：Token budget exceeded (500908/500000, source=session). Stopping to preserve results.。可点「恢复执行」重试。",
+      ),
+    ];
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    const notices = out.filter((m) => m.role === "tool");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].id).toBe("uid-budget");
+    expect(notices[0].noticeKind).toBe("budget_exceeded");
+  });
+
+  it("dedupes the disk rounds-exhausted notice against the live rounds row", () => {
+    const existing: Message[] = [
+      uidMsg("user", "继续生成", "uid-u"),
+      {
+        id: "uid-rounds",
+        role: "tool",
+        content: "已达到最大工具调用轮数 (30/30)。请发新消息继续。",
+        agentId: "meta",
+        noticeKind: "rounds_exhausted",
+        roundsRound: 30,
+        roundsMax: 30,
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      diskRow("user", "继续生成"),
+      diskRow("tool", "模型调用失败：已达到最大工具调用轮数 (30/30)。可点「恢复执行」重试。"),
+    ];
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    const notices = out.filter((m) => m.role === "tool");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].id).toBe("uid-rounds");
+    expect(notices[0].noticeKind).toBe("rounds_exhausted");
+  });
+
+  it("keeps the disk-only notice on a fresh reload (no live row in memory)", () => {
+    const out = mergeSessionMessagesTail(
+      [],
+      [
+        diskRow("user", "写 HTML"),
+        diskRow(
+          "tool",
+          "模型调用失败：Token budget exceeded (500908/500000, source=session)。可点「恢复执行」重试。",
+        ),
+      ],
+      sid,
+    );
+    expect(out.filter((m) => m.role === "tool")).toHaveLength(1);
+  });
+
+  it("keeps the notice at its chronological position when memory rows are switch-loaded twins", () => {
+    // Session switch maps disk rows into memory with positional ids; a later
+    // disk reconcile used to treat the twin as a live duplicate, dropping the
+    // disk notice and re-appending the twin at the pane tail. That displaced
+    // the death card past a later FINAL and broke the incomplete-run scan.
+    const diskRows: LoadedSessionMessage[] = [
+      diskRow("user", "写 HTML"),
+      diskRow(
+        "tool",
+        "模型调用失败：Token budget exceeded (557329/500000, source=session)。可点「恢复执行」重试。",
+      ),
+      diskRow("user", "继续完成任务"),
+      diskRow("assistant", "四个业务区已全部追加完成。"),
+    ];
+    const twins = mergeSessionMessagesTail([], diskRows, sid);
+    const out = mergeSessionMessagesTail(twins, diskRows, sid);
+    expect(out).toHaveLength(4);
+    expect(String(out[1].content)).toContain("Token budget exceeded");
+    expect(String(out[3].content)).toContain("四个业务区");
+  });
+
+  it("pairs the live notice card with the disk interruption row without losing position", () => {
+    // Death followed by a successful continuation: the live card must land at
+    // the disk notice's position (before the FINAL), keeping noticeKind.
+    const existing: Message[] = [
+      uidMsg("user", "写 HTML", "uid-u"),
+      {
+        id: "uid-budget",
+        role: "tool",
+        content:
+          "Token budget exceeded (557329/500000, source=session). Stopping to preserve results.",
+        agentId: "meta",
+        noticeKind: "budget_exceeded",
+        budgetSource: "session",
+        budgetCurrent: 557329,
+        budgetMax: 500000,
+      } as Message,
+      uidMsg("user", "继续完成任务", "uid-u2"),
+      uidMsg("assistant", "四个业务区已全部追加完成。", "uid-a"),
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "写 HTML"),
+        diskRow(
+          "tool",
+          "模型调用失败：Token budget exceeded (557329/500000, source=session)。可点「恢复执行」重试。",
+        ),
+        diskRow("user", "继续完成任务"),
+        diskRow("assistant", "四个业务区已全部追加完成。"),
+      ],
+      sid,
+    );
+    expect(out).toHaveLength(4);
+    expect(out[1].id).toBe("uid-budget");
+    expect(out[1].noticeKind).toBe("budget_exceeded");
+    expect(String(out[3].content)).toContain("四个业务区");
+  });
+
   it("reinserts live composer user turns that a stale disk snapshot dropped", () => {
     const liveUser: Message = {
       id: "uid-live",

@@ -297,6 +297,7 @@ export type ContextNoticeKind =
   | "compaction_reactive"
   | "compaction_proactive"
   | "budget_exceeded"
+  | "rounds_exhausted"
   | "widget_flow_retry";
 
 export type MessageUsage = {
@@ -380,6 +381,9 @@ export type Message = {
   budgetSource?: string;
   budgetCurrent?: number;
   budgetMax?: number;
+  /** Rounds exhausted metadata (noticeKind="rounds_exhausted") for the truncation card. */
+  roundsRound?: number;
+  roundsMax?: number;
   /** Composer command that produced this user turn. */
   command_name?: string;
   /** messages.json metadata (e.g. view_image_inject). */
@@ -420,6 +424,8 @@ export type MessageToolExtras = Pick<
   | "budgetSource"
   | "budgetCurrent"
   | "budgetMax"
+  | "roundsRound"
+  | "roundsMax"
 >;
 
 export type ForwardedHistoryItem = {

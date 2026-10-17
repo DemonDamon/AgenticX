@@ -44,6 +44,30 @@ const assistantReasoningKey = (message: Pick<Message, "reasoning">) =>
 const toolCallIdOf = (message: Message) => String(message.toolCallId ?? "").trim();
 
 /**
+ * Terminal truncation notices exist in two shapes: the live error-branch row
+ * (noticeKind budget_exceeded / rounds_exhausted, structured card fields) and
+ * the backend-persisted turn-interruption row whose text embeds the same
+ * detector phrase. This signature matches either shape so the merge can
+ * dedupe them into exactly one card per death.
+ */
+const TERMINAL_NOTICE_TEXT_PATTERNS: ReadonlyArray<[string, RegExp]> = [
+  ["budget_exhausted_notice", /Token budget exceeded/i],
+  ["rounds_exhausted_notice", /已达到最大工具调用轮数/],
+];
+
+function terminalNoticeSignature(m: Message): string | null {
+  if (m.role !== "tool") return null;
+  if (toolCallIdOf(m)) return null;
+  if (m.noticeKind === "budget_exceeded") return "budget_exhausted_notice";
+  if (m.noticeKind === "rounds_exhausted") return "rounds_exhausted_notice";
+  const text = String(m.content ?? "");
+  for (const [sig, pattern] of TERMINAL_NOTICE_TEXT_PATTERNS) {
+    if (pattern.test(text)) return sig;
+  }
+  return null;
+}
+
+/**
  * Group-workflow narration is intentionally UI-only: it explains who is being
  * assigned/reviewed without polluting the agents' durable conversation context.
  * These rows therefore have no disk counterpart, but their live position among
@@ -112,6 +136,10 @@ export function mergeSessionMessagesTail(
 
   const memoryById = new Map(existing.map((m) => [m.id, m]));
   const consumedMemory = new Set<Message>();
+  // Notice rows paired by signature: the live card is the canonical UI row
+  // (structured fields drive BudgetExceededCard etc.); the disk row only
+  // contributes its chronological position, so skip the disk-wins overlay.
+  const noticeMatchedMemory = new WeakSet<Message>();
 
   const findMemoryMatch = (diskRow: Message): Message | null => {
     const diskClientTurnId =
@@ -148,6 +176,29 @@ export function mergeSessionMessagesTail(
       if (byId && !consumedMemory.has(byId)) {
         consumedMemory.add(byId);
         return byId;
+      }
+    }
+    // Terminal truncation notices exist in two shapes: the live error-branch
+    // card (uid id, noticeKind set) and the backend-persisted interruption row
+    // (positional id, detector phrase embedded in text). They represent the
+    // same death but never share ids or content. Match them by signature so
+    // the merged pane renders exactly one card per death — at the disk row's
+    // chronological position, enriched with the live card's fields. Matching
+    // (instead of dropping the disk row) is essential: a dropped disk notice
+    // left its memory twin unconsumed, and the tail-append loop then displaced
+    // the notice to the pane end, breaking "death followed by a later FINAL".
+    // Switch-loaded twins still pair by id above and never reach this branch.
+    const diskNoticeSig = terminalNoticeSignature(diskRow);
+    if (diskNoticeSig) {
+      const byNotice = existing.find(
+        (memory) =>
+          !consumedMemory.has(memory) &&
+          terminalNoticeSignature(memory) === diskNoticeSig
+      );
+      if (byNotice) {
+        consumedMemory.add(byNotice);
+        noticeMatchedMemory.add(byNotice);
+        return byNotice;
       }
     }
     const diskBody =
@@ -206,7 +257,11 @@ export function mergeSessionMessagesTail(
   const placedToolCallIds = new Set<string>();
   for (const diskRow of mapped) {
     const memory = findMemoryMatch(diskRow);
-    const row = memory ? overlayMemoryEnrichment(diskRow, memory) : diskRow;
+    const row = memory
+      ? noticeMatchedMemory.has(memory)
+        ? memory
+        : overlayMemoryEnrichment(diskRow, memory)
+      : diskRow;
     out.push(row);
     if (memory) outputRowByMemory.set(memory, row);
     if (row.role === "assistant") {

@@ -3262,7 +3262,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   // an ended-incomplete turn is never shown as "处理中 · 静默 Ns / 长时间无响应".
   const [stallReason, setStallReason] = useState<"silent" | "incomplete">("silent");
   const [stoppingSessionId, setStoppingSessionId] = useState("");
-  const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
+  // Rounds-exhausted liveness marker; the visible truncation card is the
+  // persisted notice message (noticeKind="rounds_exhausted") in the pane.
+  const [, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
   /** Per-session previous execution_state — keyed by sid so a running session's
    * "running" never leaks onto a sibling and triggers a false「后台任务已完成」. */
@@ -9141,6 +9143,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               allMessages={pane.messages ?? []}
               sessionId={(pane.sessionId || "").trim() || undefined}
               onResumeInNewSession={() => resumeInNewSessionRef.current()}
+              onResumeDraft={() => resumeDraftRef.current()}
               onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
               onResumeTask={() => void resumeCurrentTask()}
               resumeInFlight={resumeInFlight}
@@ -9663,26 +9666,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           stopInFlight={stoppingSessionId === (pane.sessionId || "").trim()}
         />
       )}
-      {stallState === "exhausted" && (
-        <StallRecoveryCard
-          kind="exhausted"
-          rounds={exhaustedRounds?.rounds}
-          maxRounds={exhaustedRounds?.maxRounds}
-          currentModelLabel={isAutomationTaskPane ? undefined : currentModelLabel}
-          modelOptions={stallModelOptions}
-          resumeInFlight={resumeInFlight}
-          rejectReason={stallRejectReason}
-          onResume={() => void resumeCurrentTask()}
-          onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
-          onStop={() => void stopCurrentRun()}
-          stopInFlight={stoppingSessionId === (pane.sessionId || "").trim()}
-          onOpenSettings={() => useAppStore.getState().openSettings()}
-        />
-      )}
     </>
       ),
     };
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, subAgentsPending, replayPresenting, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, groupClusterByMessageId, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isAutomationTaskPane, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, subAgentsPending, replayPresenting, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -10007,6 +9994,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     async () => {}
   );
   const resumeInNewSessionRef = useRef<() => void>(() => {});
+  const resumeDraftRef = useRef<() => void>(() => {});
 
   /** Materialize a lazy session (fresh topic / no sessionId yet) with full create params. */
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
@@ -11126,6 +11114,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      /** Last-round truncation marker (rounds_exhausted) carried by FINAL data. */
+      let pendingFinalRoundsExhausted: { round: number; maxRounds: number } | null = null;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       let pendingReasoning: string | undefined = undefined;
@@ -12807,6 +12797,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
                 pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
                 pendingFinalTerminalReason = normalizedFinal.terminalReason;
+                if (payload.data?.rounds_exhausted === true) {
+                  pendingFinalRoundsExhausted = {
+                    round: Number(payload.data?.round ?? 0) || 0,
+                    maxRounds: Number(payload.data?.max_rounds ?? 0) || 0,
+                  };
+                }
                 const appliedRefs = applyFinalReferencePayload(
                   pendingReferences,
                   pendingSearchedQueries,
@@ -12961,12 +12957,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, eventAgentId || "meta", undefined, undefined, undefined, {
                   noticeKind,
                 });
-              } else if (errText.includes("已达到最大工具调用轮数")) {
+              } else if (
+                detector === "rounds_exhausted"
+                || payload.data?.rounds_exhausted === true
+                || errText.includes("已达到最大工具调用轮数")
+              ) {
                 const maxRounds = Number(payload.data?.max_rounds ?? 0) || 30;
                 const rounds = Number(payload.data?.round ?? maxRounds);
                 setExhaustedRounds({ rounds, maxRounds });
                 setStallState("exhausted");
-                addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  errText,
+                  eventAgentId || "meta",
+                  undefined,
+                  undefined,
+                  undefined,
+                  {
+                    noticeKind: "rounds_exhausted",
+                    roundsRound: rounds,
+                    roundsMax: maxRounds,
+                  },
+                );
               } else if (!isEphemeralStopErrorText(errText)) {
                 // Merge tool-scoped errors into the existing ToolCallCard when possible
                 // (hook-block / not-loaded / permission deny all share tool_call_id).
@@ -13019,6 +13032,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               turn_terminal: pendingFinalTurnTerminal,
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
+                : {}),
+              ...(pendingFinalRoundsExhausted
+                ? {
+                    rounds_exhausted: true,
+                    round: pendingFinalRoundsExhausted.round,
+                    max_rounds: pendingFinalRoundsExhausted.maxRounds,
+                  }
                 : {}),
             },
           }
@@ -13473,6 +13493,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const draft = buildBudgetResumeDraft(pane.messages ?? []);
     createNewTopic(false, pane.sessionMode ?? "daily_office");
     setBudgetExceededInfo(null);
+    setComposerHasText(isComposerNonEmpty(draft));
+  };
+
+  // Primary truncation CTA: inject the resume draft into the CURRENT
+  // session's composer — budget/rounds reset with each new message, so a
+  // follow-up here continues the same task with a fresh run.
+  resumeDraftRef.current = () => {
+    const draft = buildBudgetResumeDraft(pane.messages ?? []);
+    setBudgetExceededInfo(null);
+    setComposerText(draft);
     setComposerHasText(isComposerNonEmpty(draft));
   };
 
@@ -14931,7 +14961,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               {budgetExceededInfo ? (
                 <button
                   type="button"
-                  onClick={() => resumeInNewSessionRef.current()}
+                  onClick={() => resumeDraftRef.current()}
                   className="rounded-full bg-rose-500/15 px-2 py-0.5 text-rose-200 transition hover:bg-rose-500/25"
                 >
                   {t("status.budgetCap")}

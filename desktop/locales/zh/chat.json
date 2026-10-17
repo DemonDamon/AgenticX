@@ -605,7 +605,7 @@
     "healthStuck": "卡住",
     "healthSlow": "偏慢",
     "unattendedContinue": "无人值守 · 续跑 {{count}}/{{max}}",
-    "budgetCap": "已达预算上限 · 续跑无效",
+    "budgetCap": "本轮预算耗尽 · 发新消息可续接",
     "unattendedOn": "本会话无人值守：开",
     "unattendedOff": "本会话无人值守：关",
     "backgroundRunning": "后台运行中",
@@ -799,11 +799,16 @@
     "confirmContinue": "确认并续跑"
   },
   "budget": {
-    "title": "会话累计 token 已达上限",
-    "body": "当前累计 {{current}} / 上限 {{max}}（约 {{pct}}%，source={{source}}）。无人值守续跑无法绕过此限制，建议新建会话续接此任务。",
-    "newSession": "新建会话续接此任务",
+    "title": "本轮运行 token 预算已耗尽",
+    "body": "本次运行累计 {{current}} / 上限 {{max}}（约 {{pct}}%，source={{source}}）。预算随新消息重置——直接发新消息即可带着当前进度续接。",
+    "resumeDraft": "续接未完成的工作",
+    "newSession": "新建会话续接",
     "adjust": "调整预算上限",
-    "copySession": "复制 session_id"
+    "adjustRounds": "调整轮数上限",
+    "copySession": "复制 session_id",
+    "roundsTitle": "已达最大执行轮数（{{rounds}}/{{max}}）",
+    "roundsBody": "自动执行已停止，产物可能不完整。轮次与预算随新消息重置，发新消息可带着当前进度继续。",
+    "lastRoundHint": "此回复在最后一轮（{{rounds}}/{{max}}）产出，可能未完成"
   },
   "tokenDash": {
     "title": "Token 消耗看板",

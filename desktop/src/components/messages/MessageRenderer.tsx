@@ -1,6 +1,7 @@
 import type { Message } from "../../store";
 import { useContext, useMemo, type ReactNode } from "react";
-import { Wrench } from "lucide-react";
+import { AlertTriangle, Wrench } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
 import { TerminalLine } from "./TerminalLine";
@@ -39,6 +40,7 @@ import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessag
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
+import { readRoundsExhaustedMeta } from "../../utils/run-incomplete";
 import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
@@ -123,6 +125,8 @@ type Props = {
   allMessages?: Message[];
   sessionId?: string;
   onResumeInNewSession?: () => void;
+  /** Primary truncation CTA: inject the resume draft into the current composer. */
+  onResumeDraft?: () => void;
   onOpenBudgetSettings?: () => void;
   onResumeTask?: () => void;
   resumeInFlight?: boolean;
@@ -426,6 +430,7 @@ export function MessageRenderer({
   allMessages = [],
   sessionId,
   onResumeInNewSession,
+  onResumeDraft,
   onOpenBudgetSettings,
   onResumeTask,
   resumeInFlight = false,
@@ -503,6 +508,14 @@ export function MessageRenderer({
     return <ViewImageInjectCard message={message} />;
   }
   if (message.role === "user" || message.role === "assistant") {
+    const roundsFinalMeta = message.role === "assistant" ? readRoundsExhaustedMeta(message) : null;
+    const roundsFinalHint = roundsFinalMeta ? (
+      <RoundsFinalHint
+        round={roundsFinalMeta.round}
+        maxRounds={roundsFinalMeta.maxRounds}
+        onContinue={onResumeDraft ? () => onResumeDraft() : undefined}
+      />
+    ) : null;
     if (message.role === "assistant" && message.subAgentCluster) {
       return (
         <div className="my-2 w-full min-w-0 px-4">
@@ -536,7 +549,12 @@ export function MessageRenderer({
           badge={assistantBadge}
           onRevealPath={onRevealPath}
           onOpenFileReference={onOpenFileReference}
-          afterBody={handoff.card}
+          afterBody={
+            <>
+              {roundsFinalHint}
+              {handoff.card}
+            </>
+          }
         />,
       );
     }
@@ -553,7 +571,12 @@ export function MessageRenderer({
           badge={assistantBadge}
           onRevealPath={onRevealPath}
           onOpenFileReference={onOpenFileReference}
-          afterBody={handoff.card}
+          afterBody={
+            <>
+              {roundsFinalHint}
+              {handoff.card}
+            </>
+          }
         />,
       );
     }
@@ -620,7 +643,12 @@ export function MessageRenderer({
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}
-        afterBody={handoff.card}
+        afterBody={
+          <>
+            {roundsFinalHint}
+            {handoff.card}
+          </>
+        }
         onOpenWorkspaceRefs={onOpenAllRefs}
         sessionWebRefs={sessionWebRefs}
       />,
@@ -657,6 +685,21 @@ export function MessageRenderer({
         );
       }
     }
+    if (message.noticeKind === "rounds_exhausted" || String(message.content ?? "").includes("已达到最大工具调用轮数")) {
+      const round = Number(message.roundsRound);
+      const maxRounds = Number(message.roundsMax);
+      if (Number.isFinite(round) && Number.isFinite(maxRounds) && maxRounds > 0) {
+        return (
+          <BudgetExceededCard
+            kind="rounds"
+            rounds={{ round: round || maxRounds, maxRounds }}
+            onResumeDraft={() => onResumeDraft?.()}
+            onResumeInNewSession={() => onResumeInNewSession?.()}
+            onOpenSettings={() => onOpenBudgetSettings?.()}
+          />
+        );
+      }
+    }
     if (message.noticeKind === "budget_exceeded" || /Token budget exceeded/i.test(String(message.content ?? ""))) {
       const current = Number(message.budgetCurrent);
       const maxAllowed = Number(message.budgetMax);
@@ -668,7 +711,9 @@ export function MessageRenderer({
       if (parsed) {
         return (
           <BudgetExceededCard
+            kind="token"
             info={{ ...parsed, sessionId }}
+            onResumeDraft={() => onResumeDraft?.()}
             onResumeInNewSession={() => onResumeInNewSession?.()}
             onOpenSettings={() => onOpenBudgetSettings?.()}
           />
@@ -829,4 +874,37 @@ export function MessageRenderer({
       : toolCard;
   }
   return <SystemNotice text={message.content} />;
+}
+
+/**
+ * Soft honest hint under a final assistant reply that was produced in the
+ * last allowed round (silent half-product marker; see run-incomplete.ts).
+ */
+function RoundsFinalHint({
+  round,
+  maxRounds,
+  onContinue,
+}: {
+  round: number;
+  maxRounds: number;
+  onContinue?: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  return (
+    <div className="mt-2 flex w-full flex-wrap items-center gap-2 rounded-md border border-amber-500/35 bg-amber-500/5 px-2.5 py-1.5 text-xs text-text-muted">
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden />
+      <span className="min-w-0 flex-1">
+        {t("budget.lastRoundHint", { rounds: round || "?", max: maxRounds || "?" })}
+      </span>
+      {onContinue ? (
+        <button
+          type="button"
+          onClick={onContinue}
+          className="shrink-0 rounded-md bg-btnPrimary px-2.5 py-1 text-[11px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+        >
+          {t("budget.resumeDraft")}
+        </button>
+      ) : null}
+    </div>
+  );
 }
