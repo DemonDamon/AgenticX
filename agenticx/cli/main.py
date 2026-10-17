@@ -12,6 +12,7 @@ _SAVED_CLI_ARGV = sys.argv[:]
 import difflib
 import os
 import re
+import secrets
 import asyncio
 import click
 import typer
@@ -593,7 +594,7 @@ def studio(
 @app.command()
 def serve(
     port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
-    host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
     token: str = typer.Option("", "--token", "-t", help="Desktop 认证 token (覆盖 AGX_DESKTOP_TOKEN)"),
     gateway: bool = typer.Option(
@@ -617,30 +618,34 @@ def serve(
     publish_host = "127.0.0.1" if host in ("0.0.0.0", "::", "[::]") else host
     os.environ["AGX_SERVE_PORT"] = str(port)
     os.environ["AGX_SERVE_HOST"] = publish_host
+    os.environ["AGX_SERVE_BIND"] = host
     if gateway:
         os.environ["AGX_GATEWAY_ENABLED"] = "true"
 
     effective_token = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
+    if not effective_token:
+        effective_token = secrets.token_urlsafe(32)
+        os.environ["AGX_DESKTOP_TOKEN"] = effective_token
 
     # Write port and token to ~/.agenticx/serve.port / serve.token
     # so sibling processes (e.g. agx feishu) can auto-discover without extra flags.
     try:
         base_dir = Path.home() / ".agenticx"
         base_dir.mkdir(parents=True, exist_ok=True)
-        (base_dir / "serve.port").write_text(str(port))
+        port_file = base_dir / "serve.port"
+        port_file.write_text(str(port))
+        os.chmod(port_file, 0o600)
         _tok = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
         if _tok:
-            (base_dir / "serve.token").write_text(_tok)
+            token_file = base_dir / "serve.token"
+            token_file.write_text(_tok)
+            os.chmod(token_file, 0o600)
     except Exception:
         pass
 
     app_inst = create_studio_app()
     console.print(f"[bold green]AgenticX Studio Server[/bold green] http://{host}:{port}")
-    if effective_token:
-        masked = effective_token[:8] + "*" * max(0, len(effective_token) - 8)
-        console.print(f"  Token: {masked}")
-    else:
-        console.print("  [yellow]Warning: no token set, API is unauthenticated[/yellow]")
+    console.print("  token written to ~/.agenticx/serve.token")
     if gateway or os.getenv("AGX_GATEWAY_ENABLED", "").strip().lower() in ("1", "true", "yes"):
         console.print("  [cyan]IM Gateway client:[/cyan] enabled (see ~/.agenticx/config.yaml gateway.*)")
     console.print("  GET /api/session, POST /api/chat, POST /api/confirm, GET /api/artifacts")

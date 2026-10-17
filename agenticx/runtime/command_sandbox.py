@@ -209,6 +209,11 @@ def build_command_sandbox_plan(
 
     resolved_permissions = normalize_command_permissions(permissions)
     base_env = dict(os.environ if environ is None else environ)
+    # Sandboxed (and unsandboxed danger-full-access) children must not carry
+    # the local API credential. A script could otherwise call back into
+    # agx serve and widen its own permissions.
+    base_env.pop("AGX_DESKTOP_TOKEN", None)
+    base_env.pop("AGX_CC_BRIDGE_TOKEN", None)
     if resolved_permissions == DANGER_FULL_ACCESS:
         # This tier wraps nothing, so ``denied_path_patterns`` do not apply.
         # That is the definition, not a gap: the name means a one-shot break
@@ -248,6 +253,10 @@ def build_command_sandbox_plan(
     deny_patterns = tuple(
         text for raw in denied_path_patterns if (text := str(raw or "").strip())
     )
+    # Workspace mount tables are authorization. Shell must not rewrite them.
+    # Deny is write-side (the path stays readable inside the workspace).
+    if not any(text.endswith(".agx-mounts.json") for text in deny_patterns):
+        deny_patterns = (*deny_patterns, "**/.agx-mounts.json")
 
     temp_dir = _private_temp_dir(scope_id)
     base_env["TMPDIR"] = str(temp_dir)
@@ -873,23 +882,26 @@ def _apply_sandboxed_git_auth(
             env["PATH"] = prefix if not path else f"{prefix}{os.pathsep}{path}"
 
 
-def _argv_is_git_invocation(argv: Sequence[str]) -> bool:
-    """True when the command is git (possibly via a shell wrapper).
+_GIT_ONLY_SCRIPT = re.compile(
+    r"^\s*(?:cd\s+[^;&|`$()]+?\s*&&\s*)?git(?:\s+[^;&|`$()<>]*)?\s*$"
+)
 
-    Only the first meaningful token is inspected so ``cd repo && git pull``
-    still qualifies, while ``git config credential.helper '!cat …'`` is left
-    to the deny rules and the confirm gate. HTTPS credentials are staged
-    into the private temp dir; this detector only decides whether to do that.
+
+def _argv_is_git_invocation(argv: Sequence[str]) -> bool:
+    """True when the command is git, or a shell script that is only git.
+
+    A direct ``git`` argv qualifies. A shell ``-c`` script qualifies only
+    when the whole script is one git command, optionally prefixed with
+    ``cd <dir> &&``. Compound scripts such as ``git status; cat ~/.ssh/id``
+    do not, so they do not receive the ``~/.ssh`` read grant.
     """
     if not argv:
         return False
     first = Path(str(argv[0])).name.lower()
     if first == "git":
         return True
-    # Shell-wrapped: /bin/sh -c "git pull" or "cd repo && git pull".
     if first in {"sh", "bash", "zsh", "dash"} and len(argv) >= 3 and argv[1] == "-c":
-        script = str(argv[2])
-        return bool(re.search(r"(?:^|&&|\|\||;|\|)\s*git(?:\s|$)", script))
+        return bool(_GIT_ONLY_SCRIPT.match(str(argv[2])))
     return False
 
 

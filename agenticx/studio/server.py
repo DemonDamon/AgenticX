@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import smtplib
 import subprocess
@@ -29,7 +30,7 @@ from email.message import EmailMessage
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from jsonschema import Draft202012Validator
 
 from agenticx.studio.context_file_keys import (
@@ -1283,6 +1284,39 @@ def create_studio_app() -> FastAPI:
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
     from agenticx.studio.changeplane_routes import mount_changeplane_routes
     mount_changeplane_routes(app)
+
+    _AUTH_EXEMPT_PATHS = {"/api/health", "/api/ready"}
+    _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+    def _bind_is_public() -> bool:
+        """True when this process is not bound to loopback, or bind is unknown.
+
+        ``AGX_SERVE_BIND`` is set by ``agx serve``. Library and test callers
+        leave it unset; treating that as public skips the Host check so
+        TestClient's ``testserver`` host keeps working. Token checks still
+        apply whenever ``AGX_DESKTOP_TOKEN`` is set. ``AGX_SERVE_HOST`` stays
+        the address sibling processes should dial, which is loopback even
+        when the socket is bound to all interfaces.
+        """
+        bind = os.getenv("AGX_SERVE_BIND", "").strip().lower()
+        if not bind:
+            return True
+        return bind not in _LOOPBACK_HOSTS
+
+    @app.middleware("http")
+    async def _desktop_auth_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
+        host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+        if host and host not in _LOOPBACK_HOSTS and not _bind_is_public():
+            return JSONResponse({"detail": "invalid host"}, status_code=421)
+        if not desktop_token or request.method == "OPTIONS":
+            return await call_next(request)
+        if request.url.path in _AUTH_EXEMPT_PATHS:
+            return await call_next(request)
+        supplied = request.headers.get("x-agx-desktop-token") or ""
+        if not secrets.compare_digest(supplied, desktop_token):
+            return JSONResponse({"detail": "invalid desktop token"}, status_code=401)
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_studio_cors_origins(),
@@ -1508,7 +1542,7 @@ def create_studio_app() -> FastAPI:
     def _check_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
             return
-        if x_agx_desktop_token != desktop_token:
+        if not secrets.compare_digest(x_agx_desktop_token or "", desktop_token):
             raise HTTPException(status_code=401, detail="invalid desktop token")
 
     _verify_desktop_token = _check_token

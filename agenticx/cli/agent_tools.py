@@ -345,6 +345,11 @@ def _session_workspace_root_sets(
             return
         key = str(candidate)
         if writable:
+            from agenticx.runtime.command_sandbox import _over_broad_read_roots
+
+            if os.path.normcase(key) in _over_broad_read_roots(os.environ):
+                writable = False
+        if writable:
             if key in seen_write:
                 return
             seen_write.add(key)
@@ -5187,6 +5192,8 @@ def _is_protected_path(path: Path) -> bool:
             continue
     if resolved.name == "config.yaml" and ".agenticx" in resolved.parts:
         return True
+    if resolved.name == ".agx-mounts.json":
+        return True
     return False
 
 
@@ -7165,6 +7172,52 @@ async def _tool_codegen(
     return f"OK: generated {output_path.resolve()}"
 
 
+def _mcp_auto_connect_names() -> set[str]:
+    """Server names the user already trusted via ``mcp.auto_connect``."""
+    try:
+        raw = ConfigManager.get_value("mcp.auto_connect")
+    except Exception:
+        return set()
+    if not isinstance(raw, list):
+        return set()
+    return {str(item).strip() for item in raw if str(item).strip()}
+
+
+def _mcp_server_launch_text(session: StudioSession, name: str) -> str:
+    """Command line or URL shown in the MCP connect confirmation."""
+    configs = getattr(session, "mcp_configs", None)
+    cfg = configs.get(name) if isinstance(configs, dict) else None
+    if cfg is None:
+        return name
+    command = str(getattr(cfg, "command", None) or "").strip()
+    args = getattr(cfg, "args", None) or []
+    url = str(getattr(cfg, "url", None) or "").strip()
+    if command:
+        return " ".join([command, *[str(arg) for arg in args]])
+    return url or name
+
+
+def _mcp_import_summary(source_path: str) -> str:
+    """Server names and launch commands inside a source mcp.json."""
+    try:
+        data = json.loads(Path(source_path).expanduser().read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"{source_path} (unreadable: {exc})"
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        return source_path
+    parts: List[str] = []
+    for srv_name, spec in servers.items():
+        if not isinstance(spec, dict):
+            continue
+        command = str(spec.get("command") or "").strip()
+        args = spec.get("args") if isinstance(spec.get("args"), list) else []
+        url = str(spec.get("url") or "").strip()
+        launch = " ".join([command, *[str(arg) for arg in args]]) if command else (url or "(no command)")
+        parts.append(f"{srv_name}: {launch}")
+    return "; ".join(parts) or source_path
+
+
 def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
     name = str(arguments.get("name", "")).strip()
     if not name:
@@ -7175,6 +7228,74 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
         return "OK"
     d = (detail or "").strip()
     return f"ERROR: connect failed: {d}" if d else "ERROR: connect failed"
+
+
+async def _tool_mcp_connect_confirmed(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    """Confirm before starting an MCP process outside the command sandbox.
+
+    Servers already listed in ``mcp.auto_connect`` were trusted by the user
+    and keep connecting without another prompt.
+    """
+    name = str(arguments.get("name", "")).strip()
+    if name and name in _mcp_auto_connect_names():
+        return _tool_mcp_connect(arguments, session)
+    launch = _mcp_server_launch_text(session, name) if name else ""
+    if not await _confirm(
+        f"即将在沙箱外启动 MCP 服务 {name or '(未命名)'}：{launch}。是否继续？",
+        confirm_gate=confirm_gate,
+        context={
+            "tool": "mcp_connect",
+            "command": launch,
+            "risk": "high",
+            "risk_categories": [
+                {
+                    "code": "host_full_access",
+                    "evidence": "mcp stdio runs outside command sandbox",
+                }
+            ],
+        },
+        emit_event=emit_event,
+        session=session,
+    ):
+        return _cancelled("未授权启动 MCP 服务", confirm_gate)
+    return _tool_mcp_connect(arguments, session)
+
+
+async def _tool_mcp_import_confirmed(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    """Confirm before writing imported MCP server commands into mcp.json."""
+    source_path = str(arguments.get("source_path", "")).strip()
+    summary = _mcp_import_summary(source_path) if source_path else "(missing source_path)"
+    if not await _confirm(
+        f"即将导入 MCP 配置：{summary}。导入后连接会在沙箱外执行其中的命令。是否继续？",
+        confirm_gate=confirm_gate,
+        context={
+            "tool": "mcp_import",
+            "command": summary,
+            "risk": "high",
+            "risk_categories": [
+                {
+                    "code": "host_full_access",
+                    "evidence": "mcp stdio runs outside command sandbox",
+                }
+            ],
+        },
+        emit_event=emit_event,
+        session=session,
+    ):
+        return _cancelled("未授权导入 MCP 配置", confirm_gate)
+    return _tool_mcp_import(arguments, session)
 
 
 def _find_git_root_for_cc_bridge(start: Path, *, max_up: int = 48) -> Optional[Path]:
@@ -12721,7 +12842,9 @@ async def _dispatch_tool_async_unredacted(
         if name == "codegen":
             return await _tool_codegen(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_connect":
-            return _tool_mcp_connect(arguments, session)
+            return await _tool_mcp_connect_confirmed(
+                arguments, session, confirm_gate=gate, emit_event=event_callback
+            )
         if name == "cc_bridge_start":
             return await _tool_cc_bridge_start(arguments, session)
         if name == "cc_bridge_send":
@@ -12769,7 +12892,9 @@ async def _dispatch_tool_async_unredacted(
         if name == "tool_search":
             return _tool_tool_search(arguments, session, runtime_tool_context=runtime_tool_context)
         if name == "mcp_import":
-            return _tool_mcp_import(arguments, session)
+            return await _tool_mcp_import_confirmed(
+                arguments, session, confirm_gate=gate, emit_event=event_callback
+            )
         if name == "skill_use":
             return _tool_skill_use(arguments, session)
         if name == "skill_list":

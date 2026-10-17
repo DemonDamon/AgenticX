@@ -22,7 +22,6 @@ _meta_log = logging.getLogger(__name__)
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL as _DEFAULT_META_PRODUCT_LABEL
-from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.llms.provider_display import format_model_option_label, resolve_provider_config
@@ -473,7 +472,7 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "set_taskspace",
-            "description": "Set or add a taskspace path for current session. The path will be registered after current turn.",
+            "description": "Register a directory as a read-only reference for the current session. Writes require the user to add the folder from the workspace panel.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3182,6 +3181,7 @@ async def dispatch_meta_tool_async(
                         "id": f"hint-{datetime.utcnow().timestamp()}",
                         "label": label or "taskspace",
                         "path": raw_path,
+                        "mount_mode": "reference",
                     }
                 )
         return json.dumps(
@@ -3209,16 +3209,16 @@ async def dispatch_meta_tool_async(
         return json.dumps(_update_email_config(arguments), ensure_ascii=False)
 
     if name == "mcp_import":
-        source_path = str(arguments.get("source_path", "")).strip()
-        if not source_path:
-            return json.dumps({"ok": False, "error": "missing source_path"}, ensure_ascii=False)
-        result = import_mcp_config(source_path)
-        if result.get("ok") and session is not None:
-            try:
-                session.mcp_configs = load_available_servers()
-            except Exception:
-                pass
-        return json.dumps(result, ensure_ascii=False)
+        # Meta dispatch has no confirm gate. Importing an MCP config can
+        # start an unsandboxed process on the next connect, so refuse here
+        # and send the user through Settings (which confirms).
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "mcp_import requires user confirmation; ask the user to import via Settings",
+            },
+            ensure_ascii=False,
+        )
 
     if name == "memory_append":
         target = str(arguments.get("target", "daily") or "daily").strip().lower()

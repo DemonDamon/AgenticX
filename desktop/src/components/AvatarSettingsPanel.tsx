@@ -192,7 +192,10 @@ export function AvatarSettingsPanel(props: Props) {
       void (async () => {
         try {
           const base = String((await window.agenticxDesktop.getApiBase()) || "").replace(/\/+$/, "");
-          const res = await fetch(`${base}/api/brains`);
+          const token = String((await window.agenticxDesktop.getApiAuthToken()) || "").trim();
+          const headers: Record<string, string> = {};
+          if (token) headers["x-agx-desktop-token"] = token;
+          const res = await fetch(`${base}/api/brains`, { headers });
           const body = (await res.json()) as {
             brains?: { id: string; name: string; type: string; scope: string; owner_avatar_id?: string }[];
           };

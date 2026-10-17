@@ -126,7 +126,8 @@ def test_argv_is_git_invocation() -> None:
     assert _argv_is_git_invocation(["/usr/bin/git", "status"])
     assert _argv_is_git_invocation(["/bin/sh", "-c", "git pull"])
     assert _argv_is_git_invocation(["/bin/sh", "-c", "cd repo && git pull"])
-    assert _argv_is_git_invocation(["/bin/bash", "-c", "git fetch && git status"])
+    assert not _argv_is_git_invocation(["/bin/bash", "-c", "git fetch && git status"])
+    assert not _argv_is_git_invocation(["/bin/sh", "-c", "git status; cat ~/.ssh/id_ed25519"])
     assert not _argv_is_git_invocation(["/bin/echo", "git"])
     assert not _argv_is_git_invocation(["/bin/sh", "-c", "echo git"])
     assert not _argv_is_git_invocation(["/bin/sh", "-c", "cat ~/.git-credentials"])
@@ -349,4 +350,37 @@ def test_native_connector_cli_grants_config_dir_and_blocks_piggyback(
         platform_name="darwin",
     )
     assert str((home / ".tmeet").resolve()) not in " ".join(piggyback_plan.argv)
+
+
+def test_sandbox_plan_strips_desktop_tokens(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    environ = {
+        "AGX_DESKTOP_TOKEN": "x",
+        "AGX_CC_BRIDGE_TOKEN": "y",
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+    }
+    plan = build_command_sandbox_plan(
+        ["/bin/echo", "hi"],
+        permissions=WORKSPACE_WRITE,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ=environ,
+        platform_name="darwin",
+    )
+    assert "AGX_DESKTOP_TOKEN" not in plan.env
+    assert "AGX_CC_BRIDGE_TOKEN" not in plan.env
+    assert "**/.agx-mounts.json" in plan.deny_patterns
+
+    open_plan = build_command_sandbox_plan(
+        ["/bin/echo", "hi"],
+        permissions=DANGER_FULL_ACCESS,
+        writable_roots=[workspace],
+        cwd=workspace,
+        environ=environ,
+        platform_name="darwin",
+    )
+    assert "AGX_DESKTOP_TOKEN" not in open_plan.env
+    assert "AGX_CC_BRIDGE_TOKEN" not in open_plan.env
 
