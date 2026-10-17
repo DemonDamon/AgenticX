@@ -42,6 +42,8 @@ STAGED_DIFF="$(
     ':(exclude).githooks/patterns.local.txt' 2>/dev/null \
   | grep -E '^\+' | grep -Ev '^\+\+\+' || true
 )"
+# patterns.txt 规则豁免带 gitleaks:allow 的行；patterns.local.txt 的客户关键词不豁免
+STAGED_DIFF_ALLOWED="$(printf '%s\n' "$STAGED_DIFF" | grep -v 'gitleaks:allow' || true)"
 
 # ---- 读取 pattern ----
 parse_patterns() {
@@ -52,11 +54,9 @@ parse_patterns() {
 }
 
 PATTERN_LINES="$(parse_patterns "$PATTERNS_GLOBAL")"
-if [ -f "$PATTERNS_LOCAL" ]; then
-  PATTERN_LINES="$PATTERN_LINES"$'\n'"$(parse_patterns "$PATTERNS_LOCAL")"
-fi
+LOCAL_PATTERN_LINES="$(parse_patterns "$PATTERNS_LOCAL")"
 
-if [ -z "$PATTERN_LINES" ]; then
+if [ -z "$PATTERN_LINES" ] && [ -z "$LOCAL_PATTERN_LINES" ]; then
   exit 0
 fi
 
@@ -64,6 +64,11 @@ fi
 HITS=0
 HIT_DETAILS=""
 
+# scan_lines <pattern_lines> <diff_text>
+scan_lines() {
+local lines="$1"
+local diff_text="$2"
+[ -z "$lines" ] && return 0
 while IFS=$'\t' read -r raw_pattern label; do
   [ -z "$raw_pattern" ] && continue
   label="${label:-match}"
@@ -85,8 +90,8 @@ while IFS=$'\t' read -r raw_pattern label; do
   esac
 
   # 扫 staged diff 内容（用 -e 显式指定 pattern，避免以 - 开头的 pattern 被当 flag）
-  if [ -n "$STAGED_DIFF" ]; then
-    match="$(printf '%s' "$STAGED_DIFF" | grep $flag -e "$pat" 2>/dev/null || true)"
+  if [ -n "$diff_text" ]; then
+    match="$(printf '%s' "$diff_text" | grep $flag -e "$pat" 2>/dev/null || true)"
     if [ -n "$match" ]; then
       HITS=$((HITS + 1))
       HIT_DETAILS="${HIT_DETAILS}
@@ -103,7 +108,11 @@ $(printf '%s' "$match" | head -3 | sed 's/^/    /')"
   [PATH] ${label}:
 $(printf '%s' "$path_match" | sed 's/^/    /')"
   fi
-done <<< "$PATTERN_LINES"
+done <<< "$lines"
+}
+
+scan_lines "$PATTERN_LINES" "$STAGED_DIFF_ALLOWED"
+scan_lines "$LOCAL_PATTERN_LINES" "$STAGED_DIFF"
 
 # ---- 判定 ----
 if [ "$HITS" -gt 0 ]; then

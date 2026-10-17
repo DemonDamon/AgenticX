@@ -112,7 +112,7 @@ jobs:
                 \#*) continue ;;
                 RE:*)
                   pat="${raw#RE:}"
-                  match="$(git grep -n -E -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null || true)"
+                  match="$(git grep -n -E -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null | grep -v 'gitleaks:allow' || true)"
                   if [ -n "$match" ]; then
                     printf '%s\n' "$match" | head -3
                     echo "::error::Match for: ${label:-pattern}"
@@ -121,7 +121,7 @@ jobs:
                   ;;
                 F:*)
                   pat="${raw#F:}"
-                  match="$(git grep -n -F -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null || true)"
+                  match="$(git grep -n -F -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null | grep -v 'gitleaks:allow' || true)"
                   if [ -n "$match" ]; then
                     printf '%s\n' "$match" | head -3
                     echo "::error::Match for: ${label:-pattern}"

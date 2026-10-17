@@ -14,7 +14,7 @@ describe("loadSkillBody", () => {
     process.env.ENTERPRISE_SKILL_BUNDLE_HOST_ALLOWLIST = "cdn.example.com";
     const fetchImpl = async () => jsonResponse(200, "body");
     expect(await loadSkillBody("http://cdn.example.com/SKILL.md", fetchImpl)).toBeNull();
-    expect(await loadSkillBody("https://user:pass@cdn.example.com/SKILL.md", fetchImpl)).toBeNull();
+    expect(await loadSkillBody("https://user:pass@cdn.example.com/SKILL.md", fetchImpl)).toBeNull(); // gitleaks:allow
     expect(await loadSkillBody("https://evil.example/SKILL.md", fetchImpl)).toBeNull();
   });
 

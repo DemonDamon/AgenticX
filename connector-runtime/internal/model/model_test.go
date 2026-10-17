@@ -75,7 +75,7 @@ func TestValidateInvalid(t *testing.T) {
 		{"id 为空", mutate(func(m map[string]any) { m["id"] = "" }), "id"},
 		{"displayName 空", mutate(func(m map[string]any) { m["displayName"] = "  " }), "displayName"},
 		{"baseUrl 非 http", mutate(func(m map[string]any) { m["baseUrl"] = "ftp://x.example" }), "scheme"},
-		{"baseUrl 带 userinfo", mutate(func(m map[string]any) { m["baseUrl"] = "https://u:p@x.example" }), "userinfo"},
+		{"baseUrl 带 userinfo", mutate(func(m map[string]any) { m["baseUrl"] = "https://u:p@x.example" }), "userinfo"}, // gitleaks:allow
 		{"baseUrl 带 query", mutate(func(m map[string]any) { m["baseUrl"] = "https://x.example?a=1" }), "query"},
 		{"auth 类型未知", mutate(func(m map[string]any) { m["auth"] = map[string]any{"type": "oauth9"} }), "认证类型"},
 		{"api_key 缺规格", mutate(func(m map[string]any) { m["auth"] = map[string]any{"type": "api_key"} }), "apiKey"},

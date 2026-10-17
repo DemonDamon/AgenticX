@@ -75,7 +75,7 @@ def test_is_public_ip_matrix(address: str, expected: bool) -> None:
         "file:///etc/passwd",
         "data:text/html,hello",
         "javascript:alert(1)",
-        "https://user:password@example.com",
+        "https://user:password@example.com",  # gitleaks:allow
         "http://example.com:22",
         "http://2130706433",
         "http://0x7f000001",

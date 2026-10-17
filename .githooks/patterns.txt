@@ -7,6 +7,8 @@
 # - label: 命中时打印的说明
 #
 # 空行与 # 开头行忽略。
+# 测试夹具等合法命中：在该行末尾加 `gitleaks:allow` 注释即可跳过本文件规则（与 gitleaks 同约定）；
+# patterns.local.txt 与 CUSTOM_SECRET_KEYWORDS 里的客户关键词不受此豁免。
 #
 # 维护规则：
 # - 只放「公开披露 OK」的 pattern
@@ -33,7 +35,7 @@ RE:-----BEGIN PRIVATE KEY-----	Private key (PKCS8)
 RE:(?i)(password|passwd|pwd|secret|token|api[_\-]?key)\s*[:=]\s*['\"][^'\"]{8,}['\"]	inline secret assignment
 
 # === Credentials in URL ===
-RE:https?://[^/@\s]+:[^@\s]+@	HTTP URL with embedded credential
+RE:https?://[^/@[:space:]]+:[^/@[:space:]]+@	HTTP URL with embedded credential
 
 # === 客户识别占位（在 patterns.local.txt 里填充具体关键词）===
 # 示例（不激活，参考用）：

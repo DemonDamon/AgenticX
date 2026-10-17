@@ -138,7 +138,7 @@ def test_git_credential_paths_only_when_present(tmp_path: Path, monkeypatch: pyt
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     assert _git_credential_read_paths({"HOME": str(home)}) == ()
-    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")  # gitleaks:allow
     ssh = home / ".ssh"
     ssh.mkdir()
     paths = _git_credential_read_paths({"HOME": str(home)})
@@ -166,7 +166,7 @@ def test_git_in_writable_workspace_stages_store_credentials(
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    secret = "https://x:y@example.com\n"
+    secret = "https://x:y@example.com\n"  # gitleaks:allow
     (home / ".git-credentials").write_text(secret, encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
@@ -189,7 +189,7 @@ def test_non_git_command_gets_no_credential_grant(
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")
+    (home / ".git-credentials").write_text("https://x:y@host\n", encoding="utf-8")  # gitleaks:allow
     monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -212,7 +212,7 @@ def test_git_outside_writable_workspace_still_avoids_keychain(
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    secret = "https://x:y@example.com\n"
+    secret = "https://x:y@example.com\n"  # gitleaks:allow
     (home / ".git-credentials").write_text(secret, encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     workspace = tmp_path / "ws"
@@ -261,7 +261,7 @@ def test_sandboxed_git_credential_fill_uses_store_not_keychain(tmp_path: Path) -
     home = tmp_path / "home"
     home.mkdir()
     (home / ".git-credentials").write_text(
-        "https://sandbox-user:sandbox-token@example.com\n",
+        "https://sandbox-user:sandbox-token@example.com\n",  # gitleaks:allow
         encoding="utf-8",
     )
     workspace = tmp_path / "ws"
