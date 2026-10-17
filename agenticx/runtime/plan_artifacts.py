@@ -253,6 +253,37 @@ def read_plan_artifact(raw_path: str) -> PlanArtifact:
     )
 
 
+def count_active_plan_pending_todos(session: Any) -> int:
+    """P2.3: pending todos of the session's most recently updated unfinished Plan.
+
+    Scans the active plan root for ``*.plan.md`` files belonging to this session
+    whose lifecycle is not completed/cancelled, and counts pending/in_progress
+    todos of the newest one. Returns 0 when no active Plan exists.
+    """
+    try:
+        root = _resolve_plan_root(session)
+    except Exception:
+        return 0
+    session_id = str(getattr(session, "session_id", "") or "").strip()
+    try:
+        candidates = sorted(
+            root.glob("*.plan.md"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+    except OSError:
+        return 0
+    for path in candidates[:10]:
+        try:
+            plan = read_plan_artifact(str(path))
+        except Exception:
+            continue
+        if session_id and plan.session_id != session_id:
+            continue
+        if plan.status in {"completed", "cancelled"}:
+            continue
+        return sum(1 for todo in plan.todos if todo.status in {"pending", "in_progress"})
+    return 0
+
+
 def update_plan_artifact(session: Any, arguments: dict[str, Any]) -> str:
     plan_id = str(arguments.get("plan_id") or "").strip()
     path = _validate_plan_path(session, str(arguments.get("plan_path") or ""))

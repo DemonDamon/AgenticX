@@ -1377,7 +1377,13 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("LSP shutdown skipped: %s", exc)
 
-    def _resolve_max_tool_rounds() -> int:
+    def _resolve_max_tool_rounds(override: Any = None) -> int:
+        # P2.3b: request-level override wins (clamped); else env > config > default.
+        if override is not None:
+            try:
+                return max(10, min(120, int(override)))
+            except (TypeError, ValueError):
+                pass
         raw = str(os.getenv("AGX_MAX_TOOL_ROUNDS", "")).strip()
         if not raw:
             try:
@@ -3562,7 +3568,9 @@ def create_studio_app() -> FastAPI:
                     router = GroupChatRouter(
                         avatar_registry=avatar_registry,
                         llm_factory=llm_factory,
-                        max_tool_rounds=_resolve_max_tool_rounds(),
+                        max_tool_rounds=_resolve_max_tool_rounds(
+                            getattr(payload, "max_tool_rounds", None)
+                        ),
                         meta_leader_display_name=meta_leader_label,
                         confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
                             managed,
@@ -3933,7 +3941,9 @@ def create_studio_app() -> FastAPI:
                 llm,
                 meta_confirm_gate,
                 team_manager=team_manager,
-                max_tool_rounds=_resolve_max_tool_rounds(),
+                max_tool_rounds=_resolve_max_tool_rounds(
+                    getattr(payload, "max_tool_rounds", None)
+                ),
                 mid_turn_persist=_mid_turn_persist_cb,
                 clarify_gate=meta_clarify_gate,
                 is_unattended=turn_is_unattended,
@@ -4942,7 +4952,9 @@ def create_studio_app() -> FastAPI:
                 llm,
                 _resolve_confirm_gate(managed, "meta", unattended=loop_is_unattended),
                 team_manager=loop_tm,
-                max_tool_rounds=_resolve_max_tool_rounds(),
+                max_tool_rounds=_resolve_max_tool_rounds(
+                    payload.get("max_tool_rounds") if isinstance(payload, dict) else None
+                ),
                 mid_turn_persist=_loop_persist_cb,
                 clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_unattended),
                 is_unattended=loop_is_unattended,

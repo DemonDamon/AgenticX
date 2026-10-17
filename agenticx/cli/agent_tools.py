@@ -1149,7 +1149,12 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "file_read",
-            "description": "Read file content with optional line range.",
+            "description": (
+                "Read file content with optional line range. Large whole-file reads are "
+                "auto-degraded (stats + head preview + guidance) when they would consume "
+                ">25% of the remaining session budget; use code_outline or start_line/"
+                "end_line ranges for big files."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -6753,6 +6758,117 @@ def _tool_result_recall(
         return f"ERROR: {exc}"
 
 
+# P2.1c: exploration tools rejected by dispatch once the session budget
+# watermark (published by AgentRuntime) reports the >=80% exploration lock.
+_BUDGET_LOCKED_EXPLORE_TOOLS = frozenset(
+    {
+        "file_read",
+        "list_files",
+        "code_outline",
+        "liteparse",
+        "web_search",
+        "web_fetch",
+        "document_read_pages",
+        "knowledge_search",
+        "knowledge_read",
+        "knowledge_synthesize",
+        "query_data_source",
+        "session_search",
+        "lsp_goto_definition",
+        "lsp_find_references",
+        "near_browser_open",
+        "near_browser_snapshot",
+        "near_browser_extract_text",
+    }
+)
+# Read-style bash commands blocked under the same lock (models otherwise
+# bypass file_read denial via `cat`/`grep`). Directory listing is allowed on
+# purpose — cheap and often pre-write hygiene.
+_BUDGET_LOCKED_BASH_READ_RE = re.compile(
+    r"^\s*(cat|head|tail|less|more|grep|rg|zcat|bat)\b"
+)
+
+
+def _budget_locked_explore_denial(
+    name: str, arguments: Dict[str, Any], session: Optional[StudioSession]
+) -> Optional[str]:
+    """Return a denial string when the exploration lock blocks this tool call."""
+    if session is None:
+        return None
+    try:
+        scratch = getattr(session, "scratchpad", None)
+        if not isinstance(scratch, dict):
+            return None
+        if str(scratch.get("budget_locked", "") or "") != "1":
+            return None
+        if name in _BUDGET_LOCKED_EXPLORE_TOOLS:
+            return (
+                "[budget-guard] 探索已锁定（会话预算 ≥80%）：禁止开启新的探索分支。"
+                "请仅基于已读信息立即完成产出写入与收尾"
+                "（file_write / file_edit / todo 更新 / 最终回复）。"
+            )
+        if name == "bash_exec":
+            command = str(arguments.get("command", "") or "")
+            if _BUDGET_LOCKED_BASH_READ_RE.match(command):
+                return (
+                    "[budget-guard] 探索已锁定（会话预算 ≥80%）：读取类命令已被拒绝。"
+                    "请仅基于已读信息立即完成产出写入与收尾。"
+                )
+    except Exception:
+        return None
+    return None
+
+
+def _estimate_content_tokens(content: str) -> int:
+    """Conservative token estimate: ~1 token per CJK char, ~4 ASCII chars per token."""
+    cjk = 0
+    for ch in content:
+        if "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f" or "\uff00" <= ch <= "\uffef":
+            cjk += 1
+    other = len(content) - cjk
+    return cjk + (other + 3) // 4
+
+
+def _budget_preflight_file_read(
+    session: Optional[StudioSession], path: Path, content: str
+) -> Optional[str]:
+    """P2.2: degrade whole-file reads that would eat >25% of remaining budget.
+
+    Returns a "file health report + head preview + guidance" string when the
+    read should be degraded, or None to proceed with the normal path. Absent
+    watermark (no session / budget not yet published) keeps behavior unchanged.
+    """
+    if session is None:
+        return None
+    scratch = getattr(session, "scratchpad", None)
+    if not isinstance(scratch, dict):
+        return None
+    try:
+        remaining = int(str(scratch.get("budget_remaining", "") or "").strip())
+    except ValueError:
+        return None
+    if remaining <= 0:
+        return None
+    est_tokens = _estimate_content_tokens(content)
+    if est_tokens <= remaining * 0.25:
+        return None
+    lines = content.splitlines()
+    head = lines[:200]
+    numbered = [f"{idx + 1}|{line}" for idx, line in enumerate(head)]
+    pct_used = str(scratch.get("budget_pct", "?") or "?")
+    return (
+        "[budget-guard] 文件较大，已降级读取以保护剩余预算：\n"
+        f"- 文件: {path}\n"
+        f"- 总行数: {len(lines)}，字符数: {len(content)}，预估 token: ~{est_tokens}\n"
+        f"- 会话预算: 已用 {pct_used}%，剩余 ~{remaining} tokens；"
+        f"全量读取预估将占剩余预算的 {int(100 * est_tokens / remaining)}%\n"
+        f"已自动读取头部 {len(head)} 行：\n"
+        + "\n".join(numbered)
+        + "\n如需更多内容：先用 code_outline 看结构，再用 start_line/end_line 分段读取关键部分；"
+        "请基于已有信息规划产出，避免全量读取。"
+    )
+
+
 def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     try:
         path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
@@ -6789,6 +6905,13 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
             if tracker is not None:
                 tracker.refresh_from_disk(str(path))
         return out
+
+    # P2.2: budget-aware whole-file preflight — degrade reads that would
+    # consume >25% of the remaining session budget (head preview + guidance
+    # instead of full content). No watermark published yet => unchanged path.
+    degraded_report = _budget_preflight_file_read(session, path, content)
+    if degraded_report is not None:
+        return degraded_report
 
     if session is not None:
         try:
@@ -12695,6 +12818,12 @@ async def _dispatch_tool_async_unredacted(
     policy_denial = tool_denied_by_session_permissions(name)
     if policy_denial:
         return f"ERROR: {policy_denial}"
+    # P2.1c: exploration lock — once the session budget watermark reports
+    # >=80%, exploration tool calls are rejected so remaining budget goes to
+    # writing and finalization. Write/plan/todo tools are never blocked.
+    budget_denial = _budget_locked_explore_denial(name, arguments, session)
+    if budget_denial:
+        return budget_denial
     setattr(session, "_enterprise_ask_satisfied_tool", None)
     from agenticx.runtime.enterprise_agent_policy import (
         enterprise_ask_subject,

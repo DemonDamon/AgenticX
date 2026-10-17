@@ -23,6 +23,22 @@ MAX_MAX_TOKENS_PER_SESSION = 5_000_000
 MIN_MAX_TOKENS_PER_TURN = 50_000
 MAX_MAX_TOKENS_PER_TURN = 1_000_000
 
+# P2.1 budget-allocation thresholds (fraction of max_tokens_per_session):
+#   >=60%: one-time guidance to pivot from exploration to deliverable writing.
+#   >=80%: exploration hard-locked (tool side rejects exploration calls).
+BUDGET_EXPLORE_HINT_PCT = 60
+BUDGET_LOCK_PCT = 80
+
+# Scratchpad keys published by AgentRuntime after each round's budget check.
+# Tool dispatch reads these for budget-aware behavior (file_read preflight,
+# exploration lock) without new module coupling.
+SCRATCH_BUDGET_PCT = "budget_pct"
+SCRATCH_BUDGET_REMAINING = "budget_remaining"
+SCRATCH_BUDGET_MAX = "budget_max"
+SCRATCH_BUDGET_LOCKED = "budget_locked"
+# Session-lifetime latch so the 60% guidance fires only once per session.
+SCRATCH_BUDGET_EXPLORE_HINT_SENT = "budget_explore_hint_sent"
+
 
 class BudgetLevel(str, Enum):
     OK = "ok"
@@ -180,16 +196,46 @@ class TokenBudgetGuard:
             return session_level, "session", self.cumulative_total, self.max_session
         return turn_level, "turn", self.turn_total, self.max_turn
 
+    def session_ratio(self) -> float:
+        """Session budget usage ratio (0..1+); 0.0 when unlimited."""
+        if self.max_session <= 0:
+            return 0.0
+        return self.cumulative_total / self.max_session
+
     def convergence_hint(self) -> str:
-        """System hint injected when budget reaches WARNING level."""
+        """Hard-lock hint injected each round once budget reaches WARNING (>=80%).
+
+        P2.1: upgraded from a soft "please wrap up" to enforceable semantics —
+        exploration is closed, produce the deliverable from information already
+        read (exploration tool calls are rejected by dispatch at this level).
+        """
         pct = (
             int(100 * self.cumulative_total / self.max_session)
             if self.max_session > 0 else 0
         )
         return (
             f"<budget_warning>Token budget at {pct}% ({self.cumulative_total}/{self.max_session}). "
-            "Please wrap up: summarize findings, skip optional exploration, and converge to final answer."
+            "EXPLORATION IS LOCKED: do not open new files, topics, or searches — "
+            "exploration tool calls will be rejected from now on. Using ONLY information "
+            "already read, immediately produce and finalize the deliverable: write outputs "
+            "(file_write/file_edit), update todos, then give the final answer."
             "</budget_warning>"
+        )
+
+    def explore_budget_notice(self) -> str:
+        """One-time 60% guidance: pivot from exploration to deliverable writing."""
+        pct = (
+            int(100 * self.cumulative_total / self.max_session)
+            if self.max_session > 0 else 0
+        )
+        return (
+            f"<budget_guidance>Token budget at {pct}% ({self.cumulative_total}/{self.max_session}). "
+            "Budget structure guidance: exploration (reads/searches) should stay <=60% and "
+            "deliverable writing should keep >=30% of the session budget. If deliverable "
+            "writing has not started, stop opening new exploration threads NOW — outline the "
+            "deliverable and start writing. For any remaining reads prefer code_outline or "
+            "ranged file_read (start_line/end_line) over whole-file reads."
+            "</budget_guidance>"
         )
 
     def to_metadata(self) -> Dict[str, Any]:

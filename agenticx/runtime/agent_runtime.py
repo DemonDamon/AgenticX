@@ -78,7 +78,17 @@ from agenticx.runtime.plan_mode import (
 )
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
-from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
+from agenticx.runtime.token_budget import (
+    BUDGET_EXPLORE_HINT_PCT,
+    BUDGET_LOCK_PCT,
+    SCRATCH_BUDGET_EXPLORE_HINT_SENT,
+    SCRATCH_BUDGET_LOCKED,
+    SCRATCH_BUDGET_MAX,
+    SCRATCH_BUDGET_PCT,
+    SCRATCH_BUDGET_REMAINING,
+    BudgetLevel,
+    TokenBudgetGuard,
+)
 from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
     is_length_finish_reason,
@@ -3543,8 +3553,35 @@ async def _eager_knowledge_search_events(
     runtime._maybe_mid_turn_persist()
 
 
+class _LiveRoundIterator:
+    """Round iterator honoring ``runtime.max_tool_rounds`` changes mid-loop.
+
+    P2.3: ``range()`` snapshots the upper bound at loop entry, so raising
+    ``max_tool_rounds`` inside the body (auto-relaxation) would be ignored.
+    This iterator re-reads the bound every step, letting the loop extend
+    live while keeping identical semantics otherwise.
+    """
+
+    def __init__(self, runtime: "AgentRuntime", start: int) -> None:
+        self._runtime = runtime
+        self._next_value = int(start)
+
+    def __iter__(self) -> "_LiveRoundIterator":
+        return self
+
+    def __next__(self) -> int:
+        if self._next_value > self._runtime.max_tool_rounds:
+            raise StopIteration
+        value = self._next_value
+        self._next_value += 1
+        return value
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
+
+    # P2.3: rounds auto-relax latch (per-turn; reset in run_turn prologue).
+    _rounds_relaxed: bool = False
 
     def __init__(
         self,
@@ -3597,6 +3634,9 @@ class AgentRuntime:
         self._proactive_compact_this_turn = False
         self._overflow_retries_this_turn = 0
         self._budget_compress_notice_sent_this_turn = False
+        # P2.3: round-cap auto-relaxation latch — extended at most once per turn
+        # so a stale todo list cannot loop the run forever.
+        self._rounds_relaxed = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
         self._persist_tool_count = _resolve_mid_turn_persist_tool_count()
@@ -3643,6 +3683,48 @@ class AgentRuntime:
                 self.hooks.register(TurnArchiveHook(enabled=True), priority=-60)
         except Exception:
             pass
+
+    def _publish_budget_watermark(self, session: Any) -> None:
+        """P2.1: expose session budget level via session scratchpad.
+
+        Written after every round's budget check; tool dispatch reads these
+        keys for budget-aware behavior. Values are strings (scratchpad
+        convention). Failures are silent — watermark is best-effort.
+        """
+        try:
+            scratch = getattr(session, "scratchpad", None)
+            if not isinstance(scratch, dict):
+                return
+            guard = self.token_budget
+            max_session = int(guard.max_session or 0)
+            if max_session <= 0:
+                return
+            used = int(guard.cumulative_total)
+            pct = min(100, int(100 * used / max_session))
+            scratch[SCRATCH_BUDGET_PCT] = str(pct)
+            scratch[SCRATCH_BUDGET_REMAINING] = str(max(0, max_session - used))
+            scratch[SCRATCH_BUDGET_MAX] = str(max_session)
+            scratch[SCRATCH_BUDGET_LOCKED] = "1" if pct >= BUDGET_LOCK_PCT else "0"
+        except Exception:
+            logger.debug("budget watermark publish skipped", exc_info=True)
+
+    def _count_pending_todos(self, session: Any) -> int:
+        """P2.3: pending items across session todos and the active Plan artifact."""
+        pending = 0
+        try:
+            todo_manager = getattr(session, "todo_manager", None)
+            for item in getattr(todo_manager, "items", None) or []:
+                if str(getattr(item, "status", "") or "") in {"pending", "in_progress"}:
+                    pending += 1
+        except Exception:
+            logger.debug("todo pending count skipped", exc_info=True)
+        try:
+            from agenticx.runtime.plan_artifacts import count_active_plan_pending_todos
+
+            pending = max(pending, count_active_plan_pending_todos(session))
+        except Exception:
+            logger.debug("plan pending count skipped", exc_info=True)
+        return pending
 
     def _reload_llm_for_session(self, session: Any) -> bool:
         """Rebuild the active provider after a session-level fallback switch.
@@ -4147,6 +4229,7 @@ class AgentRuntime:
         self._proactive_compact_this_turn = False
         self._overflow_retries_this_turn = 0
         self._budget_compress_notice_sent_this_turn = False
+        self._rounds_relaxed = False
         self._pending_loop_nudge = None
         self._injected_loop_nudge = None
         setattr(session, "_context_chain_repair_attempted", False)
@@ -4659,7 +4742,57 @@ class AgentRuntime:
             out["provider"] = provider_name
             return out
 
-        for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
+        for round_idx in _LiveRoundIterator(self, max(1, int(resume_start_round))):
+            # P2.3: dynamic round relaxation — when the final round starts while
+            # the session todo list / active Plan still has unfinished items,
+            # extend the cap once (latched) instead of killing the run with
+            # unfinished work. Keeps Phase-1 honesty: if the run still exhausts
+            # the extended cap, the rounds_exhausted terminal markers fire.
+            if (
+                agent_id == "meta"
+                and round_idx >= self.max_tool_rounds
+                and not self._rounds_relaxed
+            ):
+                pending_todos = self._count_pending_todos(session)
+                if pending_todos > 0:
+                    old_round_cap = self.max_tool_rounds
+                    extra_rounds = max(3, (pending_todos + 1) // 2)
+                    self.max_tool_rounds = min(120, old_round_cap + extra_rounds)
+                    self._rounds_relaxed = True
+                    logger.info(
+                        "rounds_auto_relax session=%s pending=%s %s->%s",
+                        getattr(session, "session_id", ""),
+                        pending_todos,
+                        old_round_cap,
+                        self.max_tool_rounds,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": (
+                                f"检测到 {pending_todos} 项待办未完成，已将本轮工具轮次上限 "
+                                f"从 {old_round_cap} 自动放宽至 {self.max_tool_rounds}，继续执行。"
+                            ),
+                            "severity": "warning",
+                            "detector": "rounds_auto_relax",
+                            "pending_todos": pending_todos,
+                            "old_max_rounds": old_round_cap,
+                            "max_rounds": self.max_tool_rounds,
+                        },
+                        agent_id=agent_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"<rounds_extended>Tool-round cap auto-extended "
+                                f"{old_round_cap} -> {self.max_tool_rounds} because {pending_todos} "
+                                "todo item(s) are still unfinished. Keep executing efficiently: "
+                                "finish the remaining todos, then produce the final deliverable."
+                                "</rounds_extended>"
+                            ),
+                        }
+                    )
             if await _check_should_stop():
                 self.turn_steer.discard()
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
@@ -5487,6 +5620,24 @@ class AgentRuntime:
 
                     _spawn_usage_persist_task(_persist_usage_row())
                 budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
+                # P2.1: publish the session budget watermark to scratchpad so
+                # tool dispatch can act on it (file_read preflight degradation,
+                # exploration lock at >=80%) without new module coupling.
+                self._publish_budget_watermark(session)
+                # P2.1: one-time 60% guidance — pivot from exploration to writing.
+                try:
+                    _scratch = getattr(session, "scratchpad", None)
+                    if (
+                        isinstance(_scratch, dict)
+                        and self.token_budget.session_ratio() * 100 >= BUDGET_EXPLORE_HINT_PCT
+                        and str(_scratch.get(SCRATCH_BUDGET_EXPLORE_HINT_SENT, "") or "") != "1"
+                    ):
+                        _scratch[SCRATCH_BUDGET_EXPLORE_HINT_SENT] = "1"
+                        messages.append(
+                            {"role": "user", "content": self.token_budget.explore_budget_notice()}
+                        )
+                except Exception:
+                    logger.debug("budget explore hint skipped", exc_info=True)
                 if budget_level == BudgetLevel.EXCEEDED:
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,

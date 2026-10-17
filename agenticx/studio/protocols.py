@@ -72,6 +72,8 @@ class ChatRequest(BaseModel):
     plan_mode: Optional[bool] = False
     # Desktop + menu Multitask: write in an isolated git worktree this turn.
     isolate_run: Optional[bool] = False
+    # Per-turn tool round cap override (clamped 10-120); wins over env/config.
+    max_tool_rounds: Optional[int] = None
 
 
 class ContinueRequest(BaseModel):
