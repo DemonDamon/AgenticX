@@ -115,6 +115,8 @@ function frameBodySize(
 }
 
 const FRAME_HEADER_H = 36;
+/** Belt-and-braces: if an export IPC never settles, unblock the export UI. */
+const EXPORT_UNBLOCK_MS = 180_000;
 const MIN_ZOOM = 0.08;
 const MAX_ZOOM = 2;
 /** Trae-style canvas selection green (outline / floating bar / handles). */
@@ -1068,17 +1070,20 @@ export function DesignCanvasPanel({
       setExportFailed(false);
       void (async () => {
         try {
-          const result = await api({
+          const task = api({
             html,
             width: box.w,
             height: box.h - FRAME_HEADER_H,
             format,
             scale,
             baseName: frame.title.replace(/\.[^.]+$/, "") || "canvas-frame",
-          });
-          if (!result?.ok && !result?.canceled) setExportFailed(true);
-        } catch {
-          setExportFailed(true);
+          }).catch(() => ({ ok: false, error: "export failed" }));
+          const result: { ok?: boolean; canceled?: boolean } | null = await Promise.race([
+            task,
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), EXPORT_UNBLOCK_MS)),
+          ]);
+          if (result === null) return; // IPC stuck — just unblock the UI.
+          if (!result.ok && !result.canceled) setExportFailed(true);
         } finally {
           setExporting(false);
         }
@@ -1094,13 +1099,16 @@ export function DesignCanvasPanel({
     setExportFailed(false);
     void (async () => {
       try {
-        const result = await api({
+        const task = api({
           files: frames.map((frame) => ({ path: frame.absolutePath })),
           baseName: "design",
-        });
-        if (!result?.ok && !result?.canceled) setExportFailed(true);
-      } catch {
-        setExportFailed(true);
+        }).catch(() => ({ ok: false, error: "export failed" }));
+        const result: { ok?: boolean; canceled?: boolean } | null = await Promise.race([
+          task,
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), EXPORT_UNBLOCK_MS)),
+        ]);
+        if (result === null) return; // IPC stuck — just unblock the UI.
+        if (!result.ok && !result.canceled) setExportFailed(true);
       } finally {
         setExporting(false);
       }

@@ -12826,6 +12826,40 @@ function registerIpc(): void {
   };
 
   /**
+   * `dialog.showSaveDialog` never settles on macOS when the target window
+   * already has a stuck native modal session (e.g. a leftover NSOpenPanel),
+   * which permanently wedges the canvas export UI ("导出中…" forever).
+   * Race the dialog with a timeout; a dialog that resolves after the timeout
+   * is treated as abandoned and its picked path is dropped.
+   */
+  const SAVE_DIALOG_TIMEOUT_MS = 120_000;
+  const showSaveDialogGuarded = async (
+    options: Electron.SaveDialogOptions,
+  ): Promise<Electron.SaveDialogReturnValue | { canceled: true; timedOut: true }> => {
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    let abandoned = false;
+    const dialogPromise = (
+      focused ? dialog.showSaveDialog(focused, options) : dialog.showSaveDialog(options)
+    ).then((picked) => {
+      // Abandoned (timed out) late picks are neutralized into a cancel.
+      if (abandoned && picked.filePath) return { ...picked, canceled: true, filePath: "" };
+      return picked;
+    });
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<{ canceled: true; timedOut: true }>((resolve) => {
+      timer = setTimeout(() => {
+        abandoned = true;
+        resolve({ canceled: true, timedOut: true });
+      }, SAVE_DIALOG_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([dialogPromise, timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  /**
    * Design-canvas frame export: rasterize the frame's prepared HTML in a hidden
    * off-screen window at 1X/2X/3X and write a PNG/JPEG. `savePath` skips the
    * native save dialog (used by automation; the dialog path is the UX default).
@@ -12858,10 +12892,8 @@ function registerIpc(): void {
           defaultPath: path.join(app.getPath("downloads"), `${baseName}${scaleTag}.${ext}`),
           filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
         };
-        const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
-        const picked = focused
-          ? await dialog.showSaveDialog(focused, dialogOptions)
-          : await dialog.showSaveDialog(dialogOptions);
+        const picked = await showSaveDialogGuarded(dialogOptions);
+        if ("timedOut" in picked && picked.timedOut) return { ok: false, error: "save-dialog-timeout" };
         if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
         target = picked.filePath;
       }
@@ -12943,10 +12975,8 @@ function registerIpc(): void {
           defaultPath: path.join(app.getPath("downloads"), `${baseName}.zip`),
           filters: [{ name: "ZIP", extensions: ["zip"] }],
         };
-        const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
-        const picked = focused
-          ? await dialog.showSaveDialog(focused, dialogOptions)
-          : await dialog.showSaveDialog(dialogOptions);
+        const picked = await showSaveDialogGuarded(dialogOptions);
+        if ("timedOut" in picked && picked.timedOut) return { ok: false, error: "save-dialog-timeout" };
         if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
         target = picked.filePath;
       }
