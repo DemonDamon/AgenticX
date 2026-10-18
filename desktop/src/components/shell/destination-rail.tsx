@@ -3,6 +3,7 @@ import {
   CirclePlay,
   FileDiff,
   FolderOpen,
+  Frame,
   Globe,
   ListTodo,
   Share2,
@@ -20,6 +21,7 @@ export type DestinationKind =
   | "scratch"
   | "changes"
   | "browser"
+  | "canvas"
   | "graph"
   | "timeline"
   | "terminal"
@@ -37,6 +39,7 @@ export const DESTINATION_ITEMS: DestinationDef[] = [
   { kind: "scratch", icon: ScratchChatIcon, labelKey: "work.tabScratch", subtitleKey: "work.subtitleScratch" },
   { kind: "changes", icon: FileDiff, labelKey: "work.tabChanges", subtitleKey: "work.subtitleChanges" },
   { kind: "browser", icon: Globe, labelKey: "work.tabBrowser", subtitleKey: "work.subtitleBrowser" },
+  { kind: "canvas", icon: Frame, labelKey: "work.canvas.tabCanvas", subtitleKey: "work.canvas.subtitleCanvas" },
   { kind: "graph", icon: Share2, labelKey: "work.tabGraph", subtitleKey: "work.subtitleGraph" },
   { kind: "timeline", icon: CirclePlay, labelKey: "work.tabTimeline", subtitleKey: "work.subtitleTimeline" },
   { kind: "terminal", icon: Terminal, labelKey: "work.tabTerminal", subtitleKey: "work.subtitleTerminal" },
