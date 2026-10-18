@@ -77,6 +77,52 @@ describe("buildBudgetResumeDraft", () => {
     ]);
     expect(draft.includes("x".repeat(601))).toBe(false);
   });
+
+  it("collects produced and read file paths from tool args, deduped", () => {
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "整理 10 份标书并写评审报告" },
+      { id: "t1", role: "tool", content: "ok", toolName: "file_read", toolArgs: { path: "plans/bidding/a.md" } },
+      { id: "t2", role: "tool", content: "ok", toolName: "file_read", toolArgs: { path: "plans/bidding/b.md" } },
+      { id: "t3", role: "tool", content: "ok", toolName: "file_read", toolArgs: { path: "plans/bidding/a.md" } },
+      { id: "t4", role: "tool", content: "ok", toolName: "file_write", toolArgs: { path: "plans/bidding/review.md" } },
+      { id: "t5", role: "tool", content: "ok", toolName: "file_edit", toolArgs: { path: "plans/bidding/review.md" } },
+      { id: "t6", role: "tool", content: "ok", toolName: "bash_exec", toolArgs: { command: "ls" } },
+    ];
+    const draft = buildBudgetResumeDraft(messages);
+    expect(draft).toContain("【已读文件】");
+    expect(draft).toContain("- plans/bidding/a.md");
+    expect(draft).toContain("- plans/bidding/b.md");
+    expect(draft.indexOf("plans/bidding/a.md")).toBe(draft.lastIndexOf("plans/bidding/a.md"));
+    expect(draft).toContain("【已产出文件】");
+    expect(draft.indexOf("plans/bidding/review.md")).toBe(draft.lastIndexOf("plans/bidding/review.md"));
+    expect(draft).toContain("已读文件无需重读");
+  });
+
+  it("omits file sections when no file tool messages exist", () => {
+    const draft = buildBudgetResumeDraft([
+      { id: "u1", role: "user", content: "goal" },
+      { id: "a1", role: "assistant", content: "done partially" },
+    ]);
+    expect(draft.includes("【已产出文件】")).toBe(false);
+    expect(draft.includes("【已读文件】")).toBe(false);
+  });
+
+  it("caps long file lists with an overflow line", () => {
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "goal" },
+      ...Array.from({ length: 35 }, (_, i) => ({
+        id: `r${i}`,
+        role: "tool" as const,
+        content: "ok",
+        toolName: "file_read",
+        toolArgs: { path: `docs/file-${i}.md` },
+      })),
+    ];
+    const draft = buildBudgetResumeDraft(messages);
+    expect(draft).toContain("- docs/file-29.md");
+    expect(draft).not.toContain("- docs/file-30.md");
+    expect(draft).toContain("…等共 35 个文件");
+  });
 });
 
 describe("budget incomplete hint", () => {

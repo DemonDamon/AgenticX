@@ -1,14 +1,62 @@
 import { describe, expect, it } from "vitest";
+import type { Message } from "../store";
 import {
   buildClarificationAnswerText,
   buildClarifyRequestBody,
   isClarificationMessage,
   clarificationPayloadFromMeta,
+  latestPendingClarification,
   parseChoicePanelFields,
   parseClarificationDecisions,
   toggleDecisionSelection,
   type ClarificationDecisionPayload,
 } from "./clarification-notice";
+
+const clarifyPrompt = (requestId: string) => ({
+  requestId,
+  prompt: "先聚焦哪个方向？",
+  options: ["聚焦财务", "聚焦产品"],
+  allowFreeText: true,
+  agentId: "meta",
+  sessionId: "s1",
+});
+
+describe("latestPendingClarification", () => {
+  it("returns the newest unanswered prompt", () => {
+    const messages = [
+      { id: "1", role: "tool", content: "q1", clarificationPrompt: clarifyPrompt("r1") },
+      { id: "2", role: "tool", content: "q2", clarificationPrompt: clarifyPrompt("r2") },
+    ] as unknown as Message[];
+    expect(latestPendingClarification(messages)?.requestId).toBe("r2");
+  });
+
+  it("skips answered and suspended prompts", () => {
+    const messages = [
+      {
+        id: "1",
+        role: "tool",
+        content: "q1",
+        clarificationPrompt: clarifyPrompt("r1"),
+        metadata: { clarification_answered: true },
+      },
+      {
+        id: "2",
+        role: "tool",
+        content: "q2",
+        clarificationPrompt: clarifyPrompt("r2"),
+        clarificationSuspended: true,
+      },
+    ] as unknown as Message[];
+    expect(latestPendingClarification(messages)).toBeNull();
+  });
+
+  it("returns null when no clarification rows exist", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "hi" },
+    ] as unknown as Message[];
+    expect(latestPendingClarification(messages)).toBeNull();
+  });
+});
 
 describe("buildClarificationAnswerText", () => {
   it("joins selected options and free text", () => {

@@ -549,7 +549,7 @@ import {
   findRunningActionConfirmationToolMessage,
   findRunningClarificationToolMessage,
 } from "../utils/clarification-inline";
-import { parseChoicePanelFields, parseClarificationDecisions, buildClarifyRequestBody, type ClarificationAnswer } from "../utils/clarification-notice";
+import { parseChoicePanelFields, parseClarificationDecisions, buildClarifyRequestBody, latestPendingClarification, type ClarificationAnswer } from "../utils/clarification-notice";
 import {
   buildActionConfirmationAnswer,
   findResolvableActionConfirmation,
@@ -15300,6 +15300,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   );
 
                   if (streamActive) {
+                    // Pending clarification: the run is suspended on the clarify
+                    // gate, so an enqueued follow-up would never drain (the run
+                    // only ends after the gate resolves). Route typed text
+                    // directly as the clarification answer instead (P3: fixes
+                    // "queued messages never consumed during clarification" and
+                    // "Enter cannot force-send").
+                    const pendingClarify = latestPendingClarification(pane.messages ?? []);
+                    if (pendingClarify) {
+                      // Keep queued follow-ups parked until the gate resolves;
+                      // the run's finally block drains them afterwards.
+                      if (!hasComposerPayload) return;
+                      const optionHit = pendingClarify.options.find(
+                        (opt) => opt.trim() === trimmedComposer,
+                      );
+                      if (pendingClarify.allowFreeText !== false || optionHit) {
+                        lastComposerEnterAtRef.current = 0;
+                        void handleSubmitClarification(
+                          pendingClarify.requestId,
+                          {
+                            answerText: optionHit ? "" : trimmedComposer,
+                            selectedOptions: optionHit ? [optionHit] : [],
+                          },
+                          pendingClarify.sessionId || pane.sessionId,
+                          pendingClarify.agentId,
+                        );
+                        setComposerText("");
+                        clearQuoteTargets();
+                        return;
+                      }
+                    }
+
                     const sendQueuedNow =
                       isDoubleEnterWithinWindow(lastComposerEnterAtRef.current) ||
                       (!hasComposerPayload && queue.length > 0 && lastComposerEnterAtRef.current > 0);

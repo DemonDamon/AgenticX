@@ -10,6 +10,7 @@ import type {
   ChoicePanelOption,
   ClarificationDecision,
   ClarificationInputType,
+  Message,
   PendingClarification,
 } from "../store";
 
@@ -29,6 +30,28 @@ export type ClarificationAnswer = {
 };
 
 export type ClarificationDecisionPayload = ClarificationDecision;
+
+/**
+ * Latest still-open clarification prompt in a pane's messages.
+ *
+ * Used by the composer Enter routing: while a run is suspended on the clarify
+ * gate, typed text should be submitted as the clarification answer instead of
+ * being enqueued (a queued follow-up only drains when the run ends, and the
+ * run only ends after the gate resolves).
+ */
+export function latestPendingClarification(
+  messages: readonly Message[],
+): PendingClarification | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    const prompt = msg?.clarificationPrompt;
+    if (!prompt || msg.clarificationSuspended) continue;
+    const meta = msg.metadata as Record<string, unknown> | undefined;
+    if (meta && meta.clarification_answered) continue;
+    return prompt;
+  }
+  return null;
+}
 
 export type PendingClarificationPayload = {
   requestId: string;
