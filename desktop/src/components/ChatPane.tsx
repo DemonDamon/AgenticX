@@ -121,7 +121,7 @@ import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
-import { resolveProcessFoldRange } from "./messages/react-work-fold";
+import { parkTrailingReasoningInProcess, resolveProcessFoldRange } from "./messages/react-work-fold";
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
@@ -9223,7 +9223,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               return renderGroupedRow({ kind: "message", message: seg.message }, segIdx, {});
             }
             const { workMessages, finalAssistant } = seg.block;
-            const groupedWork = groupConsecutiveToolMessages(workMessages);
+            const groupedWork = parkTrailingReasoningInProcess(groupConsecutiveToolMessages(workMessages));
             const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
             const lastToolGroupIdxInWork = groupedWork.reduce(
               (acc, row, index) => (row.kind === "tool_group" ? index : acc),

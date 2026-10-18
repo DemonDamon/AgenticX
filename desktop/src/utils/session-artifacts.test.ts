@@ -918,6 +918,24 @@ describe("turn artifacts + primary pick", () => {
     expect(collectTurnArtifactPaths(messages, "final")).toEqual([html]);
   });
 
+  it("keeps the handoff card on the answer when think-only rows trail it", () => {
+    const html = "/Users/damon/out/report.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-html",
+        toolName: "file_write",
+        toolArgs: { path: html },
+        content: `OK: wrote ${html}`,
+      }),
+      assistantMsg({ id: "final", content: "完成" }),
+      assistantMsg({ id: "think-a", content: "", reasoning: "晚到的思考" }),
+      assistantMsg({ id: "think-b", content: "", reasoning: "又一条" }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([html]);
+    expect(collectTurnArtifactPaths(messages, "think-a")).toEqual([]);
+    expect(collectTurnArtifactPaths(messages, "think-b")).toEqual([]);
+  });
+
   it("session browse counts accumulate across turns while the latest card stays turn-local", () => {
     const a = "/tmp/a.txt";
     const b = "/tmp/b.txt";

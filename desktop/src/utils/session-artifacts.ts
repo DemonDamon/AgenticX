@@ -13,6 +13,7 @@
  */
 
 import type { Message, SubAgent } from "../store";
+import { assistantVisibleBodyForUi } from "./assistant-output";
 import { absoluteTaskspacePath, isAbsoluteFilePath } from "./workspace-file-path";
 
 // Start with `\S` so a missing `(N chars)` suffix cannot collapse the path to `/`.
@@ -856,18 +857,13 @@ export function appendMissingImageMarkdown(content: string, imagePaths: string[]
   return `${body.replace(/\s+$/, "")}\n\n${block}`;
 }
 
-/** Image previews produced in the same user turn as this assistant message. */
-export function collectTurnPreviewImagePaths(
-  messages: Message[] | undefined | null,
-  assistantMessageId: string,
-): string[] {
-  const list = messages ?? [];
-  const idx = list.findIndex((row) => row.id === assistantMessageId);
-  if (idx < 0) return [];
-  // Only the last assistant in the turn should embed the gallery (avoid duplicates).
+function turnBounds(list: Message[], idx: number): { start: number; end: number } {
+  let end = list.length;
   for (let i = idx + 1; i < list.length; i += 1) {
-    if (list[i]?.role === "user") break;
-    if (list[i]?.role === "assistant") return [];
+    if (list[i]?.role === "user") {
+      end = i;
+      break;
+    }
   }
   let start = 0;
   for (let i = idx - 1; i >= 0; i -= 1) {
@@ -876,6 +872,37 @@ export function collectTurnPreviewImagePaths(
       break;
     }
   }
+  return { start, end };
+}
+
+/**
+ * Who owns turn-level handoff (file cards, image gallery).
+ * Prefer the last assistant that actually wrote a reply. Trailing think-only
+ * rows must not steal the card and drag it under the answer.
+ */
+function turnHandoffOwnerIndex(list: Message[], idx: number): number {
+  const { start, end } = turnBounds(list, idx);
+  let bodyOwner = -1;
+  let lastAssistant = -1;
+  for (let i = start; i < end; i += 1) {
+    const row = list[i];
+    if (row?.role !== "assistant") continue;
+    lastAssistant = i;
+    if (assistantVisibleBodyForUi(String(row.content ?? "")).trim()) bodyOwner = i;
+  }
+  return bodyOwner >= 0 ? bodyOwner : lastAssistant;
+}
+
+/** Image previews produced in the same user turn as this assistant message. */
+export function collectTurnPreviewImagePaths(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): string[] {
+  const list = messages ?? [];
+  const idx = list.findIndex((row) => row.id === assistantMessageId);
+  if (idx < 0) return [];
+  if (turnHandoffOwnerIndex(list, idx) !== idx) return [];
+  const { start } = turnBounds(list, idx);
   return preferAnimatedPreviewImages(collectSessionArtifactPaths(list.slice(start, idx + 1)));
 }
 
@@ -935,18 +962,8 @@ function turnWindowForAssistant(
   const list = messages ?? [];
   const idx = list.findIndex((row) => row.id === assistantMessageId);
   if (idx < 0) return null;
-  // Only the last assistant in the turn owns the card / auto-open (avoid duplicates).
-  for (let i = idx + 1; i < list.length; i += 1) {
-    if (list[i]?.role === "user") break;
-    if (list[i]?.role === "assistant") return [];
-  }
-  let start = 0;
-  for (let i = idx - 1; i >= 0; i -= 1) {
-    if (list[i]?.role === "user") {
-      start = i + 1;
-      break;
-    }
-  }
+  if (turnHandoffOwnerIndex(list, idx) !== idx) return [];
+  const { start } = turnBounds(list, idx);
   return list.slice(start, idx + 1);
 }
 

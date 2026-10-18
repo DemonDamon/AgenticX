@@ -44,7 +44,7 @@ import { openExternalUrl } from "../utils/open-external";
 import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
-import { resolveProcessFoldRange } from "./messages/react-work-fold";
+import { parkTrailingReasoningInProcess, resolveProcessFoldRange } from "./messages/react-work-fold";
 import {
   buildClarificationMessageExtras,
   findRunningClarificationToolMessage,
@@ -2792,7 +2792,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   return renderGroupedChatRow({ kind: "message", message: seg.message }, false);
                 }
                 const { workMessages, finalAssistant } = seg.block;
-                const groupedWork = groupConsecutiveToolMessages(workMessages);
+                const groupedWork = parkTrailingReasoningInProcess(groupConsecutiveToolMessages(workMessages));
                 const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
                 const lastToolGroupIdxInWork = groupedWork.reduce(
                   (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
