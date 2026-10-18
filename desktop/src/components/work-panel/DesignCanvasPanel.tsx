@@ -19,6 +19,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { framesFromManifest, parseViewPackageManifest, planViewPackage } from "../../utils/view-package";
 import {
   ArrowDown,
   ArrowLeft,
@@ -264,6 +265,13 @@ export function DesignCanvasPanel({
   const [exportScaleFor, setExportScaleFor] = useState<"png" | "jpeg" | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
+  const [caseNotice, setCaseNotice] = useState("");
+  const [caseOpen, setCaseOpen] = useState(false);
+  const [caseTitle, setCaseTitle] = useState("");
+  const [caseSummary, setCaseSummary] = useState("");
+  const [caseRepo, setCaseRepo] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryCases, setLibraryCases] = useState<{ id: string; title: string; summary: string }[]>([]);
   /** 整理画布时的一次性位移动画开关（拖拽时不挂 transition，避免跟手延迟）。 */
   const [layoutAnim, setLayoutAnim] = useState(false);
   const [srcDocById, setSrcDocById] = useState<Record<string, string>>({});
@@ -1097,19 +1105,32 @@ export function DesignCanvasPanel({
   const exportDesignZip = useCallback(() => {
     const api = window.agenticxDesktop?.exportCanvasZip;
     if (!api || frames.length === 0 || exporting) return;
+    const planned = planViewPackage(
+      frames.map((frame) => ({
+        id: frame.id,
+        title: frame.title,
+        absolutePath: frame.absolutePath,
+        device: frame.device,
+        kind: frame.kind,
+        x: frame.x,
+        y: frame.y,
+      })),
+      { name: "design" },
+    );
     setExporting(true);
     setExportFailed(false);
     void (async () => {
       try {
         const task = api({
-          files: frames.map((frame) => ({ path: frame.absolutePath })),
-          baseName: "design",
+          files: planned.entries.map((entry) => ({ path: entry.absolutePath, zipName: entry.zipName })),
+          extraText: [{ name: "manifest.json", content: JSON.stringify(planned.manifest, null, 2) }],
+          baseName: planned.manifest.name,
         }).catch(() => ({ ok: false, error: "export failed" }));
         const result: { ok?: boolean; canceled?: boolean } | null = await Promise.race([
           task,
           new Promise<null>((resolve) => window.setTimeout(() => resolve(null), EXPORT_UNBLOCK_MS)),
         ]);
-        if (result === null) return; // IPC stuck — just unblock the UI.
+        if (result === null) return;
         if (!result.ok && !result.canceled) setExportFailed(true);
       } finally {
         setExporting(false);
@@ -1117,7 +1138,124 @@ export function DesignCanvasPanel({
     })();
   }, [frames, exporting]);
 
+  const restorePackage = useCallback(
+    (rootDir: string, manifest: unknown) => {
+      const parsed = parseViewPackageManifest(manifest);
+      const restored = framesFromManifest(parsed, rootDir);
+      setFrames(() =>
+        restored.map((frame) => ({
+          id: frame.id,
+          title: frame.title,
+          absolutePath: frame.absolutePath,
+          kind: frame.kind,
+          device: frame.device,
+          x: frame.x,
+          y: frame.y,
+          reloadNonce: 0,
+        })),
+      );
+      setCaseNotice(t("work.canvas.caseImported"));
+    },
+    [setFrames, t],
+  );
+
+  const importPackage = useCallback(() => {
+    const api = window.agenticxDesktop?.importCanvasPackage;
+    if (!api) return;
+    void (async () => {
+      const result = await api();
+      if (!result.ok || !result.rootDir || !result.manifest) {
+        if (!result.canceled) setCaseNotice(result.error || t("work.canvas.exportFailed"));
+        return;
+      }
+      try {
+        restorePackage(result.rootDir, result.manifest);
+      } catch (err) {
+        setCaseNotice(err instanceof Error ? err.message : t("work.canvas.exportFailed"));
+      }
+    })();
+  }, [restorePackage, t]);
+
+  const openCaseLibrary = useCallback(() => {
+    const api = window.agenticxDesktop?.listEnterpriseCases;
+    if (!api) return;
+    void (async () => {
+      const result = await api();
+      if (!result.ok) {
+        setCaseNotice(result.error === "enterprise-login-required" ? t("work.canvas.caseNeedLogin") : result.error || t("work.canvas.exportFailed"));
+        return;
+      }
+      const cases = result.cases ?? [];
+      if (cases.length === 0) {
+        setCaseNotice(t("work.canvas.caseEmpty"));
+        return;
+      }
+      setLibraryCases(cases.map((item) => ({ id: item.id, title: item.title, summary: item.summary })));
+      setLibraryOpen(true);
+    })();
+  }, [t]);
+
+  const fetchCase = useCallback(
+    (caseId: string) => {
+      const api = window.agenticxDesktop?.fetchEnterpriseCase;
+      if (!api) return;
+      setLibraryOpen(false);
+      void (async () => {
+        const result = await api(caseId);
+        if (!result.ok || !result.rootDir || !result.manifest) {
+          setCaseNotice(result.error === "enterprise-login-required" ? t("work.canvas.caseNeedLogin") : result.error || t("work.canvas.exportFailed"));
+          return;
+        }
+        try {
+          restorePackage(result.rootDir, result.manifest);
+        } catch (err) {
+          setCaseNotice(err instanceof Error ? err.message : t("work.canvas.exportFailed"));
+        }
+      })();
+    },
+    [restorePackage, t],
+  );
+
+  const submitCase = useCallback(() => {
+    const api = window.agenticxDesktop?.submitEnterpriseCase;
+    if (!api || frames.length === 0) return;
+    const planned = planViewPackage(
+      frames.map((frame) => ({
+        id: frame.id,
+        title: frame.title,
+        absolutePath: frame.absolutePath,
+        device: frame.device,
+        kind: frame.kind,
+        x: frame.x,
+        y: frame.y,
+      })),
+      { name: caseTitle.trim() || "design" },
+    );
+    setCaseOpen(false);
+    setExporting(true);
+    void (async () => {
+      try {
+        const result = await api({
+          title: caseTitle.trim() || planned.manifest.name,
+          summary: caseSummary.trim(),
+          sourceRepo: caseRepo.trim(),
+          manifest: planned.manifest,
+          files: planned.entries.map((entry) => ({ path: entry.absolutePath, zipName: entry.zipName })),
+        });
+        setCaseNotice(result.ok ? t("work.canvas.caseSubmitted") : result.error === "enterprise-login-required" ? t("work.canvas.caseNeedLogin") : result.error || t("work.canvas.exportFailed"));
+      } finally {
+        setExporting(false);
+      }
+    })();
+  }, [caseRepo, caseSummary, caseTitle, frames, t]);
+
   // Export-failure pill auto-clears.
+  useEffect(() => {
+    if (!caseNotice) return;
+    const timer = window.setTimeout(() => setCaseNotice(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [caseNotice]);
+
   useEffect(() => {
     if (!exportFailed) return;
     const timer = window.setTimeout(() => setExportFailed(false), 2600);
@@ -1210,6 +1348,28 @@ export function DesignCanvasPanel({
             >
               <Upload className="h-3.5 w-3.5 text-text-subtle" strokeWidth={1.7} />
               {t("work.canvas.importImages")}
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-text-strong hover:bg-surface-hover"
+              onClick={() => {
+                setAddOpen(false);
+                importPackage();
+              }}
+            >
+              <FileArchive className="h-3.5 w-3.5 text-text-subtle" strokeWidth={1.7} />
+              {t("work.canvas.importPackage")}
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-text-strong hover:bg-surface-hover"
+              onClick={() => {
+                setAddOpen(false);
+                openCaseLibrary();
+              }}
+            >
+              <Download className="h-3.5 w-3.5 text-text-subtle" strokeWidth={1.7} />
+              {t("work.canvas.fetchCase")}
             </button>
           </div>,
           document.body,
@@ -1350,6 +1510,19 @@ export function DesignCanvasPanel({
             >
               <FileArchive className={menuIconCls} strokeWidth={1.7} />
               Design ZIP
+            </button>
+            <button
+              type="button"
+              disabled={frames.length === 0 || exporting}
+              className={menuItemCls}
+              onClick={() => {
+                setExportOpen(false);
+                setCaseTitle(frames[0]?.title ?? "");
+                setCaseOpen(true);
+              }}
+            >
+              <Download className={menuIconCls} strokeWidth={1.7} />
+              {t("work.canvas.submitCase")}
             </button>
           </div>,
           document.body,
@@ -2117,9 +2290,79 @@ export function DesignCanvasPanel({
       </div>
 
       {/* Bottom-center: transient export feedback */}
-      {exporting || exportFailed ? (
+      {exporting || exportFailed || caseNotice ? (
         <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-surface-popover/95 px-2.5 py-1 text-[11.5px] text-text-strong shadow backdrop-blur">
-          {exporting ? t("work.canvas.exporting") : t("work.canvas.exportFailed")}
+          {exporting ? t("work.canvas.exporting") : exportFailed ? t("work.canvas.exportFailed") : caseNotice}
+        </div>
+      ) : null}
+
+      {caseOpen ? (
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/30" onMouseDown={() => setCaseOpen(false)}>
+          <form
+            className="w-[360px] rounded-xl border border-border bg-surface-popover p-4 shadow-xl"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitCase();
+            }}
+          >
+            <div className="text-sm font-medium text-text-strong">{t("work.canvas.submitCase")}</div>
+            <label className="mt-3 block text-[12px] text-text-subtle">
+              {t("work.canvas.caseTitle")}
+              <input
+                value={caseTitle}
+                onChange={(event) => setCaseTitle(event.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-surface-base px-2 py-1.5 text-[13px] text-text-strong"
+              />
+            </label>
+            <label className="mt-2 block text-[12px] text-text-subtle">
+              {t("work.canvas.caseSummary")}
+              <textarea
+                value={caseSummary}
+                onChange={(event) => setCaseSummary(event.target.value)}
+                rows={3}
+                className="mt-1 w-full resize-none rounded-md border border-border bg-surface-base px-2 py-1.5 text-[13px] text-text-strong"
+              />
+            </label>
+            <label className="mt-2 block text-[12px] text-text-subtle">
+              {t("work.canvas.caseRepo")}
+              <input
+                value={caseRepo}
+                onChange={(event) => setCaseRepo(event.target.value)}
+                placeholder="https://github.com/agxhub/"
+                className="mt-1 w-full rounded-md border border-border bg-surface-base px-2 py-1.5 text-[13px] text-text-strong"
+              />
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="rounded-md px-3 py-1.5 text-[12.5px] text-text-subtle" onClick={() => setCaseOpen(false)}>
+                {t("work.canvas.caseCancel")}
+              </button>
+              <button type="submit" className="rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1.5 text-[12.5px] text-[var(--ui-btn-primary-text)]">
+                {t("work.canvas.caseSubmit")}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {libraryOpen ? (
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/30" onMouseDown={() => setLibraryOpen(false)}>
+          <div
+            className="max-h-[420px] w-[360px] overflow-y-auto rounded-xl border border-border bg-surface-popover p-3 shadow-xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="px-1 pb-2 text-sm font-medium text-text-strong">{t("work.canvas.fetchCase")}</div>
+            {libraryCases.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="flex w-full flex-col rounded-lg px-2 py-2 text-left hover:bg-surface-hover"
+                onClick={() => fetchCase(item.id)}
+              >
+                <span className="text-[13px] text-text-strong">{item.title}</span>
+                {item.summary ? <span className="truncate text-[11px] text-text-faint">{item.summary}</span> : null}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
 

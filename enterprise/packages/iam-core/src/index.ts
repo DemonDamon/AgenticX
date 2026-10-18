@@ -14,6 +14,7 @@ export * from "./desktop-device-auth-service";
 export * from "./repos/assignment-keys";
 export * from "./repos/user-groups";
 export * from "./repos/agents";
+export * from "./repos/cases";
 export * from "./repos/user-opt-outs";
 export * from "./pat-revocation-store";
 export * from "./session-grant-service";

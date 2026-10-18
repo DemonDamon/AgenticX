@@ -4,6 +4,7 @@ import AgentsSection from "../_sections/agents";
 import ApiTokensSection from "../_sections/api-tokens";
 import CacheSection from "../_sections/cache";
 import CapabilitiesSection from "../_sections/capabilities";
+import CasesSection from "../_sections/cases";
 import ChannelsSection from "../_sections/channels";
 import ConnectorsSection from "../_sections/connectors";
 import McpServersSection from "../_sections/mcp-servers";
@@ -19,6 +20,7 @@ const PLATFORM_SECTION_PAGES = {
   "mcp-servers": McpServersSection,
   connectors: ConnectorsSection,
   capabilities: CapabilitiesSection,
+  cases: CasesSection,
   plugins: PluginsSection,
 } as const;
 

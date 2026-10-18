@@ -1531,10 +1531,36 @@ declare global {
         savePath?: string;
       }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       exportCanvasZip: (payload: {
-        files: { path: string }[];
+        files: { path: string; zipName?: string }[];
+        extraText?: { name: string; content: string }[];
         baseName: string;
         savePath?: string;
       }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
+      importCanvasPackage: () => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        rootDir?: string;
+        manifest?: unknown;
+        error?: string;
+      }>;
+      listEnterpriseCases: () => Promise<{
+        ok: boolean;
+        cases?: { id: string; title: string; summary: string; sourceRepo: string; status: string }[];
+        error?: string;
+      }>;
+      fetchEnterpriseCase: (caseId: string) => Promise<{
+        ok: boolean;
+        rootDir?: string;
+        manifest?: unknown;
+        error?: string;
+      }>;
+      submitEnterpriseCase: (payload: {
+        title: string;
+        summary: string;
+        sourceRepo: string;
+        manifest: unknown;
+        files: { path: string; zipName: string }[];
+      }) => Promise<{ ok: boolean; id?: string; status?: string; error?: string }>;
       writeLocalTextFile: (payload: {
         path: string;
         content: string;

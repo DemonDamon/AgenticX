@@ -45,6 +45,12 @@ import https from "node:https";
 import yaml from "js-yaml";
 import { extract as extractTar } from "tar";
 import { writeStoreZip } from "./zip-store";
+import {
+  downloadEnterpriseCase,
+  extractStoreZip,
+  listPublishedEnterpriseCases,
+  submitEnterpriseCase,
+} from "./canvas-case";
 import { isAppLocale, localeFromOsTag, type AppLocale } from "./app-locale";
 import {
   closeSplash,
@@ -12964,9 +12970,18 @@ function registerIpc(): void {
     try {
       const rawFiles = Array.isArray(payload?.files) ? payload.files : [];
       const filePaths = rawFiles
-        .map((item) => String((item as { path?: unknown })?.path ?? "").trim())
-        .filter(Boolean);
-      if (filePaths.length === 0) return { ok: false, error: "empty file list" };
+        .map((item) => {
+          const record = item as { path?: unknown; zipName?: unknown };
+          return {
+            path: String(record?.path ?? "").trim(),
+            zipName: String(record?.zipName ?? "").trim(),
+          };
+        })
+        .filter((item) => item.path);
+      const extraText = Array.isArray((payload as { extraText?: unknown })?.extraText)
+        ? ((payload as { extraText?: { name?: unknown; content?: unknown }[] }).extraText ?? [])
+        : [];
+      if (filePaths.length === 0 && extraText.length === 0) return { ok: false, error: "empty file list" };
       const baseName = sanitizeExportBaseName(payload?.baseName) || "design";
 
       let target = typeof payload?.savePath === "string" ? String(payload.savePath).trim() : "";
@@ -12983,24 +12998,140 @@ function registerIpc(): void {
 
       const usedNames = new Map<string, number>();
       const entries: { name: string; data: Buffer; mtime: Date }[] = [];
-      for (const filePath of filePaths) {
-        const normalized = normalizeLocalFsPath(filePath);
+      for (const file of filePaths) {
+        const normalized = normalizeLocalFsPath(file.path);
         if (!normalized || !fs.existsSync(normalized)) continue;
         const stat = await fs.promises.stat(normalized);
         if (!stat.isFile()) continue;
         const data = await fs.promises.readFile(normalized);
-        let name = path.basename(normalized);
+        let name = file.zipName || path.basename(normalized);
+        name = name.replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!name || name.split("/").includes("..")) continue;
         const seen = usedNames.get(name.toLowerCase()) ?? 0;
         usedNames.set(name.toLowerCase(), seen + 1);
         if (seen > 0) {
-          const ext = path.extname(name);
-          name = `${name.slice(0, name.length - ext.length)}-${seen + 1}${ext}`;
+          const slash = name.lastIndexOf("/");
+          const dir = slash >= 0 ? name.slice(0, slash + 1) : "";
+          const base = slash >= 0 ? name.slice(slash + 1) : name;
+          const ext = path.posix.extname(base);
+          name = `${dir}${base.slice(0, base.length - ext.length)}-${seen + 1}${ext}`;
         }
         entries.push({ name, data, mtime: stat.mtime });
+      }
+      for (const text of extraText) {
+        const name = String(text?.name ?? "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!name || name.split("/").includes("..")) continue;
+        entries.push({
+          name,
+          data: Buffer.from(String(text?.content ?? ""), "utf8"),
+          mtime: new Date(),
+        });
       }
       if (entries.length === 0) return { ok: false, error: "no readable files" };
       await writeStoreZip(target, entries);
       return { ok: true, path: target };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("import-canvas-package", async () => {
+    if (remoteConfig) return { ok: false, error: "远程模式不支持导入本地资产包" };
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    const dialogOptions: Electron.OpenDialogOptions = {
+      properties: ["openFile", "openDirectory"],
+      filters: [{ name: "View package", extensions: ["zip", "json"] }],
+    };
+    try {
+      const picked = focused
+        ? await dialog.showOpenDialog(focused, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+      if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true };
+      const selected = picked.filePaths[0];
+      const stat = await fs.promises.stat(selected);
+      let rootDir = selected;
+      if (stat.isFile()) {
+        const zip = await fs.promises.readFile(selected);
+        rootDir = path.join(os.homedir(), ".agenticx", "canvas-imports", String(Date.now()));
+        extractStoreZip(zip, rootDir);
+      }
+      const manifestPath = path.join(rootDir, "manifest.json");
+      if (!fs.existsSync(manifestPath)) return { ok: false, error: "manifest.json missing" };
+      const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as unknown;
+      return { ok: true, rootDir, manifest };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-enterprise-cases", async () => {
+    const cfg = loadAgxConfig();
+    const token = String(cfg.enterprise?.token ?? "").trim();
+    const portalUrl = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
+    if (!token || !portalUrl) return { ok: false, error: "enterprise-login-required" };
+    try {
+      return await listPublishedEnterpriseCases({ portalUrl, token });
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("fetch-enterprise-case", async (_event, caseId: unknown) => {
+    const id = String(caseId ?? "").trim();
+    if (!id) return { ok: false, error: "missing case id" };
+    const cfg = loadAgxConfig();
+    const token = String(cfg.enterprise?.token ?? "").trim();
+    const portalUrl = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
+    if (!token || !portalUrl) return { ok: false, error: "enterprise-login-required" };
+    const rootDir = path.join(os.homedir(), ".agenticx", "canvas-imports", id);
+    try {
+      const downloaded = await downloadEnterpriseCase({ portalUrl, token, id, destDir: rootDir });
+      if (!downloaded.ok) return downloaded;
+      const manifest = JSON.parse(await fs.promises.readFile(path.join(rootDir, "manifest.json"), "utf8")) as unknown;
+      return { ok: true, rootDir, manifest };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("submit-enterprise-case", async (_event, payload: {
+    title?: unknown;
+    summary?: unknown;
+    sourceRepo?: unknown;
+    manifest?: unknown;
+    files?: { path?: unknown; zipName?: unknown }[];
+  }) => {
+    const cfg = loadAgxConfig();
+    const token = String(cfg.enterprise?.token ?? "").trim();
+    const portalUrl = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
+    if (!token || !portalUrl) return { ok: false, error: "enterprise-login-required" };
+    try {
+      const entries: { name: string; data: Buffer }[] = [];
+      for (const file of Array.isArray(payload?.files) ? payload.files : []) {
+        const filePath = String(file?.path ?? "").trim();
+        const zipName = String(file?.zipName ?? "").trim().replace(/\\/g, "/");
+        if (!filePath || !zipName || zipName.split("/").includes("..")) continue;
+        const normalized = normalizeLocalFsPath(filePath);
+        if (!normalized || !fs.existsSync(normalized)) continue;
+        entries.push({ name: zipName, data: await fs.promises.readFile(normalized) });
+      }
+      entries.push({
+        name: "manifest.json",
+        data: Buffer.from(JSON.stringify(payload?.manifest ?? {}, null, 2), "utf8"),
+      });
+      const tmp = path.join(os.tmpdir(), `agx-case-${Date.now()}.zip`);
+      await writeStoreZip(tmp, entries);
+      const zip = await fs.promises.readFile(tmp);
+      await fs.promises.unlink(tmp).catch(() => undefined);
+      return await submitEnterpriseCase({
+        portalUrl,
+        token,
+        title: String(payload?.title ?? "").trim(),
+        summary: String(payload?.summary ?? ""),
+        sourceRepo: String(payload?.sourceRepo ?? ""),
+        manifest: payload?.manifest,
+        zip,
+      });
     } catch (err) {
       return { ok: false, error: String(err) };
     }

@@ -58,6 +58,7 @@
         "mcpServers": "MCP 托管",
         "connectors": "连接器",
         "capabilities": "能力包",
+        "cases": "案例库",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
         "perf": "性能分析"
@@ -353,6 +354,25 @@
           "noGroup": "还没有用户组",
           "groupMemberCount": "{count} 人",
           "groupHint": "用户组是授予：属于多个组的人取并集。"
+        }
+      },
+      "cases": {
+        "title": "案例库",
+        "description": "治理从 Near 回流的过程资产。归档后发布，本企业其他项目组才能看到并获取。",
+        "loading": "正在加载",
+        "empty": "还没有回流的案例",
+        "loadFailed": "案例列表加载失败",
+        "transitionFailed": "状态更新失败",
+        "noSummary": "没有说明",
+        "startReview": "开始治理",
+        "archive": "归档",
+        "publish": "发布给全公司",
+        "return": "退回",
+        "status": {
+          "submitted": "已提交",
+          "reviewing": "治理中",
+          "archived": "已归档",
+          "published": "已发布"
         }
       },
       "plugins": {

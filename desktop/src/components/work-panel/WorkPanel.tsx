@@ -109,6 +109,7 @@ import {
 } from "../workspace/html-preview-device";
 import { SessionArtifactList } from "./SessionArtifactList";
 import { DesignCanvasPanel, type CanvasFrame } from "./DesignCanvasPanel";
+import { loadCanvasFrames, saveCanvasFrames } from "../../utils/canvas-frames-store";
 import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
@@ -993,13 +994,6 @@ function EmptyBlock({
   );
 }
 
-/**
- * Canvas frames are session-scoped, but WorkPanel unmounts when the right-side
- * panel is toggled away. Keep a per-session module cache so closing the tab /
- * panel and reopening the canvas keeps the user's frame layout.
- */
-const canvasFramesBySession = new Map<string, CanvasFrame[]>();
-
 export function WorkPanel({
   paneId,
   sessionId,
@@ -1095,9 +1089,7 @@ export function WorkPanel({
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
   const [canvasTabOpen, setCanvasTabOpen] = useState(false);
-  const [canvasFrames, setCanvasFrames] = useState<CanvasFrame[]>(() =>
-    canvasFramesBySession.get(String(sessionId || "")) ? [...(canvasFramesBySession.get(String(sessionId || "")) ?? [])] : [],
-  );
+  const [canvasFrames, setCanvasFrames] = useState<CanvasFrame[]>(() => loadCanvasFrames(String(sessionId || "")));
   const [activeScratchId, setActiveScratchId] = useState<string | null>(null);
   const [pendingDismissParked, setPendingDismissParked] = useState<ScratchChat | null>(null);
   const [pendingClearHost, setPendingClearHost] = useState(false);
@@ -1181,17 +1173,18 @@ export function WorkPanel({
     setPinnedSummarySectionState(section);
   };
 
-  // Canvas frames are session-scoped and cached across panel remounts.
   const canvasSessionRef = useRef(String(sessionId || ""));
+  const canvasFramesRef = useRef(canvasFrames);
+  canvasFramesRef.current = canvasFrames;
   useEffect(() => {
     const sid = String(sessionId || "");
     if (sid !== canvasSessionRef.current) {
+      saveCanvasFrames(canvasSessionRef.current, canvasFramesRef.current);
       canvasSessionRef.current = sid;
-      setCanvasFrames(canvasFramesBySession.get(sid) ? [...(canvasFramesBySession.get(sid) ?? [])] : []);
+      setCanvasFrames(loadCanvasFrames(sid));
+      return;
     }
-  }, [sessionId]);
-  useEffect(() => {
-    canvasFramesBySession.set(String(sessionId || ""), canvasFrames);
+    saveCanvasFrames(sid, canvasFrames);
   }, [canvasFrames, sessionId]);
 
   useEffect(() => {

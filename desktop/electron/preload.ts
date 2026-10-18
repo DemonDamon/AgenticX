@@ -900,8 +900,46 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     baseName: string;
     savePath?: string;
   }) => ipcRenderer.invoke("export-canvas-frame-image", payload),
-  exportCanvasZip: async (payload: { files: { path: string }[]; baseName: string; savePath?: string }) =>
-    ipcRenderer.invoke("export-canvas-zip", payload),
+  exportCanvasZip: async (payload: {
+    files: { path: string; zipName?: string }[];
+    extraText?: { name: string; content: string }[];
+    baseName: string;
+    savePath?: string;
+  }) => ipcRenderer.invoke("export-canvas-zip", payload),
+  importCanvasPackage: async () =>
+    ipcRenderer.invoke("import-canvas-package") as Promise<{
+      ok: boolean;
+      canceled?: boolean;
+      rootDir?: string;
+      manifest?: unknown;
+      error?: string;
+    }>,
+  listEnterpriseCases: async () =>
+    ipcRenderer.invoke("list-enterprise-cases") as Promise<{
+      ok: boolean;
+      cases?: { id: string; title: string; summary: string; sourceRepo: string; status: string }[];
+      error?: string;
+    }>,
+  fetchEnterpriseCase: async (caseId: string) =>
+    ipcRenderer.invoke("fetch-enterprise-case", caseId) as Promise<{
+      ok: boolean;
+      rootDir?: string;
+      manifest?: unknown;
+      error?: string;
+    }>,
+  submitEnterpriseCase: async (payload: {
+    title: string;
+    summary: string;
+    sourceRepo: string;
+    manifest: unknown;
+    files: { path: string; zipName: string }[];
+  }) =>
+    ipcRenderer.invoke("submit-enterprise-case", payload) as Promise<{
+      ok: boolean;
+      id?: string;
+      status?: string;
+      error?: string;
+    }>,
   writeLocalTextFile: async (payload: {
     path: string;
     content: string;

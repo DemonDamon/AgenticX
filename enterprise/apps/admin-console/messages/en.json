@@ -58,6 +58,7 @@
         "mcpServers": "MCP Hosting",
         "connectors": "Connectors",
         "capabilities": "Capability Packs",
+        "cases": "Case Library",
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
         "perf": "Performance Profiling"
@@ -353,6 +354,25 @@
           "noGroup": "No groups yet",
           "groupMemberCount": "{count} people",
           "groupHint": "Groups grant access. Membership in multiple groups is a union."
+        }
+      },
+      "cases": {
+        "title": "Case library",
+        "description": "Govern process assets submitted from Near. Other teams can fetch a case only after it is archived and published.",
+        "loading": "Loading",
+        "empty": "No submitted cases yet",
+        "loadFailed": "Could not load cases",
+        "transitionFailed": "Could not update status",
+        "noSummary": "No summary",
+        "startReview": "Start review",
+        "archive": "Archive",
+        "publish": "Publish company-wide",
+        "return": "Return",
+        "status": {
+          "submitted": "Submitted",
+          "reviewing": "In review",
+          "archived": "Archived",
+          "published": "Published"
         }
       },
       "plugins": {

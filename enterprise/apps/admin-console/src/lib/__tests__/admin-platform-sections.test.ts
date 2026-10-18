@@ -12,6 +12,7 @@ describe("isPlatformSection", () => {
       "mcp-servers",
       "connectors",
       "capabilities",
+      "cases",
       "plugins",
     ]);
     for (const id of PLATFORM_SECTION_IDS) {

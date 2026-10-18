@@ -19,12 +19,12 @@ describe("postgresql migration inventory", () => {
       entries: Array<{ tag: string; idx: number }>;
     };
     expect(journal.dialect).toBe("postgresql");
-    expect(journal.entries).toHaveLength(55);
-    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(55).keys()]);
+    expect(journal.entries).toHaveLength(56);
+    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(56).keys()]);
     expect(journal.entries.slice(-3).map((e) => e.tag)).toEqual([
-      "0053_enterprise_agents",
       "0054_enterprise_agent_tasks",
       "0055_enterprise_agent_lifecycle",
+      "0056_enterprise_cases",
     ]);
   });
 
@@ -32,7 +32,7 @@ describe("postgresql migration inventory", () => {
     const sqlFiles = readdirSync(drizzleDir)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    expect(sqlFiles).toHaveLength(57);
+    expect(sqlFiles).toHaveLength(58);
 
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
