@@ -3272,6 +3272,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [stallTick, setStallTick] = useState(0);
   const [bgCompleteToast, setBgCompleteToast] = useState(false);
   const [stallHintToast, setStallHintToast] = useState("");
+  const [artifactOpenErrorToast, setArtifactOpenErrorToast] = useState("");
   const [continueCreatingToast, setContinueCreatingToast] = useState(false);
   const [stallRejectReason, setStallRejectReason] = useState("");
   const [resumeInFlight, setResumeInFlight] = useState(false);
@@ -6369,8 +6370,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (stat) {
       try {
         const info = await stat(path);
-        if (!info?.ok) return;
+        if (!info?.ok) {
+          setArtifactOpenErrorToast(t("artifact.openFailed"));
+          return;
+        }
       } catch {
+        setArtifactOpenErrorToast(t("artifact.openFailed"));
         return;
       }
     }
@@ -8661,6 +8666,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const t = window.setTimeout(() => setStallHintToast(""), 2800);
     return () => window.clearTimeout(t);
   }, [stallHintToast]);
+
+  useEffect(() => {
+    if (!artifactOpenErrorToast) return;
+    const t = window.setTimeout(() => setArtifactOpenErrorToast(""), 2800);
+    return () => window.clearTimeout(t);
+  }, [artifactOpenErrorToast]);
 
   const resumeCurrentTask = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
@@ -14795,6 +14806,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <div className="pointer-events-none mb-1 flex justify-center">
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
                 {stallHintToast}
+              </div>
+            </div>
+          ) : null}
+          {artifactOpenErrorToast ? (
+            <div className="pointer-events-none mb-1 flex justify-center">
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
+                {artifactOpenErrorToast}
               </div>
             </div>
           ) : null}

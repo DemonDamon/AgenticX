@@ -762,7 +762,8 @@
     "viewAllArtifacts": "View all artifacts ({{count}})",
     "viewAllChanges": "View all changes ({{count}})",
     "collapse": "Collapse artifacts",
-    "viewAllCount": "View all {{count}} artifacts"
+    "viewAllCount": "View all {{count}} artifacts",
+    "openFailed": "File has been moved or deleted and cannot be opened"
   },
   "contextUsage": {
     "title": "Context usage",

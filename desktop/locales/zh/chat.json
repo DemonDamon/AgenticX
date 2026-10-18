@@ -762,7 +762,8 @@
     "viewAllArtifacts": "查看所有产物 ({{count}})",
     "viewAllChanges": "查看所有变更 ({{count}})",
     "collapse": "收起产物",
-    "viewAllCount": "查看全部 {{count}} 个产物"
+    "viewAllCount": "查看全部 {{count}} 个产物",
+    "openFailed": "文件已被移动或删除，无法打开"
   },
   "contextUsage": {
     "title": "上下文用量",
