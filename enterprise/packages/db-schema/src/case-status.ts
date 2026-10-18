@@ -47,3 +47,15 @@ export function isViewPackageManifest(value: unknown): value is { format: string
   const record = value as Record<string, unknown>;
   return record.format === VIEW_PACKAGE_FORMAT && Array.isArray(record.pages) && record.pages.length > 0;
 }
+
+/** A page file may be previewed only when the manifest lists that exact relative path. */
+export function casePageFile(manifest: unknown, file: string): string | null {
+  const name = file.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!name || name.split("/").includes("..")) return null;
+  if (!isViewPackageManifest(manifest)) return null;
+  const listed = manifest.pages.some((page) => {
+    if (!page || typeof page !== "object" || Array.isArray(page)) return false;
+    return String((page as { file?: unknown }).file ?? "").replace(/\\/g, "/") === name;
+  });
+  return listed ? name : null;
+}

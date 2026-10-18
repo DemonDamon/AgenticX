@@ -368,6 +368,12 @@
         "archive": "Archive",
         "publish": "Publish company-wide",
         "return": "Return",
+        "open": "Open case",
+        "back": "Back to list",
+        "openFailed": "Could not open this case",
+        "noPages": "This case has no pages to preview",
+        "pageLoading": "Opening page",
+        "pageFailed": "Could not open this page",
         "status": {
           "submitted": "Submitted",
           "reviewing": "In review",

@@ -368,6 +368,12 @@
         "archive": "归档",
         "publish": "发布给全公司",
         "return": "退回",
+        "open": "打开案例",
+        "back": "返回列表",
+        "openFailed": "案例打开失败",
+        "noPages": "这个案例还没有可预览的页面",
+        "pageLoading": "正在打开页面",
+        "pageFailed": "页面打开失败",
         "status": {
           "submitted": "已提交",
           "reviewing": "治理中",
