@@ -256,7 +256,7 @@ export function CollabRoomConversation({
   const [roomCommand, setRoomCommand] = useState<VisibleCommand | null>(null);
   const [commandItems, setCommandItems] = useState<VisibleCommand[]>([]);
   const [perfCard, setPerfCard] = useState<{ error: string } | null>(null);
-  const [sending, setSending] = useState(false);
+  const sendChainRef = useRef<Promise<void>>(Promise.resolve());
   const [sendError, setSendError] = useState<string | null>(null);
   const [approvedSeqs, setApprovedSeqs] = useState<Set<number>>(new Set());
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -509,20 +509,17 @@ export function CollabRoomConversation({
     } else {
       text = composeRoomCommandSend(roomCommand, draft).trim();
     }
-    if (!roomId || !text || sending || status === "revoked") return;
+    if (!roomId || !text || status === "revoked") return;
     const clientMsgId = crypto.randomUUID();
-    setSending(true);
     setSendError(null);
     setDraft("");
     setRoomCommand(null);
-    try {
-      await deliver(text, clientMsgId);
-    } finally {
-      setSending(false);
-    }
+    placeOptimistic(text, clientMsgId);
+    const queued = sendChainRef.current.then(() => deliver(text, clientMsgId));
+    sendChainRef.current = queued.catch(() => undefined);
   };
 
-  const deliver = async (text: string, clientMsgId: string) => {
+  const placeOptimistic = (text: string, clientMsgId: string) => {
     const optimistic: ConversationMessage = {
       id: clientMsgId,
       room_id: roomId,
@@ -538,6 +535,10 @@ export function CollabRoomConversation({
       const without = list.filter((item) => item.client_msg_id !== clientMsgId && item.id !== clientMsgId);
       return placeMessage(without, optimistic);
     });
+  };
+
+  const deliver = async (text: string, clientMsgId: string) => {
+    placeOptimistic(text, clientMsgId);
     const markFailed = () => {
       setMessages((list) => list.map((item) => (item.client_msg_id === clientMsgId ? { ...item, status: "failed" } : item)));
     };
@@ -784,11 +785,8 @@ export function CollabRoomConversation({
               ? roomCommand.kind === "local"
                 ? tChat("composer.commands.placeholderPerfRoom")
                 : tChat("composer.commands.placeholderPrompt")
-              : sending
-                ? t("collab.sending")
-                : t("collab.inputPlaceholder")
+              : t("collab.inputPlaceholder")
           }
-          disabled={sending}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -809,7 +807,7 @@ export function CollabRoomConversation({
         <button
           type="submit"
           className="shrink-0 rounded-md border border-border bg-surface-card-strong px-3 py-2 text-sm text-text-strong disabled:opacity-50"
-          disabled={sending || (!draft.trim() && roomCommand?.kind !== "prompt")}
+          disabled={(!draft.trim() && roomCommand?.kind !== "prompt")}
         >
           {t("collab.send")}
         </button>
