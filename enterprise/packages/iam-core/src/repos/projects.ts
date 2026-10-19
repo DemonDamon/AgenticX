@@ -292,7 +292,10 @@ export function adminProjectScopeSql(
 
 function iso(value: Date | string): string {
   if (value instanceof Date) return value.toISOString();
-  const parsed = Date.parse(String(value));
+  const text = String(value);
+  // MySQL raw aggregates return zone-less UTC datetimes.
+  const zoneless = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(text);
+  const parsed = Date.parse(zoneless ? `${text.replace(" ", "T")}Z` : text);
   if (Number.isNaN(parsed)) return String(value);
   return new Date(parsed).toISOString();
 }
@@ -545,17 +548,18 @@ async function queryRooms(tenantId: string, projectId: string): Promise<AdminPro
         title: tables.rooms.title,
         room_kind: tables.rooms.roomKind,
         parent_room_id: tables.rooms.parentRoomId,
+        // Single-table selects render columns unqualified, so correlate by table name.
         member_count: sql<number>`(
           select count(*) from enterprise_collab_room_members m
-          where m.room_id = ${tables.rooms.id} and m.left_at is null
+          where m.room_id = enterprise_collab_rooms.id and m.left_at is null
         )`,
         message_count: sql<number>`(
           select count(*) from enterprise_collab_room_messages g
-          where g.room_id = ${tables.rooms.id}
+          where g.room_id = enterprise_collab_rooms.id
         )`,
         last_seq: sql<number>`coalesce((
           select max(g.seq) from enterprise_collab_room_messages g
-          where g.room_id = ${tables.rooms.id}
+          where g.room_id = enterprise_collab_rooms.id
         ), 0)`,
       })
       .from(tables.rooms)
