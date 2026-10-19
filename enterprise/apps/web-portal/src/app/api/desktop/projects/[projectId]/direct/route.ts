@@ -7,6 +7,7 @@ import {
   desktopRoomContext,
   desktopRoomErrorResponse,
   desktopRoomUnauthorized,
+  isValidCollabUserId,
   recordCollabAudit,
 } from "../../../../../../lib/desktop-collab-room-http";
 
@@ -26,7 +27,7 @@ export async function POST(request: Request, segmentData: { params: Params }) {
   }
   const peerUserId = typeof body.peer_user_id === "string" ? body.peer_user_id.trim() : "";
   const peerDisplayName = typeof body.peer_display_name === "string" ? body.peer_display_name.trim() : "";
-  if (!isValidUlid(peerUserId)) return collabRoomBadRequest("invalid peer user id");
+  if (!isValidCollabUserId(peerUserId)) return collabRoomBadRequest("invalid peer user id");
   if (!peerDisplayName) return collabRoomBadRequest("peer_display_name required");
 
   try {

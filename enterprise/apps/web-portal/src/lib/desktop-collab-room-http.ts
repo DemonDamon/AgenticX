@@ -12,6 +12,13 @@ export function desktopRoomUnauthorized(): NextResponse {
   );
 }
 
+const USER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Tenant user ids are ULIDs for new accounts but older seeded accounts use slug ids. */
+export function isValidCollabUserId(value: string): boolean {
+  return USER_ID_RE.test(value);
+}
+
 export function desktopRoomContext(identity: DesktopIdentity): CollabRoomContext {
   return { tenantId: identity.tenantId, userId: identity.userId };
 }

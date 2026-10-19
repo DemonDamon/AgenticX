@@ -7,6 +7,7 @@ import {
   desktopRoomContext,
   desktopRoomErrorResponse,
   desktopRoomUnauthorized,
+  isValidCollabUserId,
   recordCollabAudit,
 } from "../../../../../../lib/desktop-collab-room-http";
 
@@ -31,7 +32,7 @@ function readMembers(value: unknown): Array<{ userId: string; displayName: strin
     const row = item as { user_id?: unknown; display_name?: unknown };
     const userId = typeof row.user_id === "string" ? row.user_id.trim() : "";
     const displayName = typeof row.display_name === "string" ? row.display_name.trim() : "";
-    if (!isValidUlid(userId) || !displayName) return "invalid";
+    if (!isValidCollabUserId(userId) || !displayName) return "invalid";
     members.push({ userId, displayName });
   }
   return members;

@@ -219,6 +219,34 @@ describe("desktop project routes", () => {
     );
   });
 
+  it("POST /api/desktop/projects/:id/members accepts slug user ids and rejects unsafe ones", async () => {
+    vi.mocked(addProjectMember).mockResolvedValueOnce({
+      id: "01MEM0AAAAAAAAAAAAAAAAAAAA",
+      room_id: ROOM,
+      member_type: "human",
+      member_id: "user_alice_agenticx_local",
+      display_name: "alice",
+      room_role: "member",
+      joined_at: "2026-10-19T00:00:00.000Z",
+    });
+    const ok = await POST_MEMBER(
+      new Request(`http://localhost/api/desktop/projects/${PROJECT}/members`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: "user_alice_agenticx_local", display_name: "alice" }),
+      }),
+      { params: Promise.resolve({ projectId: PROJECT }) },
+    );
+    expect(ok.status).toBe(200);
+    const bad = await POST_MEMBER(
+      new Request(`http://localhost/api/desktop/projects/${PROJECT}/members`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: "../etc/passwd", display_name: "x" }),
+      }),
+      { params: Promise.resolve({ projectId: PROJECT }) },
+    );
+    expect(bad.status).toBe(400);
+  });
+
   it("POST /api/desktop/projects/:id/direct returns 401 without a PAT", async () => {
     resolveDesktopIdentity.mockResolvedValueOnce(null);
     const res = await POST_DIRECT(

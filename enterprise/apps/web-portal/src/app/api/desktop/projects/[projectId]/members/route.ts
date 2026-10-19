@@ -7,6 +7,7 @@ import {
   desktopRoomContext,
   desktopRoomErrorResponse,
   desktopRoomUnauthorized,
+  isValidCollabUserId,
   recordCollabAudit,
 } from "../../../../../../lib/desktop-collab-room-http";
 
@@ -32,7 +33,7 @@ export async function POST(request: Request, segmentData: { params: Params }) {
   }
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   const displayName = typeof body.display_name === "string" ? body.display_name.trim() : "";
-  if (!isValidUlid(userId)) return collabRoomBadRequest("invalid user id");
+  if (!isValidCollabUserId(userId)) return collabRoomBadRequest("invalid user id");
   if (!displayName) return collabRoomBadRequest("display_name required");
   const role = readRole(body.role);
   if (role === "invalid") return collabRoomBadRequest("invalid role");
