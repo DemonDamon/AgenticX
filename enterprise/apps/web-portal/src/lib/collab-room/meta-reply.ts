@@ -27,15 +27,20 @@ export type TriggerMetaReplyDeps = {
 const SYSTEM_UNAVAILABLE = "智能体暂时不可用，请稍后再试";
 const SYSTEM_NO_MODEL = "智能体暂时不可用（未配置可用模型）";
 const CONTENT_LIMIT = 4000;
+const MERGE_BACK_CONTENT_LIMIT = 12000;
 
 /** 房间里是否点名了 Meta。大小写不敏感；要求 @ 紧邻 meta。 */
 export function mentionsMeta(content: string): boolean {
   return /(^|[\s，,。.:：;；!！?？(（])@meta\b/i.test(content);
 }
 
-function clipContent(content: string): string {
-  if (content.length <= CONTENT_LIMIT) return content;
-  return `${content.slice(0, CONTENT_LIMIT)}…`;
+function contentLimit(item: CollabRoomMessage): number {
+  return item.metadata?.kind === "merge_back" ? MERGE_BACK_CONTENT_LIMIT : CONTENT_LIMIT;
+}
+
+function clipContent(content: string, limit = CONTENT_LIMIT): string {
+  if (content.length <= limit) return content;
+  return `${content.slice(0, limit)}…`;
 }
 
 export function buildMetaPrompt(
@@ -51,12 +56,13 @@ export function buildMetaPrompt(
     },
   ];
   for (const item of ordered) {
+    const clipped = clipContent(item.content, contentLimit(item));
     if (item.sender_type === "meta") {
-      messages.push({ role: "assistant", content: clipContent(item.content) });
+      messages.push({ role: "assistant", content: clipped });
       continue;
     }
     const name = item.sender_name?.trim() || item.sender_id;
-    messages.push({ role: "user", content: `${name}：${clipContent(item.content)}` });
+    messages.push({ role: "user", content: `${name}：${clipped}` });
   }
   return messages;
 }

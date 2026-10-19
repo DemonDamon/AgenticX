@@ -2,13 +2,18 @@ import { resolveDatabaseConfig } from "@agenticx/iam-core";
 import { mysqlCollabRoomStore } from "./mysql";
 import { postgresqlCollabRoomStore } from "./postgresql";
 import type {
+  CollabMergeMode,
+  CollabMergeResult,
+  CollabProject,
+  CollabProjectRoom,
+  CollabProjectSettings,
   CollabRoom,
   CollabRoomContext,
   CollabRoomMember,
   CollabRoomMessage,
+  CollabRoomRole,
   CollabRoomStore,
   CollabSenderType,
-  CollabRoomRole,
 } from "./types";
 
 export {
@@ -18,8 +23,16 @@ export {
 } from "./types";
 export type {
   CollabMemberType,
+  CollabMergeApplied,
+  CollabMergeMode,
+  CollabMergePending,
+  CollabMergeResult,
+  CollabProject,
+  CollabProjectRoom,
+  CollabProjectSettings,
   CollabRoom,
   CollabRoomContext,
+  CollabRoomKind,
   CollabRoomMember,
   CollabRoomMessage,
   CollabRoomRole,
@@ -102,9 +115,82 @@ export function appendMessage(
     content: string;
     model?: string;
     metadata?: Record<string, unknown>;
+    clientMsgId?: string;
   },
 ): Promise<CollabRoomMessage> {
   return store().appendMessage(ctx, roomId, input);
+}
+
+export function createProject(
+  ctx: CollabRoomContext,
+  input: {
+    name: string;
+    instructions?: string;
+    settings?: CollabProjectSettings;
+    deptId?: string | null;
+    displayName: string;
+    memberUserIds?: Array<{ userId: string; displayName: string }>;
+  },
+): Promise<CollabProject> {
+  return store().createProject(ctx, input);
+}
+
+export function listProjects(ctx: CollabRoomContext): Promise<CollabProject[]> {
+  return store().listProjects(ctx);
+}
+
+export function getProject(ctx: CollabRoomContext, projectId: string): Promise<CollabProjectRoom> {
+  return store().getProject(ctx, projectId);
+}
+
+export function addProjectMember(
+  ctx: CollabRoomContext,
+  projectId: string,
+  input: { userId: string; displayName: string; role?: CollabRoomRole },
+): Promise<CollabRoomMember> {
+  return store().addProjectMember(ctx, projectId, input);
+}
+
+export function createSubRoom(
+  ctx: CollabRoomContext,
+  parentRoomId: string,
+  input: {
+    title: string;
+    memberUserIds: Array<{ userId: string; displayName: string }>;
+    agentIds?: string[];
+    seedMessageIds?: string[];
+  },
+): Promise<CollabRoom> {
+  return store().createSubRoom(ctx, parentRoomId, input);
+}
+
+export function openDirectRoom(
+  ctx: CollabRoomContext,
+  projectId: string,
+  input: { peerUserId: string; peerDisplayName: string },
+): Promise<CollabRoom> {
+  return store().openDirectRoom(ctx, projectId, input);
+}
+
+export function mergeBack(
+  ctx: CollabRoomContext,
+  sourceRoomId: string,
+  input: {
+    targetRoomId: string;
+    mode: CollabMergeMode;
+    messageIds?: string[];
+    summaryText?: string;
+  },
+): Promise<CollabMergeResult> {
+  return store().mergeBack(ctx, sourceRoomId, input);
+}
+
+export function approveMerge(
+  ctx: CollabRoomContext,
+  sourceRoomId: string,
+  mergeRequestSeq: number,
+): Promise<CollabRoomMessage> {
+  return store().approveMerge(ctx, sourceRoomId, mergeRequestSeq);
 }
 
 export function appendAgentMessageAsSystem(

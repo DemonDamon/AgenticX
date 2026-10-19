@@ -27,6 +27,7 @@ function msg(partial: Partial<CollabRoomMessage> & Pick<CollabRoomMessage, "seq"
     sender_type: "human",
     sender_id: session.userId,
     sender_name: "Alice",
+    client_msg_id: null,
     created_at: "2026-08-28T00:00:00.000Z",
     ...partial,
   };
@@ -74,6 +75,21 @@ describe("buildMetaPrompt", () => {
     const user = prompt.find((item) => item.role === "user");
     expect(user?.content.endsWith("…")).toBe(true);
     expect(user?.content.length).toBe("Alice：".length + 4000 + 1);
+  });
+
+  it("buildMetaPrompt keeps a long merge_back message past the 4000 cap", () => {
+    const body = "合".repeat(9000);
+    const prompt = buildMetaPrompt([
+      msg({
+        seq: 1,
+        content: body,
+        sender_name: "系统",
+        metadata: { kind: "merge_back" },
+      }),
+    ]);
+    const user = prompt.find((item) => item.role === "user");
+    expect(user?.content).toContain(body);
+    expect((user?.content.length ?? 0) > 4000).toBe(true);
   });
 });
 

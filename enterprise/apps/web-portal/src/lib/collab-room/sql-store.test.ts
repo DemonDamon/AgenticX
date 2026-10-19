@@ -418,3 +418,326 @@ describe("SqlCollabRoomStore", () => {
     expect(insert?.inTransaction).toBe(true);
   });
 });
+
+type Row = Record<string, unknown>;
+
+function createMemoryClient(): SqlClient & { memory: { rooms: Row[]; messages: Row[] } } {
+  const projects: Row[] = [];
+  const rooms: Row[] = [];
+  const members: Row[] = [];
+  const messages: Row[] = [];
+  const users = [
+    { id: USER, tenant_id: TENANT },
+    { id: OTHER, tenant_id: TENANT },
+  ];
+
+  function roomView(row: Row): Row {
+    const roomMessages = messages.filter((item) => item.room_id === row.id);
+    const seqs = roomMessages.map((item) => Number(item.seq));
+    return {
+      ...row,
+      member_count: members.filter((item) => item.room_id === row.id && item.left_at == null).length,
+      last_seq: seqs.length ? Math.max(...seqs) : 0,
+      last_message_at: roomMessages.at(-1)?.created_at ?? null,
+    };
+  }
+
+  function insert(table: string, cols: string[], params: unknown[]) {
+    const row: Row = {};
+    cols.forEach((col, index) => {
+      row[col] = params[index];
+    });
+    if (table === "enterprise_projects") projects.push(row);
+    else if (table === "enterprise_collab_rooms") rooms.push(row);
+    else if (table === "enterprise_collab_room_members") members.push(row);
+    else if (table === "enterprise_collab_room_messages") messages.push(row);
+    else throw new Error(`insert ${table}`);
+  }
+
+  const client: SqlClient & { memory: { rooms: Row[]; messages: Row[] } } = {
+    memory: { rooms, messages },
+    async query(statement, params = []) {
+      const sql = normalize(statement);
+      const insertMatch = sql.match(/^insert into ([a-z0-9_]+) \(([^)]+)\) values/);
+      if (insertMatch?.[1] && insertMatch[2]) {
+        insert(
+          insertMatch[1],
+          insertMatch[2].split(",").map((col) => col.trim()),
+          params,
+        );
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.startsWith("update enterprise_projects")) {
+        const row = projects.find((item) => item.id === params[2] && item.tenant_id === params[3]);
+        if (row) {
+          row.main_room_id = params[0];
+          row.updated_at = params[1];
+        }
+        return { rows: [], rowCount: row ? 1 : 0 };
+      }
+      if (sql.startsWith("update enterprise_collab_rooms")) {
+        const row = rooms.find((item) => item.id === params[1]);
+        if (row) row.updated_at = params[0];
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.startsWith("update enterprise_collab_room_messages")) {
+        const row = messages.find((item) => item.room_id === params[2] && Number(item.seq) === Number(params[3]));
+        if (row) {
+          row.metadata = params[0];
+          row.updated_at = params[1];
+        }
+        return { rows: [], rowCount: row ? 1 : 0 };
+      }
+      if (sql.includes("from users")) {
+        const row = users.find((item) => item.tenant_id === params[0] && item.id === params[1]);
+        return row ? { rows: [{ id: row.id, tenant_id: row.tenant_id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("from enterprise_projects")) {
+        if (sql.includes("select id, main_room_id")) {
+          const row = projects.find((item) => item.id === params[0] && item.tenant_id === params[1]);
+          return row ? { rows: [{ id: row.id, main_room_id: row.main_room_id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("where p.id =")) {
+          const row = projects.find((item) => item.id === params[0] && item.tenant_id === params[1]);
+          if (!row) return { rows: [], rowCount: 0 };
+          return {
+            rows: [
+              {
+                ...row,
+                member_count: members.filter((item) => item.room_id === row.main_room_id && item.left_at == null).length,
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        throw new Error(`unhandled project sql: ${sql}`);
+      }
+      if (sql.includes("from enterprise_collab_rooms")) {
+        if (sql.includes("room_kind = 'direct'") && sql.includes("exists")) {
+          const [tenantId, projectId, userId, peerId] = params;
+          const room = rooms.find(
+            (item) =>
+              item.tenant_id === tenantId &&
+              item.project_id === projectId &&
+              item.room_kind === "direct" &&
+              members.some(
+                (member) =>
+                  member.room_id === item.id &&
+                  member.member_type === "human" &&
+                  member.member_id === userId &&
+                  member.left_at == null,
+              ) &&
+              members.some(
+                (member) =>
+                  member.room_id === item.id &&
+                  member.member_type === "human" &&
+                  member.member_id === peerId &&
+                  member.left_at == null,
+              ),
+          );
+          return room ? { rows: [{ id: room.id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("where r.id =")) {
+          const room = rooms.find((item) => item.id === params[0] && item.tenant_id === params[1]);
+          return room ? { rows: [roomView(room)], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("project_id, title, room_kind")) {
+          const room = rooms.find((item) => item.id === params[0] && item.tenant_id === params[1]);
+          return room ? { rows: [room], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("select id from enterprise_collab_rooms")) {
+          const room = rooms.find((item) => item.id === params[0] && item.tenant_id === params[1]);
+          return room ? { rows: [{ id: room.id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        throw new Error(`unhandled room sql: ${sql}`);
+      }
+      if (sql.includes("from enterprise_collab_room_messages")) {
+        if (sql.includes("coalesce(max(seq)")) {
+          const seqs = messages.filter((item) => item.room_id === params[0]).map((item) => Number(item.seq));
+          return { rows: [{ max_seq: seqs.length ? Math.max(...seqs) : 0 }], rowCount: 1 };
+        }
+        if (sql.includes("client_msg_id =")) {
+          const row = messages.find((item) => item.room_id === params[0] && item.client_msg_id === params[1]);
+          return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("where id =")) {
+          const row = messages.find((item) => item.id === params[0]);
+          return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        let rows = messages.filter((item) => item.room_id === params[0]);
+        if (sql.includes("tenant_id =")) rows = rows.filter((item) => item.tenant_id === params[1]);
+        if (sql.includes("and seq =")) {
+          rows = rows.filter((item) => Number(item.seq) === Number(params[params.length - 1]));
+        }
+        if (sql.includes("id in")) {
+          const ids = params.slice(2);
+          rows = rows.filter((item) => ids.includes(item.id));
+        }
+        rows = rows.slice().sort((a, b) => Number(a.seq) - Number(b.seq));
+        if (sql.includes("limit 1")) rows = rows.slice(0, 1);
+        else if (sql.includes(" limit ")) {
+          const limit = Number(params[params.length - 1]);
+          if (Number.isFinite(limit)) rows = rows.slice(0, limit);
+        }
+        return { rows, rowCount: rows.length };
+      }
+      if (sql.includes("from enterprise_collab_room_members")) {
+        let rows = members.filter((item) => item.room_id === params[0]);
+        if (sql.includes("tenant_id =")) rows = rows.filter((item) => item.tenant_id === params[1]);
+        if (sql.includes("left_at is null")) rows = rows.filter((item) => item.left_at == null);
+        if (sql.includes("member_type = 'human'")) rows = rows.filter((item) => item.member_type === "human");
+        if (sql.includes("member_id =")) rows = rows.filter((item) => item.member_id === params[params.length - 1]);
+        if (sql.includes("limit 1")) rows = rows.slice(0, 1);
+        return { rows, rowCount: rows.length };
+      }
+      throw new Error(`unhandled sql: ${sql}`);
+    },
+    async transaction(callback) {
+      return callback(client);
+    },
+    close() {},
+  };
+  return client;
+}
+
+async function setupProject() {
+  const client = createMemoryClient();
+  const store = new SqlCollabRoomStore("postgresql", client);
+  const project = await store.createProject(ctx, {
+    name: "阿尔法",
+    displayName: "Alice",
+    memberUserIds: [{ userId: OTHER, displayName: "Bob" }],
+  });
+  return { client, store, project };
+}
+
+describe("project collaboration store", () => {
+  it("createProject opens a main room with owner, meta and invitees", async () => {
+    const { store, project } = await setupProject();
+    expect(project.main_room_id).toBeTruthy();
+    const main = await store.getRoom(ctx, project.main_room_id);
+    expect(main.room_kind).toBe("main");
+    const members = await store.listMembers(ctx, project.main_room_id);
+    expect(members.map((member) => `${member.member_type}:${member.member_id}`).sort()).toEqual(
+      [`human:${OTHER}`, `human:${USER}`, "meta:meta"].sort(),
+    );
+    expect(members.find((member) => member.member_id === USER)?.room_role).toBe("owner");
+  });
+
+  it("createSubRoom rejects a member who is not in the parent room", async () => {
+    const { store, project } = await setupProject();
+    await expect(
+      store.createSubRoom(ctx, project.main_room_id, {
+        title: "小群",
+        memberUserIds: [{ userId: "01USERCCCCCCCCCCCCCCCCCC", displayName: "Cara" }],
+      }),
+    ).rejects.toBeInstanceOf(CollabRoomBadRequestError);
+  });
+
+  it("openDirectRoom returns the same room for the same pair", async () => {
+    const { client, store, project } = await setupProject();
+    const first = await store.openDirectRoom(ctx, project.id, {
+      peerUserId: OTHER,
+      peerDisplayName: "Bob",
+    });
+    const second = await store.openDirectRoom(ctx, project.id, {
+      peerUserId: OTHER,
+      peerDisplayName: "Bob",
+    });
+    expect(second.id).toBe(first.id);
+    expect(client.memory.rooms.filter((room) => room.room_kind === "direct")).toHaveLength(1);
+    expect(first.room_kind).toBe("direct");
+  });
+
+  it("appendMessage with the same clientMsgId returns the original seq", async () => {
+    const { client, store, project } = await setupProject();
+    const first = await store.appendMessage(ctx, project.main_room_id, {
+      senderType: "human",
+      senderId: USER,
+      senderName: "Alice",
+      content: "hello",
+      clientMsgId: "client-1",
+    });
+    const second = await store.appendMessage(ctx, project.main_room_id, {
+      senderType: "human",
+      senderId: USER,
+      senderName: "Alice",
+      content: "hello again",
+      clientMsgId: "client-1",
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.seq).toBe(first.seq);
+    expect(client.memory.messages.filter((message) => message.room_id === project.main_room_id)).toHaveLength(1);
+  });
+
+  it("mergeBack from a sub room writes one merge_back message per mode", async () => {
+    const { store, project } = await setupProject();
+    const sub = await store.createSubRoom(ctx, project.main_room_id, {
+      title: "小群",
+      memberUserIds: [{ userId: OTHER, displayName: "Bob" }],
+    });
+    const first = await store.appendMessage(ctx, sub.id, {
+      senderType: "human",
+      senderId: USER,
+      senderName: "Alice",
+      content: "第一条",
+    });
+    await store.appendMessage(ctx, sub.id, {
+      senderType: "human",
+      senderId: USER,
+      senderName: "Alice",
+      content: "第二条",
+    });
+    const merged = [
+      await store.mergeBack(ctx, sub.id, { targetRoomId: project.main_room_id, mode: "all" }),
+      await store.mergeBack(ctx, sub.id, {
+        targetRoomId: project.main_room_id,
+        mode: "selected",
+        messageIds: [first.id],
+      }),
+      await store.mergeBack(ctx, sub.id, {
+        targetRoomId: project.main_room_id,
+        mode: "summary",
+        summaryText: "两句话的摘要",
+      }),
+    ];
+    expect(merged).toHaveLength(3);
+    for (const item of merged) {
+      expect(item.pending).toBe(false);
+      if (item.pending) continue;
+      expect(item.message.metadata?.kind).toBe("merge_back");
+      expect(item.message.content.startsWith("【合回")).toBe(true);
+    }
+  });
+
+  it("mergeBack from a direct room stays pending until the other person approves", async () => {
+    const { store, project } = await setupProject();
+    const direct = await store.openDirectRoom(ctx, project.id, {
+      peerUserId: OTHER,
+      peerDisplayName: "Bob",
+    });
+    await store.appendMessage(ctx, direct.id, {
+      senderType: "human",
+      senderId: USER,
+      senderName: "Alice",
+      content: "私下说一句",
+    });
+    const pending = await store.mergeBack(ctx, direct.id, {
+      targetRoomId: project.main_room_id,
+      mode: "all",
+    });
+    expect(pending.pending).toBe(true);
+    if (!pending.pending) return;
+    const before = await store.listMessages(ctx, project.main_room_id);
+    expect(before.some((message) => message.metadata?.kind === "merge_back")).toBe(false);
+    const approved = await store.approveMerge(
+      { tenantId: TENANT, userId: OTHER },
+      direct.id,
+      pending.request_seq,
+    );
+    expect(approved.metadata?.kind).toBe("merge_back");
+    expect(approved.content.startsWith("【合回")).toBe(true);
+    const after = await store.listMessages(ctx, project.main_room_id);
+    expect(after.some((message) => message.id === approved.id)).toBe(true);
+  });
+});

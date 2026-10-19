@@ -6,12 +6,55 @@ export type CollabRoomContext = {
 export type CollabMemberType = "human" | "meta" | "agent";
 export type CollabSenderType = CollabMemberType | "system";
 export type CollabRoomRole = "owner" | "admin" | "member";
+export type CollabRoomKind = "room" | "main" | "sub" | "direct";
+export type CollabMergeMode = "all" | "selected" | "summary";
+
+export type CollabProjectSettings = {
+  connectors: string[];
+  experts: string[];
+  skills: string[];
+};
+
+export type CollabProject = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  instructions: string | null;
+  owner_user_id: string;
+  dept_id: string | null;
+  main_room_id: string;
+  settings: CollabProjectSettings;
+  archived_at: string | null;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CollabProjectRoom = {
+  project: CollabProject;
+  rooms: CollabRoom[];
+};
+
+export type CollabMergePending = {
+  pending: true;
+  request_seq: number;
+};
+
+export type CollabMergeApplied = {
+  pending: false;
+  message: CollabRoomMessage;
+};
+
+export type CollabMergeResult = CollabMergePending | CollabMergeApplied;
 
 export type CollabRoom = {
   id: string;
   tenant_id: string;
   title: string;
   created_by: string;
+  project_id: string | null;
+  parent_room_id: string | null;
+  room_kind: CollabRoomKind;
   archived_at?: string;
   member_count: number;
   last_message_at?: string;
@@ -42,6 +85,7 @@ export type CollabRoomMessage = {
   content: string;
   model?: string;
   metadata?: Record<string, unknown>;
+  client_msg_id: string | null;
   created_at: string;
 };
 
@@ -98,7 +142,56 @@ export interface CollabRoomStore {
       content: string;
       model?: string;
       metadata?: Record<string, unknown>;
+      clientMsgId?: string;
     },
+  ): Promise<CollabRoomMessage>;
+  createProject(
+    ctx: CollabRoomContext,
+    input: {
+      name: string;
+      instructions?: string;
+      settings?: CollabProjectSettings;
+      deptId?: string | null;
+      displayName: string;
+      memberUserIds?: Array<{ userId: string; displayName: string }>;
+    },
+  ): Promise<CollabProject>;
+  listProjects(ctx: CollabRoomContext): Promise<CollabProject[]>;
+  getProject(ctx: CollabRoomContext, projectId: string): Promise<CollabProjectRoom>;
+  addProjectMember(
+    ctx: CollabRoomContext,
+    projectId: string,
+    input: { userId: string; displayName: string; role?: CollabRoomRole },
+  ): Promise<CollabRoomMember>;
+  createSubRoom(
+    ctx: CollabRoomContext,
+    parentRoomId: string,
+    input: {
+      title: string;
+      memberUserIds: Array<{ userId: string; displayName: string }>;
+      agentIds?: string[];
+      seedMessageIds?: string[];
+    },
+  ): Promise<CollabRoom>;
+  openDirectRoom(
+    ctx: CollabRoomContext,
+    projectId: string,
+    input: { peerUserId: string; peerDisplayName: string },
+  ): Promise<CollabRoom>;
+  mergeBack(
+    ctx: CollabRoomContext,
+    sourceRoomId: string,
+    input: {
+      targetRoomId: string;
+      mode: CollabMergeMode;
+      messageIds?: string[];
+      summaryText?: string;
+    },
+  ): Promise<CollabMergeResult>;
+  approveMerge(
+    ctx: CollabRoomContext,
+    sourceRoomId: string,
+    mergeRequestSeq: number,
   ): Promise<CollabRoomMessage>;
   /** 服务端代写房间消息，不要求调用者是房间成员。 */
   appendAgentMessageAsSystem(

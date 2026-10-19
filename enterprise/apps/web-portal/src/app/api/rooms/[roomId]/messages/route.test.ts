@@ -59,6 +59,7 @@ describe("POST /api/rooms/:id/messages", () => {
       sender_type: "human",
       sender_id: session.userId,
       sender_name: session.email,
+      client_msg_id: null,
       content: "hello",
       created_at: "2026-08-28T00:00:00.000Z",
     });
@@ -130,6 +131,7 @@ describe("POST /api/rooms/:id/messages", () => {
       sender_type: "human",
       sender_id: session.userId,
       sender_name: session.email,
+      client_msg_id: null,
       content: "@Meta 帮我看下",
       created_at: "2026-08-28T00:00:00.000Z",
     });

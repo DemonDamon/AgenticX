@@ -64,15 +64,20 @@ export async function POST(request: Request, segmentData: { params: Params }) {
   const { roomId } = await segmentData.params;
   if (!isValidUlid(roomId)) return collabRoomBadRequest("invalid room id");
 
-  let body: { content?: unknown };
+  let body: { content?: unknown; client_msg_id?: unknown };
   try {
-    body = (await request.json()) as { content?: unknown };
+    body = (await request.json()) as { content?: unknown; client_msg_id?: unknown };
   } catch {
     return collabRoomBadRequest("invalid json body");
   }
   const content = typeof body.content === "string" ? body.content.trim() : "";
   if (!content) return collabRoomBadRequest("content required");
   if (content.length > CONTENT_MAX) return collabRoomBadRequest("content too long");
+  if (body.client_msg_id != null && typeof body.client_msg_id !== "string") {
+    return collabRoomBadRequest("invalid client_msg_id");
+  }
+  const clientMsgId = typeof body.client_msg_id === "string" ? body.client_msg_id.trim() : "";
+  if (clientMsgId.length > 64) return collabRoomBadRequest("client_msg_id too long");
 
   try {
     const ctx = desktopRoomContext(identity);
@@ -81,6 +86,7 @@ export async function POST(request: Request, segmentData: { params: Params }) {
       senderId: identity.userId,
       senderName: desktopSenderName(identity),
       content,
+      ...(clientMsgId ? { clientMsgId } : {}),
     });
     if (mentionsMeta(content)) {
       await triggerMetaReply(ctx, roomId, desktopAuthContext(identity)).catch((error) => {

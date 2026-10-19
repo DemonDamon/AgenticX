@@ -36,3 +36,4 @@ export * from "./collab-rooms";
 export * from "./agents";
 export * from "./agent-tasks";
 export * from "./case-library";
+export * from "./collab-projects";

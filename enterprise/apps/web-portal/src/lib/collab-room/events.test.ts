@@ -13,6 +13,7 @@ const samples: CollabRoomEvent[] = [
       sender_type: "human",
       sender_id: "01HZX3NDEKTSV4RRFFQ69G5FAV",
       sender_name: "Alice",
+      client_msg_id: null,
       content: "hello",
       created_at: "2026-08-28T00:00:00.000Z",
     },

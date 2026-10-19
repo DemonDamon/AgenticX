@@ -45,6 +45,7 @@ function msg(partial: Partial<CollabRoomMessage> & Pick<CollabRoomMessage, "seq"
     sender_type: "human",
     sender_id: session.userId,
     sender_name: "Alice",
+    client_msg_id: null,
     created_at: "2026-10-14T00:00:00.000Z",
     ...partial,
   };

@@ -1,4 +1,5 @@
 import type { AuthContext } from "@agenticx/auth";
+import { insertAuditEvent } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { collabRoomErrorResponse } from "./collab-room-http";
 import type { CollabRoomContext } from "./collab-room";
@@ -21,6 +22,28 @@ export function desktopRoomErrorResponse(error: unknown) {
 
 export function desktopSenderName(identity: DesktopIdentity): string {
   return identity.displayName?.trim() || identity.email?.trim() || identity.userId;
+}
+
+export async function recordCollabAudit(input: {
+  tenantId: string;
+  actorUserId: string;
+  eventType: string;
+  targetKind: "project" | "collab_room";
+  targetId?: string;
+  detail?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await insertAuditEvent({
+      tenantId: input.tenantId,
+      actorUserId: input.actorUserId,
+      eventType: input.eventType,
+      targetKind: input.targetKind,
+      targetId: input.targetId,
+      detail: input.detail,
+    });
+  } catch (error) {
+    console.error("[web-portal] insertAuditEvent failed:", input.eventType, error);
+  }
 }
 
 export function desktopAuthContext(identity: DesktopIdentity): AuthContext {

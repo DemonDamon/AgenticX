@@ -187,6 +187,7 @@ export function createRoomStreamSession(deps: RoomStreamSessionDeps) {
         sender_type: "human",
         sender_id: "self",
         sender_name: "",
+        client_msg_id: null,
         content: text,
         created_at: new Date().toISOString(),
       };

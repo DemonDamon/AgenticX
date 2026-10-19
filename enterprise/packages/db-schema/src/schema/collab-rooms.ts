@@ -1,6 +1,7 @@
 import { bigint, index, jsonb, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 import { auditColumns, ulid } from "./_shared";
+import { enterpriseProjects } from "./collab-projects";
 import { tenants } from "./tenants";
 import { users } from "./users";
 
@@ -15,6 +16,9 @@ export const enterpriseCollabRooms = pgTable(
     createdBy: ulid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    projectId: ulid("project_id").references(() => enterpriseProjects.id, { onDelete: "cascade" }),
+    parentRoomId: ulid("parent_room_id"),
+    roomKind: varchar("room_kind", { length: 16 }).notNull().default("room"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     ...auditColumns,
   },
@@ -23,6 +27,7 @@ export const enterpriseCollabRooms = pgTable(
       table.tenantId,
       table.updatedAt,
     ),
+    projectIdx: index("enterprise_collab_rooms_project_idx").on(table.projectId, table.roomKind),
   }),
 );
 
@@ -71,12 +76,17 @@ export const enterpriseCollabRoomMessages = pgTable(
     content: text("content").notNull(),
     model: varchar("model", { length: 160 }),
     metadata: jsonb("metadata"),
+    clientMsgId: varchar("client_msg_id", { length: 64 }),
     ...auditColumns,
   },
   (table) => ({
     roomSeqUq: uniqueIndex("enterprise_collab_room_messages_room_seq_uq").on(
       table.roomId,
       table.seq,
+    ),
+    roomClientUq: uniqueIndex("enterprise_collab_room_messages_room_client_uq").on(
+      table.roomId,
+      table.clientMsgId,
     ),
     roomCreatedIdx: index("enterprise_collab_room_messages_room_created_idx").on(
       table.roomId,

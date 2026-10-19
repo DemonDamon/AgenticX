@@ -51,6 +51,7 @@ function createdMessage(content: string) {
     sender_type: "human" as const,
     sender_id: IDENTITY.userId,
     sender_name: IDENTITY.displayName,
+    client_msg_id: null,
     content,
     created_at: "2026-08-28T00:00:00.000Z",
   };
@@ -85,6 +86,39 @@ describe("POST /api/desktop/rooms/:id/messages", () => {
         content: "hello",
       }),
     );
+  });
+
+  it("POST messages forwards a client_msg_id and returns the message", async () => {
+    const created = createdMessage("hello");
+    vi.mocked(appendMessage).mockResolvedValueOnce(created);
+    const res = await POST(
+      new Request(`http://localhost/api/desktop/rooms/${ROOM}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content: "hello", client_msg_id: "client-1" }),
+      }),
+      params(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { code: string; data: { message: { id: string } } };
+    expect(body.code).toBe("00000");
+    expect(body.data.message.id).toBe(created.id);
+    expect(appendMessage).toHaveBeenCalledWith(
+      { tenantId: IDENTITY.tenantId, userId: IDENTITY.userId },
+      ROOM,
+      expect.objectContaining({ content: "hello", clientMsgId: "client-1" }),
+    );
+  });
+
+  it("POST messages rejects a client_msg_id over 64 chars", async () => {
+    const res = await POST(
+      new Request(`http://localhost/api/desktop/rooms/${ROOM}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content: "hello", client_msg_id: "x".repeat(65) }),
+      }),
+      params(),
+    );
+    expect(res.status).toBe(400);
+    expect(appendMessage).not.toHaveBeenCalled();
   });
 
   it("POST messages rejects empty content", async () => {

@@ -393,6 +393,13 @@
       "when": 1787400000000,
       "tag": "0056_enterprise_cases",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0057_enterprise_projects",
+      "breakpoints": true
     }
   ]
 }
