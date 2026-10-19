@@ -81,6 +81,7 @@
     "connecting": "Connecting",
     "live": "Live",
     "reconnecting": "Reconnecting",
-    "unavailable": "Unavailable"
+    "unavailable": "Unavailable",
+    "offlineCached": "Offline, cached"
   }
 }

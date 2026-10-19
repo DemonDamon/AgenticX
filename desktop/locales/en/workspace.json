@@ -1154,7 +1154,10 @@
     "send": "Send",
     "statusConnecting": "Connecting",
     "statusLive": "Live",
-    "statusRetrying": "Reconnecting"
+    "statusRetrying": "Reconnecting",
+    "pendingSend": "Pending",
+    "sendFailed": "Failed to send",
+    "retry": "Retry"
   },
   "connectors": {
     "title": "Connectors",

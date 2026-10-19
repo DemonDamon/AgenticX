@@ -103,11 +103,29 @@ import {
   mergeBack as mergeCollabRoom,
   normalizePortalBase,
   openDirectRoom as openCollabDirectRoom,
+  isCollabClientStatus,
+  isCollabUnavailableError,
   searchDirectoryUsers as searchCollabDirectory,
   sendMessage as sendCollabRoomMessage,
   streamRoomEvents,
   summarizeRoom as summarizeCollabRoom,
 } from "./collab-room-client";
+import {
+  appendRoomMessages,
+  enqueueOutbox,
+  isCachedProjectDetail,
+  isCachedRoomMessage,
+  listOutbox,
+  maxCachedSeq,
+  markOutboxFailed,
+  readProjectCache,
+  readProjectsCache,
+  readRoomMessages,
+  removeOutbox,
+  writeProjectCache,
+  writeProjectsCache,
+} from "./collab-cache";
+import { requestOutboxFlush, startOutboxFlusher, stopOutboxFlusher } from "./collab-outbox-flusher";
 import {
   assignSessionToSpace,
   createLocalSpace,
@@ -8031,6 +8049,20 @@ function registerEarlyIpc(): void {
     if (typeof seq !== "number") return;
     collabRoomWatchSeq.set(roomId, Math.max(collabRoomWatchSeq.get(roomId) ?? 0, seq));
   };
+  const collabWatchAfterSeq = (roomId: string): number => {
+    let cached = 0;
+    try {
+      cached = maxCachedSeq(roomId);
+    } catch {
+      cached = 0;
+    }
+    return Math.max(collabRoomWatchSeq.get(roomId) ?? 0, cached);
+  };
+  const collabClientDeps = () => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return null;
+    return { ...deps, fetchImpl: proxyAwareFetch };
+  };
   ipcMain.handle("collab-room-list", async () => {
     const deps = resolveCollabRoomDeps();
     if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
@@ -8043,21 +8075,92 @@ function registerEarlyIpc(): void {
     if (!roomId) return { ok: false, error: "房间不存在" };
     return fetchCollabRoom({ ...deps, fetchImpl: proxyAwareFetch }, roomId);
   });
-  ipcMain.handle("collab-room-messages", async (_event, roomIdRaw: unknown, optsRaw?: unknown) => {
-    const deps = resolveCollabRoomDeps();
-    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+  ipcMain.handle("collab-room-messages", async (_event, roomIdRaw: unknown, _optsRaw?: unknown) => {
     const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
     if (!roomId) return { ok: false, error: "房间不存在" };
-    const opts = optsRaw && typeof optsRaw === "object" ? (optsRaw as { afterSeq?: number; limit?: number }) : {};
-    return fetchCollabRoomMessages({ ...deps, fetchImpl: proxyAwareFetch }, roomId, opts);
+    let cached;
+    try {
+      cached = readRoomMessages(roomId);
+    } catch {
+      return { ok: false, error: "房间不存在" };
+    }
+    const deps = collabClientDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    let after = 0;
+    try {
+      after = maxCachedSeq(roomId);
+    } catch {
+      return { ok: false, error: "房间不存在" };
+    }
+    const result = await fetchCollabRoomMessages(deps, roomId, { afterSeq: after, limit: 500 });
+    if (!result.ok) {
+      if (isCollabUnavailableError(result.error) && cached.length > 0) {
+        return { ok: true, data: { messages: cached, from_cache: true } };
+      }
+      return result;
+    }
+    const batch = Array.isArray(result.data.messages) ? result.data.messages.filter(isCachedRoomMessage) : [];
+    if (batch.length > 0) {
+      try {
+        appendRoomMessages(roomId, batch);
+      } catch {
+        return { ok: false, error: "房间不存在" };
+      }
+    }
+    let merged = cached;
+    try {
+      merged = readRoomMessages(roomId);
+    } catch {
+      merged = cached;
+    }
+    return { ok: true, data: { messages: merged, from_cache: false } };
   });
-  ipcMain.handle("collab-room-send", async (_event, roomIdRaw: unknown, contentRaw: unknown) => {
-    const deps = resolveCollabRoomDeps();
+  ipcMain.handle("collab-room-send", async (_event, roomIdRaw: unknown, contentRaw: unknown, clientMsgIdRaw?: unknown) => {
+    const deps = collabClientDeps();
     if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
     const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
     if (!roomId) return { ok: false, error: "房间不存在" };
     const content = typeof contentRaw === "string" ? contentRaw : "";
-    return sendCollabRoomMessage({ ...deps, fetchImpl: proxyAwareFetch }, roomId, content);
+    const provided = typeof clientMsgIdRaw === "string" ? clientMsgIdRaw.trim() : "";
+    const clientMsgId = provided || crypto.randomUUID();
+    try {
+      enqueueOutbox({
+        client_msg_id: clientMsgId,
+        room_id: roomId,
+        content,
+        created_at: Date.now(),
+        attempts: 0,
+      });
+    } catch {
+      return { ok: false, error: "房间不存在" };
+    }
+    const result = await sendCollabRoomMessage(deps, roomId, content, clientMsgId);
+    if (result.ok) {
+      removeOutbox(clientMsgId);
+      if (isCachedRoomMessage(result.data.message)) {
+        try {
+          appendRoomMessages(roomId, [result.data.message]);
+        } catch {
+          /* ignore */
+        }
+      }
+      return { ok: true, data: { message: result.data.message } };
+    }
+    if (isCollabClientStatus(result.status)) {
+      removeOutbox(clientMsgId);
+      return { ok: false, error: result.error };
+    }
+    markOutboxFailed(clientMsgId, result.error);
+    return { ok: true, data: { pending: true, client_msg_id: clientMsgId } };
+  });
+  ipcMain.handle("collab-outbox-list", async (_event, roomIdRaw: unknown) => {
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: true, data: { items: [] } };
+    try {
+      return { ok: true, data: { items: listOutbox(roomId) } };
+    } catch {
+      return { ok: false, error: "房间不存在" };
+    }
   });
   ipcMain.handle("collab-room-watch", async (event, roomIdRaw: unknown) => {
     const deps = resolveCollabRoomDeps();
@@ -8083,6 +8186,14 @@ function registerEarlyIpc(): void {
               onEvent: (evt) => {
                 const payload = toCollabRoomRendererEvent(evt);
                 trackCollabRoomSeq(roomId, payload);
+                if (payload.type === "room_message" && isCachedRoomMessage(payload.message)) {
+                  try {
+                    appendRoomMessages(roomId, [payload.message]);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                if (payload.type === "room_cursor") requestOutboxFlush();
                 if (payload.type === "room_closed" && payload.reason === "gone") gone = true;
                 if (!sender.isDestroyed()) {
                   sender.send("collab-room-event", { roomId, event: payload });
@@ -8091,7 +8202,7 @@ function registerEarlyIpc(): void {
               onClosed: () => undefined,
             },
             ac.signal,
-            collabRoomWatchSeq.get(roomId) ?? 0,
+            collabWatchAfterSeq(roomId),
           );
         } catch {
           /* streamRoomEvents maps errors to onClosed */
@@ -8140,9 +8251,22 @@ function registerEarlyIpc(): void {
     });
   });
   ipcMain.handle("collab-project-list", async () => {
-    const deps = resolveCollabRoomDeps();
+    const deps = collabClientDeps();
     if (!deps) return { ok: false, error: "enterprise-login-required" };
-    return fetchCollabProjects({ ...deps, fetchImpl: proxyAwareFetch });
+    const result = await fetchCollabProjects(deps);
+    if (result.ok) {
+      try {
+        writeProjectsCache(result.data.projects);
+      } catch {
+        /* ignore */
+      }
+      return { ok: true, data: { projects: result.data.projects, from_cache: false } };
+    }
+    if (isCollabUnavailableError(result.error)) {
+      const cached = readProjectsCache();
+      if (cached) return { ok: true, data: { projects: cached.projects, from_cache: true } };
+    }
+    return result;
   });
   ipcMain.handle("collab-project-create", async (_event, inputRaw: unknown) => {
     const deps = resolveCollabRoomDeps();
@@ -8191,7 +8315,26 @@ function registerEarlyIpc(): void {
     if (!ready.ok) return ready;
     const projectId = readCollabId(projectIdRaw);
     if (!projectId) return { ok: false, error: "房间不存在" };
-    return fetchCollabProject(ready.deps, projectId);
+    const result = await fetchCollabProject(ready.deps, projectId);
+    if (result.ok) {
+      try {
+        writeProjectCache(projectId, result.data);
+      } catch {
+        /* ignore */
+      }
+      return { ok: true, data: { ...result.data, from_cache: false } };
+    }
+    if (isCollabUnavailableError(result.error)) {
+      try {
+        const cached = readProjectCache(projectId);
+        if (isCachedProjectDetail(cached)) {
+          return { ok: true, data: { project: cached.project, rooms: cached.rooms, from_cache: true } };
+        }
+      } catch {
+        /* invalid id */
+      }
+    }
+    return result;
   });
   ipcMain.handle("collab-project-add-member", async (_event, projectIdRaw: unknown, inputRaw: unknown) => {
     const ready = collabDepsOrLogin();
@@ -8265,7 +8408,14 @@ function registerEarlyIpc(): void {
     if (!ready.ok) return ready;
     return searchCollabDirectory(ready.deps, typeof queryRaw === "string" ? queryRaw : "");
   });
+  startOutboxFlusher(collabClientDeps, (roomId, event) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send("collab-room-event", { roomId, event });
+    }
+  });
   app.on("before-quit", () => {
+    stopOutboxFlusher();
     abortAllCollabRoomWatches();
   });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());

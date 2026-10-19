@@ -100,6 +100,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
   const [loggedIn, setLoggedIn] = useState(true);
   const [query, setQuery] = useState("");
   const [streamStatus, setStreamStatus] = useState<RoomStreamStatus>("connecting");
+  const [fromCache, setFromCache] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [membersOpen, setMembersOpen] = useState(false);
@@ -137,6 +138,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
         }
         setLoggedIn(true);
         setError("");
+        setFromCache(listed.data.from_cache === true);
         setProject({
           id: listed.data.project.id,
           name: listed.data.project.name,
@@ -183,6 +185,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     setMainMembers([]);
     setViewerUserId("");
     setError("");
+    setFromCache(false);
     setQuery("");
     setMembersOpen(false);
   }, [projectId]);
@@ -501,8 +504,8 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
             className="w-[180px] max-w-full rounded-md border border-border bg-surface-card px-2 py-1 text-[12px] text-text-primary outline-none placeholder:text-text-faint"
           />
           <span className="inline-flex items-center gap-1 text-[12px] text-text-muted">
-            <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-            {t(`status.${status.key}`)}
+            <span className={`h-1.5 w-1.5 rounded-full ${fromCache ? "bg-text-faint" : status.dot}`} />
+            {fromCache ? t("status.offlineCached") : t(`status.${status.key}`)}
           </span>
           <button
             type="button"
@@ -549,6 +552,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
               reloadToken={reloadToken}
               showStatus={false}
               onStreamStatus={onStreamStatus}
+              onFromCache={setFromCache}
               onViewSource={(roomId) => selectRoom(roomId)}
               onBack={() => {
                 const main = rooms.find((room) => room.room_kind === "main");

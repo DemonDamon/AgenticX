@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/i18n";
 import { CollabRoomConversation } from "./CollabRoomConversation";
@@ -97,6 +97,7 @@ describe("CollabRoomConversation merge extras", () => {
       collabRoomUnwatch: vi.fn(async () => ({ ok: true })),
       onCollabRoomEvent: vi.fn(() => () => undefined),
       collabRoomSend: vi.fn(async () => ({ ok: true, data: { message: null } })),
+      collabOutboxList: vi.fn(async () => ({ ok: true, data: { items: [] } })),
       collabRoomApproveMerge: vi.fn(async () => ({ ok: true, data: { message: null } })),
     } as unknown as Window["agenticxDesktop"];
   });
@@ -110,5 +111,68 @@ describe("CollabRoomConversation merge extras", () => {
     expect(await screen.findByText("合回自「设计组」")).toBeTruthy();
     expect(screen.getByRole("button", { name: "查看原群" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "同意合回" })).toHaveLength(1);
+  });
+
+  it("replaces a pending local message when the same client_msg_id arrives", async () => {
+    let listener: ((payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) | null = null;
+    let sentId = "";
+    const desktop = window.agenticxDesktop;
+    desktop.collabRoomMessages = vi.fn(async () => ({
+      ok: true,
+      data: {
+        messages: [
+          message({
+            id: "01MSG8AAAAAAAAAAAAAAAAAAAA",
+            seq: 1,
+            sender_type: "human",
+            sender_id: VIEWER,
+            sender_name: "我",
+            content: "已同步",
+            client_msg_id: null,
+          }),
+        ],
+        from_cache: false,
+      },
+    }));
+    desktop.collabOutboxList = vi.fn(async () => ({ ok: true, data: { items: [] } }));
+    desktop.collabRoomSend = vi.fn(async (_room: string, _content: string, clientMsgId?: string) => {
+      sentId = clientMsgId ?? "";
+      return { ok: true, data: { pending: true, client_msg_id: sentId } };
+    }) as typeof desktop.collabRoomSend;
+    desktop.onCollabRoomEvent = vi.fn(
+      (cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) => {
+        listener = cb;
+        return () => undefined;
+      },
+    );
+
+    render(<CollabRoomConversation roomId={ROOM} />);
+    expect(await screen.findByText("已同步")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("输入消息，Enter 发送"), { target: { value: "hello offline" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText("待发送")).toBeTruthy();
+    expect(screen.getAllByText("hello offline")).toHaveLength(1);
+
+    await act(async () => {
+      listener?.({
+        roomId: ROOM,
+        event: {
+          type: "room_message",
+          message: message({
+            id: "01MSG9AAAAAAAAAAAAAAAAAAAA",
+            seq: 4,
+            sender_type: "human",
+            sender_id: VIEWER,
+            sender_name: "我",
+            content: "hello offline",
+            client_msg_id: sentId,
+          }),
+        },
+      });
+    });
+
+    expect(screen.getAllByText("hello offline")).toHaveLength(1);
+    expect(screen.queryByText("待发送")).toBeNull();
+    expect(screen.getByText("已同步")).toBeTruthy();
   });
 });

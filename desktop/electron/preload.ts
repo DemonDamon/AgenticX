@@ -95,8 +95,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   collabRoomGet: async (roomId: string) => ipcRenderer.invoke("collab-room-get", roomId),
   collabRoomMessages: async (roomId: string, opts?: { afterSeq?: number; limit?: number }) =>
     ipcRenderer.invoke("collab-room-messages", roomId, opts),
-  collabRoomSend: async (roomId: string, content: string) =>
-    ipcRenderer.invoke("collab-room-send", roomId, content),
+  collabRoomSend: async (roomId: string, content: string, clientMsgId?: string) =>
+    ipcRenderer.invoke("collab-room-send", roomId, content, clientMsgId),
+  collabOutboxList: async (roomId: string) => ipcRenderer.invoke("collab-outbox-list", roomId),
   collabRoomWatch: async (roomId: string) => ipcRenderer.invoke("collab-room-watch", roomId),
   collabRoomUnwatch: async (roomId: string) => ipcRenderer.invoke("collab-room-unwatch", roomId),
   localSpacesList: async () => ipcRenderer.invoke("local-spaces-list"),

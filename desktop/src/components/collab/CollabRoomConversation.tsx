@@ -37,6 +37,7 @@ type Props = {
   onMemberCount?: (count: number) => void;
   onBack?: () => void;
   onViewSource?: (roomId: string) => void;
+  onFromCache?: (fromCache: boolean) => void;
 };
 
 function asRoom(raw: unknown): RoomSummary | null {
@@ -84,6 +85,58 @@ function asMessage(raw: unknown): RoomMessage | null {
     metadata,
     client_msg_id: typeof item.client_msg_id === "string" ? item.client_msg_id : null,
   };
+}
+
+type LocalSendStatus = "pending" | "failed";
+type ConversationMessage = RoomMessage & { status?: LocalSendStatus };
+
+function placeMessage(list: ConversationMessage[], incoming: ConversationMessage): ConversationMessage[] {
+  return upsertBySeq(list, incoming) as ConversationMessage[];
+}
+
+function withServerMessage(list: ConversationMessage[], incoming: RoomMessage): ConversationMessage[] {
+  const clientId = incoming.client_msg_id;
+  const stripped = clientId
+    ? list.filter((item) => item.client_msg_id !== clientId && item.id !== clientId)
+    : list;
+  return upsertBySeq(stripped, incoming) as ConversationMessage[];
+}
+
+function DeliveryMark({
+  message,
+  onRetry,
+}: {
+  message: ConversationMessage;
+  onRetry: (message: ConversationMessage) => void;
+}) {
+  const { t } = useTranslation("workspace");
+  const status = message.status;
+  if (!status) return null;
+  switch (status) {
+    case "pending":
+      return (
+        <div className="mt-1 flex items-center gap-1 text-[11px] text-text-faint">
+          <span
+            className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
+            aria-hidden
+          />
+          {t("collab.pendingSend")}
+        </div>
+      );
+    case "failed":
+      return (
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-text-faint">
+          <span>{t("collab.sendFailed")}</span>
+          <button type="button" className="text-text-muted hover:text-text-strong" onClick={() => onRetry(message)}>
+            {t("collab.retry")}
+          </button>
+        </div>
+      );
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
 }
 
 function previewLines(content: string): string[] {
@@ -185,6 +238,7 @@ export function CollabRoomConversation({
   onMemberCount,
   onBack,
   onViewSource,
+  onFromCache,
 }: Props) {
   const { t } = useTranslation("workspace");
   const { t: tChat } = useTranslation("chat");
@@ -195,7 +249,7 @@ export function CollabRoomConversation({
   const [room, setRoom] = useState<RoomSummary | null>(null);
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [viewerUserId, setViewerUserId] = useState("");
-  const [messages, setMessages] = useState<RoomMessage[]>([]);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [status, setStatus] = useState<RoomStreamStatus>("connecting");
   const [roomError, setRoomError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -211,9 +265,11 @@ export function CollabRoomConversation({
   const onRevokedRef = useRef(onRevoked);
   const onMemberCountRef = useRef(onMemberCount);
   const onStreamStatusRef = useRef(onStreamStatus);
+  const onFromCacheRef = useRef(onFromCache);
   onRevokedRef.current = onRevoked;
   onMemberCountRef.current = onMemberCount;
   onStreamStatusRef.current = onStreamStatus;
+  onFromCacheRef.current = onFromCache;
   activeRoomIdRef.current = roomId;
 
   useEffect(() => {
@@ -319,14 +375,65 @@ export function CollabRoomConversation({
         const loaded = (history.data?.messages ?? [])
           .map(asMessage)
           .filter((item): item is RoomMessage => item != null);
-        setMessages(loaded.reduce<RoomMessage[]>((acc, item) => upsertBySeq(acc, item), []));
+        let pending: ConversationMessage[] = [];
+        const listPending = window.agenticxDesktop.collabOutboxList;
+        if (listPending) {
+          try {
+            const queued = await listPending(roomId);
+            if (!cancelled && activeRoomIdRef.current === roomId && queued.ok) {
+              const known = new Set(loaded.flatMap((item) => (item.client_msg_id ? [item.client_msg_id] : [])));
+              pending = (queued.data?.items ?? [])
+                .filter((item) => !known.has(item.client_msg_id))
+                .sort((a, b) => a.created_at - b.created_at)
+                .map((item) => ({
+                  id: item.client_msg_id,
+                  room_id: item.room_id,
+                  seq: Number.MAX_SAFE_INTEGER,
+                  sender_type: "human",
+                  sender_id: viewer,
+                  sender_name: i18n.t("collab.me", { ns: "workspace" }),
+                  content: item.content,
+                  client_msg_id: item.client_msg_id,
+                  status: "pending" as const,
+                }));
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (cancelled || activeRoomIdRef.current !== roomId) return;
+        const base = loaded.reduce<ConversationMessage[]>((acc, item) => placeMessage(acc, item), []);
+        setMessages(pending.reduce((acc, item) => placeMessage(acc, item), base));
+        onFromCacheRef.current?.(history.data?.from_cache === true);
         unsubscribeRef.current?.();
         unsubscribeRef.current = window.agenticxDesktop.onCollabRoomEvent((payload) => {
           if (payload.roomId !== activeRoomIdRef.current) return;
           if (payload.event.type === "room_message") {
             const incoming = asMessage(payload.event.message);
-            if (incoming) setMessages((list) => upsertBySeq(list, incoming));
+            if (incoming) setMessages((list) => withServerMessage(list, incoming));
             setStatus("live");
+            onFromCacheRef.current?.(false);
+            return;
+          }
+          if (payload.event.type === "outbox_sent") {
+            const clientId = typeof payload.event.client_msg_id === "string" ? payload.event.client_msg_id : "";
+            const incoming = asMessage(payload.event.message);
+            if (incoming) {
+              const message = incoming.client_msg_id ? incoming : { ...incoming, client_msg_id: clientId || null };
+              setMessages((list) => withServerMessage(list, message));
+            } else if (clientId) {
+              setMessages((list) => list.filter((item) => item.client_msg_id !== clientId && item.id !== clientId));
+            }
+            onFromCacheRef.current?.(false);
+            return;
+          }
+          if (payload.event.type === "outbox_failed") {
+            const clientId = typeof payload.event.client_msg_id === "string" ? payload.event.client_msg_id : "";
+            if (clientId) {
+              setMessages((list) =>
+                list.map((item) => (item.client_msg_id === clientId ? { ...item, status: "failed" } : item)),
+              );
+            }
             return;
           }
           if (payload.event.type === "room_closed" && payload.event.reason === "gone") {
@@ -340,6 +447,7 @@ export function CollabRoomConversation({
           }
           if (payload.event.type === "room_ping" || payload.event.type === "room_cursor") {
             setStatus("live");
+            onFromCacheRef.current?.(false);
           }
         });
         const watch = await window.agenticxDesktop.collabRoomWatch(roomId);
@@ -402,41 +510,69 @@ export function CollabRoomConversation({
       text = composeRoomCommandSend(roomCommand, draft).trim();
     }
     if (!roomId || !text || sending || status === "revoked") return;
-    const tempId = `temp-${Date.now()}`;
-    const optimistic: RoomMessage = {
-      id: tempId,
+    const clientMsgId = crypto.randomUUID();
+    setSending(true);
+    setSendError(null);
+    setDraft("");
+    setRoomCommand(null);
+    try {
+      await deliver(text, clientMsgId);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const deliver = async (text: string, clientMsgId: string) => {
+    const optimistic: ConversationMessage = {
+      id: clientMsgId,
       room_id: roomId,
       seq: Number.MAX_SAFE_INTEGER,
       sender_type: "human",
       sender_id: viewerUserId,
       sender_name: i18n.t("collab.me", { ns: "workspace" }),
       content: text,
+      client_msg_id: clientMsgId,
+      status: "pending",
     };
-    setSending(true);
-    setSendError(null);
-    setDraft("");
-    setRoomCommand(null);
-    setMessages((list) => upsertBySeq(list, optimistic));
+    setMessages((list) => {
+      const without = list.filter((item) => item.client_msg_id !== clientMsgId && item.id !== clientMsgId);
+      return placeMessage(without, optimistic);
+    });
+    const markFailed = () => {
+      setMessages((list) => list.map((item) => (item.client_msg_id === clientMsgId ? { ...item, status: "failed" } : item)));
+    };
     try {
-      const res = await window.agenticxDesktop.collabRoomSend(roomId, text);
+      const res = await window.agenticxDesktop.collabRoomSend(roomId, text, clientMsgId);
+      if (activeRoomIdRef.current !== roomId) return;
       if (!res.ok) {
-        setMessages((list) => list.filter((item) => item.id !== tempId));
-        setDraft(text);
-        setSendError(res.error || i18n.t("collab.unavailable", { ns: "workspace" }));
+        markFailed();
+        return;
+      }
+      if (res.data?.pending) {
+        onFromCacheRef.current?.(true);
+        setMessages((list) =>
+          list.map((item) => (item.client_msg_id === clientMsgId ? { ...item, status: "pending" } : item)),
+        );
         return;
       }
       const server = asMessage(res.data?.message);
-      setMessages((list) => {
-        const withoutTemp = list.filter((item) => item.id !== tempId);
-        return server ? upsertBySeq(withoutTemp, server) : withoutTemp;
-      });
+      if (!server) {
+        markFailed();
+        return;
+      }
+      const confirmed = server.client_msg_id ? server : { ...server, client_msg_id: clientMsgId };
+      setMessages((list) => withServerMessage(list, confirmed));
+      onFromCacheRef.current?.(false);
     } catch {
-      setMessages((list) => list.filter((item) => item.id !== tempId));
-      setDraft(text);
-      setSendError(i18n.t("collab.unavailable", { ns: "workspace" }));
-    } finally {
-      setSending(false);
+      if (activeRoomIdRef.current !== roomId) return;
+      markFailed();
     }
+  };
+
+  const retrySend = (message: ConversationMessage) => {
+    const clientMsgId = message.client_msg_id;
+    if (!clientMsgId || message.status === "pending") return;
+    void deliver(message.content, clientMsgId);
   };
 
   const approveMerge = async (message: RoomMessage) => {
@@ -573,6 +709,7 @@ export function CollabRoomConversation({
             <div className="whitespace-pre-wrap break-words">{visibleContent(message.content)}</div>
           )}
           {approveNode}
+          <DeliveryMark message={message} onRetry={retrySend} />
         </div>
       </div>
     );

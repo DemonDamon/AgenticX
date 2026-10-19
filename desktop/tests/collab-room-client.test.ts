@@ -58,6 +58,57 @@ describe("collab-room-client", () => {
     expect(Object.keys(body as object)).toEqual(["content"]);
   });
 
+  it("sendMessage posts client_msg_id when provided", async () => {
+    let body: unknown;
+    const result = await sendMessage(
+      {
+        ...DEPS_BASE,
+        fetchImpl: async (_url, init) => {
+          body = JSON.parse(String(init?.body ?? "{}"));
+          return new Response(JSON.stringify({ data: { message: { id: "m1" } } }), { status: 200 });
+        },
+      },
+      "01R00M0AAAAAAAAAAAAAAAAAAA",
+      "hello",
+      "cid-1",
+    );
+    expect(result.ok).toBe(true);
+    expect(body).toEqual({ content: "hello", client_msg_id: "cid-1" });
+  });
+
+  it("sendMessage reports HTTP status so 4xx can be told from a network failure", async () => {
+    const denied = await sendMessage(
+      {
+        ...DEPS_BASE,
+        fetchImpl: async () => new Response("nope", { status: 403 }),
+      },
+      "01R00M0AAAAAAAAAAAAAAAAAAA",
+      "hello",
+      "cid-1",
+    );
+    expect(denied).toEqual({ ok: false, error: "你已被移出该房间", status: 403 });
+    const down = await sendMessage(
+      {
+        ...DEPS_BASE,
+        fetchImpl: async () => new Response("nope", { status: 500 }),
+      },
+      "01R00M0AAAAAAAAAAAAAAAAAAA",
+      "hello",
+    );
+    expect(down).toEqual({ ok: false, error: "云房间服务暂时不可用", status: 500 });
+    const offline = await sendMessage(
+      {
+        ...DEPS_BASE,
+        fetchImpl: async () => {
+          throw new Error("offline");
+        },
+      },
+      "01R00M0AAAAAAAAAAAAAAAAAAA",
+      "hello",
+    );
+    expect(offline).toEqual({ ok: false, error: "云房间服务暂时不可用", status: null });
+  });
+
   it("maps 401 to a re-login message", async () => {
     const result = await listRooms({
       ...DEPS_BASE,

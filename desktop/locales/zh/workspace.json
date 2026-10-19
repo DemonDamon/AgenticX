@@ -1154,7 +1154,10 @@
     "send": "发送",
     "statusConnecting": "连接中",
     "statusLive": "实时",
-    "statusRetrying": "重连中"
+    "statusRetrying": "重连中",
+    "pendingSend": "待发送",
+    "sendFailed": "发送失败",
+    "retry": "重试"
   },
   "connectors": {
     "title": "连接器",

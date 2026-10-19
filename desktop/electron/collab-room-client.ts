@@ -34,14 +34,24 @@ function requestFetch(deps: CollabRoomClientDeps) {
   return deps.fetchImpl ?? ((input: string, init?: RequestInit) => fetch(input, init));
 }
 
-async function requestJson<T>(
+type RawEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; status: number | null };
+
+export function isCollabClientStatus(status: number | null): boolean {
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
+export function isCollabUnavailableError(error: string): boolean {
+  return error === UNAVAILABLE;
+}
+
+async function requestJsonRaw<T>(
   deps: CollabRoomClientDeps,
   path: string,
   init: RequestInit = {},
   timeoutMs = 15_000,
-): Promise<CollabRoomEnvelope<T>> {
+): Promise<RawEnvelope<T>> {
   const base = normalizePortalBase(deps.baseUrl);
-  if (!base) return { ok: false, error: UNAVAILABLE };
+  if (!base) return { ok: false, error: UNAVAILABLE, status: null };
   try {
     const res = await requestFetch(deps)(`${base}${path}`, {
       ...init,
@@ -52,15 +62,26 @@ async function requestJson<T>(
       },
       signal: init.signal ?? AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return { ok: false, error: mapCollabRoomHttpError(res.status) };
+    if (!res.ok) return { ok: false, error: mapCollabRoomHttpError(res.status), status: res.status };
     const json = (await res.json()) as { data?: T };
     if (!json || typeof json !== "object" || json.data === undefined) {
-      return { ok: false, error: UNAVAILABLE };
+      return { ok: false, error: UNAVAILABLE, status: null };
     }
     return { ok: true, data: json.data };
   } catch {
-    return { ok: false, error: UNAVAILABLE };
+    return { ok: false, error: UNAVAILABLE, status: null };
   }
+}
+
+async function requestJson<T>(
+  deps: CollabRoomClientDeps,
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 15_000,
+): Promise<CollabRoomEnvelope<T>> {
+  const result = await requestJsonRaw<T>(deps, path, init, timeoutMs);
+  if (result.ok) return result;
+  return { ok: false, error: result.error };
 }
 
 export function listRooms(
@@ -93,11 +114,14 @@ export function sendMessage(
   deps: CollabRoomClientDeps,
   roomId: string,
   content: string,
-): Promise<CollabRoomEnvelope<{ message: unknown }>> {
-  return requestJson(deps, `/api/desktop/rooms/${encodeURIComponent(roomId)}/messages`, {
+  clientMsgId?: string,
+): Promise<RawEnvelope<{ message: unknown }>> {
+  const body: { content: string; client_msg_id?: string } = { content };
+  if (typeof clientMsgId === "string" && clientMsgId.trim()) body.client_msg_id = clientMsgId.trim();
+  return requestJsonRaw(deps, `/api/desktop/rooms/${encodeURIComponent(roomId)}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
 }
 

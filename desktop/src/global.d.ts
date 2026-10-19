@@ -563,11 +563,30 @@ declare global {
       collabRoomMessages: (
         roomId: string,
         opts?: { afterSeq?: number; limit?: number },
-      ) => Promise<{ ok: boolean; data?: { messages: unknown[] }; error?: string }>;
+      ) => Promise<{ ok: boolean; data?: { messages: unknown[]; from_cache?: boolean }; error?: string }>;
       collabRoomSend: (
         roomId: string,
         content: string,
-      ) => Promise<{ ok: boolean; data?: { message: unknown }; error?: string }>;
+        clientMsgId?: string,
+      ) => Promise<{
+        ok: boolean;
+        data?: { message?: unknown; pending?: boolean; client_msg_id?: string };
+        error?: string;
+      }>;
+      collabOutboxList: (roomId: string) => Promise<{
+        ok: boolean;
+        data?: {
+          items: Array<{
+            client_msg_id: string;
+            room_id: string;
+            content: string;
+            created_at: number;
+            attempts: number;
+            last_error?: string;
+          }>;
+        };
+        error?: string;
+      }>;
       collabRoomWatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
       collabRoomUnwatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
       localSpacesList: () => Promise<{
@@ -593,6 +612,7 @@ declare global {
             created_at: string;
             updated_at: string;
           }>;
+          from_cache?: boolean;
         };
         error?: string;
       }>;
@@ -638,6 +658,7 @@ declare global {
             last_seq: number;
             created_at: string;
           }>;
+          from_cache?: boolean;
         };
         error?: string;
       }>;

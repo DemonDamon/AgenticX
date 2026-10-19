@@ -81,6 +81,7 @@
     "connecting": "连接中",
     "live": "协作中",
     "reconnecting": "重连中",
-    "unavailable": "不可用"
+    "unavailable": "不可用",
+    "offlineCached": "离线，已缓存"
   }
 }
