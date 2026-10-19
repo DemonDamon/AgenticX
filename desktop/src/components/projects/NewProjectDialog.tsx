@@ -313,8 +313,8 @@ export function NewProjectDialog({
             <div
               ref={pickerRef}
               data-project-picker
-              className="fixed z-[260] max-h-56 w-[240px] overflow-y-auto rounded-md border border-border bg-surface-base py-1 shadow-2xl"
-              style={{ left: pickerPos.left, top: pickerPos.top }}
+              className="fixed max-h-56 w-[240px] overflow-y-auto rounded-md border border-border bg-surface-base py-1 shadow-2xl"
+              style={{ left: pickerPos.left, top: pickerPos.top, zIndex: "calc(var(--ds-layer-modal) + 1)" }}
             >
               {activeItems.length === 0 ? (
                 <div className="px-3 py-2 text-[12px] text-text-faint">{t("none")}</div>
