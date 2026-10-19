@@ -27,5 +27,60 @@
     "templateOverwrite": "Switching templates replaces what you typed",
     "cancel": "Cancel",
     "confirm": "Create"
+  },
+  "refresh": "Refresh",
+  "searchMessages": "Search this chat",
+  "loadFailed": "Could not load",
+  "select": "Select",
+  "members": {
+    "title": "Project members",
+    "invite": "Invite members",
+    "direct": "Direct message",
+    "recordedNotice": "Conversations in this project are recorded by your organization",
+    "owner": "Owner",
+    "collaborator": "Collaborator",
+    "search": "Search people",
+    "addFailed": "Could not invite"
+  },
+  "rooms": {
+    "main": "Main group",
+    "direct": "Direct messages"
+  },
+  "sub": {
+    "create": "Side chat",
+    "withSelected": "Side chat with selected messages",
+    "seedCount": "{{count}} messages will be included",
+    "name": "Group name",
+    "members": "Members",
+    "experts": "Experts",
+    "failed": "Could not start the side chat"
+  },
+  "merge": {
+    "action": "Merge back",
+    "selected": "Merge selected",
+    "target": "Target",
+    "modeLabel": "Mode",
+    "mode": {
+      "all": "All",
+      "selected": "{{count}} selected",
+      "summary": "Summary"
+    },
+    "tagSelected": "Selected",
+    "generate": "Generate summary",
+    "generating": "Generating…",
+    "confirm": "Confirm merge",
+    "done": "Merged back to {{name}}",
+    "pending": "Sent to the other person for confirmation",
+    "approve": "Approve merge",
+    "cardTitle": "Merged from \"{{name}}\"",
+    "viewSource": "View original chat",
+    "expand": "Show all",
+    "failed": "Could not merge back"
+  },
+  "status": {
+    "connecting": "Connecting",
+    "live": "Live",
+    "reconnecting": "Reconnecting",
+    "unavailable": "Unavailable"
   }
 }

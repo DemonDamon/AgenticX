@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 import { MainViewShell } from "../ds/MainViewShell";
 import { HoverTip } from "../ds/HoverTip";
-import { CollabRoomPanel } from "../CollabRoomPanel";
 import { GROUP_TEMPLATES, groupTemplateI18nKey } from "../groups/group-templates";
 import { useAppStore } from "../../store";
 import { NewProjectDialog } from "./NewProjectDialog";
+import { ProjectDetailView } from "./ProjectDetailView";
 
 type ProjectCard = {
   id: string;
@@ -50,7 +50,7 @@ function relativeAdded(iso: string, locale: string): string {
 
 export function ProjectCollabView() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
-  if (activeProjectId) return <CollabRoomPanel variant="page" />;
+  if (activeProjectId) return <ProjectDetailView projectId={activeProjectId} />;
   return <ProjectCollabHome />;
 }
 

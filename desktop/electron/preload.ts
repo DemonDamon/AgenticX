@@ -112,6 +112,36 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     settings?: { connectors: string[]; experts: string[]; skills: string[] };
     member_user_ids?: { user_id: string; display_name: string }[];
   }) => ipcRenderer.invoke("collab-project-create", input),
+  collabProjectGet: async (projectId: string) => ipcRenderer.invoke("collab-project-get", projectId),
+  collabProjectAddMember: async (projectId: string, input: { user_id: string; display_name: string }) =>
+    ipcRenderer.invoke("collab-project-add-member", projectId, input),
+  collabProjectOpenDirect: async (
+    projectId: string,
+    input: { peer_user_id: string; peer_display_name: string },
+  ) => ipcRenderer.invoke("collab-project-open-direct", projectId, input),
+  collabRoomCreateSub: async (
+    parentRoomId: string,
+    input: {
+      title: string;
+      member_user_ids: { user_id: string; display_name: string }[];
+      agent_ids?: string[];
+      seed_message_ids?: string[];
+    },
+  ) => ipcRenderer.invoke("collab-room-create-sub", parentRoomId, input),
+  collabRoomMerge: async (
+    roomId: string,
+    input: {
+      target_room_id: string;
+      mode: "all" | "selected" | "summary";
+      message_ids?: string[];
+      summary_text?: string;
+    },
+  ) => ipcRenderer.invoke("collab-room-merge", roomId, input),
+  collabRoomApproveMerge: async (roomId: string, seq: number) =>
+    ipcRenderer.invoke("collab-room-approve-merge", roomId, seq),
+  collabRoomSummarize: async (roomId: string, input?: { message_ids?: string[] }) =>
+    ipcRenderer.invoke("collab-room-summarize", roomId, input),
+  collabDirectorySearch: async (q: string) => ipcRenderer.invoke("collab-directory-search", q),
   onCollabRoomEvent: (cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) => {
     const listener = (_e: unknown, payload: never) => cb(payload);
     ipcRenderer.on("collab-room-event", listener as never);

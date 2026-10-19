@@ -616,6 +616,74 @@ declare global {
         };
         error?: string;
       }>;
+      collabProjectGet: (projectId: string) => Promise<{
+        ok: boolean;
+        data?: {
+          project: {
+            id: string;
+            name: string;
+            instructions: string;
+            main_room_id: string;
+            member_count: number;
+            owner_user_id: string;
+            created_at: string;
+            updated_at: string;
+          };
+          rooms: Array<{
+            id: string;
+            title: string;
+            parent_room_id: string | null;
+            room_kind: string;
+            member_count: number;
+            last_seq: number;
+            created_at: string;
+          }>;
+        };
+        error?: string;
+      }>;
+      collabProjectAddMember: (
+        projectId: string,
+        input: { user_id: string; display_name: string },
+      ) => Promise<{ ok: boolean; data?: { member: unknown }; error?: string }>;
+      collabProjectOpenDirect: (
+        projectId: string,
+        input: { peer_user_id: string; peer_display_name: string },
+      ) => Promise<{ ok: boolean; data?: { room: { id: string; title: string } }; error?: string }>;
+      collabRoomCreateSub: (
+        parentRoomId: string,
+        input: {
+          title: string;
+          member_user_ids: { user_id: string; display_name: string }[];
+          agent_ids?: string[];
+          seed_message_ids?: string[];
+        },
+      ) => Promise<{ ok: boolean; data?: { room: { id: string; title: string } }; error?: string }>;
+      collabRoomMerge: (
+        roomId: string,
+        input: {
+          target_room_id: string;
+          mode: "all" | "selected" | "summary";
+          message_ids?: string[];
+          summary_text?: string;
+        },
+      ) => Promise<{
+        ok: boolean;
+        data?: { pending: true; request_seq: number } | { pending: false; message: unknown };
+        error?: string;
+      }>;
+      collabRoomApproveMerge: (
+        roomId: string,
+        seq: number,
+      ) => Promise<{ ok: boolean; data?: { message: unknown }; error?: string }>;
+      collabRoomSummarize: (
+        roomId: string,
+        input?: { message_ids?: string[] },
+      ) => Promise<{ ok: boolean; data?: { summary: string }; error?: string }>;
+      collabDirectorySearch: (q: string) => Promise<{
+        ok: boolean;
+        data?: { users: Array<{ id: string; display_name: string; email: string; dept_name: string }> };
+        error?: string;
+      }>;
       onCollabRoomEvent: (
         cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void,
       ) => () => void;

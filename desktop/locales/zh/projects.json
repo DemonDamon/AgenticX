@@ -27,5 +27,60 @@
     "templateOverwrite": "切换模板会覆盖当前编辑内容",
     "cancel": "取消",
     "confirm": "确定"
+  },
+  "refresh": "刷新",
+  "searchMessages": "搜索当前对话",
+  "loadFailed": "加载失败",
+  "select": "选择",
+  "members": {
+    "title": "项目成员",
+    "invite": "邀请成员",
+    "direct": "单聊",
+    "recordedNotice": "项目内的对话会被企业记录",
+    "owner": "所有者",
+    "collaborator": "协作者",
+    "search": "搜索同事",
+    "addFailed": "邀请失败"
+  },
+  "rooms": {
+    "main": "主群",
+    "direct": "单聊"
+  },
+  "sub": {
+    "create": "拉小群",
+    "withSelected": "带着选中消息拉小群",
+    "seedCount": "将带入 {{count}} 条消息",
+    "name": "群名",
+    "members": "成员",
+    "experts": "专家",
+    "failed": "拉小群失败"
+  },
+  "merge": {
+    "action": "合回",
+    "selected": "合回选中",
+    "target": "目标",
+    "modeLabel": "方式",
+    "mode": {
+      "all": "全部",
+      "selected": "选中的 {{count}} 条",
+      "summary": "摘要"
+    },
+    "tagSelected": "选中",
+    "generate": "生成摘要",
+    "generating": "生成中…",
+    "confirm": "确认合回",
+    "done": "已合回到 {{name}}",
+    "pending": "已发给对方确认",
+    "approve": "同意合回",
+    "cardTitle": "合回自「{{name}}」",
+    "viewSource": "查看原群",
+    "expand": "展开全部",
+    "failed": "合回失败"
+  },
+  "status": {
+    "connecting": "连接中",
+    "live": "协作中",
+    "reconnecting": "重连中",
+    "unavailable": "不可用"
   }
 }

@@ -38,6 +38,7 @@ async function requestJson<T>(
   deps: CollabRoomClientDeps,
   path: string,
   init: RequestInit = {},
+  timeoutMs = 15_000,
 ): Promise<CollabRoomEnvelope<T>> {
   const base = normalizePortalBase(deps.baseUrl);
   if (!base) return { ok: false, error: UNAVAILABLE };
@@ -49,7 +50,7 @@ async function requestJson<T>(
         accept: "application/json",
         ...(init.headers ?? {}),
       },
-      signal: init.signal ?? AbortSignal.timeout(15_000),
+      signal: init.signal ?? AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return { ok: false, error: mapCollabRoomHttpError(res.status) };
     const json = (await res.json()) as { data?: T };
@@ -206,6 +207,275 @@ export async function createProject(
   const project = asProjectSummary(result.data.project);
   if (!project) return { ok: false, error: UNAVAILABLE };
   return { ok: true, data: { project } };
+}
+
+export type CollabProjectDetail = CollabProjectSummary & {
+  owner_user_id: string;
+};
+
+export type CollabProjectRoom = {
+  id: string;
+  title: string;
+  parent_room_id: string | null;
+  room_kind: string;
+  member_count: number;
+  last_seq: number;
+  created_at: string;
+};
+
+export type CollabDirectoryUser = {
+  id: string;
+  display_name: string;
+  email: string;
+  dept_name: string;
+};
+
+export type CollabMergeMode = "all" | "selected" | "summary";
+
+export type CollabMergeClientResult =
+  | { pending: true; request_seq: number }
+  | { pending: false; message: unknown };
+
+function asProjectDetail(value: unknown): CollabProjectDetail | null {
+  const base = asProjectSummary(value);
+  if (!base || !value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  return {
+    ...base,
+    owner_user_id: typeof row.owner_user_id === "string" ? row.owner_user_id : "",
+  };
+}
+
+function asProjectRoom(value: unknown): CollabProjectRoom | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  if (!id) return null;
+  return {
+    id,
+    title: typeof row.title === "string" ? row.title : "",
+    parent_room_id: typeof row.parent_room_id === "string" ? row.parent_room_id : null,
+    room_kind: typeof row.room_kind === "string" ? row.room_kind : "room",
+    member_count: typeof row.member_count === "number" ? row.member_count : 0,
+    last_seq: typeof row.last_seq === "number" ? row.last_seq : 0,
+    created_at: typeof row.created_at === "string" ? row.created_at : "",
+  };
+}
+
+function asIdRecord(value: unknown): { id: string; title: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  if (!id) return null;
+  return { id, title: typeof row.title === "string" ? row.title : "" };
+}
+
+function asDirectoryUser(value: unknown): CollabDirectoryUser | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  if (!id) return null;
+  return {
+    id,
+    display_name: typeof row.display_name === "string" ? row.display_name : "",
+    email: typeof row.email === "string" ? row.email : "",
+    dept_name: typeof row.dept_name === "string" ? row.dept_name : "",
+  };
+}
+
+function readOptionalStrings(value: string[] | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const items = value.map((item) => item.trim()).filter(Boolean);
+  return items;
+}
+
+export async function getProject(
+  deps: CollabRoomClientDeps,
+  projectId: string,
+): Promise<CollabRoomEnvelope<{ project: CollabProjectDetail; rooms: CollabProjectRoom[] }>> {
+  const result = await requestJson<{ project?: unknown; rooms?: unknown }>(
+    deps,
+    `/api/desktop/projects/${encodeURIComponent(projectId)}`,
+    { method: "GET" },
+  );
+  if (!result.ok) return result;
+  const project = asProjectDetail(result.data.project);
+  if (!project) return { ok: false, error: UNAVAILABLE };
+  const rooms = Array.isArray(result.data.rooms)
+    ? result.data.rooms.map((item) => asProjectRoom(item)).filter((item): item is CollabProjectRoom => item !== null)
+    : [];
+  return { ok: true, data: { project, rooms } };
+}
+
+export async function addProjectMember(
+  deps: CollabRoomClientDeps,
+  projectId: string,
+  input: { user_id: string; display_name: string },
+): Promise<CollabRoomEnvelope<{ member: unknown }>> {
+  const result = await requestJson<{ member?: unknown }>(
+    deps,
+    `/api/desktop/projects/${encodeURIComponent(projectId)}/members`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: input.user_id.trim(),
+        display_name: input.display_name.trim(),
+      }),
+    },
+  );
+  if (!result.ok) return result;
+  if (!result.data.member || typeof result.data.member !== "object") {
+    return { ok: false, error: UNAVAILABLE };
+  }
+  return { ok: true, data: { member: result.data.member } };
+}
+
+export async function openDirectRoom(
+  deps: CollabRoomClientDeps,
+  projectId: string,
+  input: { peer_user_id: string; peer_display_name: string },
+): Promise<CollabRoomEnvelope<{ room: { id: string; title: string } }>> {
+  const result = await requestJson<{ room?: unknown }>(
+    deps,
+    `/api/desktop/projects/${encodeURIComponent(projectId)}/direct`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        peer_user_id: input.peer_user_id.trim(),
+        peer_display_name: input.peer_display_name.trim(),
+      }),
+    },
+  );
+  if (!result.ok) return result;
+  const room = asIdRecord(result.data.room);
+  if (!room) return { ok: false, error: UNAVAILABLE };
+  return { ok: true, data: { room } };
+}
+
+export async function createSubRoom(
+  deps: CollabRoomClientDeps,
+  parentRoomId: string,
+  input: {
+    title: string;
+    member_user_ids: { user_id: string; display_name: string }[];
+    agent_ids?: string[];
+    seed_message_ids?: string[];
+  },
+): Promise<CollabRoomEnvelope<{ room: { id: string; title: string } }>> {
+  const members = input.member_user_ids
+    .map((member) => ({
+      user_id: member.user_id.trim(),
+      display_name: member.display_name.trim(),
+    }))
+    .filter((member) => member.user_id && member.display_name);
+  const result = await requestJson<{ room?: unknown }>(
+    deps,
+    `/api/desktop/rooms/${encodeURIComponent(parentRoomId)}/sub-rooms`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: input.title.trim(),
+        member_user_ids: members,
+        ...(readOptionalStrings(input.agent_ids) ? { agent_ids: readOptionalStrings(input.agent_ids) } : {}),
+        ...(readOptionalStrings(input.seed_message_ids)
+          ? { seed_message_ids: readOptionalStrings(input.seed_message_ids) }
+          : {}),
+      }),
+    },
+  );
+  if (!result.ok) return result;
+  const room = asIdRecord(result.data.room);
+  if (!room) return { ok: false, error: UNAVAILABLE };
+  return { ok: true, data: { room } };
+}
+
+export async function mergeBack(
+  deps: CollabRoomClientDeps,
+  roomId: string,
+  input: {
+    target_room_id: string;
+    mode: CollabMergeMode;
+    message_ids?: string[];
+    summary_text?: string;
+  },
+): Promise<CollabRoomEnvelope<CollabMergeClientResult>> {
+  const result = await requestJson<{ pending?: unknown; request_seq?: unknown; message?: unknown }>(
+    deps,
+    `/api/desktop/rooms/${encodeURIComponent(roomId)}/merge`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target_room_id: input.target_room_id.trim(),
+        mode: input.mode,
+        ...(input.message_ids ? { message_ids: input.message_ids } : {}),
+        ...(typeof input.summary_text === "string" ? { summary_text: input.summary_text } : {}),
+      }),
+    },
+  );
+  if (!result.ok) return result;
+  if (result.data.pending === true) {
+    return {
+      ok: true,
+      data: {
+        pending: true,
+        request_seq: typeof result.data.request_seq === "number" ? result.data.request_seq : 0,
+      },
+    };
+  }
+  return { ok: true, data: { pending: false, message: result.data.message ?? null } };
+}
+
+export function approveMerge(
+  deps: CollabRoomClientDeps,
+  roomId: string,
+  seq: number,
+): Promise<CollabRoomEnvelope<{ message: unknown }>> {
+  return requestJson(deps, `/api/desktop/rooms/${encodeURIComponent(roomId)}/merge/${seq}/approve`, {
+    method: "POST",
+  });
+}
+
+export async function summarizeRoom(
+  deps: CollabRoomClientDeps,
+  roomId: string,
+  input: { message_ids?: string[] } = {},
+): Promise<CollabRoomEnvelope<{ summary: string }>> {
+  const result = await requestJson<{ summary?: unknown }>(
+    deps,
+    `/api/desktop/rooms/${encodeURIComponent(roomId)}/summarize`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input.message_ids ? { message_ids: input.message_ids } : {}),
+    },
+    60_000,
+  );
+  if (!result.ok) return result;
+  if (typeof result.data.summary !== "string") return { ok: false, error: UNAVAILABLE };
+  return { ok: true, data: { summary: result.data.summary } };
+}
+
+export async function searchDirectoryUsers(
+  deps: CollabRoomClientDeps,
+  q: string,
+): Promise<CollabRoomEnvelope<{ users: CollabDirectoryUser[] }>> {
+  const query = new URLSearchParams();
+  query.set("q", q.trim());
+  const result = await requestJson<{ users?: unknown }>(
+    deps,
+    `/api/desktop/directory/users?${query.toString()}`,
+    { method: "GET" },
+  );
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data.users)) return { ok: false, error: UNAVAILABLE };
+  const users = result.data.users
+    .map((item) => asDirectoryUser(item))
+    .filter((item): item is CollabDirectoryUser => item !== null);
+  return { ok: true, data: { users } };
 }
 
 export function parseSseChunk(buffer: string): { events: CollabRoomSseEvent[]; rest: string } {

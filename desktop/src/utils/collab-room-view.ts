@@ -7,6 +7,8 @@ export type RoomMessage = {
   sender_name: string;
   content: string;
   created_at?: string;
+  metadata?: Record<string, unknown> | null;
+  client_msg_id?: string | null;
 };
 
 export type RoomSummary = {
