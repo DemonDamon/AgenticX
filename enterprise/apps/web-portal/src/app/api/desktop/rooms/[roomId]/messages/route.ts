@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isValidUlid } from "../../../../../../lib/chat-history";
-import { appendMessage, listMessages } from "../../../../../../lib/collab-room";
+import { appendMessage, findMessageByClientMsgId, listMessages } from "../../../../../../lib/collab-room";
 import { mentionsMeta, triggerMetaReply } from "../../../../../../lib/collab-room/meta-reply";
 import { collabRoomBadRequest } from "../../../../../../lib/collab-room-http";
 import { resolveDesktopIdentity } from "../../../../../../lib/desktop-auth";
@@ -10,6 +10,7 @@ import {
   desktopRoomErrorResponse,
   desktopRoomUnauthorized,
   desktopSenderName,
+  resolveDesktopGatewayToken,
 } from "../../../../../../lib/desktop-collab-room-http";
 import { log } from "../../../../../../lib/observability/logger";
 
@@ -81,6 +82,12 @@ export async function POST(request: Request, segmentData: { params: Params }) {
 
   try {
     const ctx = desktopRoomContext(identity);
+    if (clientMsgId) {
+      const prior = await findMessageByClientMsgId(ctx, roomId, clientMsgId);
+      if (prior) {
+        return NextResponse.json({ code: "00000", message: "ok", data: { message: prior } });
+      }
+    }
     const created = await appendMessage(ctx, roomId, {
       senderType: "human",
       senderId: identity.userId,
@@ -89,7 +96,9 @@ export async function POST(request: Request, segmentData: { params: Params }) {
       ...(clientMsgId ? { clientMsgId } : {}),
     });
     if (mentionsMeta(content)) {
-      await triggerMetaReply(ctx, roomId, desktopAuthContext(identity)).catch((error) => {
+      await triggerMetaReply(ctx, roomId, desktopAuthContext(identity), {
+        getAccessToken: () => resolveDesktopGatewayToken(identity),
+      }).catch((error) => {
         log("error", {
           event: "room.meta_reply.failed",
           room_id: roomId,

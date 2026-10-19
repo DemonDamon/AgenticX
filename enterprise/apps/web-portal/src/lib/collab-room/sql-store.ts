@@ -625,6 +625,17 @@ export class SqlCollabRoomStore implements CollabRoomStore {
     throw lastError instanceof Error ? lastError : new Error("unreachable");
   }
 
+  public async findMessageByClientMsgId(
+    ctx: CollabRoomContext,
+    roomId: string,
+    clientMsgId: string,
+  ): Promise<CollabRoomMessage | null> {
+    const id = clientMsgId.trim();
+    if (!id) return null;
+    await this.requireActiveMember(this.client, ctx, roomId);
+    return this.findMessageByClientId(this.client, roomId, id);
+  }
+
   public async appendAgentMessageAsSystem(
     tenantId: string,
     roomId: string,

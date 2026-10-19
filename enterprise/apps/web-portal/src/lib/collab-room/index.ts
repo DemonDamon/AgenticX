@@ -121,6 +121,14 @@ export function appendMessage(
   return store().appendMessage(ctx, roomId, input);
 }
 
+export function findMessageByClientMsgId(
+  ctx: CollabRoomContext,
+  roomId: string,
+  clientMsgId: string,
+): Promise<CollabRoomMessage | null> {
+  return store().findMessageByClientMsgId(ctx, roomId, clientMsgId);
+}
+
 export function createProject(
   ctx: CollabRoomContext,
   input: {

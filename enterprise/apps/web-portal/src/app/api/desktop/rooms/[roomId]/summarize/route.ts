@@ -1,4 +1,3 @@
-import { JwtService } from "@agenticx/auth";
 import { ulid } from "ulid";
 import { NextResponse } from "next/server";
 import { isValidUlid } from "../../../../../../lib/chat-history";
@@ -6,14 +5,14 @@ import { getRoom, listMessages, type CollabRoomMessage } from "../../../../../..
 import { collabRoomBadRequest } from "../../../../../../lib/collab-room-http";
 import { requestMetaReply } from "../../../../../../lib/collab-room/meta-reply";
 import { listAvailableModelsForUser } from "../../../../../../lib/admin-providers-reader";
-import { resolveDesktopIdentity, type DesktopIdentity } from "../../../../../../lib/desktop-auth";
+import { resolveDesktopIdentity } from "../../../../../../lib/desktop-auth";
 import {
   desktopAuthContext,
   desktopRoomContext,
   desktopRoomErrorResponse,
   desktopRoomUnauthorized,
+  resolveDesktopGatewayToken,
 } from "../../../../../../lib/desktop-collab-room-http";
-import { getSessionAuthFromCookies } from "../../../../../../lib/session";
 
 type Params = Promise<{ roomId: string }>;
 
@@ -21,26 +20,6 @@ const SUMMARY_SYSTEM_PROMPT = "把下面的群聊整理成：结论、决定、�
 const RECENT_LIMIT = 200;
 const PAGE_LIMIT = 500;
 const PAGE_CAP = 40;
-
-async function resolveSummaryAccessToken(identity: DesktopIdentity): Promise<string | null> {
-  try {
-    const auth = await getSessionAuthFromCookies();
-    if (auth?.accessToken) return auth.accessToken;
-  } catch {
-    /* ignore */
-  }
-  try {
-    const jwt = new JwtService({
-      issuer: "agenticx-enterprise-web-portal",
-      audience: "agenticx-web-users",
-      accessTtlSeconds: 120,
-    });
-    const signed = await jwt.signAccessToken(desktopAuthContext(identity));
-    return signed.token;
-  } catch {
-    return null;
-  }
-}
 
 function summaryUnavailable(): NextResponse {
   return NextResponse.json(
@@ -130,7 +109,7 @@ export async function POST(request: Request, segmentData: { params: Params }) {
     const models = await listAvailableModelsForUser(identity.userId, identity.email, identity.deptId);
     const first = models[0];
     if (!first) return summaryUnavailable();
-    const accessToken = await resolveSummaryAccessToken(identity);
+    const accessToken = await resolveDesktopGatewayToken(identity);
     if (!accessToken) return summaryUnavailable();
 
     const session = desktopAuthContext(identity);

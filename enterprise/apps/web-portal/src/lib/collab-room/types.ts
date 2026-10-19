@@ -145,6 +145,11 @@ export interface CollabRoomStore {
       clientMsgId?: string;
     },
   ): Promise<CollabRoomMessage>;
+  findMessageByClientMsgId(
+    ctx: CollabRoomContext,
+    roomId: string,
+    clientMsgId: string,
+  ): Promise<CollabRoomMessage | null>;
   createProject(
     ctx: CollabRoomContext,
     input: {

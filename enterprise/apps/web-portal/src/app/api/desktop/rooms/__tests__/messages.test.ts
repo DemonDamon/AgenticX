@@ -11,6 +11,7 @@ vi.mock("../../../../../lib/collab-room", async (importOriginal) => {
   return {
     ...actual,
     appendMessage: vi.fn(),
+    findMessageByClientMsgId: vi.fn(async () => null),
     listMessages: vi.fn(),
   };
 });
@@ -23,7 +24,7 @@ vi.mock("../../../../../lib/collab-room/meta-reply", async (importOriginal) => {
   };
 });
 
-import { appendMessage } from "../../../../../lib/collab-room";
+import { appendMessage, findMessageByClientMsgId } from "../../../../../lib/collab-room";
 import { triggerMetaReply } from "../../../../../lib/collab-room/meta-reply";
 import { GET, POST } from "../[roomId]/messages/route";
 
@@ -159,6 +160,27 @@ describe("POST /api/desktop/rooms/:id/messages", () => {
     expect(triggerMetaReply).toHaveBeenCalledTimes(1);
     const session = vi.mocked(triggerMetaReply).mock.calls[0][2];
     expect(session.sessionId).toMatch(/^desktop-pat-/);
+    const overrides = vi.mocked(triggerMetaReply).mock.calls[0]?.[3];
+    expect(typeof overrides?.getAccessToken).toBe("function");
+  });
+
+  it("POST messages returns the stored message for a repeated client_msg_id without asking Meta again", async () => {
+    vi.mocked(findMessageByClientMsgId).mockResolvedValueOnce({
+      ...createdMessage("@Meta hi"),
+      client_msg_id: "retry-1",
+    });
+    const res = await POST(
+      new Request(`http://localhost/api/desktop/rooms/${ROOM}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content: "@Meta hi", client_msg_id: "retry-1" }),
+      }),
+      params(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { message: { client_msg_id: string } } };
+    expect(body.data.message.client_msg_id).toBe("retry-1");
+    expect(appendMessage).not.toHaveBeenCalled();
+    expect(triggerMetaReply).not.toHaveBeenCalled();
   });
 
   it("POST messages does not trigger a meta reply without a mention", async () => {
