@@ -845,6 +845,12 @@ declare global {
         theme?: string;
         locale?: string;
       }>;
+      loadChatAppearance: () => Promise<import("../shared/chat-appearance").AppearanceResult<import("../shared/chat-appearance").AppearanceDocument>>;
+      saveChatAppearance: (payload: import("../shared/chat-appearance").AppearanceSave) => Promise<import("../shared/chat-appearance").AppearanceResult<import("../shared/chat-appearance").AppearanceDocument>>;
+      importChatWallpaper: () => Promise<import("../shared/chat-appearance").AppearanceResult<import("../shared/chat-appearance").ImageAsset | null>>;
+      readChatWallpaper: (assetId: string) => Promise<import("../shared/chat-appearance").AppearanceResult<import("../shared/chat-appearance").ImageAsset>>;
+      importChatAppearancePackage: () => Promise<import("../shared/chat-appearance").AppearanceResult<import("../shared/chat-appearance").ThemePackage | null>>;
+      exportChatAppearancePackage: (payload: { name: string; appearance: import("../shared/chat-appearance").ChatAppearance }) => Promise<import("../shared/chat-appearance").AppearanceResult<null>>;
       saveUiPrefs: (payload: {
         theme?: "dark" | "light" | "dim";
         locale?: "zh" | "en";

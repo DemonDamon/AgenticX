@@ -1,3 +1,8 @@
+import { ChatWallpaper } from "./appearance/ChatWallpaper";
+import { useAppearanceStore } from "../appearance/store";
+import { appearanceVariables } from "../appearance/render";
+import { resolveAppearance } from "../../shared/chat-appearance";
+import { shouldSendPulse } from "../appearance/animation-policy";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n/i18n";
@@ -441,6 +446,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const avatars = useAppStore((s) => s.avatars);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const appearanceVisible = useAppStore(s => !s.settings.open);
+  const appearanceDocument = useAppearanceStore(s => s.document);
+  const appearancePulse = useAppearanceStore(s => s.pulse);
+  const chatAppearance = resolveAppearance(appearanceDocument, "meta");
+  const currentAppearancePulse = appearancePulse?.paneId === "lite-pane" && appearancePulse.sessionId === sessionId ? appearancePulse.seq : 0;
   const liteQueueKey = "lite-pane";
   const queuedMessages = useAppStore((s) => s.pendingMessages[liteQueueKey] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
@@ -1453,6 +1463,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       const decoder = new TextDecoder();
       if (!reader) { if (isCurrentRequest()) { setStatus("idle"); setStreaming(false); } return; }
 
+      if (shouldSendPulse({ avatarId: null, sessionId, currentSessionId: useAppStore.getState().sessionId,
+        continuation: isContinuation, suppressUserEcho: !!opts?.insertAfterId, skipUserHistory: false, hasReader: true })) {
+        useAppearanceStore.getState().sendPulse("lite-pane", sessionId, crypto.randomUUID());
+      }
       let cumulativeFull = "";
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
@@ -2581,7 +2595,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="agx-appearance-host flex h-full min-w-0 flex-1 flex-col" data-custom-bubbles={chatStyle === "im" && chatAppearance.variants[theme].bubbles.custom} style={appearanceVariables(chatAppearance, theme, chatStyle === "im")}>
+      <ChatWallpaper key={sessionId} appearance={chatAppearance} mode={theme} focused={isLite && appearanceVisible} pulse={currentAppearancePulse} />
       {/* Title bar */}
       <div className="drag-region flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex w-20 items-center" />

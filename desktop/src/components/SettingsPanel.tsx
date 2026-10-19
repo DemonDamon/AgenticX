@@ -69,6 +69,7 @@ import type { TFunction } from "i18next";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { useDisplayedMetaAvatarUrl } from "../hooks/useDisplayedMetaAvatarUrl";
+import { ChatAppearanceSettings, type AppearanceEditorHandle } from "./settings/appearance/ChatAppearanceSettings";
 import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -4981,7 +4982,7 @@ export function SettingsPanel({
   onThemeChange,
   onChatStyleChange,
   onRunModeChange,
-  onClose,
+  onClose: onCloseRequested,
   onSave,
   panes,
   avatars,
@@ -5025,6 +5026,11 @@ export function SettingsPanel({
   const metaIdentitySavedRef = useRef("");
   const metaSoulDraftRef = useRef("");
   const metaSoulSavedRef = useRef("");
+  const appearanceEditorRef = useRef<AppearanceEditorHandle>(null);
+  const onClose = () => {
+    if (appearanceEditorRef.current) appearanceEditorRef.current.requestLeave(onCloseRequested);
+    else onCloseRequested();
+  };
   const toolsTabRef = useRef<ToolsTabHandle>(null);
   const knowledgeRef = useRef<KnowledgeSettingsHandle>(null);
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
@@ -7141,7 +7147,11 @@ export function SettingsPanel({
                       ? "border-transparent bg-btnPrimary text-btnPrimary-text"
                       : "border-transparent text-text-primary hover:bg-surface-card hover:text-text-strong"
                   }`}
-                  onClick={() => setTab(item.id)}
+                  onClick={() => {
+                    const changeTab = () => setTab(item.id);
+                    if (appearanceEditorRef.current) appearanceEditorRef.current.requestLeave(changeTab);
+                    else changeTab();
+                  }}
                   title={item.label}
                 >
                   {Icon ? (
@@ -7318,6 +7328,7 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
+                <ChatAppearanceSettings ref={appearanceEditorRef} />
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
                     <button

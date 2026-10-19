@@ -1181,7 +1181,7 @@ export function ImBubble({
           <>
             <MaybeConversationContent
               active={isGroupAssistant}
-              className={
+              className={`agx-appearance-assistant ${
                 compactAssistant && noBubbleBorder
                   ? `agx-im-body-type relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isMetaPendingWork
@@ -1191,7 +1191,7 @@ export function ImBubble({
                       : (message.references?.length ?? 0) > 0
                         ? `agx-im-body-type relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                         : `agx-im-body-type relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-              }
+              }`}
               style={
                 compactAssistant && noBubbleBorder
                   ? undefined

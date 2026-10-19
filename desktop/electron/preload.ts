@@ -373,6 +373,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("pin-session", payload),
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
+  loadChatAppearance: () => ipcRenderer.invoke("appearance-load"),
+  saveChatAppearance: (payload: import("./chat-appearance-contract").AppearanceSave) => ipcRenderer.invoke("appearance-save", payload),
+  importChatWallpaper: () => ipcRenderer.invoke("appearance-import-wallpaper"),
+  readChatWallpaper: (assetId: string) => ipcRenderer.invoke("appearance-read-wallpaper", assetId),
+  importChatAppearancePackage: () => ipcRenderer.invoke("appearance-import-package"),
+  exportChatAppearancePackage: (payload: { name: string; appearance: import("./chat-appearance-contract").ChatAppearance }) => ipcRenderer.invoke("appearance-export-package", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
   saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,

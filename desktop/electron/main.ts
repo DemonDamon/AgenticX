@@ -18,6 +18,7 @@ import {
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { registerChatAppearanceIpc } from "./chat-appearance-ipc";
 import {
   mergeGatewayAdapters,
   readGatewayAdapterForm,
@@ -13733,6 +13734,7 @@ if (!gotTheLock) {
   app.setName("Near");
 
   app.whenReady().then(async () => {
+    registerChatAppearanceIpc(CONFIG_DIR, () => mainWindow);
     try {
       protocol.handle(LOCAL_MEDIA_SCHEME, (request) => {
         const resolved = resolveAllowedLocalVideoFile(parseLocalMediaPath(request.url), {

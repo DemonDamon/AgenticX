@@ -1,3 +1,8 @@
+import { ChatWallpaper } from "./appearance/ChatWallpaper";
+import { useAppearanceStore } from "../appearance/store";
+import { appearanceVariables } from "../appearance/render";
+import { resolveAppearance, resolveAppearanceScope } from "../../shared/chat-appearance";
+import { shouldSendPulse } from "../appearance/animation-policy";
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n/i18n";
@@ -2966,6 +2971,10 @@ function resolveReadyAttachment(
 type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
+  const appearanceDocument = useAppearanceStore(s => s.document);
+  const appearancePulse = useAppearanceStore(s => s.pulse);
+  const appearanceTheme = useAppStore(s => s.theme);
+  const appearanceVisible = useAppStore(s => s.mainView === "chat" && !s.settings.open);
   const { t } = useTranslation("chat");
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
@@ -11053,6 +11062,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return;
       }
 
+      const currentAppearanceSession = useAppStore.getState().panes.find(p => p.id === pane.id)?.sessionId ?? "";
+      if (clientTurnId && shouldSendPulse({ avatarId: pane.avatarId, sessionId: requestSessionId, currentSessionId: currentAppearanceSession,
+        continuation: isContinuation, suppressUserEcho, skipUserHistory, hasReader: true })) {
+        useAppearanceStore.getState().sendPulse(pane.id, requestSessionId, clientTurnId);
+      }
+
       let cumulativeFull = "";
       let receivedGroupTerminalEvent = false;
       let pendingSuggestedQuestions: string[] = [];
@@ -14163,6 +14178,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const agentActivitySummary = useMemo(() => summarizeAgentActivity(paneSubAgents), [paneSubAgents]);
 
+  const chatAppearance = resolveAppearance(appearanceDocument, resolveAppearanceScope(pane.avatarId));
+  const currentAppearancePulse = appearancePulse?.paneId === pane.id && appearancePulse.sessionId === pane.sessionId ? appearancePulse.seq : 0;
+
   const isBrandEmptyState =
     (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
     (!!pane.sessionId && visibleMessages.length === 0);
@@ -14211,10 +14229,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         className={
           workExpandedLayout
             ? "pointer-events-none absolute inset-x-0 bottom-0 z-[60] flex justify-center px-3 pb-3 sm:px-6"
-            : "agx-chatpane-main-column relative flex min-h-0 min-w-0 flex-1 flex-col"
+            : "agx-chatpane-main-column agx-appearance-host relative flex min-h-0 min-w-0 flex-1 flex-col"
         }
-        style={workExpandedLayout ? undefined : { minWidth: CHAT_COLUMN_MIN_WIDTH }}
+        data-custom-bubbles={chatStyle === "im" && chatAppearance.variants[appearanceTheme].bubbles.custom}
+        style={workExpandedLayout ? undefined : { minWidth: CHAT_COLUMN_MIN_WIDTH, ...appearanceVariables(chatAppearance, appearanceTheme, chatStyle === "im") }}
       >
+        {!workExpandedLayout ? <ChatWallpaper key={pane.sessionId} appearance={chatAppearance} mode={appearanceTheme} focused={focused && appearanceVisible} pulse={currentAppearancePulse} /> : null}
         <div
           className={
             workExpandedLayout

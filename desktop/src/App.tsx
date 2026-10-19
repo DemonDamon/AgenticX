@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AvatarSidebar } from "./components/AvatarSidebar";
+import { useAppearanceStore } from "./appearance/store";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
@@ -331,6 +332,7 @@ async function requestSession(
 }
 
 export function App() {
+  useEffect(() => { void useAppearanceStore.getState().load(); }, []);
   const { t } = useTranslation("sidebar");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
