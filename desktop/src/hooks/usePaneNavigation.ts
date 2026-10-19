@@ -253,7 +253,7 @@ export function usePaneNavigation() {
    * Optional `draftText` pre-fills the composer (editable, not auto-sent) —
    * used by the avatar gallery's "AI 创建" flow to hand off a template prompt.
    */
-  const newMetaTask = useCallback((draftText?: string) => {
+  const newMetaTask = useCallback((draftText?: string, opts?: { spaceId?: string }) => {
     setMainView("chat");
     const metaPane = panes.find((item) => item.avatarId === null);
     let paneId = metaPane?.id;
@@ -265,10 +265,17 @@ export function usePaneNavigation() {
     }
     setActiveAvatarId(null);
     const targetPaneId = paneId;
+    const spaceId = opts?.spaceId?.trim() ?? "";
     // Defer so the pane is mounted/focused before it handles the new-topic event.
     window.setTimeout(() => {
       window.dispatchEvent(
-        new CustomEvent("agenticx:pane:new-topic", { detail: { paneId: targetPaneId, draftText } })
+        new CustomEvent("agenticx:pane:new-topic", {
+          detail: {
+            paneId: targetPaneId,
+            draftText,
+            ...(spaceId ? { spaceId } : {}),
+          },
+        })
       );
     }, 0);
   }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);

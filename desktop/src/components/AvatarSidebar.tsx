@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
-import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Store, Users, Waypoints } from "lucide-react";
+import { AlarmClock, BookOpen, Bot, MessageSquarePlus, Store, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import {
@@ -42,8 +42,7 @@ type NavEntry =
 const NAV_ENTRY_DEFS = [
   { kind: "action" as const, id: "new-task" as const, icon: MessageSquarePlus },
   { kind: "view" as const, id: "avatars" as const, icon: Bot },
-  { kind: "view" as const, id: "groups" as const, icon: Waypoints },
-  { kind: "view" as const, id: "collab" as const, icon: Users },
+  { kind: "view" as const, id: "collab" as const, icon: Waypoints },
   { kind: "view" as const, id: "automation" as const, icon: AlarmClock },
   { kind: "view" as const, id: "wiki" as const, icon: BookOpen },
   { kind: "view" as const, id: "market" as const, icon: Store },
@@ -52,7 +51,6 @@ const NAV_ENTRY_DEFS = [
 const NAV_LABEL_KEY: Record<(typeof NAV_ENTRY_DEFS)[number]["id"], string> = {
   "new-task": "nav.newTask",
   avatars: "nav.avatars",
-  groups: "nav.groups",
   collab: "nav.collab",
   automation: "nav.automation",
   wiki: "nav.wiki",
@@ -77,6 +75,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
   const setGroups = useAppStore((s) => s.setGroups);
   const mainView = useAppStore((s) => s.mainView);
   const setMainView = useAppStore((s) => s.setMainView);
+  const openProject = useAppStore((s) => s.openProject);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const panes = useAppStore((s) => s.panes);
 
@@ -297,6 +296,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
                   if (entry.kind === "action") newMetaTask();
+                  else if (entry.id === "collab") openProject(null);
                   else setMainView(entry.id);
                 }}
               >

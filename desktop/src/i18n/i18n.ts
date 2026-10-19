@@ -12,6 +12,8 @@ import zhWorkspace from "../../locales/zh/workspace.json";
 import enWorkspace from "../../locales/en/workspace.json";
 import zhMarketplace from "../../locales/zh/marketplace.json";
 import enMarketplace from "../../locales/en/marketplace.json";
+import zhProjects from "../../locales/zh/projects.json";
+import enProjects from "../../locales/en/projects.json";
 import { LOCALE_STORAGE_KEY } from "./locales";
 import { resolveAppLocale } from "./resolve-locale";
 
@@ -32,7 +34,7 @@ void i18n.use(initReactI18next).init({
   lng: initial,
   fallbackLng: "zh",
   defaultNS: "common",
-  ns: ["common", "settings", "chat", "sidebar", "workspace", "marketplace"],
+  ns: ["common", "settings", "chat", "sidebar", "workspace", "marketplace", "projects"],
   resources: {
     zh: {
       common: zhCommon,
@@ -41,6 +43,7 @@ void i18n.use(initReactI18next).init({
       sidebar: zhSidebar,
       workspace: zhWorkspace,
       marketplace: zhMarketplace,
+      projects: zhProjects,
     },
     en: {
       common: enCommon,
@@ -49,6 +52,7 @@ void i18n.use(initReactI18next).init({
       sidebar: enSidebar,
       workspace: enWorkspace,
       marketplace: enMarketplace,
+      projects: enProjects,
     },
   },
   interpolation: { escapeValue: false },

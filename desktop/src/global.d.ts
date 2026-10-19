@@ -570,6 +570,52 @@ declare global {
       ) => Promise<{ ok: boolean; data?: { message: unknown }; error?: string }>;
       collabRoomWatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
       collabRoomUnwatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+      localSpacesList: () => Promise<{
+        version: 1;
+        spaces: Array<{ id: string; name: string; path: string; created_at: number }>;
+        session_space: Record<string, string>;
+      }>;
+      localSpacesCreate: (payload: { path: string; name?: string }) => Promise<
+        | { ok: true; space: { id: string; name: string; path: string; created_at: number } }
+        | { ok: false; error: string }
+      >;
+      localSpacesRemove: (payload: { id: string }) => Promise<{ ok: true }>;
+      localSpacesAssign: (payload: { sessionId: string; spaceId: string }) => Promise<{ ok: true }>;
+      collabProjectList: () => Promise<{
+        ok: boolean;
+        data?: {
+          projects: Array<{
+            id: string;
+            name: string;
+            instructions: string;
+            main_room_id: string;
+            member_count: number;
+            created_at: string;
+            updated_at: string;
+          }>;
+        };
+        error?: string;
+      }>;
+      collabProjectCreate: (input: {
+        name: string;
+        instructions?: string;
+        settings?: { connectors: string[]; experts: string[]; skills: string[] };
+        member_user_ids?: { user_id: string; display_name: string }[];
+      }) => Promise<{
+        ok: boolean;
+        data?: {
+          project: {
+            id: string;
+            name: string;
+            instructions: string;
+            main_room_id: string;
+            member_count: number;
+            created_at: string;
+            updated_at: string;
+          };
+        };
+        error?: string;
+      }>;
       onCollabRoomEvent: (
         cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void,
       ) => () => void;

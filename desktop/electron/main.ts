@@ -91,13 +91,21 @@ import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge"
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
 import {
+  createProject as createCollabProject,
   getRoom as fetchCollabRoom,
   listMessages as fetchCollabRoomMessages,
+  listProjects as fetchCollabProjects,
   listRooms as fetchCollabRooms,
   normalizePortalBase,
   sendMessage as sendCollabRoomMessage,
   streamRoomEvents,
 } from "./collab-room-client";
+import {
+  assignSessionToSpace,
+  createLocalSpace,
+  readLocalSpaces,
+  removeLocalSpace,
+} from "./local-spaces";
 import {
   cancelEnterpriseDeviceAuth,
   pollEnterpriseDeviceAuth,
@@ -8102,6 +8110,50 @@ function registerEarlyIpc(): void {
     const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
     if (roomId) abortCollabRoomWatch(roomId);
     return { ok: true };
+  });
+  ipcMain.handle("local-spaces-list", async () => readLocalSpaces());
+  ipcMain.handle("local-spaces-create", async (_event, payload: unknown) => {
+    const body = payload && typeof payload === "object" ? (payload as { path?: unknown; name?: unknown }) : {};
+    return createLocalSpace({
+      path: typeof body.path === "string" ? body.path : "",
+      name: typeof body.name === "string" ? body.name : undefined,
+    });
+  });
+  ipcMain.handle("local-spaces-remove", async (_event, payload: unknown) => {
+    const body = payload && typeof payload === "object" ? (payload as { id?: unknown }) : {};
+    return removeLocalSpace(typeof body.id === "string" ? body.id : "");
+  });
+  ipcMain.handle("local-spaces-assign", async (_event, payload: unknown) => {
+    const body =
+      payload && typeof payload === "object" ? (payload as { sessionId?: unknown; spaceId?: unknown }) : {};
+    return assignSessionToSpace({
+      sessionId: typeof body.sessionId === "string" ? body.sessionId : "",
+      spaceId: typeof body.spaceId === "string" ? body.spaceId : "",
+    });
+  });
+  ipcMain.handle("collab-project-list", async () => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "enterprise-login-required" };
+    return fetchCollabProjects({ ...deps, fetchImpl: proxyAwareFetch });
+  });
+  ipcMain.handle("collab-project-create", async (_event, inputRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "enterprise-login-required" };
+    const body = inputRaw && typeof inputRaw === "object" ? (inputRaw as Record<string, unknown>) : {};
+    return createCollabProject(
+      { ...deps, fetchImpl: proxyAwareFetch },
+      {
+        name: typeof body.name === "string" ? body.name : "",
+        instructions: typeof body.instructions === "string" ? body.instructions : undefined,
+        settings:
+          body.settings && typeof body.settings === "object" && !Array.isArray(body.settings)
+            ? (body.settings as { connectors: string[]; experts: string[]; skills: string[] })
+            : undefined,
+        member_user_ids: Array.isArray(body.member_user_ids)
+          ? (body.member_user_ids as { user_id: string; display_name: string }[])
+          : undefined,
+      },
+    );
   });
   app.on("before-quit", () => {
     abortAllCollabRoomWatches();

@@ -726,6 +726,8 @@ type AppState = {
   /** Which content the right main area shows (chat / gallery / projects / automation / wiki). */
   mainView: MainView;
   setMainView: (view: MainView) => void;
+  activeProjectId: string | null;
+  openProject: (projectId: string | null) => void;
   /**
    * Snapshot of the active chat pane when leaving `mainView: "chat"` for a landing
    * page (avatars / groups / collab / automation). Used by MainViewShell's back button.
@@ -1378,6 +1380,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
   mainView: "chat",
+  activeProjectId: null,
   setMainView: (view) =>
     set((state) => {
       // Leaving chat → landing: remember the active pane so landing pages can offer "back".
@@ -3306,6 +3309,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       collabRooms: { ...state.collabRooms, open: true },
     }));
+  },
+  openProject: (projectId) => {
+    set({ activeProjectId: projectId });
+    get().setMainView("collab");
   },
   closeCollabRooms: () => {
     set((state) => ({

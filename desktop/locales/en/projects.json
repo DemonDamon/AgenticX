@@ -1,0 +1,31 @@
+{
+  "title": "Projects",
+  "subtitle": "Work together as one team",
+  "new": "New project",
+  "mine": "My projects",
+  "fromTemplate": "Start from a template",
+  "localGroups": "Local expert groups",
+  "localGroupsHint": "Expert group chats that run on this computer",
+  "needLogin": "Sign in to your organization to create and join projects",
+  "signIn": "Sign in",
+  "search": "Search projects",
+  "added": "Added {{when}}",
+  "more": "More",
+  "empty": "No projects yet",
+  "submitting": "Creating…",
+  "createFailed": "Could not create the project",
+  "none": "None",
+  "dialog": {
+    "name": "Name",
+    "instructions": "Instructions",
+    "connectors": "Connectors",
+    "experts": "Experts",
+    "skills": "Skills",
+    "optional": "(optional)",
+    "add": "Add",
+    "pickTemplate": "Template",
+    "templateOverwrite": "Switching templates replaces what you typed",
+    "cancel": "Cancel",
+    "confirm": "Create"
+  }
+}

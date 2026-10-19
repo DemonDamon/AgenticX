@@ -467,6 +467,26 @@ export function parseDesktopBoundSessionId(bindings: Record<string, unknown> | u
   return String((desktop as Record<string, unknown>).session_id ?? "").trim();
 }
 
+/** Split filtered history rows into standalone tasks and per-space buckets. */
+export function splitRowsBySpace<T extends { session_id: string }>(
+  rows: readonly T[],
+  sessionSpace: Readonly<Record<string, string>>,
+): { taskRows: T[]; rowsBySpace: Record<string, T[]> } {
+  const taskRows: T[] = [];
+  const rowsBySpace: Record<string, T[]> = {};
+  for (const row of rows) {
+    const spaceId = String(sessionSpace[row.session_id] ?? "").trim();
+    if (!spaceId) {
+      taskRows.push(row);
+      continue;
+    }
+    const bucket = rowsBySpace[spaceId];
+    if (bucket) bucket.push(row);
+    else rowsBySpace[spaceId] = [row];
+  }
+  return { taskRows, rowsBySpace };
+}
+
 export const SIDEBAR_HISTORY_PAGE_SIZE = 20;
 export const SIDEBAR_HISTORY_FILTER_KEY = "agx-sidebar-history-avatar-filter-v1";
 export const SIDEBAR_HISTORY_COLLAPSE_KEY = "agx-sidebar-history-collapse-v1";

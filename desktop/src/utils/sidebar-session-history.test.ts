@@ -15,6 +15,7 @@ import {
   sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
+  splitRowsBySpace,
   notifySidebarSessionCatalogChangedForAutomationProgress,
 } from "./sidebar-session-history";
 
@@ -370,6 +371,70 @@ describe("sidebar-session-history utils", () => {
       "child",
       "grandchild",
       "parent",
+    ]);
+  });
+});
+
+describe("splitRowsBySpace", () => {
+  it("drops space sessions from today and earlier and counts the remaining tasks", () => {
+    const now = Date.now() / 1000;
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "task-today",
+        avatar_id: null,
+        session_name: "独立任务",
+        updated_at: now,
+        pinned: false,
+      },
+      {
+        session_id: "space-today",
+        avatar_id: null,
+        session_name: "空间今天",
+        updated_at: now,
+        pinned: false,
+      },
+      {
+        session_id: "task-old",
+        avatar_id: null,
+        session_name: "更早任务",
+        updated_at: now - 86400 * 3,
+        pinned: false,
+      },
+      {
+        session_id: "space-old",
+        avatar_id: null,
+        session_name: "空间更早",
+        updated_at: now - 86400 * 3,
+        pinned: false,
+      },
+      {
+        session_id: "space-pin",
+        avatar_id: null,
+        session_name: "空间置顶",
+        updated_at: now,
+        pinned: true,
+      },
+    ]);
+    const { taskRows, rowsBySpace } = splitRowsBySpace(rows, {
+      "space-today": "space-a",
+      "space-old": "space-a",
+      "space-pin": "space-a",
+    });
+    const buckets = bucketSidebarHistoryNodes(nestContinueSessionRows(taskRows), new Set());
+    const pinnedIds = flattenSidebarHistoryNodes(buckets.pinned).map((row) => row.session_id);
+    const todayIds = flattenSidebarHistoryNodes(buckets.today).map((row) => row.session_id);
+    const earlierIds = flattenSidebarHistoryNodes(buckets.earlier).map((row) => row.session_id);
+    expect(pinnedIds).not.toContain("space-pin");
+    expect(todayIds).toEqual(["task-today"]);
+    expect(earlierIds).toEqual(["task-old"]);
+    expect(todayIds.concat(earlierIds, pinnedIds)).not.toEqual(
+      expect.arrayContaining(["space-today", "space-old", "space-pin"]),
+    );
+    expect(taskRows.map((row) => row.session_id).sort()).toEqual(["task-old", "task-today"]);
+    expect(rowsBySpace["space-a"].map((row) => row.session_id).sort()).toEqual([
+      "space-old",
+      "space-pin",
+      "space-today",
     ]);
   });
 });

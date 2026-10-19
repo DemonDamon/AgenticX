@@ -10,7 +10,7 @@ import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarifi
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
-import { CollabRoomPanel } from "./components/CollabRoomPanel";
+import { ProjectCollabView } from "./components/projects/ProjectCollabView";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { AvatarGalleryView } from "./components/gallery/AvatarGalleryView";
@@ -2697,7 +2697,7 @@ export function App() {
                         </div>
                         {mainView === "avatars" ? <AvatarGalleryView /> : null}
                         {mainView === "groups" ? <ProjectsView /> : null}
-                        {mainView === "collab" ? <CollabRoomPanel variant="page" /> : null}
+                        {mainView === "collab" ? <ProjectCollabView /> : null}
                         {mainView === "automation" ? <AutomationView /> : null}
                         {mainView === "wiki" ? <WikiBrowseView /> : null}
                         {mainView === "market" ? <MarketplaceView /> : null}

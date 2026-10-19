@@ -1,0 +1,31 @@
+{
+  "title": "项目",
+  "subtitle": "多人协作，打造超级团队",
+  "new": "新建项目",
+  "mine": "我的项目",
+  "fromTemplate": "从模板创建",
+  "localGroups": "本机专家群",
+  "localGroupsHint": "只在本机运行的数字专家群聊",
+  "needLogin": "登录企业账号后可创建和加入项目",
+  "signIn": "登录企业账号",
+  "search": "搜索项目",
+  "added": "添加于 {{when}}",
+  "more": "更多",
+  "empty": "还没有项目",
+  "submitting": "创建中…",
+  "createFailed": "创建项目失败",
+  "none": "暂无",
+  "dialog": {
+    "name": "项目名称",
+    "instructions": "指令",
+    "connectors": "连接器",
+    "experts": "专家",
+    "skills": "技能",
+    "optional": "（可选）",
+    "add": "添加",
+    "pickTemplate": "选择模板",
+    "templateOverwrite": "切换模板会覆盖当前编辑内容",
+    "cancel": "取消",
+    "confirm": "确定"
+  }
+}

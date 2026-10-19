@@ -4,7 +4,7 @@
     "newTask": "新建任务",
     "avatars": "数字专家",
     "groups": "专家群聊",
-    "collab": "多人协作",
+    "collab": "项目协作",
     "automation": "定时任务",
     "wiki": "Wiki",
     "market": "插件市场"
@@ -192,6 +192,7 @@
   },
   "history": {
     "title": "历史对话",
+    "tasks": "任务",
     "filterAll": "全部",
     "empty": "暂无",
     "emptyPinned": "暂无置顶",
@@ -345,6 +346,14 @@
     "files": { "label": "管理文件", "prompt": "请帮我规划本地文件整理方案，先询问我目录目标。" },
     "search": { "label": "搜索", "prompt": "请先澄清我的问题，再给出可验证的信息检索结果。" },
     "plan": { "label": "做计划", "prompt": "请为我的目标生成分步骤计划，包含风险与里程碑。" }
+  },
+  "spaces": {
+    "title": "空间",
+    "collapseAll": "全部收起",
+    "create": "新建空间",
+    "newTaskHere": "在此空间新建任务",
+    "remove": "移除空间",
+    "reveal": "在访达中显示"
   },
   "groups": {
     "title": "专家群聊",

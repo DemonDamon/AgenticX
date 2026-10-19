@@ -99,6 +99,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("collab-room-send", roomId, content),
   collabRoomWatch: async (roomId: string) => ipcRenderer.invoke("collab-room-watch", roomId),
   collabRoomUnwatch: async (roomId: string) => ipcRenderer.invoke("collab-room-unwatch", roomId),
+  localSpacesList: async () => ipcRenderer.invoke("local-spaces-list"),
+  localSpacesCreate: async (payload: { path: string; name?: string }) =>
+    ipcRenderer.invoke("local-spaces-create", payload),
+  localSpacesRemove: async (payload: { id: string }) => ipcRenderer.invoke("local-spaces-remove", payload),
+  localSpacesAssign: async (payload: { sessionId: string; spaceId: string }) =>
+    ipcRenderer.invoke("local-spaces-assign", payload),
+  collabProjectList: async () => ipcRenderer.invoke("collab-project-list"),
+  collabProjectCreate: async (input: {
+    name: string;
+    instructions?: string;
+    settings?: { connectors: string[]; experts: string[]; skills: string[] };
+    member_user_ids?: { user_id: string; display_name: string }[];
+  }) => ipcRenderer.invoke("collab-project-create", input),
   onCollabRoomEvent: (cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) => {
     const listener = (_e: unknown, payload: never) => cb(payload);
     ipcRenderer.on("collab-room-event", listener as never);

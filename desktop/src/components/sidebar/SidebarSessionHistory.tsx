@@ -55,9 +55,11 @@ import {
   sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
+  splitRowsBySpace,
   type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
+import { SidebarSpaces } from "./SidebarSpaces";
 import { excludeScratchSessionsFromHistory, scratchHistoryBlocklist } from "../../utils/scratch-chat";
 import { HoverTip } from "../ds/HoverTip";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
@@ -75,6 +77,8 @@ type CollapseState = {
   pinned: boolean;
   today: boolean;
   earlier: boolean;
+  tasks: boolean;
+  spaces: boolean;
 };
 
 const DEFAULT_COLLAPSE: CollapseState = {
@@ -83,6 +87,8 @@ const DEFAULT_COLLAPSE: CollapseState = {
   pinned: false,
   today: false,
   earlier: false,
+  tasks: false,
+  spaces: false,
 };
 
 function loadCollapse(): CollapseState {
@@ -153,6 +159,7 @@ export function SidebarSessionHistory() {
   const setMainView = useAppStore((s) => s.setMainView);
 
   const [sessions, setSessions] = useState<SidebarSessionRow[]>([]);
+  const [sessionSpace, setSessionSpace] = useState<Record<string, string>>({});
   const [historyReady, setHistoryReady] = useState(false);
   const [feishuBoundId, setFeishuBoundId] = useState("");
   const [wechatBoundId, setWechatBoundId] = useState("");
@@ -233,6 +240,16 @@ export function SidebarSessionHistory() {
     }
   }, [clearSessionHistoryHint]);
 
+  const loadSpaceMap = useCallback(async () => {
+    try {
+      const listed = await window.agenticxDesktop.localSpacesList();
+      if (!mountedRef.current) return;
+      setSessionSpace(listed?.session_space ?? {});
+    } catch (err) {
+      console.warn("[SidebarSessionHistory] localSpacesList failed", err);
+    }
+  }, []);
+
   const loadBindings = useCallback(async () => {
     try {
       const [feishu, wechat] = await Promise.all([
@@ -249,16 +266,29 @@ export function SidebarSessionHistory() {
   useEffect(() => {
     void loadSessions();
     void loadBindings();
-  }, [loadSessions, loadBindings, sessionCatalogRevision]);
+    void loadSpaceMap();
+  }, [loadSessions, loadBindings, loadSpaceMap, sessionCatalogRevision]);
 
   useEffect(() => {
-    const listTimer = window.setInterval(() => void loadSessions(), 5000);
+    const listTimer = window.setInterval(() => {
+      void loadSessions();
+      void loadSpaceMap();
+    }, 5000);
     const bindTimer = window.setInterval(() => void loadBindings(), 3000);
     return () => {
       window.clearInterval(listTimer);
       window.clearInterval(bindTimer);
     };
-  }, [loadSessions, loadBindings]);
+  }, [loadSessions, loadBindings, loadSpaceMap]);
+
+  useEffect(() => {
+    const onSpacesChanged = () => {
+      void loadSessions();
+      void loadSpaceMap();
+    };
+    window.addEventListener("agenticx:spaces:changed", onSpacesChanged);
+    return () => window.removeEventListener("agenticx:spaces:changed", onSpacesChanged);
+  }, [loadSessions, loadSpaceMap]);
 
   useEffect(() => {
     if (!fileManageTarget) return;
@@ -420,9 +450,14 @@ export function SidebarSessionHistory() {
     return includeContinueSearchAncestors(avatarFiltered, matched);
   }, [sessionsWithHints, avatarFilter, rowMatchesSearch, searchQuery]);
 
+  const { taskRows, rowsBySpace } = useMemo(
+    () => splitRowsBySpace(filteredForBuckets, sessionSpace),
+    [filteredForBuckets, sessionSpace],
+  );
+
   const historyTree = useMemo(
-    () => nestContinueSessionRows(filteredForBuckets),
-    [filteredForBuckets]
+    () => nestContinueSessionRows(taskRows),
+    [taskRows]
   );
 
   const buckets = useMemo(
@@ -1376,9 +1411,18 @@ export function SidebarSessionHistory() {
         aria-hidden={showFileManage}
       >
       <div className="flex items-center gap-1 px-3 pb-1 pt-3">
-        <div className="min-w-0 flex-1 truncate text-[11px] font-light text-text-muted">
-          {t("history.title")}
-        </div>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+          onClick={() => toggleSection("tasks")}
+        >
+          <span className="min-w-0 truncate text-[11px] font-light text-text-muted">
+            {t("history.tasks")}
+          </span>
+          <span className="inline-flex shrink-0 rounded-sm bg-surface-card px-1 py-px text-[10px] font-medium text-text-muted">
+            {taskRows.length}
+          </span>
+        </button>
         <SidebarCreateButton className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-faint hover:bg-surface-hover hover:text-text-strong [&_svg]:h-3.5 [&_svg]:w-3.5" />
         {!selectMode ? (
           <>
@@ -1540,6 +1584,8 @@ export function SidebarSessionHistory() {
           </div>
         )}
 
+        {!collapse.tasks ? (
+          <>
         {/* Pinned */}
         {sectionHeader("pinned", t("history.pinned"))}
         {!collapse.pinned && (
@@ -1585,6 +1631,17 @@ export function SidebarSessionHistory() {
             {t("history.showMore")}
           </button>
         ) : null}
+          </>
+        ) : null}
+
+        <SidebarSpaces
+          rowsBySpace={rowsBySpace}
+          onOpenSession={(row) => {
+            void openSession(row);
+          }}
+          collapsed={collapse.spaces}
+          onToggleCollapsed={() => toggleSection("spaces")}
+        />
       </div>
       </div>
 

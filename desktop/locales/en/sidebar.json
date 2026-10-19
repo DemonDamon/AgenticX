@@ -4,7 +4,7 @@
     "newTask": "New task",
     "avatars": "Experts",
     "groups": "Expert groups",
-    "collab": "Collaboration",
+    "collab": "Projects",
     "automation": "Scheduled tasks",
     "wiki": "Wiki",
     "market": "Marketplace"
@@ -192,6 +192,7 @@
   },
   "history": {
     "title": "History",
+    "tasks": "Tasks",
     "filterAll": "All",
     "empty": "None",
     "emptyPinned": "No pinned chats",
@@ -345,6 +346,14 @@
     "files": { "label": "Files", "prompt": "Help me plan a local file-organization scheme. Ask me about the folder and goal first." },
     "search": { "label": "Search", "prompt": "Clarify my question first, then give verifiable search results." },
     "plan": { "label": "Plan", "prompt": "Turn my goal into a step-by-step plan with risks and milestones." }
+  },
+  "spaces": {
+    "title": "Spaces",
+    "collapseAll": "Collapse all",
+    "create": "New space",
+    "newTaskHere": "New task in this space",
+    "remove": "Remove space",
+    "reveal": "Show in Finder"
   },
   "groups": {
     "title": "Expert groups",

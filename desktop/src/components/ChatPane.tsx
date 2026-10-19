@@ -10006,6 +10006,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const resumeInNewSessionRef = useRef<() => void>(() => {});
   const resumeDraftRef = useRef<() => void>(() => {});
+  const pendingSpaceIdRef = useRef<string | null>(null);
 
   /** Materialize a lazy session (fresh topic / no sessionId yet) with full create params. */
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
@@ -10042,6 +10043,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       clearPaneAwaitingFreshSession(pane.id);
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
+      const spaceId = pendingSpaceIdRef.current;
+      if (spaceId && pane.avatarId === null) {
+        pendingSpaceIdRef.current = null;
+        try {
+          const listed = await window.agenticxDesktop.localSpacesList();
+          const space = listed.spaces.find((item) => item.id === spaceId);
+          if (!space) {
+            console.warn("[ChatPane] local space missing:", spaceId);
+          } else {
+            await window.agenticxDesktop.addTaskspace({
+              sessionId: newSessionId,
+              path: space.path,
+              label: space.name,
+            });
+            await window.agenticxDesktop.localSpacesAssign({ sessionId: newSessionId, spaceId });
+            window.dispatchEvent(new CustomEvent("agenticx:spaces:changed"));
+          }
+        } catch (err) {
+          console.warn("[ChatPane] assign local space failed:", err);
+        }
+      }
       return newSessionId;
     } catch (err) {
       console.error("[ChatPane] materializeLazySession threw:", err);
@@ -13456,6 +13478,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   const createNewTopic = (inherit = true, sessionMode: PaneSessionMode = "daily_office") => {
+    pendingSpaceIdRef.current = null;
     const prevSessionId = (pane.sessionId || "").trim();
     // 用户主动新建会话时，不应强制中断旧会话流：旧会话允许后台继续执行。
     // 发送锁在 sendChat 里会基于 isPaneAwaitingFreshSession 进行抢占释放。
@@ -13525,12 +13548,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   useEffect(() => {
     const onNewTopic = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { paneId?: string; draftText?: string; autoSend?: boolean }
+        | { paneId?: string; draftText?: string; autoSend?: boolean; spaceId?: string }
         | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
       // 专家指令直达 autoSend：派发方在 ack-retry 等 acknowledged，先确认再执行。
       if (detail?.autoSend) markExpertAutoSendConsumed(pane.id);
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
+      const spaceId = typeof detail?.spaceId === "string" ? detail.spaceId.trim() : "";
+      pendingSpaceIdRef.current = spaceId || null;
       const draftText = detail?.draftText;
       if (draftText) {
         // Persist before the session-switch restore effect reads the pane key, so a
