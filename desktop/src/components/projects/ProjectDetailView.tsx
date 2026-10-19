@@ -607,7 +607,9 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
               }
             />
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-text-faint">{t("loadFailed")}</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-text-faint">
+              {error ? t("loadFailed") : t("loadingProject")}
+            </div>
           )}
         </section>
       </div>

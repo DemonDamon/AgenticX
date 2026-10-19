@@ -31,6 +31,7 @@
   "refresh": "刷新",
   "searchMessages": "搜索当前对话",
   "loadFailed": "加载失败",
+  "loadingProject": "正在加载…",
   "select": "选择",
   "members": {
     "title": "项目成员",
