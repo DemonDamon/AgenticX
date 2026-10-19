@@ -8,6 +8,7 @@ export const PLATFORM_SECTION_IDS = [
   "mcp-servers",
   "connectors",
   "capabilities",
+  "projects",
   "cases",
   "plugins",
 ] as const;

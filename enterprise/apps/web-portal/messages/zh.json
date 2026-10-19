@@ -46,6 +46,7 @@
     "emptyWordmark": "NEAR",
     "emptyTagline": "Near, Always Near.",
     "collabRoom": "协作房间",
+    "myProjects": "我的项目",
     "quotaTitle": "配额进度",
     "quotaToday": "今日",
     "quotaWeek": "本周",
@@ -340,5 +341,29 @@
     "toolStepOk": "成功",
     "toolStepFailed": "失败",
     "toolStepLine": "{server} · {tool} · {status} · {ms} 毫秒"
+  },
+  "projects": {
+    "title": "我的项目",
+    "backToWorkspace": "返回工作区",
+    "backToList": "返回项目列表",
+    "loading": "正在加载…",
+    "empty": "你还没有参与任何项目。",
+    "loadFailed": "加载失败，请稍后重试",
+    "openFailed": "无法打开项目",
+    "memberCount": "{count} 名成员",
+    "noActivity": "暂无活动",
+    "desktopHint": "在桌面端可以发消息、拉小群和合回",
+    "mainGroup": "主群",
+    "subGroup": "小群",
+    "directGroup": "单聊",
+    "noRooms": "还没有可见的群",
+    "selectRoom": "选择一个群查看对话",
+    "noMessages": "还没有消息",
+    "messagesFailed": "对话加载失败",
+    "directForbidden": "无权查看单聊内容",
+    "loadingMessages": "正在加载对话",
+    "loadMore": "加载更多",
+    "mergeFrom": "合回自「{title}」",
+    "mergeUnknown": "合回记录"
   }
 }

@@ -12,6 +12,7 @@ describe("isPlatformSection", () => {
       "mcp-servers",
       "connectors",
       "capabilities",
+      "projects",
       "cases",
       "plugins",
     ]);

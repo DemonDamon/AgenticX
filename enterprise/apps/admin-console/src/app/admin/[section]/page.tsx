@@ -10,6 +10,7 @@ import ConnectorsSection from "../_sections/connectors";
 import McpServersSection from "../_sections/mcp-servers";
 import ModelsSection from "../_sections/models";
 import PluginsSection from "../_sections/plugins";
+import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
   agents: AgentsSection,
@@ -20,6 +21,7 @@ const PLATFORM_SECTION_PAGES = {
   "mcp-servers": McpServersSection,
   connectors: ConnectorsSection,
   capabilities: CapabilitiesSection,
+  projects: ProjectsSection,
   cases: CasesSection,
   plugins: PluginsSection,
 } as const;

@@ -46,6 +46,7 @@ import {
   Trash2,
   Languages,
   Users,
+  Waypoints,
 } from "lucide-react";
 import {
   ChatLocaleProvider,
@@ -419,6 +420,16 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             >
               <Users />
               {!collapsed && t("collabRoom")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => router.push("/projects")}
+              className={collapsed ? "" : "w-full justify-start"}
+              size={collapsed ? "icon" : "default"}
+              aria-label={t("myProjects")}
+            >
+              <Waypoints />
+              {!collapsed && t("myProjects")}
             </Button>
           </div>
 

@@ -46,6 +46,7 @@
     "emptyWordmark": "NEAR",
     "emptyTagline": "Near, Always Near.",
     "collabRoom": "Collaboration rooms",
+    "myProjects": "My projects",
     "quotaTitle": "Quota",
     "quotaToday": "Today",
     "quotaWeek": "This week",
@@ -340,5 +341,29 @@
     "toolStepOk": "Succeeded",
     "toolStepFailed": "Failed",
     "toolStepLine": "{server} · {tool} · {status} · {ms} ms"
+  },
+  "projects": {
+    "title": "My projects",
+    "backToWorkspace": "Back to workspace",
+    "backToList": "Back to projects",
+    "loading": "Loading…",
+    "empty": "You have not joined a project yet.",
+    "loadFailed": "Could not load projects. Please try again.",
+    "openFailed": "Could not open this project",
+    "memberCount": "{count} members",
+    "noActivity": "No activity yet",
+    "desktopHint": "Send messages, start a side room, and merge back from the desktop app.",
+    "mainGroup": "Main room",
+    "subGroup": "Side rooms",
+    "directGroup": "Direct chats",
+    "noRooms": "No visible rooms yet",
+    "selectRoom": "Select a room to read the conversation",
+    "noMessages": "No messages yet",
+    "messagesFailed": "Could not load the conversation",
+    "directForbidden": "You cannot view this direct chat",
+    "loadingMessages": "Loading conversation",
+    "loadMore": "Load more",
+    "mergeFrom": "Merged from \"{title}\"",
+    "mergeUnknown": "Merged record"
   }
 }
