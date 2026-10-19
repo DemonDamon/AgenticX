@@ -179,15 +179,13 @@ function MergeBackCard({
   const lines = previewLines(message.content);
   const tagKey = modeTagKey(mode);
   const tag = tagKey ? t(tagKey) : "";
+  const stats = [participants.join("、"), count > 0 ? t("merge.count", { count }) : ""].filter(Boolean).join(" · ");
   return (
     <div className="max-w-[80%] rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
       <div className="mb-1 break-words text-text-primary">{t("merge.cardTitle", { name: sourceTitle })}</div>
       <div className="mb-1 flex flex-wrap items-center gap-1">
         {tag ? <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[11px] text-text-muted">{tag}</span> : null}
-        <span>
-          {participants.length ? `${participants.join("、")} · ` : ""}
-          {count}
-        </span>
+        {stats ? <span>{stats}</span> : null}
       </div>
       {summary || expanded ? (
         <div className="whitespace-pre-wrap break-words text-text-primary">{message.content}</div>

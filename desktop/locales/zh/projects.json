@@ -74,6 +74,7 @@
     "pending": "已发给对方确认",
     "approve": "同意合回",
     "cardTitle": "合回自「{{name}}」",
+    "count": "{{count}} 条",
     "viewSource": "查看原群",
     "expand": "展开全部",
     "failed": "合回失败"

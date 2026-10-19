@@ -74,6 +74,7 @@
     "pending": "Sent to the other person for confirmation",
     "approve": "Approve merge",
     "cardTitle": "Merged from \"{{name}}\"",
+    "count": "{{count}} messages",
     "viewSource": "View original chat",
     "expand": "Show all",
     "failed": "Could not merge back"
