@@ -55,6 +55,21 @@ export function ChatWallpaper({ appearance, mode, focused = false, preview = fal
   const unavailable = useAppearanceStore(s => s.gpuUnavailable);
   const environment = useEnvironment(animate && appearance.motion !== "off" && (w.type === "gradient" || w.type === "shader"));
   const [burst, setBurst] = useState(false);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [pointerInside, setPointerInside] = useState(false);
+  const effectVisible = w.type !== "shader" || (w.effect?.opacity ?? 1) > 0;
+  const cursorEffect = w.type === "shader" && w.effect?.id === "cursor-ripples";
+  useEffect(() => {
+    if (!cursorEffect || !animate || appearance.motion === "off") return;
+    const host = hostRef.current?.closest<HTMLElement>(".agx-appearance-host, .agx-appearance-preview");
+    if (!host) return;
+    const enter = () => setPointerInside(true);
+    const leave = () => { setPointerInside(false); setBurst(false); };
+    // The library listens on window. Mount only inside this host; never intercept chat input.
+    setPointerInside(host.matches(":hover"));
+    host.addEventListener("mouseenter", enter); host.addEventListener("mouseleave", leave);
+    return () => { host.removeEventListener("mouseenter", enter); host.removeEventListener("mouseleave", leave); };
+  }, [cursorEffect, animate, appearance.motion]);
   const lastPulse = useRef(pulse);
   useEffect(() => {
     if (w.type !== "image" || !w.assetId) return;
@@ -65,17 +80,17 @@ export function ChatWallpaper({ appearance, mode, focused = false, preview = fal
   useEffect(() => {
     if (lastPulse.current === pulse) return;
     lastPulse.current = pulse;
-    if (pulse && appearance.motion === "on-send" && focused && environment.focused && environment.visible && !environment.reduced) setBurst(true);
-  }, [pulse, appearance.motion, focused, environment.focused, environment.visible, environment.reduced]);
+    if (pulse && appearance.motion === "on-send" && focused && environment.focused && environment.visible && !environment.reduced && effectVisible && (!cursorEffect || pointerInside)) setBurst(true);
+  }, [pulse, appearance.motion, focused, environment.focused, environment.visible, environment.reduced, cursorEffect, pointerInside, effectVisible]);
   const eligible = animate && mayAnimate({ motion: appearance.motion, type: w.type, focused: focused && environment.focused,
     visible: environment.visible, reducedMotion: environment.reduced, unavailable, preview, previewActive });
-  const running = eligible && (appearance.motion === "continuous" || burst);
-  useEffect(() => { if (!eligible) setBurst(false); }, [eligible]);
+  const running = eligible && (!cursorEffect || pointerInside) && effectVisible && (appearance.motion === "continuous" || burst);
+  useEffect(() => { if (!eligible || !effectVisible) setBurst(false); }, [eligible, effectVisible]);
   if (w.type === "default" && variant.pattern.id === "none" && variant.overlay === 0) return null;
-  return <div className="agx-wallpaper" aria-hidden="true" data-wallpaper-type={w.type}>
+  return <div ref={hostRef} className="agx-wallpaper" aria-hidden="true" data-wallpaper-type={w.type}>
     <div className="agx-wallpaper-layer" style={{ background: wallpaperBackground(w) }} />
     {w.type === "image" && image?.id === w.assetId ? <img className="agx-wallpaper-image" src={image.url} alt="" style={{ objectPosition: `${w.x * 100}% ${w.y * 100}%`, transform: `scale(${w.zoom})`, filter: `blur(${w.blur}px)` }} /> : null}
-    {running ? <ShaderBoundary><Suspense fallback={null}><ShaderWallpaper wallpaper={w} speed={appearance.speed} pulse={pulse} duration={appearance.motion === "on-send" ? 900 : undefined} onComplete={() => setBurst(false)} /></Suspense></ShaderBoundary> : null}
+    {running ? <ShaderBoundary><Suspense fallback={null}><ShaderWallpaper key={w.effect?.id ?? "gradient"} wallpaper={w} speed={appearance.speed} pulse={pulse} duration={appearance.motion === "on-send" ? 900 : undefined} onComplete={() => setBurst(false)} /></Suspense></ShaderBoundary> : null}
     <div className="agx-wallpaper-layer" style={{ ...PATTERN_STYLES[variant.pattern.id], opacity: variant.pattern.opacity, color: mode === "light" ? "#172033" : "#FFFFFF" }} />
     <div className="agx-wallpaper-layer" style={{ background: mode === "light" ? "#FFFFFF" : "#000000", opacity: variant.overlay }} />
   </div>;

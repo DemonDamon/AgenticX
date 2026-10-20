@@ -30,7 +30,18 @@ export function wallpaperBackground(w: Wallpaper): string | undefined {
   if (w.type === "default" || w.type === "image") return undefined;
   if (w.type === "solid") return w.colors[0];
   const c = gradientColors(w);
-  return `linear-gradient(${(w.angle + 90) % 360}deg, ${c[2]}80, ${c[3]}80), linear-gradient(${w.angle}deg, ${c[0]}, ${c[1]})`;
+  const base = `linear-gradient(${(w.angle + 90) % 360}deg, ${c[2]}80, ${c[3]}80), linear-gradient(${w.angle}deg, ${c[0]}, ${c[1]})`;
+  if (w.type !== "shader" || !w.effect) return base;
+  const effect = w.effect;
+  const alpha = Math.round(effect.opacity * 48).toString(16).padStart(2, "0");
+  const ink = `${c[1]}${alpha}`;
+  switch (effect.id) {
+    case "noise": return `radial-gradient(${ink} .75px, transparent 1px) 0 0 / 4px 4px, ${base}`;
+    case "ripples": return `repeating-radial-gradient(circle at center, transparent 0 18px, ${ink} 19px 22px, transparent 23px 35px), ${base}`;
+    case "glass": return `radial-gradient(ellipse at center, transparent 30%, ${ink} 48%, transparent 52%), ${base}`;
+    case "fluted-glass": return `repeating-linear-gradient(${effect.params.angle + 90}deg, transparent 0 18px, ${ink} 20px 23px, transparent 25px 40px), ${base}`;
+    default: return base;
+  }
 }
 export const PATTERN_STYLES: Record<string, CSSProperties> = {
   none: {},
@@ -38,3 +49,27 @@ export const PATTERN_STYLES: Record<string, CSSProperties> = {
   grid: { backgroundImage: "linear-gradient(currentColor 1px, transparent 1px), linear-gradient(90deg, currentColor 1px, transparent 1px)", backgroundSize: "32px 32px" },
   waves: { backgroundImage: "repeating-radial-gradient(ellipse at 0 50%, transparent 0 12px, currentColor 13px 14px, transparent 15px 26px)", backgroundSize: "64px 48px" },
 };
+
+
+/** Palette-derived light/dark anchors keep effects visible with near-identical colors. */
+export function effectTone(hex: string, target: number, amount: number): string {
+  return "#" + [1, 3, 5].map(i => {
+    const value = parseInt(hex.slice(i, i + 2), 16);
+    return Math.round(value + (target - value) * amount).toString(16).padStart(2, "0");
+  }).join("").toUpperCase();
+}
+
+/** Small static selection swatches emphasize each effect's shape without six GPU canvases. */
+export function effectPreviewBackground(w: Wallpaper): string {
+  const c = gradientColors(w);
+  const light = effectTone(c[0], 255, .48), dark = effectTone(c[1], 0, .35);
+  const base = `linear-gradient(135deg, ${dark}, ${c[2]}, ${light})`;
+  switch (w.effect?.id) {
+    case "noise": return `radial-gradient(ellipse at 20% 70%, ${light} 0%, transparent 55%), radial-gradient(ellipse at 75% 10%, ${dark} 0%, transparent 65%), ${base}`;
+    case "ripples": return `repeating-radial-gradient(ellipse at 50% 70%, ${light} 0 2px, ${dark} 4px 8px, transparent 11px 16px), ${base}`;
+    case "glass": return `radial-gradient(ellipse 48px 38px at 50% 50%, ${light}50 50%, ${light} 60%, ${dark} 65%, transparent 73%), linear-gradient(115deg, transparent 35%, ${light} 48%, ${dark} 52%, transparent 65%), ${base}`;
+    case "fluted-glass": return `repeating-linear-gradient(90deg, ${light} 0px, ${dark} 9px, ${c[2]} 12px, ${light} 18px), ${base}`;
+    case "cursor-ripples": return `repeating-radial-gradient(circle at 72% 60%, transparent 0 9px, ${light} 10px 12px, ${dark} 13px 14px, transparent 16px 25px), ${base}`;
+    default: return base;
+  }
+}

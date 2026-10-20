@@ -1,10 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PRESET_IDS, defaultAppearance, presetAppearance, resolveAppearance, type AppearanceDocument, type AppearanceVariant, type ChatAppearance, type WallpaperType, type PatternId, type MotionMode, type PresetId } from "../../../../shared/chat-appearance";
+import { PRESET_IDS, defaultAppearance, defaultEffect, presetAppearance, resolveAppearance, type AppearanceDocument, type AppearanceVariant, type ChatAppearance, type WallpaperType, type PatternId, type MotionMode, type PresetId } from "../../../../shared/chat-appearance";
 import { useAppStore } from "../../../store";
 import { useAppearanceStore } from "../../../appearance/store";
 import { appearanceVariables } from "../../../appearance/render";
 import { ChatWallpaper, cacheWallpaper } from "../../appearance/ChatWallpaper";
+import { BackgroundEffectControls } from "./BackgroundEffectControls";
 import { Panel } from "../../ds/Panel";
 import { Button } from "../../ds/Button";
 import { Modal } from "../../ds/Modal";
@@ -35,6 +36,7 @@ export const ChatAppearanceSettings = forwardRef<AppearanceEditorHandle>(functio
   const [failed, setFailed] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const [pulse, setPulse] = useState(0);
+  const previewRef = useRef<HTMLDivElement>(null);
   const dirty = !!editor && signature(editor.draft, editor.following) !== editor.baseline;
   useEffect(() => { void useAppearanceStore.getState().load(); useAppearanceStore.getState().setPreviewActive(true);
     return () => useAppearanceStore.getState().setPreviewActive(false); }, []);
@@ -68,7 +70,7 @@ export const ChatAppearanceSettings = forwardRef<AppearanceEditorHandle>(functio
     if (!result.value) return;
     const image = result.value;
     cacheWallpaper(image);
-    updateVariant(v => { v.wallpaper.type = "image"; v.wallpaper.assetId = image.id; });
+    updateVariant(v => { v.wallpaper.type = "image"; v.wallpaper.effect = null; v.wallpaper.assetId = image.id; });
   });
   const scopeOptions = [{ value: "global", label: tr("global") }, { value: "meta", label: "Near" },
     ...avatars.filter(a => a.id && !a.id.startsWith("automation:")).map(a => ({ value: `avatar:${a.id}`, label: a.name })),
@@ -84,7 +86,7 @@ export const ChatAppearanceSettings = forwardRef<AppearanceEditorHandle>(functio
       <div className="flex items-center justify-between gap-2 text-xs text-text-muted"><span>{tr(`mode_${theme}`)}</span>{scope !== "global" ? <button type="button" className="text-theme hover:underline" onClick={() => {
         const next = structuredClone(document.global); setEditor({ ...editor, draft: next, following: true }); setMessage("");
       }}>{following ? tr("following") : tr("followGlobal")}</button> : null}</div>
-      <div className="agx-appearance-preview" style={appearanceVariables(draft, theme, true)} data-testid="appearance-preview">
+      <div ref={previewRef} className="agx-appearance-preview" style={appearanceVariables(draft, theme, true)} data-testid="appearance-preview">
         <ChatWallpaper appearance={draft} mode={theme} preview focused pulse={pulse} />
         <div className="relative space-y-3 p-4">
           <div className="flex justify-end"><div className="agx-appearance-preview-bubble" style={{ background: "var(--chat-im-user-bg)", color: "var(--chat-im-user-text)" }}>{tr("previewUser")}</div></div>
@@ -97,13 +99,16 @@ export const ChatAppearanceSettings = forwardRef<AppearanceEditorHandle>(functio
       }}><div className="agx-appearance-preview mb-1.5 !min-h-12"><ChatWallpaper appearance={presetAppearance(id)} mode={theme} animate={false} /></div><span className="block truncate">{tr(`preset_${id}`)}</span></button>)}</div>
       <div className="agx-appearance-controls">
         {select(tr("background"), wallpaper.type, (["default", "solid", "gradient", "image", "shader"] as WallpaperType[]).map(value => ({ value, label: tr(`type_${value}`) })), value => {
-          if (value === "image" && !wallpaper.assetId) chooseImage(); else updateVariant(v => { v.wallpaper.type = value as WallpaperType; if (value !== "image") v.wallpaper.assetId = null; });
+          if (value === "image" && !wallpaper.assetId) chooseImage(); else updateVariant(v => { v.wallpaper.type = value as WallpaperType; v.wallpaper.effect = value === "shader" ? defaultEffect("gradient") : null; if (value !== "image") v.wallpaper.assetId = null; });
         })}
         {select(tr("pattern"), variant.pattern.id, ["none", "dots", "grid", "waves"].map(value => ({ value, label: tr(`pattern_${value}`) })), value => updateVariant(v => { v.pattern.id = value as PatternId; }))}
         {wallpaper.type !== "default" && wallpaper.type !== "image" ? <div className="agx-appearance-field"><span>{tr("colors")}</span><div className="flex flex-wrap items-center gap-2">{wallpaper.colors.map((c, i) => <input key={i} type="color" aria-label={`${tr("color")} ${i + 1}`} value={c} onChange={e => updateVariant(v => { v.wallpaper.colors[i] = e.target.value; })} />)}<Button className="!px-2 !py-1" disabled={wallpaper.colors.length >= 4} aria-label={tr("addColor")} onClick={() => updateVariant(v => { v.wallpaper.colors.push(v.wallpaper.colors[0]); })}>+</Button><Button className="!px-2 !py-1" disabled={wallpaper.colors.length <= 2} aria-label={tr("removeColor")} onClick={() => updateVariant(v => { v.wallpaper.colors.pop(); })}>−</Button></div></div> : null}
         {range(tr("patternIntensity"), variant.pattern.opacity, 0, 1, 0.01, value => updateVariant(v => { v.pattern.opacity = value; }))}
         {range(tr("overlay"), variant.overlay, 0, 1, 0.01, value => updateVariant(v => { v.overlay = value; }))}
         {(wallpaper.type === "gradient" || wallpaper.type === "shader") ? range(tr("angle"), wallpaper.angle, 0, 360, 1, value => updateVariant(v => { v.wallpaper.angle = value; })) : null}
+        {wallpaper.type === "shader" ? <BackgroundEffectControls wallpaper={wallpaper}
+          onSelect={id => { update(next => { next.variants[theme].wallpaper.effect = defaultEffect(id); next.motion = "continuous"; }); setPulse(p => p + 1); }}
+          onChange={effect => { updateVariant(v => { v.wallpaper.effect = effect; }); setPulse(p => p + 1); }} /> : null}
         {wallpaper.type === "image" ? <>
           <div className="agx-appearance-field"><span>{tr("image")}</span><Button onClick={chooseImage}>{tr("chooseImage")}</Button></div>
           {range(tr("blur"), wallpaper.blur, 0, 24, 1, value => updateVariant(v => { v.wallpaper.blur = value; }))}
@@ -119,7 +124,10 @@ export const ChatAppearanceSettings = forwardRef<AppearanceEditorHandle>(functio
         {(wallpaper.type === "gradient" || wallpaper.type === "shader") ? <>
           {select(tr("motion"), draft.motion, ["off", "on-send", "continuous"].map(value => ({ value, label: tr(`motion_${value}`) })), value => update(next => { next.motion = value as MotionMode; }))}
           {range(tr("speed"), draft.speed, 0.25, 2, 0.05, value => update(next => { next.speed = value; }))}
-          <Button onClick={() => setPulse(p => p + 1)}>{tr("previewMotion")}</Button>
+          <Button disabled={draft.motion === "off"} onClick={() => {
+            previewRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (draft.motion === "on-send") setPulse(p => p + 1);
+          }}>{tr(draft.motion === "on-send" ? "previewMotion" : "viewMotionPreview")}</Button>
         </> : null}
       </div>
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">

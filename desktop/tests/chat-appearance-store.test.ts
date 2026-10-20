@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppearanceStore } from "../electron/chat-appearance-store";
-import { defaultAppearance, presetAppearance, resolveAppearance, resolveAppearanceScope } from "../electron/chat-appearance-contract";
+import { defaultAppearance, defaultEffect, presetAppearance, resolveAppearance, resolveAppearanceScope } from "../electron/chat-appearance-contract";
 
 const dirs: string[] = [];
 function setup(extra = {}) {
@@ -69,5 +69,26 @@ describe("identity appearance inheritance", () => {
     const next = store.load(); if (!next.ok) throw Error(next.error);
     expect(resolveAppearance(next.value, "avatar:a").presetId).toBe("mist");
     expect(resolveAppearance(next.value, "group:g").presetId).toBe("dusk");
+  });
+});
+
+describe("legacy document upgrade", () => {
+  it("reads v1 without writing and saves v2 with all existing scope overrides", () => {
+    const { dir, store } = setup();
+    const legacy = JSON.parse(JSON.stringify(defaultAppearance())); legacy.version = 1;
+    for (const v of Object.values(legacy.variants) as Array<{wallpaper: Record<string, unknown>}>) delete v.wallpaper.effect;
+    legacy.variants.dim.wallpaper.type = "shader";
+    const before = JSON.stringify({ version: 1, revision: 7, global: legacy, overrides: { "avatar:a": legacy, "group:g": legacy } });
+    const file = join(dir, "appearance.json"); writeFileSync(file, before);
+    const loaded = store.load(); if (!loaded.ok) throw Error(loaded.error);
+    expect(loaded.warning).toBeUndefined(); expect(loaded.value.version).toBe(2);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    const next = loaded.value.global; next.variants.dark.wallpaper.type = "shader"; next.variants.dark.wallpaper.effect = defaultEffect("glass");
+    expect(store.save({ expectedRevision: 7, scope: "global", appearance: next })).toMatchObject({ ok: true, value: { version: 2, revision: 8 } });
+    const persisted = JSON.parse(readFileSync(file, "utf8"));
+    expect(persisted.overrides["avatar:a"].variants.dim.wallpaper.effect.id).toBe("gradient");
+    expect(persisted.overrides["group:g"].version).toBe(2);
+    const fresh = new AppearanceStore(dir, { decodeImage: () => ({ width: 1, height: 1 }) }).load();
+    expect(fresh).toMatchObject({ ok: true, value: { global: { variants: { dark: { wallpaper: { effect: { id: "glass" } } } } } } });
   });
 });

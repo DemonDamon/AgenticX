@@ -124,7 +124,7 @@ export class AppearanceStore {
       const assets = referencedAssets(appearance).map(id => {
         const image = this.readWallpaper(id); if (!image.ok) throw Error(image.error); return image.value;
       });
-      const theme = parseThemePackage({ format: "near-chat-theme", version: 1, name: p.name, appearance, assets });
+      const theme = parseThemePackage({ format: "near-chat-theme", version: 2, name: p.name, appearance, assets });
       if (Buffer.byteLength(JSON.stringify(theme)) > MAX_PACKAGE_BYTES) throw Error("主题包大小必须不超过 20 MiB");
       return { ok: true, value: theme };
     } catch (error) { return fail(error); }
