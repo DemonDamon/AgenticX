@@ -34,6 +34,8 @@ import {
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import { localizeChatErrorMessage, localizeChatMessageError } from "../lib/chat-error-i18n";
+import { useFeatureUsage } from "../lib/use-feature-usage";
+import { DeepResearchRemainingBadge, SearchQuotaExhaustedNotice } from "./FeatureUsageNotice";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
 import {
   Activity,
@@ -120,6 +122,13 @@ export function MachiChatView({
   const draftSessionId = useChatStore((s) => s.draftSessionId);
   const messages = useChatStore((s) => s.messages);
   const status = useChatStore((s) => s.status);
+  const { states: featureUsage, refresh: refreshFeatureUsage } = useFeatureUsage();
+  const previousStatusRef = React.useRef(status);
+  React.useEffect(() => {
+    const wasBusy = previousStatusRef.current === "sending" || previousStatusRef.current === "streaming";
+    previousStatusRef.current = status;
+    if (wasBusy && status !== "sending" && status !== "streaming") refreshFeatureUsage();
+  }, [status, refreshFeatureUsage]);
   const planChatRevising = useChatStore((s) => s.planChatRevising);
   const activeModel = useChatStore((s) => s.activeModel);
   const errorMessage = useChatStore((s) => s.errorMessage);
@@ -1038,6 +1047,11 @@ export function MachiChatView({
         </div>
       ) : null}
 
+      <SearchQuotaExhaustedNotice
+        state={featureUsage.search_provider_calls ?? null}
+        scopeKey={activeSessionId ?? ""}
+      />
+
       <InputArea
         value={draft}
         // 计划对齐：空闲时隐藏停止钮；正在改计划时显示 sending，避免「发出去没反应」。
@@ -1105,6 +1119,7 @@ export function MachiChatView({
                   <X className="hidden h-3.5 w-3.5 group-hover/dr-chip:block" strokeWidth={2.5} />
                 </button>
                 <span className="shrink-0">{tw("deepResearchChip")}</span>
+                <DeepResearchRemainingBadge state={featureUsage.deep_research_runs ?? null} />
                 <div ref={prefMenuRef} className="relative min-w-0">
                   <button
                     type="button"
