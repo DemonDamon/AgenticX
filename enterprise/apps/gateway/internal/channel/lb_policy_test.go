@@ -33,8 +33,8 @@ func TestInverseLatencyWeight(t *testing.T) {
 
 func TestPrefixHashStable(t *testing.T) {
 	msgs := []openai.ChatMessage{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi"},
+		{Role: "user", Content: openai.NewStringContent("hello")},
+		{Role: "assistant", Content: openai.NewStringContent("hi")},
 	}
 	a := PrefixHashIndex(msgs, 2, 5)
 	b := PrefixHashIndex(msgs, 2, 5)
@@ -44,7 +44,7 @@ func TestPrefixHashStable(t *testing.T) {
 }
 
 func TestPrefixHashRemapsWhenCountChanges(t *testing.T) {
-	msgs := []openai.ChatMessage{{Role: "user", Content: "same prompt"}}
+	msgs := []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("same prompt")}}
 	idx3 := PrefixHashIndex(msgs, 1, 3)
 	idx5 := PrefixHashIndex(msgs, 1, 5)
 	_ = idx3

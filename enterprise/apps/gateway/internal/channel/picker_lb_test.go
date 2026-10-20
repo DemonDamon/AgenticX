@@ -79,9 +79,9 @@ func TestPickPrefixCacheStableForSameMessages(t *testing.T) {
 	p := NewPicker(reg, NewStatsStore(), NewAffinityStore(time.Minute))
 	p.policy = LBPrefixCache
 	msgs := []openai.ChatMessage{
-		{Role: "user", Content: "explain gateway load balancing"},
-		{Role: "assistant", Content: "ok"},
-		{Role: "user", Content: "with prefix affinity"},
+		{Role: "user", Content: openai.NewStringContent("explain gateway load balancing")},
+		{Role: "assistant", Content: openai.NewStringContent("ok")},
+		{Role: "user", Content: openai.NewStringContent("with prefix affinity")},
 	}
 
 	var firstID string
@@ -112,7 +112,7 @@ func TestPickPrefixBeforeAffinity(t *testing.T) {
 	aff.Set("sess1", "m1", "c2")
 	p := NewPicker(reg, NewStatsStore(), aff)
 	p.policy = LBPrefixCache
-	msgs := []openai.ChatMessage{{Role: "user", Content: "prefix wins over affinity"}}
+	msgs := []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("prefix wins over affinity")}}
 
 	ch, decision, ok := p.PickWithPrefix("m1", Identity{TenantID: "t1", SessionID: "sess1"}, nil, msgs)
 	if !ok {

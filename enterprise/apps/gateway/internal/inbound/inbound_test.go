@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
+	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
 
 func TestParseClaudeMessagesBasic(t *testing.T) {
@@ -22,7 +23,7 @@ func TestParseClaudeMessagesBasic(t *testing.T) {
 	if req.Model != "claude-3-5-sonnet" || !req.Stream || req.System != "You are helpful" {
 		t.Fatalf("unexpected %+v", req)
 	}
-	if len(req.Messages) != 1 || req.Messages[0].Content != "Hello" {
+	if len(req.Messages) != 1 || openai.ContentText(req.Messages[0].Content) != "Hello" {
 		t.Fatalf("messages %+v", req.Messages)
 	}
 }
@@ -54,7 +55,7 @@ func TestParseResponsesStringInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || req.Messages[0].Content != "hello" {
+	if len(req.Messages) != 1 || openai.ContentText(req.Messages[0].Content) != "hello" {
 		t.Fatalf("unexpected %+v", req.Messages)
 	}
 }

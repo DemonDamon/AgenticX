@@ -10,16 +10,16 @@ func TestCanonicalKeyStableAcrossFieldOrder(t *testing.T) {
 	reqA := openai.ChatCompletionRequest{
 		Model: "gpt-4o",
 		Messages: []openai.ChatMessage{
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
+			{Role: "user", Content: openai.NewStringContent("hello")},
+			{Role: "assistant", Content: openai.NewStringContent("hi")},
 		},
 		Temperature: 0.2,
 	}
 	reqB := openai.ChatCompletionRequest{
 		Model: "gpt-4o",
 		Messages: []openai.ChatMessage{
-			{Role: "assistant", Content: "hi"},
-			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: openai.NewStringContent("hi")},
+			{Role: "user", Content: openai.NewStringContent("hello")},
 		},
 		Temperature: 0.2,
 	}
@@ -36,7 +36,7 @@ func TestCanonicalKeyStableAcrossFieldOrder(t *testing.T) {
 func TestCanonicalKeyExcludesStream(t *testing.T) {
 	base := openai.ChatCompletionRequest{
 		Model:    "gpt-4o",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "ping"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("ping")}},
 	}
 	stream := base
 	stream.Stream = true
@@ -50,7 +50,7 @@ func TestCanonicalKeyExcludesStream(t *testing.T) {
 func TestShouldBypassTools(t *testing.T) {
 	req := openai.ChatCompletionRequest{
 		Model: "gpt-4o",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "call tool"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("call tool")}},
 		Tools: []openai.Tool{{Type: "function", Function: &openai.ToolFunction{Name: "search"}}},
 		ToolChoice: "auto",
 	}
