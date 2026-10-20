@@ -7,7 +7,35 @@ export type ReconnectStreamHandlers = {
   onDone?: () => void;
   onError?: (error: unknown) => void;
   signal?: AbortSignal;
+  /** Events already on the message. Matching replay frames are skipped by count. */
+  savedEvents?: DeepResearchEvent[];
 };
+
+/** `type:ts` when the event was stamped; otherwise the full payload. */
+export function deepResearchReplayEventKey(event: DeepResearchEvent): string {
+  return event.ts ? `${event.type}:${event.ts}` : JSON.stringify(event);
+}
+
+/**
+ * Count-based replay filter. Each saved occurrence consumes one matching frame.
+ * A later event with the same type but a new timestamp still applies.
+ */
+export function createDeepResearchReplayGate(
+  savedEvents: DeepResearchEvent[],
+): (event: DeepResearchEvent) => boolean {
+  const counts = new Map<string, number>();
+  for (const event of savedEvents) {
+    const key = deepResearchReplayEventKey(event);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return (event) => {
+    const key = deepResearchReplayEventKey(event);
+    const remaining = counts.get(key) ?? 0;
+    if (remaining <= 0) return false;
+    counts.set(key, remaining - 1);
+    return true;
+  };
+}
 
 /** Consume reconnect SSE and fan out deep-research events + report deltas. */
 export async function consumeDeepResearchReconnectStream(
@@ -26,6 +54,7 @@ export async function consumeDeepResearchReconnectStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const skipSaved = createDeepResearchReplayGate(handlers.savedEvents ?? []);
 
   while (true) {
     const { done, value } = await reader.read();
@@ -52,7 +81,9 @@ export async function consumeDeepResearchReconnectStream(
           choices?: Array<{ delta?: { content?: string } }>;
         };
         if (parsed.agenticx_deep_research_event) {
-          handlers.onEvent(parsed.agenticx_deep_research_event);
+          if (!skipSaved(parsed.agenticx_deep_research_event)) {
+            handlers.onEvent(parsed.agenticx_deep_research_event);
+          }
         }
         const piece = parsed.choices?.[0]?.delta?.content;
         if (typeof piece === "string" && piece) {

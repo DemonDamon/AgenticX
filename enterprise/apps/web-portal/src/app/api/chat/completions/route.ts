@@ -16,7 +16,16 @@ import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { executeWebSearch } from "../../../../lib/web-search/providers";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
-import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
+import {
+  CLARIFY_TIMEOUT_MS,
+  TOTAL_BUDGET_MS,
+  runDeepResearchTurn,
+} from "../../../../lib/deep-research/orchestrator";
+import {
+  hasGatewayBearerLifetime,
+  refreshGatewayBearer,
+  requiredResearchBearerLifetimeMs,
+} from "../../../../lib/deep-research/gateway-auth-refresh";
 import { defaultRunStore, type RunStore } from "../../../../lib/deep-research/run-store";
 import { resolvePortalLocaleFromCookies } from "../../../../lib/portal-locale";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
@@ -91,6 +100,41 @@ function countedExecuteSearch(session: FeatureUsageSession): typeof executeWebSe
     await reserveMemberSearchProviderCall(subject);
     return executeWebSearch(query, maxResults, cfg, fetchImpl);
   };
+}
+
+type RotatedAuthTokens = Awaited<ReturnType<typeof refreshTokens>>;
+
+function withRotatedAuthCookies(response: Response, tokens: RotatedAuthTokens): NextResponse {
+  const outgoing =
+    response instanceof NextResponse
+      ? response
+      : new NextResponse(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+  outgoing.cookies.set(ACCESS_COOKIE, tokens.accessToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: tokens.expiresInSeconds,
+    path: "/",
+  });
+  outgoing.cookies.set(REFRESH_COOKIE, tokens.refreshToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: 7 * 24 * 60 * 60,
+    path: "/",
+  });
+  return outgoing;
+}
+
+function researchAuthError(message: string, traceId: string): NextResponse {
+  return NextResponse.json(
+    { error: { code: "40100", message } },
+    { status: 401, headers: { "x-agenticx-trace-id": traceId } },
+  );
 }
 
 function runStoreWithUsage(usage: ResearchUsagePolicy): RunStore {
@@ -315,9 +359,38 @@ export async function POST(request: Request) {
       if (response) return response;
       throw error;
     }
+    const requiredBearerLifetimeMs = requiredResearchBearerLifetimeMs(
+      TOTAL_BUDGET_MS,
+      CLARIFY_TIMEOUT_MS,
+    );
+    let rotatedTokens: RotatedAuthTokens | null = null;
+    if (!hasGatewayBearerLifetime(accessToken, requiredBearerLifetimeMs)) {
+      if (!refreshToken) {
+        return researchAuthError("登录状态即将到期，无法启动深度调研。请刷新页面后重试。", traceId);
+      }
+      try {
+        rotatedTokens = await refreshTokens(refreshToken);
+      } catch {
+        return researchAuthError("登录状态续期失败，无法启动深度调研。请刷新页面后重试。", traceId);
+      }
+      const refreshedAccessToken = rotatedTokens.accessToken;
+      if (
+        !hasGatewayBearerLifetime(refreshedAccessToken, requiredBearerLifetimeMs) ||
+        !(await refreshGatewayBearer({
+          headers: gatewayHeaders,
+          refreshAccessToken: async () => ({ accessToken: refreshedAccessToken }),
+        }))
+      ) {
+        return withRotatedAuthCookies(
+          researchAuthError("登录状态续期后仍不足以完成深度调研，请刷新页面后重试。", traceId),
+          rotatedTokens,
+        );
+      }
+      refreshToken = rotatedTokens.refreshToken;
+    }
     const deepResearchRunId = ulid().toLowerCase();
     logCtx.setRun(deepResearchRunId);
-    return runDeepResearchTurn(await withSkills(parsedBody), {
+    const researchResponse = await runDeepResearchTurn(await withSkills(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       signal: request.signal,
@@ -363,6 +436,9 @@ export async function POST(request: Request) {
         }
       },
     });
+    return rotatedTokens
+      ? withRotatedAuthCookies(researchResponse, rotatedTokens)
+      : researchResponse;
   }
 
   if (enableWebSearch && parsedBody) {

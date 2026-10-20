@@ -1278,6 +1278,13 @@ func (s *Server) handleStream(
 		)
 		if code := streamErrorCode(streamErr); code != "" {
 			writeStreamPolicyError(w, flusher, code, formatStreamError(streamErr), nil)
+		} else if up, ok := streamErr.(*adaptor.UpstreamError); ok {
+			apiErr := adaptor.MapUpstreamError(up.StatusCode, up.Body, "")
+			if apiErr.Code == "42902" {
+				writeStreamAPIError(w, flusher, apiErr)
+			} else {
+				writeStreamError(w, flusher, apiErr.Message)
+			}
 		} else {
 			writeStreamError(w, flusher, formatStreamError(streamErr))
 		}
@@ -1861,6 +1868,19 @@ func roleFromScopes(scopes []string) string {
 		}
 	}
 	return "staff"
+}
+
+func writeStreamAPIError(w http.ResponseWriter, flusher http.Flusher, apiErr openai.APIError) {
+	payload := map[string]any{
+		"error": map[string]string{
+			"code":    apiErr.Code,
+			"message": apiErr.Message,
+		},
+	}
+	raw, _ := json.Marshal(payload)
+	_, _ = w.Write([]byte("event: error\n"))
+	_, _ = w.Write([]byte("data: " + string(raw) + "\n\n"))
+	flusher.Flush()
 }
 
 func writeStreamError(w http.ResponseWriter, flusher http.Flusher, message string) {

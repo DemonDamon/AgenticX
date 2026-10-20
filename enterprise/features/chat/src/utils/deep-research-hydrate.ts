@@ -15,12 +15,29 @@ export type HydrateDeepResearchRun = {
 };
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const KNOWN_STATUSES = new Set([
+  "running",
+  "awaiting_clarify",
+  "completed",
+  "failed",
+  "cancelled",
+]);
 const PLAN_CHAT_USER_PREFIX = "你：";
+const MAX_OLDER_RUNS_TO_HYDRATE = 3;
 
 function normalizeStatus(raw: string): ChatMessageDeepResearch["status"] {
-  if (raw === "running" || raw === "awaiting_clarify") return raw;
-  if (raw === "failed" || raw === "cancelled") return raw;
-  return "completed";
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "running" || normalized === "awaiting_clarify") return normalized;
+  if (normalized === "completed" || normalized === "failed" || normalized === "cancelled") {
+    return normalized;
+  }
+  // Unknown status must stay visibly in progress. Only an explicit terminal
+  // status from the run store is allowed to look finished.
+  return "running";
+}
+
+function isKnownRunStatus(raw: string): boolean {
+  return KNOWN_STATUSES.has(raw.trim().toLowerCase());
 }
 
 /** Derive the latest interaction profile / plan snapshot from persisted events. */
@@ -136,7 +153,9 @@ function matchesSameRun(
 }
 
 function buildWorkbenchFromLatest(latest: HydrateDeepResearchRun): ChatMessageDeepResearch {
-  const status = normalizeStatus(String(latest.status));
+  const rawStatus = String(latest.status);
+  const status = normalizeStatus(rawStatus);
+  const knownStatus = isKnownRunStatus(rawStatus);
   const artifactIds =
     latest.artifactIds?.length
       ? latest.artifactIds
@@ -163,12 +182,18 @@ function buildWorkbenchFromLatest(latest: HydrateDeepResearchRun): ChatMessageDe
         (typeof e.path === "string" && e.path.includes("final-report"))),
   );
   if (
+    knownStatus &&
     deep_research.status === "running" &&
     (latest.phase === "done" || hasPhaseDone || hasFinalReport)
   ) {
     deep_research.status = "completed";
-  } else if (!TERMINAL.has(deep_research.status) && deep_research.status !== "awaiting_clarify") {
-    if (hasPhaseDone || hasFinalReport) deep_research.status = "completed";
+  } else if (
+    knownStatus &&
+    !TERMINAL.has(deep_research.status) &&
+    deep_research.status !== "awaiting_clarify" &&
+    (hasPhaseDone || hasFinalReport)
+  ) {
+    deep_research.status = "completed";
   }
   return deep_research;
 }
@@ -455,11 +480,13 @@ export function mergeDeepResearchHydrate(
 export async function fetchLatestDeepResearchForHydrate(
   sessionId: string,
   fetchImpl: typeof fetch = fetch,
+  runId?: string,
 ): Promise<HydrateDeepResearchRun | null> {
   if (!sessionId.trim()) return null;
+  const runQuery = runId?.trim() ? `&runId=${encodeURIComponent(runId.trim())}` : "";
   try {
     const res = await fetchImpl(
-      `/api/chat/deep-research/runs?sessionId=${encodeURIComponent(sessionId)}&hydrate=1`,
+      `/api/chat/deep-research/runs?sessionId=${encodeURIComponent(sessionId)}&hydrate=1${runQuery}`,
       { cache: "no-store" },
     );
     if (!res.ok) return null;
@@ -472,6 +499,27 @@ export async function fetchLatestDeepResearchForHydrate(
   }
 }
 
+function hydrateRunIds(
+  messages: ChatMessage[],
+  sessionId: string,
+  latestRunId: string | undefined,
+): string[] {
+  const preferred: string[] = [];
+  const rest: string[] = [];
+  for (const message of messages) {
+    if (message.session_id !== sessionId || message.role !== "assistant") continue;
+    const runId = message.deep_research?.runId?.trim();
+    if (!runId || isPlaceholderRunId(runId) || runId === latestRunId) continue;
+    const bucket =
+      message.deep_research?.status === "running" ||
+      message.deep_research?.status === "awaiting_clarify"
+        ? preferred
+        : rest;
+    bucket.push(runId);
+  }
+  return [...new Set([...preferred, ...rest])].slice(-MAX_OLDER_RUNS_TO_HYDRATE);
+}
+
 export async function hydrateMessagesDeepResearch(
   sessionId: string,
   messages: ChatMessage[],
@@ -481,5 +529,12 @@ export async function hydrateMessagesDeepResearch(
   // mid-run) gets overlaid with the real run status instead of showing an
   // interactive plan card that would only yield "alreadyContinued" on submit.
   const latest = await fetchLatestDeepResearchForHydrate(sessionId, fetchImpl);
-  return mergeDeepResearchHydrate(messages, latest);
+  let merged = mergeDeepResearchHydrate(messages, latest);
+  const olderRunIds = hydrateRunIds(messages, sessionId, latest?.runId);
+  for (const runId of olderRunIds) {
+    const run = await fetchLatestDeepResearchForHydrate(sessionId, fetchImpl, runId);
+    if (!run || run.runId?.trim() !== runId || run.sessionId?.trim() !== sessionId) continue;
+    merged = mergeDeepResearchHydrate(merged, run);
+  }
+  return merged;
 }

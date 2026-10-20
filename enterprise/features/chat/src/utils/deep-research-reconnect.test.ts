@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { DeepResearchEvent } from "@agenticx/core-api";
 import {
   abortAllDeepResearchReconnects,
   abortDeepResearchReconnect,
+  consumeDeepResearchReconnectStream,
   countActiveDeepResearchReconnects,
   startDeepResearchReconnect,
 } from "./deep-research-reconnect";
@@ -24,6 +26,30 @@ function hangingFetch(): typeof fetch {
     return new Response(stream, { status: 200 });
   }) as unknown as typeof fetch;
 }
+
+describe("consumeDeepResearchReconnectStream replay dedupe", () => {
+  it("已保存的 3 个阶段只抵扣一次，新的阶段仍会追加", async () => {
+    const saved: DeepResearchEvent[] = [
+      { type: "phase", phase: "recon", message: "侦察", ts: "t1" },
+      { type: "phase", phase: "plan", message: "计划", ts: "t2" },
+      { type: "phase", phase: "lanes", message: "检索", ts: "t3" },
+    ];
+    const replay = [
+      ...saved,
+      { type: "phase", phase: "synthesize", message: "撰写", ts: "t4" },
+    ];
+    const body = replay
+      .map((event) => `data: ${JSON.stringify({ agenticx_deep_research_event: event })}\n\n`)
+      .join("");
+    const applied: DeepResearchEvent[] = [];
+    await consumeDeepResearchReconnectStream(
+      "run-1",
+      { savedEvents: saved, onEvent: (event) => applied.push(event) },
+      (async () => new Response(`${body}data: [DONE]\n\n`, { status: 200 })) as typeof fetch,
+    );
+    expect(applied).toEqual([replay[3]]);
+  });
+});
 
 describe("startDeepResearchReconnect", () => {
   it("同一 runId 重复重连会顶替旧流，任何时刻只有一条活跃流", async () => {

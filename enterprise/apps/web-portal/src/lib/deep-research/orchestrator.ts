@@ -189,6 +189,31 @@ class DeepResearchPolicyError extends Error {
   }
 }
 
+const DEEP_RESEARCH_UPSTREAM_BUSY = "模型服务繁忙，请稍后再试。";
+const DEEP_RESEARCH_QUOTA_EXHAUSTED = "额度已用尽，请稍后再试。";
+
+class DeepResearchGatewayQuotaError extends Error {
+  readonly userMessage: string;
+
+  constructor(message = DEEP_RESEARCH_QUOTA_EXHAUSTED) {
+    super(message);
+    this.name = "DeepResearchGatewayQuotaError";
+    this.userMessage = message;
+  }
+}
+
+class DeepResearchUpstreamRateLimitError extends DeepResearchGatewayQuotaError {
+  constructor() {
+    super(DEEP_RESEARCH_UPSTREAM_BUSY);
+    this.name = "DeepResearchUpstreamRateLimitError";
+  }
+}
+
+function throwIfGatewayLimit(failure: GatewayFailure): void {
+  if (failure.code === "42902") throw new DeepResearchUpstreamRateLimitError();
+  if (failure.code === "42901") throw new DeepResearchGatewayQuotaError();
+}
+
 async function readGatewayFailure(response: Response): Promise<GatewayFailure> {
   const rawText = await response.text().catch(() => "");
   let code: string | undefined;
@@ -519,6 +544,7 @@ async function callGatewayJson(
     const failure = await readGatewayFailure(response);
     const policyError = policyErrorFromFailure(failure);
     if (policyError) throw policyError;
+    throwIfGatewayLimit(failure);
     return "";
   }
   const payload = (await response.json()) as {
@@ -1887,6 +1913,7 @@ export async function runDeepResearchTurn(
           } catch (error) {
             if (error instanceof DOMException && error.name === "AbortError") throw error;
             if (error instanceof DeepResearchPolicyError) throw error;
+            if (error instanceof DeepResearchGatewayQuotaError) throw error;
             searchFailures += 1;
             console.warn(
               "[deep-research] lane failed:",
@@ -2238,6 +2265,7 @@ export async function runDeepResearchTurn(
             const failure = await readGatewayFailure(upstream);
             const policyError = policyErrorFromFailure(failure);
             if (policyError) throw policyError;
+            throwIfGatewayLimit(failure);
             const note = `\n\n> 本节撰写失败：${(failure.rawText || failure.message).slice(0, 200)}`;
             enqueueDelta(note);
             reportContentParts.push(note);
@@ -2301,6 +2329,18 @@ export async function runDeepResearchTurn(
                     ? streamErrorMessage
                     : copy.policyGatewayBlocked,
                 );
+              }
+              if (streamErrorCode === "42902" || streamErrorCode === "42901") {
+                try {
+                  await reader.cancel();
+                } catch {
+                  // Gateway may already have closed the stream after the error frame.
+                }
+                throwIfGatewayLimit({
+                  code: streamErrorCode,
+                  message: "gateway stream error",
+                  rawText: "",
+                });
               }
               const piece = parsed?.choices?.[0]?.delta?.content;
               if (typeof piece === "string") {
@@ -2402,6 +2442,7 @@ export async function runDeepResearchTurn(
           verifiedReport = verification.markdown;
         } catch (error) {
           if (error instanceof DeepResearchPolicyError) throw error;
+          if (error instanceof DeepResearchGatewayQuotaError) throw error;
           console.warn(
             "[deep-research] citation verification skipped:",
             error instanceof Error ? error.message : error,
@@ -2597,6 +2638,20 @@ export async function runDeepResearchTurn(
               phase: "done",
               message: copy.policyBlocked,
             },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", error.userMessage);
+        } else if (error instanceof DeepResearchUpstreamRateLimitError) {
+          enqueueDelta(`\n\n> ${error.userMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "模型服务繁忙" },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", error.userMessage);
+        } else if (error instanceof DeepResearchGatewayQuotaError) {
+          enqueueDelta(`\n\n> ${error.userMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "额度已用尽" },
             { status: "failed", phase: "done" },
           );
           await persistFinish("failed", error.userMessage);

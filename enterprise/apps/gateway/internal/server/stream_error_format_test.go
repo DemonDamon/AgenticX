@@ -15,6 +15,20 @@ func TestStreamErrorCodeDoesNotMapIdleTimeoutToPolicy(t *testing.T) {
 	}
 }
 
+func TestFormatStreamErrorUpstreamRateLimit(t *testing.T) {
+	msg := formatStreamError(errors.New("upstream 429: provider details"))
+	if msg != "模型服务繁忙，请稍后再试" {
+		t.Fatalf("expected busy message, got %q", msg)
+	}
+	if strings.Contains(msg, "provider details") {
+		t.Fatalf("provider details leaked: %q", msg)
+	}
+	coded := formatStreamError(errors.New("gateway code 42902"))
+	if coded != "模型服务繁忙，请稍后再试" {
+		t.Fatalf("expected 42902 message, got %q", coded)
+	}
+}
+
 func TestFormatStreamErrorIdleTimeoutMessage(t *testing.T) {
 	msg := formatStreamError(errors.New("stream:idle_timeout"))
 	if !strings.Contains(msg, "流式空闲超时") {

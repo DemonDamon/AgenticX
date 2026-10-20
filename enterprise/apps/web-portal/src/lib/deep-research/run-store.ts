@@ -61,6 +61,35 @@ export type RunRecord = {
   updatedAt: string;
 };
 
+/** Polling payload: identity and progress only, never events or report text. */
+export type ActiveRunSummary = Pick<
+  RunRecord,
+  "runId" | "sessionId" | "status" | "phase" | "topic" | "createdAt" | "updatedAt"
+> & { traceId?: string };
+
+function toActiveRunSummary(row: {
+  runId: string;
+  sessionId: string;
+  status: string;
+  phase: string;
+  topic: string;
+  traceId?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}): ActiveRunSummary {
+  const traceId = row.traceId?.trim();
+  return {
+    runId: row.runId,
+    sessionId: row.sessionId,
+    status: isRunStatus(row.status) ? row.status : "running",
+    phase: row.phase,
+    topic: row.topic,
+    ...(traceId ? { traceId } : {}),
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
 export type RunStore = {
   create(input: {
     runId: string;
@@ -95,6 +124,12 @@ export type RunStore = {
   ): Promise<boolean>;
   get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
   listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
+  /** Lightweight status list for polling; excludes events and report text. */
+  listActiveSummaries(
+    tenantId: string,
+    userId: string,
+    sessionId?: string,
+  ): Promise<ActiveRunSummary[]>;
   /** Most recently updated run for a session (any status) — used to rehydrate workbench after refresh. */
   getLatestBySession(
     tenantId: string,
@@ -337,6 +372,19 @@ function createMemoryStore(): RunStore {
           events: [...row.events],
           citations: [...row.citations],
         }));
+    },
+
+    async listActiveSummaries(tenantId, userId, sessionId) {
+      return [...bucket.values()]
+        .filter(
+          (row) =>
+            row.tenantId === tenantId &&
+            row.userId === userId &&
+            ACTIVE_STATUSES.includes(row.status) &&
+            (sessionId === undefined || row.sessionId === sessionId),
+        )
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map(toActiveRunSummary);
     },
 
     async getLatestBySession(tenantId, userId, sessionId) {
@@ -700,6 +748,60 @@ function createSqlStore(): RunStore {
           ),
         );
       return rows.map(mapRow).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    },
+
+    async listActiveSummaries(tenantId, userId, sessionId) {
+      const config = resolveDatabaseConfig();
+      if (config.dialect === "mysql") {
+        const { raw: db } = await createMysqlDb(config);
+        const rows = await db
+          .select({
+            runId: mysqlTable.runId,
+            sessionId: mysqlTable.sessionId,
+            status: mysqlTable.status,
+            phase: mysqlTable.phase,
+            topic: mysqlTable.topic,
+            traceId: mysqlTable.traceId,
+            createdAt: mysqlTable.createdAt,
+            updatedAt: mysqlTable.updatedAt,
+          })
+          .from(mysqlTable)
+          .where(
+            and(
+              eq(mysqlTable.tenantId, tenantId),
+              eq(mysqlTable.userId, userId),
+              inArray(mysqlTable.status, ACTIVE_STATUSES),
+              ...(sessionId ? [eq(mysqlTable.sessionId, sessionId)] : []),
+            ),
+          );
+        return rows
+          .map(toActiveRunSummary)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      }
+      const db = getIamDb();
+      const rows = await db
+        .select({
+          runId: pgTable.runId,
+          sessionId: pgTable.sessionId,
+          status: pgTable.status,
+          phase: pgTable.phase,
+          topic: pgTable.topic,
+          traceId: pgTable.traceId,
+          createdAt: pgTable.createdAt,
+          updatedAt: pgTable.updatedAt,
+        })
+        .from(pgTable)
+        .where(
+          and(
+            eq(pgTable.tenantId, tenantId),
+            eq(pgTable.userId, userId),
+            inArray(pgTable.status, ACTIVE_STATUSES),
+            ...(sessionId ? [eq(pgTable.sessionId, sessionId)] : []),
+          ),
+        );
+      return rows
+        .map(toActiveRunSummary)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     },
 
     async getLatestBySession(tenantId, userId, sessionId) {

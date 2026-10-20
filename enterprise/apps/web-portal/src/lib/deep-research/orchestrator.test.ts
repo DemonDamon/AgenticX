@@ -691,6 +691,73 @@ describe("runDeepResearchTurn", () => {
     expect(text).not.toContain("深度调研完成");
   });
 
+  it.each([
+    {
+      code: "42902",
+      hint: "模型服务繁忙",
+    },
+    {
+      code: "42901",
+      hint: "额度已用尽",
+    },
+  ])("stops the research when the gateway returns $code and says $hint", async ({ code, hint }) => {
+    const runStore = createMemoryRunStore();
+    const runId = `run-limit-${code}`;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean; messages?: Array<{ content?: string }> };
+      if (body.stream === false) {
+        const userText = body.messages?.find((message) => message.content?.includes("证据包"))?.content;
+        if (userText) {
+          return new Response(
+            JSON.stringify({
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    title: "测试调研",
+                    sections: [{ id: "s1", title: "核心结论", brief: "结论" }],
+                  }),
+                },
+              }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "车道备忘" } }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: { code, message: "upstream detail" } }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "查询某项指标的最新值" }] },
+      baseDeps({
+        runId,
+        runStore,
+        fetchImpl,
+        buildPlan: async () => ({
+          topic: "测试调研",
+          complexity: "simple" as const,
+          subQuestions: ["指标最新值"],
+        }),
+        executeSearch: async () => [
+          { title: "来源", url: "https://example.com/source", snippet: "公开指标" },
+        ],
+      }),
+    );
+    const { text, events } = await readSsePayload(response);
+    const row = await runStore.get("t1", "u1", runId);
+    expect(row?.status).toBe("failed");
+    expect(text).toContain(hint);
+    expect(text).not.toContain("本节撰写失败");
+    expect(text).not.toContain("upstream detail");
+    expect(events).toContainEqual(expect.objectContaining({ type: "phase", phase: "done", message: hint }));
+  });
+
   it("keeps running after transport abort and persists completed run (AC-3)", async () => {
     const controller = new AbortController();
     const runStore = createMemoryRunStore();

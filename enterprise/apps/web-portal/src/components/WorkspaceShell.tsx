@@ -20,6 +20,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  toast,
   useLocale,
   useUiTheme,
 } from "@agenticx/ui";
@@ -56,6 +57,10 @@ import {
   useChatStore,
   type HistoryAppendPayload,
 } from "@agenticx/feature-chat";
+import {
+  refreshSessionKeepalive,
+  shouldRenewVisibleSession,
+} from "../lib/session-keepalive";
 import { MachiChatView } from "./MachiChatView";
 import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -310,6 +315,44 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
       cancelled = true;
       disposeHistoryOutbox();
       useChatStore.getState().setHistoryPrincipal(null);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let stopped = false;
+    let mismatched = false;
+    let renewing = false;
+    let expiresAtMs: number | null = null;
+    const renewIfNeeded = () => {
+      if (stopped || mismatched || renewing) return;
+      const visible = document.visibilityState === "visible";
+      if (!shouldRenewVisibleSession(expiresAtMs, Date.now(), visible)) return;
+      renewing = true;
+      void refreshSessionKeepalive({
+        expectedPrincipal: useChatStore.getState().historyPrincipal,
+        fetcher: (input, init) => fetch(input, init),
+        isActive: () => !stopped && !mismatched,
+        onPrincipalMismatch() {
+          mismatched = true;
+          toast.error("登录账号已变化，请重新登录");
+        },
+        onRenewed(result) {
+          const parsed = Date.parse(result.expiresAt);
+          expiresAtMs = Number.isFinite(parsed) ? parsed : null;
+        },
+      }).finally(() => {
+        renewing = false;
+      });
+    };
+    renewIfNeeded();
+    const timer = window.setInterval(renewIfNeeded, 60_000);
+    window.addEventListener("focus", renewIfNeeded);
+    document.addEventListener("visibilitychange", renewIfNeeded);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", renewIfNeeded);
+      document.removeEventListener("visibilitychange", renewIfNeeded);
     };
   }, []);
 

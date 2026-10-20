@@ -48,6 +48,14 @@ func QuotaExceeded(message string) APIError {
 	}
 }
 
+func UpstreamRateLimited(message string) APIError {
+	return APIError{
+		Code:       "42902",
+		Message:    message,
+		HTTPStatus: http.StatusTooManyRequests,
+	}
+}
+
 func Internal(message string) APIError {
 	return APIError{
 		Code:       "50000",

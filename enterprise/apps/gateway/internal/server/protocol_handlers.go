@@ -166,7 +166,7 @@ func (s *Server) dispatchProtocol(
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
 		inboundProtocol: inboundProtocolLabel(session.inbound),
-		budgetCheck: &budgetCheck,
+		budgetCheck:     &budgetCheck,
 	}, session) {
 		return
 	}
@@ -397,7 +397,12 @@ func (s *Server) protocolStream(
 			return
 		}
 		if up, ok := streamErr.(*adaptor.UpstreamError); ok {
-			writeStreamError(w, flusher, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound).Message)
+			apiErr := adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound)
+			if apiErr.Code == "42902" {
+				writeStreamAPIError(w, flusher, apiErr)
+				return
+			}
+			writeStreamError(w, flusher, apiErr.Message)
 			return
 		}
 		writeStreamError(w, flusher, formatStreamError(streamErr))

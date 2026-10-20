@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
-	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
+	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
@@ -118,33 +118,33 @@ func (s *Server) handleChatCompleteRelay(
 	}
 
 	ev := audit.Event{
-		ID:              makeID("audit"),
-		TenantID:        identity.TenantID,
-		EventTime:       time.Now().UTC().Format(time.RFC3339),
-		EventType:       "chat_call",
-		UserID:          identity.UserID,
-		UserEmail:       identity.UserEmail,
-		DepartmentID:    identity.DepartmentID,
-		SessionID:       identity.SessionID,
-		TraceID:         identity.TraceID,
-		DeploymentID:    identity.DeploymentID,
-		ClientType:      "web-portal",
-		ClientIP:        r.RemoteAddr,
-		Provider:        decision.Provider,
-		Model:           req.Model,
-		Route:           decision.Route,
-		ChannelID:       decision.ChannelID,
-		ChannelKeyRef:   result.KeyRef,
-		APITokenID:      identity.APITokenID,
-		InputTokens:     providerInputTokens,
-		OutputTokens:    providerOutputTokens,
-		TotalTokens:     providerInputTokens + providerOutputTokens,
-		LatencyMS:       time.Since(startedAt).Milliseconds(),
+		ID:                makeID("audit"),
+		TenantID:          identity.TenantID,
+		EventTime:         time.Now().UTC().Format(time.RFC3339),
+		EventType:         "chat_call",
+		UserID:            identity.UserID,
+		UserEmail:         identity.UserEmail,
+		DepartmentID:      identity.DepartmentID,
+		SessionID:         identity.SessionID,
+		TraceID:           identity.TraceID,
+		DeploymentID:      identity.DeploymentID,
+		ClientType:        "web-portal",
+		ClientIP:          r.RemoteAddr,
+		Provider:          decision.Provider,
+		Model:             req.Model,
+		Route:             decision.Route,
+		ChannelID:         decision.ChannelID,
+		ChannelKeyRef:     result.KeyRef,
+		APITokenID:        identity.APITokenID,
+		InputTokens:       providerInputTokens,
+		OutputTokens:      providerOutputTokens,
+		TotalTokens:       providerInputTokens + providerOutputTokens,
+		LatencyMS:         time.Since(startedAt).Milliseconds(),
 		LatencyMSUpstream: time.Since(startedAt).Milliseconds(),
-		EstimatedTokens: estimatedInputTokens,
-		ActualTokens:    providerInputTokens + providerOutputTokens,
-		SettleDelta:     settle.Delta,
-		CacheLayer:      string(cache.LayerNone),
+		EstimatedTokens:   estimatedInputTokens,
+		ActualTokens:      providerInputTokens + providerOutputTokens,
+		SettleDelta:       settle.Delta,
+		CacheLayer:        string(cache.LayerNone),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(joinMessages(req.Messages)),
 			ResponseHash:    hashText(responseContent),
@@ -280,6 +280,9 @@ func formatStreamError(err error) string {
 	}
 	if strings.Contains(msg, "stream:buffer_exceeded") {
 		return "上游响应过大，流式缓冲已超限。"
+	}
+	if strings.Contains(msg, "42902") || strings.HasPrefix(msg, "upstream 429:") || strings.HasPrefix(msg, "upstream 529:") {
+		return "模型服务繁忙，请稍后再试"
 	}
 	return msg
 }

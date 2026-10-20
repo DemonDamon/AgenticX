@@ -1,5 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
-import { refreshGatewayBearer } from "./gateway-auth-refresh";
+import { hasGatewayBearerLifetime, refreshGatewayBearer } from "./gateway-auth-refresh";
+
+function token(expSeconds: number): string {
+  return `header.${Buffer.from(JSON.stringify({ exp: expSeconds })).toString("base64url")}.signature`;
+}
+
+describe("hasGatewayBearerLifetime", () => {
+  const now = Date.parse("2026-10-20T08:00:00.000Z");
+
+  it("accepts a token that outlives the required window and rejects one that only meets it", () => {
+    expect(hasGatewayBearerLifetime(token(Math.floor((now + 30 * 60_000) / 1000)), 27 * 60_000, now)).toBe(true);
+    expect(hasGatewayBearerLifetime(token(Math.floor((now + 20 * 60_000) / 1000)), 27 * 60_000, now)).toBe(false);
+    expect(hasGatewayBearerLifetime(token(Math.floor((now + 27 * 60_000) / 1000)), 27 * 60_000, now)).toBe(false);
+  });
+
+  it("fails closed for opaque tokens and non-numeric exp", () => {
+    expect(hasGatewayBearerLifetime("opaque-token", 60_000, now)).toBe(false);
+    expect(
+      hasGatewayBearerLifetime(
+        `header.${Buffer.from('{"exp":"later"}').toString("base64url")}.signature`,
+        60_000,
+        now,
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("refreshGatewayBearer", () => {
   it("updates authorization when refresh returns a token", async () => {

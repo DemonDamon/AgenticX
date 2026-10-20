@@ -89,7 +89,7 @@ describe("deep-research resume trace_id", () => {
         email: "u@example.com",
         sessionId: "auth-session",
       },
-      accessToken: "access",
+      accessToken: `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60 })).toString("base64url")}.s`,
       refreshToken: "refresh",
     } as never);
 
@@ -163,7 +163,7 @@ describe("deep-research resume trace_id", () => {
         email: "u@example.com",
         sessionId: "auth-session",
       },
-      accessToken: "access",
+      accessToken: `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60 })).toString("base64url")}.s`,
       refreshToken: "refresh",
     } as never);
     getRun.mockResolvedValue({
@@ -224,7 +224,7 @@ describe("deep-research resume trace_id", () => {
         email: "u@example.com",
         sessionId: "auth-session",
       },
-      accessToken: "access",
+      accessToken: `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60 })).toString("base64url")}.s`,
       refreshToken: "refresh",
     } as never);
     getRun.mockResolvedValue({

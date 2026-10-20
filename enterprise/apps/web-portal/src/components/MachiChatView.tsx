@@ -35,6 +35,7 @@ import {
 import { type ChatClient } from "@agenticx/sdk-ts";
 import { localizeChatErrorMessage, localizeChatMessageError } from "../lib/chat-error-i18n";
 import { useFeatureUsage } from "../lib/use-feature-usage";
+import { takeDeepResearchRunsToRecover } from "../lib/deep-research/auto-recover";
 import { DeepResearchRemainingBadge, SearchQuotaExhaustedNotice } from "./FeatureUsageNotice";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
 import {
@@ -375,30 +376,16 @@ export function MachiChatView({
           m.deep_research?.runId === run.runId,
       );
     const targetId = existing?.id;
+    const savedEvents = existing?.deep_research?.events ?? [];
+    const skipReplayDelta = Boolean(existing?.content?.trim());
     if (!targetId) {
       // No matching bubble yet — stream still reconnects into a local placeholder via content only.
       console.info("[deep-research] reconnect: no assistant bubble for", run.runId);
-    } else {
-      useChatStore.setState((prev) => ({
-        messages: prev.messages.map((m) =>
-          m.id === targetId
-            ? {
-                ...m,
-                content: "",
-                deep_research: {
-                  runId: run.runId,
-                  status: run.status === "awaiting_clarify" ? "awaiting_clarify" : "running",
-                  events: [],
-                  artifactIds: [],
-                  clarifyAnswers: m.deep_research?.clarifyAnswers,
-                },
-              }
-            : m,
-        ),
-      }));
     }
 
+    let skippedReplayDelta = false;
     void startDeepResearchReconnect(run.runId, {
+      savedEvents,
       onEvent: (event) => {
         if (!targetId) return;
         useChatStore.setState((prev) => ({
@@ -466,6 +453,10 @@ export function MachiChatView({
       },
       onDelta: (text) => {
         if (!targetId) return;
+        if (skipReplayDelta && !skippedReplayDelta) {
+          skippedReplayDelta = true;
+          return;
+        }
         useChatStore.setState((prev) => ({
           messages: prev.messages.map((m) =>
             m.id === targetId ? { ...m, content: `${m.content ?? ""}${text}` } : m,
@@ -715,6 +706,35 @@ export function MachiChatView({
     { streamStateBySessionId },
     activeSessionId,
   );
+
+  // A restored workbench hides the recover banner, so reconnect it here; the
+  // session-switch cleanup above aborts these streams, hence the per-session reset.
+  const autoRecoverRef = React.useRef<{ sessionId: string | null; handled: Set<string> }>({
+    sessionId: null,
+    handled: new Set(),
+  });
+  React.useEffect(() => {
+    if (!activeSessionId) return;
+    if (autoRecoverRef.current.sessionId !== activeSessionId) {
+      autoRecoverRef.current = { sessionId: activeSessionId, handled: new Set() };
+    }
+    const runIds = takeDeepResearchRunsToRecover({
+      messages: visibleMessages,
+      sessionId: activeSessionId,
+      streaming: suppressRecoverWhileStreaming,
+      handled: autoRecoverRef.current.handled,
+    });
+    for (const runId of runIds) {
+      handleDeepResearchRecover({
+        runId,
+        sessionId: activeSessionId,
+        status: "running",
+        phase: "lanes",
+        topic: "",
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }, [activeSessionId, visibleMessages, suppressRecoverWhileStreaming, handleDeepResearchRecover]);
 
   const userIdsInActiveSession = React.useMemo(() => {
     return new Set(visibleMessages.filter((message) => message.role === "user").map((message) => message.id));

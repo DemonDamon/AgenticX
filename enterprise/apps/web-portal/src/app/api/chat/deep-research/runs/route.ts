@@ -149,12 +149,33 @@ export async function GET(request: Request) {
   logCtx.setMode("deep_research");
   const store = defaultRunStore;
   await reapStaleRunsThrottled();
-  const activeRaw = await store.listActive(session.tenantId, session.userId, sessionId);
-  const active = await healFinishedActiveRuns(activeRaw);
+  const runId = url.searchParams.get("runId")?.trim() || undefined;
+  const summaries = await store.listActiveSummaries(session.tenantId, session.userId, sessionId);
+  // Summaries omit the fields heal needs. Load the few still-running rows and
+  // keep the existing "already has a report → completed" close-out.
+  const runningRows = (
+    await Promise.all(
+      summaries
+        .filter((row) => row.status === "running")
+        .map((row) => store.get(session.tenantId, session.userId, row.runId)),
+    )
+  ).filter((row): row is RunRecord => row != null);
+  const stillRunning = await healFinishedActiveRuns(runningRows);
+  const stillRunningIds = new Set(stillRunning.map((row) => row.runId));
+  const healedAway = new Set(
+    runningRows.map((row) => row.runId).filter((id) => !stillRunningIds.has(id)),
+  );
+  const active = summaries.filter((row) => !healedAway.has(row.runId));
 
   let latest: ReturnType<typeof toHydratePayload> | null = null;
   if (hydrate && sessionId) {
-    const raw = await store.getLatestBySession(session.tenantId, session.userId, sessionId);
+    let raw: RunRecord | null = null;
+    if (runId) {
+      const got = await store.get(session.tenantId, session.userId, runId);
+      raw = got && got.sessionId === sessionId ? got : null;
+    } else {
+      raw = await store.getLatestBySession(session.tenantId, session.userId, sessionId);
+    }
     if (raw && (raw.events.length > 0 || raw.reportMarkdown.trim().length > 0)) {
       const row = await enrichRowWithStoredArtifacts(raw);
       if ((await runHasStoredReport(row)) && row.status === "running") {

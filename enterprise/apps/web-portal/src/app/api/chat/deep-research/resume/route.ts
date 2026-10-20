@@ -11,9 +11,16 @@ import { cookies } from "next/headers";
 import { loadTenantWebSearchConfig } from "../../../../../lib/web-search/tenant-config";
 import { defaultArtifactStore } from "../../../../../lib/deep-research/artifact-store";
 import {
+  CLARIFY_TIMEOUT_MS,
+  TOTAL_BUDGET_MS,
   parsePlanPatchSubQuestions,
   runDeepResearchTurn,
 } from "../../../../../lib/deep-research/orchestrator";
+import {
+  hasGatewayBearerLifetime,
+  refreshGatewayBearer,
+  requiredResearchBearerLifetimeMs,
+} from "../../../../../lib/deep-research/gateway-auth-refresh";
 import {
   isOrphanedPlanGate,
   latestResearchPlanEvent,
@@ -71,6 +78,30 @@ async function drainResponseBody(response: Response): Promise<void> {
   } catch {
     // transport cancelled mid-continue — run-store writer may still finish
   }
+}
+
+type RotatedAuthTokens = Awaited<ReturnType<typeof refreshTokens>>;
+
+function withRotatedAuthCookies(response: NextResponse, tokens: RotatedAuthTokens): NextResponse {
+  response.cookies.set(ACCESS_COOKIE, tokens.accessToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: tokens.expiresInSeconds,
+    path: "/",
+  });
+  response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: 7 * 24 * 60 * 60,
+    path: "/",
+  });
+  return response;
+}
+
+function researchAuthError(message: string): NextResponse {
+  return NextResponse.json({ error: { code: "40100", message } }, { status: 401 });
 }
 
 function alreadyContinued(runId: string) {
@@ -576,6 +607,41 @@ export async function POST(request: Request) {
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 
+  const requiredBearerLifetimeMs = requiredResearchBearerLifetimeMs(
+    TOTAL_BUDGET_MS,
+    CLARIFY_TIMEOUT_MS,
+  );
+  let rotatedTokens: RotatedAuthTokens | null = null;
+  if (!hasGatewayBearerLifetime(accessToken, requiredBearerLifetimeMs)) {
+    if (!refreshToken) {
+      locks.delete(runId);
+      return researchAuthError("登录状态即将到期，无法续跑深度调研。请刷新页面后重试。");
+    }
+    try {
+      rotatedTokens = await refreshTokens(refreshToken);
+    } catch {
+      locks.delete(runId);
+      return researchAuthError("登录状态续期失败，无法续跑深度调研。请刷新页面后重试。");
+    }
+    const refreshedAccessToken = rotatedTokens.accessToken;
+    if (
+      !hasGatewayBearerLifetime(refreshedAccessToken, requiredBearerLifetimeMs) ||
+      !(await refreshGatewayBearer({
+        headers: gatewayHeaders,
+        refreshAccessToken: async () => ({ accessToken: refreshedAccessToken }),
+      }))
+    ) {
+      locks.delete(runId);
+      return withRotatedAuthCookies(
+        researchAuthError("登录状态续期后仍不足以完成深度调研，请刷新页面后重试。"),
+        rotatedTokens,
+      );
+    }
+    refreshToken = rotatedTokens.refreshToken;
+  }
+  const respond = (response: NextResponse) =>
+    rotatedTokens ? withRotatedAuthCookies(response, rotatedTokens) : response;
+
   if (reenterPlanChat) {
     try {
       if (run.status === "failed" || run.status === "cancelled" || run.status === "completed") {
@@ -592,10 +658,10 @@ export async function POST(request: Request) {
     } catch (error) {
       locks.delete(runId);
       console.warn("[deep-research] orphan plan_chat reopen failed:", error);
-      return NextResponse.json(
+      return respond(NextResponse.json(
         { error: { code: "50000", message: "failed to continue plan chat" } },
         { status: 500 },
-      );
+      ));
     }
 
     void runDeepResearchTurn(
@@ -668,11 +734,11 @@ export async function POST(request: Request) {
         locks.delete(runId);
       });
 
-    return NextResponse.json({
+    return respond(NextResponse.json({
       code: "00000",
       message: "ok",
       data: { runId, resumed: true, orphanContinued: true, planChat: true },
-    });
+    }));
   }
 
   const action = planAction || (skip ? "skip" : "approve");
@@ -714,10 +780,10 @@ export async function POST(request: Request) {
   } catch (error) {
     locks.delete(runId);
     console.warn("[deep-research] orphan plan append failed:", error);
-    return NextResponse.json(
+    return respond(NextResponse.json(
       { error: { code: "50000", message: "failed to continue plan gate" } },
       { status: 500 },
-    );
+    ));
   }
 
   void runDeepResearchTurn(
@@ -786,10 +852,10 @@ export async function POST(request: Request) {
       locks.delete(runId);
     });
 
-  return NextResponse.json({
+  return respond(NextResponse.json({
     code: "00000",
     message: "ok",
     data: { runId, resumed: true, orphanContinued: true },
-  });
+  }));
   }, request);
 }

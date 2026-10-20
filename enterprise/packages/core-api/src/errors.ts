@@ -38,6 +38,8 @@ export function toComplianceMessage(
       "当前账号未开通聊天权限（workspace:chat）。请重新登录，或联系管理员为账号分配聊天权限。";
   } else if (code === "42901") {
     message = "本月 token 配额已用尽，请联系管理员调整额度或切换更低成本模型。";
+  } else if (code === "42902") {
+    message = "模型服务繁忙，请稍后再试。";
   } else if (!isPolicyErrorCode(code)) {
     message = fallback;
   } else if (fallback.includes("命中策略")) {

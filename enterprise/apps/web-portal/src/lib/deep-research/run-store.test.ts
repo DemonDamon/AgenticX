@@ -253,6 +253,12 @@ describe("memory run store", () => {
     expect(active.every((r) => r.status === "running" || r.status === "awaiting_clarify")).toBe(
       true,
     );
+    await store.appendEvents("r1", [{ type: "phase", phase: "lanes", message: "检索" }]);
+    await store.appendReport("r1", "报告正文不应出现在摘要里");
+    const summaries = await store.listActiveSummaries("t1", "u1", "s1");
+    expect(summaries.map((r) => r.runId).sort()).toEqual(["r1", "r2"]);
+    expect(summaries[0]).not.toHaveProperty("events");
+    expect(summaries[0]).not.toHaveProperty("reportMarkdown");
   });
 
   it("denies cross-tenant get", async () => {

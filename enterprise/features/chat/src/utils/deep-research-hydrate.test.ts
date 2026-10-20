@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@agenticx/core-api";
-import { deriveDeepResearchSnapshot, mergeDeepResearchHydrate } from "./deep-research-hydrate";
+import {
+  deriveDeepResearchSnapshot,
+  hydrateMessagesDeepResearch,
+  mergeDeepResearchHydrate,
+} from "./deep-research-hydrate";
 
 function msg(
   partial: Pick<ChatMessage, "id" | "role" | "content"> & Partial<ChatMessage>,
@@ -583,5 +587,66 @@ describe("mergeDeepResearchHydrate", () => {
       events: [{ type: "run_started", runId: "run-first" }],
     });
     expect(twice).toHaveLength(2);
+  });
+
+  it("未知状态显示为进行中，不当成已完成", () => {
+    const next = mergeDeepResearchHydrate(
+      [msg({ id: "u1", role: "user", content: "主题" })],
+      {
+        runId: "run-unknown",
+        sessionId: "s1",
+        status: "exporting",
+        phase: "lanes",
+        topic: "主题",
+        updatedAt: "2026-08-01T02:00:00.000Z",
+        events: [{ type: "phase", phase: "lanes", message: "检索" }],
+      },
+    );
+    expect(next.at(-1)?.deep_research?.status).toBe("running");
+  });
+});
+
+describe("hydrateMessagesDeepResearch runId", () => {
+  it("按消息上的 runId 精确拉取，而不是只拿会话里最新的一次", async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      const runId = new URL(url, "http://localhost").searchParams.get("runId");
+      const id = runId ?? "latest-run";
+      return new Response(
+        JSON.stringify({
+          data: {
+            latest: {
+              runId: id,
+              sessionId: "s1",
+              status: "running",
+              phase: "lanes",
+              topic: "主题",
+              updatedAt: "2026-08-01T02:00:00.000Z",
+              events: [{ type: "phase", phase: "lanes", message: id }],
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    const messages = [
+      msg({
+        id: "a-old",
+        role: "assistant",
+        content: "",
+        deep_research: {
+          runId: "old-run",
+          status: "running",
+          events: [{ type: "phase", phase: "lanes", message: "旧" }],
+        },
+      }),
+    ];
+    await hydrateMessagesDeepResearch("s1", messages, fetchImpl);
+    expect(urls.some((url) => url.includes("hydrate=1") && !url.includes("runId="))).toBe(true);
+    expect(urls).toContain(
+      "/api/chat/deep-research/runs?sessionId=s1&hydrate=1&runId=old-run",
+    );
   });
 });

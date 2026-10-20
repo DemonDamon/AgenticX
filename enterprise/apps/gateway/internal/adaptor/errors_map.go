@@ -11,9 +11,9 @@ func MapUpstreamError(status int, body string, inboundProtocol string) openai.AP
 	bodyLower := strings.ToLower(body)
 	switch {
 	case status == 529 || strings.Contains(bodyLower, "overloaded"):
-		return openai.QuotaExceeded("Upstream overloaded")
+		return openai.UpstreamRateLimited("模型服务繁忙，请稍后再试")
 	case status == 429:
-		return openai.QuotaExceeded(nonEmptyMessage(body, "Rate limit exceeded"))
+		return openai.UpstreamRateLimited("模型服务繁忙，请稍后再试")
 	case status == 401 || status == 403:
 		return openai.Unauthorized(nonEmptyMessage(body, "invalid upstream credentials"))
 	case status >= 500:

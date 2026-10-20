@@ -45,6 +45,8 @@ vi.mock("../../../../../lib/auth-runtime", () => ({
 
 vi.mock("../../../../../lib/deep-research/orchestrator", () => ({
   runDeepResearchTurn: vi.fn(async () => new Response("deep", { status: 200 })),
+  TOTAL_BUDGET_MS: 1_200_000,
+  CLARIFY_TIMEOUT_MS: 300_000,
 }));
 
 vi.mock("../../../../../lib/deep-research/artifact-store", () => ({
@@ -157,7 +159,7 @@ describe("chat completions feature usage", () => {
     });
     vi.mocked(getSessionAuthFromCookies).mockResolvedValue({
       session,
-      accessToken: "tok",
+      accessToken: `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60 })).toString("base64url")}.s`,
       refreshToken: "ref",
     } as never);
     vi.mocked(isChatSessionOwned).mockResolvedValue(true);
