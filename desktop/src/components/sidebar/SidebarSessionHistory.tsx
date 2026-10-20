@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Archive,
@@ -12,7 +12,6 @@ import {
   MoreHorizontal,
   Pencil,
   Pin,
-  Search,
   Smartphone,
   SquareArrowOutUpRight,
   Trash2,
@@ -34,7 +33,6 @@ import {
 } from "../../utils/session-tail-cache";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../../utils/session-message-map";
 import { LoopReviewCard } from "../session/LoopReviewCard";
-import { SidebarCreateButton } from "../quick-compose/SidebarCreateButton";
 import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
   SIDEBAR_HISTORY_FILTER_KEY,
@@ -59,6 +57,7 @@ import {
   type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
+import { SessionChannelMarks } from "./SessionChannelMarks";
 import { SidebarSpaces } from "./SidebarSpaces";
 import { excludeScratchSessionsFromHistory, scratchHistoryBlocklist } from "../../utils/scratch-chat";
 import { HoverTip } from "../ds/HoverTip";
@@ -72,8 +71,6 @@ type MoreMenuState = {
 };
 
 type CollapseState = {
-  wechat: boolean;
-  feishu: boolean;
   pinned: boolean;
   today: boolean;
   earlier: boolean;
@@ -82,8 +79,6 @@ type CollapseState = {
 };
 
 const DEFAULT_COLLAPSE: CollapseState = {
-  wechat: false,
-  feishu: false,
   pinned: false,
   today: false,
   earlier: false,
@@ -96,7 +91,13 @@ function loadCollapse(): CollapseState {
     const raw = localStorage.getItem(SIDEBAR_HISTORY_COLLAPSE_KEY);
     if (!raw) return { ...DEFAULT_COLLAPSE };
     const parsed = JSON.parse(raw) as Partial<CollapseState>;
-    return { ...DEFAULT_COLLAPSE, ...parsed };
+    return {
+      pinned: parsed.pinned ?? DEFAULT_COLLAPSE.pinned,
+      today: parsed.today ?? DEFAULT_COLLAPSE.today,
+      earlier: parsed.earlier ?? DEFAULT_COLLAPSE.earlier,
+      tasks: parsed.tasks ?? DEFAULT_COLLAPSE.tasks,
+      spaces: parsed.spaces ?? DEFAULT_COLLAPSE.spaces,
+    };
   } catch {
     return { ...DEFAULT_COLLAPSE };
   }
@@ -133,7 +134,7 @@ function resolveSidebarChipStripeColor(
 }
 
 export function SidebarSessionHistory() {
-  const { t } = useTranslation("sidebar");
+  const { t, i18n } = useTranslation("sidebar");
   const { t: tCommon } = useTranslation("common");
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
@@ -167,8 +168,7 @@ export function SidebarSessionHistory() {
   const [avatarFilter, setAvatarFilter] = useState<string>(() => loadFilter());
   const [visibleLimit, setVisibleLimit] = useState(SIDEBAR_HISTORY_PAGE_SIZE);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery] = useState("");
   const [loopReviewScores, setLoopReviewScores] = useState<Record<string, number>>({});
   const [loopReviewFor, setLoopReviewFor] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -186,7 +186,6 @@ export function SidebarSessionHistory() {
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const fetchedLoopReviewRef = useRef<Set<string>>(new Set());
   const pendingLoopReviewRef = useRef<Set<string>>(new Set());
@@ -384,12 +383,6 @@ export function SidebarSessionHistory() {
     return () => window.clearTimeout(t);
   }, [editingId]);
 
-  useEffect(() => {
-    if (!searchOpen) return;
-    const t = window.setTimeout(() => searchInputRef.current?.focus(), 0);
-    return () => window.clearTimeout(t);
-  }, [searchOpen]);
-
   const rowMatchesSearch = useCallback(
     (row: SidebarSessionRow): boolean => {
       const q = searchQuery.trim().toLowerCase();
@@ -421,24 +414,6 @@ export function SidebarSessionHistory() {
     [sessions, sessionHistoryHints, panes, hiddenScratchSessionIds]
   );
 
-  const wechatRow = useMemo(() => {
-    const row = sessionsWithHints.find((s) => s.session_id === wechatBoundId) ?? null;
-    if (!row) return null;
-    return rowMatchesSearch(row) ? row : null;
-  }, [sessionsWithHints, wechatBoundId, rowMatchesSearch]);
-  const feishuRow = useMemo(() => {
-    const row = sessionsWithHints.find((s) => s.session_id === feishuBoundId) ?? null;
-    if (!row) return null;
-    return rowMatchesSearch(row) ? row : null;
-  }, [sessionsWithHints, feishuBoundId, rowMatchesSearch]);
-
-  const specialIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (wechatBoundId) ids.add(wechatBoundId);
-    if (feishuBoundId) ids.add(feishuBoundId);
-    return ids;
-  }, [wechatBoundId, feishuBoundId]);
-
   const filteredForBuckets = useMemo(() => {
     const avatarFiltered = sessionsWithHints.filter((row) =>
       matchesSidebarAvatarFilter(row, avatarFilter)
@@ -461,8 +436,8 @@ export function SidebarSessionHistory() {
   );
 
   const buckets = useMemo(
-    () => bucketSidebarHistoryNodes(historyTree, specialIds),
-    [historyTree, specialIds]
+    () => bucketSidebarHistoryNodes(historyTree, new Set()),
+    [historyTree]
   );
 
   const chronological = useMemo(
@@ -476,8 +451,6 @@ export function SidebarSessionHistory() {
   const historyEmptyHint = historyReady ? t("history.empty") : t("history.loading");
   const pinnedEmptyHint = historyReady ? t("history.emptyPinned") : t("history.loading");
   const visibleLoopReviewKey = [
-    wechatRow?.session_id,
-    feishuRow?.session_id,
     ...flattenSidebarHistoryNodes(buckets.pinned).map((row) => row.session_id),
     ...flattenSidebarHistoryNodes(todayVisible).map((row) => row.session_id),
     ...flattenSidebarHistoryNodes(earlierVisible).map((row) => row.session_id),
@@ -519,20 +492,14 @@ export function SidebarSessionHistory() {
 
   const visibleLoopReviewIds = useMemo(() => {
     const rows: SidebarSessionRow[] = [];
-    if (!collapse.wechat && wechatRow) rows.push(wechatRow);
-    if (!collapse.feishu && feishuRow) rows.push(feishuRow);
     if (!collapse.pinned) rows.push(...flattenSidebarHistoryNodes(buckets.pinned));
     if (!collapse.today) rows.push(...flattenSidebarHistoryNodes(todayVisible));
     if (!collapse.earlier) rows.push(...flattenSidebarHistoryNodes(earlierVisible));
     return rows.map((row) => row.session_id);
   }, [
-    collapse.wechat,
-    collapse.feishu,
     collapse.pinned,
     collapse.today,
     collapse.earlier,
-    wechatRow,
-    feishuRow,
     buckets.pinned,
     todayVisible,
     earlierVisible,
@@ -576,8 +543,6 @@ export function SidebarSessionHistory() {
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
-    if (wechatRow) map.set(wechatRow.session_id, wechatRow);
-    if (feishuRow) map.set(feishuRow.session_id, feishuRow);
     for (const row of flattenSidebarHistoryNodes(buckets.pinned)) {
       map.set(row.session_id, row);
     }
@@ -585,7 +550,7 @@ export function SidebarSessionHistory() {
       map.set(row.session_id, row);
     }
     return Array.from(map.values());
-  }, [wechatRow, feishuRow, buckets.pinned, chronological]);
+  }, [buckets.pinned, chronological]);
 
   const selectableIds = useMemo(
     () => selectableRows.map((r) => r.session_id),
@@ -1280,6 +1245,11 @@ export function SidebarSessionHistory() {
               </span>
             ) : null}
             <span className="min-w-0 flex-1 truncate">{title}</span>
+            <SessionChannelMarks
+              sessionId={row.session_id}
+              wechatBoundId={wechatBoundId}
+              feishuBoundId={feishuBoundId}
+            />
             {loopScore !== undefined ? (
               <span
                 role="button"
@@ -1368,21 +1338,11 @@ export function SidebarSessionHistory() {
     ? sessions.find((s) => s.session_id === moreMenu.sessionId) ?? null
     : null;
 
-  const sectionHeader = (
-    key: keyof CollapseState,
-    label: string,
-    opts?: {
-      accentClass?: string;
-      badge?: { text: string; className: string };
-      trailing?: ReactNode;
-    }
-  ) => (
+  const sectionHeader = (key: keyof CollapseState, label: string) => (
     <div className="flex items-center gap-1 px-2 py-1">
       <button
         type="button"
-        className={`flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold tracking-[0.06em] ${
-          opts?.accentClass ?? "text-text-faint"
-        }`}
+        className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold tracking-[0.06em] text-text-faint"
         onClick={() => toggleSection(key)}
       >
         <ChevronDown
@@ -1390,13 +1350,7 @@ export function SidebarSessionHistory() {
           strokeWidth={2}
         />
         <span className="truncate uppercase">{label}</span>
-        {opts?.badge ? (
-          <span className={`inline-flex shrink-0 rounded-sm px-1 py-px text-[10px] font-medium ${opts.badge.className}`}>
-            {opts.badge.text}
-          </span>
-        ) : null}
       </button>
-      {opts?.trailing}
     </div>
   );
 
@@ -1410,180 +1364,98 @@ export function SidebarSessionHistory() {
         }`}
         aria-hidden={showFileManage}
       >
-      <div className="flex items-center gap-1 px-3 pb-1 pt-3">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
-          onClick={() => toggleSection("tasks")}
-        >
-          <span className="min-w-0 truncate text-[11px] font-light text-text-muted">
-            {t("history.tasks")}
-          </span>
-          <span className="inline-flex shrink-0 rounded-sm bg-surface-card px-1 py-px text-[10px] font-medium text-text-muted">
-            {taskRows.length}
-          </span>
-        </button>
-        <SidebarCreateButton className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-faint hover:bg-surface-hover hover:text-text-strong [&_svg]:h-3.5 [&_svg]:w-3.5" />
-        {!selectMode ? (
-          <>
-            <button
-              type="button"
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => {
-                setSelectMode(true);
-                setSelectedSessionIds([]);
-                setFilterOpen(false);
-              }}
-              title={t("history.multiSelect")}
-              aria-label={t("history.multiSelect")}
-            >
-              <ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <button
-              ref={filterBtnRef}
-              type="button"
-              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
-                avatarFilter !== "all"
-                  ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-rgb,59,130,246))]"
-                  : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1">
+        <div className="group/tasks flex h-8 items-center gap-0.5 rounded-md px-2 text-[13px] text-text-muted hover:bg-surface-hover hover:text-text-strong">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-1 text-left group-hover/tasks:font-semibold"
+            onClick={() => toggleSection("tasks")}
+          >
+            <span className="truncate">
+              {i18n.language.startsWith("en")
+                ? `${t("history.tasks")} (${taskRows.length})`
+                : `${t("history.tasks")}（${taskRows.length}）`}
+            </span>
+            <ChevronRight
+              className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform group-hover/tasks:text-text-strong ${
+                collapse.tasks ? "" : "rotate-90"
               }`}
-              onClick={openFilterMenu}
-              title={t("history.filterTitle", { label: filterLabel })}
-              aria-label={t("history.filterAria")}
-            >
-              <ListFilter className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
-                searchOpen || searchQuery.trim()
-                  ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-rgb,59,130,246))]"
-                  : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
-              }`}
-              onClick={() => {
-                setSearchOpen((v) => {
-                  const next = !v;
-                  if (!next) setSearchQuery("");
-                  return next;
-                });
-              }}
-              title={t("history.searchTitle")}
-              aria-label={t("history.searchAria")}
-            >
-              <Search className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-              onClick={toggleSelectAll}
-              disabled={batchDeleting || selectableIds.length === 0}
-              title={t("history.selectAllToggle")}
-            >
-              {allSelectableSelected ? t("history.deselectAll") : t("history.selectAll")}
-            </button>
-            <button
-              type="button"
-              className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-rose-400 hover:bg-surface-hover hover:text-rose-500 disabled:opacity-50"
-              onClick={() => void deleteSelectedSessions()}
-              disabled={batchDeleting || selectedSessionIds.length === 0}
-              title={
-                selectedSessionIds.length > 0
-                  ? t("history.deleteCount", { count: selectedSessionIds.length })
-                  : t("history.selectFirst")
-              }
-            >
-              {batchDeleting
-                ? t("history.deleting")
-                : selectedSessionIds.length > 0
-                  ? t("history.deleteWithCount", { count: selectedSessionIds.length })
-                  : tCommon("delete")}
-            </button>
-            <button
-              type="button"
-              className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-              onClick={() => {
-                setSelectMode(false);
-                setSelectedSessionIds([]);
-              }}
-              disabled={batchDeleting}
-              title={t("history.cancelSelect")}
-            >
-              {tCommon("cancel")}
-            </button>
-          </>
-        )}
-      </div>
-
-      {searchOpen ? (
-        <div className="px-2 pb-1.5">
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setVisibleLimit(SIDEBAR_HISTORY_PAGE_SIZE);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setSearchOpen(false);
-                setSearchQuery("");
-              }
-            }}
-            placeholder={t("history.searchPlaceholder")}
-            className="w-full rounded-md border border-[color:var(--border-muted)] bg-surface-card px-2 py-1 text-[12px] text-text-primary outline-none placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.45)]"
-          />
+              strokeWidth={1.8}
+            />
+          </button>
+          {selectMode ? (
+            <div className="flex shrink-0 items-center">
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-card hover:text-text-strong disabled:opacity-50"
+                onClick={toggleSelectAll}
+                disabled={batchDeleting || selectableIds.length === 0}
+                title={t("history.selectAllToggle")}
+              >
+                {allSelectableSelected ? t("history.deselectAll") : t("history.selectAll")}
+              </button>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-rose-400 hover:bg-surface-card hover:text-rose-500 disabled:opacity-50"
+                onClick={() => void deleteSelectedSessions()}
+                disabled={batchDeleting || selectedSessionIds.length === 0}
+                title={
+                  selectedSessionIds.length > 0
+                    ? t("history.deleteCount", { count: selectedSessionIds.length })
+                    : t("history.selectFirst")
+                }
+              >
+                {batchDeleting
+                  ? t("history.deleting")
+                  : selectedSessionIds.length > 0
+                    ? t("history.deleteWithCount", { count: selectedSessionIds.length })
+                    : tCommon("delete")}
+              </button>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-card hover:text-text-strong disabled:opacity-50"
+                onClick={() => {
+                  setSelectMode(false);
+                  setSelectedSessionIds([]);
+                }}
+                disabled={batchDeleting}
+                title={t("history.cancelSelect")}
+              >
+                {tCommon("cancel")}
+              </button>
+            </div>
+          ) : (
+            <div className={`${filterOpen ? "flex" : "hidden group-hover/tasks:flex"} shrink-0 items-center`}>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
+                onClick={() => {
+                  setSelectMode(true);
+                  setSelectedSessionIds([]);
+                  setFilterOpen(false);
+                }}
+                title={t("history.multiSelect")}
+                aria-label={t("history.multiSelect")}
+              >
+                <ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+              <button
+                ref={filterBtnRef}
+                type="button"
+                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
+                  avatarFilter !== "all"
+                    ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-rgb,59,130,246))]"
+                    : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+                }`}
+                onClick={openFilterMenu}
+                title={t("history.filterTitle", { label: filterLabel })}
+                aria-label={t("history.filterAria")}
+              >
+                <ListFilter className="h-3.5 w-3.5" strokeWidth={1.75} />
+              </button>
+            </div>
+          )}
         </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
-        {/* WeChat IM */}
-        {sectionHeader("wechat", t("history.wechatIm"), {
-          accentClass: "text-[#25D366]",
-          badge: wechatBoundId
-            ? {
-                text: t("history.bound"),
-                className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
-              }
-            : undefined,
-        })}
-        {!collapse.wechat && (
-          <div className="mb-1">
-            {wechatRow ? (
-              renderRow(wechatRow)
-            ) : (
-              <div className="px-2 py-1 text-[11px] text-text-faint">
-                {wechatBoundId && searchQuery.trim() ? t("history.noMatch") : t("history.unbound")}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Feishu IM */}
-        {sectionHeader("feishu", t("history.feishuIm"), {
-          accentClass: "text-[#3370FF]",
-          badge: feishuBoundId
-            ? {
-                text: t("history.bound"),
-                className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
-              }
-            : undefined,
-        })}
-        {!collapse.feishu && (
-          <div className="mb-1">
-            {feishuRow ? (
-              renderRow(feishuRow)
-            ) : (
-              <div className="px-2 py-1 text-[11px] text-text-faint">
-                {feishuBoundId && searchQuery.trim() ? t("history.noMatch") : t("history.unbound")}
-              </div>
-            )}
-          </div>
-        )}
-
         {!collapse.tasks ? (
           <>
         {/* Pinned */}
@@ -1641,6 +1513,8 @@ export function SidebarSessionHistory() {
           }}
           collapsed={collapse.spaces}
           onToggleCollapsed={() => toggleSection("spaces")}
+          wechatBoundId={wechatBoundId}
+          feishuBoundId={feishuBoundId}
         />
       </div>
       </div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, FolderPlus, Plus, Shrink, Waypoints } from "lucide-react";
+import { ChevronRight, FolderOpen, FolderPlus, Plus, Shrink, Waypoints } from "lucide-react";
 import { useAppStore } from "../../store";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import {
@@ -11,6 +11,7 @@ import {
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
 import { HoverTip } from "../ds/HoverTip";
+import { SessionChannelMarks } from "./SessionChannelMarks";
 
 const SPACES_EXPANDED_KEY = "agx-sidebar-spaces-expanded-v1";
 
@@ -37,6 +38,8 @@ type Props = {
   spaces?: SidebarLocalSpace[];
   projects?: SidebarProjectRow[];
   enterpriseLoggedIn?: boolean;
+  wechatBoundId?: string;
+  feishuBoundId?: string;
 };
 
 function loadExpanded(): Record<string, boolean> {
@@ -67,6 +70,8 @@ export function SidebarSpaces({
   spaces: spacesProp,
   projects: projectsProp,
   enterpriseLoggedIn: loggedInProp,
+  wechatBoundId = "",
+  feishuBoundId = "",
 }: Props) {
   const { t, i18n } = useTranslation("sidebar");
   const openProject = useAppStore((s) => s.openProject);
@@ -206,37 +211,45 @@ export function SidebarSpaces({
   const menuSpace = menu ? spaces.find((space) => space.id === menu.spaceId) ?? null : null;
 
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-1 px-2 py-1">
+    <div className="mt-1">
+      <div className="group/spaces flex h-8 items-center gap-0.5 rounded-md px-2 text-[13px] text-text-muted hover:bg-surface-hover hover:text-text-strong">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center text-left text-[11px] font-semibold tracking-[0.06em] text-text-faint"
+          className="flex min-w-0 flex-1 items-center gap-1 text-left group-hover/spaces:font-semibold"
           onClick={() => onToggleCollapsed?.()}
         >
-          <span className="truncate uppercase">{countLabel(t("spaces.title"), count, english)}</span>
+          <span className="truncate">{countLabel(t("spaces.title"), count, english)}</span>
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform group-hover/spaces:text-text-strong ${
+              collapsed ? "" : "rotate-90"
+            }`}
+            strokeWidth={1.8}
+          />
         </button>
-        {count > 0 ? (
-          <HoverTip label={t("spaces.collapseAll")}>
+        <div className="hidden shrink-0 items-center group-hover/spaces:flex">
+          {count > 0 ? (
+            <HoverTip label={t("spaces.collapseAll")}>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
+                aria-label={t("spaces.collapseAll")}
+                onClick={collapseAll}
+              >
+                <Shrink className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+            </HoverTip>
+          ) : null}
+          <HoverTip label={t("spaces.create")}>
             <button
               type="button"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text-strong"
-              aria-label={t("spaces.collapseAll")}
-              onClick={collapseAll}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
+              aria-label={t("spaces.create")}
+              onClick={() => void createSpace()}
             >
-              <Shrink className="h-3.5 w-3.5" strokeWidth={1.8} />
+              <FolderPlus className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
           </HoverTip>
-        ) : null}
-        <HoverTip label={t("spaces.create")}>
-          <button
-            type="button"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text-strong"
-            aria-label={t("spaces.create")}
-            onClick={() => void createSpace()}
-          >
-            <FolderPlus className="h-3.5 w-3.5" strokeWidth={1.8} />
-          </button>
-        </HoverTip>
+        </div>
       </div>
 
       {collapsed ? null : (
@@ -287,6 +300,11 @@ export function SidebarSpaces({
                           onClick={() => onOpenSession(row)}
                         >
                           <span className="min-w-0 flex-1 truncate">{title}</span>
+                          <SessionChannelMarks
+                            sessionId={row.session_id}
+                            wechatBoundId={wechatBoundId}
+                            feishuBoundId={feishuBoundId}
+                          />
                           {relative ? (
                             <span className="shrink-0 text-[11px] tabular-nums text-text-faint">{relative}</span>
                           ) : null}
