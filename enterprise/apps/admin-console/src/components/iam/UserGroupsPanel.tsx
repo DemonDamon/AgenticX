@@ -26,6 +26,8 @@ import { useTranslations } from "next-intl";
 
 import { adminFetch, adminFetchOrTimeout } from "../../lib/admin-client-auth";
 import { groupAssignmentKey, groupPackBindingChanges } from "../../lib/capability-pack-form";
+import { LimitEditor } from "../quota/LimitEditor";
+import { formatCost, formatTokenCount } from "../quota/QuotaRing";
 
 type GroupRow = {
   id: string;
@@ -39,10 +41,20 @@ type PackRow = { id: string; slug: string; displayName: string; status: string; 
 
 const EMPTY_FORM = { name: "", description: "", memberIds: [] as string[] };
 
+type GroupSpending = {
+  unit: "tokens" | "cost_usd";
+  period: "day" | "week" | "month";
+  limit: number;
+};
+
+const PERIOD_KEY = { day: "periodDay", week: "periodWeek", month: "periodMonth" } as const;
+
 export function UserGroupsPanel() {
   const t = useTranslations("pages.iam.userGroups");
   const tc = useTranslations("common");
+  const tl = useTranslations("pages.iam.limits");
   const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [limits, setLimits] = useState<Record<string, GroupSpending | null>>({});
   const [users, setUsers] = useState<UserRow[]>([]);
   const [packs, setPacks] = useState<PackRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +86,15 @@ export function UserGroupsPanel() {
       const groupJson = (await groupRes.json()) as { message?: string; data?: { items?: GroupRow[] } };
       if (!groupRes.ok) throw new Error(groupJson.message || t("toast.loadFailed"));
       setGroups(groupJson.data?.items ?? []);
+      const overviewRes = await adminFetch("/api/admin/user-groups/overview", { cache: "no-store" });
+      const overviewJson = (await overviewRes.json().catch(() => ({}))) as {
+        data?: { groups?: Array<{ id: string; spending: GroupSpending | null }> };
+      };
+      if (overviewRes.ok) {
+        const next: Record<string, GroupSpending | null> = {};
+        for (const group of overviewJson.data?.groups ?? []) next[group.id] = group.spending;
+        setLimits(next);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
@@ -218,6 +239,19 @@ export function UserGroupsPanel() {
                   {t("memberCount", { count: group.memberIds.length })} ·{" "}
                   {t("packCount", { count: bound.length })}
                 </div>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{t("perMemberLimit")}</span>
+                  {" "}
+                  {limits[group.id]
+                    ? t("perMemberSummary", {
+                        period: tl(PERIOD_KEY[limits[group.id]!.period]),
+                        limit: limits[group.id]!.unit === "cost_usd"
+                          ? formatCost(limits[group.id]!.limit)
+                          : formatTokenCount(limits[group.id]!.limit),
+                        unit: limits[group.id]!.unit === "cost_usd" ? "USD" : "Token",
+                      })
+                    : t("inheritsParent")}
+                </div>
                 <div className="flex flex-wrap gap-1">
                   {bound.map((pack) => (
                     <Badge key={pack.id} variant="secondary">
@@ -284,6 +318,9 @@ export function UserGroupsPanel() {
                   </label>
                 ))}
               </div>
+              {editing && editing !== "new" ? (
+                <LimitEditor scope="groups" id={editing.id} onSaved={() => void load()} />
+              ) : null}
             </div>
           </ScrollArea>
           <DialogFooter>

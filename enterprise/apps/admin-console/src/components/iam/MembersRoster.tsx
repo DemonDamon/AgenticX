@@ -38,6 +38,8 @@ import {
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Pencil, Plus, ShieldCheck, ShieldX, Trash2, Users, Check } from "lucide-react";
+import { LimitEditor } from "../quota/LimitEditor";
+import { QuotaRing } from "../quota/QuotaRing";
 import { VisibleModelsEditor } from "../visible-models-editor";
 
 type Status = "active" | "disabled" | "locked";
@@ -83,6 +85,35 @@ type RoleOption = { id: string; code: string; name: string };
 
 const PAGE_SIZE = 50;
 const UNASSIGNED_LIMIT = 200;
+const MEMBERS_VIEW_KEY = "agx-admin-members-view";
+
+type FeatureCount = {
+  limit: number;
+  used: number;
+  remaining: number | null;
+  window: "day" | "week" | "month" | null;
+};
+
+type MemberQuota = {
+  userId: string;
+  budget: {
+    rule: { unit: "tokens" | "cost_usd"; period: "day" | "week" | "month"; limit: number } | null;
+    source: "user" | "group" | "default" | "none";
+    used: number;
+    period: "day" | "week" | "month";
+  };
+  features: {
+    search_provider_calls: FeatureCount;
+    deep_research_runs: FeatureCount;
+  };
+};
+
+const SOURCE_KEY = {
+  user: "sourceUser",
+  group: "sourceGroup",
+  default: "sourceDefault",
+  none: "sourceNone",
+} as const;
 
 export type MembersDeptFilter = string | "all" | "unassigned";
 
@@ -106,6 +137,7 @@ export function MembersRoster({
 }) {
   const t = useTranslations("pages.iam.users");
   const tm = useTranslations("pages.iam.members");
+  const tl = useTranslations("pages.iam.limits");
   const statusMeta = useMemo(() => getStatusMeta(t), [t]);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -118,6 +150,11 @@ export function MembersRoster({
   const [editOpen, setEditOpen] = useState(false);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
+  const [view, setView] = useState<"cards" | "list">("cards");
+  const [overview, setOverview] = useState<Record<string, MemberQuota>>({});
+  const [overviewNonce, setOverviewNonce] = useState(0);
+  const [focusLimits, setFocusLimits] = useState(false);
+  const limitsRef = useRef<HTMLDivElement>(null);
 
   const deptLabelMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -222,6 +259,41 @@ export function MembersRoster({
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(MEMBERS_VIEW_KEY);
+    if (stored === "list" || stored === "cards") setView(stored);
+  }, []);
+
+  useEffect(() => {
+    if (!selected || !focusLimits) return;
+    const handle = window.setTimeout(() => limitsRef.current?.scrollIntoView({ block: "start" }), 50);
+    return () => window.clearTimeout(handle);
+  }, [selected, focusLimits]);
+
+  useEffect(() => {
+    if (users.length === 0) {
+      setOverview({});
+      return;
+    }
+    let alive = true;
+    const ids = users.map((user) => user.id).join(",");
+    void (async () => {
+      try {
+        const res = await adminFetch(`/api/admin/users/quota-overview?userIds=${encodeURIComponent(ids)}`, { cache: "no-store" });
+        const json = (await res.json()) as { data?: { items?: MemberQuota[] } };
+        if (!alive || !res.ok) return;
+        const next: Record<string, MemberQuota> = {};
+        for (const item of json.data?.items ?? []) next[item.userId] = item;
+        setOverview(next);
+      } catch {
+        /* 卡片仍可打开详情 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [users, overviewNonce]);
 
   useEffect(() => {
     let alive = true;
@@ -466,10 +538,79 @@ export function MembersRoster({
     return filters;
   }, [statusFilter, activeDept, deptLabelMap, statusMeta, t, tm, hideDeptFilter]);
 
+  function chooseView(next: "cards" | "list") {
+    setView(next);
+    window.localStorage.setItem(MEMBERS_VIEW_KEY, next);
+  }
+
+  function featureText(name: string, count: FeatureCount | undefined) {
+    if (!count || count.remaining == null) return `${name} · ${tm("featureOpen")}`;
+    return `${name} · ${tm("featureRemaining", {
+      window: count.window ? tl(`window.${count.window}`) : "",
+      remaining: count.remaining,
+      limit: count.limit,
+    })}`;
+  }
+
+  function openMember(user: AdminUser, limits: boolean) {
+    setSelected(user);
+    setEditOpen(false);
+    setFocusLimits(limits);
+  }
+
+  const filterControls = (
+    <div className="flex flex-wrap gap-2">
+      <Select
+        value={statusFilter}
+        onValueChange={(value) => {
+          setPage(1);
+          setStatusFilter(value as "all" | Status);
+        }}
+      >
+        <SelectTrigger className="h-9 w-[140px]">
+          <SelectValue placeholder={t("filterAllStatus")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("filterAllStatus")}</SelectItem>
+          <SelectItem value="active">{t("status.active")}</SelectItem>
+          <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
+          <SelectItem value="locked">{t("status.locked")}</SelectItem>
+        </SelectContent>
+      </Select>
+      {hideDeptFilter ? null : (
+        <Select value={deptFilter} onValueChange={(value) => applyDept(value)}>
+          <SelectTrigger className="h-9 w-[200px]">
+            <SelectValue placeholder={t("filterAllDept")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filterAllDept")}</SelectItem>
+            <SelectItem value="unassigned">{tm("unassigned")}</SelectItem>
+            {deptOptions.map((opt) => (
+              <SelectItem key={opt.id} value={opt.id}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       <Card>
         <CardContent className="pt-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            {filterControls}
+            <div className="flex gap-1">
+              <Button size="sm" variant={view === "cards" ? "default" : "outline"} onClick={() => chooseView("cards")}>
+                {tm("viewCards")}
+              </Button>
+              <Button size="sm" variant={view === "list" ? "default" : "outline"} onClick={() => chooseView("list")}>
+                {tm("viewList")}
+              </Button>
+            </div>
+          </div>
           {loading && users.length === 0 ? (
             <EmptyState
               icon={<Users className="h-5 w-5" />}
@@ -478,6 +619,52 @@ export function MembersRoster({
               size="sm"
               className="border-0"
             />
+          ) : view === "cards" ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {users.map((user) => {
+                const item = overview[user.id];
+                const rule = item?.budget.rule;
+                return (
+                  <div
+                    key={user.id}
+                    onClick={() => openMember(user, false)}
+                    className="cursor-pointer rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40"
+                  >
+                    <div className="flex gap-3">
+                      <QuotaRing
+                        used={item?.budget.used ?? 0}
+                        limit={rule?.limit ?? 0}
+                        unlimited={!rule || rule.limit <= 0}
+                        period={item?.budget.period ?? "month"}
+                        unit={rule?.unit ?? "tokens"}
+                        size={96}
+                      />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div>
+                          <div className="truncate font-medium">{user.displayName}</div>
+                          <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+                        </div>
+                        <Badge variant="secondary">{tm(SOURCE_KEY[item?.budget.source ?? "none"])}</Badge>
+                        <p className="text-xs text-muted-foreground">{featureText(tm("searchName"), item?.features.search_provider_calls)}</p>
+                        <p className="text-xs text-muted-foreground">{featureText(tm("researchName"), item?.features.deep_research_runs)}</p>
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto px-0"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openMember(user, true);
+                          }}
+                        >
+                          {tm("detailEdit")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <DataTable
               className="min-w-0 [&_div:has(>table)]:overflow-x-auto [&_table]:min-w-[840px] [&_th]:whitespace-nowrap"
@@ -489,52 +676,7 @@ export function MembersRoster({
                 setStatusFilter("all");
                 applyDept("all");
               }}
-              onRowClick={(row) => {
-                setSelected(row.original);
-                setEditOpen(false);
-              }}
-              toolbarLeft={
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) => {
-                      setPage(1);
-                      setStatusFilter(value as "all" | Status);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder={t("filterAllStatus")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("filterAllStatus")}</SelectItem>
-                      <SelectItem value="active">{t("status.active")}</SelectItem>
-                      <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
-                      <SelectItem value="locked">{t("status.locked")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {hideDeptFilter ? null : (
-                  <Select
-                    value={deptFilter}
-                    onValueChange={(value) => {
-                      applyDept(value);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-[200px]">
-                      <SelectValue placeholder={t("filterAllDept")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("filterAllDept")}</SelectItem>
-                      <SelectItem value="unassigned">{tm("unassigned")}</SelectItem>
-                      {deptOptions.map((opt) => (
-                        <SelectItem key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  )}
-                </div>
-              }
+              onRowClick={(row) => openMember(row.original, false)}
               onExport={() => {
                 const csv = [
                   ["id", "email", "displayName", "status", "deptId", "createdAt"].join(","),
@@ -669,6 +811,16 @@ export function MembersRoster({
                     variant="inline"
                   />
                 ) : null}
+                <div ref={limitsRef} className="space-y-2 border-t border-border pt-4">
+                  <h3 className="text-sm font-medium">{tm("usageLimits")}</h3>
+                  <p className="text-xs leading-5 text-muted-foreground">{tm("usageLimitsHint")}</p>
+                  <LimitEditor
+                    key={selected.id}
+                    scope="users"
+                    id={selected.id}
+                    onSaved={() => setOverviewNonce((value) => value + 1)}
+                  />
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-border pt-3">

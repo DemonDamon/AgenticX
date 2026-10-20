@@ -974,7 +974,78 @@
         "orgDialogDescription": "新建、改名、移动或删除部门，并设置部门可见模型。",
         "importDialogTitle": "导入成员",
         "importDialogDescription": "上传 CSV，映射列后批量创建账号。",
-        "loading": "加载中..."
+        "loading": "加载中...",
+        "inheritance": "个人特例优先，其次取所在用户组中最严的上限，最后使用全员默认；部门与公司的共享上限同时生效。",
+        "defaultLimits": "全员默认上限",
+        "viewCards": "卡片",
+        "viewList": "列表",
+        "detailEdit": "详细编辑",
+        "usageLimits": "使用上限",
+        "usageLimitsHint": "只限制这个人，优先于用户组和全员默认；部门与公司共享上限仍生效。关闭后恢复继承。",
+        "sourceUser": "个人特例",
+        "sourceGroup": "用户组",
+        "sourceDefault": "每人默认",
+        "sourceNone": "未设上限",
+        "searchName": "联网搜索",
+        "researchName": "深度研究",
+        "featureOpen": "未设上限",
+        "featureRemaining": "{window}剩余 {remaining} / {limit}"
+      },
+      "limits": {
+        "tabs": { "spending": "Token / 美元", "search": "联网搜索", "research": "深度研究" },
+        "enable": "单独设置上限",
+        "inherit": "关闭后恢复继承，不会留下一条看不见的零额度。",
+        "unitTokens": "Token 上限",
+        "unitCost": "美元上限",
+        "exclusive": "Token 与美元只能选一个。选了 Token 就不再按美元限制，选了美元也不再叠加 Token 上限。",
+        "period": "统计周期",
+        "periodDay": "每日",
+        "periodWeek": "每周",
+        "periodMonth": "每月",
+        "amount": "上限",
+        "warning": "预警阈值（%）",
+        "action": "达到上限后",
+        "actionBlock": "停止请求",
+        "actionWarn": "仅告警，继续放行",
+        "actionFallback": "切换到备用模型",
+        "fallbackModel": "备用模型",
+        "save": "保存上限",
+        "saving": "保存中…",
+        "calls": "次调用",
+        "runs": "次研究",
+        "sharedCount": "这一次数由范围内的人共同消耗。关闭后不再单独设置。",
+        "personalCount": "这一次数分别计算到每个人。关闭后恢复继承。",
+        "noLimit": "未设上限",
+        "window": { "day": "每日", "week": "每周", "month": "每月" },
+        "ring": {
+          "day": "今日已用",
+          "week": "本周已用",
+          "month": "本月已用",
+          "open": "{period} {used} {unit}，未设上限",
+          "meter": "{period} {used} / {limit} {unit}"
+        },
+        "defaults": {
+          "title": "全员默认上限",
+          "description": "没有个人特例、也不在设了上限的用户组里时，使用这里的每人默认。部门与公司的共享上限仍然同时生效。"
+        },
+        "users": {
+          "title": "个人上限",
+          "description": "只限制这个人，优先于用户组和全员默认；部门与公司共享上限仍生效。关闭后恢复继承。"
+        },
+        "groups": {
+          "title": "本组每人上限",
+          "description": "这条规则分别限制组里的每个人。同一人属于多个组时取最严的上限，个人特例优先。达到上限后停止请求。"
+        },
+        "departments": {
+          "title": "部门共享上限",
+          "description": "部门成员共同消耗这一条上限。个人上限与公司共享上限同时生效。达到上限后停止请求。"
+        },
+        "loadFailed": "读取上限失败",
+        "saveFailed": "保存上限失败",
+        "conflict": "设置刚被其他管理员修改，请刷新后重试",
+        "reload": "重新加载",
+        "missingTarget": "无法识别当前设置对象，请刷新后重试",
+        "needLimit": "请输入大于 0 的上限"
       },
       "userGroups": {
         "title": "用户组",
@@ -996,6 +1067,9 @@
         "memberCount": "{count} 人",
         "packCount": "{count} 个能力包",
         "confirmDelete": "确认删除该用户组？成员不会被删，绑定的能力包会解除。",
+        "perMemberLimit": "本组每人上限",
+        "inheritsParent": "继承上级",
+        "perMemberSummary": "{period} {limit} {unit}",
         "toast": {
           "loadFailed": "加载失败",
           "saved": "已保存",

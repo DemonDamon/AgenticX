@@ -3,7 +3,10 @@ import { enterpriseRuntimeTokenQuotas as qTable } from "@agenticx/db-schema/mysq
 import { normalizeFeatureUsageConfig, type FeatureUsageConfig } from "@agenticx/config";
 import { migrateLegacyQuotasIfNeeded, resolveRuntimeAdminDir, type QuotaConfig as SharedQuotaConfig } from "@agenticx/iam-core";
 import * as path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { QuotaConflictError, asQuotaDate, nextQuotaUpdatedAt, sameQuotaVersion } from "../../quota-config-patch";
+
+export { QuotaConflictError };
 
 export type QuotaAction = "block" | "warn" | "fallback";
 
@@ -79,13 +82,13 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   };
 }
 
-function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
+function normalizeQuota(input: Partial<QuotaConfig> | undefined, updatedAt = new Date()): QuotaConfig {
   const next: QuotaConfig = {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
     apiTokens: {},
-    updatedAt: new Date().toISOString(),
+    updatedAt: updatedAt.toISOString(),
   };
   const roles = input?.defaults?.role ?? {};
   for (const [key, value] of Object.entries(roles)) next.defaults.role[key] = normalizeRule(value);
@@ -103,9 +106,14 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   return next;
 }
 
-function configFromRow(payload: Record<string, unknown> | undefined | null): QuotaConfig | null {
+function configFromRow(payload: Record<string, unknown> | undefined | null, updatedAt?: Date): QuotaConfig | null {
   if (!payload || typeof payload !== "object") return null;
-  return normalizeQuota(payload as Partial<QuotaConfig>);
+  return normalizeQuota(payload as Partial<QuotaConfig>, updatedAt);
+}
+
+function withPreservedFeatureUsage(input: Partial<QuotaConfig>, existing: QuotaConfig | null): Partial<QuotaConfig> {
+  if (Object.prototype.hasOwnProperty.call(input, "featureUsage") || !existing?.featureUsage) return input;
+  return { ...input, featureUsage: existing.featureUsage };
 }
 
 async function migrateLegacyQuotasOnce(tid: string): Promise<void> {
@@ -122,38 +130,57 @@ export async function getQuotaConfig(): Promise<QuotaConfig> {
   const row = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
   if (!row.length) {
     /** 尚无记录时写入默认模板并返回（等同旧 json 首次自动生成）。 */
-    const seed = normalizeQuota(DEFAULT_CONFIG);
+    const updatedAt = new Date();
+    const seed = normalizeQuota(DEFAULT_CONFIG, updatedAt);
     await db
       .insert(qTable)
       .values({
         tenantId: tid,
         config: seed as unknown as Record<string, unknown>,
-        updatedAt: new Date(seed.updatedAt),
+        updatedAt,
       })
       .onDuplicateKeyUpdate({
         set: {
           config: seed as unknown as Record<string, unknown>,
-          updatedAt: new Date(seed.updatedAt),
+          updatedAt,
         },
       });
     return seed;
   }
-  const parsed = configFromRow(row[0]?.config as Record<string, unknown>);
-  return parsed ?? normalizeQuota(DEFAULT_CONFIG);
+  const storedAt = asQuotaDate(row[0]?.updatedAt) ?? asQuotaDate((row[0]?.config as { updatedAt?: string } | null)?.updatedAt);
+  const parsed = configFromRow(row[0]?.config as Record<string, unknown>, storedAt);
+  return parsed ?? normalizeQuota(DEFAULT_CONFIG, storedAt);
 }
 
-export async function setQuotaConfig(input: Partial<QuotaConfig>): Promise<QuotaConfig> {
+export async function setQuotaConfig(
+  input: Partial<QuotaConfig>,
+  options?: { expectedUpdatedAt?: string },
+): Promise<QuotaConfig> {
   const tid = tenant();
   await migrateLegacyQuotasOnce(tid);
-  const existing = await getQuotaConfig();
-  const next = normalizeQuota({
-    ...input,
-    ...(!Object.prototype.hasOwnProperty.call(input, "featureUsage") && existing.featureUsage
-      ? { featureUsage: existing.featureUsage }
-      : {}),
-  });
-  next.updatedAt = new Date().toISOString();
   const db = getAdminMysqlDb();
+  if (options?.expectedUpdatedAt !== undefined) {
+    const currentRows = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
+    const current = currentRows[0];
+    if (!current || !sameQuotaVersion(options.expectedUpdatedAt, current.updatedAt)) {
+      throw new QuotaConflictError();
+    }
+    const existing = configFromRow(current.config as Record<string, unknown>, asQuotaDate(current.updatedAt));
+    const updatedAt = nextQuotaUpdatedAt(asQuotaDate(current.updatedAt));
+    const next = normalizeQuota(withPreservedFeatureUsage(input, existing), updatedAt);
+    const updated = await db
+      .update(qTable)
+      .set({
+        config: next as unknown as Record<string, unknown>,
+        updatedAt,
+      })
+      .where(and(eq(qTable.tenantId, tid), eq(qTable.updatedAt, current.updatedAt)));
+    if ((updated[0]?.affectedRows ?? 0) < 1) throw new QuotaConflictError();
+    return next;
+  }
+  const existing = await getQuotaConfig();
+  const next = normalizeQuota(withPreservedFeatureUsage(input, existing));
+  next.updatedAt = new Date().toISOString();
   await db
     .insert(qTable)
     .values({

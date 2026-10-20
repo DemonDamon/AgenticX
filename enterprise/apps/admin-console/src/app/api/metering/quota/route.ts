@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../lib/admin-auth";
+import { QUOTA_PATCH_KEYS, QuotaConflictError, mergeQuotaPatch } from "../../../../lib/quota-config-patch";
 import { getQuotaConfig, setQuotaConfig } from "../../../../lib/token-quota-store";
 
 const FEATURE_USAGE_FIELDS = new Set([
@@ -66,6 +67,14 @@ function invalidFeatureUsage(value: unknown): string | null {
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isQuotaConflict(error: unknown): boolean {
+  return error instanceof QuotaConflictError || (error instanceof Error && error.name === "QuotaConflictError");
+}
+
 export async function GET() {
   const guard = await requireAdminScope(["metering:read"]);
   if (!guard.ok) return guard.response;
@@ -85,16 +94,45 @@ export async function PUT(request: Request) {
   } catch {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
-  if (body && typeof body === "object" && !Array.isArray(body) && "featureUsage" in body) {
-    const problem = invalidFeatureUsage((body as Record<string, unknown>).featureUsage);
+  if (!isRecord(body)) {
+    return NextResponse.json({ code: "40001", message: "invalid quota payload" }, { status: 400 });
+  }
+  if ("featureUsage" in body) {
+    const problem = invalidFeatureUsage(body.featureUsage);
     if (problem) {
       return NextResponse.json({ code: "40001", message: problem }, { status: 400 });
     }
   }
-  const quota = await setQuotaConfig((body as Record<string, unknown>) ?? {});
-  return NextResponse.json({
-    code: "00000",
-    message: "ok",
-    data: { quota },
-  });
+
+  let expectedUpdatedAt: string | undefined;
+  if (Object.prototype.hasOwnProperty.call(body, "expectedUpdatedAt")) {
+    const raw = body.expectedUpdatedAt;
+    if (typeof raw !== "string" || Number.isNaN(new Date(raw).getTime())) {
+      return NextResponse.json({ code: "40001", message: "invalid quota version" }, { status: 400 });
+    }
+    expectedUpdatedAt = raw;
+  }
+
+  const hasPatch = QUOTA_PATCH_KEYS.some((key) => Object.prototype.hasOwnProperty.call(body, key));
+  try {
+    const quota = hasPatch
+      ? await setQuotaConfig(
+          mergeQuotaPatch((await getQuotaConfig()) as unknown as Record<string, unknown>, body),
+          expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : undefined,
+        )
+      : await setQuotaConfig(body);
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { quota },
+    });
+  } catch (error) {
+    if (isQuotaConflict(error)) {
+      return NextResponse.json(
+        { code: "40900", message: "次数上限刚被其他管理员修改，请刷新后重试" },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
 }

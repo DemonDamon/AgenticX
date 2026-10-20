@@ -31,6 +31,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { LimitEditor } from "../quota/LimitEditor";
 import { VisibleModelsEditor } from "../visible-models-editor";
 import {
   TreeNode,
@@ -623,11 +624,16 @@ export function DepartmentManager({
           <div className="flex-1 space-y-0 divide-y divide-border">
             <div className="px-6 py-5">
               {currentNode ? (
-                <VisibleModelsEditor
-                  target={{ kind: "dept", id: currentNode.id }}
-                  variant="sheet"
-                  onClose={() => setDeptSettingsOpen(false)}
-                />
+                <>
+                  <VisibleModelsEditor
+                    target={{ kind: "dept", id: currentNode.id }}
+                    variant="sheet"
+                    onClose={() => setDeptSettingsOpen(false)}
+                  />
+                  <div className="mt-6 border-t border-border pt-6">
+                    <LimitEditor scope="departments" id={currentNode.id} />
+                  </div>
+                </>
               ) : null}
             </div>
           </div>

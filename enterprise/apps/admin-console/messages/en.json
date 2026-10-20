@@ -974,7 +974,78 @@
         "orgDialogDescription": "Create, rename, move, or delete departments, and set which models a department can use.",
         "importDialogTitle": "Import members",
         "importDialogDescription": "Upload a CSV, map columns, and create accounts in bulk.",
-        "loading": "Loading..."
+        "loading": "Loading...",
+        "inheritance": "A personal exception comes first, then the strictest limit among the member's groups, then the default for everyone. Department and company shared limits apply at the same time.",
+        "defaultLimits": "Default limits",
+        "viewCards": "Cards",
+        "viewList": "List",
+        "detailEdit": "Edit details",
+        "usageLimits": "Usage limits",
+        "usageLimitsHint": "Limits this person ahead of groups and the default for everyone. Department and company shared limits still apply. Turn off to inherit again.",
+        "sourceUser": "Personal exception",
+        "sourceGroup": "User group",
+        "sourceDefault": "Default for everyone",
+        "sourceNone": "No limit",
+        "searchName": "Web search",
+        "researchName": "Deep research",
+        "featureOpen": "No limit",
+        "featureRemaining": "{remaining} / {limit} left {window}"
+      },
+      "limits": {
+        "tabs": { "spending": "Token / USD", "search": "Web search", "research": "Deep research" },
+        "enable": "Set a separate limit",
+        "inherit": "When off, this level inherits again instead of keeping a hidden zero.",
+        "unitTokens": "Token limit",
+        "unitCost": "USD limit",
+        "exclusive": "Choose Token or USD, not both. A Token limit does not also cap USD, and a USD limit does not also cap Tokens.",
+        "period": "Period",
+        "periodDay": "Daily",
+        "periodWeek": "Weekly",
+        "periodMonth": "Monthly",
+        "amount": "Limit",
+        "warning": "Warning threshold (%)",
+        "action": "When the limit is reached",
+        "actionBlock": "Block requests",
+        "actionWarn": "Warn only, continue",
+        "actionFallback": "Switch to a fallback model",
+        "fallbackModel": "Fallback model",
+        "save": "Save limit",
+        "saving": "Saving…",
+        "calls": "calls",
+        "runs": "runs",
+        "sharedCount": "People in this scope share this count. Turn off to remove the separate limit.",
+        "personalCount": "This count is tracked for each person. Turn off to inherit again.",
+        "noLimit": "No limit",
+        "window": { "day": "Daily", "week": "Weekly", "month": "Monthly" },
+        "ring": {
+          "day": "Used today",
+          "week": "Used this week",
+          "month": "Used this month",
+          "open": "{period}: {used} {unit}, no limit",
+          "meter": "{period}: {used} / {limit} {unit}"
+        },
+        "defaults": {
+          "title": "Default for everyone",
+          "description": "Used when a person has no personal exception and no group limit. Department and company shared limits still apply."
+        },
+        "users": {
+          "title": "Personal limit",
+          "description": "Limits this person ahead of groups and the default for everyone. Department and company shared limits still apply. Turn off to inherit again."
+        },
+        "groups": {
+          "title": "Per-member group limit",
+          "description": "Applied to each person in the group. Across groups, the strictest limit wins, and a personal exception comes first. Reaching the limit blocks requests."
+        },
+        "departments": {
+          "title": "Department shared limit",
+          "description": "Department members share this limit. Personal limits and the company shared limit still apply. Reaching the limit blocks requests."
+        },
+        "loadFailed": "Could not load limits",
+        "saveFailed": "Could not save limits",
+        "conflict": "Another administrator just changed this. Refresh and try again.",
+        "reload": "Reload",
+        "missingTarget": "This target could not be identified. Refresh and try again.",
+        "needLimit": "Enter a limit greater than 0"
       },
       "userGroups": {
         "title": "User groups",
@@ -996,6 +1067,9 @@
         "memberCount": "{count} people",
         "packCount": "{count} packs",
         "confirmDelete": "Delete this group? People stay; pack bindings for this group are removed.",
+        "perMemberLimit": "Per-member limit",
+        "inheritsParent": "Inherits",
+        "perMemberSummary": "{period} {limit} {unit}",
         "toast": {
           "loadFailed": "Failed to load",
           "saved": "Saved",

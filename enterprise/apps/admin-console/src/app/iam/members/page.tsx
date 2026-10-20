@@ -23,6 +23,7 @@ import { DepartmentManager } from "../../../components/iam/DepartmentManager";
 import { DepartmentTree } from "../../../components/iam/DepartmentTree";
 import { MembersRoster, type MembersDeptFilter } from "../../../components/iam/MembersRoster";
 import { UserGroupsPanel } from "../../../components/iam/UserGroupsPanel";
+import { LimitEditor } from "../../../components/quota/LimitEditor";
 
 function readDept(raw: string | null): MembersDeptFilter {
   if (!raw || raw === "all") return "all";
@@ -36,6 +37,7 @@ function MembersPageContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [defaultsOpen, setDefaultsOpen] = useState(false);
 
   const tab = searchParams.get("tab") === "groups" ? "groups" : "members";
   const deptId = readDept(searchParams.get("dept"));
@@ -66,6 +68,7 @@ function MembersPageContent() {
   return (
     <div className="space-y-5">
       <PageHeader title={t("title")} description={t("description")} />
+      <p className="text-sm leading-6 text-muted-foreground">{t("inheritance")}</p>
       <Tabs
         value={tab}
         onValueChange={(value) => {
@@ -81,6 +84,9 @@ function MembersPageContent() {
             <TabsTrigger value="groups">{t("tabGroups")}</TabsTrigger>
           </TabsList>
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDefaultsOpen(true)}>
+              {t("defaultLimits")}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setFlag("org", true)}>
               <Building2 />
               {t("editOrg")}
@@ -135,6 +141,16 @@ function MembersPageContent() {
           <UserGroupsPanel />
         </TabsContent>
       </Tabs>
+
+      <Dialog open={defaultsOpen} onOpenChange={setDefaultsOpen}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("defaultLimits")}</DialogTitle>
+            <DialogDescription>{t("inheritance")}</DialogDescription>
+          </DialogHeader>
+          {defaultsOpen ? <LimitEditor scope="defaults" onSaved={() => setRefreshKey((value) => value + 1)} /> : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={orgOpen}

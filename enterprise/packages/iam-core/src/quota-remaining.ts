@@ -1,8 +1,9 @@
-import { enterpriseRuntimeTokenQuotas as qTable, gatewayQuotaPoolUsage } from "@agenticx/db-schema";
+import { enterpriseRuntimeTokenQuotas as qTable, gatewayQuotaPoolUsage, usageRecords as pgUsageRecords } from "@agenticx/db-schema";
+import { usageRecords as mysqlUsageRecords } from "@agenticx/db-schema/mysql";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { and, eq } from "drizzle-orm";
-import { getIamDb } from "./db";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { createMysqlDb, getIamDb } from "./db";
 import { resolveDatabaseConfig } from "./database/config";
 import { loadMysqlQuotaConfig, readMysqlQuotaUsage } from "./repos/mysql/quota";
 
@@ -41,18 +42,15 @@ type UsageRow = { user_id: string; month: string; used_total: number };
 
 export type QuotaWindow = "day" | "week" | "month";
 
-function currentPeriod(): string {
-  const now = new Date();
+function currentPeriod(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function currentDayPeriod(): string {
-  const now = new Date();
+function currentDayPeriod(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
 }
 
-function currentWeekPeriod(): string {
-  const now = new Date();
+function currentWeekPeriod(now = new Date()): string {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
@@ -61,10 +59,10 @@ function currentWeekPeriod(): string {
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-function periodForWindow(window: QuotaWindow): string {
-  if (window === "day") return currentDayPeriod();
-  if (window === "week") return currentWeekPeriod();
-  return currentPeriod();
+function periodForWindow(window: QuotaWindow, now = new Date()): string {
+  if (window === "day") return currentDayPeriod(now);
+  if (window === "week") return currentWeekPeriod(now);
+  return currentPeriod(now);
 }
 
 function requiredTenant(explicit?: string): string {
@@ -556,4 +554,210 @@ export async function getQuotaSummaryForSession(input: {
   const user = monthly;
   const unlimited = monthly.unlimited && daily.unlimited && weekly.unlimited && (!dept || dept.unlimited);
   return { daily, weekly, monthly, user, dept, unlimited };
+}
+
+/** One usage_records row, or a test fixture with the same columns. */
+export type UsageRecordSlice = {
+  userId: string;
+  timeBucket: string | Date;
+  totalTokens: number;
+  costUsd: number;
+};
+
+/** Token and cost totals for one member in one calendar window. */
+export type QuotaWindowUsageTotals = {
+  userId: string;
+  window: QuotaWindow;
+  period: string;
+  tokens: number;
+  costUsd: number;
+};
+
+const QUOTA_WINDOWS: readonly QuotaWindow[] = ["day", "week", "month"];
+const USAGE_QUERY_CHUNK = 100;
+
+function utcDayStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function utcWeekStart(now: Date): Date {
+  const start = utcDayStart(now);
+  const weekday = (start.getUTCDay() + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - weekday);
+  return start;
+}
+
+function utcMonthStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+export function usageWindowStart(window: QuotaWindow, now = new Date()): Date {
+  if (window === "day") return utcDayStart(now);
+  if (window === "week") return utcWeekStart(now);
+  return utcMonthStart(now);
+}
+
+function finiteNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Fold usage_records rows into per-user day / week / month totals.
+ * A row counts toward every requested window that contains its time_bucket.
+ */
+export function foldUsageRecordSlices(input: {
+  userIds: readonly string[];
+  windows: readonly QuotaWindow[];
+  rows: readonly UsageRecordSlice[];
+  now?: Date;
+}): QuotaWindowUsageTotals[] {
+  const now = input.now ?? new Date();
+  const nowMs = now.getTime();
+  const starts = new Map(input.windows.map((window) => [window, usageWindowStart(window, now).getTime()]));
+  const totals = new Map<string, { tokens: number; costUsd: number }>();
+  for (const row of input.rows) {
+    const userId = row.userId?.trim();
+    if (!userId) continue;
+    const at = row.timeBucket instanceof Date ? row.timeBucket.getTime() : new Date(row.timeBucket).getTime();
+    if (!Number.isFinite(at) || at > nowMs) continue;
+    for (const window of input.windows) {
+      if (at < (starts.get(window) ?? 0)) continue;
+      const key = `${userId}\0${window}`;
+      const current = totals.get(key) ?? { tokens: 0, costUsd: 0 };
+      current.tokens += finiteNumber(row.totalTokens);
+      current.costUsd += finiteNumber(row.costUsd);
+      totals.set(key, current);
+    }
+  }
+  return input.userIds.flatMap((userId) => input.windows.map((window) => {
+    const spent = totals.get(`${userId}\0${window}`);
+    return {
+      userId,
+      window,
+      period: periodForWindow(window, now),
+      tokens: spent?.tokens ?? 0,
+      costUsd: spent?.costUsd ?? 0,
+    };
+  }));
+}
+
+type UsageAggregateRow = {
+  userId: string | null;
+  dayTokens: unknown;
+  dayCost: unknown;
+  weekTokens: unknown;
+  weekCost: unknown;
+  monthTokens: unknown;
+  monthCost: unknown;
+};
+
+function asAggregate(row: UsageAggregateRow): UsageAggregateRow {
+  return row;
+}
+
+function totalsFromAggregates(
+  userIds: readonly string[],
+  windows: readonly QuotaWindow[],
+  rows: readonly UsageAggregateRow[],
+  now: Date,
+): QuotaWindowUsageTotals[] {
+  const byUser = new Map<string, UsageAggregateRow>();
+  for (const row of rows) {
+    const userId = row.userId?.trim();
+    if (userId) byUser.set(userId, row);
+  }
+  return userIds.flatMap((userId) => windows.map((window) => {
+    const row = byUser.get(userId);
+    const tokens = window === "day" ? row?.dayTokens : window === "week" ? row?.weekTokens : row?.monthTokens;
+    const cost = window === "day" ? row?.dayCost : window === "week" ? row?.weekCost : row?.monthCost;
+    return {
+      userId,
+      window,
+      period: periodForWindow(window, now),
+      tokens: finiteNumber(tokens),
+      costUsd: finiteNumber(cost),
+    };
+  }));
+}
+
+async function readUsageAggregates(tenantId: string, userIds: readonly string[], now: Date): Promise<UsageAggregateRow[]> {
+  const bounds: Record<QuotaWindow, Date> = {
+    day: usageWindowStart("day", now),
+    week: usageWindowStart("week", now),
+    month: usageWindowStart("month", now),
+  };
+  const rows: UsageAggregateRow[] = [];
+  const config = resolveDatabaseConfig();
+  for (let offset = 0; offset < userIds.length; offset += USAGE_QUERY_CHUNK) {
+    const chunk = userIds.slice(offset, offset + USAGE_QUERY_CHUNK);
+    if (config.dialect === "mysql") {
+      const table = mysqlUsageRecords;
+      const since = (start: Date, column: typeof table.totalTokens | typeof table.costUsd) =>
+        sql<string>`coalesce(sum(case when ${table.timeBucket} >= ${start} then ${column} else 0 end), 0)`;
+      const { raw } = await createMysqlDb(config);
+      const selected = await raw
+        .select({
+          userId: table.userId,
+          dayTokens: since(bounds.day, table.totalTokens),
+          dayCost: since(bounds.day, table.costUsd),
+          weekTokens: since(bounds.week, table.totalTokens),
+          weekCost: since(bounds.week, table.costUsd),
+          monthTokens: since(bounds.month, table.totalTokens),
+          monthCost: since(bounds.month, table.costUsd),
+        })
+        .from(table)
+        .where(and(
+          eq(table.tenantId, tenantId),
+          inArray(table.userId, chunk),
+          gte(table.timeBucket, bounds.month),
+        ))
+        .groupBy(table.userId);
+      rows.push(...selected.map(asAggregate));
+      continue;
+    }
+    const table = pgUsageRecords;
+    const since = (start: Date, column: typeof table.totalTokens | typeof table.costUsd) =>
+      sql<string>`coalesce(sum(case when ${table.timeBucket} >= ${start} then ${column} else 0 end), 0)`;
+    const selected = await getIamDb()
+      .select({
+        userId: table.userId,
+        dayTokens: since(bounds.day, table.totalTokens),
+        dayCost: since(bounds.day, table.costUsd),
+        weekTokens: since(bounds.week, table.totalTokens),
+        weekCost: since(bounds.week, table.costUsd),
+        monthTokens: since(bounds.month, table.totalTokens),
+        monthCost: since(bounds.month, table.costUsd),
+      })
+      .from(table)
+      .where(and(
+        eq(table.tenantId, tenantId),
+        inArray(table.userId, chunk),
+        gte(table.timeBucket, bounds.month),
+      ))
+      .groupBy(table.userId);
+    rows.push(...selected.map(asAggregate));
+  }
+  return rows;
+}
+
+/**
+ * Token and cost usage for many members across day / week / month windows.
+ * One grouped read of usage_records per dialect; an empty member list reads nothing.
+ */
+export async function getQuotaWindowUsagesForUsers(input: {
+  tenantId: string;
+  userIds: readonly string[];
+  windows?: readonly QuotaWindow[];
+  now?: Date;
+  /** Test fixture. Skips the database and folds these usage_records rows. */
+  recordsOverride?: readonly UsageRecordSlice[];
+}): Promise<QuotaWindowUsageTotals[]> {
+  const userIds = [...new Set(input.userIds.map((id) => id.trim()).filter(Boolean))];
+  const windows = input.windows ?? QUOTA_WINDOWS;
+  if (userIds.length === 0 || windows.length === 0) return [];
+  const now = input.now ?? new Date();
+  if (input.recordsOverride) return foldUsageRecordSlices({ userIds, windows, rows: input.recordsOverride, now });
+  if (!process.env.DATABASE_URL?.trim()) return foldUsageRecordSlices({ userIds, windows, rows: [], now });
+  return totalsFromAggregates(userIds, windows, await readUsageAggregates(input.tenantId, userIds, now), now);
 }

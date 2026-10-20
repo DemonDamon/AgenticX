@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   getQuotaSummaryForSession,
   getQuotaWindowUsageForScope,
+  getQuotaWindowUsagesForUsers,
   getQuotaUsageForScope,
   resolveRuntimeGatewayDir,
   type QuotaConfigSnapshot,
@@ -268,5 +269,47 @@ describe("quota-remaining", () => {
       configOverride: cfg,
     });
     expect(daily.unlimited).toBe(true);
+  });
+
+  it("returns nothing when no users are requested", async () => {
+    await expect(getQuotaWindowUsagesForUsers({
+      tenantId: "tenant-test",
+      userIds: [],
+      windows: ["day", "week", "month"],
+    })).resolves.toEqual([]);
+  });
+
+  it("sums token and cost usage for several users across day, week and month", async () => {
+    const now = new Date("2026-10-20T12:00:00.000Z");
+    const totals = await getQuotaWindowUsagesForUsers({
+      tenantId: "tenant-test",
+      userIds: ["a", "b", "c"],
+      windows: ["day", "week", "month"],
+      now,
+      recordsOverride: [
+        { userId: "a", timeBucket: "2026-10-20T01:00:00.000Z", totalTokens: 10, costUsd: 0.1 },
+        { userId: "a", timeBucket: "2026-10-19T01:00:00.000Z", totalTokens: 5, costUsd: 0.2 },
+        { userId: "a", timeBucket: "2026-10-01T01:00:00.000Z", totalTokens: 7, costUsd: 0.3 },
+        { userId: "a", timeBucket: "2026-09-30T01:00:00.000Z", totalTokens: 100, costUsd: 9 },
+        { userId: "b", timeBucket: "2026-10-20T02:00:00.000Z", totalTokens: 3, costUsd: 1 },
+      ],
+    });
+
+    const pick = (userId: string, window: "day" | "week" | "month") =>
+      totals.find((row) => row.userId === userId && row.window === window);
+
+    expect(pick("a", "day")).toMatchObject({ period: "2026-10-20", tokens: 10 });
+    expect(pick("a", "day")?.costUsd).toBeCloseTo(0.1);
+    expect(pick("a", "week")).toMatchObject({ tokens: 15 });
+    expect(pick("a", "week")?.period.startsWith("2026-W")).toBe(true);
+    expect(pick("a", "week")?.costUsd).toBeCloseTo(0.3);
+    expect(pick("a", "month")).toMatchObject({ period: "2026-10", tokens: 22 });
+    expect(pick("a", "month")?.costUsd).toBeCloseTo(0.6);
+    expect(pick("b", "day")).toMatchObject({ tokens: 3, costUsd: 1 });
+    expect(pick("b", "month")).toMatchObject({ tokens: 3, costUsd: 1 });
+    expect(pick("c", "day")).toMatchObject({ tokens: 0, costUsd: 0 });
+    expect(pick("c", "week")).toMatchObject({ tokens: 0, costUsd: 0 });
+    expect(pick("c", "month")).toMatchObject({ tokens: 0, costUsd: 0 });
+    expect(totals).toHaveLength(9);
   });
 });
