@@ -1,5 +1,6 @@
 import { getAdminMysqlDb } from "./database";
 import { enterpriseRuntimeTokenQuotas as qTable } from "@agenticx/db-schema/mysql";
+import { normalizeFeatureUsageConfig, type FeatureUsageConfig } from "@agenticx/config";
 import { migrateLegacyQuotasIfNeeded, resolveRuntimeAdminDir, type QuotaConfig as SharedQuotaConfig } from "@agenticx/iam-core";
 import * as path from "node:path";
 import { eq } from "drizzle-orm";
@@ -22,6 +23,7 @@ export type QuotaRule = {
 
 export type QuotaConfig = SharedQuotaConfig & {
   apiTokens?: Record<string, QuotaRule>;
+  featureUsage?: FeatureUsageConfig;
 };
 
 const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
@@ -95,6 +97,9 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
   const apiTokens = input?.apiTokens ?? {};
   for (const [key, value] of Object.entries(apiTokens)) next.apiTokens![key] = normalizeRule(value);
+  if (input && Object.prototype.hasOwnProperty.call(input, "featureUsage") && input.featureUsage !== undefined) {
+    next.featureUsage = normalizeFeatureUsageConfig(input.featureUsage);
+  }
   return next;
 }
 
@@ -140,7 +145,13 @@ export async function getQuotaConfig(): Promise<QuotaConfig> {
 export async function setQuotaConfig(input: Partial<QuotaConfig>): Promise<QuotaConfig> {
   const tid = tenant();
   await migrateLegacyQuotasOnce(tid);
-  const next = normalizeQuota(input);
+  const existing = await getQuotaConfig();
+  const next = normalizeQuota({
+    ...input,
+    ...(!Object.prototype.hasOwnProperty.call(input, "featureUsage") && existing.featureUsage
+      ? { featureUsage: existing.featureUsage }
+      : {}),
+  });
   next.updatedAt = new Date().toISOString();
   const db = getAdminMysqlDb();
   await db

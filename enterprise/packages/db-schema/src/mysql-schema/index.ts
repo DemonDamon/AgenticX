@@ -39,3 +39,4 @@ export * from "./agents";
 export * from "./agent-tasks";
 export * from "./case-library";
 export * from "./collab-projects";
+export * from "./feature-usage";

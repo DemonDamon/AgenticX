@@ -14,8 +14,10 @@ import { listAvailableModelsForUser } from "../../../../lib/admin-providers-read
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
 import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
+import { executeWebSearch } from "../../../../lib/web-search/providers";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
+import { defaultRunStore, type RunStore } from "../../../../lib/deep-research/run-store";
 import { resolvePortalLocaleFromCookies } from "../../../../lib/portal-locale";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 import { log } from "../../../../lib/observability/logger";
@@ -23,7 +25,18 @@ import { withRequestLog } from "../../../../lib/observability/with-request-log";
 import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
 import { applyAssignedSkillPrompt } from "../../../../lib/enterprise-skill-context";
 import { recallFeedbackMessages } from "../../../../lib/chat-feedback-context";
-import type { PlatformFeature } from "@agenticx/config";
+import {
+  FeatureUsageUnavailableError,
+  admitFeatureUsage,
+  featureUsageCountingRequired,
+  isFeatureUsageLimitError,
+  isFeatureUsageUnavailableError,
+  researchUsagePolicy,
+  reserveMemberSearchProviderCall,
+} from "../../../../lib/feature-usage/gate";
+import { featureUsageSubject, type FeatureUsageSession } from "../../../../lib/feature-usage/subject";
+import type { ResearchUsagePolicy } from "../../../../lib/feature-usage/counters";
+import type { MeteredFeature, PlatformFeature } from "@agenticx/config";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -47,6 +60,45 @@ const GATEWAY_COMPLETIONS_URL =
  */
 export const maxDuration = 1500;
 export const runtime = "nodejs";
+
+function featureUsageResponse(error: unknown): Response | null {
+  if (isFeatureUsageLimitError(error)) {
+    return NextResponse.json(
+      { error: { code: "42904", message: error.userMessage } },
+      { status: 429 },
+    );
+  }
+  if (isFeatureUsageUnavailableError(error)) {
+    return NextResponse.json(
+      { error: { code: "50305", message: error.userMessage } },
+      { status: 503 },
+    );
+  }
+  return null;
+}
+
+/** Count one real provider call. Empty queries never reach a provider. */
+function countedExecuteSearch(session: FeatureUsageSession): typeof executeWebSearch {
+  return async (query, maxResults, cfg, fetchImpl) => {
+    if (!query.trim()) return [];
+    let subject;
+    try {
+      subject = await featureUsageSubject(session);
+    } catch (error) {
+      throw new FeatureUsageUnavailableError("search_provider_calls", error);
+    }
+    await admitFeatureUsage("search_provider_calls", subject);
+    await reserveMemberSearchProviderCall(subject);
+    return executeWebSearch(query, maxResults, cfg, fetchImpl);
+  };
+}
+
+function runStoreWithUsage(usage: ResearchUsagePolicy): RunStore {
+  return {
+    ...defaultRunStore,
+    create: (input) => defaultRunStore.create({ ...input, usage }),
+  };
+}
 
 const FEATURE_DENIED_MESSAGE: Record<"web_search" | "deep_research", string> = {
   web_search: "当前账号未开通联网搜索",
@@ -227,7 +279,42 @@ export async function POST(request: Request) {
     return { ...sanitized, messages };
   };
 
+  const usageSession: FeatureUsageSession = {
+    tenantId: session.tenantId,
+    userId: session.userId,
+    deptId: session.deptId,
+    scopes: session.scopes ?? [],
+  };
+
+  async function denyIfFeatureUsageExhausted(feature: MeteredFeature): Promise<Response | null> {
+    try {
+      let subject;
+      try {
+        subject = await featureUsageSubject(usageSession);
+      } catch (error) {
+        throw new FeatureUsageUnavailableError(feature, error);
+      }
+      await admitFeatureUsage(feature, subject);
+      return null;
+    } catch (error) {
+      return featureUsageResponse(error)
+        ?? featureUsageResponse(new FeatureUsageUnavailableError(feature, error));
+    }
+  }
+
   if (enableDeepResearch && parsedBody) {
+    const deniedUsage = await denyIfFeatureUsageExhausted("deep_research_runs");
+    if (deniedUsage) return deniedUsage;
+    let usage: ResearchUsagePolicy | null;
+    try {
+      const policy = await researchUsagePolicy(await featureUsageSubject(usageSession));
+      usage = (await featureUsageCountingRequired(policy.policies)) ? policy : null;
+    } catch (error) {
+      const response = featureUsageResponse(error)
+        ?? featureUsageResponse(new FeatureUsageUnavailableError("deep_research_runs", error));
+      if (response) return response;
+      throw error;
+    }
     const deepResearchRunId = ulid().toLowerCase();
     logCtx.setRun(deepResearchRunId);
     return runDeepResearchTurn(await withSkills(parsedBody), {
@@ -236,6 +323,8 @@ export async function POST(request: Request) {
       signal: request.signal,
       locale: await resolvePortalLocaleFromCookies(),
       loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+      executeSearch: countedExecuteSearch(usageSession),
+      runStore: usage ? runStoreWithUsage(usage) : defaultRunStore,
       artifactStore: defaultArtifactStore,
       tenantId: session.tenantId,
       userId: session.userId,
@@ -277,14 +366,19 @@ export async function POST(request: Request) {
   }
 
   if (enableWebSearch && parsedBody) {
+    const deniedUsage = await denyIfFeatureUsageExhausted("search_provider_calls");
+    if (deniedUsage) return deniedUsage;
     try {
       return await runWebSearchTurn(await withSkills(parsedBody), {
         url: GATEWAY_COMPLETIONS_URL,
         headers: gatewayHeaders,
         signal: request.signal,
         loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+        executeSearch: countedExecuteSearch(usageSession),
       });
     } catch (error) {
+      const usageResponse = featureUsageResponse(error);
+      if (usageResponse) return usageResponse;
       const detail = error instanceof Error ? error.message : "web search turn failed";
       return NextResponse.json(
         {

@@ -9,6 +9,13 @@ import {
   trimEvents,
 } from "./run-store";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
+import type { FeatureUsagePolicies } from "@agenticx/config";
+import {
+  __createMemoryFeatureUsageOps,
+  __setFeatureUsageOpsForTests,
+  readFeatureUsageTotals,
+} from "../feature-usage/counters";
+import { isFeatureUsageLimitError } from "../feature-usage/errors";
 
 function progress(i: number): DeepResearchEvent {
   return { type: "lane_progress", laneId: "l1", message: `p${i}` };
@@ -353,5 +360,74 @@ describe("createRunWriter", () => {
     await vi.advanceTimersByTimeAsync(RUN_FLUSH_INTERVAL_MS);
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy.mock.calls[0]![1]).toHaveLength(2);
+  });
+});
+
+const RESEARCH_POLICIES: FeatureUsagePolicies = {
+  personal: { limits: { day: 1, week: 0, month: 0 }, source: "user" },
+  department: { limits: { day: 0, week: 0, month: 0 }, source: "none" },
+  company: { limits: { day: 0, week: 0, month: 0 }, source: "none" },
+};
+
+describe("run store feature usage", () => {
+  beforeEach(() => {
+    __setFeatureUsageOpsForTests(__createMemoryFeatureUsageOps());
+  });
+
+  afterEach(() => {
+    __setFeatureUsageOpsForTests(null);
+  });
+
+  it("does not create a second run once the research ceiling is full", async () => {
+    const store = createMemoryRunStore();
+    const usage = { deptId: "d1", policies: RESEARCH_POLICIES };
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "first",
+      usage,
+    });
+
+    const error = await store.create({
+      runId: "r2",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "second",
+      usage,
+    }).catch((caught: unknown) => caught);
+
+    expect(isFeatureUsageLimitError(error)).toBe(true);
+    expect(await store.get("t1", "u1", "r2")).toBeNull();
+    expect(await store.listActive("t1", "u1")).toHaveLength(1);
+  });
+
+  it("does not charge a continuation that omits usage", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "first",
+      usage: { deptId: "d1", policies: RESEARCH_POLICIES },
+    });
+    await store.finish("r1", "cancelled");
+    await store.create({
+      runId: "continued",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "first",
+    });
+
+    expect((await readFeatureUsageTotals({
+      tenantId: "t1",
+      feature: "deep_research_runs",
+      userId: "u1",
+    })).day).toBe(1);
+    expect(await store.get("t1", "u1", "continued")).toMatchObject({ runId: "continued" });
   });
 });

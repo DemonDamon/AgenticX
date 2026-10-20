@@ -184,6 +184,18 @@
     "loadingMessages": "加载消息…",
     "scrollToBottom": "回到底部",
     "feedbackSaveFailed": "反馈没有保存，请稍后重试",
+    "featureUsage": {
+      "searchExhaustedTitle": "{window}联网搜索次数已用完",
+      "searchExhaustedBody": "上限 {limit} 次，由管理员设置。仍可继续对话，只是这一轮不会联网检索；需要更多请联系管理员调整。",
+      "dismissSearchNotice": "关闭搜索额度提示",
+      "researchUnavailable": "深度研究次数暂时无法确认，请稍后再试",
+      "researchExhausted": "深度研究次数已用完，请联系管理员调整",
+      "researchRemainingHint": "已用 / 上限，由管理员设置",
+      "windowDay": "今日",
+      "windowWeek": "本周",
+      "windowMonth": "本月",
+      "unavailable": "额度暂不可用"
+    },
     "errors": {
       "emptyResponse": "尚未生成最终答复，已保留已有内容。可继续生成或重新生成重试。",
       "interrupted": "回复已中断，已保留已生成内容。可继续生成或重试。",

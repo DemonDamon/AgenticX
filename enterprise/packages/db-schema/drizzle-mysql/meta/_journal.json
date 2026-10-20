@@ -239,6 +239,13 @@
       "when": 1787700000001,
       "tag": "0033_gateway_budget_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1787800000001,
+      "tag": "0034_enterprise_feature_usage",
+      "breakpoints": true
     }
   ]
 }

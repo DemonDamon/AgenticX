@@ -7,6 +7,13 @@ import { enterpriseDeepResearchRuns as mysqlTable } from "@agenticx/db-schema/my
 import { createMysqlDb, getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import {
+  createMysqlFeatureUsageOps,
+  createPgFeatureUsageOps,
+  featureUsageCounterOps,
+  reserveResearchUsage,
+  type ResearchUsagePolicy,
+} from "../feature-usage/counters";
 import type { Citation } from "./registry";
 
 export const MAX_EVENTS_PER_RUN = 400;
@@ -62,6 +69,8 @@ export type RunStore = {
     sessionId: string;
     topic: string;
     traceId?: string;
+    /** Present only when this call opens a new run. Continuations omit it. */
+    usage?: ResearchUsagePolicy;
   }): Promise<RunRecord>;
   /** 追加事件并可选更新 status/phase；超过 MAX_EVENTS_PER_RUN 时丢弃最旧的 lane_progress。 */
   appendEvents(
@@ -223,7 +232,15 @@ function createMemoryStore(): RunStore {
 
   return {
     async create(input) {
-      const now = new Date().toISOString();
+      const now = new Date();
+      if (input.usage) {
+        await reserveResearchUsage(await featureUsageCounterOps(), {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          usage: input.usage,
+          now,
+        });
+      }
       const row: RunRecord = {
         runId: input.runId,
         tenantId: input.tenantId,
@@ -237,8 +254,8 @@ function createMemoryStore(): RunStore {
         reportMarkdown: "",
         citations: [],
         eventSeq: 0,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
       };
       bucket.set(input.runId, row);
       return { ...row, events: [], citations: [] };
@@ -380,12 +397,37 @@ function createSqlStore(): RunStore {
         updatedAt: now,
       };
 
+      const usage = input.usage;
       if (config.dialect === "mysql") {
         const { raw: db } = await createMysqlDb(config);
-        await db.insert(mysqlTable).values(values);
+        if (usage) {
+          await db.transaction(async (tx) => {
+            await reserveResearchUsage(createMysqlFeatureUsageOps(tx), {
+              tenantId: input.tenantId,
+              userId: input.userId,
+              usage,
+              now,
+            });
+            await tx.insert(mysqlTable).values(values);
+          });
+        } else {
+          await db.insert(mysqlTable).values(values);
+        }
       } else {
         const db = getIamDb();
-        await db.insert(pgTable).values(values);
+        if (usage) {
+          await db.transaction(async (tx) => {
+            await reserveResearchUsage(createPgFeatureUsageOps(tx), {
+              tenantId: input.tenantId,
+              userId: input.userId,
+              usage,
+              now,
+            });
+            await tx.insert(pgTable).values(values);
+          });
+        } else {
+          await db.insert(pgTable).values(values);
+        }
       }
 
       return {

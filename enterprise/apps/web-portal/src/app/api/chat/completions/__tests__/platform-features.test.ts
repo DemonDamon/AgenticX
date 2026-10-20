@@ -6,6 +6,19 @@ vi.mock("@agenticx/iam-core", () => ({
   loadAuthUserByEmail: vi.fn(),
   listUserOptOuts: vi.fn(async () => []),
   resolveAssignmentKeysForUser: vi.fn(async () => ["all"]),
+  listUserGroupIdsForUser: vi.fn(async () => []),
+  getUserRolesDetail: vi.fn(async () => ({ roleCodes: ["member"], scopes: [] })),
+  resolveDatabaseConfig: () => ({ dialect: "postgresql" }),
+  getIamDb: () => ({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [],
+        }),
+      }),
+    }),
+  }),
+  createMysqlDb: vi.fn(),
 }));
 
 vi.mock("../../../../../lib/session", () => ({
@@ -55,6 +68,7 @@ import { getSessionAuthFromCookies } from "../../../../../lib/session";
 import { isChatSessionOwned } from "../../../../../lib/chat-history";
 import { runWebSearchTurn } from "../../../../../lib/web-search/tool-loop";
 import { runDeepResearchTurn } from "../../../../../lib/deep-research/orchestrator";
+import { POST } from "../route";
 
 const session = {
   userId: "u1",
@@ -94,7 +108,6 @@ describe("chat completions platform feature authorization", () => {
 
   it("rejects web search when the user is not assigned the feature", async () => {
     isPlatformFeatureAllowedForUser.mockResolvedValue(false);
-    const { POST } = await import("../route");
     const res = await POST(request({ agenticx_web_search: true }));
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error?: { code?: string; message?: string } };
@@ -105,7 +118,6 @@ describe("chat completions platform feature authorization", () => {
 
   it("rejects deep research when the user is not assigned the feature", async () => {
     isPlatformFeatureAllowedForUser.mockResolvedValue(false);
-    const { POST } = await import("../route");
     const res = await POST(request({ agenticx_deep_research: true }));
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error?: { message?: string } };
@@ -115,7 +127,6 @@ describe("chat completions platform feature authorization", () => {
 
   it("lets an assigned user start web search", async () => {
     isPlatformFeatureAllowedForUser.mockResolvedValue(true);
-    const { POST } = await import("../route");
     const res = await POST(request({ agenticx_web_search: true }));
     expect(res.status).toBe(200);
     expect(isPlatformFeatureAllowedForUser).toHaveBeenCalledWith(
@@ -128,7 +139,6 @@ describe("chat completions platform feature authorization", () => {
   });
 
   it("keeps ordinary chat off the platform-feature check", async () => {
-    const { POST } = await import("../route");
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>

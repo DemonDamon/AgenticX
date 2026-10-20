@@ -184,6 +184,18 @@
     "loadingMessages": "Loading messages…",
     "scrollToBottom": "Scroll to bottom",
     "feedbackSaveFailed": "Couldn't save feedback. Please try again.",
+    "featureUsage": {
+      "searchExhaustedTitle": "Web search limit reached for {window}",
+      "searchExhaustedBody": "The limit is {limit}. You can keep chatting, but this turn will not search the web. Ask an administrator to raise the limit.",
+      "dismissSearchNotice": "Dismiss search limit notice",
+      "researchUnavailable": "Deep research usage cannot be confirmed right now. Try again shortly.",
+      "researchExhausted": "Deep research limit reached. Ask an administrator to raise it.",
+      "researchRemainingHint": "Used / limit, set by an administrator",
+      "windowDay": "today",
+      "windowWeek": "this week",
+      "windowMonth": "this month",
+      "unavailable": "Usage unavailable"
+    },
     "errors": {
       "emptyResponse": "No final answer was generated. Existing content was kept. Continue generating or regenerate to try again.",
       "interrupted": "The reply was interrupted. Generated content was kept. Continue generating or try again.",

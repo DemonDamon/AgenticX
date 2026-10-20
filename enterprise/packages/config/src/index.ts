@@ -4,4 +4,5 @@ export * from "./capability-state";
 export * from "./desktop-capability-policy";
 export * from "./desktop-agent-action-policy";
 export * from "./member-spending-limit";
+export * from "./feature-usage-limits";
 export * from "./schemas";
