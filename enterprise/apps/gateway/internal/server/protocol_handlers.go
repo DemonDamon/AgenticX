@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -376,8 +378,18 @@ func (s *Server) protocolStream(
 
 	streamResult, streamErr := s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
 	decision := routingDecisionFromStream(streamResult, req.Model, s.decider.Decide(r, req.Model))
+	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
+	if requestTimedOut {
+		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
+	}
 
 	if streamErr != nil {
+		if requestTimedOut {
+			defer func() {
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				flusher.Flush()
+			}()
+		}
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
 		if len(blockedHits) > 0 {

@@ -66,6 +66,8 @@ export type ChatChunk = {
   error?: {
     code: string;
     message: string;
+    /** transport：连接在完成标记前断开；upstream / gateway：上游或网关显式错误。 */
+    origin?: "transport" | "upstream" | "gateway";
   };
 };
 

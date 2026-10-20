@@ -184,6 +184,7 @@ export class HttpChatClient implements ChatClient {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let sawDone = false;
       // Every exit from this block (natural EOF, [DONE] sentinel, chunk.error, or a thrown
       // read error) MUST release the reader immediately. Otherwise the browser keeps the
       // underlying HTTP/1.1 connection out of the per-origin pool (Chrome/Firefox cap at 6),
@@ -209,6 +210,7 @@ export class HttpChatClient implements ChatClient {
           if (dataLines.length === 0) continue;
           const data = dataLines.join("\n");
           if (data === "[DONE]") {
+            sawDone = true;
             yield { requestId, done: true };
             this.pending.delete(requestId);
             return;
@@ -331,7 +333,20 @@ export class HttpChatClient implements ChatClient {
           // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
       }
-      yield { requestId, done: true };
+      if (sawDone) {
+        yield { requestId, done: true };
+      } else {
+        yield {
+          requestId,
+          done: true,
+          traceId: pending.traceId,
+          error: {
+            code: "50000",
+            origin: "transport",
+            message: "连接提前中断，未收到完成标记",
+          },
+        };
+      }
       } finally {
         await releaseStreamReader(reader);
       }

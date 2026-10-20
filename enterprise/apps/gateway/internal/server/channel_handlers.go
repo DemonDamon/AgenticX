@@ -272,6 +272,9 @@ func formatStreamError(err error) string {
 		return "stream failed"
 	}
 	msg := err.Error()
+	if strings.Contains(msg, "stream:request_timeout") {
+		return "本次生成超过时限，已停止。可以缩短问题或稍后重试。"
+	}
 	if strings.Contains(msg, "stream:idle_timeout") {
 		return "上游模型长时间无响应（流式空闲超时）。请重试；若刚使用联网搜索，可先关闭搜索或更换模型后再试。"
 	}

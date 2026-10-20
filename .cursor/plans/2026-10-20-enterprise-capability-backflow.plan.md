@@ -58,6 +58,12 @@ web-portal 原有失败（验收只看「有无新增失败」，这些不算回
 9. `src/app/api/desktop/capabilities/__tests__/route.test.ts` › lists capabilities the user turned off
 10. `src/app/api/auth/sso/saml/__tests__/start-cookie-policy.test.ts` › uses SameSite=None and Secure in production
 
+另有两项原有问题（2026-10-20 在 `e7c63c3e` 的独立工作区复核，与回流无关）：
+
+- `pnpm -C enterprise/apps/web-portal typecheck` 原本就有 **26 条**类型错误，分布在 `features/chat/src/components/molecules/{deep-research-artifact-tree,zip-store}.ts`、`features/chat/src/store.ts`（L1029）、`src/lib/deep-research/{citation-verifier,evidence-pack}.ts`、`src/lib/video-probe{,.test}.ts`、`src/components/ComposerPlusMenu.tsx` 及若干测试文件。验收口径：**不新增类型错误**（按「文件 + 行 + 错误码」比对），不要求这条命令退出码为 0。
+- `pnpm -C enterprise/features/chat test` 原本就有 **2 条**失败：`store.interrupt.test.ts › retains partial assistant content and persists on user cancel`、`store.multi-session.test.ts › does not enqueue send on idle session B while session A streams`。B3 改造停止与落盘逻辑时若让第一条转绿，记入验收记录。
+- `packages/sdk-ts`、`packages/config`、`apps/admin-console typecheck` 原本全过。
+
 网关测试编译失败的原因已核实：`openai.ChatMessage.Content` 已改为 `json.RawMessage`，这五个包的 `*_test.go` 还在用字符串字面量。生产代码能编译。由 B0 修复（仅测试文件）。
 
 ## 2. 产品决策（已定，子计划按此执行）

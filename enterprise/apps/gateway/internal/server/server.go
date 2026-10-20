@@ -650,7 +650,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(10 * time.Minute))
+	r.Use(requestTimeout(requestTimeoutFromEnv(s.logger)))
 	if s.metrics != nil && s.metrics.Enabled() {
 		r.Use(s.metrics.HTTPMiddleware())
 	}
@@ -1193,8 +1193,18 @@ func (s *Server) handleStream(
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
 	}
+	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
+	if requestTimedOut {
+		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
+	}
 
 	if streamErr != nil {
+		if requestTimedOut {
+			defer func() {
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				flusher.Flush()
+			}()
+		}
 		if len(blockedHits) > 0 {
 			ev := audit.Event{
 				ID:            makeID("audit"),

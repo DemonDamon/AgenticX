@@ -233,6 +233,116 @@ describe("HttpChatClient stream cancel", () => {
     expect(cancelSpy).toHaveBeenCalled();
   });
 
+  it("ends a stream that includes [DONE] without an error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n',
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+        ),
+      ),
+    );
+    try {
+      const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+      const { requestId } = await client.sendMessage({
+        sessionId: "session-1",
+        model: "test-model",
+        messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+      });
+      const chunks = [];
+      for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+      expect(chunks.at(-1)).toEqual({ requestId, done: true });
+      expect(chunks.at(-1)?.error).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reports EOF without [DONE] as a transport error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+        ),
+      ),
+    );
+    try {
+      const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+      const { requestId, traceId } = await client.sendMessage({
+        sessionId: "session-1",
+        model: "test-model",
+        messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+      });
+      const chunks = [];
+      for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+      expect(chunks.find((chunk) => chunk.delta === "partial")?.done).toBe(false);
+      expect(chunks.at(-1)).toMatchObject({
+        requestId,
+        done: true,
+        traceId,
+        error: {
+          code: "50000",
+          origin: "transport",
+          message: "连接提前中断，未收到完成标记",
+        },
+      });
+      expect(chunks.at(-1)?.cancelled).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("yields cancelled without error when the user aborts mid-stream", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
+            );
+            init?.signal?.addEventListener("abort", () => {
+              controller.error(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          },
+        });
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        );
+      }),
+    );
+    try {
+      const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+      const { requestId } = await client.sendMessage({
+        sessionId: "session-1",
+        model: "test-model",
+        messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+      });
+      const collectChunks = (async () => {
+        const chunks = [];
+        for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+        return chunks;
+      })();
+      await client.cancel(requestId);
+      const chunks = await collectChunks;
+      expect(chunks.at(-1)?.done).toBe(true);
+      expect(chunks.at(-1)?.cancelled).toBe(true);
+      expect(chunks.at(-1)?.error).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("normalizes opaque browser network errors to actionable Chinese copy", () => {
     expect(normalizeTransportErrorMessage("Failed to fetch")).toContain("无法连接门户服务");
     expect(normalizeTransportErrorMessage("network error")).toContain("无法连接门户服务");
