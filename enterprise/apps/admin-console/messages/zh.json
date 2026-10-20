@@ -36,11 +36,8 @@
       },
       "items": {
         "dashboard": "仪表盘",
-        "users": "用户",
-        "departments": "部门",
-        "userGroups": "用户组",
+        "members": "组织与成员",
         "roles": "角色",
-        "bulkImport": "批量导入",
         "logObserve": "运行观测",
         "audit": "审计日志",
         "portalLogs": "Portal 日志",
@@ -962,6 +959,23 @@
       }
     },
     "iam": {
+      "members": {
+        "title": "组织与成员",
+        "description": "管理成员、组织结构和用户组。",
+        "tabMembers": "成员",
+        "tabGroups": "用户组",
+        "editOrg": "编辑组织结构",
+        "import": "导入",
+        "newUser": "新建用户",
+        "allMembers": "全部成员",
+        "unassigned": "未归属组织",
+        "unassignedLimitHint": "仅显示前 200 位",
+        "orgDialogTitle": "编辑组织结构",
+        "orgDialogDescription": "新建、改名、移动或删除部门，并设置部门可见模型。",
+        "importDialogTitle": "导入成员",
+        "importDialogDescription": "上传 CSV，映射列后批量创建账号。",
+        "loading": "加载中..."
+      },
       "userGroups": {
         "title": "用户组",
         "description": "把一批人放进一组，再给组绑定能力包。属于多个组的人取并集。",

@@ -38,7 +38,6 @@ import {
   Bell,
   Bot,
   Boxes,
-  Building2,
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
@@ -60,8 +59,6 @@ import {
   Sun,
   UserCog,
   Users,
-  UsersRound,
-  Wand2,
   Waypoints,
   Cable,
   Database,
@@ -84,7 +81,7 @@ type NavGroup = {
   items: NavItem[];
 };
 
-const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: NavGroup[] = [
   {
     id: "overview",
     label: "overview",
@@ -94,11 +91,8 @@ const NAV_GROUPS: NavGroup[] = [
     id: "iam",
     label: "iam",
     items: [
-      { href: "/iam/users", labelKey: "users", icon: Users },
-      { href: "/iam/departments", labelKey: "departments", icon: Building2 },
-      { href: "/iam/user-groups", labelKey: "userGroups", icon: UsersRound },
+      { href: "/iam/members", labelKey: "members", icon: Users },
       { href: "/iam/roles", labelKey: "roles", icon: UserCog },
-      { href: "/iam/bulk-import", labelKey: "bulkImport", icon: Wand2 },
     ],
   },
   {
@@ -617,7 +611,7 @@ export function AppShell({ children }: AppShellProps) {
                     <div className="text-xs font-normal text-muted-foreground">admin@agenticx.local</div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => router.push("/iam/users")}>
+                  <DropdownMenuItem onClick={() => router.push("/iam/members")}>
                     <Users className="mr-2 h-4 w-4" />
                     {t("userMgmt")}
                   </DropdownMenuItem>

@@ -36,11 +36,8 @@
       },
       "items": {
         "dashboard": "Dashboard",
-        "users": "Users",
-        "departments": "Departments",
-        "userGroups": "User groups",
+        "members": "Organization & Members",
         "roles": "Roles",
-        "bulkImport": "Bulk Import",
         "logObserve": "Runtime",
         "audit": "Audit Logs",
         "portalLogs": "Portal Logs",
@@ -962,6 +959,23 @@
       }
     },
     "iam": {
+      "members": {
+        "title": "Organization & Members",
+        "description": "Manage members, organization structure, and user groups.",
+        "tabMembers": "Members",
+        "tabGroups": "User groups",
+        "editOrg": "Edit organization",
+        "import": "Import",
+        "newUser": "New user",
+        "allMembers": "All members",
+        "unassigned": "Unassigned organization",
+        "unassignedLimitHint": "Showing only the first 200",
+        "orgDialogTitle": "Edit organization",
+        "orgDialogDescription": "Create, rename, move, or delete departments, and set which models a department can use.",
+        "importDialogTitle": "Import members",
+        "importDialogDescription": "Upload a CSV, map columns, and create accounts in bulk.",
+        "loading": "Loading..."
+      },
       "userGroups": {
         "title": "User groups",
         "description": "Put people in a group, then bind capability packs. Membership in multiple groups is a union.",
