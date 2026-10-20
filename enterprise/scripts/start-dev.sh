@@ -153,6 +153,11 @@ if [ -z "${GATEWAY_INTERNAL_TOKEN:-}" ] || [ -z "${GATEWAY_REMOTE_PROVIDERS_URL:
   echo "          请重新运行：bash scripts/bootstrap.sh" >&2
 fi
 
+# 早期 bootstrap 生成的 .env.local 没有预算快照地址，管理台保存的预算到不了 gateway。
+if [ -z "${GATEWAY_REMOTE_BUDGET_CONFIG_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
+  export GATEWAY_REMOTE_BUDGET_CONFIG_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/budget-snapshot"
+fi
+
 # 3) 可选自动迁移：仅本地 DB 默认开启，避免共享库被意外改 schema。
 AUTO_MIGRATE="${AGX_AUTO_DB_MIGRATE:-1}"
 if [[ "$AUTO_MIGRATE" = "1" ]]; then

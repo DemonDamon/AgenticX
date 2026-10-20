@@ -184,6 +184,8 @@ flowchart LR
 - 运维监控分组里额度 / 套餐 / 分账与观测混放（与 B12 收敛额度入口相关，视 B12 结果再定）。
 - 交付仓同样存在「编辑 / 重新生成时整段替换消息导致该会话赞踩被级联删除」的问题（B8 在主仓已修），可回推给交付仓。
 - 管理台文案里有接口路径直接展示给管理员（原有问题，非回流引入）：`messages/zh.json` 的 `pages.iam.users.loadingDescription`「正在从 /api/admin/users 拉取用户列表」、批量导入的「POST /api/admin/iam/bulk-import · {count} 行」，英文同位置。
+- 管理台 `/metering/quota` 预算区：动作下拉直接显示英文 `warn`；单位下拉把 tokens 显示为「词元」，与页面其他处「Token」不统一；部门 / 个人需手填 ID（原有问题）。
+- compose 部署未配置 `GATEWAY_REMOTE_QUOTA_CONFIG_URL` 等远程配置地址（只有测试 compose 配了部分），生产 compose 下额度 / 预算是否生效需按部署方式复核。
 - 管理台成员表下方有两套分页（表格组件自带一套 + 页面一套，原用户页即如此）。
 - 管理台顶栏在内容区较窄（约 800px）时，面包屑与居中的搜索框重叠（原有问题，各页都有）。
 

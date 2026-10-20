@@ -1,123 +1,130 @@
 import { getAdminMysqlDb } from "./database";
 import { enterpriseRuntimeBudgets as budgetTable, gatewayBudgetAlerts as alertTable } from "@agenticx/db-schema/mysql";
-import { desc, eq } from "drizzle-orm";
+import { listUserGroups } from "@agenticx/iam-core";
+import { and, desc, eq, sql } from "drizzle-orm";
+import {
+  BUDGET_PATCH_KEYS,
+  BudgetConflictError,
+  budgetGatewaySnapshot,
+  mergeBudgetPatch,
+  normalizeBudget,
+  type BudgetConfig,
+  type BudgetConfigPatch,
+  type BudgetGatewaySnapshot,
+  type SetBudgetOptions,
+} from "../postgresql/budget-store";
 
-export type BudgetAction = "block" | "warn" | "fallback";
-
-export type BudgetRule = {
-  unit: "cost_usd" | "tokens";
-  period: "day" | "month";
-  limit: number;
-  warnThresholdPct?: number;
-  action: BudgetAction;
-  fallbackModel?: string;
+export {
+  BUDGET_PATCH_KEYS,
+  BudgetConflictError,
+  budgetGatewaySnapshot,
+  mergeBudgetPatch,
+  normalizeBudget,
 };
+export type {
+  BudgetAction,
+  BudgetConfig,
+  BudgetConfigPatch,
+  BudgetGatewaySnapshot,
+  BudgetRule,
+  CompanyMonthlyLimits,
+  SetBudgetOptions,
+} from "../postgresql/budget-store";
 
-export type BudgetConfig = {
-  updatedAt: string;
-  defaults?: BudgetRule;
-  tenants?: Record<string, BudgetRule>;
-  departments?: Record<string, BudgetRule>;
-  users?: Record<string, BudgetRule>;
-};
-
-const DEFAULT_CONFIG: BudgetConfig = {
-  updatedAt: new Date().toISOString(),
-  defaults: {
-    unit: "cost_usd",
-    period: "month",
-    limit: 0,
-    warnThresholdPct: 80,
-    action: "warn",
-  },
-  tenants: {},
-  departments: {},
-  users: {},
-};
-
-function tenant(): string {
-  const t = process.env.DEFAULT_TENANT_ID?.trim();
-  if (!t) throw new Error("DEFAULT_TENANT_ID is required for budget config.");
-  return t;
+function tenant(explicit?: string): string {
+  const value = (explicit ?? process.env.DEFAULT_TENANT_ID)?.trim();
+  if (!value) throw new Error("DEFAULT_TENANT_ID is required for budget config.");
+  return value;
 }
 
-function normalizeRule(input: Partial<BudgetRule> | undefined): BudgetRule {
-  const unit = input?.unit === "tokens" ? "tokens" : "cost_usd";
-  const period = input?.period === "day" ? "day" : "month";
-  const limit = Number(input?.limit ?? 0);
-  const warnThresholdPct = Number(input?.warnThresholdPct ?? 80);
-  const action = input?.action === "block" || input?.action === "fallback" ? input.action : "warn";
-  return {
-    unit,
-    period,
-    limit: Number.isFinite(limit) && limit > 0 ? limit : 0,
-    warnThresholdPct: Number.isFinite(warnThresholdPct) ? Math.min(100, Math.max(0, warnThresholdPct)) : 80,
-    action,
-    fallbackModel: input?.fallbackModel?.trim() || undefined,
-  };
+function asDate(value: unknown): Date | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return undefined;
 }
 
-function normalizeBudget(input: Partial<BudgetConfig> | undefined): BudgetConfig {
-  const next: BudgetConfig = {
-    updatedAt: new Date().toISOString(),
-    defaults: normalizeRule(input?.defaults ?? DEFAULT_CONFIG.defaults),
-    tenants: {},
-    departments: {},
-    users: {},
-  };
-  for (const [k, v] of Object.entries(input?.tenants ?? {})) next.tenants![k] = normalizeRule(v);
-  for (const [k, v] of Object.entries(input?.departments ?? {})) next.departments![k] = normalizeRule(v);
-  for (const [k, v] of Object.entries(input?.users ?? {})) next.users![k] = normalizeRule(v);
-  return next;
+function sameBudgetVersion(expected: string, stored: unknown): boolean {
+  const left = new Date(expected).getTime();
+  const right = asDate(stored)?.getTime();
+  return Number.isFinite(left) && right !== undefined && left === right;
 }
 
-export async function getBudgetConfig(): Promise<BudgetConfig> {
-  const tid = tenant();
+function nextBudgetUpdatedAt(current: Date | undefined, now = new Date()): Date {
+  if (!current || now.getTime() > current.getTime()) return now;
+  return new Date(current.getTime() + 1);
+}
+
+export async function getBudgetConfig(tenantId?: string): Promise<BudgetConfig> {
+  const tid = tenant(tenantId);
   const db = getAdminMysqlDb();
-  const row = await db.select().from(budgetTable).where(eq(budgetTable.tenantId, tid)).limit(1);
-  if (!row.length) {
-    const seed = normalizeBudget(DEFAULT_CONFIG);
+  const rows = await db.select().from(budgetTable).where(eq(budgetTable.tenantId, tid)).limit(1);
+  const row = rows[0];
+  if (!row) {
+    const updatedAt = new Date();
+    const seed = normalizeBudget(undefined, { updatedAt, tenantId: tid });
     await db
       .insert(budgetTable)
       .values({
         tenantId: tid,
         config: seed as unknown as Record<string, unknown>,
-        updatedAt: new Date(seed.updatedAt),
+        updatedAt,
       })
       .onDuplicateKeyUpdate({
-        set: {
-          config: seed as unknown as Record<string, unknown>,
-          updatedAt: new Date(seed.updatedAt),
-        },
+        set: { tenantId: sql`${budgetTable.tenantId}` },
       });
     return seed;
   }
-  const cfg = row[0]?.config as Partial<BudgetConfig> | undefined;
-  return normalizeBudget(cfg ?? DEFAULT_CONFIG);
+  const storedAt = asDate(row.updatedAt) ?? asDate((row.config as { updatedAt?: string } | null)?.updatedAt);
+  return normalizeBudget(row.config as BudgetConfigPatch & { version?: number }, {
+    updatedAt: storedAt,
+    tenantId: tid,
+  });
 }
 
-export async function setBudgetConfig(input: Partial<BudgetConfig>): Promise<BudgetConfig> {
+export async function setBudgetConfig(input: BudgetConfigPatch, options?: SetBudgetOptions): Promise<BudgetConfig> {
   const tid = tenant();
-  const next = normalizeBudget(input);
   const db = getAdminMysqlDb();
-  await db
-    .insert(budgetTable)
-    .values({
-      tenantId: tid,
-      config: next as unknown as Record<string, unknown>,
-      updatedAt: new Date(next.updatedAt),
-    })
-    .onDuplicateKeyUpdate({
-      set: {
-        config: next as unknown as Record<string, unknown>,
-        updatedAt: new Date(next.updatedAt),
-      },
-    });
+  const rows = await db.select().from(budgetTable).where(eq(budgetTable.tenantId, tid)).limit(1);
+  const row = rows[0];
+  const expected = options?.expectedUpdatedAt;
+  if (expected !== undefined && (!row || !sameBudgetVersion(expected, row.updatedAt))) {
+    throw new BudgetConflictError();
+  }
+
+  const storedAt = row ? asDate(row.updatedAt) : undefined;
+  const current = normalizeBudget((row?.config as BudgetConfigPatch & { version?: number } | undefined) ?? undefined, {
+    updatedAt: storedAt ?? new Date(),
+    tenantId: tid,
+  });
+  const updatedAt = nextBudgetUpdatedAt(storedAt);
+  const next = normalizeBudget({ ...mergeBudgetPatch(current, input), version: 2 }, { updatedAt, tenantId: tid });
+  const config = next as unknown as Record<string, unknown>;
+
+  if (expected !== undefined) {
+    const updated = await db
+      .update(budgetTable)
+      .set({ config, updatedAt })
+      .where(and(eq(budgetTable.tenantId, tid), eq(budgetTable.updatedAt, row!.updatedAt)));
+    if ((updated[0]?.affectedRows ?? 0) < 1) throw new BudgetConflictError();
+    return next;
+  }
+
+  await db.insert(budgetTable).values({ tenantId: tid, config, updatedAt }).onDuplicateKeyUpdate({
+    set: { config, updatedAt },
+  });
   return next;
 }
 
-export async function buildBudgetSnapshotForGateway(): Promise<BudgetConfig> {
-  return getBudgetConfig();
+export async function buildBudgetSnapshotForGateway(tenantId?: string): Promise<BudgetGatewaySnapshot> {
+  const tid = tenant(tenantId);
+  const [config, groups] = await Promise.all([getBudgetConfig(tid), listUserGroups(tid)]);
+  return budgetGatewaySnapshot(
+    config,
+    groups.map((group) => ({ id: group.id, memberIds: group.memberIds })),
+  );
 }
 
 export async function listBudgetAlerts(limit = 50) {

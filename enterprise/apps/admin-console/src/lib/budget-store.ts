@@ -3,6 +3,11 @@ import * as mysql from "./db-stores/mysql/budget-store";
 import * as postgresql from "./db-stores/postgresql/budget-store";
 
 export type * from "./db-stores/postgresql/budget-store";
+export {
+  BUDGET_PATCH_KEYS,
+  BudgetConflictError,
+  mergeBudgetPatch,
+} from "./db-stores/postgresql/budget-store";
 
 function implementation(): typeof postgresql {
   const config = resolveDatabaseConfig();

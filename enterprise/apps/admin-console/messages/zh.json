@@ -1911,6 +1911,27 @@
           "loadFailed": "加载失败",
           "saveSuccess": "额度配置已保存",
           "saveFailed": "保存失败"
+        },
+        "budget": {
+          "companyTitle": "公司月度上限",
+          "companyDescription": "整个公司每月合计，达到即停止请求",
+          "tokenLabel": "Token",
+          "costLabel": "美元",
+          "unlimited": "0 为不限",
+          "defaultTitle": "每人默认上限",
+          "defaultDescription": "没有个人特例或用户组上限的成员使用这条",
+          "defaultLabel": "每人默认",
+          "orgTitle": "组织共享上限",
+          "orgDescription": "组织内所有人合计，达到即停止请求",
+          "orgLabel": "组织共享",
+          "deptTitle": "部门共享上限",
+          "deptDescription": "部门内所有人合计",
+          "userTitle": "个人特例",
+          "actionStop": "停止请求",
+          "periodDay": "每日",
+          "periodWeek": "每周",
+          "periodMonth": "每月",
+          "conflict": "预算刚被其他管理员修改，请刷新后重试"
         }
       },
       "quotaPlans": {

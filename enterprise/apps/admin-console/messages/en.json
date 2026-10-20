@@ -1911,6 +1911,27 @@
           "loadFailed": "Failed to load",
           "saveSuccess": "Quota config saved",
           "saveFailed": "Save failed"
+        },
+        "budget": {
+          "companyTitle": "Company monthly limit",
+          "companyDescription": "Combined company total for the month. Requests stop when it is reached.",
+          "tokenLabel": "Tokens",
+          "costLabel": "US dollars",
+          "unlimited": "0 means unlimited",
+          "defaultTitle": "Default limit per person",
+          "defaultDescription": "Used when a member has no personal exception and no user-group limit.",
+          "defaultLabel": "Per person",
+          "orgTitle": "Organization shared limit",
+          "orgDescription": "Combined total for everyone in the organization. Requests stop when it is reached.",
+          "orgLabel": "Organization",
+          "deptTitle": "Department shared limit",
+          "deptDescription": "Combined total for everyone in the department.",
+          "userTitle": "Personal exceptions",
+          "actionStop": "Stop requests",
+          "periodDay": "Daily",
+          "periodWeek": "Weekly",
+          "periodMonth": "Monthly",
+          "conflict": "Another admin just changed the budget. Refresh and try again."
         }
       },
       "quotaPlans": {

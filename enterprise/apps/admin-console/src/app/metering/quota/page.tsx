@@ -86,11 +86,15 @@ type BudgetRule = {
   action: BudgetAction;
   fallbackModel?: string;
 };
+type CompanyMonthlyLimits = { tokens: number; costUsd: number };
 type BudgetConfig = {
+  version?: 2;
   updatedAt: string;
+  companyLimits?: CompanyMonthlyLimits;
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
+  groups?: Record<string, BudgetRule>;
   users?: Record<string, BudgetRule>;
 };
 type BudgetAlert = {
@@ -109,6 +113,7 @@ type BudgetAlert = {
 
 const EMPTY_BUDGET: BudgetConfig = {
   updatedAt: "",
+  companyLimits: { tokens: 0, costUsd: 0 },
   defaults: { unit: "cost_usd", period: "month", limit: 0, warnThresholdPct: 80, action: "warn" },
   tenants: {},
   departments: {},
@@ -121,6 +126,11 @@ const EMPTY_BUDGET_RULE: BudgetRule = {
   limit: 0,
   warnThresholdPct: 80,
   action: "warn",
+};
+
+const SHARED_BUDGET_RULE: BudgetRule = {
+  ...EMPTY_BUDGET_RULE,
+  action: "block",
 };
 
 const EMPTY_PRICING: PricingConfig = {
@@ -306,12 +316,15 @@ function BudgetRuleEditor({
   rule,
   onChange,
   onRemove,
+  lockAction = false,
 }: {
   label: string;
   rule: BudgetRule;
   onChange: (patch: Partial<BudgetRule>) => void;
   onRemove?: () => void;
+  lockAction?: boolean;
 }) {
+  const t = useTranslations("pages.ops.quota");
   return (
     <div className="grid grid-cols-[160px_repeat(5,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
       <div className="font-medium text-sm pb-2">{label}</div>
@@ -330,9 +343,9 @@ function BudgetRuleEditor({
         <Select value={rule.period} onValueChange={(v) => onChange({ period: v as BudgetRule["period"] })}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="day">日</SelectItem>
-            <SelectItem value="week">周</SelectItem>
-            <SelectItem value="month">月</SelectItem>
+            <SelectItem value="day">{t("budget.periodDay")}</SelectItem>
+            <SelectItem value="week">{t("budget.periodWeek")}</SelectItem>
+            <SelectItem value="month">{t("budget.periodMonth")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -346,14 +359,18 @@ function BudgetRuleEditor({
       </div>
       <div className="space-y-1">
         <Label className="text-xs">超限动作</Label>
-        <Select value={rule.action} onValueChange={(v) => onChange({ action: v as BudgetAction })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="warn">warn</SelectItem>
-            <SelectItem value="block">block</SelectItem>
-            <SelectItem value="fallback">fallback</SelectItem>
-          </SelectContent>
-        </Select>
+        {lockAction ? (
+          <Input value={t("budget.actionStop")} disabled readOnly />
+        ) : (
+          <Select value={rule.action} onValueChange={(v) => onChange({ action: v as BudgetAction })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="warn">warn</SelectItem>
+              <SelectItem value="block">block</SelectItem>
+              <SelectItem value="fallback">fallback</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
       {onRemove ? (
         <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={onRemove}>
@@ -362,7 +379,7 @@ function BudgetRuleEditor({
       ) : (
         <div />
       )}
-      {rule.action === "fallback" ? (
+      {!lockAction && rule.action === "fallback" ? (
         <div className="col-span-full space-y-1">
           <Label className="text-xs">降级模型</Label>
           <Input value={rule.fallbackModel ?? ""} placeholder="gpt-4o-mini" onChange={(e) => onChange({ fallbackModel: e.target.value })} />
@@ -378,6 +395,7 @@ export default function MeteringQuotaPage() {
   const [quota, setQuota] = useState<QuotaConfig>(EMPTY);
   const [pricing, setPricing] = useState<PricingConfig>(EMPTY_PRICING);
   const [budget, setBudget] = useState<BudgetConfig>(EMPTY_BUDGET);
+  const [budgetTenantId, setBudgetTenantId] = useState("");
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
   const [usageByKey, setUsageByKey] = useState<Record<string, UsageSnapshot>>({});
   const [usageLoading, setUsageLoading] = useState(false);
@@ -399,12 +417,13 @@ export default function MeteringQuotaPage() {
       ]);
       const quotaJson = (await quotaRes.json()) as { data?: { quota?: QuotaConfig } };
       const pricingJson = (await pricingRes.json()) as { data?: { pricing?: PricingConfig } };
-      const budgetJson = (await budgetRes.json()) as { data?: { budget?: BudgetConfig } };
+      const budgetJson = (await budgetRes.json()) as { data?: { budget?: BudgetConfig; tenantId?: string } };
       const alertsJson = (await alertsRes.json()) as { data?: { alerts?: BudgetAlert[] } };
       const nextQuota = { ...EMPTY, ...(quotaJson.data?.quota ?? EMPTY), apiTokens: quotaJson.data?.quota?.apiTokens ?? {} };
       setQuota(nextQuota);
       setPricing({ ...EMPTY_PRICING, ...(pricingJson.data?.pricing ?? EMPTY_PRICING) });
       setBudget({ ...EMPTY_BUDGET, ...(budgetJson.data?.budget ?? EMPTY_BUDGET) });
+      setBudgetTenantId(budgetJson.data?.tenantId ?? "");
       setBudgetAlerts(alertsJson.data?.alerts ?? []);
       setUsageLoading(true);
       void loadAllUsages(nextQuota)
@@ -436,9 +455,28 @@ export default function MeteringQuotaPage() {
       adminFetch("/api/metering/budget", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(budget),
+        body: JSON.stringify({
+          ...(budget.updatedAt ? { expectedUpdatedAt: budget.updatedAt } : {}),
+          companyLimits: budget.companyLimits ?? { tokens: 0, costUsd: 0 },
+          defaults: budget.defaults,
+          tenants: budget.tenants ?? {},
+          departments: budget.departments ?? {},
+          users: budget.users ?? {},
+        }),
       }),
     ]);
+    if (budgetRes.status === 409) {
+      let message = t("budget.conflict");
+      try {
+        const body = (await budgetRes.json()) as { message?: string };
+        if (body.message) message = body.message;
+      } catch {
+        // 冲突提示用上面的文案。
+      }
+      toast.error(message);
+      await load();
+      return;
+    }
     if (!quotaRes.ok || !pricingRes.ok || !budgetRes.ok) {
       toast.error(tc("toast.saveFailed"));
       return;
@@ -475,13 +513,24 @@ export default function MeteringQuotaPage() {
   };
 
   const updateBudgetMap = (scope: "users" | "departments" | "tenants", key: string, patch: Partial<BudgetRule>) => {
-    setBudget((prev) => ({
-      ...prev,
-      [scope]: {
-        ...(prev[scope] ?? {}),
-        [key]: { ...(prev[scope]?.[key] ?? EMPTY_BUDGET_RULE), ...patch },
-      },
-    }));
+    setBudget((prev) => {
+      const shared = scope !== "users";
+      const nextRule: BudgetRule = {
+        ...(prev[scope]?.[key] ?? (shared ? SHARED_BUDGET_RULE : EMPTY_BUDGET_RULE)),
+        ...patch,
+      };
+      if (shared) {
+        nextRule.action = "block";
+        delete nextRule.fallbackModel;
+      }
+      return {
+        ...prev,
+        [scope]: {
+          ...(prev[scope] ?? {}),
+          [key]: nextRule,
+        },
+      };
+    });
   };
 
   const addBudgetMapKey = (scope: "users" | "departments" | "tenants", key: string) => {
@@ -489,7 +538,10 @@ export default function MeteringQuotaPage() {
     if (!trimmed) return;
     setBudget((prev) => ({
       ...prev,
-      [scope]: { ...(prev[scope] ?? {}), [trimmed]: prev[scope]?.[trimmed] ?? { ...EMPTY_BUDGET_RULE } },
+      [scope]: {
+        ...(prev[scope] ?? {}),
+        [trimmed]: prev[scope]?.[trimmed] ?? { ...(scope === "users" ? EMPTY_BUDGET_RULE : SHARED_BUDGET_RULE) },
+      },
     }));
   };
 
@@ -750,24 +802,78 @@ export default function MeteringQuotaPage() {
         <TabsContent value="budget" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>默认预算</CardTitle>
-              <CardDescription>
-                保存后发布快照，网关经 GATEWAY_REMOTE_BUDGET_CONFIG_URL 拉取；limit=0 表示不启用。
-              </CardDescription>
+              <CardTitle>{t("budget.companyTitle")}</CardTitle>
+              <CardDescription>{t("budget.companyDescription")}</CardDescription>
             </CardHeader>
             <CardContent>
-              {budget.defaults ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="company-monthly-token-limit">{t("budget.tokenLabel")}</Label>
+                  <Input
+                    id="company-monthly-token-limit"
+                    inputMode="numeric"
+                    value={budget.companyLimits?.tokens || ""}
+                    placeholder={t("budget.unlimited")}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setBudget((prev) => ({
+                        ...prev,
+                        companyLimits: {
+                          tokens: value ? Number(value) : 0,
+                          costUsd: prev.companyLimits?.costUsd ?? 0,
+                        },
+                      }));
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-monthly-cost-limit">{t("budget.costLabel")}</Label>
+                  <Input
+                    id="company-monthly-cost-limit"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={budget.companyLimits?.costUsd || ""}
+                    placeholder={t("budget.unlimited")}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setBudget((prev) => ({
+                        ...prev,
+                        companyLimits: {
+                          tokens: prev.companyLimits?.tokens ?? 0,
+                          costUsd: Number.isFinite(value) && value > 0 ? value : 0,
+                        },
+                      }));
+                    }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("budget.orgTitle")}</CardTitle>
+              <CardDescription>{t("budget.orgDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {budgetTenantId ? (
                 <BudgetRuleEditor
-                  label="租户默认"
-                  rule={budget.defaults}
-                  onChange={(patch) => setBudget((prev) => ({ ...prev, defaults: { ...(prev.defaults ?? EMPTY_BUDGET_RULE), ...patch } }))}
+                  label={t("budget.orgLabel")}
+                  lockAction
+                  rule={budget.tenants?.[budgetTenantId] ?? SHARED_BUDGET_RULE}
+                  onChange={(patch) => updateBudgetMap("tenants", budgetTenantId, patch)}
                 />
               ) : null}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>部门预算</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>{t("budget.deptTitle")}</CardTitle>
+              <CardDescription>{t("budget.deptDescription")}</CardDescription>
+            </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex gap-2">
                 <Input placeholder={t("deptIdPlaceholder")} value={newBudgetDept} onChange={(e) => setNewBudgetDept(e.target.value)} />
@@ -776,13 +882,38 @@ export default function MeteringQuotaPage() {
                 </Button>
               </div>
               {Object.entries(budget.departments ?? {}).map(([id, rule]) => (
-                <BudgetRuleEditor key={id} label={id} rule={rule} onChange={(patch) => updateBudgetMap("departments", id, patch)} onRemove={() => removeBudgetMapKey("departments", id)} />
+                <BudgetRuleEditor
+                  key={id}
+                  label={id}
+                  lockAction
+                  rule={rule}
+                  onChange={(patch) => updateBudgetMap("departments", id, patch)}
+                  onRemove={() => removeBudgetMapKey("departments", id)}
+                />
               ))}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>用户预算</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>{t("budget.defaultTitle")}</CardTitle>
+              <CardDescription>{t("budget.defaultDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {budget.defaults ? (
+                <BudgetRuleEditor
+                  label={t("budget.defaultLabel")}
+                  rule={budget.defaults}
+                  onChange={(patch) => setBudget((prev) => ({ ...prev, defaults: { ...(prev.defaults ?? EMPTY_BUDGET_RULE), ...patch } }))}
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("budget.userTitle")}</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex gap-2">
                 <Input placeholder={t("userIdPlaceholder")} value={newBudgetUser} onChange={(e) => setNewBudgetUser(e.target.value)} />
