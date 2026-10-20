@@ -202,4 +202,9 @@ flowchart LR
 
 ## 9. 验收记录
 
-（验收方填写）
+2026-10-20 全量回归（claude opus 5.5）：B0–B12 共 14 份子计划均已验收提交，各自记录见子计划末尾。
+
+- 单测：web-portal 1037/1038、admin-console 240/240、iam-core 55/55、db-schema 16/16、config 70/70、sdk-ts 17/17、features/chat 276/277；两条失败均为 §1.3 基线（`orchestrator.test.ts › refreshes gateway bearer before synthesize…`、`store.multi-session.test.ts › does not enqueue send on idle session B…`）。
+- 类型检查：admin-console、iam-core、db-schema、config、sdk-ts 均 0 错误；web-portal 26 条（与基线「文件 + 错误码」一致）；features/chat 自身 13 条，全部早于本分支（artifact-tree / zip-store / store.ts 与 `deep-research-hydrate.test.ts`、`deep-research-plan-chat-composer.test.ts`），本轮唯一新增的 `DeepResearchContinueCard.test.tsx` TS2722 已修复。
+- Go：`apps/gateway` 仅基线 `internal/mcphost › TestConnectorBackendExecuteActionMissingConnection` 失败；`packages/policy-engine` 通过。均在 `env -i` 干净环境下运行。
+- 本地服务已恢复默认启动参数（门户无 `PORTAL_HSTS_MAX_AGE` / `DEEP_RESEARCH_TOTAL_BUDGET_MS`）；测试期间写入的预算、次数上限与分页测试会话已清理。

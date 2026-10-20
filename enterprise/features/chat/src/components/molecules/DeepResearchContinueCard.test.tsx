@@ -41,7 +41,8 @@ describe("DeepResearchContinueCard", () => {
     expect(textOf(element)).toContain("继续完成报告");
     expect(textOf(element)).toContain("继续写作仍受使用上限与内容策略限制");
     const button = findButton(element);
-    button?.props.onClick();
+    expect(button?.props.onClick).toBeTypeOf("function");
+    button?.props.onClick?.();
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
