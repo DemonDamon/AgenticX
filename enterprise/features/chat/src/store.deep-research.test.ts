@@ -2,14 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatChunk, ChatClient, ChatRequest, SendMessageResult } from "@agenticx/sdk-ts";
 import type { ChatSession } from "@agenticx/core-api";
 
-const { appendMessages } = vi.hoisted(() => ({
+const { appendMessages, createSession } = vi.hoisted(() => ({
   appendMessages: vi.fn().mockResolvedValue(undefined),
+  createSession: vi.fn(),
 }));
 
 vi.mock("./history-client", () => ({
   createPortalChatHistoryClient: () => ({
     listSessions: vi.fn().mockResolvedValue([]),
-    createSession: vi.fn(),
+    listSessionsPage: vi.fn().mockResolvedValue({ sessions: [], nextCursor: null }),
+    createSession,
     getMessages: vi.fn().mockResolvedValue([]),
     appendMessages,
     replaceMessages: vi.fn().mockResolvedValue(undefined),
@@ -146,6 +148,78 @@ describe("chat store deepResearch request wiring", () => {
 
     releaseStream();
     await sendPromise;
+  });
+
+  it("sends a draft only once when sendMessage is repeated before promotion", async () => {
+    let resolveCreate!: (created: ChatSession) => void;
+    createSession.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+    const onAccepted = vi.fn();
+    useChatStore.setState({
+      sessions: [],
+      activeSessionId: "draft-A",
+      draftSessionId: "draft-A",
+      messages: [],
+      hydrated: true,
+      historyListLoaded: true,
+      streamStateBySessionId: {},
+      status: "idle",
+    });
+    const client = new CapturingClient();
+    const first = useChatStore.getState().sendMessage(
+      client,
+      { content: "hello once", deepResearch: true },
+      { onAccepted },
+    );
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    await useChatStore.getState().sendMessage(client, { content: "hello once", deepResearch: true });
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(client.requests).toHaveLength(0);
+
+    resolveCreate({ ...session("real-A", "hello once"), active_model: "test-model" });
+    await first;
+    expect(onAccepted).toHaveBeenCalledWith("real-A");
+    expect(client.requests).toHaveLength(1);
+    expect(client.requests[0]?.sessionId).toBe("real-A");
+  });
+
+  it("keeps the first draft answer on its session after the user switches away", async () => {
+    let resolveCreate!: (created: ChatSession) => void;
+    createSession.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+    const onAccepted = vi.fn();
+    useChatStore.setState({
+      sessions: [],
+      activeSessionId: "draft-A",
+      draftSessionId: "draft-A",
+      messages: [],
+      hydrated: true,
+      historyListLoaded: true,
+      streamStateBySessionId: {},
+      status: "idle",
+    });
+    const client = new CapturingClient();
+    const first = useChatStore.getState().sendMessage(
+      client,
+      { content: "stay on A", deepResearch: true },
+      { onAccepted },
+    );
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    useChatStore.setState((prev) => ({
+      sessions: [...prev.sessions, session("B", "other")],
+      activeSessionId: "B",
+    }));
+    resolveCreate({ ...session("real-A", "stay on A"), active_model: "test-model" });
+    await first;
+
+    expect(onAccepted).toHaveBeenCalledWith("real-A");
+    expect(useChatStore.getState().activeSessionId).toBe("B");
+    expect(client.requests[0]?.sessionId).toBe("real-A");
+    expect(useChatStore.getState().messages.filter((message) => message.role === "user")).toEqual([
+      expect.objectContaining({ session_id: "real-A", content: "stay on A" }),
+    ]);
   });
 
   it("omits deepResearch when toggle is off", async () => {

@@ -14,7 +14,7 @@ import {
   type ChatRequest as SdkChatRequest,
   type DeepResearchEvent,
 } from "@agenticx/sdk-ts";
-import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
+import { ChatHistoryHttpError, createPortalChatHistoryClient, HISTORY_PAGE_SIZE } from "./history-client";
 import {
   computePayloadHash,
   enqueueAppend,
@@ -82,6 +82,8 @@ function writeLastActiveSessionId(sessionId: string | null | undefined): void {
 const deepResearchCheckpointAtByAssistantId = new Map<string, number>();
 const DEEP_RESEARCH_CHECKPOINT_MS = 8_000;
 const cancellingSessions = new Set<string>();
+/** Prevent concurrent first turns from promoting the same draft more than once. */
+const draftSubmissionInFlight = new Set<string>();
 const responseCheckpoints = new Map<string, ReturnType<typeof createResponseCheckpoint<ChatMessage>>>();
 const streamTextBySession = new Map<string, ReturnType<typeof createStreamTextBuffer>>();
 
@@ -170,7 +172,22 @@ type SendMessageInput = {
 type SendMessageOptions = {
   /** Interrupt current stream and send immediately (queue send-now / double Enter). */
   forceSend?: boolean;
+  /** Dispatch to this session even when another conversation is currently active. */
+  targetSessionId?: string;
+  /** Fires once accepted, carrying the actual session id after draft promotion. */
+  onAccepted?: (sessionId: string) => void;
 };
+
+function notifyMessageAccepted(
+  onAccepted: SendMessageOptions["onAccepted"],
+  sessionId: string,
+): void {
+  try {
+    onAccepted?.(sessionId);
+  } catch {
+    // Composer bookkeeping must not stop a turn that the store already accepted.
+  }
+}
 
 type EditUserMessageInput = {
   messageId: string;
@@ -222,6 +239,11 @@ export type ChatStoreState = {
   /** 服务端历史已加载（Enterprise portal） */
   hydrated: boolean;
   historyLoading: boolean;
+  /** Session metadata arrived; writes may persist before message restore finishes. */
+  historyListLoaded: boolean;
+  historyNextCursor: string | null;
+  historyLoadingMore: boolean;
+  historyLoadMoreError: string | null;
   historyError: string | null;
   /** Per-session durable history sync status (separate from rename/delete historyError). */
   historySyncBySessionId: Record<string, HistorySyncSessionState>;
@@ -256,6 +278,7 @@ const EMPTY_USAGE: SessionTokenUsage = {
 
 export type ChatStoreActions = {
   hydrateSessions(): Promise<void>;
+  loadMoreSessions(): Promise<void>;
   bootstrap(params?: { tenantId?: string; userId?: string; defaultModel?: string; title?: string }): void;
   createSession(params?: { tenantId?: string; userId?: string; defaultModel?: string; title?: string }): Promise<void>;
   switchSession(sessionId: string): Promise<void>;
@@ -761,6 +784,7 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 }
 
 let chatHydrateInFlight: Promise<void> | null = null;
+let historyPageLoadInFlight: Promise<void> | null = null;
 let sessionMessageLoadSeq = 0;
 let historyAuthRedirectScheduled = false;
 const historyAppendChainsBySessionId = new Map<string, Promise<void>>();
@@ -1043,6 +1067,10 @@ function createAssistantStreamWriter(
   };
 }
 
+function canPersistHistory(state: ChatStoreState): boolean {
+  return state.hydrated || state.historyListLoaded || state.historyPrincipal !== null;
+}
+
 function checkpointOrdinaryResponse(
   set: ChatStoreSet,
   get: () => ChatStoreState,
@@ -1053,7 +1081,7 @@ function checkpointOrdinaryResponse(
 ) {
   const checkpoint = createResponseCheckpoint<ChatMessage>({
     read: () => {
-      if (!get().hydrated || !ownsRequest()) return undefined;
+      if (!canPersistHistory(get()) || !ownsRequest()) return undefined;
       const assistant = get().messages.find((message) => message.id === assistantId);
       return assistant?.role === "assistant" && !assistant.deep_research ? assistant : undefined;
     },
@@ -1228,6 +1256,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   responseVersionsByUserMessageId: {},
   hydrated: false,
   historyLoading: false,
+  historyListLoaded: false,
+  historyNextCursor: null,
+  historyLoadingMore: false,
+  historyLoadMoreError: null,
   historyError: null,
   historySyncBySessionId: {},
   historyPrincipal: null,
@@ -1623,51 +1655,138 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
     if (get().hydrated) return;
 
+    const stateAtStart = get();
+    const selectionSeq = sessionMessageLoadSeq;
+    const initialSessionIds = new Set(stateAtStart.sessions.map((session) => session.id));
+    const hadExplicitSelection = Boolean(
+      stateAtStart.messages.length > 0 ||
+        (stateAtStart.activeSessionId &&
+          stateAtStart.activeSessionId !== stateAtStart.draftSessionId),
+    );
+
     chatHydrateInFlight = (async () => {
       set({ historyLoading: true, historyError: null });
+      const keepCurrentSelection = (): boolean => {
+        const live = get();
+        const actedDuring =
+          selectionSeq !== sessionMessageLoadSeq ||
+          live.activeSessionId !== stateAtStart.activeSessionId ||
+          live.draftSessionId !== stateAtStart.draftSessionId ||
+          live.messages.length !== stateAtStart.messages.length;
+        if (!hadExplicitSelection && !actedDuring) return false;
+        set({ hydrated: true, historyLoading: false, historyError: null });
+        const selectedId = get().activeSessionId;
+        const hasLocalMessages = selectedId
+          ? get().messages.some((message) => message.session_id === selectedId)
+          : false;
+        if (
+          selectedId &&
+          !isDraftSessionId(get(), selectedId) &&
+          get().sessions.some((session) => session.id === selectedId) &&
+          !hasLocalMessages &&
+          !isSessionStreaming(get(), selectedId)
+        ) {
+          void get().switchSession(selectedId);
+        }
+        historyAuthRedirectScheduled = false;
+        void flushHistoryOutbox().then(async (sessionIds) => {
+          for (const id of sessionIds) {
+            await get().refetchSessionMessages(id);
+          }
+        });
+        return true;
+      };
       try {
-        const sessions = sortSessionsForHistory(await portalHistory.listSessions());
+        const firstPage = await portalHistory.listSessionsPage({ limit: HISTORY_PAGE_SIZE });
+        const sessions = sortSessionsForHistory(firstPage.sessions);
+        set((prev) => {
+          const pageIds = new Set(sessions.map((session) => session.id));
+          const addedDuringLoad = prev.sessions.filter(
+            (session) => !initialSessionIds.has(session.id) && !pageIds.has(session.id),
+          );
+          return {
+            sessions: sortSessionsForHistory([...sessions, ...addedDuringLoad]),
+            historyNextCursor: firstPage.nextCursor,
+            historyLoading: false,
+            historyListLoaded: true,
+            historyLoadMoreError: null,
+            historyError: null,
+          };
+        });
+        if (keepCurrentSelection()) return;
         if (sessions.length === 0) {
-          set({
-            ...beginDraftSessionPatch(get()),
+          set((prev) => ({
+            ...beginDraftSessionPatch(prev),
             sessions: [],
             hydrated: true,
             historyLoading: false,
+            historyNextCursor: firstPage.nextCursor,
             historyError: null,
-          });
+          }));
           historyAuthRedirectScheduled = false;
           void flushHistoryOutbox();
           return;
         }
-        // Prefer: active deep-research run session → last open session → newest created.
-        const rememberedId = readLastActiveSessionId();
-        let preferredId = rememberedId && sessions.some((s) => s.id === rememberedId)
-          ? rememberedId
-          : sessions[0]!.id;
-        try {
-          const activeRuns = await fetchActiveDeepResearchRuns(null);
-          const runSessionId = activeRuns[0]?.sessionId?.trim();
-          if (runSessionId && sessions.some((s) => s.id === runSessionId)) {
-            preferredId = runSessionId;
+        const availableSessions = new Map(sessions.map((session) => [session.id, session]));
+        const ensureSessionAvailable = async (sessionId: string): Promise<boolean> => {
+          if (availableSessions.has(sessionId)) return true;
+          const alreadyLoaded = get().sessions.find((session) => session.id === sessionId);
+          if (alreadyLoaded) {
+            availableSessions.set(sessionId, alreadyLoaded);
+            return true;
           }
-        } catch {
-          // banner/hydrate must not fail closed on runs probe
+          try {
+            const session = await portalHistory.getSession(sessionId);
+            if (session.id !== sessionId) return false;
+            availableSessions.set(session.id, session);
+            set((prev) => ({
+              sessions: prev.sessions.some((item) => item.id === session.id)
+                ? prev.sessions
+                : sortSessionsForHistory([...prev.sessions, session]),
+            }));
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const rememberedId = readLastActiveSessionId();
+        let preferredId = sessions[0]!.id;
+        const runsPromise = fetchActiveDeepResearchRuns(null);
+        const rememberedReady = rememberedId
+          ? ensureSessionAvailable(rememberedId)
+          : Promise.resolve(false);
+        const loadMessages = async (sessionId: string) => {
+          const [remoteMessages, overlay] = await Promise.all([
+            portalHistory.getMessages(sessionId),
+            listPendingOverlayMessages(sessionId),
+          ]);
+          return hydrateMessagesDeepResearch(
+            sessionId,
+            mergeOverlayMessages(remoteMessages, overlay),
+          );
+        };
+        if (rememberedId && availableSessions.has(rememberedId)) preferredId = rememberedId;
+        let messagesPromise = loadMessages(preferredId);
+        const [activeRuns, rememberedOk] = await Promise.all([runsPromise, rememberedReady]);
+        if (rememberedId && rememberedOk && preferredId !== rememberedId) {
+          void messagesPromise.catch(() => undefined);
+          preferredId = rememberedId;
+          messagesPromise = loadMessages(preferredId);
         }
-        const activeSession =
-          sessions.find((session) => session.id === preferredId) ?? sessions[0]!;
-        const activeSessionId = activeSession.id;
-        writeLastActiveSessionId(activeSessionId);
-        const remoteMessages = await portalHistory.getMessages(activeSessionId);
-        const overlay = await listPendingOverlayMessages(activeSessionId);
-        const merged = await hydrateMessagesDeepResearch(
-          activeSessionId,
-          mergeOverlayMessages(remoteMessages, overlay),
-        );
+        const runSessionId = activeRuns[0]?.sessionId?.trim();
+        if (runSessionId && runSessionId !== preferredId && await ensureSessionAvailable(runSessionId)) {
+          void messagesPromise.catch(() => undefined);
+          preferredId = runSessionId;
+          messagesPromise = loadMessages(preferredId);
+        }
+        if (keepCurrentSelection()) return;
+        const merged = await messagesPromise;
+        if (keepCurrentSelection()) return;
+        const activeSession = availableSessions.get(preferredId) ?? sessions[0]!;
         const responseVersions = buildHydratedResponseVersions(merged);
-
+        writeLastActiveSessionId(activeSession.id);
         set({
-          sessions,
-          activeSessionId,
+          activeSessionId: activeSession.id,
           draftSessionId: null,
           messages: merged,
           hydrated: true,
@@ -1678,7 +1797,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           activeRequestId: null,
           errorMessage: null,
           sessionTokens: { ...EMPTY_USAGE },
-          sessionTokensBySessionId: { [activeSessionId]: { ...EMPTY_USAGE } },
+          sessionTokensBySessionId: { [activeSession.id]: { ...EMPTY_USAGE } },
           responseVersionsByUserMessageId: responseVersions,
         });
         historyAuthRedirectScheduled = false;
@@ -1703,6 +1822,43 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     await chatHydrateInFlight;
   },
 
+  async loadMoreSessions() {
+    const cursor = get().historyNextCursor;
+    if (!cursor) return;
+    if (historyPageLoadInFlight) return historyPageLoadInFlight;
+    set({ historyLoadingMore: true, historyLoadMoreError: null });
+    const pending = (async () => {
+      try {
+        const page = await portalHistory.listSessionsPage({
+          limit: HISTORY_PAGE_SIZE,
+          cursor,
+        });
+        if (get().historyNextCursor !== cursor) return;
+        set((prev) => {
+          const merged = new Map(prev.sessions.map((session) => [session.id, session]));
+          for (const session of page.sessions) {
+            if (!merged.has(session.id)) merged.set(session.id, session);
+          }
+          return {
+            sessions: sortSessionsForHistory([...merged.values()]),
+            historyNextCursor: page.nextCursor,
+            historyLoadMoreError: null,
+          };
+        });
+      } catch (error) {
+        set({ historyLoadMoreError: resolveHistoryErrorMessage(error, "加载更多历史失败") });
+      } finally {
+        set({ historyLoadingMore: false });
+      }
+    })();
+    historyPageLoadInFlight = pending;
+    try {
+      await pending;
+    } finally {
+      if (historyPageLoadInFlight === pending) historyPageLoadInFlight = null;
+    }
+  },
+
   bootstrap(params) {
     if (get().hydrated) return;
     set({
@@ -1713,6 +1869,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async createSession(params) {
+    sessionMessageLoadSeq += 1;
     if (!get().hydrated) {
       set((prev) => ({
         ...beginDraftSessionPatch(prev, params),
@@ -1954,8 +2111,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   async sendMessage(client, input, options) {
     const state = get();
-    let sessionId = state.activeSessionId;
-    if (!sessionId) return;
+    const requestedSessionId = options?.targetSessionId?.trim() || state.activeSessionId;
+    if (!requestedSessionId) return;
+    let sessionId = requestedSessionId;
+    if (
+      options?.targetSessionId &&
+      !isDraftSessionId(state, sessionId) &&
+      !state.sessions.some((session) => session.id === sessionId)
+    ) {
+      return;
+    }
+    let requestModel =
+      state.sessions.find((session) => session.id === sessionId)?.active_model ?? state.activeModel;
 
     const content = input.content.trim();
     const attachments =
@@ -1964,55 +2131,82 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ) ?? [];
     if (!content && attachments.length === 0) return;
 
+    // Claim a draft synchronously, before the plan-chat gate below can yield.
+    // A repeated submit during session creation is ignored; once this turn is
+    // accepted, normal sending/streaming queue behavior takes over.
+    const claimedDraftId = isDraftSessionId(state, sessionId) ? sessionId : null;
+    if (claimedDraftId && draftSubmissionInFlight.has(claimedDraftId)) return;
+    if (claimedDraftId) {
+      draftSubmissionInFlight.add(claimedDraftId);
+      sessionMessageLoadSeq += 1;
+    }
+    let ownsDraftClaim = Boolean(claimedDraftId);
+    const releaseDraftClaim = () => {
+      if (!ownsDraftClaim || !claimedDraftId) return;
+      draftSubmissionInFlight.delete(claimedDraftId);
+      ownsDraftClaim = false;
+    };
+
     // Best-effort outbox flush before a new turn; do not block typing/send.
     void flushHistoryOutbox({ timeoutMs: 800 });
 
-    // 计划对齐 gate：主输入只改计划；含 forceSend 也绝不能 cancel + 新开一轮。
-    if (content && (await get().resumePlanChatFromComposer(content))) {
-      return;
-    }
-
-    if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
-      const enqueueSessionId = sessionId;
-      set((prev) => ({
-        pendingMessages: [
-          ...prev.pendingMessages,
-          {
-            id: makeId(),
-            sessionId: enqueueSessionId,
-            content: content || "（附件）",
-            attachments: attachments.length > 0 ? attachments : undefined,
-            timestamp: Date.now(),
-          },
-        ],
-      }));
-      return;
-    }
-
-    if (options?.forceSend && isSessionStreaming(get(), sessionId)) {
-      await get().cancel(client);
-    }
-
     let queueSessionId = sessionId;
-    if (isDraftSessionId(get(), sessionId)) {
-        if (state.hydrated) {
+    let userMessage: ChatMessage | undefined;
+    let assistantMessage: ChatMessage | undefined;
+    let webSearchEnabled = false;
+    let deepResearchEnabled = false;
+    let nextSessionMessages: ChatMessage[] = [];
+    let sendingId = "";
+    let ownedRequestId = "";
+    try {
+      // 计划对齐 gate：主输入只改计划；含 forceSend 也绝不能 cancel + 新开一轮。
+      if (content && (await get().resumePlanChatFromComposer(content))) {
+        return;
+      }
+
+      if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
+        const enqueueSessionId = sessionId;
+        set((prev) => ({
+          pendingMessages: [
+            ...prev.pendingMessages,
+            {
+              id: makeId(),
+              sessionId: enqueueSessionId,
+              content: content || "（附件）",
+              attachments: attachments.length > 0 ? attachments : undefined,
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+        notifyMessageAccepted(options?.onAccepted, enqueueSessionId);
+        return;
+      }
+
+      if (options?.forceSend && isSessionStreaming(get(), sessionId)) {
+        await get().cancel(client);
+      }
+
+      if (claimedDraftId) {
+        if (canPersistHistory(get())) {
           try {
             const created = await portalHistory.createSession({
               title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-              activeModel: state.activeModel,
+              activeModel: requestModel,
             });
             sessionId = created.id;
+            requestModel = created.active_model ?? requestModel;
             set((prev) => {
-              const draftId = prev.draftSessionId;
-              const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
+              const draftTokens = prev.sessionTokensBySessionId[claimedDraftId] ?? { ...EMPTY_USAGE };
               const nextTokensMap = { ...prev.sessionTokensBySessionId };
-              if (draftId) delete nextTokensMap[draftId];
+              delete nextTokensMap[claimedDraftId];
               nextTokensMap[created.id] = draftTokens;
+              const stillOnDraft = prev.activeSessionId === claimedDraftId;
               return {
-                draftSessionId: null,
-                activeSessionId: created.id,
+                draftSessionId: prev.draftSessionId === claimedDraftId ? null : prev.draftSessionId,
+                activeSessionId: stillOnDraft ? created.id : prev.activeSessionId,
                 sessions: [...prev.sessions, created],
                 sessionTokensBySessionId: nextTokensMap,
+                ...(stillOnDraft ? { sessionTokens: draftTokens } : {}),
               };
             });
           } catch (error) {
@@ -2029,25 +2223,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             tenant_id: input.tenantId ?? DEFAULT_TENANT,
             user_id: input.userId ?? DEFAULT_USER,
             title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-            active_model: state.activeModel,
+            active_model: requestModel,
             message_count: 0,
             created_at: now(),
             updated_at: now(),
           };
           set((prev) => ({
-            draftSessionId: null,
+            draftSessionId: prev.draftSessionId === claimedDraftId ? null : prev.draftSessionId,
             sessions: [...prev.sessions, promoted],
           }));
         }
       }
 
-    queueSessionId = sessionId;
+      queueSessionId = sessionId;
 
     const latest = get();
     const tenantId = input.tenantId ?? latest.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
     const userId = input.userId ?? latest.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
     const createdAtPair = pairedCreatedAt();
-    const userMessage: ChatMessage = {
+    const stagedUser: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
       tenant_id: tenantId,
@@ -2057,16 +2251,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       attachments: attachments.length > 0 ? attachments : undefined,
       created_at: createdAtPair.user,
     };
-    const webSearchEnabled = Boolean(input.webSearch);
-    const deepResearchEnabled = Boolean(input.deepResearch);
-    const assistantMessage: ChatMessage = {
+    userMessage = stagedUser;
+    webSearchEnabled = Boolean(input.webSearch);
+    deepResearchEnabled = Boolean(input.deepResearch);
+    const stagedAssistant: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
       tenant_id: tenantId,
       user_id: userId,
       role: "assistant",
       content: "",
-      model: latest.activeModel,
+      model: requestModel,
       created_at: createdAtPair.assistant,
       ...(deepResearchEnabled
         ? {
@@ -2079,9 +2274,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
         : {}),
     };
+    assistantMessage = stagedAssistant;
 
     const sessionMessages = getSessionMessages(latest.messages, sessionId);
-    const nextSessionMessages = [...sessionMessages, userMessage, assistantMessage];
+    nextSessionMessages = [...sessionMessages, stagedUser, stagedAssistant];
     const priorUserCount = sessionMessages.filter((m) => m.role === "user").length;
     const shouldAutoTitle = priorUserCount === 0;
     set((prev) => ({
@@ -2103,8 +2299,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
-        [userMessage.id]: {
-          versions: [toAssistantVersion(assistantMessage, { queryVersionIndex: 0, retryAttempt: 0, queryText: content })],
+        [stagedUser.id]: {
+          versions: [toAssistantVersion(stagedAssistant, { queryVersionIndex: 0, retryAttempt: 0, queryText: content })],
           activeIndex: 0,
           activeAssistantIndexByQueryVersion: { 0: 0 },
         },
@@ -2124,19 +2320,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         };
       }),
     }));
-    writeLastActiveSessionId(sessionId);
-    const sendingId = makeId();
-    let ownedRequestId = sendingId;
+    if (get().activeSessionId === sessionId) writeLastActiveSessionId(sessionId);
+    sendingId = makeId();
+    ownedRequestId = sendingId;
     setSessionStream(set, sessionId, {
       status: "sending",
       activeRequestId: sendingId,
       assistantMessageId: assistantMessage.id,
     });
+    notifyMessageAccepted(options?.onAccepted, sessionId);
+    } finally {
+      releaseDraftClaim();
+    }
+    if (!userMessage || !assistantMessage) return;
 
     // Deep research can run for minutes; refresh aborts SSE before the old
     // end-of-stream persist. Shell must hit history immediately so the turn
     // survives reload (workbench reattached via run-store hydrate / checkpoints).
-    if (deepResearchEnabled && get().hydrated) {
+    if (deepResearchEnabled && canPersistHistory(get())) {
       void persistAppendMessages(set, sessionId, [userMessage, assistantMessage]);
     }
 
@@ -2162,7 +2363,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         );
 
     const checkpointDeepResearchTurn = (force = false) => {
-      if (!deepResearchEnabled || !get().hydrated) return;
+      if (!deepResearchEnabled || !canPersistHistory(get())) return;
       const nowTs = Date.now();
       const last = deepResearchCheckpointAtByAssistantId.get(assistantMessage.id) ?? 0;
       if (!force && nowTs - last < DEEP_RESEARCH_CHECKPOINT_MS) return;
@@ -2354,7 +2555,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ordinaryCheckpoint?.stop();
       // Persist turn: deep-research always (incl. refresh abort). Ordinary chat
       // persists a clean end or a failed/disconnected answer; cancel persists itself.
-      if (get().hydrated) {
+      if (canPersistHistory(get())) {
         const after = get();
         const currentRequest = getSessionRequestId(after, sessionId);
         const stillOwner = !currentRequest || currentRequest === ownedRequestId;

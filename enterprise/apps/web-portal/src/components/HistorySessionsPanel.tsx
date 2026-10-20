@@ -22,6 +22,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
+import { useChatStore } from "@agenticx/feature-chat";
 import {
   formatHistoryRelativeTime,
   groupHistory,
@@ -54,6 +55,11 @@ export function HistorySessionsPanel({
 }: HistorySessionsPanelProps) {
   const t = useTranslations("workspace");
   const locale = useLocale();
+  const historyLoading = useChatStore((state) => state.historyLoading);
+  const historyNextCursor = useChatStore((state) => state.historyNextCursor);
+  const historyLoadingMore = useChatStore((state) => state.historyLoadingMore);
+  const historyLoadMoreError = useChatStore((state) => state.historyLoadMoreError);
+  const loadMoreSessions = useChatStore((state) => state.loadMoreSessions);
   const [query, setQuery] = React.useState("");
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const selecting = selected.size > 0;
@@ -133,8 +139,20 @@ export function HistorySessionsPanel({
           </div>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-24">
-          {grouped.length === 0 ? (
+        <div
+          className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-24"
+          onScroll={(event) => {
+            if (!historyNextCursor || historyLoadingMore) return;
+            const el = event.currentTarget;
+            if (el.scrollHeight - el.scrollTop - el.clientHeight > 48) return;
+            void loadMoreSessions();
+          }}
+        >
+          {historyLoading && sessions.length === 0 ? (
+            <div role="status" className="px-4 py-12 text-center text-sm text-muted-foreground">
+              {t("loadingHistory")}
+            </div>
+          ) : grouped.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center text-sm text-muted-foreground">
               <MessageSquare className="h-5 w-5" />
               <span>{query.trim() ? t("historySearchEmpty") : t("noHistory")}</span>
@@ -257,6 +275,24 @@ export function HistorySessionsPanel({
               ))}
             </div>
           )}
+          {historyNextCursor ? (
+            <div className="px-2 pt-5 text-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={historyLoadingMore}
+                onClick={() => void loadMoreSessions()}
+              >
+                {historyLoadingMore ? "正在加载更多…" : "加载更多"}
+              </Button>
+            </div>
+          ) : null}
+          {historyLoadMoreError ? (
+            <p role="alert" className="px-4 pt-3 text-center text-xs text-destructive">
+              {historyLoadMoreError}
+            </p>
+          ) : null}
         </div>
 
         {selecting ? (

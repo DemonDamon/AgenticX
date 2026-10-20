@@ -14,6 +14,8 @@ import {
   type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
+  type ChatSessionListCursor,
+  type ChatSessionListPage,
 } from "./types";
 
 export type SqlDialect = "postgresql" | "mysql";
@@ -64,6 +66,33 @@ function truncatePreview(value: unknown, max = 160): string | undefined {
   const text = String(value).replace(/\s+/g, " ").trim();
   if (!text) return undefined;
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function isCanonicalIso(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value;
+}
+
+/** Illegal cursors start over at the first page instead of skipping rows. */
+function usableSessionListCursor(cursor: ChatSessionListCursor | null): ChatSessionListCursor | null {
+  if (!cursor) return null;
+  if (cursor.pinnedAt !== null && !isCanonicalIso(cursor.pinnedAt)) return null;
+  if (!isCanonicalIso(cursor.createdAt) || !ULID_RE.test(cursor.id)) return null;
+  return cursor;
+}
+
+function sessionPreviewSql(): string {
+  return `coalesce(
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'assistant'
+              order by m.created_at asc limit 1),
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'user'
+              order by m.created_at asc limit 1)
+           ) as preview_text`;
 }
 
 function mapSession(row: Record<string, unknown>): ChatSession {
@@ -196,45 +225,92 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     return (await this.ownedSession(this.client, ctx, sessionId)) !== null;
   }
 
+  private sessionListOrderBy(withIdTieBreak: boolean): string {
+    const tie = withIdTieBreak ? ", s.id desc" : "";
+    return this.dialect === "postgresql"
+      ? `(s.pinned_at is null) asc, s.pinned_at desc nulls last, s.created_at desc${tie}`
+      : `(s.pinned_at is null) asc, s.pinned_at desc, s.created_at desc${tie}`;
+  }
+
   public async listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]> {
     const p1 = this.dialect === "postgresql" ? "$1" : "?";
     const p2 = this.dialect === "postgresql" ? "$2" : "?";
-    const previewExpr =
-      this.dialect === "postgresql"
-        ? `coalesce(
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'assistant'
-              order by m.created_at asc limit 1),
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'user'
-              order by m.created_at asc limit 1)
-           ) as preview_text`
-        : `coalesce(
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'assistant'
-              order by m.created_at asc limit 1),
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'user'
-              order by m.created_at asc limit 1)
-           ) as preview_text`;
-    const orderBy =
-      this.dialect === "postgresql"
-        ? `(s.pinned_at is null) asc, s.pinned_at desc nulls last, s.created_at desc`
-        : `(s.pinned_at is null) asc, s.pinned_at desc, s.created_at desc`;
     const result = await this.client.query(
-      `select s.*, ${previewExpr}
+      `select s.*, ${sessionPreviewSql()}
        from chat_sessions s
        where s.tenant_id = ${p1}
          and s.user_id = ${p2}
          and s.deleted_at is null and s.message_count > 0
-       order by ${orderBy}`,
+       order by ${this.sessionListOrderBy(false)}`,
       [ctx.tenantId, ctx.userId],
     );
     return result.rows.map(mapSession);
+  }
+
+  public async getChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<ChatSession> {
+    const result = await this.client.query(
+      `select s.*, ${sessionPreviewSql()}
+       from chat_sessions s
+       where s.id = ${this.dialect === "postgresql" ? "$1" : "?"}
+         and s.tenant_id = ${this.dialect === "postgresql" ? "$2" : "?"}
+         and s.user_id = ${this.dialect === "postgresql" ? "$3" : "?"}
+         and s.deleted_at is null and s.message_count > 0
+       limit 1`,
+      [sessionId, ctx.tenantId, ctx.userId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new ChatHistoryNotFoundError();
+    return mapSession(row);
+  }
+
+  public async listChatSessionsPage(
+    ctx: ChatHistoryContext,
+    input: { limit: number; cursor: ChatSessionListCursor | null },
+  ): Promise<ChatSessionListPage> {
+    const params: unknown[] = [];
+    const param = (value: unknown): string => {
+      params.push(value);
+      return this.dialect === "postgresql" ? `$${params.length}` : "?";
+    };
+    const tenant = param(ctx.tenantId);
+    const user = param(ctx.userId);
+    const beforeCreated = (cursor: ChatSessionListCursor) => {
+      const createdAt = new Date(cursor.createdAt);
+      return `(s.created_at < ${param(createdAt)} or
+        (s.created_at = ${param(createdAt)} and s.id < ${param(cursor.id)}))`;
+    };
+    const cursor = usableSessionListCursor(input.cursor);
+    let cursorFilter = "";
+    if (cursor?.pinnedAt) {
+      const pinnedAt = new Date(cursor.pinnedAt);
+      cursorFilter = `and (s.pinned_at is null or s.pinned_at < ${param(pinnedAt)} or
+        (s.pinned_at = ${param(pinnedAt)} and ${beforeCreated(cursor)}))`;
+    } else if (cursor) {
+      cursorFilter = `and s.pinned_at is null and ${beforeCreated(cursor)}`;
+    }
+    const limit = param(input.limit + 1);
+    const orderBy = this.sessionListOrderBy(true);
+    const result = await this.client.query(
+      `select s.*, ${sessionPreviewSql()}
+       from (
+         select * from chat_sessions s
+         where s.tenant_id = ${tenant} and s.user_id = ${user}
+           and s.deleted_at is null and s.message_count > 0
+           ${cursorFilter}
+         order by ${orderBy}
+         limit ${limit}
+       ) s
+       order by ${orderBy}`,
+      params,
+    );
+    const sessions = result.rows.slice(0, input.limit).map(mapSession);
+    const last = result.rows.length > input.limit ? sessions.at(-1) : undefined;
+    return {
+      sessions,
+      nextCursor: last
+        ? { pinnedAt: last.pinned_at ?? null, createdAt: last.created_at, id: last.id }
+        : null,
+    };
   }
 
   public async createChatSession(

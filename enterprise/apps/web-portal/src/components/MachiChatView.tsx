@@ -94,6 +94,14 @@ type MachiChatViewProps = {
   onDeepResearchModeChange?: (next: boolean) => void;
 };
 
+export function shouldIgnoreComposerSubmission(
+  revision: number,
+  sendingRevision: number | null,
+  acceptedRevision: number | null,
+): boolean {
+  return revision === sendingRevision || revision === acceptedRevision;
+}
+
 function isComplianceError(message: string): boolean {
   return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
 }
@@ -141,6 +149,24 @@ export function MachiChatView({
   const continuableResponse = findContinuableResponse(messages, activeSessionId);
   const displayErrorMessage = errorMessage ? localizeChatErrorMessage(errorMessage, t) : errorMessage;
   const [draft, setDraft] = React.useState("");
+  const composerDraftRef = React.useRef(draft);
+  const composerRevisionRef = React.useRef(0);
+  const sendingComposerRevisionRef = React.useRef<number | null>(null);
+  const acceptedComposerRevisionRef = React.useRef<number | null>(null);
+  const markComposerChanged = React.useCallback(() => {
+    composerRevisionRef.current += 1;
+    sendingComposerRevisionRef.current = null;
+    acceptedComposerRevisionRef.current = null;
+  }, []);
+  const updateComposerDraft = React.useCallback((value: string) => {
+    if (composerDraftRef.current !== value) markComposerChanged();
+    composerDraftRef.current = value;
+    setDraft(value);
+  }, [markComposerChanged]);
+  const clearComposerDraft = React.useCallback(() => {
+    composerDraftRef.current = "";
+    setDraft("");
+  }, []);
   const [feedbackByMessageId, setFeedbackByMessageId] = React.useState<
     Record<string, "like" | "dislike">
   >({});
@@ -796,40 +822,72 @@ export function MachiChatView({
 
   const handleSend = React.useCallback(
     (opts?: { forceSend?: boolean }) => {
-      const trimmed = draft.trim();
+      const submissionRevision = composerRevisionRef.current;
+      if (
+        shouldIgnoreComposerSubmission(
+          submissionRevision,
+          sendingComposerRevisionRef.current,
+          acceptedComposerRevisionRef.current,
+        )
+      ) {
+        return;
+      }
+      const trimmed = composerDraftRef.current.trim();
       const messageAttachments = toMessageAttachments();
       if (!trimmed && messageAttachments.length === 0) return;
-      setDraft("");
+      const sendSessionId = String(useChatStore.getState().activeSessionId ?? "").trim();
+      if (!sendSessionId) return;
+      sendingComposerRevisionRef.current = submissionRevision;
+      clearComposerDraft();
       clearAttachments();
       // 计划卡仍在时：主输入只改方案，绝不排队 / forceSend 开新对话。
       void (async () => {
-        const store = useChatStore.getState();
-        const sid = store.activeSessionId;
-        if (sid && findActivePlanChatGate(store.messages, sid)) {
-          await resumePlanChatFromComposer(trimmed);
-          return;
+        try {
+          const store = useChatStore.getState();
+          if (findActivePlanChatGate(store.messages, sendSessionId)) {
+            const handled = await resumePlanChatFromComposer(trimmed);
+            if (handled && composerRevisionRef.current === submissionRevision) {
+              acceptedComposerRevisionRef.current = submissionRevision;
+            }
+            return;
+          }
+          // 计划对齐中禁止 forceSend：会 cancel 原 SSE，模型会「直接开写」而不是改计划卡。
+          const gateStillOpen = Boolean(
+            findActivePlanChatGate(useChatStore.getState().messages, sendSessionId),
+          );
+          await sendMessage(
+            client,
+            {
+              content: trimmed,
+              attachments: messageAttachments,
+              webSearch: webSearchMode === "auto",
+              deepResearch: deepResearchMode,
+              skillId: focusedSkillId,
+            },
+            {
+              targetSessionId: sendSessionId,
+              ...(opts?.forceSend && !gateStillOpen ? { forceSend: true } : {}),
+              onAccepted: (acceptedSessionId) => {
+                const activeSessionId = useChatStore.getState().activeSessionId;
+                if (activeSessionId !== acceptedSessionId && activeSessionId !== sendSessionId) return;
+                if (composerRevisionRef.current === submissionRevision) {
+                  acceptedComposerRevisionRef.current = submissionRevision;
+                }
+              },
+            },
+          );
+        } finally {
+          if (sendingComposerRevisionRef.current === submissionRevision) {
+            sendingComposerRevisionRef.current = null;
+          }
         }
-        // 计划对齐中禁止 forceSend：会 cancel 原 SSE，模型会「直接开写」而不是改计划卡。
-        const gateStillOpen =
-          !!sid && Boolean(findActivePlanChatGate(useChatStore.getState().messages, sid));
-        await sendMessage(
-          client,
-          {
-            content: trimmed,
-            attachments: messageAttachments,
-            webSearch: webSearchMode === "auto",
-            deepResearch: deepResearchMode,
-            skillId: focusedSkillId,
-          },
-          opts?.forceSend && !gateStillOpen ? { forceSend: true } : undefined,
-        );
       })();
     },
     [
       clearAttachments,
+      clearComposerDraft,
       client,
       deepResearchMode,
-      draft,
       resumePlanChatFromComposer,
       sendMessage,
       toMessageAttachments,
@@ -986,7 +1044,7 @@ export function MachiChatView({
         status={
           planChatRevising ? "sending" : planChatGateActive ? "idle" : status
         }
-        onChange={setDraft}
+        onChange={updateComposerDraft}
         onSend={() => handleSend()}
         onForceSend={() => handleSend({ forceSend: true })}
         onCancel={() => void cancel(client)}

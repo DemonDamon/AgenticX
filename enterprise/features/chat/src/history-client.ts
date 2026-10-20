@@ -150,8 +150,17 @@ export type AppendMessagesOptions = {
   retries?: number;
 };
 
+export type ChatSessionPage = {
+  sessions: ChatSession[];
+  nextCursor: string | null;
+};
+
+export const HISTORY_PAGE_SIZE = 40;
+
 export type PortalChatHistoryClient = {
   listSessions(): Promise<ChatSession[]>;
+  listSessionsPage(input?: { limit?: number; cursor?: string | null }): Promise<ChatSessionPage>;
+  getSession(sessionId: string): Promise<ChatSession>;
   createSession(input: { title: string; activeModel?: string }): Promise<ChatSession>;
   getMessages(sessionId: string): Promise<ChatMessage[]>;
   appendMessages(
@@ -176,6 +185,30 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
       const res = await historyRequest(BASE, { cache: "no-store" });
       const json = (await res.json()) as { data?: { sessions?: ChatSession[] } };
       return json.data?.sessions ?? [];
+    },
+
+    async listSessionsPage(input) {
+      const params = new URLSearchParams({
+        limit: String(input?.limit ?? HISTORY_PAGE_SIZE),
+      });
+      if (input?.cursor) params.set("cursor", input.cursor);
+      const res = await historyRequest(`${BASE}?${params}`, { cache: "no-store" });
+      const json = (await res.json()) as {
+        data?: { sessions?: ChatSession[]; next_cursor?: string | null };
+      };
+      return {
+        sessions: json.data?.sessions ?? [],
+        nextCursor: json.data?.next_cursor ?? null,
+      };
+    },
+
+    async getSession(sessionId) {
+      const res = await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}`, {
+        cache: "no-store",
+      });
+      const json = (await res.json()) as { data?: { session?: ChatSession } };
+      if (!json.data?.session) throw new Error("missing session in response");
+      return json.data.session;
     },
 
     async createSession(input) {

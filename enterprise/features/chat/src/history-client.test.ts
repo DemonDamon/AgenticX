@@ -40,6 +40,24 @@ describe("historyRequest", () => {
   });
 });
 
+describe("createPortalChatHistoryClient.listSessionsPage", () => {
+  it("requests one page and reads next_cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { sessions: [{ id: "A" }], next_cursor: "cursor-2" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createPortalChatHistoryClient();
+    await expect(client.listSessionsPage({ cursor: "cursor-1" })).resolves.toEqual({
+      sessions: [{ id: "A" }],
+      nextCursor: "cursor-2",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/chat/sessions?limit=40&cursor=cursor-1");
+  });
+});
+
 describe("createPortalChatHistoryClient.appendMessages", () => {
   it("retries then persists", async () => {
     const fetchMock = vi

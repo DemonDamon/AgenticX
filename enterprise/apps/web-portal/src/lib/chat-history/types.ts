@@ -6,6 +6,17 @@ export type ChatHistoryContext = {
   userId: string;
 };
 
+export type ChatSessionListCursor = {
+  pinnedAt: string | null;
+  createdAt: string;
+  id: string;
+};
+
+export type ChatSessionListPage = {
+  sessions: ChatSession[];
+  nextCursor: ChatSessionListCursor | null;
+};
+
 export class ChatHistoryNotFoundError extends Error {
   public constructor(message = "session not found") {
     super(message);
@@ -27,7 +38,12 @@ export type AppendChatMessagesOptions = {
 
 export interface ChatHistoryStore {
   isChatSessionOwned(ctx: ChatHistoryContext, sessionId: string): Promise<boolean>;
+  getChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<ChatSession>;
   listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]>;
+  listChatSessionsPage(
+    ctx: ChatHistoryContext,
+    input: { limit: number; cursor: ChatSessionListCursor | null },
+  ): Promise<ChatSessionListPage>;
   createChatSession(
     ctx: ChatHistoryContext,
     input: { title: string; activeModel?: string },

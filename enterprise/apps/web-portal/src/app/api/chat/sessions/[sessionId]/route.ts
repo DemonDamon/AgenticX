@@ -1,14 +1,41 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import {
   chatHistoryNotFound,
   chatHistoryServerError,
   chatHistoryUnauthorized,
   toChatHistoryContext,
 } from "../../../../../lib/chat-history-http";
-import { ChatHistoryNotFoundError, patchChatSession, softDeleteChatSession } from "../../../../../lib/chat-history";
+import {
+  ChatHistoryNotFoundError,
+  getChatSession,
+  patchChatSession,
+  softDeleteChatSession,
+} from "../../../../../lib/chat-history";
 
 type Params = Promise<{ sessionId: string }>;
+
+export async function GET(_request: Request, segmentData: { params: Params }) {
+  const session = await getSessionFromCookies();
+  if (!session) return chatHistoryUnauthorized();
+  if (session.mustChangePassword) return passwordChangeRequiredResponse();
+  const { sessionId } = await segmentData.params;
+  if (!sessionId?.trim()) {
+    return NextResponse.json({ error: { code: "40001", message: "missing session id" } }, { status: 400 });
+  }
+  try {
+    const ctx = toChatHistoryContext(session);
+    const chatSession = await getChatSession(ctx, sessionId);
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { session: chatSession },
+    });
+  } catch (error) {
+    if (error instanceof ChatHistoryNotFoundError) return chatHistoryNotFound();
+    return chatHistoryServerError(error);
+  }
+}
 
 export async function PATCH(request: Request, segmentData: { params: Params }) {
   const session = await getSessionFromCookies();

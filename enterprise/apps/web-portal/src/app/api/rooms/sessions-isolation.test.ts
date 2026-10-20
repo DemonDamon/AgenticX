@@ -40,7 +40,7 @@ describe("personal chat sessions stay isolated from rooms", () => {
         updated_at: "2026-08-28T00:00:00.000Z",
       },
     ]);
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/chat/sessions"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown> };
     expect(body.data.sessions).toHaveLength(1);

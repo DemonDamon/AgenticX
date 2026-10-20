@@ -9,10 +9,12 @@ import {
   type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
+  type ChatSessionListCursor,
+  type ChatSessionListPage,
 } from "./chat-history/types";
 
 export { ChatHistoryConflictError, ChatHistoryNotFoundError };
-export type { AppendChatMessagesOptions, ChatHistoryContext };
+export type { AppendChatMessagesOptions, ChatHistoryContext, ChatSessionListCursor, ChatSessionListPage };
 
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
@@ -41,8 +43,19 @@ export function isChatSessionOwned(
   return store().isChatSessionOwned(ctx, sessionId);
 }
 
+export function getChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<ChatSession> {
+  return store().getChatSession(ctx, sessionId);
+}
+
 export function listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]> {
   return store().listChatSessions(ctx);
+}
+
+export function listChatSessionsPage(
+  ctx: ChatHistoryContext,
+  input: { limit: number; cursor: ChatSessionListCursor | null },
+): Promise<ChatSessionListPage> {
+  return store().listChatSessionsPage(ctx, input);
 }
 
 export function createChatSession(
