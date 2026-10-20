@@ -378,8 +378,8 @@ export function AppShell({ children }: AppShellProps) {
         >
           {/* brand */}
           <div className="flex h-14 items-center justify-center gap-2 px-3">
-            <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
-              <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
+            <span className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+              <MachiAvatar size={32} className="h-8 w-8" />
             </span>
             {!collapsed && (
               <div className="min-w-0 flex-1">

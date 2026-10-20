@@ -7,26 +7,22 @@ type MachiAvatarProps = {
   src?: string;
 };
 
-export function MachiAvatar({ className, size = 96, src = "/machi-logo-transparent.png" }: MachiAvatarProps) {
-  const isDefaultLogo = src === "/machi-logo-transparent.png";
+export function MachiAvatar({ className, size = 96, src = "/near-logo.png" }: MachiAvatarProps) {
   return (
     <span
       className={cn(
-        "relative inline-flex items-center justify-center overflow-hidden rounded-md",
+        "relative inline-flex items-center justify-center overflow-hidden",
         className
       )}
       style={{ width: size, height: size }}
-      aria-label="Machi avatar"
+      aria-label="Near"
     >
       <img
         src={src}
-        alt="Machi"
+        alt="Near"
         width={size}
         height={size}
-        className={cn(
-          "h-full w-full object-cover",
-          isDefaultLogo && "dark:invert opacity-90 dark:opacity-100"
-        )}
+        className="h-full w-full object-contain"
       />
     </span>
   );

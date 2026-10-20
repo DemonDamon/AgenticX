@@ -25,12 +25,12 @@ export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps
   return (
     <div className={["flex flex-col items-center gap-4 text-center", className].filter(Boolean).join(" ")}>
       <img
-        src="/machi-logo-transparent.png"
+        src="/near-logo.png"
         alt=""
         width={176}
         height={184}
         draggable={false}
-        className="h-40 w-40 select-none object-contain opacity-[0.92] dark:invert md:h-44 md:w-44"
+        className="h-40 w-40 select-none object-contain opacity-[0.92] md:h-44 md:w-44"
       />
       <div className="flex flex-col items-center gap-2 select-none">
         <div

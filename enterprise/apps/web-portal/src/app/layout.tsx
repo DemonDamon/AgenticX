@@ -43,4 +43,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 
 export const metadata = {
   title: "AgenticX Enterprise · web-portal",
+  icons: {
+    icon: [{ url: "/near-mark.png?v=2", type: "image/png", sizes: "256x256" }],
+  },
 };

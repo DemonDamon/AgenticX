@@ -360,8 +360,8 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             ].join(" ")}
           >
             <div className={`flex min-w-0 items-center gap-2 ${collapsed ? "justify-center" : "flex-1"}`}>
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center">
+                <MachiAvatar size={36} className="h-9 w-9" />
               </span>
               {!collapsed && (
                 <div className="min-w-0 flex-1">
