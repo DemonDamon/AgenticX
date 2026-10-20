@@ -182,7 +182,8 @@
     "welcomeTitle": "我是 Machi",
     "welcomeSubtitle": "很高兴见到你，有什么我可以帮忙的吗？",
     "loadingMessages": "加载消息…",
-    "scrollToBottom": "回到底部"
+    "scrollToBottom": "回到底部",
+    "feedbackSaveFailed": "反馈没有保存，请稍后重试"
   },
   "settings": {
     "title": "设置",

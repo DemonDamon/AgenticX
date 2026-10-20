@@ -12,6 +12,7 @@ export * from "./policy";
 export * from "./sso-providers";
 export * from "./chat-sessions";
 export * from "./chat-messages";
+export * from "./chat-message-feedback";
 export * from "./chat-history-operations";
 export * from "./chat-artifacts";
 export * from "./chat-attachments";

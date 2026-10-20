@@ -22,6 +22,7 @@ import { log } from "../../../../lib/observability/logger";
 import { withRequestLog } from "../../../../lib/observability/with-request-log";
 import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
 import { applyAssignedSkillPrompt } from "../../../../lib/enterprise-skill-context";
+import { recallFeedbackMessages } from "../../../../lib/chat-feedback-context";
 import type { PlatformFeature } from "@agenticx/config";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
@@ -298,7 +299,17 @@ export async function POST(request: Request) {
   }
 
   if (parsedBody) {
-    forwardBody = JSON.stringify(await withSkills(parsedBody));
+    // Ordinary lane only. recallFeedbackMessages calls loadPortalFeedbackContext
+    // and withFeedbackContext. Web search and deep research return above.
+    const skilled = await withSkills(parsedBody);
+    const recalled = await recallFeedbackMessages(skilled.messages, {
+      tenantId: session.tenantId,
+      userId: session.userId,
+    });
+    forwardBody = JSON.stringify({
+      ...skilled,
+      messages: Array.isArray(recalled) ? recalled : skilled.messages,
+    });
   }
 
   let upstream: Response;

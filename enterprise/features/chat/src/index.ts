@@ -42,3 +42,14 @@ export * from "./hooks/useComposerAttachments";
 export * from "./utils/clipboard-images";
 export * from "./utils/model-vision";
 export * from "./utils/build-multimodal-content";
+export {
+  createChatFeedbackClient,
+  createPortalChatFeedbackClient,
+  parseChatFeedbackMap,
+} from "./feedback-client";
+export type {
+  ChatFeedbackByMessageId,
+  ChatFeedbackClient,
+  ChatFeedbackValue,
+  ChatMessageFeedback,
+} from "./feedback-client";

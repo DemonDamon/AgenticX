@@ -31,6 +31,24 @@ export interface SqlClient {
 
 const ALLOWED_ROLES: ChatMessageRole[] = ["system", "user", "assistant", "tool"];
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+const WEB_FEEDBACK_COLUMNS = [
+  "id",
+  "tenant_id",
+  "user_id",
+  "department_id",
+  "session_id",
+  "message_id",
+  "value",
+  "source",
+  "external_session_id",
+  "external_message_id",
+  "trace_id",
+  "provider",
+  "model",
+  "answer_excerpt",
+  "created_at",
+  "updated_at",
+] as const;
 
 function normalizeRole(role: string): ChatMessageRole {
   if (ALLOWED_ROLES.includes(role as ChatMessageRole)) return role as ChatMessageRole;
@@ -499,6 +517,83 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     });
   }
 
+  /**
+   * message_id is ON DELETE CASCADE, so replacing a session's messages would
+   * drop every vote in that session. Snapshot web votes first and put back
+   * the ones whose message still exists after the rewrite.
+   */
+  private feedbackTableExists = false;
+
+  /** Editing must keep working while a deployment has not run the feedback migration yet. */
+  private async hasFeedbackTable(client: SqlClient): Promise<boolean> {
+    if (this.feedbackTableExists) return true;
+    const result =
+      this.dialect === "postgresql"
+        ? await client.query(`select to_regclass('chat_message_feedback') is not null as present`, [])
+        : await client.query(
+            `select count(*) as present from information_schema.tables
+             where table_schema = database() and table_name = 'chat_message_feedback'`,
+            [],
+          );
+    const present = result.rows[0]?.present;
+    this.feedbackTableExists = present === true || Number(present) > 0;
+    return this.feedbackTableExists;
+  }
+
+  private async snapshotWebFeedback(
+    client: SqlClient,
+    ctx: ChatHistoryContext,
+    sessionId: string,
+  ): Promise<Record<string, unknown>[]> {
+    if (!(await this.hasFeedbackTable(client))) return [];
+    const p = this.dialect === "postgresql";
+    const result = await client.query(
+      `select ${WEB_FEEDBACK_COLUMNS.join(", ")}
+       from chat_message_feedback
+       where tenant_id = ${p ? "$1" : "?"}
+         and user_id = ${p ? "$2" : "?"}
+         and session_id = ${p ? "$3" : "?"}
+         and source = 'web'`,
+      [ctx.tenantId, ctx.userId, sessionId],
+    );
+    return result.rows;
+  }
+
+  private async restoreWebFeedback(
+    client: SqlClient,
+    rows: Record<string, unknown>[],
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const width = WEB_FEEDBACK_COLUMNS.length;
+    const params: unknown[] = [];
+    for (const row of rows) {
+      for (const column of WEB_FEEDBACK_COLUMNS) {
+        params.push(row[column] ?? null);
+      }
+    }
+    const columnList = WEB_FEEDBACK_COLUMNS.join(", ");
+    if (this.dialect === "postgresql") {
+      let offset = 0;
+      const values = rows
+        .map(() => {
+          const tuple = `(${this.placeholders(width, offset)})`;
+          offset += width;
+          return tuple;
+        })
+        .join(", ");
+      await client.query(
+        `insert into chat_message_feedback (${columnList}) values ${values}`,
+        params,
+      );
+      return;
+    }
+    const values = rows.map(() => `(${this.placeholders(width)})`).join(", ");
+    await client.query(
+      `insert into chat_message_feedback (${columnList}) values ${values}`,
+      params,
+    );
+  }
+
   public async replaceAllChatSessionMessages(
     ctx: ChatHistoryContext,
     sessionId: string,
@@ -507,6 +602,7 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     await this.client.transaction(async (tx) => {
       const session = await this.ownedSession(tx, ctx, sessionId, true);
       if (!session) throw new ChatHistoryNotFoundError();
+      const feedbackRows = await this.snapshotWebFeedback(tx, ctx, sessionId);
       await tx.query(
         `delete from chat_messages where session_id = ${this.dialect === "postgresql" ? "$1" : "?"}
          and tenant_id = ${this.dialect === "postgresql" ? "$2" : "?"}
@@ -515,6 +611,14 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
       );
       const now = new Date();
       const lastAt = await this.insertMessages(tx, ctx, sessionId, messages, now);
+      const survivingIds = new Set(messages.map((message) => message.id));
+      await this.restoreWebFeedback(
+        tx,
+        feedbackRows.filter((row) => {
+          const messageId = row.message_id == null ? "" : String(row.message_id);
+          return messageId.length > 0 && survivingIds.has(messageId);
+        }),
+      );
       const firstUser = messages.find((message) => message.role === "user");
       const title =
         firstUser && sessionTitleNeedsAutoFill(String(session.title))

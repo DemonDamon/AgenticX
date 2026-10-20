@@ -27,6 +27,7 @@ import {
   setDeepResearchInteractionPref,
   DEEP_RESEARCH_INTERACTION_OPTION_IDS,
   findActivePlanChatGate,
+  createPortalChatFeedbackClient,
   type DeepResearchInteractionPref,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
@@ -57,6 +58,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
   cn,
+  toast,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
 import { ComposerPlusMenu, type WebSearchMode } from "./ComposerPlusMenu";
@@ -105,6 +107,7 @@ export function MachiChatView({
   // re-run model-menu / switchModel fallback logic on every delta.
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const draftSessionId = useChatStore((s) => s.draftSessionId);
   const messages = useChatStore((s) => s.messages);
   const status = useChatStore((s) => s.status);
   const planChatRevising = useChatStore((s) => s.planChatRevising);
@@ -135,6 +138,61 @@ export function MachiChatView({
   const displayErrorMessage =
     errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
   const [draft, setDraft] = React.useState("");
+  const [feedbackByMessageId, setFeedbackByMessageId] = React.useState<
+    Record<string, "like" | "dislike">
+  >({});
+  const feedbackClient = React.useMemo(() => createPortalChatFeedbackClient(), []);
+  const feedbackWriteGen = React.useRef(0);
+  React.useEffect(() => {
+    const sessionId =
+      activeSessionId && activeSessionId !== draftSessionId ? activeSessionId : "";
+    const genAtStart = feedbackWriteGen.current;
+    let cancelled = false;
+    setFeedbackByMessageId({});
+    if (!sessionId) return;
+    void feedbackClient
+      .list(sessionId)
+      .then((next) => {
+        if (cancelled || feedbackWriteGen.current !== genAtStart) return;
+        if (useChatStore.getState().activeSessionId !== sessionId) return;
+        setFeedbackByMessageId(next);
+      })
+      .catch(() => {
+        // 回显失败不影响当前对话。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, draftSessionId, feedbackClient]);
+  const handleFeedback = React.useCallback(
+    async (messageId: string, type: "like" | "dislike") => {
+      const sessionId =
+        activeSessionId && activeSessionId !== draftSessionId ? activeSessionId : "";
+      if (!sessionId || !messageId) return;
+      const clearing = feedbackByMessageId[messageId] === type;
+      feedbackWriteGen.current += 1;
+      try {
+        if (clearing) {
+          await feedbackClient.clear({ sessionId, messageId });
+        } else {
+          await feedbackClient.set({ sessionId, messageId, value: type });
+        }
+        if (useChatStore.getState().activeSessionId !== sessionId) return;
+        setFeedbackByMessageId((prev) => {
+          if (clearing) {
+            if (!Object.prototype.hasOwnProperty.call(prev, messageId)) return prev;
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          }
+          return { ...prev, [messageId]: type };
+        });
+      } catch {
+        toast.error(t("feedbackSaveFailed"));
+      }
+    },
+    [activeSessionId, draftSessionId, feedbackByMessageId, feedbackClient, t],
+  );
   const [orgSkills, setOrgSkills] = React.useState<
     Array<{ id: string; displayName: string; selectable: boolean; reason?: string }>
   >([]);
@@ -1269,8 +1327,9 @@ export function MachiChatView({
                     navigator.clipboard.writeText(url);
                     console.log("Shared:", url);
                   }}
+                  feedbackByMessageId={feedbackByMessageId}
                   onFeedback={(messageId, type) => {
-                    console.log(`Feedback ${type} for message ${messageId}`);
+                    void handleFeedback(messageId, type);
                   }}
                 />
               </div>

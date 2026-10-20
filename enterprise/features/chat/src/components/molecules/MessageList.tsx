@@ -166,6 +166,8 @@ type MessageListProps = {
   onShare?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
+  /** Current user's vote for each message, used to echo a saved like or dislike. */
+  feedbackByMessageId?: Record<string, "like" | "dislike" | null | undefined>;
   /** Kimi-style jump-to-bottom control when user scrolls up during streaming. */
   showScrollToBottomFab?: boolean;
   scrollToBottomLabel?: string;
@@ -367,6 +369,7 @@ export function MessageList({
   onShare,
   onCopy,
   onFeedback,
+  feedbackByMessageId,
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
@@ -1217,13 +1220,24 @@ export function MessageList({
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    className={
+                                      feedbackByMessageId?.[message.id] === "like"
+                                        ? "h-7 w-7 rounded-full bg-success/15 text-success hover:bg-success/20 hover:text-success"
+                                        : "h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    }
+                                    aria-pressed={feedbackByMessageId?.[message.id] === "like"}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       onFeedback?.(message.id, "like");
                                     }}
                                   >
-                                    <IconThumbsUp className="h-3.5 w-3.5" />
+                                    <IconThumbsUp
+                                      className={
+                                        feedbackByMessageId?.[message.id] === "like"
+                                          ? "h-3.5 w-3.5 fill-current"
+                                          : "h-3.5 w-3.5"
+                                      }
+                                    />
                                   </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>{copy.messageActions.helpful}</TooltipContent>
@@ -1233,13 +1247,24 @@ export function MessageList({
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    className={
+                                      feedbackByMessageId?.[message.id] === "dislike"
+                                        ? "h-7 w-7 rounded-full bg-danger/15 text-danger hover:bg-danger/20 hover:text-danger"
+                                        : "h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    }
+                                    aria-pressed={feedbackByMessageId?.[message.id] === "dislike"}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       onFeedback?.(message.id, "dislike");
                                     }}
                                   >
-                                    <IconThumbsDown className="h-3.5 w-3.5" />
+                                    <IconThumbsDown
+                                      className={
+                                        feedbackByMessageId?.[message.id] === "dislike"
+                                          ? "h-3.5 w-3.5 fill-current"
+                                          : "h-3.5 w-3.5"
+                                      }
+                                    />
                                   </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>{copy.messageActions.unhelpful}</TooltipContent>
