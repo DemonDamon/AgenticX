@@ -5,9 +5,20 @@ import enterprisePkg from "../../package.json";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self'; object-src 'none'; base-uri 'self'" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+];
+
 const config: NextConfig = {
   env: {
     NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,
+  },
+  // HSTS is applied per request in src/middleware.ts so it can read deploy env.
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
   transpilePackages: [
     "@agenticx/ui",
