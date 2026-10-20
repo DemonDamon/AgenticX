@@ -100,6 +100,7 @@ import {
   sectionMeetsFormat,
 } from "./report-writer";
 import { finalizeReportArtifacts } from "./finalize-report-artifacts";
+import { publicRetrievalFetch } from "./retrieval-policy";
 import {
   refreshGatewayBearer,
   type RefreshAccessToken,
@@ -748,6 +749,22 @@ export async function runDeepResearchTurn(
       "chat.answer",
     );
     return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT, traceId);
+  }
+
+  // 仅纯文本、非续跑的公开研究为发往网关的请求签名。大纲与分节写作由签名函数按消息形态拒绝。
+  const plainTextPublicResearch =
+    !deps.continueFromPlanGate &&
+    !deps.headers["x-agenticx-attachment-route"] &&
+    originalMessages.every((message) => {
+      const content = (message as { content?: unknown }).content;
+      return content == null || typeof content === "string";
+    });
+  if (plainTextPublicResearch) {
+    const gatewayFetch = deps.fetchImpl ?? fetch;
+    deps = {
+      ...deps,
+      fetchImpl: publicRetrievalFetch(gatewayFetch, deps.url),
+    };
   }
 
   const encoder = new TextEncoder();

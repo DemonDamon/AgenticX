@@ -500,12 +500,13 @@ func makeEvalContext(identity requestIdentity, stage string) policyengine.EvalCo
 		clientType = "web-portal"
 	}
 	return policyengine.EvalContext{
-		TenantID:   identity.TenantID,
-		DeptIDs:    deptIDs,
-		RoleCodes:  roleCodes,
-		UserID:     identity.UserID,
-		ClientType: clientType,
-		Stage:      stage,
+		PublicRetrieval: identity.PublicRetrieval,
+		TenantID:        identity.TenantID,
+		DeptIDs:         deptIDs,
+		RoleCodes:       roleCodes,
+		UserID:          identity.UserID,
+		ClientType:      clientType,
+		Stage:           stage,
 	}
 }
 
@@ -776,7 +777,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
-	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
+	reqPolicy := s.evaluateChatRequestPolicy(r, rawBody, &req, &identity)
 	if reqPolicy.Blocked {
 		s.logger.Warn("policy blocked request", "model", req.Model, "hits", len(reqPolicy.Hits))
 		if err := s.writeAuditEvent(audit.Event{
@@ -808,6 +809,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writePolicyError(w, "90001", "请求触发合规拦截", reqPolicy.Hits)
+		return
+	}
+	if err := s.writePublicRetrievalWarnings(r, identity, decision, req.Model, "request", latestUserText, reqPolicy.Hits, startedAt); err != nil {
+		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
 	if reqPolicy.RedactedText != latestUserText {
@@ -1471,23 +1476,25 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 }
 
 type requestIdentity struct {
-	TenantID      string
-	UserID        string
-	UserEmail     string
-	DepartmentID  string
-	DepartmentIDs []string
-	SessionID     string
-	RoleCodes     []string
-	ClientType    string
-	Scopes        []string
-	DataResidency string
-	APITokenID    int64
-	AuthViaPAT    bool
-	TraceID       string
-	TraceStep     int
-	TraceStage    string
-	DeploymentID  string
-	AgentID       string
+	// PublicRetrieval is set only after a verified public-retrieval signature.
+	PublicRetrieval bool
+	TenantID        string
+	UserID          string
+	UserEmail       string
+	DepartmentID    string
+	DepartmentIDs   []string
+	SessionID       string
+	RoleCodes       []string
+	ClientType      string
+	Scopes          []string
+	DataResidency   string
+	APITokenID      int64
+	AuthViaPAT      bool
+	TraceID         string
+	TraceStep       int
+	TraceStage      string
+	DeploymentID    string
+	AgentID         string
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {

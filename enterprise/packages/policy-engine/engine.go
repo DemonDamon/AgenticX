@@ -102,9 +102,13 @@ func (e *Engine) EvaluateWithContext(text string, ctx EvalContext) EvaluateResul
 				result = applyHit(result, compiled.rule, ctx.Stage, hit)
 			}
 		case RuleKindPII:
+			rule := compiled.rule
+			if ctx.PublicRetrieval && strings.EqualFold(strings.TrimSpace(ctx.Stage), "request") && !strings.EqualFold(strings.TrimSpace(rule.PIIType), "api-key") {
+				rule.Action = ActionWarn
+			}
 			hits := compiled.piiRegexp.FindAllString(result.RedactedText, -1)
 			for _, hit := range hits {
-				result = applyHit(result, compiled.rule, ctx.Stage, hit)
+				result = applyHit(result, rule, ctx.Stage, hit)
 			}
 		}
 	}

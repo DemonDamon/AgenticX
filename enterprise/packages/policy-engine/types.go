@@ -57,12 +57,14 @@ type AppliesTo struct {
 }
 
 type EvalContext struct {
-	TenantID   string
-	DeptIDs    []string
-	RoleCodes  []string
-	UserID     string
-	ClientType string
-	Stage      string
+	// PublicRetrieval is set only by a trusted caller, never from user metadata.
+	PublicRetrieval bool
+	TenantID        string
+	DeptIDs         []string
+	RoleCodes       []string
+	UserID          string
+	ClientType      string
+	Stage           string
 }
 
 type HitEvent struct {

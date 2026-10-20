@@ -41,6 +41,13 @@ type ChatCompletionRequest struct {
 	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
 	// ThinkingBudget tokens for Anthropic/Gemini thinking models (internal pivot field).
 	ThinkingBudget int `json:"-"`
+	PolicyContext *PolicyContext `json:"__policy_context,omitempty"`
+}
+
+// PolicyContext is a server-signed provenance assertion, stripped before relay.
+type PolicyContext struct {
+	Source         string `json:"source"`
+	UserTextSHA256 string `json:"user_text_sha256,omitempty"`
 }
 
 type ChatCompletionChoice struct {
