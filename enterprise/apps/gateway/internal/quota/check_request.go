@@ -40,6 +40,7 @@ type CheckResult struct {
 	FallbackModel        string
 	BudgetReservedTokens int64
 	BudgetReservedCost   float64
+	BudgetReceipt        *BudgetReceipt
 }
 
 func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) CheckResult {
@@ -131,6 +132,7 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			FallbackModel:        budget.FallbackModel,
 			BudgetReservedTokens: budget.ReservedTokens,
 			BudgetReservedCost:   budget.ReservedCost,
+			BudgetReceipt:        budget.Receipt,
 		}
 		if budget.Warn {
 			result.Headers["X-AgenticX-Budget-Warn"] = budget.Description
@@ -148,6 +150,7 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 		Description:          "ok",
 		BudgetReservedTokens: budget.ReservedTokens,
 		BudgetReservedCost:   budget.ReservedCost,
+		BudgetReceipt:        budget.Receipt,
 	}
 }
 

@@ -19,6 +19,11 @@ func IsHTTPURL(s string) bool {
 
 // HTTPGet 使用 GATEWAY_INTERNAL_TOKEN（若配置）发起 GET；返回响应体切片、HTTP 状态码与错误。
 func HTTPGet(url string) ([]byte, int, error) {
+	return HTTPGetWithHeaders(url, nil)
+}
+
+// HTTPGetWithHeaders 在保留内部 Bearer 鉴权的同时附加调用方请求头（例如租户）。
+func HTTPGetWithHeaders(url string, headers map[string]string) ([]byte, int, error) {
 	if !IsHTTPURL(url) {
 		return nil, 0, fmt.Errorf("gatewayinternal: URL must start with http:// or https://")
 	}
@@ -27,6 +32,11 @@ func HTTPGet(url string) ([]byte, int, error) {
 	req, err := http.NewRequest(http.MethodGet, strings.TrimSpace(url), nil)
 	if err != nil {
 		return nil, 0, err
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			req.Header.Set(key, strings.TrimSpace(value))
+		}
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

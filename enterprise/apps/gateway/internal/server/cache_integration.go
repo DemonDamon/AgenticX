@@ -145,11 +145,9 @@ func (s *Server) reportUsageDetailed(
 		pricingVersion = result.PricingVersion
 	}
 	if budgetCheck != nil && s.quotaTracker != nil {
-		qctx := s.quotaContext(identity, decision.Model)
-		s.quotaTracker.SettleBudget(
-			qctx,
-			budgetCheck.BudgetReservedTokens,
-			budgetCheck.BudgetReservedCost,
+		s.quotaTracker.SettleCheckedBudget(
+			s.quotaContext(identity, decision.Model),
+			*budgetCheck,
 			int64(n.TotalTokens),
 			cost,
 		)
@@ -282,7 +280,6 @@ func inboundProtocolLabel(label string) string {
 	}
 	return label
 }
-
 
 func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeContext, session protocolSession) bool {
 	if s.cacheService == nil {

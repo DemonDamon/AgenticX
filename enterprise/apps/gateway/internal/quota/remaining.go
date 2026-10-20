@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -274,6 +275,55 @@ func findTenantPoolRule(cfg Config) (Rule, bool) {
 		}
 	}
 	return Rule{}, false
+}
+
+// BudgetHeadroom is the remaining shared company, organization or department budget.
+type BudgetHeadroom struct {
+	Dimension string  `json:"dimension"`
+	Key       string  `json:"key"`
+	Unit      string  `json:"unit"`
+	Period    string  `json:"period"`
+	Limit     float64 `json:"limit"`
+	Used      float64 `json:"used"`
+	Remaining float64 `json:"remaining"`
+}
+
+// RemainingBudget reads company, organization and department budget headroom.
+// Personal caps and monthly token quotas are left to their own readers.
+func (t *Tracker) RemainingBudget(ctx RequestContext) ([]BudgetHeadroom, error) {
+	if t == nil {
+		return nil, errors.New("budget tracker unavailable")
+	}
+	cfg := t.loadBudgetConfigForTenant(ctx.TenantID)
+	if cfg.loadErr != nil {
+		return nil, cfg.loadErr
+	}
+	at := budgetUsageNow().UTC()
+	out := make([]BudgetHeadroom, 0, 4)
+	for _, target := range selectBudgetTargets(cfg, ctx) {
+		if target.dimension != "company" && target.dimension != "tenant" && target.dimension != "dept" {
+			continue
+		}
+		period := budgetPeriodKey(target.rule.Period, at)
+		used, err := t.readBudgetUsedValue(ctx.TenantID, target.dimension, target.key, period, target.rule.Unit)
+		if err != nil {
+			return nil, err
+		}
+		remaining := target.rule.Limit - used
+		if remaining < 0 {
+			remaining = 0
+		}
+		out = append(out, BudgetHeadroom{
+			Dimension: target.dimension,
+			Key:       target.key,
+			Unit:      target.rule.Unit,
+			Period:    period,
+			Limit:     target.rule.Limit,
+			Used:      used,
+			Remaining: remaining,
+		})
+	}
+	return out, nil
 }
 
 func scopeFromRule(rule Rule, ctx RequestContext) (string, string) {

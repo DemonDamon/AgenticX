@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -41,6 +42,23 @@ func (s *Server) applyBudgetFallback(req *openai.ChatCompletionRequest, decision
 
 func (s *Server) rollbackBudgetReservation(identity requestIdentity, model string, check quota.CheckResult) {
 	if s.quotaTracker == nil {
+		return
+	}
+	if check.BudgetReceipt != nil {
+		var lastErr error
+		// One attempt plus up to two retries. The receipt refund is idempotent.
+		for attempt := 0; attempt < 3; attempt++ {
+			if err := s.quotaTracker.RollbackBudgetReceipt(check.BudgetReceipt); err == nil {
+				return
+			} else {
+				lastErr = err
+			}
+		}
+		if s.logger != nil {
+			s.logger.Error("budget reservation rollback failed", "error", lastErr)
+		} else {
+			log.Printf("[budget] reservation rollback failed: %v", lastErr)
+		}
 		return
 	}
 	if check.BudgetReservedTokens == 0 && check.BudgetReservedCost == 0 {

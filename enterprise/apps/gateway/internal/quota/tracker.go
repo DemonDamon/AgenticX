@@ -66,24 +66,25 @@ type Decision struct {
 }
 
 type Tracker struct {
-	cfgPath              string
-	usagePath            string
-	poolUsagePath        string
-	remoteURL            string
-	remoteFetched        time.Time
-	remoteCfgSnapshot    Config
-	budgetCfgPath        string
-	budgetUsagePath      string
-	budgetRemoteURL      string
-	budgetRemoteFetched  time.Time
-	budgetRemoteSnapshot BudgetConfig
-	mu                   sync.Mutex
-	remoteMu             sync.Mutex
-	budgetRemoteMu       sync.Mutex
-	usageCache           map[string]int64
-	budgetAlertSink      BudgetAlertSink
-	poolCounter          PoolCounter
-	requestCounter       *RequestCountCounter
+	cfgPath                string
+	usagePath              string
+	poolUsagePath          string
+	remoteURL              string
+	remoteFetched          time.Time
+	remoteCfgSnapshot      Config
+	budgetCfgPath          string
+	budgetUsagePath        string
+	budgetRemoteURL        string
+	budgetRemoteSnapshots  map[string]remoteBudgetSnapshot
+	budgetDatabase         *database.Handle
+	budgetDatabaseRequired bool
+	mu                     sync.Mutex
+	remoteMu               sync.Mutex
+	budgetRemoteMu         sync.Mutex
+	usageCache             map[string]int64
+	budgetAlertSink        BudgetAlertSink
+	poolCounter            PoolCounter
+	requestCounter         *RequestCountCounter
 }
 
 func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
@@ -99,17 +100,25 @@ func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
 	if poolUsagePath == "" {
 		poolUsagePath = DefaultPoolUsagePath()
 	}
+	budgetDatabaseRequired := strings.EqualFold(strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_BACKEND")), "database")
+	var budgetDatabase *database.Handle
+	if budgetDatabaseRequired && handle != nil && handle.DB != nil {
+		budgetDatabase = handle
+	}
 	return &Tracker{
-		cfgPath:         cfgPath,
-		usagePath:       usagePath,
-		poolUsagePath:   poolUsagePath,
-		remoteURL:       strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
-		budgetCfgPath:   budgetCfgPath,
-		budgetUsagePath: budgetUsagePath,
-		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
-		usageCache:      map[string]int64{},
-		poolCounter:     newPoolCounter(handle, poolUsagePath),
-		requestCounter:  newRequestCountCounter(handle, poolUsagePath),
+		cfgPath:                cfgPath,
+		usagePath:              usagePath,
+		poolUsagePath:          poolUsagePath,
+		remoteURL:              strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
+		budgetCfgPath:          budgetCfgPath,
+		budgetUsagePath:        budgetUsagePath,
+		budgetRemoteURL:        strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
+		budgetRemoteSnapshots:  map[string]remoteBudgetSnapshot{},
+		budgetDatabase:         budgetDatabase,
+		budgetDatabaseRequired: budgetDatabaseRequired,
+		usageCache:             map[string]int64{},
+		poolCounter:            newPoolCounter(handle, poolUsagePath),
+		requestCounter:         newRequestCountCounter(handle, poolUsagePath),
 	}
 }
 
