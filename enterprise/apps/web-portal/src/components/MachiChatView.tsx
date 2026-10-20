@@ -34,6 +34,7 @@ import {
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import { localizeChatErrorMessage, localizeChatMessageError } from "../lib/chat-error-i18n";
+import { findPortalReportContinuation } from "../lib/portal-continuation";
 import { useFeatureUsage } from "../lib/use-feature-usage";
 import { takeDeepResearchRunsToRecover } from "../lib/deep-research/auto-recover";
 import { DeepResearchRemainingBadge, SearchQuotaExhaustedNotice } from "./FeatureUsageNotice";
@@ -401,7 +402,12 @@ export function MachiChatView({
               (event.action === "approved" || event.action === "updated")
             ) {
               status = "running";
-            } else if (event.type === "phase" && event.phase === "done") status = "completed";
+            } else if (event.type === "phase" && event.phase === "done") {
+              const eventsSoFar = [...(prevDr?.events ?? []), event];
+              status = eventsSoFar.some((item) => item.type === "report_resume_available")
+                ? "failed"
+                : "completed";
+            }
             else if (status === "awaiting_clarify") {
               // 与 store.applyDeepResearchEvent 对齐：plan proposed 期间 narrative 不解除 awaiting。
               const eventsSoFar = [...(prevDr?.events ?? []), event];
@@ -1416,6 +1422,14 @@ export function MachiChatView({
                   onShowNextRetryVersion={showNextRetryVersion}
                   onRequestDeepResearchFiles={requestDeepResearchFiles}
                   onRequestDeepResearchLaneSources={requestDeepResearchLaneSources}
+                  onContinueReport={(messageId) => {
+                    const state = useChatStore.getState();
+                    const message = state.messages.find((item) => item.id === messageId);
+                    const sourceRunId = message?.deep_research?.runId;
+                    if (!message || !sourceRunId || !activeSessionId) return;
+                    if (!findPortalReportContinuation([message], activeSessionId)) return;
+                    void state.attachReportContinuation(activeSessionId, sourceRunId);
+                  }}
                   onRequestAttachmentPreview={requestAttachmentPreview}
                   onCopy={(content) => {
                     console.log("Copied:", content);

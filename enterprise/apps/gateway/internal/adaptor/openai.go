@@ -249,6 +249,13 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 	var eventName string
 	var dataLines []string
 	var totalBytes int64
+	var terminal bool
+	completeOrError := func() error {
+		if terminal {
+			return nil
+		}
+		return fmt.Errorf("stream:incomplete")
+	}
 
 	type readResult struct {
 		line []byte
@@ -290,6 +297,7 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 			return false, nil
 		}
 		if payload == "[DONE]" {
+			terminal = true
 			return true, nil
 		}
 		var envelope struct {
@@ -318,6 +326,12 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 		if chunk.ID == "" && chunk.Object == "" && len(chunk.Choices) == 0 {
 			return false, nil
 		}
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
+				terminal = true
+				break
+			}
+		}
 		if err := push(chunk); err != nil {
 			return false, err
 		}
@@ -339,7 +353,7 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 					return err
 				}
 				if readErr == io.EOF {
-					return nil
+					return completeOrError()
 				}
 				continue
 			}
@@ -351,8 +365,10 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
-				_, err := flushEvent()
-				return err
+				if _, err := flushEvent(); err != nil {
+					return err
+				}
+				return completeOrError()
 			}
 			return fmt.Errorf("read upstream stream: %w", readErr)
 		}

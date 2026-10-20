@@ -12,6 +12,7 @@ function msg(partial: Partial<ChatMessage> & Pick<ChatMessage, "role" | "content
     content: partial.content,
     created_at: partial.created_at ?? "2026-07-30T00:00:00.000Z",
     ...(partial.interruption ? { interruption: partial.interruption } : {}),
+    ...(partial.control ? { control: partial.control } : {}),
   };
 }
 
@@ -63,6 +64,15 @@ describe("filterMessagesForCompletion", () => {
       "查到的天气结论。",
     ]);
     expect(messages[1]?.content).toContain(thought);
+  });
+
+  it("omits report continuation control messages from model history", () => {
+    const out = filterMessagesForCompletion([
+      msg({ role: "user", content: "原始问题" }),
+      msg({ role: "user", content: "继续完成报告", control: "continue_report" }),
+      msg({ role: "assistant", content: "续写中的报告" }),
+    ]);
+    expect(out.map((message) => message.content)).toEqual(["原始问题", "续写中的报告"]);
   });
 
   it("retains the available answer of a cancelled turn", () => {

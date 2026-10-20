@@ -111,7 +111,15 @@ export type DeepResearchEventPayload =
       sourcesSelected: number;
       pagesFetched: number;
     }
-  | { type: "narrative"; text: string };
+  | { type: "narrative"; text: string }
+  /** Saved chapters can be continued. Emitted only when the report stopped early. */
+  | {
+      type: "report_resume_available";
+      runId: string;
+      nextRunId: string;
+      completedSections: number;
+      totalSections: number;
+    };
 
 /** Optional wall-clock ISO timestamp stamped at emit time for trace duration. */
 export type DeepResearchEvent = DeepResearchEventPayload & { ts?: string };

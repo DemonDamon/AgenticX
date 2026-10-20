@@ -20,12 +20,14 @@ import {
   type LaneSource,
 } from "./deep-research-lane-sources";
 import { WebSearchFavicon } from "./WebSearchFavicon";
+import { DeepResearchContinueCard } from "./DeepResearchContinueCard";
 
 /** A lane plus the pages it searched, handed to the docked source panel. */
 export type DeepResearchLaneSelection = { title: string; sources: LaneSource[] };
 
 export type DeepResearchWorkbenchProps = {
   deepResearch: ChatMessageDeepResearch;
+  onContinueReport?: () => void;
   onClarifySubmitted?: (answers: Record<string, string>) => void;
   /** Intermediate lane memos via expandable step "查看产物". */
   onOpenArtifact?: (artifactId: string) => void;
@@ -460,6 +462,7 @@ function TrailingThinkingDots() {
 
 export function DeepResearchWorkbench({
   deepResearch,
+  onContinueReport,
   onClarifySubmitted,
   onOpenArtifact,
   onOpenLaneSources,
@@ -483,6 +486,7 @@ export function DeepResearchWorkbench({
   const hasClarify = deepResearch.events.some((e): e is Extract<DeepResearchEvent, { type: "clarify" }> =>
     e.type === "clarify",
   );
+  const hasReportResume = deepResearch.events.some((event) => event.type === "report_resume_available");
   const planGatePending = isPlanGatePending(deepResearch.events);
   const planChatGatePending = isPlanChatGatePending(deepResearch.events);
   const anyPlanGatePending = planGatePending || planChatGatePending;
@@ -502,7 +506,7 @@ export function DeepResearchWorkbench({
     );
   }
 
-  if (segments.length === 0 && !hasClarify) return null;
+  if (segments.length === 0 && !hasClarify && !hasReportResume) return null;
 
   return (
     <div className={className} data-testid="deep-research-workbench">
@@ -602,6 +606,7 @@ export function DeepResearchWorkbench({
           }
         }
       })}
+      <DeepResearchContinueCard research={deepResearch} onContinue={onContinueReport} />
       {showTrailingDots ? <TrailingThinkingDots /> : null}
     </div>
   );

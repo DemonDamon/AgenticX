@@ -8,6 +8,8 @@ export function labelForDeepResearchEvent(
   switch (event.type) {
     case "run_started":
       return copy.timeline.runStarted;
+    case "report_resume_available":
+      return `已完成 ${event.completedSections} / ${event.totalSections} 章，可以继续完成报告`;
     case "phase":
       return event.message || event.phase;
     case "clarify":

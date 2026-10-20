@@ -15,10 +15,12 @@ import {
   MIN_RESULTS_PER_LANE,
   PLAN_GATE_ACTION_KEY,
   SEARCH_CONCURRENCY,
+  continueFromReport,
   expandLanesFromClarifyAnswers,
   filterCitationsForSection,
   formatEvidencePack,
   formatSourcesAppendix,
+  incompleteReportNote,
   mapPool,
   matchSelectedOptions,
   parsePlanPatchSubQuestions,
@@ -27,6 +29,7 @@ import {
   runDeepResearchTurn,
 } from "./orchestrator";
 import { createMemoryArtifactStore } from "./artifact-store";
+import type { ReportCheckpoint } from "./report-checkpoint";
 import { createMemoryRunStore } from "./run-store";
 import {
   clearClarifyWaiters,
@@ -914,8 +917,10 @@ describe("runDeepResearchTurn", () => {
 
     const { text, events, raw } = await readSsePayload(response);
     expect(events.some((e) => e.type === "phase" && e.phase === "synthesize")).toBe(true);
-    // Budget-exhausted runs still persist a final report artifact; chat shows summary only.
-    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
+    // Budget exhaustion stops before a half-written chapter and offers continuation.
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(false);
+    expect(events.some((e) => e.type === "report_resume_available")).toBe(true);
+    expect(text).toContain(incompleteReportNote("zh"));
     expect(text).not.toContain("budget-report");
     expect(raw).toContain("[DONE]");
   });
@@ -2878,5 +2883,266 @@ describe("interaction policy wiring", { concurrent: false }, () => {
     // s2 只引用 [1] → 证据包只含第 1 条来源，不含第 2 条
     expect(s2Prompt).toContain("[1]");
     expect(s2Prompt).not.toContain("[2]");
+  });
+});
+
+function outlineResponse(sections: Array<{ id: string; title: string }>): Response {
+  return new Response(
+    JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            title: "阶段报告",
+            sections: sections.map((section) => ({
+              ...section,
+              brief: section.title,
+              citation_indexes: [1],
+              format: "prose",
+            })),
+          }),
+        },
+      }],
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function jsonText(content: string): Response {
+  return new Response(
+    JSON.stringify({ choices: [{ message: { content } }] }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function streamFrames(frames: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(encoder.encode(frame));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+function contentFrame(content: string, finishReason?: string): string {
+  return `data: ${JSON.stringify({
+    choices: [{ delta: { content }, ...(finishReason ? { finish_reason: finishReason } : {}) }],
+  })}\n\n`;
+}
+
+describe("report continuation", () => {
+  const sections = [
+    { id: "s1", title: "第一章" },
+    { id: "s2", title: "第二章" },
+    { id: "s3", title: "第三章" },
+  ];
+
+  function researchDeps(fetchImpl: typeof fetch, extras: Record<string, unknown> = {}) {
+    return baseDeps({
+      fetchImpl,
+      runId: "run-report",
+      artifactStore: createMemoryArtifactStore(),
+      runStore: createMemoryRunStore(),
+      buildPlan: async () => ({
+        topic: "阶段报告",
+        complexity: "simple" as const,
+        subQuestions: ["问题"],
+      }),
+      executeSearch: async () => [{ title: "来源", url: "https://example.com/a", snippet: "摘要" }],
+      ...extras,
+    });
+  }
+
+  it("keeps the first two chapters when chapter 3 is truncated and offers continuation", async () => {
+    let sectionCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      if (body.stream === false) {
+        const system = body.messages?.find((message) => message.role === "system")?.content ?? "";
+        if (system.includes("大纲")) return outlineResponse(sections);
+        return jsonText("备忘");
+      }
+      sectionCalls += 1;
+      if (sectionCalls < 3) {
+        return streamFrames([contentFrame(sectionCalls === 1 ? "第一章全文" : "第二章全文"), "data: [DONE]\n\n"]);
+      }
+      return streamFrames([contentFrame("第三章半截不应入库", "length"), "data: [DONE]\n\n"]);
+    }) as unknown as typeof fetch;
+    const store = createMemoryArtifactStore();
+    const runStore = createMemoryRunStore();
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "写一份报告" }] },
+      researchDeps(fetchImpl, { artifactStore: store, runStore, runId: "run-truncate" }),
+    );
+    const { events } = await readSsePayload(response);
+    const row = await runStore.get("t1", "u1", "run-truncate");
+    const rows = await store.listByRun("t1", "u1", "run-truncate");
+    const report = rows.find((item) => item.path.endsWith("partial-report.md"));
+    expect(row?.status).toBe("failed");
+    expect(report?.content).toContain("第一章全文");
+    expect(report?.content).toContain("第二章全文");
+    expect(report?.content).not.toContain("第三章半截不应入库");
+    expect(report?.content).toContain(incompleteReportNote("zh"));
+    expect(rows.some((item) => item.path.endsWith("final-report.md"))).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "report_resume_available",
+      runId: "run-truncate",
+      completedSections: 2,
+      totalSections: 3,
+    }));
+    expect(typeof (events.find((event) => event.type === "report_resume_available") as { nextRunId?: string } | undefined)?.nextRunId).toBe("string");
+  });
+
+  it("retries a transport failure before any model frame and then finishes the chapter", async () => {
+    let sectionCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean; messages?: Array<{ content?: string }> };
+      if (body.stream === false) {
+        const system = body.messages?.[0]?.content ?? "";
+        if (system.includes("大纲")) return outlineResponse([{ id: "s1", title: "唯一章" }]);
+        return jsonText("备忘");
+      }
+      sectionCalls += 1;
+      if (sectionCalls === 1) {
+        return new Response(
+          JSON.stringify({ error: { code: "50000", message: "stream:incomplete" } }),
+          { status: 500, headers: { "content-type": "application/json" } },
+        );
+      }
+      return streamFrames([contentFrame("唯一章全文"), "data: [DONE]\n\n"]);
+    }) as unknown as typeof fetch;
+    const runStore = createMemoryRunStore();
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "写一份报告" }] },
+      researchDeps(fetchImpl, { runStore, runId: "run-retry" }),
+    );
+    await readSsePayload(response);
+    expect(sectionCalls).toBe(2);
+    expect((await runStore.get("t1", "u1", "run-retry"))?.status).toBe("completed");
+  });
+
+  it("does not retry a transport failure after model content has arrived", async () => {
+    let sectionCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean; messages?: Array<{ content?: string }> };
+      if (body.stream === false) {
+        const system = body.messages?.[0]?.content ?? "";
+        if (system.includes("大纲")) return outlineResponse([{ id: "s1", title: "已完成" }, { id: "s2", title: "中断章" }]);
+        return jsonText("备忘");
+      }
+      sectionCalls += 1;
+      if (sectionCalls === 1) return streamFrames([contentFrame("已完成正文"), "data: [DONE]\n\n"]);
+      return streamFrames([
+        contentFrame("中断半截不应入库"),
+        `data: ${JSON.stringify({ error: { code: "50000", message: "stream:incomplete" } })}\n\n`,
+      ]);
+    }) as unknown as typeof fetch;
+    const store = createMemoryArtifactStore();
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "写一份报告" }] },
+      researchDeps(fetchImpl, { artifactStore: store, runId: "run-no-retry" }),
+    );
+    await readSsePayload(response);
+    expect(sectionCalls).toBe(2);
+    const report = (await store.listByRun("t1", "u1", "run-no-retry")).find((item) => item.path.endsWith("partial-report.md"));
+    expect(report?.content).toContain("已完成正文");
+    expect(report?.content).not.toContain("中断半截不应入库");
+  });
+
+  it.each(["42901", "42902"])("does not retry gateway limit %s", async (code) => {
+    let sectionCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean; messages?: Array<{ content?: string }> };
+      if (body.stream === false) {
+        const system = body.messages?.[0]?.content ?? "";
+        if (system.includes("大纲")) return outlineResponse([{ id: "s1", title: "唯一章" }]);
+        return jsonText("备忘");
+      }
+      sectionCalls += 1;
+      return new Response(
+        JSON.stringify({ error: { code, message: "upstream detail" } }),
+        { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } },
+      );
+    }) as unknown as typeof fetch;
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "写一份报告" }] },
+      researchDeps(fetchImpl, { runId: `run-limit-${code}` }),
+    );
+    const { text } = await readSsePayload(response);
+    expect(sectionCalls).toBe(1);
+    expect(text).toContain(code === "42902" ? "模型服务繁忙" : "额度已用尽");
+    expect(text).not.toContain(incompleteReportNote("zh"));
+  });
+
+  it("continues from chapter 3 without searching again", async () => {
+    const section = (id: string, title: string) => ({
+      id,
+      title,
+      brief: title,
+      citationIndexes: [1],
+      format: "prose" as const,
+    });
+    const checkpoint: ReportCheckpoint = {
+      version: 1,
+      sourceRunId: "old",
+      nextRunId: "continued",
+      topic: "原主题",
+      messages: [{ role: "user", content: "原始提问" }],
+      writingRequirements: "保持原写作要求",
+      model: "saved-model",
+      provider: "saved-provider",
+      outline: {
+        title: "原报告",
+        sections: [section("s1", "第一章"), section("s2", "第二章"), section("s3", "第三章")],
+      },
+      completed: [
+        { section: section("s1", "第一章"), body: "第一章已完成" },
+        { section: section("s2", "第二章"), body: "第二章已完成" },
+      ],
+      sectionEvidence: ["证据1", "证据2", "证据3"],
+      citations: [{ index: 1, title: "来源", url: "https://example.com/a", snippet: "摘要" }],
+      deliveryPrefs: { format: "md", shapes: ["structured"] },
+      stats: { queriesPlanned: 4, urlsDiscovered: 8, sourcesSelected: 3, pagesFetched: 2 },
+      createdAt: "2026-10-20T00:00:00.000Z",
+    };
+    const search = vi.fn(async () => {
+      throw new Error("search should not run");
+    });
+    const prompts: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        model?: string;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      prompts.push(body.messages?.map((message) => message.content ?? "").join("\n") ?? "");
+      expect(body.model).toBe("saved-model");
+      if (body.stream === false) return jsonText("摘要");
+      return streamFrames([contentFrame("第三章新写"), "data: [DONE]\n\n"]);
+    }) as unknown as typeof fetch;
+    const store = createMemoryArtifactStore();
+    const response = await continueFromReport(checkpoint, {
+      ...baseDeps({
+        fetchImpl,
+        executeSearch: search,
+        artifactStore: store,
+        runStore: createMemoryRunStore(),
+        runId: checkpoint.nextRunId,
+      }),
+      headers: { "x-agenticx-provider": "saved-provider" },
+    });
+    await readSsePayload(response);
+    expect(search).not.toHaveBeenCalled();
+    expect(prompts.some((prompt) => prompt.includes("大纲助手"))).toBe(false);
+    expect(prompts.some((prompt) => prompt.includes("第三章"))).toBe(true);
+    const report = (await store.listByRun("t1", "u1", "continued")).find((item) => item.path.endsWith("final-report.md"));
+    expect(report?.content).toContain("第一章已完成");
+    expect(report?.content).toContain("第二章已完成");
+    expect(report?.content).toContain("第三章新写");
+    expect(report?.content).not.toContain(incompleteReportNote("zh"));
   });
 });

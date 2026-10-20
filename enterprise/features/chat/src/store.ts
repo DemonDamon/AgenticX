@@ -35,7 +35,8 @@ import { createResponseCheckpoint } from "./utils/response-checkpoint";
 import { createStreamTextBuffer } from "./utils/stream-text-buffer";
 import { findContinuableResponse } from "./utils/turn-continuation";
 import { probeNote } from "./debug/update-depth-probe";
-import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
+import { fetchLatestDeepResearchForHydrate, hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
+import { startDeepResearchReconnect } from "./utils/deep-research-reconnect";
 import { getDeepResearchInteractionPref } from "./utils/deep-research-interaction-pref";
 import { fetchActiveDeepResearchRuns } from "./utils/deep-research-active-run";
 import {
@@ -303,6 +304,8 @@ export type ChatStoreActions = {
     mode?: { continue?: boolean },
   ): Promise<void>;
   continueResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
+  /** Open a continuation run for a stopped report and attach it to this session. */
+  attachReportContinuation(sessionId: string, runId: string): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
   showNextResponseVersion(userMessageId: string): void;
   showPreviousRetryVersion(userMessageId: string): void;
@@ -408,6 +411,7 @@ function buildUserContentWithDocuments(
  */
 export function filterMessagesForCompletion(messages: ChatMessage[]): ChatMessage[] {
   return messages.flatMap((message) => {
+    if (message.control === "continue_report") return [];
     if (message.role !== "assistant") return [message];
     const prefix = message.interruption
       ? message.content.slice(0, message.interruption.contentLength)
@@ -621,7 +625,10 @@ function applyDeepResearchEventToAssistant(
             ? "awaiting_clarify"
             : "running";
       } else if (event.type === "phase" && event.phase === "done") {
-        status = "completed";
+        const eventsSoFar = [...(prevDr?.events ?? []), event];
+        status = eventsSoFar.some((item) => item.type === "report_resume_available")
+          ? "failed"
+          : "completed";
       } else if (
         status === "awaiting_clarify" &&
         (event.type === "clarify_timeout" ||
@@ -845,6 +852,8 @@ async function persistAppendMessagesNow(
   sessionId: string,
   messages: ChatMessage[],
 ): Promise<void> {
+  messages = messages.filter((message) => message.control !== "continue_report");
+  if (messages.length === 0) return;
   const payloads = messages.map(stripToAppendPayload);
   const operationId = newUlid();
   const payloadHash = await computePayloadHash(payloads);
@@ -2910,6 +2919,137 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (isSessionStreaming(state, source.session_id)) return;
     if (findContinuableResponse(state.messages, state.activeSessionId)?.id !== source.id) return;
     await get().regenerateAssistantResponse(client, assistantMessageId, { continue: true });
+  },
+
+  async attachReportContinuation(sessionId, runId) {
+    const state = get();
+    if (!sessionId || !runId || isSessionStreaming(state, sessionId)) return;
+    const source = state.messages.find(
+      (message) =>
+        message.session_id === sessionId &&
+        message.role === "assistant" &&
+        message.deep_research?.runId === runId,
+    );
+    if (!source?.deep_research) {
+      if (state.activeSessionId === sessionId) {
+        set({ errorMessage: "找不到可继续的研究报告。" });
+      }
+      return;
+    }
+    const pendingId = makeId();
+    setSessionStream(set, sessionId, {
+      status: "sending",
+      activeRequestId: pendingId,
+      assistantMessageId: source.id,
+    });
+    try {
+      const response = await fetch("/api/chat/deep-research/continue", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        data?: { runId?: unknown; traceId?: unknown };
+        error?: { message?: unknown };
+      } | null;
+      if (!response.ok || typeof body?.data?.runId !== "string") {
+        const message = typeof body?.error?.message === "string"
+          ? body.error.message
+          : "暂时无法继续完成报告，请稍后重试。";
+        throw new Error(message);
+      }
+      if (getSessionRequestId(get(), sessionId) !== pendingId) return;
+      const nextRunId = body.data.runId;
+      const traceId = typeof body.data.traceId === "string" ? body.data.traceId.trim() : "";
+      const stamp = new Date().toISOString();
+      const scope = {
+        session_id: sessionId,
+        tenant_id: source.tenant_id,
+        user_id: source.user_id,
+      };
+      const userMessage: ChatMessage = {
+        ...scope,
+        id: makeId(),
+        role: "user",
+        content: "继续完成报告",
+        control: "continue_report",
+        created_at: stamp,
+      };
+      const assistantMessage: ChatMessage = {
+        ...scope,
+        id: makeId(),
+        role: "assistant",
+        content: "",
+        created_at: stamp,
+        ...(source.model ? { model: source.model } : {}),
+        ...(traceId ? { trace_id: traceId } : {}),
+        deep_research: { runId: nextRunId, status: "running", events: [] },
+      };
+      set((prev) => ({ messages: [...prev.messages, userMessage, assistantMessage] }));
+      if (get().hydrated) void persistAppendMessages(set, sessionId, [userMessage, assistantMessage]);
+      const hydrated = await fetchLatestDeepResearchForHydrate(sessionId, fetch, nextRunId);
+      if (hydrated?.events?.length) {
+        const knownStatus = hydrated.status;
+        const status =
+          knownStatus === "failed" ||
+          knownStatus === "cancelled" ||
+          knownStatus === "completed" ||
+          knownStatus === "awaiting_clarify" ||
+          knownStatus === "running"
+            ? knownStatus
+            : "running";
+        set((prev) => ({
+          messages: prev.messages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  deep_research: {
+                    runId: nextRunId,
+                    status,
+                    events: hydrated.events,
+                    ...(hydrated.artifactIds?.length ? { artifactIds: hydrated.artifactIds } : {}),
+                  },
+                }
+              : message,
+          ),
+        }));
+      }
+      setSessionStream(set, sessionId, {
+        status: "streaming",
+        activeRequestId: pendingId,
+        assistantMessageId: assistantMessage.id,
+      });
+      const savedEvents = get().messages.find((message) => message.id === assistantMessage.id)?.deep_research?.events ?? [];
+      await startDeepResearchReconnect(nextRunId, {
+        savedEvents,
+        onEvent: (event) => {
+          applyDeepResearchEventToAssistant(set, assistantMessage.id, userMessage.id, event);
+        },
+        onDelta: (text) => {
+          set((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, content: `${message.content ?? ""}${text}` }
+                : message,
+            ),
+          }));
+        },
+        onDone: () => {
+          const latest = get().messages.find((message) => message.id === assistantMessage.id);
+          if (latest && get().hydrated) void persistAppendMessages(set, sessionId, [latest]);
+        },
+      });
+    } catch (error) {
+      if (get().activeSessionId === sessionId) {
+        set({
+          errorMessage: error instanceof Error ? error.message : "暂时无法继续完成报告，请稍后重试。",
+        });
+      }
+    } finally {
+      if (getSessionRequestId(get(), sessionId) === pendingId) {
+        setSessionStream(set, sessionId, null);
+      }
+    }
   },
 
   async regenerateAssistantResponse(client, assistantMessageId, mode) {

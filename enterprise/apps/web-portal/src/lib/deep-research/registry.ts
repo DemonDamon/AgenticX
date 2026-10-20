@@ -36,6 +36,13 @@ export class CitationRegistry {
   private readonly byKey = new Map<string, Citation>();
   private nextIndex = 1;
 
+  constructor(saved: readonly Citation[] = []) {
+    for (const citation of saved) {
+      this.byKey.set(normalizeCitationUrl(citation.url), { ...citation });
+      this.nextIndex = Math.max(this.nextIndex, citation.index + 1);
+    }
+  }
+
   add(hit: WebSearchHit): Citation {
     const key = normalizeCitationUrl(hit.url);
     const existing = this.byKey.get(key);

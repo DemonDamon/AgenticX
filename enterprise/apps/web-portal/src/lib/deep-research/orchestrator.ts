@@ -35,6 +35,11 @@ import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
+import {
+  saveReportCheckpoint as writeReportCheckpoint,
+  type CheckpointMessage,
+  type ReportCheckpoint,
+} from "./report-checkpoint";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import {
@@ -98,6 +103,7 @@ import {
   linkifyCitations,
   renderTableOfContents,
   sectionMeetsFormat,
+  stripRepeatedSectionHeading,
 } from "./report-writer";
 import { finalizeReportArtifacts } from "./finalize-report-artifacts";
 import { publicRetrievalFetch } from "./retrieval-policy";
@@ -209,6 +215,80 @@ class DeepResearchUpstreamRateLimitError extends DeepResearchGatewayQuotaError {
   }
 }
 
+/** First attempt plus two retries. A chapter is committed only after a clean terminal frame. */
+const MAX_SECTION_TRANSPORT_ATTEMPTS = 3;
+const SECTION_RETRY_MAX_DELAY_MS = 10_000;
+const SECTION_RETRY_TIME_RESERVE_MS = 30_000;
+const TRUNCATED_FINISH_REASONS = new Set([
+  "length",
+  "max_tokens",
+  "max_output_tokens",
+  "token_limit",
+  "token_limit_exceeded",
+]);
+
+export function incompleteReportNote(locale: "zh" | "en"): string {
+  return locale === "en"
+    ? "The report is unfinished. You can continue it."
+    : "报告未写完，可以继续完成";
+}
+
+type SectionFailureKind = "truncated" | "transport" | "timeout";
+
+class DeepResearchSectionError extends Error {
+  constructor(
+    readonly kind: SectionFailureKind,
+    readonly retryable = false,
+    readonly retryAfterMs?: number,
+  ) {
+    super(kind);
+    this.name = "DeepResearchSectionError";
+  }
+}
+
+function sectionRetryAfterMs(header: string | null, nowMs: number): number | undefined {
+  const value = header?.trim();
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - nowMs) : undefined;
+}
+
+function waitForSectionRetry(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+/** Retry only identifiable transport failures, and only before any model content frame. */
+function retryableSectionStreamError(code: string | undefined, message: string): boolean {
+  if (code !== "50000") return false;
+  if (
+    message.includes("stream:incomplete") ||
+    message.startsWith("read upstream stream:") ||
+    message.startsWith("upstream request failed:")
+  ) {
+    return true;
+  }
+  const status = /^upstream (\d{3}):/.exec(message)?.[1];
+  return status !== undefined && (Number(status) === 429 || Number(status) >= 500);
+}
+
 function throwIfGatewayLimit(failure: GatewayFailure): void {
   if (failure.code === "42902") throw new DeepResearchUpstreamRateLimitError();
   if (failure.code === "42901") throw new DeepResearchGatewayQuotaError();
@@ -308,6 +388,8 @@ export type DeepResearchDeps = {
   refreshAccessToken?: RefreshAccessToken;
   /** Orphan plan-gate continue: reuse runId, jump to lanes. */
   continueFromPlanGate?: ContinueFromPlanGate;
+  /** Resume report writing from a saved chapter checkpoint. Skips retrieval. */
+  continueFromReport?: ReportCheckpoint;
   /** Portal cookie locale; missing or unknown → zh. */
   locale?: "zh" | "en";
 };
@@ -554,6 +636,187 @@ async function callGatewayJson(
   return typeof content === "string" ? content : "";
 }
 
+type SectionStreamHooks = {
+  deps: DeepResearchDeps;
+  baseBody: Record<string, unknown>;
+  runSignal: AbortSignal;
+  budgetLeft: () => number;
+  now: () => number;
+  policyBlockedMessage: string;
+  encoder: TextEncoder;
+  forwardFrame: (frame: string) => void;
+  onRetry: (title: string) => void;
+};
+
+async function streamSectionOnce(
+  hooks: SectionStreamHooks,
+  messages: Array<{ role: string; content: string }>,
+): Promise<string> {
+  let upstream: Response;
+  try {
+    upstream = await callGatewayStream(
+      hooks.deps,
+      { ...hooks.baseBody, stream: true, messages },
+      "dr.section",
+    );
+  } catch (error) {
+    if (error instanceof DeepResearchPolicyError || error instanceof DeepResearchGatewayQuotaError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (error instanceof TypeError && !hooks.runSignal.aborted) {
+      throw new DeepResearchSectionError("transport", true);
+    }
+    throw error;
+  }
+  if (!upstream.ok || !upstream.body) {
+    const failure = await readGatewayFailure(upstream);
+    const policyError = policyErrorFromFailure(failure);
+    if (policyError) throw policyError;
+    throwIfGatewayLimit(failure);
+    const retryAfterMs = sectionRetryAfterMs(upstream.headers.get("retry-after"), hooks.now());
+    const transportStatus = upstream.status >= 500 || upstream.status === 429 || failure.code === "50000";
+    const shortRetry = retryAfterMs === undefined || retryAfterMs <= SECTION_RETRY_MAX_DELAY_MS;
+    throw new DeepResearchSectionError("transport", transportStatus && shortRetry, retryAfterMs);
+  }
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let terminal = false;
+  let truncated = false;
+  let sawModelFrame = false;
+  const sectionParts: string[] = [];
+  const failStream = async (error: unknown): Promise<never> => {
+    try {
+      await reader.cancel();
+    } catch {
+      // Gateway may already have closed the stream.
+    }
+    throw error;
+  };
+  while (true) {
+    if (hooks.runSignal.aborted) {
+      await failStream(new DOMException("Aborted", "AbortError"));
+    }
+    let read: ReadableStreamReadResult<Uint8Array>;
+    try {
+      read = await reader.read();
+    } catch (error) {
+      if (error instanceof TypeError && !hooks.runSignal.aborted) {
+        throw new DeepResearchSectionError("transport", !sawModelFrame);
+      }
+      throw error;
+    }
+    const { done, value } = read;
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx = buffer.indexOf("\n\n");
+    while (idx >= 0) {
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      idx = buffer.indexOf("\n\n");
+      const dataLine = frame
+        .split("\n")
+        .map((line) => line.trim())
+        .find((line) => line.startsWith("data:"));
+      if (!dataLine) {
+        hooks.forwardFrame(frame);
+        continue;
+      }
+      const data = dataLine.replace(/^data:\s*/, "");
+      if (data === "[DONE]") {
+        terminal = true;
+        continue;
+      }
+      type GatewayStreamFrame = {
+        choices?: Array<{ delta?: { content?: string }; finish_reason?: unknown }>;
+        error?: { code?: unknown; message?: unknown };
+      };
+      let parsed: GatewayStreamFrame | null = null;
+      try {
+        parsed = JSON.parse(data) as GatewayStreamFrame;
+      } catch {
+        hooks.forwardFrame(frame);
+        continue;
+      }
+      const streamErrorCode = parsed.error?.code;
+      if (typeof streamErrorCode === "string" && isPolicyErrorCode(streamErrorCode)) {
+        const streamErrorMessage = parsed.error?.message;
+        await failStream(new DeepResearchPolicyError(
+          streamErrorCode,
+          typeof streamErrorMessage === "string" ? streamErrorMessage : hooks.policyBlockedMessage,
+        ));
+      }
+      if (streamErrorCode === "42902" || streamErrorCode === "42901") {
+        try {
+          await reader.cancel();
+        } catch {
+          // Gateway may already have closed the stream.
+        }
+        throwIfGatewayLimit({
+          code: streamErrorCode,
+          message: "gateway stream error",
+          rawText: "",
+        });
+      }
+      if (parsed.error) {
+        const streamErrorMessage = typeof parsed.error.message === "string" ? parsed.error.message : "";
+        const code = typeof streamErrorCode === "string" ? streamErrorCode : undefined;
+        await failStream(new DeepResearchSectionError(
+          "transport",
+          !sawModelFrame && retryableSectionStreamError(code, streamErrorMessage),
+        ));
+      }
+      const finishReason = parsed.choices?.[0]?.finish_reason;
+      if (typeof finishReason === "string" && finishReason.trim()) {
+        terminal = true;
+        if (TRUNCATED_FINISH_REASONS.has(finishReason.trim().toLowerCase())) truncated = true;
+      }
+      const piece = parsed.choices?.[0]?.delta?.content;
+      let isContentDelta = false;
+      if (typeof piece === "string" && piece.length > 0) {
+        sawModelFrame = true;
+        sectionParts.push(piece);
+        isContentDelta = true;
+      }
+      if (!isContentDelta) hooks.forwardFrame(frame);
+    }
+  }
+  if (!terminal) throw new DeepResearchSectionError("transport", !sawModelFrame);
+  if (truncated) throw new DeepResearchSectionError("truncated");
+  const section = stripThinkBlocks(sectionParts.join(""));
+  if (!section.trim()) throw new DeepResearchSectionError("transport", false);
+  return section;
+}
+
+async function streamSectionWithRetry(
+  hooks: SectionStreamHooks,
+  messages: Array<{ role: string; content: string }>,
+  title: string,
+): Promise<string> {
+  for (let attempt = 1; attempt <= MAX_SECTION_TRANSPORT_ATTEMPTS; attempt += 1) {
+    try {
+      return await streamSectionOnce(hooks, messages);
+    } catch (error) {
+      if (!(error instanceof DeepResearchSectionError)) throw error;
+      if (error.kind !== "transport" || !error.retryable) throw error;
+      if (hooks.runSignal.aborted) {
+        throw hooks.runSignal.reason ?? new DOMException("Aborted", "AbortError");
+      }
+      if (error.retryAfterMs !== undefined && error.retryAfterMs > SECTION_RETRY_MAX_DELAY_MS) throw error;
+      const retryDelayMs = error.retryAfterMs ?? 0;
+      if (
+        attempt >= MAX_SECTION_TRANSPORT_ATTEMPTS ||
+        hooks.budgetLeft() <= retryDelayMs + SECTION_RETRY_TIME_RESERVE_MS
+      ) {
+        throw error;
+      }
+      hooks.onRetry(title);
+      await waitForSectionRetry(retryDelayMs, hooks.runSignal);
+    }
+  }
+  throw new DeepResearchSectionError("transport");
+}
+
 async function pipeWithPrefix(
   upstream: Response,
   prefixText: string,
@@ -717,6 +980,10 @@ export async function runDeepResearchTurn(
     : [];
   let userQuery = extractLastUserQuery(originalMessages);
   let originalUserQuery = userQuery;
+  if (deps.continueFromReport?.topic?.trim()) {
+    userQuery = deps.continueFromReport.topic.trim();
+    originalUserQuery = userQuery;
+  }
   const continueFrom = deps.continueFromPlanGate;
   if (continueFrom?.topic?.trim()) {
     userQuery = continueFrom.topic.trim();
@@ -751,7 +1018,7 @@ export async function runDeepResearchTurn(
   const searchCfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const pageFetchCfg = resolvePageFetchConfig(tenant);
 
-  if (!deepResearchEnabled) {
+  if (!deepResearchEnabled && !deps.continueFromReport) {
     const upstream = await callGatewayStream(
       deps,
       {
@@ -764,7 +1031,7 @@ export async function runDeepResearchTurn(
     return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT, traceId);
   }
 
-  if (!searchCfg.enabled) {
+  if (!searchCfg.enabled && !deps.continueFromReport) {
     const upstream = await callGatewayStream(
       deps,
       {
@@ -780,6 +1047,7 @@ export async function runDeepResearchTurn(
   // 仅纯文本、非续跑的公开研究为发往网关的请求签名。大纲与分节写作由签名函数按消息形态拒绝。
   const plainTextPublicResearch =
     !deps.continueFromPlanGate &&
+    !deps.continueFromReport &&
     !deps.headers["x-agenticx-attachment-route"] &&
     originalMessages.every((message) => {
       const content = (message as { content?: unknown }).content;
@@ -921,9 +1189,408 @@ export async function runDeepResearchTurn(
       let finalReportReady = false;
       let summarySent = false;
       let wrapupFallback: Parameters<typeof fallbackSummary>[0] | null = null;
+      const completedReportSections: ReportCheckpoint["completed"] = [];
+      let reportCheckpoint: ReportCheckpoint | null = null;
+
+      const sectionHooks = (): SectionStreamHooks => ({
+        deps: toolDeps,
+        baseBody,
+        runSignal,
+        budgetLeft,
+        now,
+        policyBlockedMessage: copy.policyGatewayBlocked,
+        encoder,
+        forwardFrame: (frame) => {
+          safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
+        },
+        onRetry: (title) => {
+          enqueueEvent({
+            type: "phase",
+            phase: "synthesize",
+            message:
+              locale === "en"
+                ? `Transport failed while writing “${title}”. Retrying…`
+                : `「${title}」传输中断，正在重试…`,
+          });
+        },
+      });
+
+      const checkpointMessagesFrom = (messages: ChatMessage[]): CheckpointMessage[] =>
+        messages.flatMap((message) => {
+          if (!["user", "assistant", "system"].includes(message.role)) return [];
+          if (message.content != null && typeof message.content !== "string") return [];
+          return [{ role: message.role, content: message.content }];
+        });
+
+      const persistReportCheckpoint = async (publish: boolean): Promise<void> => {
+        if (!reportCheckpoint) return;
+        const checkpoint: ReportCheckpoint = {
+          ...reportCheckpoint,
+          completed: completedReportSections.map((entry) => ({
+            section: entry.section,
+            body: entry.body,
+          })),
+          citations: registrySnapshot(),
+        };
+        reportCheckpoint = checkpoint;
+        try {
+          await writeReportCheckpoint(
+            artifactStore,
+            { tenantId, userId, sessionId },
+            checkpoint,
+          );
+          if (!publish) return;
+          enqueueEvent({
+            type: "report_resume_available",
+            runId,
+            nextRunId: checkpoint.nextRunId,
+            completedSections: checkpoint.completed.length,
+            totalSections: checkpoint.outline.sections.length,
+          });
+          await writer?.flush();
+        } catch (error) {
+          console.warn(
+            "[deep-research] report checkpoint save failed:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+      };
+
+      const finishIncompleteReport = async (): Promise<void> => {
+        const note = incompleteReportNote(locale);
+        const outline = reportCheckpoint?.outline;
+        if (outline && completedReportSections.length > 0) {
+          const completedOutline = {
+            ...outline,
+            sections: completedReportSections.map((entry) => entry.section),
+          };
+          const markdown = linkifyCitations(
+            stripThinkBlocks(
+              [
+                `# ${sanitizeResearchTopic(outline.title)}\n\n`,
+                renderTableOfContents(completedOutline, locale),
+                ...completedReportSections.map(
+                  ({ section, body }) => `\n\n## ${section.title}\n\n${body}`,
+                ),
+                `\n\n> ${note}\n`,
+              ].join(""),
+            ),
+            new Set(registrySnapshot().map((citation) => citation.index)),
+          );
+          try {
+            const record = await artifactStore.write({
+              tenantId,
+              userId,
+              sessionId,
+              runId,
+              path: `research/${runId}/partial-report.md`,
+              title: sanitizeResearchTopic(outline.title),
+              kind: "report",
+              content: markdown,
+            });
+            artifactsWritten += 1;
+            enqueueEvent({
+              type: "artifact",
+              id: record.id,
+              path: record.path,
+              title: record.title,
+              kind: "report",
+              bytes: record.byteSize,
+            });
+          } catch (error) {
+            console.warn(
+              "[deep-research] partial report write failed:",
+              error instanceof Error ? error.message : error,
+            );
+          }
+        }
+        await persistReportCheckpoint(true);
+        enqueueDelta(`\n\n> ${note}\n`);
+        enqueueEvent(
+          { type: "phase", phase: "done", message: note },
+          { status: "failed", phase: "done" },
+        );
+        await persistFinish("failed", note);
+        safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+        safeClose();
+      };
+
+      const commitSection = async (
+        outline: ReportCheckpoint["outline"],
+        index: number,
+        evidence: string,
+        previousSummaries: string[],
+      ): Promise<void> => {
+        const section = outline.sections[index];
+        if (!section) return;
+        if (budgetLeft() <= 0) throw new DeepResearchSectionError("timeout");
+        enqueueEvent({
+          type: "phase",
+          phase: "synthesize",
+          message: copy.writingSection(index + 1, outline.sections.length, section.title),
+        });
+        const sectionBody = stripRepeatedSectionHeading(
+          await streamSectionWithRetry(
+            sectionHooks(),
+            buildSectionMessages({
+              outline,
+              section,
+              sectionIndex: index,
+              evidence,
+              previousSummaries,
+              locale,
+            }),
+            section.title,
+          ),
+          section.title,
+        );
+        if (!sectionMeetsFormat(section, sectionBody)) {
+          const tableLike = section.format === "comparison_table" || section.format === "tradeoff";
+          if (!(tableLike && registrySnapshot().length === 0)) {
+            console.warn("[deep-research] section format miss", section.id, section.format);
+          }
+        }
+        const block = `\n\n## ${section.title}\n\n${sectionBody}`;
+        reportContentParts.push(block);
+        writer?.pushReport(block);
+        completedReportSections.push({ section, body: sectionBody });
+        if (sectionBody.trim()) previousSummaries.push(sectionBody.trim().slice(0, 200));
+        await persistReportCheckpoint(false);
+      };
+
+      const publishCompletedReport = async (input: {
+        outline: ReportCheckpoint["outline"];
+        planTopic: string;
+        deliveryPrefs: DeliveryPrefs;
+        stats: ReportCheckpoint["stats"];
+      }): Promise<void> => {
+        enqueueEvent({ type: "phase", phase: "synthesize", message: copy.synthesizePhase });
+        const citations = registrySnapshot();
+        const validIndexes = new Set(citations.map((citation) => citation.index));
+        let verifiedReport = stripThinkBlocks(reportContentParts.join(""));
+        try {
+          const verification = await verifyReportCitations({
+            markdown: verifiedReport,
+            citations,
+            topic: input.planTopic,
+            callJson: (body) => callGatewayJson(toolDeps, body, "dr.citation-verify"),
+            baseBody,
+            remainingMs: budgetLeft(),
+            modelCallsRemaining: 1,
+            locale,
+            onVerifyStart: () => {
+              enqueueEvent({ type: "phase", phase: "synthesize", message: copy.citationVerify });
+            },
+          });
+          verifiedReport = verification.markdown;
+        } catch (error) {
+          if (error instanceof DeepResearchPolicyError) throw error;
+          if (error instanceof DeepResearchGatewayQuotaError) throw error;
+          console.warn(
+            "[deep-research] citation verification skipped:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        const finalReport = linkifyCitations(verifiedReport, validIndexes);
+        const summaryInput = {
+          topic: sanitizeResearchTopic(input.planTopic || copy.researchReportFallback),
+          outline: input.outline,
+          stats: { ...input.stats, citationCount: citations.length },
+          artifacts: producedArtifacts.map((artifact) => ({
+            ...artifact,
+            title: sanitizeResearchTopic(artifact.title || artifact.path),
+          })),
+          runId,
+          deliveryPrefs: input.deliveryPrefs,
+        };
+        wrapupFallback = summaryInput;
+        if (finalReport.trim() && artifactsWritten < MAX_ARTIFACTS_PER_RUN) {
+          const record = await artifactStore.write({
+            tenantId,
+            userId,
+            sessionId,
+            runId,
+            path: `research/${runId}/final-report.md`,
+            title: primaryArtifactTitle(input.planTopic || input.outline.title || copy.researchReportFallback, {
+              ...input.deliveryPrefs,
+              format: "md",
+            }),
+            kind: "report",
+            content: finalReport,
+          });
+          artifactsWritten += 1;
+          producedArtifacts.push({
+            id: record.id,
+            path: record.path,
+            title: record.title,
+            kind: "report",
+          });
+          finalReportReady = true;
+          enqueueEvent({
+            type: "artifact",
+            id: record.id,
+            path: record.path,
+            title: record.title,
+            kind: "report",
+            bytes: record.byteSize,
+          });
+        } else if (finalReport.trim()) {
+          finalReportReady = true;
+        }
+        if (finalReport.trim()) {
+          try {
+            artifactsWritten = await finalizeReportArtifacts({
+              artifactStore,
+              tenantId,
+              userId,
+              sessionId,
+              runId,
+              topic: input.planTopic || copy.researchReportFallback,
+              outline: input.outline,
+              markdown: finalReport,
+              citations,
+              locale,
+              stats: input.stats,
+              artifactsWritten,
+              deliveryPrefs: input.deliveryPrefs,
+              enqueueEvent: (event) => {
+                if (event.type === "artifact" && event.path && event.id) {
+                  producedArtifacts.push({
+                    id: event.id,
+                    path: event.path,
+                    title: event.title ?? "",
+                    kind: event.kind ?? "report",
+                  });
+                }
+                enqueueEvent(event);
+              },
+            });
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.warn("[deep-research] finalizeReportArtifacts failed:", reason);
+            enqueueEvent({ type: "narrative", text: copy.htmlFailed(reason) });
+          }
+        }
+        let summaryPolicyError: DeepResearchPolicyError | null = null;
+        try {
+          summaryInput.artifacts = producedArtifacts;
+          const summary = await buildCompletionSummary(summaryInput, {
+            locale,
+            callJson: async (messages) => {
+              try {
+                return await callGatewayJson(toolDeps, { ...baseBody, messages }, "dr.section");
+              } catch (error) {
+                if (error instanceof DeepResearchPolicyError) {
+                  summaryPolicyError = error;
+                  return "";
+                }
+                throw error;
+              }
+            },
+          });
+          if (summaryPolicyError) throw summaryPolicyError;
+          if (summary.trim()) {
+            enqueueDelta(summary);
+            summarySent = true;
+          }
+        } catch (error) {
+          if (error instanceof DeepResearchPolicyError) throw error;
+          console.warn(
+            "[deep-research] completion summary failed:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        if (!summarySent && finalReportReady) {
+          summaryInput.artifacts = producedArtifacts;
+          enqueueDelta(fallbackSummary(summaryInput, locale));
+          summarySent = true;
+        }
+        try {
+          const sourcesFrame = formatWebSearchSourcesSse(citationsToHits(citations));
+          if (sourcesFrame) safeControllerEnqueue(encoder.encode(sourcesFrame));
+        } catch (error) {
+          console.warn(
+            "[deep-research] sources frame failed:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        enqueueEvent(
+          { type: "phase", phase: "done", message: copy.done },
+          { status: "completed", phase: "done" },
+        );
+        await persistFinish("completed");
+        safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+        safeClose();
+      };
+
+      const writeContinuedReport = async (checkpoint: ReportCheckpoint): Promise<void> => {
+        const registry = new CitationRegistry(checkpoint.citations);
+        registrySnapshot = () => registry.list();
+        enqueueEvent({ type: "run_started", runId });
+        enqueueEvent({
+          type: "narrative",
+          text:
+            locale === "en"
+              ? `Restored ${checkpoint.completed.length} completed sections and the original evidence. Continuing the rest.`
+              : `已恢复 ${checkpoint.completed.length} 个完整章节及原有证据，仅继续未完成内容。`,
+        });
+        enqueueEvent({ type: "research_stats", ...checkpoint.stats });
+        if (deps.refreshAccessToken) {
+          await refreshGatewayBearer({
+            headers: toolDeps.headers,
+            refreshAccessToken: deps.refreshAccessToken,
+          });
+        }
+        const outline = {
+          ...checkpoint.outline,
+          title: sanitizeResearchTopic(checkpoint.outline.title),
+        };
+        for (const entry of checkpoint.completed) completedReportSections.push(entry);
+        reportCheckpoint = {
+          version: 1,
+          sourceRunId: runId,
+          nextRunId: ulid().toLowerCase(),
+          topic: checkpoint.topic,
+          ...(checkpoint.messages ? { messages: checkpoint.messages } : {}),
+          ...(checkpoint.writingRequirements !== undefined
+            ? { writingRequirements: checkpoint.writingRequirements }
+            : {}),
+          model: checkpoint.model,
+          provider: checkpoint.provider,
+          outline,
+          completed: completedReportSections,
+          sectionEvidence: checkpoint.sectionEvidence,
+          citations: registry.list(),
+          deliveryPrefs: checkpoint.deliveryPrefs,
+          stats: checkpoint.stats,
+          createdAt: new Date().toISOString(),
+        };
+        await persistReportCheckpoint(false);
+        reportContentParts.push(`# ${sanitizeResearchTopic(outline.title)}\n\n`);
+        reportContentParts.push(renderTableOfContents(outline, locale));
+        const previousSummaries: string[] = [];
+        for (const saved of completedReportSections) {
+          reportContentParts.push(`\n\n## ${saved.section.title}\n\n${saved.body}`);
+          if (saved.body.trim()) previousSummaries.push(saved.body.trim().slice(0, 200));
+        }
+        for (let index = completedReportSections.length; index < outline.sections.length; index += 1) {
+          const evidence = checkpoint.sectionEvidence[index] || checkpoint.writingRequirements || checkpoint.topic;
+          await commitSection(outline, index, evidence, previousSummaries);
+        }
+        await publishCompletedReport({
+          outline,
+          planTopic: checkpoint.topic,
+          deliveryPrefs: checkpoint.deliveryPrefs,
+          stats: checkpoint.stats,
+        });
+      };
 
       try {
         if (runSignal.aborted) throw new DOMException("Aborted", "AbortError");
+        if (deps.continueFromReport) {
+          await writeContinuedReport(deps.continueFromReport);
+          return;
+        }
 
         // deps.fetchImpl 是「调 gateway」的实现，不能用来探外站；出网探测固定走
         // directFetch，需要替身时只允许注入 probeEgressFn。
@@ -2249,173 +2916,48 @@ export async function runDeepResearchTurn(
         if (outlinePolicyError) throw outlinePolicyError;
         outline.title = sanitizeResearchTopic(outline.title);
 
-        const streamSectionInto = async (
-          messages: Array<{ role: string; content: string }>,
-        ): Promise<string> => {
-          const upstream = await callGatewayStream(
-            toolDeps,
-            {
-              ...baseBody,
-              stream: true,
-              messages,
-            },
-            "dr.section",
-          );
-          if (!upstream.ok || !upstream.body) {
-            const failure = await readGatewayFailure(upstream);
-            const policyError = policyErrorFromFailure(failure);
-            if (policyError) throw policyError;
-            throwIfGatewayLimit(failure);
-            const note = `\n\n> 本节撰写失败：${(failure.rawText || failure.message).slice(0, 200)}`;
-            enqueueDelta(note);
-            reportContentParts.push(note);
-            return "";
-          }
-
-          const reader = upstream.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          const sectionParts: string[] = [];
-          while (true) {
-            if (runSignal?.aborted) {
-              try {
-                await reader.cancel();
-              } catch {
-                // ignore
-              }
-              throw new DOMException("Aborted", "AbortError");
-            }
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let idx = buffer.indexOf("\n\n");
-            while (idx >= 0) {
-              const frame = buffer.slice(0, idx);
-              buffer = buffer.slice(idx + 2);
-              idx = buffer.indexOf("\n\n");
-              const dataLine = frame
-                .split("\n")
-                .map((line) => line.trim())
-                .find((line) => line.startsWith("data:"));
-              if (!dataLine) {
-                // forward non-data keepalive/comment frames as-is
-                safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
-                continue;
-              }
-              const data = dataLine.replace(/^data:\s*/, "");
-              if (data === "[DONE]") continue;
-              let isContentDelta = false;
-              type GatewayStreamFrame = {
-                choices?: Array<{ delta?: { content?: string } }>;
-                error?: { code?: unknown; message?: unknown };
-              };
-              let parsed: GatewayStreamFrame | null = null;
-              try {
-                parsed = JSON.parse(data) as GatewayStreamFrame;
-              } catch {
-                // forward non-delta frames as-is
-              }
-              const streamErrorCode = parsed?.error?.code;
-              if (typeof streamErrorCode === "string" && isPolicyErrorCode(streamErrorCode)) {
-                try {
-                  await reader.cancel();
-                } catch {
-                  // Gateway may already have closed the stream after the error frame.
-                }
-                const streamErrorMessage = parsed?.error?.message;
-                throw new DeepResearchPolicyError(
-                  streamErrorCode,
-                  typeof streamErrorMessage === "string"
-                    ? streamErrorMessage
-                    : copy.policyGatewayBlocked,
-                );
-              }
-              if (streamErrorCode === "42902" || streamErrorCode === "42901") {
-                try {
-                  await reader.cancel();
-                } catch {
-                  // Gateway may already have closed the stream after the error frame.
-                }
-                throwIfGatewayLimit({
-                  code: streamErrorCode,
-                  message: "gateway stream error",
-                  rawText: "",
-                });
-              }
-              const piece = parsed?.choices?.[0]?.delta?.content;
-              if (typeof piece === "string") {
-                sectionParts.push(piece);
-                reportContentParts.push(piece);
-                writer?.pushReport(piece);
-                isContentDelta = true;
-              }
-              // Report content deltas are NOT forwarded to the chat transport —
-              // the chat area shows only a completion summary, not the full report.
-              if (!isContentDelta) {
-                safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
-              }
-            }
-          }
-          return stripThinkBlocks(sectionParts.join(""));
+        const sectionEvidence = outline.sections.map((section, index) =>
+          index === 0 ? evidence : evidenceForSection(section),
+        );
+        reportCheckpoint = {
+          version: 1,
+          sourceRunId: runId,
+          nextRunId: ulid().toLowerCase(),
+          topic: plan.topic || originalUserQuery || userQuery,
+          messages: checkpointMessagesFrom(originalMessages),
+          writingRequirements: prefsWritingHint,
+          model:
+            typeof baseBody.model === "string" && baseBody.model.trim()
+              ? baseBody.model.trim()
+              : "default",
+          provider: deps.headers["x-agenticx-provider"] ?? "",
+          outline,
+          completed: [],
+          sectionEvidence,
+          citations: registry.list(),
+          deliveryPrefs,
+          stats: {
+            queriesPlanned: totalQueries,
+            urlsDiscovered: totalDiscovered,
+            sourcesSelected: totalSelected,
+            pagesFetched: totalPagesFetched,
+          },
+          createdAt: new Date().toISOString(),
         };
+        await persistReportCheckpoint(false);
 
-        // Build report content silently: accumulate into reportContentParts + run-store only.
-        const titleBlock = `# ${sanitizeResearchTopic(outline.title)}\n\n`;
-        reportContentParts.push(titleBlock);
-        const toc = renderTableOfContents(outline, locale);
-        reportContentParts.push(toc);
-
+        reportContentParts.push(`# ${sanitizeResearchTopic(outline.title)}\n\n`);
+        reportContentParts.push(renderTableOfContents(outline, locale));
         const previousSummaries: string[] = [];
-        let truncated = false;
-        for (let i = 0; i < outline.sections.length; i += 1) {
-          const section = outline.sections[i]!;
-          if (budgetLeft() <= 0) {
-            truncated = true;
-            const remaining = outline.sections
-              .slice(i)
-              .map((s) => s.title)
-              .join("、");
-            const note = `\n\n> 报告因时间预算截断，以下章节未展开：${remaining}`;
-            reportContentParts.push(note);
-            break;
-          }
-          enqueueEvent({
-            type: "phase",
-            phase: "synthesize",
-            message: copy.writingSection(i + 1, outline.sections.length, section.title),
-          });
-          const heading = `\n\n## ${section.title}\n\n`;
-          reportContentParts.push(heading);
-          const sectionBody = await streamSectionInto(
-            buildSectionMessages({
-              outline,
-              section,
-              sectionIndex: i,
-              // 首节「核心结论」需要全局证据；其余节按 citationIndexes 裁剪证据。
-              evidence: i === 0 ? evidence : evidenceForSection(section),
-              previousSummaries,
-              locale,
-            }),
+        for (let index = 0; index < outline.sections.length; index += 1) {
+          await commitSection(
+            outline,
+            index,
+            sectionEvidence[index] ?? evidence,
+            previousSummaries,
           );
-          if (!sectionMeetsFormat(section, sectionBody)) {
-            const tableLike =
-              section.format === "comparison_table" || section.format === "tradeoff";
-            const noEvidence = registrySnapshot().length === 0;
-            if (!(tableLike && noEvidence)) {
-              console.warn(
-                "[deep-research] section format miss",
-                section.id,
-                section.format,
-              );
-            }
-          }
-          if (sectionBody.trim()) {
-            previousSummaries.push(sectionBody.trim().slice(0, 200));
-          }
         }
-        if (!truncated) {
-          enqueueEvent({ type: "phase", phase: "synthesize", message: copy.synthesizePhase });
-        }
+        enqueueEvent({ type: "phase", phase: "synthesize", message: copy.synthesizePhase });
 
         const citations = registry.list();
         const validIndexes = new Set(citations.map((c) => c.index));
@@ -2616,6 +3158,13 @@ export async function runDeepResearchTurn(
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         safeClose();
       } catch (error) {
+        if (
+          error instanceof DeepResearchSectionError &&
+          (error.kind === "truncated" || error.kind === "transport" || error.kind === "timeout")
+        ) {
+          await finishIncompleteReport();
+          return;
+        }
         if (error instanceof DOMException && error.name === "AbortError") {
           enqueueEvent(
             { type: "phase", phase: "done", message: copy.cancelled },
@@ -2691,6 +3240,27 @@ export async function runDeepResearchTurn(
   });
 
   return eventStreamResponse(stream, traceId);
+}
+
+/** Continue a stopped report from its checkpoint. Retrieval and the outline are not repeated. */
+export async function continueFromReport(
+  checkpoint: ReportCheckpoint,
+  deps: DeepResearchDeps,
+): Promise<Response> {
+  const messages = checkpoint.messages?.length
+    ? checkpoint.messages
+    : [{ role: "user", content: checkpoint.topic }];
+  return runDeepResearchTurn(
+    { model: checkpoint.model, messages },
+    {
+      ...deps,
+      continueFromReport: checkpoint,
+      headers: {
+        ...deps.headers,
+        ...(checkpoint.provider ? { "x-agenticx-provider": checkpoint.provider } : {}),
+      },
+    },
+  );
 }
 
 /** Test helper: plain failure stream when all searches fail (exported for AC). */

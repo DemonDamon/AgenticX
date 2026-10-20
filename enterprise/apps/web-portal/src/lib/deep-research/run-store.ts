@@ -37,6 +37,7 @@ const ACTIVE_STATUSES: DeepResearchRunStatus[] = ["running", "awaiting_clarify"]
 
 const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>([
   "run_started",
+  "report_resume_available",
   "clarify",
   "clarify_chat",
   "research_profile",

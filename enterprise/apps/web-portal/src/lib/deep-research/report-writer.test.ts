@@ -8,8 +8,24 @@ import {
   parseOutlineJson,
   renderTableOfContents,
   sectionMeetsFormat,
+  stripRepeatedSectionHeading,
   type ReportOutline,
 } from "./report-writer";
+
+describe("stripRepeatedSectionHeading", () => {
+  it("drops a leading heading that repeats the section title", () => {
+    expect(stripRepeatedSectionHeading("## 构建性能与生态取舍\n\n正文第一段", "构建性能与生态取舍")).toBe(
+      "正文第一段",
+    );
+    expect(stripRepeatedSectionHeading("\n# 2. 构建性能与生态取舍 \n正文", "构建性能与生态取舍")).toBe("正文");
+  });
+
+  it("keeps bodies whose first heading is a different subsection", () => {
+    const body = "### 构建速度排序\n\n正文";
+    expect(stripRepeatedSectionHeading(body, "构建性能与生态取舍")).toBe(body);
+    expect(stripRepeatedSectionHeading("正文开头", "构建性能与生态取舍")).toBe("正文开头");
+  });
+});
 
 describe("parseOutlineJson", () => {
   it("parses fenced json", () => {

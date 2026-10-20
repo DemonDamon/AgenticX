@@ -151,7 +151,15 @@ export type DeepResearchEventPayload =
       pagesFetched: number;
     }
   /** Short assistant prose between workbench steps (not part of final report content). */
-  | { type: "narrative"; text: string };
+  | { type: "narrative"; text: string }
+  /** Saved chapters can be continued. Emitted only when the report stopped early. */
+  | {
+      type: "report_resume_available";
+      runId: string;
+      nextRunId: string;
+      completedSections: number;
+      totalSections: number;
+    };
 
 /** Optional wall-clock ISO timestamp stamped at emit time for trace duration. */
 export type DeepResearchEvent = DeepResearchEventPayload & { ts?: string };
@@ -178,6 +186,11 @@ export type ChatMessage = {
   user_id: EntityId;
   role: ChatMessageRole;
   content: string;
+  /**
+   * Continuation trigger. Not a user question: hide it in the transcript and
+   * drop it before the message is sent to a model.
+   */
+  control?: "continue_report";
   /**
    * 助手回答未正常结束时的说明。
    * contentLength 之前是模型真实输出，之后是系统追加的提示。

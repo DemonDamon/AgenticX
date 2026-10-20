@@ -28,6 +28,8 @@ vi.mock("./history-client", () => ({
 
 vi.mock("./utils/deep-research-active-run", () => ({
   fetchActiveDeepResearchRuns: vi.fn().mockResolvedValue([]),
+  activeRunReconnectUrl: (runId: string) =>
+    `/api/chat/deep-research/runs/${encodeURIComponent(runId)}/stream`,
 }));
 
 import { useChatStore } from "./store";
@@ -393,5 +395,80 @@ describe("chat store deepResearch request wiring", () => {
     });
     release();
     await sendPromise;
+  });
+});
+
+describe("chat store report continuation", () => {
+  it("opens a continuation run, hides the control turn from history, and reconnects that run", async () => {
+    appendMessages.mockClear();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/chat/deep-research/continue")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ runId: "source-run" });
+        return new Response(JSON.stringify({
+          code: "00000",
+          data: { runId: "next-run", traceId: "trace-next", sessionId: "A" },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("hydrate=1")) {
+        expect(url).toContain("runId=next-run");
+        return new Response(JSON.stringify({ data: { latest: null } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/runs/next-run/stream")) {
+        const frame = JSON.stringify({
+          agenticx_deep_research_event: { type: "run_started", runId: "next-run" },
+        });
+        return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+      }
+      return new Response("missing", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    useChatStore.setState({
+      sessions: [session("A", "deep research")],
+      activeSessionId: "A",
+      hydrated: true,
+      status: "idle",
+      activeRequestId: null,
+      streamingSessionId: null,
+      streamStateBySessionId: {},
+      errorMessage: null,
+      messages: [{
+        id: "01J0000000000000000000000A",
+        session_id: "A",
+        tenant_id: "01J00000000000000000000001",
+        user_id: "01J00000000000000000000004",
+        role: "assistant",
+        content: "部分报告",
+        created_at: "2026-10-20T00:00:00.000Z",
+        model: "saved-model",
+        deep_research: {
+          runId: "source-run",
+          status: "failed",
+          events: [{
+            type: "report_resume_available",
+            runId: "source-run",
+            nextRunId: "next-run",
+            completedSections: 2,
+            totalSections: 4,
+          }],
+        },
+      }],
+    });
+    try {
+      await useChatStore.getState().attachReportContinuation("A", "source-run");
+      const messages = useChatStore.getState().messages;
+      expect(messages.some((message) => message.control === "continue_report" && message.content === "继续完成报告")).toBe(true);
+      const assistant = messages.find((message) => message.deep_research?.runId === "next-run");
+      expect(assistant?.trace_id).toBe("trace-next");
+      expect(assistant?.model).toBe("saved-model");
+      expect(assistant?.deep_research?.events.some((event) => event.type === "run_started")).toBe(true);
+      const persisted = appendMessages.mock.calls.flatMap((call) => call[1] as Array<{ content?: string }>);
+      expect(persisted.some((message) => message.content === "继续完成报告")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -34,6 +34,7 @@ import { AttachmentContentPanel } from "./AttachmentContentPanel";
 import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
 import { findActivePlanChatGate } from "../../utils/deep-research-plan-chat-composer";
+import { isReportContinuationAvailable } from "../../utils/turn-continuation";
 import { useChatStore } from "../../store";
 import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 import "../../markdown/chat-prism-themes.css";
@@ -201,6 +202,8 @@ type MessageListProps = {
     sessionId: string,
     lane: DeepResearchPanelLane,
   ) => void;
+  /** Continue a saved report from the workbench card. */
+  onContinueReport?: (assistantMessageId: string) => void;
   /** When set, attachment preview is owned by the parent (docked side pane). */
   onRequestAttachmentPreview?: (attachment: ChatMessageAttachment) => void;
 };
@@ -394,6 +397,7 @@ export function MessageList({
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
   onRequestDeepResearchLaneSources,
+  onContinueReport,
   onRequestAttachmentPreview,
 }: MessageListProps) {
   const copy = useChatCopy();
@@ -704,6 +708,7 @@ export function MessageList({
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-4">
           {messages.map((message, messageIndex) => {
+            if (message.control === "continue_report") return null;
             const isUser = message.role === "user";
             const isAssistant = message.role === "assistant";
             const isTerminal = styleVariant === "terminal";
@@ -884,6 +889,13 @@ export function MessageList({
                         {isAssistant && message.deep_research ? (
                           <DeepResearchWorkbench
                             deepResearch={message.deep_research}
+                            onContinueReport={
+                              onContinueReport &&
+                              !sessionStreamBusy &&
+                              isReportContinuationAvailable(message)
+                                ? () => onContinueReport(message.id)
+                                : undefined
+                            }
                             planChatInteractive={
                               activePlanChatAssistantId === message.id
                             }

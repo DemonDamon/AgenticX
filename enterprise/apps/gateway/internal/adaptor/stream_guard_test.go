@@ -64,3 +64,36 @@ func TestStreamBufferExceeded(t *testing.T) {
 		t.Fatalf("expected stream:buffer_exceeded, got %v", err)
 	}
 }
+
+func TestOpenAIStreamRequiresTerminalFrame(t *testing.T) {
+	const content = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"chapter\"}}]}\n\n"
+	const finish = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+	for _, tc := range []struct {
+		name    string
+		stream  string
+		wantErr bool
+	}{
+		{name: "done marker", stream: content + "data: [DONE]\n\n"},
+		{name: "finish reason without done marker", stream: content + finish},
+		{name: "closed mid-chapter", stream: content, wantErr: true},
+		{name: "closed after partial final frame", stream: content + "data: {\"choices\":[{\"delta\":{\"content\":\"more\"}}]}", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var chunks int
+			err := parseSSEStream(strings.NewReader(tc.stream), StreamConfig{}, func(openai.StreamChunk) error {
+				chunks++
+				return nil
+			})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "stream:incomplete") {
+					t.Fatalf("expected incomplete stream error, got %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if chunks == 0 {
+				t.Fatal("expected content chunk to reach caller")
+			}
+		})
+	}
+}

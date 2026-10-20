@@ -275,6 +275,21 @@ export function buildSectionMessages(args: {
   ];
 }
 
+function normalizeHeadingText(text: string): string {
+  return text
+    .replace(/^(?:\d+(?:\.\d+)*[.、)]?|[一二三四五六七八九十]+[、.])\s*/, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+/** Models sometimes ignore "do not repeat the title"; the report adds its own `## title`. */
+export function stripRepeatedSectionHeading(body: string, title: string): string {
+  const match = body.match(/^\s*#{1,6}[ \t]+([^\n]*)\n?/);
+  if (!match) return body;
+  if (normalizeHeadingText(match[1] ?? "") !== normalizeHeadingText(title)) return body;
+  return body.slice(match[0].length).replace(/^\s+/, "");
+}
+
 function hasGfmTable(body: string): boolean {
   const lines = body.replace(/\r\n/g, "\n").split("\n");
   for (let i = 0; i < lines.length - 1; i += 1) {
