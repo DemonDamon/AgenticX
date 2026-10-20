@@ -31,6 +31,7 @@
         "iam": "IAM",
         "ops": "Operations",
         "platform": "Platform",
+        "content": "Collaboration",
         "observability": "Observability"
       },
       "items": {

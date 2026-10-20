@@ -126,9 +126,15 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: Plug },
       { href: "/admin/connectors", labelKey: "connectors", icon: Cable },
       { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
+      { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
+    ],
+  },
+  {
+    id: "content",
+    label: "content",
+    items: [
       { href: "/admin/projects", labelKey: "projects", icon: Waypoints },
       { href: "/admin/cases", labelKey: "cases", icon: Library },
-      { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
     ],
   },
 ];
