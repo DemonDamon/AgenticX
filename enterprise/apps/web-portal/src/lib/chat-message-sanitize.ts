@@ -115,6 +115,21 @@ function sanitizeWebSearchSources(raw: unknown): WebSearchSource[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function sanitizeInterruption(raw: unknown, content: string): ChatMessage["interruption"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { reason, contentLength } = raw as Record<string, unknown>;
+  if (
+    (reason !== "cancelled" && reason !== "failed" && reason !== "disconnected") ||
+    typeof contentLength !== "number" ||
+    !Number.isInteger(contentLength) ||
+    contentLength < 0 ||
+    contentLength > content.length
+  ) {
+    return undefined;
+  }
+  return { reason, contentLength };
+}
+
 function sanitizeDeepResearch(raw: unknown): ChatMessageDeepResearch | undefined {
   if (raw == null) return undefined;
   if (!raw || typeof raw !== "object") throw new Error("invalid deep_research");
@@ -300,6 +315,7 @@ export function sanitizeInboundMessages(
     // 避免旧客户端或脏数据把整批消息的落库打挂。
     const traceIdRaw = typeof row.trace_id === "string" ? row.trace_id.trim() : "";
     const traceId = isTraceId(traceIdRaw) ? traceIdRaw : undefined;
+    const interruption = role === "assistant" ? sanitizeInterruption(row.interruption, content) : undefined;
     out.push({
       id,
       session_id: sessionId,
@@ -312,6 +328,7 @@ export function sanitizeInboundMessages(
       deep_research: deepResearch,
       model,
       trace_id: traceId,
+      ...(interruption ? { interruption } : {}),
       created_at: createdAt,
     });
   }

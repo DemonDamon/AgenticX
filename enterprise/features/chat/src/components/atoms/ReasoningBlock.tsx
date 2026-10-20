@@ -33,6 +33,14 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+const ReasoningMarkdown = React.memo(function ReasoningMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={assistantUrlTransform} components={ASSISTANT_MD_COMPONENTS}>
+      {content}
+    </ReactMarkdown>
+  );
+});
+
 function ThinkingGlyph() {
   return (
     <svg
@@ -123,13 +131,7 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
                 <div className="mt-1.5 w-px min-h-3 flex-1 bg-border/55" />
               </div>
               <div className="agx-assistant-md ml-2.5 min-w-0 flex-1 break-words pb-0.5 text-sm leading-6 text-muted-foreground">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  urlTransform={assistantUrlTransform}
-                  components={ASSISTANT_MD_COMPONENTS}
-                >
-                  {content}
-                </ReactMarkdown>
+                <ReasoningMarkdown content={content} />
               </div>
             </div>
           ) : (

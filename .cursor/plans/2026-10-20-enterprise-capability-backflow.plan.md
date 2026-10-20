@@ -182,6 +182,7 @@ flowchart LR
 - 交付仓的轻量 e2e harness（嵌入式 PG + 网关 + 门户 + Playwright）值得单独评估回流。
 - 管理台 `next.config.ts` 是否也加同一组安全响应头。
 - 运维监控分组里额度 / 套餐 / 分账与观测混放（与 B12 收敛额度入口相关，视 B12 结果再定）。
+- 门户「编辑后重新发送」（`features/chat/src/store.ts` `editUserMessageAndResend`）没有接普通回答的流式落盘，编辑后生成中途刷新会丢失这次回答。
 - 交付仓同样存在「编辑 / 重新生成时整段替换消息导致该会话赞踩被级联删除」的问题（B8 在主仓已修），可回推给交付仓。
 - 管理台文案里有接口路径直接展示给管理员（原有问题，非回流引入）：`messages/zh.json` 的 `pages.iam.users.loadingDescription`「正在从 /api/admin/users 拉取用户列表」、批量导入的「POST /api/admin/iam/bulk-import · {count} 行」，英文同位置。
 - 管理台 `/metering/quota` 预算区：动作下拉直接显示英文 `warn`；单位下拉把 tokens 显示为「词元」，与页面其他处「Token」不统一；部门 / 个人需手填 ID（原有问题）。

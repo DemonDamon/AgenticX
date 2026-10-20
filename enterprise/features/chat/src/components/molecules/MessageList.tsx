@@ -38,6 +38,26 @@ import { useChatStore } from "../../store";
 import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 import "../../markdown/chat-prism-themes.css";
 
+// Zustand updates messages immutably. Cache only while the message is retained;
+// settled long answers need not be parsed again for every active response tick.
+const parsedMessages = new WeakMap<ChatMessage, {
+  streaming: boolean;
+  content: ReturnType<typeof parseAssistantContent>;
+}>();
+function parsedContent(message: ChatMessage, streaming: boolean) {
+  let parsed = parsedMessages.get(message);
+  if (!parsed || parsed.streaming !== streaming) {
+    parsed = { streaming, content: parseAssistantContent(message, streaming) };
+    parsedMessages.set(message, parsed);
+  }
+  return parsed.content;
+}
+
+function researchInFlight(message: ChatMessage): boolean {
+  return message.role === "assistant" &&
+    (message.deep_research?.status === "running" || message.deep_research?.status === "awaiting_clarify");
+}
+
 // 内联 SVG 图标组件
 function IconCopy({ className }: { className?: string }) {
   return (
@@ -387,13 +407,19 @@ export function MessageList({
       (state.activeSessionId === listSessionIdForStream ? state.status : "idle");
     return sessionStatus === "sending" || sessionStatus === "streaming";
   });
+  const trackedInFlightAssistantId = useChatStore((state) =>
+    listSessionIdForStream
+      ? state.streamStateBySessionId[listSessionIdForStream]?.assistantMessageId ?? null
+      : null,
+  );
   const inFlightAssistantId = React.useMemo(() => {
     if (!sessionStreamBusy) return null;
+    if (trackedInFlightAssistantId) return trackedInFlightAssistantId;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       if (messages[i]?.role === "assistant") return messages[i]!.id;
     }
     return null;
-  }, [messages, sessionStreamBusy]);
+  }, [messages, sessionStreamBusy, trackedInFlightAssistantId]);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = React.useState(false);
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
@@ -683,7 +709,9 @@ export function MessageList({
             const isTerminal = styleVariant === "terminal";
             const isClean = styleVariant === "clean";
             const isSelected = selectedMessages.has(message.id);
-            const parsedAssistant = isAssistant ? parseAssistantContent(message) : null;
+            const parsedAssistant = isAssistant
+              ? parsedContent(message, message.id === inFlightAssistantId || researchInFlight(message))
+              : null;
             const rawDisplayContent = parsedAssistant
               ? parsedAssistant.displayContent
               : message.content;

@@ -63,6 +63,8 @@ export type ChatChunk = {
   deepResearchEvent?: DeepResearchEvent;
   /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */
   cancelled?: boolean;
+  /** 上游返回的结束原因（如 stop / length），length 表示回答被长度上限截断。 */
+  finishReason?: string;
   error?: {
     code: string;
     message: string;

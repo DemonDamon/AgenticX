@@ -91,4 +91,4 @@ r.Use(requestTimeout(requestTimeoutFromEnv()))
 ## 验收记录
 
 - 2026-10-20 Opus 5.5 复核（自动部分）：AC-1 `sdk-ts` 16/16 通过、typecheck 通过；AC-2 / AC-4 `go test ./internal/server/...` ok，含四条超时用例；AC-3 门户类型错误与基线完全一致（26 条，无新增），`features/chat` 两条失败为基线原有。代码复核：超时路径只写一次 `[DONE]`（`writeStreamError` 本身不写）；非超时错误帧路径 SDK 在 `chunk.error` 分支立即返回，不会叠加「连接中断」；`[DONE]` 核对未发现需要补的门户成功路径。
-- AC-5 手工：待第一波完成后统一走查。
+- AC-5 手工（2026-10-20）：网关以 `GATEWAY_REQUEST_TIMEOUT=5s` 重启后，门户长问题 5 秒后显示「本次生成超过时限，已停止。可以缩短问题或稍后重试。」并带请求 ID，输入区出现「继续生成」；恢复默认后续写正常长输出。通过。

@@ -183,7 +183,13 @@
     "welcomeSubtitle": "Nice to meet you. What can I help with?",
     "loadingMessages": "Loading messages…",
     "scrollToBottom": "Scroll to bottom",
-    "feedbackSaveFailed": "Couldn't save feedback. Please try again."
+    "feedbackSaveFailed": "Couldn't save feedback. Please try again.",
+    "errors": {
+      "emptyResponse": "No final answer was generated. Existing content was kept. Continue generating or regenerate to try again.",
+      "interrupted": "The reply was interrupted. Generated content was kept. Continue generating or try again.",
+      "transport": "The connection dropped. Generated content was kept. Click Continue next to the input box to finish the reply.",
+      "truncated": "The reply ended early because it reached the model's output limit. Generated content was kept. Click Continue next to the input box to finish the reply."
+    }
   },
   "settings": {
     "title": "Settings",

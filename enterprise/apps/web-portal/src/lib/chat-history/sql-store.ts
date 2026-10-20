@@ -87,6 +87,7 @@ type MessageMetadata = {
   web_search_sources?: ChatMessage["web_search_sources"];
   deep_research?: ChatMessage["deep_research"];
   trace_id?: string;
+  interruption?: ChatMessage["interruption"];
 };
 
 function parseMetadata(value: unknown): MessageMetadata | null {
@@ -119,10 +120,26 @@ export function serializeMessageMetadata(message: ChatMessage): string | null {
   if (message.trace_id) {
     metadata.trace_id = message.trace_id;
   }
+  if (message.interruption) metadata.interruption = message.interruption;
   // IMPORTANT: mysql2 + MySQL JSON columns reject JS objects here with
   // ER_INVALID_JSON_TEXT ("Invalid value." at position 1). Always pass a
   // JSON string (or null). PostgreSQL jsonb accepts the string equally well.
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
+}
+
+/**
+ * Ordinary answers may continue from the saved prefix. A completed row (no
+ * interruption) cannot be rewritten, and cannot be marked disconnected again.
+ */
+export function ordinaryAssistantUpdateAllowed(existing: ChatMessage, incoming: ChatMessage): boolean {
+  if (existing.model !== incoming.model) return false;
+  if (incoming.interruption?.reason === "disconnected" && !existing.interruption) return false;
+  const length = existing.interruption?.contentLength;
+  if (existing.interruption) {
+    if (length == null || !Number.isInteger(length) || length < 0 || length > existing.content.length) return false;
+    return incoming.content.startsWith(existing.content.slice(0, length));
+  }
+  return existing.content === incoming.content && !incoming.interruption;
 }
 
 /** Exported for unit tests — keep metadata.trace_id round-trip stable. */
@@ -140,6 +157,7 @@ export function mapMessage(row: Record<string, unknown>): ChatMessage {
     deep_research: metadata?.deep_research,
     model: row.model == null ? undefined : String(row.model),
     trace_id: metadata?.trace_id,
+    interruption: metadata?.interruption,
     created_at: toDate(row.created_at).toISOString(),
   };
 }
@@ -403,6 +421,17 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
       }
       // created_at is immutable identity for the turn; drifting it is treated as conflict.
       if (mapped.created_at !== message.created_at) {
+        throw new ChatHistoryConflictError("message id conflict with different payload");
+      }
+      // Late snapshots must not make a completed ordinary answer resumable again,
+      // and an interrupted answer may only grow from its saved prefix.
+      if (
+        mapped.role === "assistant" &&
+        message.role === "assistant" &&
+        !mapped.deep_research &&
+        !message.deep_research &&
+        !ordinaryAssistantUpdateAllowed(mapped, message)
+      ) {
         throw new ChatHistoryConflictError("message id conflict with different payload");
       }
     }

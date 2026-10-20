@@ -178,6 +178,14 @@ export type ChatMessage = {
   user_id: EntityId;
   role: ChatMessageRole;
   content: string;
+  /**
+   * 助手回答未正常结束时的说明。
+   * contentLength 之前是模型真实输出，之后是系统追加的提示。
+   */
+  interruption?: {
+    reason: "cancelled" | "failed" | "disconnected";
+    contentLength: number;
+  };
   attachments?: ChatMessageAttachment[];
   web_search_sources?: WebSearchSource[];
   deep_research?: ChatMessageDeepResearch;

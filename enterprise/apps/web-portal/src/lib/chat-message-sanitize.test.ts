@@ -6,6 +6,32 @@ const TENANT = "01HYAAAAAAAAAAAAAAAAAAAAA2";
 const USER = "01HYAAAAAAAAAAAAAAAAAAAAA3";
 
 describe("sanitizeInboundMessages", () => {
+  it("keeps only bounded assistant interruption metadata", () => {
+    const base = {
+      id: "01HYAAAAAAAAAAAAAAAAAAAAA4",
+      role: "assistant",
+      content: "prefix",
+      interruption: { reason: "cancelled", contentLength: 6, extra: "ignored" },
+    };
+    expect(sanitizeInboundMessages(SESSION, TENANT, USER, [base])[0]?.interruption).toEqual({
+      reason: "cancelled",
+      contentLength: 6,
+    });
+    expect(
+      sanitizeInboundMessages(SESSION, TENANT, USER, [
+        { ...base, interruption: { reason: "disconnected", contentLength: 6 } },
+      ])[0]?.interruption,
+    ).toEqual({ reason: "disconnected", contentLength: 6 });
+    for (const contentLength of [-1, 7, 1.5]) {
+      expect(
+        sanitizeInboundMessages(SESSION, TENANT, USER, [
+          { ...base, interruption: { reason: "failed", contentLength } },
+        ])[0]?.interruption,
+      ).toBeUndefined();
+    }
+    expect(sanitizeInboundMessages(SESSION, TENANT, USER, [{ ...base, role: "user", content: "prefix" }])[0]?.interruption).toBeUndefined();
+  });
+
   it("preserves image attachments on user messages", () => {
     const dataUrl = "data:image/png;base64,abcd";
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [

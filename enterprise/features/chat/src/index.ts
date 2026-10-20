@@ -30,6 +30,8 @@ export type { ChatCopy, PortalLocale } from "./i18n/chat-copy";
 export { ChatLocaleProvider, useChatCopy, useChatLocale } from "./i18n/ChatLocaleProvider";
 export * from "./utils/deep-research-reconnect";
 export * from "./utils/session-stream-state";
+export * from "./utils/turn-continuation";
+export { prepareAssistantContinuation } from "./assistant-content";
 export * from "./components/molecules/InputArea";
 export * from "./components/molecules/MessageQueuePanel";
 export * from "./components/molecules/QueuedMessageBubble";

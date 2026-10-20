@@ -16,6 +16,12 @@ function baseMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 }
 
 describe("serializeMessageMetadata", () => {
+  it("round trips a stopped answer's continuation boundary through SQL metadata", () => {
+    const message = baseMessage({ interruption: { reason: "cancelled", contentLength: 2 } });
+    const metadata = serializeMessageMetadata(message);
+    expect(mapMessage({ ...message, metadata }).interruption).toEqual(message.interruption);
+  });
+
   it("returns null when there is no metadata", () => {
     expect(serializeMessageMetadata(baseMessage())).toBeNull();
   });

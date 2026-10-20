@@ -11,6 +11,7 @@ type InputAreaProps = {
   onSend: () => void;
   onForceSend?: () => void;
   onCancel: () => void;
+  onContinue?: () => void;
   leftToolbar?: React.ReactNode;
   rightToolbar?: React.ReactNode;
   className?: string;
@@ -48,6 +49,7 @@ export function InputArea({
   onSend,
   onForceSend,
   onCancel,
+  onContinue,
   leftToolbar,
   rightToolbar,
   className,
@@ -181,8 +183,12 @@ export function InputArea({
           <div className="flex items-center gap-1.5 pl-2">
             {rightToolbar}
             {canCancel ? (
-              <Button variant="secondary" size="icon" onClick={onCancel} className="h-8 w-8 rounded-full shadow-none">
+              <Button variant="secondary" size="icon" onClick={onCancel} aria-label="停止生成" title="停止生成" className="h-8 w-8 rounded-full shadow-none">
                 <SquareIcon className="h-3.5 w-3.5 fill-current" />
+              </Button>
+            ) : onContinue ? (
+              <Button variant="secondary" size="icon" onClick={onContinue} aria-label="继续生成" title="从中断处继续生成" className="h-8 w-8 rounded-full shadow-none">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-current"><path d="M7 4v16l14-8z" /></svg>
               </Button>
             ) : null}
             <Button

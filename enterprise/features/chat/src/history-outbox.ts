@@ -50,6 +50,8 @@ export type HistoryAppendPayload = {
   attachments?: HistoryAppendAttachmentMeta[];
   /** Deep-research workbench state — must survive refresh / session switch. */
   deep_research?: ChatMessageDeepResearch;
+  /** Continuation boundary for an interrupted ordinary answer. */
+  interruption?: ChatMessage["interruption"];
 };
 
 export type HistoryOutboxOp = {
@@ -205,6 +207,7 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
   };
   if (message.model) payload.model = message.model;
   if (message.trace_id) payload.trace_id = message.trace_id;
+  if (message.interruption) payload.interruption = message.interruption;
   if (message.web_search_sources?.length) {
     payload.web_search_sources = message.web_search_sources.map((source) => ({
       title: source.title,
@@ -621,13 +624,11 @@ export async function listPendingOverlayMessages(
   const ops = (await listPrincipalOps(storage, coordinator.principal))
     .filter((op) => op.sessionId === sessionId)
     .sort((a, b) => a.localSeq - b.localSeq || a.createdAt - b.createdAt);
-  const out: ChatMessage[] = [];
-  const seen = new Set<string>();
+  const out = new Map<string, ChatMessage>();
   for (const op of ops) {
     for (const message of op.messages) {
-      if (seen.has(message.id)) continue;
-      seen.add(message.id);
-      out.push({
+      // Keep insertion order, but restore the newest queued snapshot of an id.
+      out.set(message.id, {
         id: message.id,
         session_id: sessionId,
         tenant_id: coordinator.principal.tenantId,
@@ -635,6 +636,8 @@ export async function listPendingOverlayMessages(
         role: message.role,
         content: message.content,
         model: message.model,
+        trace_id: message.trace_id,
+        interruption: message.interruption,
         created_at: message.created_at,
         web_search_sources: message.web_search_sources,
         deep_research: message.deep_research,
@@ -649,7 +652,7 @@ export async function listPendingOverlayMessages(
       });
     }
   }
-  return out;
+  return [...out.values()];
 }
 
 export async function markSessionsDeleted(sessionIds: string[]): Promise<void> {

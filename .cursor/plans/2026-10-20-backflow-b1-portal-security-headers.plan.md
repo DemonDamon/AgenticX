@@ -95,4 +95,4 @@ export const config = {
 ## 验收记录
 
 - 2026-10-20 Opus 5.5 复核（自动部分）：AC-1–AC-3 三个测试文件 21 条全过；AC-4 门户测试无基线外新失败，类型错误与基线一致（26 条，本计划文件 0 条）。代码复核：响应头值与计划一致；HSTS 只读环境变量、不看 `NODE_ENV`，非法值只提变量名；middleware 只设头，无其他逻辑；compose 仅一行注释。
-- AC-5 手工：`next.config.ts` 改动需重启门户开发服务，待第一波统一走查。
+- AC-5 手工（2026-10-20）：重启门户后 `curl -sI /auth` 返回 CSP、X-Frame-Options、X-Content-Type-Options、Referrer-Policy 四个头；以 `PORTAL_HSTS_MAX_AGE=60` 启动时额外返回 `strict-transport-security: max-age=60`；登录、聊天正常。通过。

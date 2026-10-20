@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ulid } from "ulid";
-import { SqlChatHistoryStore, type SqlClient, type SqlResult } from "./sql-store";
+import { mapMessage, SqlChatHistoryStore, type SqlClient, type SqlResult } from "./sql-store";
 import { ChatHistoryConflictError } from "./types";
 
 type Row = Record<string, unknown>;
@@ -303,6 +303,63 @@ describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dial
       ),
     ).rejects.toThrow(/valid ULID/);
     expect(client.messages.size).toBe(0);
+  });
+
+  it("continues an interrupted answer in place without accepting prefix edits or stale snapshots", async () => {
+    const client = createFakeClient();
+    const store = new SqlChatHistoryStore(dialect, client);
+    const sessionId = ulid();
+    seedSession(client, sessionId);
+    const ctx = { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" };
+    const message = {
+      id: ulid(),
+      session_id: sessionId,
+      tenant_id: ctx.tenantId,
+      user_id: ctx.userId,
+      role: "assistant" as const,
+      content: "first\n\nnetwork error",
+      model: "m",
+      created_at: "2026-07-30T00:00:00.000Z",
+      interruption: { reason: "failed" as const, contentLength: 5 },
+    };
+    await store.appendChatMessages(ctx, sessionId, [message]);
+    await expect(store.appendChatMessages(ctx, sessionId, [{ ...message, content: "replaced" }])).rejects.toBeInstanceOf(ChatHistoryConflictError);
+    const continued = { ...message, content: "first second", interruption: undefined };
+    await store.appendChatMessages(ctx, sessionId, [continued]);
+    const continuedRow = mapMessage(client.messages.get(message.id)!);
+    expect(continuedRow).toMatchObject({ id: message.id, content: "first second" });
+    expect(continuedRow.interruption).toBeUndefined();
+    expect(client.messages.size).toBe(1);
+    await expect(store.appendChatMessages(ctx, sessionId, [message])).rejects.toBeInstanceOf(ChatHistoryConflictError);
+    await expect(store.appendChatMessages(ctx, sessionId, [{ ...continued, content: "arbitrary rewrite" }])).rejects.toBeInstanceOf(ChatHistoryConflictError);
+  });
+
+  it("advances ordinary checkpoints, survives reload, and clears recovery on completion", async () => {
+    const client = createFakeClient();
+    const store = new SqlChatHistoryStore(dialect, client);
+    const sessionId = ulid();
+    seedSession(client, sessionId);
+    const ctx = { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" };
+    const first = {
+      id: ulid(),
+      session_id: sessionId,
+      tenant_id: ctx.tenantId,
+      user_id: ctx.userId,
+      role: "assistant" as const,
+      content: "partial",
+      model: "m",
+      created_at: "2026-07-30T00:00:00.000Z",
+      interruption: { reason: "disconnected" as const, contentLength: 7 },
+    };
+    await store.appendChatMessages(ctx, sessionId, [first]);
+    const next = { ...first, content: "partial answer", interruption: { ...first.interruption, contentLength: 14 } };
+    await store.appendChatMessages(ctx, sessionId, [next]);
+    expect(mapMessage(client.messages.get(first.id)!)).toMatchObject(next);
+    await expect(store.appendChatMessages(ctx, sessionId, [first])).rejects.toBeInstanceOf(ChatHistoryConflictError);
+    await store.appendChatMessages(ctx, sessionId, [{ ...next, interruption: undefined }]);
+    expect(mapMessage(client.messages.get(first.id)!).interruption).toBeUndefined();
+    await expect(store.appendChatMessages(ctx, sessionId, [next])).rejects.toBeInstanceOf(ChatHistoryConflictError);
+    expect(client.messages.size).toBe(1);
   });
 
   it("same operation_id different hash → conflict", async () => {

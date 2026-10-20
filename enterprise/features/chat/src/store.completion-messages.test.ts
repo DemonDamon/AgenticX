@@ -11,6 +11,7 @@ function msg(partial: Partial<ChatMessage> & Pick<ChatMessage, "role" | "content
     role: partial.role,
     content: partial.content,
     created_at: partial.created_at ?? "2026-07-30T00:00:00.000Z",
+    ...(partial.interruption ? { interruption: partial.interruption } : {}),
   };
 }
 
@@ -31,5 +32,48 @@ describe("filterMessagesForCompletion", () => {
       msg({ role: "assistant", content: "" }),
     ]);
     expect(out.map((m) => m.content)).toEqual(["hello", "hi", "again"]);
+  });
+
+  it("excludes error-only replies and preserves generated text before an error", () => {
+    const error = "回复已中断，已保留已生成内容。可继续生成或重试。";
+    const prefix = "已生成的内容。 ";
+    const messages = [
+      msg({ role: "assistant", content: error, interruption: { reason: "failed", contentLength: 0 } }),
+      msg({
+        role: "assistant",
+        content: `${prefix}\n\n${error}`,
+        interruption: { reason: "failed", contentLength: prefix.length },
+      }),
+      msg({ role: "user", content: "广州天气如何" }),
+    ];
+    const out = filterMessagesForCompletion(messages);
+    expect(out.map((message) => message.content)).toEqual([prefix, "广州天气如何"]);
+    expect(messages[1]?.content).toContain(error);
+  });
+
+  it("keeps assistant answers without historical reasoning and leaves user text intact", () => {
+    const thought = "<think>我可能无法联网</think>";
+    const messages = [
+      msg({ role: "user", content: thought }),
+      msg({ role: "assistant", content: `${thought}查到的天气结论。` }),
+      msg({ role: "assistant", content: "<think>只产生了思考" }),
+    ];
+    expect(filterMessagesForCompletion(messages).map((message) => message.content)).toEqual([
+      thought,
+      "查到的天气结论。",
+    ]);
+    expect(messages[1]?.content).toContain(thought);
+  });
+
+  it("retains the available answer of a cancelled turn", () => {
+    const content = "<think>分析</think>已生成的正文";
+    const out = filterMessagesForCompletion([
+      msg({
+        role: "assistant",
+        content,
+        interruption: { reason: "cancelled", contentLength: content.length },
+      }),
+    ]);
+    expect(out[0]?.content).toBe("已生成的正文");
   });
 });

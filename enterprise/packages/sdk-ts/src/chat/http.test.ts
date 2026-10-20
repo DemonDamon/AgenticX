@@ -261,6 +261,37 @@ describe("HttpChatClient stream cancel", () => {
     }
   });
 
+  it("surfaces the upstream finish_reason so callers can detect truncation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            'data: {"choices":[{"delta":{"content":"cut"}}]}\n\n' +
+              'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' +
+              "data: [DONE]\n\n",
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+        ),
+      ),
+    );
+    try {
+      const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+      const { requestId } = await client.sendMessage({
+        sessionId: "session-1",
+        model: "test-model",
+        messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+      });
+      const chunks = [];
+      for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+      expect(chunks.some((chunk) => chunk.finishReason === "length" && chunk.done === false)).toBe(true);
+      expect(chunks.at(-1)).toMatchObject({ requestId, done: true });
+      expect(chunks.at(-1)?.error).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("reports EOF without [DONE] as a transport error", async () => {
     vi.stubGlobal(
       "fetch",

@@ -27,11 +27,13 @@ import {
   setDeepResearchInteractionPref,
   DEEP_RESEARCH_INTERACTION_OPTION_IDS,
   findActivePlanChatGate,
+  findContinuableResponse,
   createPortalChatFeedbackClient,
   type DeepResearchInteractionPref,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
+import { localizeChatErrorMessage, localizeChatMessageError } from "../lib/chat-error-i18n";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
 import {
   Activity,
@@ -135,8 +137,9 @@ export function MachiChatView({
   const showPreviousRetryVersion = useChatStore((s) => s.showPreviousRetryVersion);
   const showNextRetryVersion = useChatStore((s) => s.showNextRetryVersion);
   const cancel = useChatStore((s) => s.cancel);
-  const displayErrorMessage =
-    errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
+  const continueResponse = useChatStore((s) => s.continueResponse);
+  const continuableResponse = findContinuableResponse(messages, activeSessionId);
+  const displayErrorMessage = errorMessage ? localizeChatErrorMessage(errorMessage, t) : errorMessage;
   const [draft, setDraft] = React.useState("");
   const [feedbackByMessageId, setFeedbackByMessageId] = React.useState<
     Record<string, "like" | "dislike">
@@ -655,6 +658,10 @@ export function MachiChatView({
     if (!activeSessionId) return [];
     return messages.filter((message) => message.session_id === activeSessionId);
   }, [messages, activeSessionId]);
+  const displayMessages = React.useMemo(
+    () => visibleMessages.map((message) => localizeChatMessageError(message, t)),
+    [visibleMessages, t],
+  );
 
   /** 工作台已有事件的 run：用户正在看，不必再挂「继续查看」。空壳（刷新未回放）仍要露出横条。 */
   const visibleDeepResearchRunIds = React.useMemo(() => {
@@ -983,6 +990,11 @@ export function MachiChatView({
         onSend={() => handleSend()}
         onForceSend={() => handleSend({ forceSend: true })}
         onCancel={() => void cancel(client)}
+        onContinue={
+          continuableResponse && status !== "sending" && status !== "streaming" && !planChatRevising
+            ? () => void continueResponse(client, continuableResponse.id)
+            : undefined
+        }
         appearance="portal"
         minTextareaHeight={isEmpty ? 96 : undefined}
         className={
@@ -1298,7 +1310,7 @@ export function MachiChatView({
                   />
                 </div>
                 <MessageList
-                  messages={visibleMessages}
+                  messages={displayMessages}
                   className="min-h-0 flex-1"
                   styleVariant="im"
                   assistantFrameless

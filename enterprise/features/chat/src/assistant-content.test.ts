@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseAssistantContent, recoverIncompleteCodeFences, stripModelCitationTags, stripPlaceholderCitationMarkers } from "./assistant-content";
+import type { ChatMessage } from "@agenticx/core-api";
+import {
+  parseAssistantContent,
+  prepareAssistantContinuation,
+  recoverIncompleteCodeFences,
+  STREAM_EMPTY_RESPONSE_ERROR,
+  stripModelCitationTags,
+  stripPlaceholderCitationMarkers,
+} from "./assistant-content";
 
 describe("recoverIncompleteCodeFences", () => {
   it("fills code body from reasoning when visible output stops at opening fence", () => {
@@ -30,6 +38,77 @@ describe("stripModelCitationTags", () => {
 });
 
 describe("parseAssistantContent", () => {
+  const unfinished: ChatMessage = {
+    id: "unfinished",
+    session_id: "s1",
+    tenant_id: "t1",
+    user_id: "u1",
+    role: "assistant",
+    content: "<think>尚在分析问题",
+    created_at: "2026-10-15T00:00:00.000Z",
+  };
+
+  it.each(["cancelled", "disconnected", "failed"] as const)(
+    "presents a recoverable terminal state for %s reasoning without an answer",
+    (reason) => {
+      const message = { ...unfinished, interruption: { reason, contentLength: unfinished.content.length } };
+      const parsed = parseAssistantContent(message, false);
+      expect(parsed.thinkingInProgress).toBe(false);
+      expect(parsed.reasoningContent).toBe("尚在分析问题");
+      expect(parsed.displayContent).toBe(STREAM_EMPTY_RESPONSE_ERROR);
+      expect(parsed.displayContent).toContain("继续生成");
+      expect(message.content).toBe(unfinished.content);
+    },
+  );
+
+  it("settles legacy history without interruption metadata when the stream is not live", () => {
+    expect(parseAssistantContent(unfinished, true)).toMatchObject({
+      thinkingInProgress: true,
+      displayContent: "",
+    });
+    expect(parseAssistantContent(unfinished, false)).toMatchObject({
+      thinkingInProgress: false,
+      displayContent: expect.stringContaining("尚未生成最终答复"),
+    });
+  });
+
+  it("keeps an active stream running when its persisted checkpoint is marked disconnected", () => {
+    const checkpoint = {
+      ...unfinished,
+      interruption: { reason: "disconnected" as const, contentLength: unfinished.content.length },
+    };
+    expect(parseAssistantContent(checkpoint, true)).toMatchObject({
+      thinkingInProgress: true,
+      displayContent: "",
+    });
+  });
+
+  it("retains a partial answer without injecting a missing-answer notice", () => {
+    const partial = "<think>分析</think>已有部分答案";
+    const message = {
+      ...unfinished,
+      content: partial,
+      interruption: { reason: "disconnected" as const, contentLength: partial.length },
+    };
+    expect(parseAssistantContent(message, false)).toMatchObject({
+      thinkingInProgress: false,
+      displayContent: "已有部分答案",
+      reasoningContent: "分析",
+    });
+  });
+
+  it("does not announce failure for a durable research run", () => {
+    const research = { runId: "run", status: "running" as const, events: [] };
+    expect(parseAssistantContent({ ...unfinished, deep_research: research }, false).displayContent).toBe("");
+  });
+
+  it("closes an open reasoning block for continuation and drops it from the model request", () => {
+    const prepared = prepareAssistantContinuation(unfinished.content);
+    expect(prepared.retainedContent.endsWith("</think>")).toBe(true);
+    expect(prepared.requestContent.trim()).toBe("");
+    expect(prepareAssistantContinuation("<think>分析</think>已生成的正文").requestContent).toBe("已生成的正文");
+  });
+
   it("maps vendor think tags and recovers truncated code blocks", () => {
     const thinkOpen = "<" + "think" + ">";
     const thinkClose = "<" + "/" + "think" + ">";

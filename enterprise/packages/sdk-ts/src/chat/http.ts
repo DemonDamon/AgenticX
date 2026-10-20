@@ -328,6 +328,10 @@ export class HttpChatClient implements ChatClient {
               delta,
             };
           }
+          const finishReason = chunk.choices?.[0]?.finish_reason;
+          if (typeof finishReason === "string" && finishReason.trim()) {
+            yield { requestId, done: false, finishReason };
+          }
           // Do NOT treat finish_reason=stop as stream end.
           // Portal BFF appends trailer frames (agenticx_web_search_sources / agenticx_usage)
           // after the last content chunk and before data: [DONE]. Returning here drops them.

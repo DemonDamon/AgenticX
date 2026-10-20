@@ -30,6 +30,10 @@ import {
 import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
+import { parseAssistantContent, prepareAssistantContinuation, STREAM_EMPTY_RESPONSE_ERROR } from "./assistant-content";
+import { createResponseCheckpoint } from "./utils/response-checkpoint";
+import { createStreamTextBuffer } from "./utils/stream-text-buffer";
+import { findContinuableResponse } from "./utils/turn-continuation";
 import { probeNote } from "./debug/update-depth-probe";
 import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
 import { getDeepResearchInteractionPref } from "./utils/deep-research-interaction-pref";
@@ -77,9 +81,65 @@ function writeLastActiveSessionId(sessionId: string | null | undefined): void {
 /** Throttle mid-run history checkpoints per assistant message. */
 const deepResearchCheckpointAtByAssistantId = new Map<string, number>();
 const DEEP_RESEARCH_CHECKPOINT_MS = 8_000;
+const cancellingSessions = new Set<string>();
+const responseCheckpoints = new Map<string, ReturnType<typeof createResponseCheckpoint<ChatMessage>>>();
+const streamTextBySession = new Map<string, ReturnType<typeof createStreamTextBuffer>>();
 
 /** Stable code mapped to i18n in web-portal; keep messages intact on catch. */
 export const STREAM_UPDATE_DEPTH_ERROR = "STREAM_UPDATE_DEPTH";
+
+/**
+ * A provider finish_reason of length is a truncated answer, not a successful
+ * completion. The portal translates this exact copy.
+ */
+export const STREAM_LENGTH_ERROR =
+  "回复因达到模型输出上限而提前结束，已保留已生成内容。可点击输入框旁的“继续生成”接着完成。";
+
+export const STREAM_TRANSPORT_ERROR =
+  "连接中断，已保留已生成内容。可点击输入框旁的“继续生成”接着完成。";
+
+export const STREAM_INTERRUPTED_ERROR =
+  "回复已中断，已保留已生成内容。可继续生成或重试。";
+
+export { STREAM_EMPTY_RESPONSE_ERROR } from "./assistant-content";
+
+const STREAM_LENGTH_FINISH_REASONS = new Set([
+  "length",
+  "max_tokens",
+  "max_output_tokens",
+  "token_limit",
+  "token_limit_exceeded",
+]);
+
+function streamFinishReasonErrorMessage(finishReason: string | null | undefined): string | null {
+  const normalized = finishReason?.trim().toLowerCase();
+  return normalized && STREAM_LENGTH_FINISH_REASONS.has(normalized) ? STREAM_LENGTH_ERROR : null;
+}
+
+function readFinishReason(chunk: object): string | undefined {
+  if (!("finishReason" in chunk)) return undefined;
+  const value = (chunk as { finishReason?: unknown }).finishReason;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function hasEmptyOrdinaryResponse(message: ChatMessage | undefined): boolean {
+  return Boolean(
+    message &&
+      !message.deep_research &&
+      !parseAssistantContent(message, true).displayContent.trim(),
+  );
+}
+
+function streamErrorNotice(
+  error: { code?: string; message?: string; origin?: string },
+  traceId?: string,
+): { notice: string; reason: "failed" | "disconnected" } {
+  if (error.origin === "transport") {
+    return { notice: STREAM_TRANSPORT_ERROR, reason: "disconnected" };
+  }
+  const notice = toComplianceMessage(error.code, error.message?.trim() || STREAM_INTERRUPTED_ERROR, traceId);
+  return { notice, reason: "failed" };
+}
 
 function toStreamCatchErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : "Unknown send error";
@@ -94,6 +154,7 @@ export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 export type SessionStreamState = {
   status: "sending" | "streaming";
   activeRequestId: string;
+  assistantMessageId?: string;
 };
 
 type SendMessageInput = {
@@ -137,6 +198,7 @@ export type AssistantResponseVersion = {
   queryText: string;
   web_search_sources?: ChatMessage["web_search_sources"];
   deep_research?: ChatMessage["deep_research"];
+  interruption?: ChatMessage["interruption"];
 };
 
 export type UserResponseVersionState = {
@@ -212,7 +274,12 @@ export type ChatStoreActions = {
   removePendingMessage(messageId: string): void;
   editPendingMessage(messageId: string, content: string): void;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
-  regenerateAssistantResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
+  regenerateAssistantResponse(
+    client: ChatClient,
+    assistantMessageId: string,
+    mode?: { continue?: boolean },
+  ): Promise<void>;
+  continueResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
   showNextResponseVersion(userMessageId: string): void;
   showPreviousRetryVersion(userMessageId: string): void;
@@ -312,13 +379,19 @@ function buildUserContentWithDocuments(
 }
 
 /**
- * Optimistic UI appends an empty assistant placeholder for streaming.
- * Upstream providers such as Moonshot/Kimi reject empty assistant content.
+ * Send answer text as history, excluding reasoning and appended transport/error
+ * notices. Saved messages retain both for display and continuation.
+ * Empty assistant placeholders are still omitted (providers reject them).
  */
 export function filterMessagesForCompletion(messages: ChatMessage[]): ChatMessage[] {
-  return messages.filter((message) => {
-    if (message.role !== "assistant") return true;
-    return Boolean(message.content?.trim());
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    const prefix = message.interruption
+      ? message.content.slice(0, message.interruption.contentLength)
+      : message.content;
+    const content = prepareAssistantContinuation(prefix).requestContent;
+    if (!content.trim()) return [];
+    return [content === message.content ? message : { ...message, content }];
   });
 }
 
@@ -413,6 +486,7 @@ function toAssistantVersion(
     queryText: meta?.queryText ?? "",
     web_search_sources: message.web_search_sources,
     deep_research: message.deep_research,
+    interruption: message.interruption,
   };
 }
 
@@ -788,6 +862,227 @@ async function persistAppendMessagesNow(
     }
     void flushHistoryOutbox();
   }
+}
+
+function appendStreamFinishReasonNotice(content: string, notice: string): string {
+  if (content.includes(notice)) return content;
+  // Checkpoints/Continue use an exact byte prefix, including trailing whitespace.
+  return content ? `${content}\n\n${notice}` : notice;
+}
+
+function appendStreamErrorText(content: string, errorMessage: string): string {
+  if (content.includes(errorMessage)) return content;
+  // A provider can stop before closing its reasoning block. Keep the
+  // failure notice outside that block so the user can actually see it.
+  const retained = prepareAssistantContinuation(content).retainedContent;
+  return retained ? `${retained}\n\n${errorMessage}` : errorMessage;
+}
+
+function appendStreamFinishReasonNoticeToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  notice: string,
+): void {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) => {
+      if (message.id !== assistantId || message.role !== "assistant") return message;
+      const content = appendStreamFinishReasonNotice(message.content, notice);
+      return content === message.content
+        ? message
+        : {
+            ...message,
+            content,
+            interruption: message.interruption ?? { reason: "failed" as const, contentLength: message.content.length },
+          };
+    });
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) => {
+            if (index !== current.activeIndex) return version;
+            const content = appendStreamFinishReasonNotice(version.content, notice);
+            return content === version.content
+              ? version
+              : {
+                  ...version,
+                  content,
+                  interruption: version.interruption ?? { reason: "failed" as const, contentLength: version.content.length },
+                };
+          }),
+        },
+      },
+    };
+  });
+}
+
+function appendStreamErrorToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  errorMessage: string,
+  reason: "failed" | "disconnected" = "failed",
+): void {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) =>
+      message.id === assistantId && message.role === "assistant"
+        ? {
+            ...message,
+            interruption: message.interruption ?? { reason, contentLength: message.content.length },
+            content: appendStreamErrorText(message.content, errorMessage),
+          }
+        : message,
+    );
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex
+              ? {
+                  ...version,
+                  content: appendStreamErrorText(version.content, errorMessage),
+                  interruption: version.interruption ?? { reason, contentLength: version.content.length },
+                }
+              : version,
+          ),
+        },
+      },
+    };
+  });
+}
+
+function settleOrdinaryTerminal(
+  set: ChatStoreSet,
+  get: () => ChatStoreState,
+  sessionId: string,
+  assistantId: string,
+  userMessageId: string,
+  deepResearchEnabled: boolean,
+  streamCancelled: boolean,
+  streamFinishReason: string | undefined,
+): void {
+  const assistantNow = get().messages.find((message) => message.id === assistantId);
+  if (assistantNow?.interruption?.reason === "cancelled") return;
+  const finishReasonError = streamFinishReasonErrorMessage(streamFinishReason);
+  const emptyError =
+    !finishReasonError &&
+    !streamCancelled &&
+    !deepResearchEnabled &&
+    get().status !== "error" &&
+    hasEmptyOrdinaryResponse(assistantNow)
+      ? STREAM_EMPTY_RESPONSE_ERROR
+      : null;
+  const terminalError = finishReasonError ?? emptyError;
+  if (!terminalError) return;
+  if (terminalError === STREAM_EMPTY_RESPONSE_ERROR) {
+    appendStreamErrorToAssistant(set, assistantId, userMessageId, terminalError, "failed");
+  } else {
+    appendStreamFinishReasonNoticeToAssistant(set, assistantId, userMessageId, terminalError);
+  }
+  set((prev) =>
+    prev.activeSessionId === sessionId
+      ? { status: "error" as const, errorMessage: terminalError }
+      : {},
+  );
+}
+
+function createAssistantStreamWriter(
+  set: ChatStoreSet,
+  get: () => ChatStoreState,
+  sessionId: string,
+  assistantId: string,
+  userMessageId: string,
+  ownsRequest: () => boolean,
+) {
+  const writer = createStreamTextBuffer((delta) => {
+    if (!ownsRequest()) return;
+    set((prev) => {
+      const current = prev.responseVersionsByUserMessageId[userMessageId];
+      return {
+        messages: prev.messages.map((message) =>
+          message.id === assistantId ? { ...message, content: message.content + delta } : message,
+        ),
+        responseVersionsByUserMessageId: current
+          ? {
+              ...prev.responseVersionsByUserMessageId,
+              [userMessageId]: {
+                ...current,
+                versions: current.versions.map((version) =>
+                  version.id === assistantId ? { ...version, content: version.content + delta } : version,
+                ),
+              },
+            }
+          : prev.responseVersionsByUserMessageId,
+      };
+    });
+  }, get().messages.find((message) => message.id === assistantId)?.content.length);
+  streamTextBySession.get(sessionId)?.stop();
+  streamTextBySession.set(sessionId, writer);
+  return {
+    push: writer.push,
+    flush: writer.flush,
+    stop() {
+      try {
+        writer.stop();
+      } finally {
+        if (streamTextBySession.get(sessionId) === writer) streamTextBySession.delete(sessionId);
+      }
+    },
+  };
+}
+
+function checkpointOrdinaryResponse(
+  set: ChatStoreSet,
+  get: () => ChatStoreState,
+  sessionId: string,
+  userMessageId: string,
+  assistantId: string,
+  ownsRequest: () => boolean,
+) {
+  const checkpoint = createResponseCheckpoint<ChatMessage>({
+    read: () => {
+      if (!get().hydrated || !ownsRequest()) return undefined;
+      const assistant = get().messages.find((message) => message.id === assistantId);
+      return assistant?.role === "assistant" && !assistant.deep_research ? assistant : undefined;
+    },
+    save: async (assistant) => {
+      const user = get().messages.find((message) => message.id === userMessageId && message.role === "user");
+      const snapshot: ChatMessage = {
+        ...assistant,
+        // Snapshot-only marker: an interrupted page can offer Continue,
+        // but the live answer remains running and the final append clears it.
+        interruption: { reason: "disconnected", contentLength: assistant.content.length },
+      };
+      await persistAppendMessages(set, sessionId, user ? [user, snapshot] : [snapshot]);
+    },
+    onError: () =>
+      setSessionHistorySync(set, sessionId, {
+        pendingCount: 1,
+        state: "dead_letter",
+        message: "中途回复尚未保存，请保留页面并重试同步。",
+      }),
+  });
+  responseCheckpoints.get(assistantId)?.stop();
+  responseCheckpoints.set(assistantId, checkpoint);
+  return {
+    changed: checkpoint.changed,
+    stop() {
+      checkpoint.stop();
+      if (responseCheckpoints.get(assistantId) === checkpoint) responseCheckpoints.delete(assistantId);
+    },
+  };
 }
 
 function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
@@ -1830,7 +2125,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }),
     }));
     writeLastActiveSessionId(sessionId);
-    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
+    const sendingId = makeId();
+    let ownedRequestId = sendingId;
+    setSessionStream(set, sessionId, {
+      status: "sending",
+      activeRequestId: sendingId,
+      assistantMessageId: assistantMessage.id,
+    });
 
     // Deep research can run for minutes; refresh aborts SSE before the old
     // end-of-stream persist. Shell must hit history immediately so the turn
@@ -1838,6 +2139,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (deepResearchEnabled && get().hydrated) {
       void persistAppendMessages(set, sessionId, [userMessage, assistantMessage]);
     }
+
+    const streamWriter = deepResearchEnabled
+      ? null
+      : createAssistantStreamWriter(
+          set,
+          get,
+          sessionId,
+          assistantMessage.id,
+          userMessage.id,
+          () => getSessionRequestId(get(), sessionId) === ownedRequestId,
+        );
+    const ordinaryCheckpoint = deepResearchEnabled
+      ? null
+      : checkpointOrdinaryResponse(
+          set,
+          get,
+          sessionId,
+          userMessage.id,
+          assistantMessage.id,
+          () => getSessionRequestId(get(), sessionId) === ownedRequestId,
+        );
 
     const checkpointDeepResearchTurn = (force = false) => {
       if (!deepResearchEnabled || !get().hydrated) return;
@@ -1855,6 +2177,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     let streamEndedCleanly = false;
     let streamHadError = false;
+    let streamCancelled = false;
+    let streamFinishReason: string | undefined;
     try {
       const request = toSdkRequest(
         sessionId,
@@ -1866,7 +2190,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
-      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      if (getSessionRequestId(get(), sessionId) !== sendingId) {
+        await client.cancel(requestId);
+        return;
+      }
+      ownedRequestId = requestId;
+      setSessionStream(set, sessionId, {
+        status: "streaming",
+        activeRequestId: requestId,
+        assistantMessageId: assistantMessage.id,
+      });
       // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
       // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
       if (traceId) {
@@ -1878,54 +2211,69 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
 
       for await (const chunk of client.stream(requestId)) {
+        if (getSessionRequestId(get(), sessionId) !== ownedRequestId) return;
+        const finishReason = readFinishReason(chunk);
+        if (finishReason) streamFinishReason = finishReason;
+        if (!chunk.delta || chunk.error || chunk.cancelled || chunk.done) streamWriter?.flush();
+
         if (chunk.cancelled) {
-          setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          streamCancelled = true;
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+            set((prev) => (prev.activeSessionId === sessionId ? { errorMessage: null } : {}));
+          }
           break;
         }
 
         if (chunk.error) {
           streamHadError = true;
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
+          const settled = streamErrorNotice(chunk.error, chunk.traceId);
+          appendStreamErrorToAssistant(
+            set,
+            assistantMessage.id,
+            userMessage.id,
+            settled.notice,
+            settled.reason,
           );
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
-          set((prev) => ({
-            messages: prev.messages.map((message) =>
-              message.id === assistantMessage.id ? { ...message, content: complianceMessage } : message
-            ),
-          }));
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { status: "error" as const, errorMessage: settled.notice }
+              : {},
+          );
           return;
         }
 
         if (chunk.delta) {
           probeNote("stream.delta", { sessionId, assistantId: assistantMessage.id, n: chunk.delta.length });
-          set((prev) => {
-            const current = prev.responseVersionsByUserMessageId[userMessage.id];
-            const nextVersionState = current
-              ? {
-                  ...current,
-                  versions: current.versions.map((version, index) =>
-                    index === current.activeIndex ? { ...version, content: `${version.content}${chunk.delta}` } : version
-                  ),
-                }
-              : undefined;
-
-            return {
-              messages: prev.messages.map((message) =>
-                message.id === assistantMessage.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
-              ),
-              responseVersionsByUserMessageId: nextVersionState
+          if (streamWriter) {
+            streamWriter.push(chunk.delta);
+          } else {
+            set((prev) => {
+              const current = prev.responseVersionsByUserMessageId[userMessage.id];
+              const nextVersionState = current
                 ? {
-                    ...prev.responseVersionsByUserMessageId,
-                    [userMessage.id]: nextVersionState,
+                    ...current,
+                    versions: current.versions.map((version, index) =>
+                      index === current.activeIndex ? { ...version, content: `${version.content}${chunk.delta}` } : version
+                    ),
                   }
-                : prev.responseVersionsByUserMessageId,
-            };
-          });
+                : undefined;
+
+              return {
+                messages: prev.messages.map((message) =>
+                  message.id === assistantMessage.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
+                ),
+                responseVersionsByUserMessageId: nextVersionState
+                  ? {
+                      ...prev.responseVersionsByUserMessageId,
+                      [userMessage.id]: nextVersionState,
+                    }
+                  : prev.responseVersionsByUserMessageId,
+              };
+            });
+          }
+          ordinaryCheckpoint?.changed();
         }
 
         if (chunk.usage) {
@@ -1965,30 +2313,61 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
+          streamWriter?.flush();
           streamEndedCleanly = true;
-          setSessionStream(set, sessionId, null);
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+          }
         }
       }
-    } catch (error) {
-      setSessionStream(set, sessionId, null);
-      set((prev) =>
-        prev.activeSessionId === sessionId
-          ? {
-              status: "error" as const,
-              errorMessage: toStreamCatchErrorMessage(error),
-            }
-          : {},
+
+      streamWriter?.flush();
+      settleOrdinaryTerminal(
+        set,
+        get,
+        sessionId,
+        assistantMessage.id,
+        userMessage.id,
+        deepResearchEnabled,
+        streamCancelled,
+        streamFinishReason,
       );
+    } catch (error) {
+      try {
+        streamWriter?.flush();
+      } catch {
+        // A buffered write failure is reported on the next push; keep the turn's own error.
+      }
+      if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+        const streamErrorMessage = toStreamCatchErrorMessage(error);
+        appendStreamErrorToAssistant(set, assistantMessage.id, userMessage.id, streamErrorMessage, "failed");
+        streamHadError = true;
+        setSessionStream(set, sessionId, null);
+        set((prev) =>
+          prev.activeSessionId === sessionId
+            ? { status: "error" as const, errorMessage: streamErrorMessage }
+            : {},
+        );
+      }
     } finally {
-      // Persist turn: deep-research always (incl. refresh abort); normal chat on clean end.
+      streamWriter?.stop();
+      ordinaryCheckpoint?.stop();
+      // Persist turn: deep-research always (incl. refresh abort). Ordinary chat
+      // persists a clean end or a failed/disconnected answer; cancel persists itself.
       if (get().hydrated) {
         const after = get();
+        const currentRequest = getSessionRequestId(after, sessionId);
+        const stillOwner = !currentRequest || currentRequest === ownedRequestId;
         const u = after.messages.find((m) => m.id === userMessage.id);
         const a = after.messages.find((m) => m.id === assistantMessage.id);
         const shouldPersist =
           u?.role === "user" &&
           a?.role === "assistant" &&
-          (deepResearchEnabled || (streamEndedCleanly && !streamHadError && after.status !== "error"));
+          stillOwner &&
+          (deepResearchEnabled
+            ? true
+            : a.interruption?.reason !== "cancelled" &&
+              (streamEndedCleanly || streamHadError || Boolean(a.interruption)));
         if (shouldPersist) {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await persistAppendMessages(set, sessionId, [u, a]);
@@ -2118,7 +2497,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : session
       ),
     }));
-    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
+    const sendingId = makeId();
+    let ownedRequestId = sendingId;
+    const editDeepResearch = Boolean(state.lastDeepResearchBySessionId[sessionId]);
+    setSessionStream(set, sessionId, {
+      status: "sending",
+      activeRequestId: sendingId,
+      assistantMessageId: replacementAssistant.id,
+    });
+    const streamWriter = editDeepResearch
+      ? null
+      : createAssistantStreamWriter(
+          set,
+          get,
+          sessionId,
+          replacementAssistant.id,
+          input.messageId,
+          () => getSessionRequestId(get(), sessionId) === ownedRequestId,
+        );
+    let streamCancelled = false;
+    let streamFinishReason: string | undefined;
 
     try {
       const request = toSdkRequest(
@@ -2131,7 +2529,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
-      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      if (getSessionRequestId(get(), sessionId) !== sendingId) {
+        await client.cancel(requestId);
+        return;
+      }
+      ownedRequestId = requestId;
+      setSessionStream(set, sessionId, {
+        status: "streaming",
+        activeRequestId: requestId,
+        assistantMessageId: replacementAssistant.id,
+      });
       // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
       // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
       if (traceId) {
@@ -2143,25 +2550,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
 
       for await (const chunk of client.stream(requestId)) {
+        if (getSessionRequestId(get(), sessionId) !== ownedRequestId) return;
+        const finishReason = readFinishReason(chunk);
+        if (finishReason) streamFinishReason = finishReason;
+        if (!chunk.delta || chunk.error || chunk.cancelled || chunk.done) streamWriter?.flush();
         if (chunk.cancelled) {
-          setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          streamCancelled = true;
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+            set((prev) => (prev.activeSessionId === sessionId ? { errorMessage: null } : {}));
+          }
           break;
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
-          );
+          const settled = streamErrorNotice(chunk.error, chunk.traceId);
+          appendStreamErrorToAssistant(set, replacementAssistant.id, input.messageId, settled.notice, settled.reason);
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
-          set((prev) => ({
-            messages: prev.messages.map((message) =>
-              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
-            ),
-          }));
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { status: "error" as const, errorMessage: settled.notice }
+              : {},
+          );
           return;
         }
 
@@ -2172,7 +2582,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             n: chunk.delta.length,
             via: "edit",
           });
-          set((prev) => {
+          if (streamWriter) {
+            streamWriter.push(chunk.delta);
+          } else set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[input.messageId];
             const nextVersionState = versionState
               ? {
@@ -2230,12 +2642,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          setSessionStream(set, sessionId, null);
+          streamWriter?.flush();
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+          }
         }
       }
 
+      streamWriter?.flush();
+      settleOrdinaryTerminal(
+        set,
+        get,
+        sessionId,
+        replacementAssistant.id,
+        input.messageId,
+        editDeepResearch,
+        streamCancelled,
+        streamFinishReason,
+      );
+
       const afterEdit = get();
-      if (afterEdit.status !== "error" && afterEdit.hydrated) {
+      const editedAssistant = afterEdit.messages.find((message) => message.id === replacementAssistant.id);
+      if ((afterEdit.status !== "error" || editedAssistant?.interruption) && afterEdit.hydrated) {
         const snapshot = getSessionMessages(afterEdit.messages, sessionId);
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -2252,19 +2680,38 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
     } catch (error) {
-      setSessionStream(set, sessionId, null);
-      set((prev) =>
-        prev.activeSessionId === sessionId
-          ? {
-              status: "error" as const,
-              errorMessage: toStreamCatchErrorMessage(error),
-            }
-          : {},
-      );
+      try {
+        streamWriter?.flush();
+      } catch {
+        // Keep the turn error below.
+      }
+      if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+        const streamErrorMessage = toStreamCatchErrorMessage(error);
+        appendStreamErrorToAssistant(set, replacementAssistant.id, input.messageId, streamErrorMessage, "failed");
+        setSessionStream(set, sessionId, null);
+        set((prev) =>
+          prev.activeSessionId === sessionId
+            ? { status: "error" as const, errorMessage: streamErrorMessage }
+            : {},
+        );
+      }
+    } finally {
+      streamWriter?.stop();
     }
   },
 
-  async regenerateAssistantResponse(client, assistantMessageId) {
+  async continueResponse(client, assistantMessageId) {
+    const state = get();
+    const source = state.messages.find(
+      (message) => message.id === assistantMessageId && message.session_id === state.activeSessionId,
+    );
+    if (!source || source.role !== "assistant" || source.deep_research) return;
+    if (isSessionStreaming(state, source.session_id)) return;
+    if (findContinuableResponse(state.messages, state.activeSessionId)?.id !== source.id) return;
+    await get().regenerateAssistantResponse(client, assistantMessageId, { continue: true });
+  },
+
+  async regenerateAssistantResponse(client, assistantMessageId, mode) {
     const state = get();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
@@ -2282,17 +2729,40 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const tenantId = sourceAssistantMessage.tenant_id ?? sourceUserMessage.tenant_id ?? DEFAULT_TENANT;
     const userId = sourceAssistantMessage.user_id ?? sourceUserMessage.user_id ?? DEFAULT_USER;
     const targetUserMessageId = sourceUserMessage.id;
+    const continuing = mode?.continue === true;
+    const rawPrefix = continuing
+      ? sourceAssistantMessage.content.slice(0, sourceAssistantMessage.interruption?.contentLength ?? sourceAssistantMessage.content.length)
+      : "";
+    const { retainedContent: prefix, requestContent: answerPrefix } = prepareAssistantContinuation(rawPrefix);
+    const ordinaryContinuation = continuing && !sourceAssistantMessage.deep_research;
+    const deepResearchEnabled = !ordinaryContinuation && Boolean(state.lastDeepResearchBySessionId[sessionId]);
 
     const replacementAssistant: ChatMessage = {
-      id: makeId(),
+      ...(continuing ? sourceAssistantMessage : {}),
+      id: continuing ? sourceAssistantMessage.id : makeId(),
       session_id: sessionId,
       tenant_id: tenantId,
       user_id: userId,
       role: "assistant",
-      content: "",
-      model: state.activeModel,
+      content: prefix,
+      interruption: undefined,
+      model: continuing ? sourceAssistantMessage.model ?? state.activeModel : state.activeModel,
       // Keep assistant after the related user even if both were previously same-ms stamped.
-      created_at: pairedCreatedAt(Math.max(Date.parse(sourceUserMessage.created_at) || Date.now(), Date.now())).assistant,
+      created_at: continuing
+        ? sourceAssistantMessage.created_at
+        : pairedCreatedAt(Math.max(Date.parse(sourceUserMessage.created_at) || Date.now(), Date.now())).assistant,
+      ...(deepResearchEnabled
+        ? {
+            deep_research: {
+              runId: "pending",
+              status: "running" as const,
+              events: [],
+              artifactIds: [],
+            },
+          }
+        : continuing
+          ? { deep_research: undefined }
+          : {}),
     };
 
     const nextSessionMessages = [...sessionMessages];
@@ -2311,22 +2781,45 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ...queryVersionIndices.map((index) => previousVersions[index]?.retryAttempt ?? 0),
       0,
     );
-    const nextVersions = [
-      ...previousVersions,
-      toAssistantVersion(replacementAssistant, {
-        queryVersionIndex: currentQueryVersionIndex,
-        retryAttempt: currentMaxRetryAttempt + 1,
-        queryText: currentVersion?.queryText ?? sourceUserMessage.content,
-      }),
-    ];
-    const nextActiveIndex = Math.max(0, nextVersions.length - 1);
+    const continuationVersion = toAssistantVersion(replacementAssistant, {
+      queryVersionIndex: currentQueryVersionIndex,
+      retryAttempt: currentVersion?.retryAttempt ?? 0,
+      queryText: currentVersion?.queryText ?? sourceUserMessage.content,
+    });
+    const nextVersions = continuing
+      ? previousVersions.map((version, index) => (index === currentVersionIndex ? continuationVersion : version))
+      : [
+          ...previousVersions,
+          toAssistantVersion(replacementAssistant, {
+            queryVersionIndex: currentQueryVersionIndex,
+            retryAttempt: currentMaxRetryAttempt + 1,
+            queryText: currentVersion?.queryText ?? sourceUserMessage.content,
+          }),
+        ];
+    const nextActiveIndex = continuing ? currentVersionIndex : Math.max(0, nextVersions.length - 1);
     const nextActiveAssistantIndexByQueryVersion = {
       ...(previousVersionState?.activeAssistantIndexByQueryVersion ?? { [currentQueryVersionIndex]: currentVersionIndex }),
       [currentQueryVersionIndex]: nextActiveIndex,
     };
 
     // 只把目标 query 及其之前上下文发送给模型，避免“重试旧 query”误用后续 query 作为当前提问。
-    const regenerateRequestMessages = nextSessionMessages.slice(0, assistantIndex + 1);
+    // Continue sends the visible prefix, never the appended notice or reasoning.
+    const regenerateRequestMessages = nextSessionMessages.slice(0, assistantIndex);
+    if (!continuing || answerPrefix.trim()) {
+      regenerateRequestMessages.push({
+        ...replacementAssistant,
+        content: continuing ? answerPrefix : replacementAssistant.content,
+        reasoning: undefined,
+      });
+    }
+    if (continuing && answerPrefix.trim()) {
+      regenerateRequestMessages.push({
+        ...sourceUserMessage,
+        id: makeId(),
+        attachments: undefined,
+        content: "继续完成上一条尚未结束的回答。从已有内容的断点继续，只输出后续内容，不要重复、改写或重新生成已完成部分。",
+      });
+    }
 
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
@@ -2349,20 +2842,57 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : session
       ),
     }));
-    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
+    const sendingId = makeId();
+    let ownedRequestId = sendingId;
+    setSessionStream(set, sessionId, {
+      status: "sending",
+      activeRequestId: sendingId,
+      assistantMessageId: replacementAssistant.id,
+    });
+    const streamWriter = deepResearchEnabled
+      ? null
+      : createAssistantStreamWriter(
+          set,
+          get,
+          sessionId,
+          replacementAssistant.id,
+          targetUserMessageId,
+          () => getSessionRequestId(get(), sessionId) === ownedRequestId,
+        );
+    const ordinaryCheckpoint = !deepResearchEnabled
+      ? checkpointOrdinaryResponse(
+          set,
+          get,
+          sessionId,
+          targetUserMessageId,
+          replacementAssistant.id,
+          () => getSessionRequestId(get(), sessionId) === ownedRequestId,
+        )
+      : null;
+    let streamCancelled = false;
+    let streamFinishReason: string | undefined;
 
     try {
       const request = toSdkRequest(
         sessionId,
-        state.activeModel,
+        continuing ? replacementAssistant.model ?? state.activeModel : state.activeModel,
         regenerateRequestMessages,
         Boolean(state.lastWebSearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchBySessionId[sessionId]),
+        deepResearchEnabled,
         getDeepResearchInteractionPref(),
         get().lastSkillIdBySessionId[sessionId],
       );
       const { requestId, traceId } = await client.sendMessage(request);
-      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      if (getSessionRequestId(get(), sessionId) !== sendingId) {
+        await client.cancel(requestId);
+        return;
+      }
+      ownedRequestId = requestId;
+      setSessionStream(set, sessionId, {
+        status: "streaming",
+        activeRequestId: requestId,
+        assistantMessageId: replacementAssistant.id,
+      });
       // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
       // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
       if (traceId) {
@@ -2374,25 +2904,34 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
 
       for await (const chunk of client.stream(requestId)) {
+        if (getSessionRequestId(get(), sessionId) !== ownedRequestId) return;
+        const finishReason = readFinishReason(chunk);
+        if (finishReason) streamFinishReason = finishReason;
+        if (!chunk.delta || chunk.error || chunk.cancelled || chunk.done) streamWriter?.flush();
         if (chunk.cancelled) {
-          setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          streamCancelled = true;
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+            set((prev) => (prev.activeSessionId === sessionId ? { errorMessage: null } : {}));
+          }
           break;
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
+          const settled = streamErrorNotice(chunk.error, chunk.traceId);
+          appendStreamErrorToAssistant(
+            set,
+            replacementAssistant.id,
+            targetUserMessageId,
+            settled.notice,
+            settled.reason,
           );
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
-          set((prev) => ({
-            messages: prev.messages.map((message) =>
-              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
-            ),
-          }));
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { status: "error" as const, errorMessage: settled.notice }
+              : {},
+          );
           return;
         }
 
@@ -2403,7 +2942,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             n: chunk.delta.length,
             via: "regenerate",
           });
-          set((prev) => {
+          if (streamWriter) {
+            streamWriter.push(chunk.delta);
+          } else set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[targetUserMessageId];
             const nextVersionState = versionState
               ? {
@@ -2425,6 +2966,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 : prev.responseVersionsByUserMessageId,
             };
           });
+          ordinaryCheckpoint?.changed();
         }
 
         if (chunk.usage) {
@@ -2461,12 +3003,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          setSessionStream(set, sessionId, null);
+          streamWriter?.flush();
+          if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+            setSessionStream(set, sessionId, null);
+          }
         }
       }
 
+      streamWriter?.flush();
+      settleOrdinaryTerminal(
+        set,
+        get,
+        sessionId,
+        replacementAssistant.id,
+        targetUserMessageId,
+        deepResearchEnabled,
+        streamCancelled,
+        streamFinishReason,
+      );
+
       const afterRegen = get();
-      if (afterRegen.status !== "error" && afterRegen.hydrated) {
+      const regeneratedAssistant = afterRegen.messages.find((message) => message.id === replacementAssistant.id);
+      if (!continuing && (afterRegen.status !== "error" || regeneratedAssistant?.interruption) && afterRegen.hydrated) {
         const snapshot = getSessionMessages(afterRegen.messages, sessionId);
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -2483,15 +3041,43 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
     } catch (error) {
-      setSessionStream(set, sessionId, null);
-      set((prev) =>
-        prev.activeSessionId === sessionId
-          ? {
-              status: "error" as const,
-              errorMessage: toStreamCatchErrorMessage(error),
-            }
-          : {},
-      );
+      try {
+        streamWriter?.flush();
+      } catch {
+        // Keep the turn error below.
+      }
+      if (getSessionRequestId(get(), sessionId) === ownedRequestId) {
+        const streamErrorMessage = toStreamCatchErrorMessage(error);
+        appendStreamErrorToAssistant(
+          set,
+          replacementAssistant.id,
+          targetUserMessageId,
+          streamErrorMessage,
+          "failed",
+        );
+        setSessionStream(set, sessionId, null);
+        set((prev) =>
+          prev.activeSessionId === sessionId
+            ? { status: "error" as const, errorMessage: streamErrorMessage }
+            : {},
+        );
+      }
+    } finally {
+      streamWriter?.stop();
+      ordinaryCheckpoint?.stop();
+      if (continuing) {
+        const latest = get();
+        const active = getSessionRequestId(latest, sessionId);
+        const assistant = latest.messages.find((message) => message.id === replacementAssistant.id);
+        if (
+          latest.hydrated &&
+          assistant &&
+          assistant.interruption?.reason !== "cancelled" &&
+          (!active || active === ownedRequestId)
+        ) {
+          await persistAppendMessages(set, sessionId, [assistant]);
+        }
+      }
     }
   },
 
@@ -2541,6 +3127,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
                 deep_research: targetVersion.deep_research,
+                interruption: targetVersion.interruption,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -2596,6 +3183,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
                 deep_research: targetVersion.deep_research,
+                interruption: targetVersion.interruption,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -2643,6 +3231,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
                 deep_research: targetVersion.deep_research,
+                interruption: targetVersion.interruption,
               }
             : message
         ),
@@ -2688,6 +3277,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
                 deep_research: targetVersion.deep_research,
+                interruption: targetVersion.interruption,
               }
             : message
         ),
@@ -2696,12 +3286,79 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async cancel(client) {
-    const state = get();
+    let state = get();
     const sessionId = state.activeSessionId;
-    if (!sessionId) return;
+    if (!sessionId || cancellingSessions.has(sessionId)) return;
+    try {
+      streamTextBySession.get(sessionId)?.stop();
+    } catch {
+      // A rendering failure must not prevent server cancellation.
+    }
+    streamTextBySession.delete(sessionId);
+    state = get();
     const requestId = getSessionRequestId(state, sessionId);
     if (!requestId) return;
-    await client.cancel(requestId);
+    const streamAssistantId = state.streamStateBySessionId[sessionId]?.assistantMessageId;
+    const latestAssistant =
+      state.messages.find((message) => message.id === streamAssistantId && message.role === "assistant") ??
+      [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "assistant");
+    if (latestAssistant?.deep_research) {
+      await client.cancel(requestId);
+      return;
+    }
+    cancellingSessions.add(sessionId);
+    const stoppingId = makeId();
+    try {
+      setSessionStream(set, sessionId, {
+        status: "streaming",
+        activeRequestId: stoppingId,
+        assistantMessageId: latestAssistant?.id,
+      });
+      if (latestAssistant) {
+        responseCheckpoints.get(latestAssistant.id)?.stop();
+        responseCheckpoints.delete(latestAssistant.id);
+        const interruption = latestAssistant.interruption ?? {
+          reason: "cancelled" as const,
+          contentLength: latestAssistant.content.length,
+        };
+        set((prev) => ({
+          messages: prev.messages.map((message) =>
+            message.id === latestAssistant.id ? { ...message, interruption } : message,
+          ),
+          responseVersionsByUserMessageId: Object.fromEntries(
+            Object.entries(prev.responseVersionsByUserMessageId).map(([id, versionState]) => [
+              id,
+              {
+                ...versionState,
+                versions: versionState.versions.map((version) =>
+                  version.id === latestAssistant.id ? { ...version, interruption } : version,
+                ),
+              },
+            ]),
+          ),
+        }));
+      }
+      await client.cancel(requestId);
+      const stopped = get().messages.find((message) => message.id === latestAssistant?.id);
+      if (stopped && get().hydrated) {
+        const sessionMessages = getSessionMessages(get().messages, sessionId);
+        const index = sessionMessages.findIndex((message) => message.id === stopped.id);
+        const user = index > 0 && sessionMessages[index - 1]?.role === "user" ? sessionMessages[index - 1] : undefined;
+        await persistAppendMessages(set, sessionId, user ? [user, stopped] : [stopped]);
+      }
+      if (getSessionRequestId(get(), sessionId) === stoppingId) {
+        setSessionStream(set, sessionId, null);
+        set((prev) => (prev.activeSessionId === sessionId ? { errorMessage: null } : {}));
+      }
+    } catch {
+      set((prev) =>
+        prev.activeSessionId === sessionId
+          ? { errorMessage: "终止未确认，请重试；后台任务可能仍在运行。" }
+          : {},
+      );
+    } finally {
+      cancellingSessions.delete(sessionId);
+    }
   },
 
   deleteMessage(messageId) {

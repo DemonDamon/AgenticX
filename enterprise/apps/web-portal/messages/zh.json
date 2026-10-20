@@ -183,7 +183,13 @@
     "welcomeSubtitle": "很高兴见到你，有什么我可以帮忙的吗？",
     "loadingMessages": "加载消息…",
     "scrollToBottom": "回到底部",
-    "feedbackSaveFailed": "反馈没有保存，请稍后重试"
+    "feedbackSaveFailed": "反馈没有保存，请稍后重试",
+    "errors": {
+      "emptyResponse": "尚未生成最终答复，已保留已有内容。可继续生成或重新生成重试。",
+      "interrupted": "回复已中断，已保留已生成内容。可继续生成或重试。",
+      "transport": "连接中断，已保留已生成内容。可点击输入框旁的“继续生成”接着完成。",
+      "truncated": "回复因达到模型输出上限而提前结束，已保留已生成内容。可点击输入框旁的“继续生成”接着完成。"
+    }
   },
   "settings": {
     "title": "设置",

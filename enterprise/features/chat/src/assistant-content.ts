@@ -12,6 +12,10 @@ export type ParsedAssistantContent = {
   thinkingInProgress: boolean;
 };
 
+/** 非流式、可见正文为空时展示；推理原文仍留在 reasoning。 */
+export const STREAM_EMPTY_RESPONSE_ERROR =
+  "尚未生成最终答复，已保留已有内容。可继续生成或重新生成重试。";
+
 /** Convert rendered-style Markdown into text suitable for copying to a human reader. */
 export function markdownToPlainText(raw: string): string {
   let text = (raw ?? "").replace(/\r\n?/g, "\n");
@@ -72,7 +76,7 @@ export function markdownToPlainText(raw: string): string {
 /** Return the visible, Markdown-free text for a message copy action. */
 export function toCopyableMessageText(message: ChatMessage): string {
   const visibleContent = message.role === "assistant"
-    ? parseAssistantContent(message).displayContent
+    ? parseAssistantContent(message, false).displayContent
     : message.content ?? "";
   return markdownToPlainText(visibleContent);
 }
@@ -151,17 +155,44 @@ export function displayContentFromRawAssistantText(raw: string): string {
     role: "assistant",
     content: raw ?? "",
     created_at: new Date(0).toISOString(),
-  }).displayContent;
+  }, true).displayContent;
 }
 
-export function parseAssistantContent(message: ChatMessage): ParsedAssistantContent {
+/** Keep saved stream bytes, but never tell a resumed model that reasoning is an answer. */
+export function prepareAssistantContinuation(raw: string): { retainedContent: string; requestContent: string } {
+  const source = raw ?? "";
+  const normalized = normalizeThinkTags(source);
+  const lower = normalized.toLowerCase();
+  const openIdx = lower.indexOf(REDACTED_OPEN);
+  if (openIdx < 0) {
+    return { retainedContent: source, requestContent: normalized };
+  }
+  const reasoningStart = openIdx + REDACTED_OPEN.length;
+  const closeIdx = lower.indexOf(REDACTED_CLOSE, reasoningStart);
+  if (closeIdx < 0) {
+    return {
+      // A stopped open reasoning block must not swallow the next turn's answer.
+      retainedContent: `${source}${THINK_CLOSE}`,
+      requestContent: normalized.slice(0, openIdx),
+    };
+  }
+  return {
+    retainedContent: source,
+    requestContent: `${normalized.slice(0, openIdx)}${normalized.slice(closeIdx + REDACTED_CLOSE.length)}`,
+  };
+}
+
+export function parseAssistantContent(message: ChatMessage, streaming = false): ParsedAssistantContent {
   const fallbackReasoning = (message.reasoning ?? "").trim();
   const raw = normalizeThinkTags(message.content ?? "");
   const lower = raw.toLowerCase();
   const openIdx = lower.indexOf(REDACTED_OPEN);
 
   if (openIdx < 0) {
-    const displayContent = finalizeAssistantDisplayContent(recoverIncompleteCodeFences(raw, fallbackReasoning));
+    let displayContent = finalizeAssistantDisplayContent(recoverIncompleteCodeFences(raw, fallbackReasoning));
+    if (!streaming && !displayContent.trim() && !message.deep_research && message.interruption) {
+      displayContent = STREAM_EMPTY_RESPONSE_ERROR;
+    }
     return {
       displayContent,
       reasoningContent: fallbackReasoning,
@@ -173,29 +204,27 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
   const before = raw.slice(0, openIdx);
   const reasoningStart = openIdx + REDACTED_OPEN.length;
   const closeIdx = lower.indexOf(REDACTED_CLOSE, reasoningStart);
-
-  if (closeIdx < 0) {
-    const reasoningContent = raw.slice(reasoningStart);
-    return {
-      displayContent: finalizeAssistantDisplayContent(recoverIncompleteCodeFences(before, reasoningContent)),
-      reasoningContent,
-      thinkingStarted: true,
-      thinkingInProgress: true,
-    };
-  }
-
-  const reasoningContent = raw.slice(reasoningStart, closeIdx);
-  const displayContent = finalizeAssistantDisplayContent(
+  const unclosed = closeIdx < 0;
+  const reasoningContent = unclosed ? raw.slice(reasoningStart) : raw.slice(reasoningStart, closeIdx);
+  let displayContent = finalizeAssistantDisplayContent(
     recoverIncompleteCodeFences(
-      `${before}${raw.slice(closeIdx + REDACTED_CLOSE.length)}`,
+      unclosed ? before : `${before}${raw.slice(closeIdx + REDACTED_CLOSE.length)}`,
       reasoningContent,
     ),
   );
+  if (
+    !streaming &&
+    !displayContent.trim() &&
+    !message.deep_research &&
+    (message.interruption || unclosed)
+  ) {
+    displayContent = STREAM_EMPTY_RESPONSE_ERROR;
+  }
 
   return {
     displayContent,
     reasoningContent,
     thinkingStarted: true,
-    thinkingInProgress: false,
+    thinkingInProgress: unclosed && streaming,
   };
 }
