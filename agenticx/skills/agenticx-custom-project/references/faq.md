@@ -58,6 +58,22 @@ python3 scripts/custom_project.py classify --kind style --where business
 
 不要停。业务修复和交付可以先进行。上游合并之后，再在你们的集成节点升级或去掉被覆盖的本地补丁。不要开一个定时任务每天去问 PR 状态。
 
+## 助手在他的电脑上启动了 Demo UI，我的笔记本为什么打不开 127.0.0.1:8765？
+
+`127.0.0.1` 是**运行服务那台机器**的环回地址。服务跑在助手桌面或远程电脑上时，这个地址只在那台机器上有效，不是用户笔记本的。
+
+下一步二选一：在运行服务那台机器（助手桌面）的浏览器里打开；或由助手截图展示。只有服务真的跑在用户本机时，才说「在你电脑上打开 localhost」。
+
+## 想给 Demo UI 换皮，是把这个技能改一改，还是把设计技能并进来？
+
+都不行。UI 美化、设计系统指引用**独立**的设计类技能，与本技能按兄弟技能并列组合（SkillHub 发现、确认后安装）。**不要**把第三方设计技能的正文合并进 `agenticx-custom-project`。换皮本身判业务 style：
+
+```bash
+python3 scripts/custom_project.py classify --kind style --where business
+```
+
+结论是留在业务仓，不提上游 PR。
+
 ## Windows 提示 agx 不是内部或外部命令，是不是安装坏了？
 
 多半是新开的窗口还没拿到 PATH，或 Python 的 Scripts 目录不在 PATH 里。关掉「命令提示符」或 PowerShell 再开一次。仍没有时，用 doctor 打印的那条 `py -3 -m pip install agenticx`，不要猜一个安装路径。

@@ -2,14 +2,14 @@
 name: agenticx-custom-project
 slug: agenticx-custom-project
 displayName: AgenticX 定制项目助手
-version: "1.0.0"
-summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR。
+version: "1.1.0"
+summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR；含 depend 模式自研业务闭环分层、本地 Demo UI 归属与设计技能组合约定。
 license: Apache-2.0
 homepage: https://www.agxbuilder.com/
 description: Use when a user builds a custom or client project on AgenticX, or asks whether a bug or feature should stay in their repo or become an upstream issue or pull request. 用户说「帮我初始化项目」「这个 bug 要不要提给官方」「新功能该留在自己仓库还是提 PR」「怎么 fork」「连不上 GitHub」「Windows 找不到命令」时启用。也用于起草 Issue 或 PR。不用于只在 Near 里聊天，或只想写第一段示例智能体。
 metadata:
   author: Damon Li
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # AgenticX 定制项目助手
@@ -30,6 +30,8 @@ metadata:
 | 这个功能该写在我们仓库，还是贡献回去 | 判断 |
 | 帮我给官方开一个 Issue / PR | 写草稿，满足条件再提交 |
 | pip 超时、GitHub 打不开、Windows 说找不到命令 | 先看报错对照 |
+| 基于 AgenticX 做领域 Demo / 最小可跑闭环（不改框架） | 初始化（depend）+ 业务分层指引 |
+| Demo UI 要换皮 / 想把设计技能并进来 | 初始化后的业务 style；设计技能按兄弟技能组合，不并入本技能 |
 | 门户、管理台、网关里的问题能不能直接改代码提 PR | 判断，结论是先开 Issue |
 
 ## 什么时候不用
@@ -79,6 +81,34 @@ python3 scripts/custom_project.py plan --mode depend --stack python --name my-ag
 `--write` 只会写业务骨架或一份拷贝记录。它不会克隆官方仓库，也不会改 git remote。目录里已有文件就停止，不覆盖。
 
 `agx project create` 若问「目录已存在，是否覆盖」，回答否，除非用户明确说可以覆盖。模板名只有 `basic`、`multi_agent`、`enterprise`。
+
+#### depend 模式：领域 Demo 的默认路径
+
+大多数「基于 AgenticX 做客户或领域 Demo」就是 `--mode depend --stack python`：用 pip 安装官方发布包（写作时验证过的示例是 `agenticx==0.6.5`，安装前以 `agx --version` / PyPI 为准），**不要克隆官方源码**。闭环全部自研，放在业务仓。典型分层（示意路径，可按项目改名）：
+
+| 路径 | 职责 |
+| --- | --- |
+| `services/<领域>_core/` | 领域概念与存储（内存 + 本地 JSON 即可起步） |
+| `services/<规则>/`（如 reasoner） | 业务规则：简单传递、继承、证据链 |
+| `services/agent_bridge/` | 把 `query`、`infer` 等包装成 `agenticx.FunctionTool` |
+| `scripts/demo_loop.py` | 不联网的一键闭环：写样例 → query → infer → 校验结论 |
+| `services/api/` + `apps/portal/` | 可选：FastAPI + 单页 Demo UI |
+
+- `demo_loop.py` 是自检基准：退出码 `0`、样例断言通过即闭环成立；装了 agx 时可再经 `FunctionTool.run` 验证工具链。未装 agx 时桥接可返回空工具列表，纯 Python 部分仍可跑。
+- 目标目录已非空时，**不要**强跑 `agx project create` 覆盖；手工对齐 basic 脚手架精神即可。
+- 各业务仓锁定自己验证过的 AgenticX 版本，不必全局统一。
+
+#### Demo UI 的 localhost 归属
+
+- Demo UI（如 FastAPI 起在 `http://127.0.0.1:8765/`）是**启动服务那台机器**上的环回地址。助手若在远程桌面或自己的电脑上启动服务，`127.0.0.1` 不是用户笔记本的地址。
+- 让用户在**运行服务那台机器**的浏览器里打开，或由助手截图展示。只有服务真的在用户本机时，才说「在你电脑上打开 localhost」。
+- Demo UI 的主题、文案、布局是业务 style：`--kind style --where business`，留在业务仓，不提上游 PR。
+
+#### 组合其他技能，不合并正文
+
+- UI 美化、设计系统指引用**独立**的设计类技能，与本技能并列组合使用；国内优先经 SkillHub 发现和安装。
+- **禁止**把第三方设计技能的正文合并进 `agenticx-custom-project`，也不要把本技能内容并进别人的技能。
+- 安装任何技能前，先汇总来源、版本、风险，征得用户确认。
 
 ### 2. 判断 bug 或新功能
 
@@ -207,7 +237,7 @@ python3 scripts/custom_project.py classify --kind bug --where desktop --cause-cl
 
 修完并做针对性验证即可。不要为了这一处去扫官方全历史。若这批结束时确认它是大家都会遇到的问题，再和同类小修合成一个 PR。
 
-更多案例（通用新功能、门户只开 Issue、不会改代码、密钥被拦住、GitHub 打不开）见 [references/examples.md](references/examples.md)。
+更多案例（通用新功能、门户只开 Issue、不会改代码、密钥被拦住、GitHub 打不开、领域 Demo 的 depend 闭环与 Demo UI）见 [references/examples.md](references/examples.md)。
 
 ## 出错了怎么办
 
@@ -250,6 +280,10 @@ python3 scripts/custom_project.py self-test
 **草稿写好了，能不能说已经提交？** 不能。只有 `submit --execute` 成功并返回链接之后才能说已创建。
 
 **客户数据能放进复现步骤吗？** 不能。用合成例子。名称用 `--hide` 去掉。
+
+**助手在他的电脑上启动了 Demo UI，我笔记本打不开 127.0.0.1？** `127.0.0.1` 是**运行服务那台机器**的环回。在助手桌面浏览器打开，或让助手截图。详见 [references/faq.md](references/faq.md)。
+
+**能把设计技能的正文并进这个技能吗？** 不能。设计技能按兄弟技能组合（SkillHub 安装），业务 UI 换皮判 `--kind style --where business`，不提上游。
 
 **各个业务仓必须锁同一个 AgenticX 版本吗？** 不必。各仓库使用自己验证过的版本。
 
