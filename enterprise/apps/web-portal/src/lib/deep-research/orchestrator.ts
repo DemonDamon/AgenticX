@@ -35,6 +35,7 @@ import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
+import { watchRunCancellation } from "./run-cancellation";
 import {
   saveReportCheckpoint as writeReportCheckpoint,
   type CheckpointMessage,
@@ -1168,6 +1169,9 @@ export async function runDeepResearchTurn(
 
       /** 代理按读超时切流；lanes / synthesize 有分钟级静默窗口，必须定时喂字节。 */
       const HEARTBEAT_MS = 15_000;
+      const cancellation = watchRunCancellation(runStore, { tenantId, userId, runId }, (reason) => {
+        runController.abort(reason);
+      });
       const heartbeat = setInterval(() => {
         enqueueFlush();
       }, HEARTBEAT_MS);
@@ -3234,6 +3238,7 @@ export async function runDeepResearchTurn(
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         safeClose();
       } finally {
+        cancellation.dispose();
         clearInterval(heartbeat);
       }
     },

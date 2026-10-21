@@ -35,7 +35,11 @@ import { createResponseCheckpoint } from "./utils/response-checkpoint";
 import { createStreamTextBuffer } from "./utils/stream-text-buffer";
 import { findContinuableResponse } from "./utils/turn-continuation";
 import { probeNote } from "./debug/update-depth-probe";
-import { fetchLatestDeepResearchForHydrate, hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
+import {
+  fetchLatestDeepResearchForHydrate,
+  hydrateMessagesDeepResearch,
+  normalizeLegacyHydratedMessageIds,
+} from "./utils/deep-research-hydrate";
 import { startDeepResearchReconnect } from "./utils/deep-research-reconnect";
 import { getDeepResearchInteractionPref } from "./utils/deep-research-interaction-pref";
 import { fetchActiveDeepResearchRuns } from "./utils/deep-research-active-run";
@@ -798,6 +802,8 @@ const historyAppendChainsBySessionId = new Map<string, Promise<void>>();
 const portalHistory = createPortalChatHistoryClient();
 
 function mergeOverlayMessages(remote: ChatMessage[], overlay: ChatMessage[]): ChatMessage[] {
+  remote = normalizeLegacyHydratedMessageIds(remote);
+  overlay = normalizeLegacyHydratedMessageIds(overlay);
   if (overlay.length === 0) return remote;
   const byId = new Map<string, ChatMessage>();
   for (const message of remote) byId.set(message.id, message);
@@ -3644,6 +3650,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       state.messages.find((message) => message.id === streamAssistantId && message.role === "assistant") ??
       [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "assistant");
     if (latestAssistant?.deep_research) {
+      const runId = latestAssistant.deep_research.runId?.trim();
+      if (runId && runId !== "pending") {
+        await fetch("/api/chat/deep-research/cancel", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ runId }),
+        }).catch(() => undefined);
+      }
       await client.cancel(requestId);
       return;
     }

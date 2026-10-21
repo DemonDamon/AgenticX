@@ -3,6 +3,7 @@ import type { ChatMessage } from "@agenticx/core-api";
 import {
   deriveDeepResearchSnapshot,
   hydrateMessagesDeepResearch,
+  hydratedResearchMessageId,
   mergeDeepResearchHydrate,
 } from "./deep-research-hydrate";
 
@@ -439,7 +440,12 @@ describe("mergeDeepResearchHydrate", () => {
       ],
     });
 
-    expect(next.map((m) => m.id)).toEqual(["u1", "a1", "u2", "dr-assistant-run-plan-exec"]);
+    expect(next.map((m) => m.id)).toEqual([
+      "u1",
+      "a1",
+      "u2",
+      hydratedResearchMessageId("s1", "run-plan", "execution-assistant"),
+    ]);
     expect(next[1]?.content).toBe("");
     expect(next[1]?.deep_research?.planVersion).toBe(1);
     expect(

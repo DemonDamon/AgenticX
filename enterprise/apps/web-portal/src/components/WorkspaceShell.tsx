@@ -141,6 +141,33 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [historySectionCollapsed, setHistorySectionCollapsed] = React.useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const workspaceRef = React.useRef<HTMLElement>(null);
+  React.useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const mobile = window.matchMedia("(max-width: 1023px)");
+    const update = () => {
+      const element = workspaceRef.current;
+      if (!element) return;
+      if (!mobile.matches) {
+        element.style.removeProperty("--chat-viewport-height");
+        element.style.removeProperty("top");
+        return;
+      }
+      if (viewport.scale !== 1) return;
+      element.style.setProperty("--chat-viewport-height", `${viewport.height}px`);
+      element.style.top = `${viewport.offsetTop}px`;
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    mobile.addEventListener("change", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+      mobile.removeEventListener("change", update);
+    };
+  }, []);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
   const [deepResearchMode, setDeepResearchMode] = React.useState(false);
   /** Tenant gate: sidebar entry hidden when admin disables deep research. Default ON. */
@@ -382,7 +409,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   return (
     <ChatLocaleProvider locale={locale === "en" ? "en" : "zh"}>
     <TooltipProvider delayDuration={200}>
-      <main className="flex h-[100dvh] overflow-hidden bg-background text-foreground">
+      <main ref={workspaceRef} className="fixed inset-x-0 top-0 flex h-[var(--chat-viewport-height,100dvh)] min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] text-foreground lg:static">
         {/* 侧栏 */}
         <aside
           data-collapsed={collapsed ? "1" : undefined}

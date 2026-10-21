@@ -1457,7 +1457,7 @@ export function MachiChatView({
         </div>
 
         {!isEmpty && (
-          <div className="relative z-10 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-6 pt-4 sm:px-6 sm:pb-8">
+          <div className="relative z-10 min-w-0 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6 lg:pb-8 lg:pt-4">
             {composer}
           </div>
         )}

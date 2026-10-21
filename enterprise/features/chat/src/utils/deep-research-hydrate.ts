@@ -25,6 +25,47 @@ const KNOWN_STATUSES = new Set([
 const PLAN_CHAT_USER_PREFIX = "你：";
 const MAX_OLDER_RUNS_TO_HYDRATE = 3;
 
+type HydratedMessageKind = "user" | "assistant" | "execution-assistant";
+
+/** Stable run-scoped identity, including across browsers and older local overlays. */
+export function hydratedResearchMessageId(sessionId: string, runId: string, kind: HydratedMessageKind): string {
+  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  let hash = 0x6c62272e07bb014262b821756295c58dn;
+  for (const byte of new TextEncoder().encode(JSON.stringify([sessionId, runId]))) {
+    hash = BigInt.asUintN(128, (hash ^ BigInt(byte)) * 0x1000000000000000000013bn);
+  }
+  hash = (hash << 2n) | BigInt(kind === "user" ? 0 : kind === "assistant" ? 1 : 2);
+  let random = "";
+  for (let i = 0; i < 16; i += 1) {
+    random = alphabet[Number(hash & 31n)] + random;
+    hash >>= 5n;
+  }
+  const timestamp = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i.test(runId) ? runId.slice(0, 10).toUpperCase() : "0000000000";
+  return timestamp + random;
+}
+
+export function normalizeLegacyHydratedMessageIds(messages: ChatMessage[]): ChatMessage[] {
+  let next = messages;
+  for (const [index, message] of messages.entries()) {
+    const prefix = message.role === "user" ? "dr-user-" : message.role === "assistant" ? "dr-assistant-" : null;
+    if (!prefix || !message.id.startsWith(prefix)) continue;
+    const suffix = message.id.slice(prefix.length);
+    const execution = message.role === "assistant" && suffix.endsWith("-exec");
+    const runId = execution ? suffix.slice(0, -5) : suffix;
+    if (!runId) continue;
+    if (next === messages) next = messages.slice();
+    next[index] = {
+      ...message,
+      id: hydratedResearchMessageId(
+        message.session_id,
+        runId,
+        execution ? "execution-assistant" : message.role as "user" | "assistant",
+      ),
+    };
+  }
+  return next;
+}
+
 function normalizeStatus(raw: string): ChatMessageDeepResearch["status"] {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "running" || normalized === "awaiting_clarify") return normalized;
@@ -339,7 +380,7 @@ export function repairPlanChatHydrateTimeline(
   const revisionUser = next[lastRevisionIdx]!;
   const baseMs = Date.parse(revisionUser.created_at) || Date.now();
   const synthetic: ChatMessage = {
-    id: `dr-assistant-${latest.runId}-exec`,
+    id: hydratedResearchMessageId(latest.sessionId, latest.runId, "execution-assistant"),
     session_id: latest.sessionId,
     tenant_id: revisionUser.tenant_id,
     user_id: revisionUser.user_id,
@@ -450,7 +491,7 @@ export function mergeDeepResearchHydrate(
   const tenantId = messages[0]?.tenant_id ?? "tenant";
   const userId = messages[0]?.user_id ?? "user";
   const syntheticAssistant: ChatMessage = {
-    id: `dr-assistant-${latest.runId}`,
+    id: hydratedResearchMessageId(latest.sessionId, latest.runId, "assistant"),
     session_id: latest.sessionId,
     tenant_id: tenantId,
     user_id: userId,
@@ -461,7 +502,7 @@ export function mergeDeepResearchHydrate(
   };
   const syntheticUser: ChatMessage | null = topic
     ? {
-        id: `dr-user-${latest.runId}`,
+        id: hydratedResearchMessageId(latest.sessionId, latest.runId, "user"),
         session_id: latest.sessionId,
         tenant_id: tenantId,
         user_id: userId,
