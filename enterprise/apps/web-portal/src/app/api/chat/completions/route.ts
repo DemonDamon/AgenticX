@@ -34,6 +34,8 @@ import { withRequestLog } from "../../../../lib/observability/with-request-log";
 import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
 import { applyAssignedSkillPrompt } from "../../../../lib/enterprise-skill-context";
 import { recallFeedbackMessages } from "../../../../lib/chat-feedback-context";
+import { withLocalThinkingBudget } from "../../../../lib/local-thinking-budget";
+import { localThinkingBudgetFetch } from "../../../../lib/local-thinking-fetch";
 import {
   FeatureUsageUnavailableError,
   admitFeatureUsage,
@@ -230,6 +232,7 @@ export async function POST(request: Request) {
   let enableWebSearch = false;
   let enableDeepResearch = false;
   let parsedBody: Record<string, unknown> | null = null;
+  let thinkingModel: { id: string; route: string } | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
   try {
@@ -253,7 +256,9 @@ export async function POST(request: Request) {
     if (typeof parsed.model === "string" && parsed.model.includes("/")) {
       // 服务端实时校验：用户/部门可见模型收窄后，禁止转发到已失效的模型（客户端未刷新前也不得放行）。
       const effectiveModels = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? undefined);
-      const isVisible = effectiveModels.some((m) => m.id === parsed.model);
+      const selected = effectiveModels.find((m) => m.id === parsed.model);
+      const isVisible = Boolean(selected);
+      if (selected?.route) thinkingModel = { id: selected.model, route: selected.route };
       if (!isVisible) {
         return NextResponse.json(
           {
@@ -471,7 +476,7 @@ export async function POST(request: Request) {
   if (parsedBody) {
     // Ordinary lane only. recallFeedbackMessages calls loadPortalFeedbackContext
     // and withFeedbackContext. Web search and deep research return above.
-    const skilled = await withSkills(parsedBody);
+    const skilled = withLocalThinkingBudget(await withSkills(parsedBody), thinkingModel);
     const recalled = await recallFeedbackMessages(skilled.messages, {
       tenantId: session.tenantId,
       userId: session.userId,
@@ -484,7 +489,7 @@ export async function POST(request: Request) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(GATEWAY_COMPLETIONS_URL, {
+    upstream = await localThinkingBudgetFetch(thinkingModel)(GATEWAY_COMPLETIONS_URL, {
       method: "POST",
       headers: gatewayHeaders,
       body: forwardBody,

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { AppProviders } from "../providers/AppProviders";
@@ -40,6 +41,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     </html>
   );
 }
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+};
 
 export const metadata = {
   title: "AgenticX Enterprise · web-portal",

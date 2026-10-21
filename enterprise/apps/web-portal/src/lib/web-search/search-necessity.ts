@@ -10,6 +10,7 @@ export type WebSearchSkipReason =
   | "assistant_meta" // 问助手身份/能力
   | "attachment_only" // 只让处理已注入的附件内容
   | "arithmetic" // 纯算式
+  | "format_constraint" // 只约束怎么答，没有要查的事实
   | "referential_no_entity"; // 指代追问但历史消解不出实体（由 tool-loop 构造）
 
 export type WebSearchNeed =
@@ -33,6 +34,8 @@ const GREETING =
 const ASSISTANT_META =
   /^(你是谁|你是什么|你叫什么(名字)?|你的名字(是什么)?|你能(做什么|干什么|帮我做什么)|你会(什么|做什么)|你有什么(功能|能力)|你是(什么|哪个)模型|介绍一下你自己|自我介绍|who are you|what can you do|what are you|your name)$/i;
 
+const FORMAT_CONSTRAINT =
+  /^(?:请)?(?:只|仅)(?:回复|回答|说|输出)|^(?:不要|不用|别)(?:联网|搜索|检索)/;
 const ARITHMETIC = /^[\d\s+\-*/×÷().=%]+$/;
 const ARITHMETIC_OP = /[+\-*/×÷=%]/;
 
@@ -101,6 +104,11 @@ export function classifyWebSearchNeed(input: ClassifyInput): WebSearchNeed {
   // 4) Greeting / thanks / ack
   if (GREETING.test(normalized)) {
     return { need: "skip", reason: "greeting" };
+  }
+
+  // 4b) Reply-format instructions. Info markers above already force a search.
+  if (FORMAT_CONSTRAINT.test(normalized)) {
+    return { need: "skip", reason: "format_constraint" };
   }
 
   // 5) Assistant identity / capability

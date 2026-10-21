@@ -99,7 +99,7 @@ func (a *OpenAIAdaptor) Complete(
 	if strings.TrimSpace(upstream.Model) == "" {
 		upstream.Model = modelForChannel(ch, req.Model)
 	}
-	body, err := json.Marshal(upstream)
+	body, err := json.Marshal(openai.CompatibleRequest(upstream))
 	if err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("marshal upstream request: %w", err)
 	}
@@ -144,7 +144,7 @@ func (a *OpenAIAdaptor) Stream(
 	if strings.TrimSpace(upstream.Model) == "" {
 		upstream.Model = modelForChannel(ch, req.Model)
 	}
-	body, err := json.Marshal(upstream)
+	body, err := json.Marshal(openai.CompatibleRequest(upstream))
 	if err != nil {
 		return fmt.Errorf("marshal upstream request: %w", err)
 	}

@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
+import { extractPptxText } from "./pptx-text";
 import { convertLegacyOffice } from "./office-convert";
 import { parseVideoAttachment } from "./video-probe";
 import { MAX_PARSE_FILE_BYTES, MAX_PARSED_TEXT_CHARS } from "./attachment-parse-limits";
@@ -55,22 +56,7 @@ async function extractSpreadsheet(buffer: Buffer): Promise<string> {
 }
 
 async function extractPptx(buffer: Buffer): Promise<string> {
-  const zip = await JSZip.loadAsync(buffer);
-  const slideFiles = Object.keys(zip.files)
-    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const texts: string[] = [];
-  for (const path of slideFiles.slice(0, 80)) {
-    const xml = await zip.file(path)?.async("string");
-    if (!xml) continue;
-    const matches = xml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) ?? [];
-    const slideText = matches
-      .map((m) => m.replace(/<\/?a:t[^>]*>/g, "").trim())
-      .filter(Boolean)
-      .join(" ");
-    if (slideText) texts.push(slideText);
-  }
-  return texts.join("\n\n");
+  return extractPptxText(await JSZip.loadAsync(buffer));
 }
 
 export async function parseAttachmentFile(

@@ -121,7 +121,7 @@ func (p *OpenAICompatibleProvider) Complete(
 		upstream.Model = decision.Model
 	}
 
-	body, err := json.Marshal(upstream)
+	body, err := json.Marshal(openai.CompatibleRequest(upstream))
 	if err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("marshal upstream request: %w", err)
 	}
@@ -172,7 +172,7 @@ func (p *OpenAICompatibleProvider) Stream(
 		upstream.Model = decision.Model
 	}
 
-	body, err := json.Marshal(upstream)
+	body, err := json.Marshal(openai.CompatibleRequest(upstream))
 	if err != nil {
 		return fmt.Errorf("marshal upstream request: %w", err)
 	}

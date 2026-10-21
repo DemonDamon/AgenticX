@@ -37,6 +37,16 @@ describe("classifyWebSearchNeed", () => {
     }
   });
 
+  it("skips reply-format instructions that do not ask for facts", () => {
+    for (const query of ["只回复一个字：好", "请只回答好", "不要联网", "别搜索"]) {
+      expect(classifyWebSearchNeed({ query }), query).toEqual({
+        need: "skip",
+        reason: "format_constraint",
+      });
+    }
+    expect(classifyWebSearchNeed({ query: "只回复今天的金价" })).toEqual({ need: "search" });
+  });
+
   it("skips pure arithmetic (AC-1)", () => {
     for (const query of ["1+1=?", "(3+4)*2"]) {
       expect(classifyWebSearchNeed({ query }), query).toEqual({
