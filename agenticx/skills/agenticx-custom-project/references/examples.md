@@ -199,3 +199,54 @@ python3 scripts/custom_project.py classify --kind security --where business
 ```
 
 结论是留在本地处理：轮换密钥、从业务仓库历史里去掉。不要开公开 Issue，也不要在对话里重复那串密钥。官方仓库的安全问题才用 `--where runtime` 或 `--where desktop`，公开文字仍不写密钥和利用步骤。
+
+## 12. 领域 Demo：不改框架的最小本体推理闭环（合成数据）
+
+用户说：「用 AgenticX 做一个最小本体推理 Demo，不改框架，要能 query、infer，最好有个浏览器页面。」
+
+第一步，初始化按 depend 模式：
+
+```bash
+python3 scripts/custom_project.py doctor
+python3 scripts/custom_project.py plan --mode depend --stack python --name ontology-reasoner
+python3 scripts/custom_project.py plan --mode depend --stack python --name ontology-reasoner --write --dir /你的空目录
+```
+
+结论是：新建业务仓，pip 装官方发布包（示例 `agenticx==0.6.5`，以 `agx --version` / PyPI 为准），**不克隆官方源码**。目录已非空时不要强跑 `agx project create` 覆盖，手工对齐 basic 脚手架精神即可。
+
+第二步，业务仓里自研闭环，分层示意（路径可改名）：
+
+| 路径 | 职责 |
+| --- | --- |
+| `services/ontology_core/` | 内存本体：概念、属性、关系；JSON 持久化 |
+| `services/reasoner/` | 简单规则：传递 `is_a`、沿 `is_a` 继承属性、证据链 |
+| `services/agent_bridge/` | 用 `agenticx.FunctionTool` 包装 `ontology_query`、`ontology_infer` |
+| `scripts/demo_loop.py` | 不联网一键：写样例 → query → infer → 校验 |
+| `tests/test_min_loop.py` | 无网单测 |
+| `services/api/` + `apps/portal/` | 可选：FastAPI + 中文单页 Demo UI |
+
+样例公理用合成概念，例如 `Manager is_a Employee`、`Employee is_a Person`，推理应得到 `Manager is_a Person`（传递闭包）。不写客户名、不贴真实标书内容。
+
+```bash
+.venv/bin/python scripts/demo_loop.py
+```
+
+退出码 `0` 打印 query / infer 结果并校验传递闭包即闭环成立；装了 agx 时可再经 `FunctionTool.run` 调用一轮。未装 agx 时桥接返回空工具列表，纯 Python 部分照常可跑。
+
+第三步，可选 Demo UI：
+
+```bash
+.venv/bin/uvicorn services.api.app:app --host 127.0.0.1 --port 8765
+```
+
+`http://127.0.0.1:8765/` 是**启动服务那台机器**上的环回地址。服务跑在助手桌面（远程电脑）时，用户笔记本打不开它；让助手在他的桌面浏览器打开或截图展示。Demo UI 不是全量门户，无鉴权、无多租户，只用于本地看闭环。
+
+第四步：用户嫌页面丑，想换皮。**不要**把设计技能的正文并进 `agenticx-custom-project`；另装一个独立的设计类技能（SkillHub 发现、经用户确认后安装），在业务仓里重做 `apps/portal`。判断仍是：
+
+```bash
+python3 scripts/custom_project.py classify --kind style --where business
+```
+
+结论是留在业务仓，不提上游 PR，也不改官方仓库。
+
+这个案例的要点：框架只做依赖；存储、规则、桥接、闭环脚本和 UI 全部在业务仓自研，Issue / PR 一条都不用提。
