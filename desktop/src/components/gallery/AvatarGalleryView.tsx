@@ -29,11 +29,11 @@ function avatarInitials(name: string): string {
 
 type CardMenuState = { avatarId: string; x: number; y: number } | null;
 
-/** Gallery cards: idle / focus / selected borders follow --theme-color-rgb. */
+/** Gallery cards: hover matches marketplace cards (neutral border + soft lift). Selected still uses theme color. */
 const GALLERY_CARD_BASE =
-  "group relative flex cursor-pointer flex-col rounded-xl border bg-surface-card p-4 transition-all outline-none hover:bg-surface-card-strong";
+  "agx-market-card group relative flex cursor-pointer flex-col rounded-xl border bg-surface-card p-4 outline-none";
 const GALLERY_CARD_IDLE =
-  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+  "border-border focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 const GALLERY_CARD_SELECTED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] bg-surface-card-strong ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
