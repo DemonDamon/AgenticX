@@ -68,7 +68,7 @@ python test_connectivity.py
 - **Milvus** (2.3.3): 向量数据库
 - **Qdrant** (1.7.4): 向量搜索引擎
 - **Chroma** (0.4.22): 向量数据库
-- **Weaviate** (1.22.4): 向量搜索引擎
+- **Weaviate** (1.39.13): 向量搜索引擎
 - **Elasticsearch** (8.11.3): 搜索引擎 + 向量搜索
 
 ### Graph Storage
@@ -188,12 +188,22 @@ JAEGER_PORT=16686
 | Qdrant | 6333 | 向量搜索引擎 |
 | Chroma | 8000 | 向量数据库 |
 | Weaviate | 8080 | 向量搜索引擎 |
+| Weaviate gRPC | 50051 | Python v4 客户端必需 |
 | Neo4j | 7687 | 图数据库 |
 | Elasticsearch | 9200 | 搜索引擎 |
 | MinIO | 9000 | 对象存储 |
 | Prometheus | 9090 | 监控系统 |
 | Grafana | 3000 | 可视化面板 |
 | Jaeger | 16686 | 分布式追踪 |
+
+### 升级 Weaviate
+
+Weaviate 只支持逐个小版本升级（1.22 → 1.23 → … → 1.39），不能直接从 1.22.4 跳到 1.39.13。如果 `./data/weaviate` 里已有数据：
+
+- 数据可以重建（例如只是开发测试数据）：`docker-compose stop weaviate`，删除 `./data/weaviate`，再 `docker-compose up -d weaviate`。
+- 需要保留数据：先导出数据再在新版本中重新导入，或者依次把镜像切换到每个小版本的最新补丁版并启动一次，直到 1.39.13。
+
+参见 [Weaviate 升级说明](https://docs.weaviate.io/deploy/migration)。
 
 ## 📈 监控和可视化
 

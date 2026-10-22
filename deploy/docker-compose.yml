@@ -148,7 +148,7 @@ services:
 
   # Weaviate - 向量搜索引擎
   weaviate:
-    image: semitechnologies/weaviate:1.22.4
+    image: semitechnologies/weaviate:1.39.13
     container_name: agenticx-weaviate
     environment:
       QUERY_DEFAULTS_LIMIT: 25
@@ -159,6 +159,7 @@ services:
       CLUSTER_HOSTNAME: 'node1'
     ports:
       - "8080:8080"
+      - "50051:50051"
     volumes:
       - ./data/weaviate:/var/lib/weaviate
     restart: unless-stopped
