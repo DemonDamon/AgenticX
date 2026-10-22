@@ -3327,6 +3327,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const chatFadeTopRef = useRef<HTMLDivElement>(null);
+  const chatFadeBottomRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
   /** >0 while we assign scrollTop; scroll events in that window must not unpin. */
   const programmaticScrollRef = useRef(0);
@@ -14302,6 +14304,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     (!!pane.sessionId && visibleMessages.length === 0);
   const liftComposer = isBrandEmptyState && !workExpandedLayout;
 
+  useEffect(() => {
+    const el = listRef.current;
+    const top = chatFadeTopRef.current;
+    const bottom = chatFadeBottomRef.current;
+    if (!el || !top || !bottom) return;
+    const sync = () => {
+      const overflow = el.scrollHeight - el.clientHeight;
+      if (overflow <= 4) {
+        top.style.opacity = "0";
+        bottom.style.opacity = "0";
+        return;
+      }
+      top.style.opacity = String(Math.min(1, el.scrollTop / 28));
+      const remaining = overflow - el.scrollTop;
+      bottom.style.opacity = String(Math.min(1, remaining / 28));
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      ro.disconnect();
+    };
+  }, [paneId, liftComposer, workExpandedLayout]);
+
   return (
     <div
       ref={paneRef}
@@ -14660,6 +14688,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             timeoutMs={3200}
           />
           </div>
+
+          {!liftComposer ? (
+            <>
+              <div ref={chatFadeTopRef} aria-hidden className="agx-chat-scroll-fade agx-chat-scroll-fade-top" />
+              <div ref={chatFadeBottomRef} aria-hidden className="agx-chat-scroll-fade agx-chat-scroll-fade-bottom" />
+            </>
+          ) : null}
 
           {continueCreatingToast ? (
             <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">

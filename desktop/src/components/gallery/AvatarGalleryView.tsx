@@ -70,6 +70,8 @@ export function AvatarGalleryView() {
   const [settingsAvatarId, setSettingsAvatarId] = useState<string | null>(null);
   const [cardMenu, setCardMenu] = useState<CardMenuState>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const scrollFadeRef = useRef<HTMLDivElement>(null);
 
   const avatarsLoaded = corePreloadAttempted || avatars.length > 0;
 
@@ -102,6 +104,20 @@ export function AvatarGalleryView() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    const fade = scrollFadeRef.current;
+    if (!header || !fade) return;
+    const scroller = header.closest(".overflow-y-auto");
+    if (!(scroller instanceof HTMLElement)) return;
+    const sync = () => {
+      fade.style.opacity = String(Math.min(1, scroller.scrollTop / 28));
+    };
+    sync();
+    scroller.addEventListener("scroll", sync, { passive: true });
+    return () => scroller.removeEventListener("scroll", sync);
   }, []);
 
   const sortedAvatars = useMemo(() => {
@@ -217,7 +233,7 @@ export function AvatarGalleryView() {
   return (
     <MainViewShell>
       {/* Sticky title row only; 关注分身仍靠排序置顶，不钉死 */}
-      <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 bg-surface-base px-6 pb-4 pt-6">
+      <div ref={headerRef} className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 bg-surface-base px-6 pb-4 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-text-strong">{t("gallery.title")}</h2>
@@ -272,6 +288,7 @@ export function AvatarGalleryView() {
             <EmptyStateHeaderFigures />
           </div>
         </div>
+        <div ref={scrollFadeRef} aria-hidden className="agx-gallery-scroll-fade" />
       </div>
 
       {!avatarsLoaded ? (

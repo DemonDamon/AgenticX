@@ -1229,6 +1229,55 @@ input[type="radio"] {
     0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
+/* Chat transcript: content fades into the pane at the header and above the task bar. */
+.agx-chat-scroll-fade {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  height: 3.25rem;
+  opacity: 0;
+}
+.agx-chat-scroll-fade-top {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--shell-panel) 0%,
+    color-mix(in srgb, var(--shell-panel) 78%, transparent) 34%,
+    color-mix(in srgb, var(--shell-panel) 28%, transparent) 70%,
+    transparent 100%
+  );
+}
+.agx-chat-scroll-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--shell-panel) 0%,
+    color-mix(in srgb, var(--shell-panel) 78%, transparent) 34%,
+    color-mix(in srgb, var(--shell-panel) 28%, transparent) 70%,
+    transparent 100%
+  );
+}
+
+/* Expert gallery: cards scrolling under the sticky header fade out instead of clipping on a hard edge. */
+.agx-gallery-scroll-fade {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 3.25rem;
+  opacity: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--surface-base) 0%,
+    color-mix(in srgb, var(--surface-base) 78%, transparent) 34%,
+    color-mix(in srgb, var(--surface-base) 28%, transparent) 70%,
+    transparent 100%
+  );
+}
+
 /* Filter chips (marketplace skills / connectors): selected = theme tint fill + theme text (Comate-like). */
 .agx-filter-chip-active {
   border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.22);
