@@ -20,6 +20,36 @@ from mem0.vector_stores.base import VectorStoreBase
 
 logger = logging.getLogger(__name__)
 
+_INTEGRATION_HEADER = "X-Weaviate-Client-Integration"
+
+
+def _register_integration_header(client, user_headers: Optional[dict] = None) -> None:
+    """Tag requests with ``X-Weaviate-Client-Integration: agenticx/<version>``.
+
+    Weaviate (1.38+) uses this header to attribute traffic to the integration
+    that sent it. ``client.integrations.configure`` applies it to both the REST
+    and the gRPC transport. ``_IntegrationConfig`` is private client API, so the
+    whole registration is best-effort: any failure is logged and ignored. A
+    header the user passed in ``additional_headers`` is left untouched.
+    """
+    if user_headers and any(k.lower() == _INTEGRATION_HEADER.lower() for k in user_headers):
+        return
+    try:
+        from pydantic import Field
+        from weaviate.connect.integrations import _IntegrationConfig
+
+        try:
+            from agenticx._version import __version__ as version
+        except Exception:
+            version = "unknown"
+
+        class _AgenticXIntegration(_IntegrationConfig):
+            integration: str = Field(default=f"agenticx/{version}", serialization_alias=_INTEGRATION_HEADER)
+
+        client.integrations.configure(_AgenticXIntegration())
+    except Exception:
+        logger.debug("Could not register the Weaviate integration header", exc_info=True)
+
 
 class OutputData(BaseModel):
     id: str
@@ -55,6 +85,7 @@ class Weaviate(VectorStoreBase):
                 auth_credentials=Auth.api_key(auth_client_secret),
                 headers=additional_headers,
             )
+        _register_integration_header(self.client, additional_headers)
 
         self.collection_name = collection_name
         self.embedding_model_dims = embedding_model_dims
