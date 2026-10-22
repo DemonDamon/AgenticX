@@ -34,6 +34,10 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
   "fullstack-squad": Boxes,
 };
 
+/** Same hover lift + shadow as marketplace UnifiedGrid (not bg-only hover). */
+const COLLAB_CARD_BASE =
+  "agx-market-card group relative rounded-xl border border-border bg-surface-cardSolid outline-none";
+
 function relativeAdded(iso: string, locale: string): string {
   const ts = Date.parse(iso);
   if (!Number.isFinite(ts)) return "";
@@ -184,7 +188,7 @@ function ProjectCollabHome() {
               {visible.map((project) => {
                 const when = relativeAdded(project.created_at, i18n.language);
                 return (
-                  <div key={project.id} className="relative rounded-xl border border-border bg-surface-card p-4">
+                  <div key={project.id} className={`relative p-4 ${COLLAB_CARD_BASE}`}>
                     <button
                       type="button"
                       className="flex w-full items-start gap-3 pr-6 text-left"
@@ -220,17 +224,24 @@ function ProjectCollabHome() {
         </section>
       )}
 
-      <button
-        type="button"
-        className="mt-8 flex w-full items-center gap-3 rounded-xl border border-border bg-surface-card p-4 text-left hover:bg-surface-hover"
+      <div
+        role="button"
+        tabIndex={0}
+        className={`mt-8 flex w-full cursor-pointer items-center gap-3 p-4 text-left ${COLLAB_CARD_BASE}`}
         onClick={() => setMainView("groups")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setMainView("groups");
+          }
+        }}
       >
         <Waypoints className="h-5 w-5 shrink-0 text-text-muted" strokeWidth={1.75} />
         <span className="min-w-0">
           <span className="block text-[15px] font-semibold text-text-strong">{t("localGroups")}</span>
           <span className="mt-1 block text-[12px] text-text-muted">{t("localGroupsHint")}</span>
         </span>
-      </button>
+      </div>
 
       <section className="mt-8">
         <h2 className="text-[15px] font-semibold text-text-strong">{t("fromTemplate")}</h2>
@@ -240,18 +251,25 @@ function ProjectCollabHome() {
             const name = tSidebar(groupTemplateI18nKey(template.id, "name"));
             const description = tSidebar(groupTemplateI18nKey(template.id, "description"));
             return (
-              <button
+              <div
                 key={template.id}
-                type="button"
-                className="flex items-start gap-3 rounded-xl border border-border bg-surface-card p-4 text-left hover:bg-surface-hover"
+                role="button"
+                tabIndex={0}
+                className={`flex cursor-pointer items-start gap-3 p-4 text-left ${COLLAB_CARD_BASE}`}
                 onClick={() => openCreate(description, template.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openCreate(description, template.id);
+                  }
+                }}
               >
                 <Icon className="mt-0.5 h-5 w-5 shrink-0 text-text-muted" strokeWidth={1.75} />
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] font-semibold text-text-strong">{name}</span>
                   <span className="mt-1 block text-[12px] text-text-muted">{description}</span>
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>

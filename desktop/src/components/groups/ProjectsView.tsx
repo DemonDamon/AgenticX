@@ -42,11 +42,11 @@ type EditorState =
   | { mode: "edit"; group: GroupChat }
   | null;
 
-/** Project cards: hover / focus borders follow --theme-color-rgb. */
+/** Same hover as marketplace cards: opaque fill so the lift shadow stays outside the card. */
 const PROJECT_CARD_BASE =
-  "rounded-xl border bg-surface-card transition-all outline-none hover:bg-surface-card-strong";
+  "agx-market-card relative rounded-xl border border-border bg-surface-cardSolid outline-none";
 const PROJECT_CARD_IDLE =
-  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+  "border-border focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 const PROJECT_CARD_SELECTED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] bg-surface-card-strong ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
@@ -262,11 +262,18 @@ export function ProjectsView() {
           {GROUP_TEMPLATES.map((tpl) => {
             const Icon = ICON_MAP[tpl.icon] ?? FolderKanban;
             return (
-              <button
+              <div
                 key={tpl.id}
-                type="button"
-                className={`flex items-start gap-3 px-4 py-3.5 text-left ${PROJECT_CARD_BASE} ${PROJECT_CARD_IDLE}`}
+                role="button"
+                tabIndex={0}
+                className={`flex cursor-pointer items-start gap-3 px-4 py-3.5 text-left ${PROJECT_CARD_BASE} ${PROJECT_CARD_IDLE}`}
                 onClick={() => handleTemplateSelect(tpl.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleTemplateSelect(tpl.id);
+                  }
+                }}
               >
                 <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-panel">
                   <Icon className="h-[18px] w-[18px] text-text-subtle" aria-hidden />
@@ -277,7 +284,7 @@ export function ProjectsView() {
                     {t(groupTemplateI18nKey(tpl.id, "description"))}
                   </p>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

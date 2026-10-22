@@ -1216,6 +1216,8 @@ input[type="radio"] {
 }
 
 .agx-market-card:hover {
+  position: relative;
+  z-index: 1;
   transform: translateY(-1px);
   /* Dark/dim default — soft lift without accent glow */
   box-shadow:
@@ -1225,8 +1227,19 @@ input[type="radio"] {
 
 :root[data-theme="light"] .agx-market-card:hover {
   box-shadow:
-    0 8px 28px rgba(15, 23, 42, 0.10),
-    0 2px 8px rgba(15, 23, 42, 0.06);
+    0 12px 32px rgba(15, 23, 42, 0.14),
+    0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+/* Template rows are <button>. Native button hover tints the fill and hides the lift. */
+button.agx-market-card {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--surface-card-solid);
+}
+
+button.agx-market-card:hover {
+  background-color: var(--surface-card-solid);
 }
 
 /* Chat transcript: content fades into the pane at the header and above the task bar. */

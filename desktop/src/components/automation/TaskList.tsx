@@ -100,10 +100,9 @@ function relativeTime(iso: string): string {
   return i18n.t("automation.daysAgo", { ...ns, count: Math.floor(diff / 86400_000) });
 }
 
-/** Task rows: hover / expanded borders follow --theme-color-rgb. */
-const TASK_ROW_BASE = "rounded-lg border bg-surface-card transition-all";
-const TASK_ROW_IDLE =
-  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)]";
+/** Same hover as marketplace cards: opaque fill so the lift shadow stays outside the card. */
+const TASK_ROW_BASE = "agx-market-card rounded-lg border border-border bg-surface-cardSolid";
+const TASK_ROW_IDLE = "border-border";
 const TASK_ROW_EXPANDED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 

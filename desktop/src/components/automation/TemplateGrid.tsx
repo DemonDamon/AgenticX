@@ -30,11 +30,11 @@ interface Props {
   onSelect: (template: AutomationTemplate) => void;
 }
 
-/** Template cards: hover / focus borders follow --theme-color-rgb. */
+/** Same hover as marketplace cards: opaque fill so the lift shadow stays outside the card. */
 const TEMPLATE_CARD_BASE =
-  "flex items-start gap-3 rounded-lg border bg-surface-card px-3 py-2.5 text-left transition-all outline-none hover:bg-surface-card-strong";
+  "agx-market-card relative flex items-start gap-3 rounded-lg border border-border bg-surface-cardSolid px-3 py-2.5 text-left outline-none";
 const TEMPLATE_CARD_IDLE =
-  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+  "border-border focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function TemplateGrid({ onSelect }: Props) {
   const { t } = useTranslation("workspace");
@@ -47,11 +47,18 @@ export function TemplateGrid({ onSelect }: Props) {
         {AUTOMATION_TEMPLATES.map((tpl) => {
           const Icon = ICON_MAP[tpl.icon] ?? Bell;
           return (
-            <button
+            <div
               key={tpl.id}
-              type="button"
-              className={`${TEMPLATE_CARD_BASE} ${TEMPLATE_CARD_IDLE}`}
+              role="button"
+              tabIndex={0}
+              className={`cursor-pointer ${TEMPLATE_CARD_BASE} ${TEMPLATE_CARD_IDLE}`}
               onClick={() => onSelect(tpl)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(tpl);
+                }
+              }}
             >
               <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-panel">
                 <Icon className="h-4 w-4 text-text-subtle" aria-hidden />
@@ -62,7 +69,7 @@ export function TemplateGrid({ onSelect }: Props) {
                   {t(`automation.templates.${tpl.id}.description`)}
                 </p>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
