@@ -33,6 +33,11 @@ class StageState:
     artifacts: list[str] = field(default_factory=list)
     blocker: str = ""
     avatar_id: str = ""
+    # Plan DSL v1（B 端案例库垂直切片）：以下字段全部可选，旧格式 plan.mdc
+    # 不含这些键时读出为默认值。
+    gate_criteria: list[str] = field(default_factory=list)  # 该阶段 Gate 的验收标准（自然语言，LLM 消费）
+    artifact_refs: list[str] = field(default_factory=list)  # 产物相对路径引用（相对 output_dir）
+    case_link: str = ""  # 该阶段产物沉淀到的 case-entry 路径（SP-C 消费）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,6 +56,11 @@ class DeliveryPlan:
     overall_status: str = "pending"
     stages: list[StageState] = field(default_factory=list)
     input_files: list[str] = field(default_factory=list)
+    # Plan DSL v1（B 端案例库垂直切片）：以下字段全部可选，旧格式 plan.mdc
+    # 不含这些键时读出为默认值。
+    intent: str = ""  # 用户原始需求描述（一句话）
+    scope: dict[str, str] = field(default_factory=dict)  # 适用条件（domain/team_size/model_requirement）
+    case_refs: list[str] = field(default_factory=list)  # 初始化时消费的 case-entry 路径列表（SP-D 消费）
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +72,9 @@ class DeliveryPlan:
             "current_stage": self.current_stage,
             "overall_status": self.overall_status,
             "input_files": list(self.input_files),
+            "intent": self.intent,
+            "scope": dict(self.scope),
+            "case_refs": list(self.case_refs),
             "stages": [s.to_dict() for s in self.stages],
         }
 
@@ -116,6 +129,18 @@ def write_plan(path: Path, plan: DeliveryPlan) -> None:
         "current_stage": plan.current_stage,
         "overall_status": plan.overall_status,
         "input_files": plan.input_files,
+        # Plan DSL v1: structured extension fields (consumed by LLM / SP-C/SP-D).
+        "intent": plan.intent,
+        "scope": plan.scope,
+        "case_refs": plan.case_refs,
+        "stages": {
+            stage.id: {
+                "gate_criteria": stage.gate_criteria,
+                "artifact_refs": stage.artifact_refs,
+                "case_link": stage.case_link,
+            }
+            for stage in plan.stages
+        },
     }
     lines = [
         "---",
@@ -161,9 +186,17 @@ def read_plan(path: Path) -> DeliveryPlan | None:
     if not isinstance(meta, dict):
         return None
 
+    # Plan DSL v1: stage-level extension fields live under front["stages"][stage_id].
+    # Old-format files without these keys fall back to the dataclass defaults.
+    stages_meta = meta.get("stages")
+    if not isinstance(stages_meta, dict):
+        stages_meta = {}
     stages: list[StageState] = []
     for sid in STAGE_ORDER:
         block = _extract_stage_block(text, sid)
+        ext = stages_meta.get(sid)
+        if not isinstance(ext, dict):
+            ext = {}
         stages.append(
             StageState(
                 id=sid,
@@ -173,8 +206,15 @@ def read_plan(path: Path) -> DeliveryPlan | None:
                 artifacts=list(block.get("artifacts") or []),
                 blocker=str(block.get("blocker") or ""),
                 avatar_id=_avatar_for_stage(sid),
+                gate_criteria=[str(x) for x in (ext.get("gate_criteria") or [])],
+                artifact_refs=[str(x) for x in (ext.get("artifact_refs") or [])],
+                case_link=str(ext.get("case_link") or ""),
             )
         )
+
+    # Plan DSL v1: plan-level extension fields (old files default to "" / {} / []).
+    scope_raw = meta.get("scope")
+    scope = {str(k): str(v) for k, v in scope_raw.items()} if isinstance(scope_raw, dict) else {}
 
     return DeliveryPlan(
         task_id=str(meta.get("task_id") or ""),
@@ -185,6 +225,9 @@ def read_plan(path: Path) -> DeliveryPlan | None:
         current_stage=str(meta.get("current_stage") or "requirements"),
         overall_status=str(meta.get("overall_status") or "pending"),
         input_files=[str(x) for x in (meta.get("input_files") or [])],
+        intent=str(meta.get("intent") or ""),
+        scope=scope,
+        case_refs=[str(x) for x in (meta.get("case_refs") or [])],
         stages=stages,
     )
 
@@ -220,6 +263,9 @@ def update_stage(
     artifacts: list[str] | None = None,
     blocker: str | None = None,
     increment_retry: bool = False,
+    gate_criteria: list[str] | None = None,
+    artifact_refs: list[str] | None = None,
+    case_link: str | None = None,
 ) -> None:
     for stage in plan.stages:
         if stage.id != stage_id:
@@ -230,6 +276,12 @@ def update_stage(
             stage.artifacts = list(artifacts)
         if blocker is not None:
             stage.blocker = blocker
+        if gate_criteria is not None:
+            stage.gate_criteria = list(gate_criteria)
+        if artifact_refs is not None:
+            stage.artifact_refs = list(artifact_refs)
+        if case_link is not None:
+            stage.case_link = case_link
         if increment_retry:
             stage.retries += 1
         plan.current_stage = stage_id

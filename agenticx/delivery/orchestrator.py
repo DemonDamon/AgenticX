@@ -11,18 +11,20 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agenticx.delivery.bootstrap import ensure_delivery_bundle
 from agenticx.delivery.config import get_delivery_config
 from agenticx.delivery.plan_mdc import (
     STAGE_ORDER,
+    DeliveryPlan,
     default_plan,
     read_plan,
     update_stage,
     write_plan,
 )
-from agenticx.delivery.stages import materialize_stage_artifacts, next_stage, validate_stage_artifacts
+from agenticx.delivery.stage_agents import default_llm_factory, llm_gate_judge, make_stage_agent
+from agenticx.delivery.stages import materialize_stage_artifacts, next_stage, validate_stage_with_gate
 from agenticx.delivery.store import (
     DeliveryTaskRecord,
     get_task,
@@ -51,8 +53,12 @@ class TaskSpec:
 class DeliveryOrchestrator:
     """Thin orchestration layer over plan.mdc + worktree + stage runners."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        on_stage_passed: Callable[[str, Path, DeliveryPlan], None] | None = None,
+    ) -> None:
         self.cfg = get_delivery_config()
+        self.on_stage_passed = on_stage_passed
 
     def is_enabled(self) -> bool:
         return bool(self.cfg.get("enabled", True))
@@ -169,6 +175,9 @@ class DeliveryOrchestrator:
         dry = bool(self.cfg.get("dry_run"))
         output_dir = Path(record.output_dir)
 
+        # SP-B: LLM 不可用时 factory 为 None → 各阶段降级 stub；dry-run 永不调 LLM。
+        llm_factory = None if dry else default_llm_factory()
+
         stage_index = 0
         while stage_index < len(STAGE_ORDER):
             stage_id = STAGE_ORDER[stage_index]
@@ -187,6 +196,7 @@ class DeliveryOrchestrator:
             plan.overall_status = "running"
             write_plan(plan_path, plan)
 
+            stage_agent = make_stage_agent(stage_id, llm_factory=llm_factory)
             artifacts = materialize_stage_artifacts(
                 stage_id,
                 output_dir=output_dir,
@@ -194,10 +204,20 @@ class DeliveryOrchestrator:
                 project_name=record.project_name,
                 input_files=record.input_files,
                 dry_run=dry,
+                intent=plan.intent,
+                stage_agent=stage_agent,
             )
-            ok, reason = validate_stage_artifacts(stage_id, output_dir)
+            # SP-B: 两级质量门——fast path 失败直接退回；该阶段实际用了 Agent 时
+            # 追加 LLM 评审（gate_criteria 来自 stage state），其余走纯 fast path。
             stage = next(s for s in plan.stages if s.id == stage_id)
-            if not ok:
+            verdict = validate_stage_with_gate(
+                stage_id,
+                output_dir,
+                gate_criteria=stage.gate_criteria,
+                llm_judge=llm_gate_judge if stage_agent is not None else None,
+            )
+            if not verdict.passed:
+                reason = "; ".join(verdict.failures) or "gate failed"
                 update_stage(plan, stage_id, status="failed", blocker=reason, increment_retry=True)
                 stage = next(s for s in plan.stages if s.id == stage_id)
                 if stage.retries >= max_retries:
@@ -211,6 +231,11 @@ class DeliveryOrchestrator:
                 continue
 
             update_stage(plan, stage_id, status="completed", artifacts=artifacts, blocker="")
+            if self.on_stage_passed is not None:
+                try:
+                    self.on_stage_passed(stage_id, output_dir, plan)
+                except Exception:
+                    logger.exception("on_stage_passed callback failed for %s", stage_id)
             nxt = next_stage(stage_id)
             plan.current_stage = nxt or stage_id
             write_plan(plan_path, plan)
