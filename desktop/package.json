@@ -89,5 +89,9 @@
     "vite": "^6.4.4",
     "vitest": "^4.1.10",
     "wait-on": "^8.0.3"
+  },
+  "overrides": {
+    "proxy-addr": "^2.0.8",
+    "shell-quote": "^1.12.0"
   }
 }
