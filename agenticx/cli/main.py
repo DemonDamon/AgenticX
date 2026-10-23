@@ -592,8 +592,15 @@ def case_compile(
     output_root: Optional[str] = typer.Option(
         None, "--output-root", "-o", help="cases 落盘根目录（默认 ./cases）"
     ),
+    push: bool = typer.Option(False, "--push", help="本地落盘后推送至云端案例库"),
+    url: Optional[str] = typer.Option(
+        None, "--url", help="context-service 地址（默认 AGX_CONTEXT_SERVICE_URL 或 http://localhost:8420）"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token", help="context-service token（默认 AGX_CONTEXT_SERVICE_TOKEN）"
+    ),
 ):
-    """从 plan.mdc 生成 case-entry 并落盘（B 端案例库沉淀）"""
+    """从 plan.mdc 生成 case-entry 并落盘（B 端案例库沉淀；--push 同步上报云端）"""
     from agenticx.cases.precipitate import compile_case_entry
     from agenticx.cases.store import CaseStore
     from agenticx.delivery.plan_mdc import read_plan
@@ -617,36 +624,83 @@ def case_compile(
     console.print(f"路径: {saved}")
     console.print(f"freshness: {entry.freshness}")
 
+    if push:
+        from agenticx.cases.remote import push_case
+
+        try:
+            pushed = push_case(saved, url=url, token=token)
+        except RuntimeError as exc:
+            console.print(f"[bold red]错误:[/bold red] 云端推送失败: {exc}")
+            console.print("本地 case-entry 已保留，可稍后重新 --push")
+            raise typer.Exit(1)
+        console.print("[bold green]✓ 已推送至云端案例库[/bold green]")
+        compiled = pushed.get("compile") or {}
+        skipped = compiled.get("skipped")
+        console.print(
+            f"云端 compile: written={compiled.get('written')} skipped={skipped}"
+            + (f"（{compiled.get('skipped_reason')}）" if skipped else "")
+        )
+
 
 @case_app.command("search")
 def case_search(
     query: str = typer.Argument(..., help="检索关键词（空格分隔多个词）"),
     domain: Optional[str] = typer.Option(None, "--domain", help="按 scope.domain 硬过滤"),
     top_k: int = typer.Option(5, "--top-k", help="最多返回条数"),
+    remote: bool = typer.Option(False, "--remote", help="检索云端案例库（否则本地）"),
+    url: Optional[str] = typer.Option(
+        None, "--url", help="context-service 地址（默认 AGX_CONTEXT_SERVICE_URL 或 http://localhost:8420）"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token", help="context-service token（默认 AGX_CONTEXT_SERVICE_TOKEN）"
+    ),
 ):
-    """按关键词检索案例库（V1 子串匹配 summary/problem/solution）"""
+    """按关键词检索案例库（--remote 走云端，否则本地子串匹配）"""
     from agenticx.cases.search import search_cases
     from agenticx.cases.store import CaseStore
 
-    store = CaseStore(Path.cwd() / "cases")
     scope_filter = {"domain": domain} if domain else None
-    hits = search_cases(query, store=store, scope_filter=scope_filter, top_k=top_k)
-    if not hits:
+    if remote:
+        from agenticx.cases.remote import search_cases_remote
+
+        try:
+            hits = search_cases_remote(
+                query, scope_filter=scope_filter, top_k=top_k, url=url, token=token
+            )
+        except RuntimeError as exc:
+            console.print(f"[bold red]错误:[/bold red] {exc}")
+            raise typer.Exit(1)
+        rows = [
+            (
+                str(hit.get("case_id") or ""),
+                str(hit.get("title") or ""),
+                hit.get("score"),
+                [str(m) for m in (hit.get("matched_on") or [])],
+            )
+            for hit in hits
+        ]
+    else:
+        store = CaseStore(Path.cwd() / "cases")
+        hits = search_cases(query, store=store, scope_filter=scope_filter, top_k=top_k)
+        rows = [
+            (hit.entry.case_id, hit.entry.title, hit.score, hit.matched_on)
+            for hit in hits
+        ]
+
+    if not rows:
         console.print("无匹配案例")
+        if not remote:
+            console.print("[dim]提示: 可用 --remote 检索云端案例库[/dim]")
         return
 
-    table = Table(title=f"案例检索: {query}")
+    table = Table(title=f"案例检索: {query}" + ("（云端）" if remote else ""))
     table.add_column("case_id", style="cyan")
     table.add_column("标题", style="green")
     table.add_column("score", justify="right")
     table.add_column("matched_on")
-    for hit in hits:
-        table.add_row(
-            hit.entry.case_id,
-            hit.entry.title,
-            f"{hit.score:g}",
-            ", ".join(hit.matched_on),
-        )
+    for case_id, case_title, score, matched_on in rows:
+        score_text = f"{score:g}" if isinstance(score, (int, float)) else str(score)
+        table.add_row(case_id, case_title, score_text, ", ".join(matched_on))
     console.print(table)
 
 
@@ -655,20 +709,55 @@ def case_init(
     case: str = typer.Option(..., "--case", help="要消费的 case_id"),
     target: str = typer.Option(..., "--target", help="新项目目标目录（须为空或不存在）"),
     intent: str = typer.Option("", "--intent", help="项目意图（缺省回退 case 摘要）"),
+    remote: bool = typer.Option(False, "--remote", help="从云端案例库获取 case（本地案例库没有时用）"),
+    url: Optional[str] = typer.Option(
+        None, "--url", help="context-service 地址（默认 AGX_CONTEXT_SERVICE_URL 或 http://localhost:8420）"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token", help="context-service token（默认 AGX_CONTEXT_SERVICE_TOKEN）"
+    ),
 ):
     """从案例初始化新项目（生成 plan.mdc 并注入 wiki/skills 产物）"""
+    import tempfile
     from agenticx.cases.init_inject import init_project_from_case
+    from agenticx.cases.model import parse_case_md
     from agenticx.cases.store import CaseStore
 
+    target_dir = Path(target).expanduser()
     store = CaseStore(Path.cwd() / "cases")
-    entry = store.get(case)
-    if entry is None:
-        console.print(f"[bold red]错误:[/bold red] case 未找到: {case}")
-        raise typer.Exit(1)
+
+    if remote:
+        from agenticx.cases.remote import get_case_remote
+
+        if target_dir.exists() and any(target_dir.iterdir()):
+            console.print(f"[bold red]错误:[/bold red] 目标目录非空: {target}（--remote 初始化要求空目录）")
+            raise typer.Exit(1)
+        try:
+            content = get_case_remote(case, url=url, token=token)
+        except RuntimeError as exc:
+            console.print(f"[bold red]错误:[/bold red] {exc}")
+            raise typer.Exit(1)
+        fd, tmp_name = tempfile.mkstemp(suffix=".md")
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            entry = parse_case_md(tmp_path)
+        except ValueError as exc:
+            console.print(f"[bold red]错误:[/bold red] 云端返回的 case 内容无法解析: {exc}")
+            raise typer.Exit(1)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    else:
+        entry = store.get(case)
+        if entry is None:
+            console.print(f"[bold red]错误:[/bold red] case 未找到: {case}")
+            console.print("[dim]提示: 可加 --remote 从云端案例库获取[/dim]")
+            raise typer.Exit(1)
 
     result = init_project_from_case(
         entry,
-        target_dir=Path(target).expanduser(),
+        target_dir=target_dir,
         store=store,
         intent=intent,
     )
@@ -677,6 +766,53 @@ def case_init(
 
 
 app.add_typer(case_app)
+
+
+# ==================== Wiki 推送命令 ====================
+wiki_app = typer.Typer(name="wiki", help="Wiki 推送命令", no_args_is_help=True)
+
+
+@wiki_app.callback(invoke_without_command=True)
+def wiki_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(False, "-h", "--help", help="显示帮助信息"),
+):
+    """Wiki 推送子命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@wiki_app.command("push")
+def wiki_push(
+    wiki_dir: str = typer.Option("./wiki", "--dir", help="wiki 目录（默认 ./wiki）"),
+    compile: bool = typer.Option(True, "--compile/--no-compile", help="推送后是否编译进共享 wiki"),
+    url: Optional[str] = typer.Option(
+        None, "--url", help="context-service 地址（默认 AGX_CONTEXT_SERVICE_URL 或 http://localhost:8420）"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token", help="context-service token（默认 AGX_CONTEXT_SERVICE_TOKEN）"
+    ),
+):
+    """推送项目 wiki 目录到企业 context-service（沉淀为公司级共享资产）"""
+    from agenticx.cases.remote import push_wiki
+
+    try:
+        result = push_wiki(wiki_dir, url=url, token=token, compile=compile)
+    except RuntimeError as exc:
+        console.print(f"[bold red]错误:[/bold red] {exc}")
+        raise typer.Exit(1)
+
+    errors = result.get("errors") or []
+    console.print("[bold green]✓ wiki 推送完成[/bold green]")
+    console.print(f"ingested: {result.get('ingested')}")
+    console.print(f"compiled: {result.get('compiled')}")
+    console.print(f"errors: {len(errors)}")
+    for err in errors:
+        console.print(f"  - {err}")
+
+
+app.add_typer(wiki_app)
 
 
 @app.command()
