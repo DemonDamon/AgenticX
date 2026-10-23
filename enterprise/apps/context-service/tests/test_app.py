@@ -467,3 +467,13 @@ def test_wiki_list_walks_nested_pages(client: TestClient, tmp_path: Path, monkey
     assert payload["ok"] is True
     assert "concepts/赔付制度.md" in payload["pages"]  # 编译产物
     assert "synthesis/deep/nested.md" in payload["pages"]  # 深层目录 walk
+
+    # wiki/list 返回的路径必须能直接喂给 /context/wiki/page（相对 wiki/ 基准）
+    res = client.get(
+        "/context/wiki/page",
+        params={"path": "synthesis/deep/nested.md"},
+        headers=_auth(),
+    )
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert "# nested" in res.json()["content"]

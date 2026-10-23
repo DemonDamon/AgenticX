@@ -267,12 +267,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rel = path.strip().lstrip("/").replace("\\", "/")
         if not rel or ".." in rel.split("/"):
             raise HTTPException(status_code=400, detail="invalid page path")
-        target = (storage / rel).resolve()
-        try:
-            target.relative_to(storage)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid page path") from None
-        if not target.is_file():
+        target = None
+        # 两段查找：先按相对 storage（兼容既有调用方），再按相对 wiki/（与 wiki/list 返回一致）
+        for base in (storage, storage / "wiki"):
+            candidate = (base / rel).resolve()
+            try:
+                candidate.relative_to(storage)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                target = candidate
+                break
+        if target is None:
             raise HTTPException(status_code=404, detail="page not found")
         return {"ok": True, "path": rel, "content": target.read_text(encoding="utf-8")}
 
