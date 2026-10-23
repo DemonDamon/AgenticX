@@ -128,7 +128,7 @@ memory = [
 ]
 # ── Graphiti temporal memory graph (Near memory graph panel) ──
 graphiti = [
-    "graphiti-core[kuzu]>=0.29.1,<0.30",
+    "graphiti-core[kuzu]>=0.29.1,<0.32",
 ]
 # ── 文档处理 ──
 # 注意：pytesseract 需要 tesseract (brew install tesseract)
