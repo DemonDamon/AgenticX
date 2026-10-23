@@ -80,7 +80,7 @@
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
     "cross-env": "^10.1.0",
-    "electron": "^34.5.8",
+    "electron": "^42.11.9",
     "electron-builder": "^25.1.8",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.3",
