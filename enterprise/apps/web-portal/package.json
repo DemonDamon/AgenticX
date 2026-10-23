@@ -47,7 +47,7 @@
     "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/pg": "^8.15.6",
-    "@types/react": "19.2.14",
+    "@types/react": "19.3.0",
     "eslint": "^10.4.0",
     "eslint-config-next": "^16.2.6",
     "eslint-plugin-i18next": "^6.1.4",
