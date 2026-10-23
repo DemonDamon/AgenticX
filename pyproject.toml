@@ -62,7 +62,7 @@ dependencies = [
     "tokenizers>=0.19.0,<1",
     "huggingface-hub>=0.24.0,<1",
     # 核心工具库
-    "docstring-parser>=0.11,<0.16",  # FunctionTool 需要解析 docstring；0.15+ 为 agentkit-sdk-python 所需
+    "docstring-parser>=0.11,<0.19",  # FunctionTool 需要解析 docstring；0.15+ 为 agentkit-sdk-python 所需
     # 通用工具
     "ujson>=5.8.0,<6",
     "tqdm>=4.65.0,<5",
@@ -216,7 +216,7 @@ docs = [
     "mkdocstrings>=0.22.0,<1",
     "mkdocs-autorefs>=0.4.0,<2",
     "pydoc-markdown>=4.8.0,<5",
-    "docstring-parser>=0.11,<0.16",
+    "docstring-parser>=0.11,<0.19",
 ]
 # ── 开发工具 ──
 dev = [
