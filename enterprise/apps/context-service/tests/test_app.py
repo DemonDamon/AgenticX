@@ -1,7 +1,8 @@
 """统一上下文服务的接口契约测试。不联网：embedding 用确定性桩，LLM 用 monkeypatch。
 
 覆盖链路：token 鉴权 → ingest → search(L0) → read(L1) → compile → wiki/page，
-以及增量跳过（SP31）与路径穿越拒绝。
+以及增量跳过（SP31）与路径穿越拒绝。SP-F1 追加：wiki/push 批量容错、
+cases/search 过滤与 scope、cases/get、wiki/list。
 """
 
 from __future__ import annotations
@@ -99,6 +100,10 @@ def test_every_context_route_requires_the_internal_token(client: TestClient):
     assert client.post("/context/search", json={"query": "q"}).status_code == 401
     assert client.post("/context/read", json={"hit_id": "h"}).status_code == 401
     assert client.get("/context/wiki/page", params={"path": "wiki/x.md"}).status_code == 401
+    assert client.post("/context/wiki/push", json={"pages": []}).status_code == 401
+    assert client.post("/context/cases/search", json={"query": "q"}).status_code == 401
+    assert client.get("/context/cases/get", params={"case_id": "x"}).status_code == 401
+    assert client.get("/context/wiki/list").status_code == 401
 
 
 def test_wrong_token_is_rejected(client: TestClient):
@@ -255,3 +260,210 @@ def test_wiki_page_rejects_path_traversal(client: TestClient):
         == 400
     )
     assert client.get("/context/wiki/page", params={"path": ""}, headers=_auth()).status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# SP-F1: wiki/push · cases/search · cases/get · wiki/list                     #
+# --------------------------------------------------------------------------- #
+
+CASE_A_MD = (
+    "---\n"
+    "case_id: CASE-001\n"
+    "title: 冷链断链赔付\n"
+    "type: case\n"
+    "summary: 冷链运输温控断链后的赔付处置经验\n"
+    "scope:\n"
+    "  domain: logistics\n"
+    "  team_size: '5'\n"
+    "lifecycle_status: active\n"
+    "---\n\n"
+    "# 冷链断链赔付\n\n"
+    "## 问题\n\n冷链运输途中温控断链，客户索赔。\n\n"
+    "## 方案\n\n按温控记录分段定责，保价部分按申报价值赔。\n\n"
+    "## 结果\n\n赔付周期从 7 天缩短到 2 天。\n"
+)
+
+CASE_B_MD = (
+    "---\n"
+    "case_id: CASE-002\n"
+    "title: 支付对账差错冲正\n"
+    "type: case\n"
+    "summary: 支付渠道对账出现重复扣款时的冲正处置经验\n"
+    "scope:\n"
+    "  domain: payment\n"
+    "lifecycle_status: superseded\n"
+    "---\n\n"
+    "# 支付对账差错冲正\n\n"
+    "## 问题\n\n对账批跑发现渠道重复扣款。\n\n"
+    "## 方案\n\n以渠道流水为准反向冲正。\n\n"
+    "## 结果\n\n差错率下降九成。\n"
+)
+
+
+def _seed_case_docs(client: TestClient) -> None:
+    """两个案例条目（不同 domain）+ 一个普通文档，覆盖过滤三态。"""
+    for name, text in (
+        ("case-a", CASE_A_MD),
+        ("case-b", CASE_B_MD),
+        ("plain-notes", LONG_DOC),
+    ):
+        res = client.post("/context/ingest", json={"name": name, "text": text}, headers=_auth())
+        assert res.status_code == 200, res.text
+
+
+def test_wiki_push_batch_continues_past_page_failures(client: TestClient):
+    res = client.post(
+        "/context/wiki/push",
+        json={
+            "pages": [
+                {"name": "push-a", "text": LONG_DOC},
+                {"name": "../escape", "text": "x"},  # 非法名：路径穿越
+                {"name": "push-empty", "text": "   "},  # 空文本
+            ],
+            "compile": False,
+        },
+        headers=_auth(),
+    )
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    assert payload["ok"] is False
+    assert payload["ingested"] == 1
+    assert payload["compiled"] == 0
+    assert [e["name"] for e in payload["errors"]] == ["../escape", "push-empty"]
+
+    # 成功页确实入了库、可检索——单页失败没有拖垮整批
+    res = client.post("/context/search", json={"query": "未保价货物 赔付"}, headers=_auth())
+    assert res.json()["hits"]
+
+
+def test_wiki_push_compiles_each_page_and_survives_single_page_compile_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    calls = {"n": 0}
+
+    def _half_broken_llm(_messages, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:  # 第 1 页：分析 + 生成成功
+            if calls["n"] % 2 == 1:
+                return '{"entities": ["赔付"], "concepts": ["赔付制度"]}'
+            return WIKI_PAGE_BLOCK
+        raise RuntimeError("llm down")  # 第 2 页编译失败
+
+    monkeypatch.setattr(wiki_compiler_mod, "_invoke_llm", _half_broken_llm)
+
+    res = client.post(
+        "/context/wiki/push",
+        json={
+            "pages": [
+                {"name": "push-ok", "text": LONG_DOC},
+                {"name": "push-bad", "text": "支付 对账 差错 冲正 重复扣款。" * 40},
+            ],
+        },  # compile 缺省 true
+        headers=_auth(),
+    )
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    assert payload["ingested"] == 2
+    assert payload["compiled"] == 1
+    assert payload["ok"] is False
+    assert [e["name"] for e in payload["errors"]] == ["push-bad"]
+
+    # 成功页的编译产物已进共享 wiki；失败页没有写入任何页面
+    res = client.get("/context/wiki/list", headers=_auth())
+    assert "concepts/赔付制度.md" in res.json()["pages"]
+
+
+def test_cases_search_requires_query(client: TestClient):
+    assert (
+        client.post("/context/cases/search", json={"query": " "}, headers=_auth()).status_code == 400
+    )
+
+
+def test_cases_search_returns_only_case_entries(client: TestClient):
+    _seed_case_docs(client)
+    res = client.post(
+        "/context/cases/search", json={"query": "赔付 对账", "top_k": 5}, headers=_auth()
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["ok"] is True
+    # 普通文档（无 case_id frontmatter）被排除，只回案例条目
+    assert {c["case_id"] for c in payload["cases"]} == {"CASE-001", "CASE-002"}
+
+    entry = next(c for c in payload["cases"] if c["case_id"] == "CASE-001")
+    assert entry["title"] == "冷链断链赔付"
+    assert "冷链" in entry["summary"]
+    assert entry["scope"] == {"domain": "logistics", "team_size": "5"}
+    assert entry["lifecycle_status"] == "active"
+    assert entry["matched_on"] == []  # 无 scope_filter 时 matched_on 为空
+    assert isinstance(entry["score"], float)
+
+
+def test_cases_search_scope_filter(client: TestClient):
+    _seed_case_docs(client)
+
+    # 键值相等 → 命中并记入 matched_on
+    res = client.post(
+        "/context/cases/search",
+        json={"query": "赔付", "scope_filter": {"domain": "payment"}},
+        headers=_auth(),
+    )
+    cases = res.json()["cases"]
+    assert [c["case_id"] for c in cases] == ["CASE-002"]
+    assert cases[0]["matched_on"] == ["domain"]
+
+    # 条目缺键 → 保守放行；有键但值不等 → 拒绝
+    res = client.post(
+        "/context/cases/search",
+        json={"query": "赔付", "scope_filter": {"team_size": "99"}},
+        headers=_auth(),
+    )
+    assert {c["case_id"] for c in res.json()["cases"]} == {"CASE-002"}
+
+    # 值全不匹配 → 空
+    res = client.post(
+        "/context/cases/search",
+        json={"query": "赔付", "scope_filter": {"domain": "hr"}},
+        headers=_auth(),
+    )
+    assert res.json()["cases"] == []
+
+
+def test_cases_get_returns_original_md(client: TestClient):
+    _seed_case_docs(client)
+    res = client.get("/context/cases/get", params={"case_id": "CASE-001"}, headers=_auth())
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["ok"] is True
+    assert payload["case_id"] == "CASE-001"
+    assert payload["content"] == CASE_A_MD  # 完整 md 原文，含 frontmatter
+
+
+def test_cases_get_miss_and_blank(client: TestClient):
+    _seed_case_docs(client)
+    assert (
+        client.get("/context/cases/get", params={"case_id": "NOPE"}, headers=_auth()).status_code
+        == 404
+    )
+    assert client.get("/context/cases/get", headers=_auth()).status_code == 400
+
+
+def test_wiki_list_walks_nested_pages(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _stub_llm(monkeypatch)
+    res = client.post(
+        "/context/wiki/push",
+        json={"pages": [{"name": "push-a", "text": LONG_DOC}]},
+        headers=_auth(),
+    )
+    assert res.json()["ok"] is True
+
+    nested = tmp_path / "context_data" / "wiki" / "synthesis" / "deep" / "nested.md"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("# nested\n", encoding="utf-8")
+
+    res = client.get("/context/wiki/list", headers=_auth())
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["ok"] is True
+    assert "concepts/赔付制度.md" in payload["pages"]  # 编译产物
+    assert "synthesis/deep/nested.md" in payload["pages"]  # 深层目录 walk
