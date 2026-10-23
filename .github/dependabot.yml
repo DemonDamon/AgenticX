@@ -1,0 +1,94 @@
+version: 2
+updates:
+  # Python 主仓（agenticx 核心包）
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      pip-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # npm：desktop（Electron 桌面端，大头，独立限制）
+  - package-ecosystem: npm
+    directory: "/desktop"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-dev-deps:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+
+  # npm：mobile
+  - package-ecosystem: npm
+    directory: "/mobile"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-dev-deps:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+
+  # npm：enterprise workspace（pnpm-lock，web-portal / admin-console 等）
+  - package-ecosystem: npm
+    directory: "/enterprise"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-dev-deps:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+
+  # Go：主仓活跃模块（customers/、.paper-aamas/、research/ 副本不配置）
+  - package-ecosystem: gomod
+    directory: "/enterprise/apps/gateway"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      gomod-x-deps:
+        patterns: ["golang.org/x/*"]
+  - package-ecosystem: gomod
+    directory: "/enterprise/apps/edge-agent"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      gomod-x-deps:
+        patterns: ["golang.org/x/*"]
+  - package-ecosystem: gomod
+    directory: "/enterprise/packages/policy-engine"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: gomod
+    directory: "/connector-runtime"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: gomod
+    directory: "/packaging/wechat-sidecar"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+  - package-ecosystem: gomod
+    directory: "/enterprise/scripts/perf/mock-upstream"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+  - package-ecosystem: gomod
+    directory: "/enterprise/scripts/perf/mint-perf-jwt"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+
+  # GitHub Actions（CI workflow 用的 action 版本）
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
