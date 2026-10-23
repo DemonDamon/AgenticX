@@ -571,6 +571,114 @@ def sandbox_status():
 app.add_typer(sandbox_app)
 
 
+# ==================== 案例库命令 ====================
+case_app = typer.Typer(name="case", help="案例库命令", no_args_is_help=True)
+
+
+@case_app.callback(invoke_without_command=True)
+def case_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(False, "-h", "--help", help="显示帮助信息"),
+):
+    """案例库子命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@case_app.command("compile")
+def case_compile(
+    plan: str = typer.Option(..., "--plan", help="delivery plan.mdc 路径"),
+    output_root: Optional[str] = typer.Option(
+        None, "--output-root", "-o", help="cases 落盘根目录（默认 ./cases）"
+    ),
+):
+    """从 plan.mdc 生成 case-entry 并落盘（B 端案例库沉淀）"""
+    from agenticx.cases.precipitate import compile_case_entry
+    from agenticx.cases.store import CaseStore
+    from agenticx.delivery.plan_mdc import read_plan
+
+    plan_path = Path(plan).expanduser()
+    if not plan_path.is_file():
+        console.print(f"[bold red]错误:[/bold red] plan 文件不存在: {plan}")
+        raise typer.Exit(1)
+    parsed = read_plan(plan_path)
+    if parsed is None:
+        console.print(f"[bold red]错误:[/bold red] plan.mdc 解析失败: {plan}")
+        raise typer.Exit(1)
+
+    root = Path(output_root).expanduser() if output_root else Path.cwd() / "cases"
+    store = CaseStore(root)
+    entry = compile_case_entry(parsed, store=store)
+    saved = store.path_for(entry)
+
+    console.print(f"[bold green]✓ case-entry 已生成[/bold green]")
+    console.print(f"case_id: {entry.case_id}")
+    console.print(f"路径: {saved}")
+    console.print(f"freshness: {entry.freshness}")
+
+
+@case_app.command("search")
+def case_search(
+    query: str = typer.Argument(..., help="检索关键词（空格分隔多个词）"),
+    domain: Optional[str] = typer.Option(None, "--domain", help="按 scope.domain 硬过滤"),
+    top_k: int = typer.Option(5, "--top-k", help="最多返回条数"),
+):
+    """按关键词检索案例库（V1 子串匹配 summary/problem/solution）"""
+    from agenticx.cases.search import search_cases
+    from agenticx.cases.store import CaseStore
+
+    store = CaseStore(Path.cwd() / "cases")
+    scope_filter = {"domain": domain} if domain else None
+    hits = search_cases(query, store=store, scope_filter=scope_filter, top_k=top_k)
+    if not hits:
+        console.print("无匹配案例")
+        return
+
+    table = Table(title=f"案例检索: {query}")
+    table.add_column("case_id", style="cyan")
+    table.add_column("标题", style="green")
+    table.add_column("score", justify="right")
+    table.add_column("matched_on")
+    for hit in hits:
+        table.add_row(
+            hit.entry.case_id,
+            hit.entry.title,
+            f"{hit.score:g}",
+            ", ".join(hit.matched_on),
+        )
+    console.print(table)
+
+
+@case_app.command("init")
+def case_init(
+    case: str = typer.Option(..., "--case", help="要消费的 case_id"),
+    target: str = typer.Option(..., "--target", help="新项目目标目录（须为空或不存在）"),
+    intent: str = typer.Option("", "--intent", help="项目意图（缺省回退 case 摘要）"),
+):
+    """从案例初始化新项目（生成 plan.mdc 并注入 wiki/skills 产物）"""
+    from agenticx.cases.init_inject import init_project_from_case
+    from agenticx.cases.store import CaseStore
+
+    store = CaseStore(Path.cwd() / "cases")
+    entry = store.get(case)
+    if entry is None:
+        console.print(f"[bold red]错误:[/bold red] case 未找到: {case}")
+        raise typer.Exit(1)
+
+    result = init_project_from_case(
+        entry,
+        target_dir=Path(target).expanduser(),
+        store=store,
+        intent=intent,
+    )
+    console.print("[bold green]✓ 项目已从案例初始化[/bold green]")
+    console.print(result.report)
+
+
+app.add_typer(case_app)
+
+
 @app.command()
 def version():
     """显示版本信息"""
