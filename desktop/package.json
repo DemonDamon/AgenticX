@@ -88,7 +88,7 @@
     "typescript": "^5.8.2",
     "vite": "^6.4.4",
     "vitest": "^4.1.10",
-    "wait-on": "^8.0.3"
+    "wait-on": "^9.5.1"
   },
   "overrides": {
     "proxy-addr": "^2.0.8",
