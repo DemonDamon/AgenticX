@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  ClipboardItem,
   dialog,
   ipcMain,
   Menu,
@@ -7951,7 +7952,9 @@ function registerEarlyIpc(): void {
       if (image.isEmpty()) {
         return { ok: false, error: "empty image" };
       }
-      clipboard.writeImage(image);
+      await clipboard.write([
+        new ClipboardItem({ "image/png": new Blob([new Uint8Array(image.toPNG())]) }),
+      ]);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };
@@ -11384,7 +11387,7 @@ function registerIpc(): void {
       const pdfBuffer = await offscreen.webContents.printToPDF({
         pageSize: "A4",
         printBackground: true,
-        margins: { marginType: "default" },
+        margins: { top: 0.39, bottom: 0.39, left: 0.39, right: 0.39 },
       });
       fs.writeFileSync(targetPath, pdfBuffer);
       return { ok: true, canceled: false, path: targetPath };
@@ -14415,7 +14418,7 @@ if (!gotTheLock) {
           ? path.join(process.resourcesPath, "assets", "icon.png")
           : path.resolve(process.cwd(), "assets", "icon.png");
         if (fs.existsSync(iconPath)) {
-          app.dock.setIcon(iconPath);
+          app.dock?.setIcon(iconPath);
         }
       }
 
