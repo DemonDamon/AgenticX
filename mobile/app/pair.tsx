@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { openSettings } from "expo-linking";
 import { router } from "expo-router";
-import { useCallback, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -59,7 +59,9 @@ function FinderCorners() {
   );
 }
 
-function QrScanner({
+const QR_BARCODE_SETTINGS = { barcodeTypes: ["qr" as const] };
+
+const QrScanner = memo(function QrScanner({
   locked,
   onResult,
 }: {
@@ -67,6 +69,13 @@ function QrScanner({
   onResult: (data: string) => void;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
+
+  const handleBarcode = useCallback(
+    (result: { data: string }) => {
+      onResult(result.data);
+    },
+    [onResult],
+  );
 
   if (permission === null) {
     return (
@@ -103,8 +112,8 @@ function QrScanner({
     <View style={styles.cameraWrap}>
       <CameraView
         style={styles.camera}
-        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-        onBarcodeScanned={locked ? undefined : (result) => onResult(result.data)}
+        barcodeScannerSettings={QR_BARCODE_SETTINGS}
+        onBarcodeScanned={locked ? undefined : handleBarcode}
       />
       <FinderCorners />
       {locked ? (
@@ -114,7 +123,7 @@ function QrScanner({
       ) : null}
     </View>
   );
-}
+});
 
 export default function PairScreen() {
   const [busy, setBusy] = useState(false);
@@ -186,11 +195,7 @@ export default function PairScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        style={styles.page}
-        contentContainerStyle={styles.pageContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.topSection}>
         <View style={styles.hero}>
           <BrandMark size={84} plated />
           <Text style={styles.productName}>Near</Text>
@@ -207,7 +212,14 @@ export default function PairScreen() {
         ) : (
           <QrScanner locked={busy || scanned} onResult={handleScanned} />
         )}
-        <Text style={styles.scanHint}>打开桌面端 Near → 设备 → 用手机扫描配对二维码</Text>
+      </View>
+
+      <ScrollView
+        style={styles.bottomScroll}
+        contentContainerStyle={styles.bottomContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.scanHint}>打开桌面端 Near → 设置 → 远程连接 → Near 手机 App，用本页扫码配对</Text>
 
         {message !== null ? (
           <View style={styles.messageBox}>
@@ -269,12 +281,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: brand.cream,
   },
-  page: {
+  topSection: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
+    gap: spacing.md,
+  },
+  bottomScroll: {
     flex: 1,
   },
-  pageContent: {
-    padding: spacing.xl,
-    paddingTop: spacing.xxl,
+  bottomContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
     gap: spacing.md,
   },
   hero: {

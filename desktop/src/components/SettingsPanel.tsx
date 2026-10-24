@@ -5292,6 +5292,8 @@ export function SettingsPanel({
   const [gwShowToken, setGwShowToken] = useState(false);
   const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
   const [gwQrOpen, setGwQrOpen] = useState(false);
+  // 二维码弹窗文案视角：mobile = Near 手机 App 配对；im = 飞书/企微机器人绑定
+  const [gwQrMode, setGwQrMode] = useState<"mobile" | "im">("mobile");
   // WeChat iLink sidecar
   const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "stale" | "recovering" | "expired" | "error">("idle");
   const [wechatBotId, setWechatBotId] = useState("");
@@ -9170,6 +9172,65 @@ export function SettingsPanel({
                   </fieldset>
                 </Panel>
 
+                <Panel title={t("server.gatewayConn")}>
+                  <p className="text-xs text-text-faint">{t("server.gatewayConnHint")}</p>
+                  <div className="mt-3 space-y-3">
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.gatewayUrl")}
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        placeholder="https://gateway.example.com"
+                        value={gwUrl}
+                        onChange={(e) => setGwUrl(e.target.value)}
+                      />
+                    </label>
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.deviceId")}
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        placeholder="my-macbook"
+                        value={gwDeviceId}
+                        onChange={(e) => setGwDeviceId(e.target.value)}
+                      />
+                    </label>
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.deviceToken")}
+                      <div className="relative mt-1">
+                        <input
+                          className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                          type={gwShowToken ? "text" : "password"}
+                          value={gwToken}
+                          onChange={(e) => setGwToken(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                          onClick={() => setGwShowToken(!gwShowToken)}
+                        >
+                          {gwShowToken ? tCommon("hide") : tCommon("show")}
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                </Panel>
+
+                <Panel title={t("server.mobileApp")}>
+                  <p className="text-xs text-text-faint">{t("server.mobileAppHint")}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                      disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
+                      onClick={() => {
+                        setGwQrMode("mobile");
+                        setGwQrOpen(true);
+                      }}
+                    >
+                      {t("server.qrBindMobile")}
+                    </button>
+                  </div>
+                </Panel>
+
                 <Panel title={t("server.feishu")}>
                   {/* Tab switcher */}
                   <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
@@ -9242,59 +9303,20 @@ export function SettingsPanel({
                     </div>
                   )}
 
-                  {/* Webhook mode tab */}
+                  {/* Webhook 模式子页：仅保留 IM（飞书/企微）机器人扫码绑定 */}
                   {imTab === "webhook" && (
-                    <div className="space-y-3">
-                      <p className="text-xs text-text-faint">
-                        {t("server.webhookHint")}
-                      </p>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.gatewayUrl")}
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                          placeholder="https://gateway.example.com"
-                          value={gwUrl}
-                          onChange={(e) => setGwUrl(e.target.value)}
-                        />
-                      </label>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.deviceId")}
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                          placeholder="my-macbook"
-                          value={gwDeviceId}
-                          onChange={(e) => setGwDeviceId(e.target.value)}
-                        />
-                      </label>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.deviceToken")}
-                        <div className="relative mt-1">
-                          <input
-                            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
-                            type={gwShowToken ? "text" : "password"}
-                            value={gwToken}
-                            onChange={(e) => setGwToken(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
-                            onClick={() => setGwShowToken(!gwShowToken)}
-                          >
-                            {gwShowToken ? tCommon("hide") : tCommon("show")}
-                          </button>
-                        </div>
-                      </label>
-                    </div>
-                  )}
-                  {imTab === "webhook" && (
-                  <><div className="mt-3 flex flex-wrap items-center gap-2">
+                  <><p className="text-xs text-text-faint">{t("server.webhookHint")}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
                       disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
-                      onClick={() => setGwQrOpen(true)}
+                      onClick={() => {
+                        setGwQrMode("im");
+                        setGwQrOpen(true);
+                      }}
                     >
-                      {t("server.qrBind")}
+                      {t("server.qrBindIm")}
                     </button>
                     <button
                       type="button"
@@ -9659,6 +9681,7 @@ export function SettingsPanel({
 
                 <QrConnectModal
                   open={gwQrOpen}
+                  mode={gwQrMode}
                   gatewayBaseUrl={gwUrl.trim().replace(/\/+$/, "")}
                   deviceId={gwDeviceId.trim()}
                   token={gwToken.trim()}
