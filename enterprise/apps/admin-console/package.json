@@ -30,7 +30,7 @@
     "@agenticx/ui": "workspace:*",
     "@tanstack/react-table": "^8.21.3",
     "drizzle-orm": "^0.45.2",
-    "lucide-react": "^0.542.0",
+    "lucide-react": "^1.61.0",
     "mysql2": "^3.14.1",
     "next": "^15.1.0",
     "next-intl": "^3",
