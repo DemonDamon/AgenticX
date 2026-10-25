@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PAT_SCOPES } from "@agenticx/core-api";
 import { createPat, listPats } from "@agenticx/iam-core";
 import { requireAdminScope } from "../../../../lib/admin-auth";
 
@@ -40,6 +41,17 @@ export async function POST(request: Request) {
     };
     if (!body.name?.trim() || !body.userId?.trim()) {
       return NextResponse.json({ code: "40000", message: "name and userId required" }, { status: 400 });
+    }
+    if (body.scopes !== undefined) {
+      if (!Array.isArray(body.scopes) || body.scopes.some((scope) => typeof scope !== "string" || !scope.trim())) {
+        return NextResponse.json({ code: "40000", message: "权限列表不合法" }, { status: 400 });
+      }
+      const unknown = body.scopes
+        .map((scope) => scope.trim())
+        .find((scope) => scope.startsWith("ma:") && !(PAT_SCOPES as readonly string[]).includes(scope));
+      if (unknown) {
+        return NextResponse.json({ code: "40000", message: `未知的托管智能体权限：${unknown}` }, { status: 400 });
+      }
     }
     const result = await createPat({
       tenantId,

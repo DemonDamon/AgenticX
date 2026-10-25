@@ -51,6 +51,7 @@ import {
   ShieldCheck,
   KeyRound,
   Mail,
+  Laptop,
 } from "lucide-react";
 import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
@@ -124,6 +125,7 @@ import {
   type TokenBudgetConfig,
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
+import { EnterpriseWorkerPanel } from "./settings/enterprise/EnterpriseWorkerPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { CredentialsTab } from "./settings/credentials/CredentialsTab";
 import { GatewayAdaptersPanel } from "./settings/server/GatewayAdaptersPanel";
@@ -1091,6 +1093,7 @@ function ModelCapabilityBadges({
 
 const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "account", icon: User },
+  { id: "enterprise_worker", icon: Laptop },
   { id: "general", icon: Settings2 },
   { id: "provider", icon: Cpu },
   { id: "mcp", icon: Plug },
@@ -5018,9 +5021,36 @@ export function SettingsPanel({
   const typesafeSettings = useTypesafeSettings();
   const locale = useAppStore((s) => s.locale);
   const setLocale = useAppStore((s) => s.setLocale);
+  const [enterpriseLoggedIn, setEnterpriseLoggedIn] = useState(false);
+  const [enterpriseAccountReady, setEnterpriseAccountReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const account = await window.agenticxDesktop.loadEnterpriseAccount();
+        if (!cancelled) setEnterpriseLoggedIn(Boolean(account.ok && account.loggedIn));
+      } catch {
+        if (!cancelled) setEnterpriseLoggedIn(false);
+      } finally {
+        if (!cancelled) setEnterpriseAccountReady(true);
+      }
+    })();
+    const off = window.agenticxDesktop.onEnterpriseAccountChanged((payload) => {
+      setEnterpriseLoggedIn(Boolean(payload.loggedIn));
+      setEnterpriseAccountReady(true);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
   const tabs = useMemo(
-    () => TAB_DEFS.map((def) => ({ ...def, label: t(`tabs.${def.id}`) })),
-    [t],
+    () =>
+      TAB_DEFS.filter((def) => def.id !== "enterprise_worker" || enterpriseLoggedIn).map((def) => ({
+        ...def,
+        label: t(`tabs.${def.id}`),
+      })),
+    [t, enterpriseLoggedIn],
   );
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
@@ -5054,6 +5084,10 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const securityTabRef = useRef<SecurityCenterTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  useEffect(() => {
+    if (!enterpriseAccountReady) return;
+    if (tab === "enterprise_worker" && !enterpriseLoggedIn) setTab("account");
+  }, [enterpriseAccountReady, enterpriseLoggedIn, tab]);
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
@@ -7218,6 +7252,7 @@ export function SettingsPanel({
             }`}
           >
             {tab === "account" && <AccountTab />}
+            {tab === "enterprise_worker" && <EnterpriseWorkerPanel />}
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>

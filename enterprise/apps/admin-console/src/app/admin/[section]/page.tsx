@@ -1,5 +1,12 @@
 import { notFound } from "next/navigation";
 import { isPlatformSection } from "../../../lib/admin-platform-sections";
+import AgentEnvironmentsSection from "../_sections/agent-environments";
+import AgentEvalsSection from "../_sections/agent-evals";
+import AgentMemorySection from "../_sections/agent-memory";
+import AgentChannelsSection from "../_sections/agent-channels";
+import AgentSchedulesSection from "../_sections/agent-schedules";
+import AgentWebhooksSection from "../_sections/agent-webhooks";
+import AgentVaultsSection from "../_sections/agent-vaults";
 import AgentsSection from "../_sections/agents";
 import ApiTokensSection from "../_sections/api-tokens";
 import CacheSection from "../_sections/cache";
@@ -14,6 +21,13 @@ import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
   agents: AgentsSection,
+  "agent-environments": AgentEnvironmentsSection,
+  "agent-vaults": AgentVaultsSection,
+  "agent-memory": AgentMemorySection,
+  "agent-evals": AgentEvalsSection,
+  "agent-schedules": AgentSchedulesSection,
+  "agent-webhooks": AgentWebhooksSection,
+  "agent-channels": AgentChannelsSection,
   models: ModelsSection,
   channels: ChannelsSection,
   cache: CacheSection,

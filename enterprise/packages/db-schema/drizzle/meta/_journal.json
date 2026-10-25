@@ -421,6 +421,69 @@
       "when": 1787800000000,
       "tag": "0060_enterprise_feature_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787900000000,
+      "tag": "0061_ma_control_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0062_ma_work_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0063_ma_vaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0064_ma_memory_stores",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1788300000000,
+      "tag": "0065_ma_schedules_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0066_ma_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0067_ma_agent_quotas",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1788600000000,
+      "tag": "0068_ma_evals",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1788700000000,
+      "tag": "0069_ma_memory_dreams",
+      "breakpoints": true
     }
   ]
 }

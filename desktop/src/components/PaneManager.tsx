@@ -15,6 +15,8 @@ import { listSessionsCoalesced } from "../utils/list-sessions-coalesce";
 import { shouldUsePaneTabs } from "../utils/pane-tab-mode";
 import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
+import { ManagedChatPane } from "./managed/ManagedChatPane";
+import { isManagedPaneAvatarId } from "../utils/ma-pane";
 import { PaneDivider } from "./PaneDivider";
 import { SortablePaneWrapper } from "./SortablePaneWrapper";
 
@@ -278,16 +280,19 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const paneIds = durablePanes.map((p) => p.id);
   const activeDragPane = activeDragId ? durablePanes.find((p) => p.id === activeDragId) : undefined;
 
-  const renderChatPane = (pane: ChatPaneState, isFocused: boolean) => (
-    <ChatPane
-      paneId={pane.id}
-      focused={isFocused}
-      onFocus={() => setActivePaneId(pane.id)}
-      onOpenConfirm={onOpenConfirm}
-      onOpenClarification={onOpenClarification}
-      onSubmitClarification={onSubmitClarification}
-    />
-  );
+  const renderChatPane = (pane: ChatPaneState, isFocused: boolean) =>
+    isManagedPaneAvatarId(pane.avatarId) ? (
+      <ManagedChatPane paneId={pane.id} focused={isFocused} onFocus={() => setActivePaneId(pane.id)} />
+    ) : (
+      <ChatPane
+        paneId={pane.id}
+        focused={isFocused}
+        onFocus={() => setActivePaneId(pane.id)}
+        onOpenConfirm={onOpenConfirm}
+        onOpenClarification={onOpenClarification}
+        onSubmitClarification={onSubmitClarification}
+      />
+    );
 
   if (previewPane) {
     return (

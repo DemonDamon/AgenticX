@@ -3,6 +3,7 @@
   "navResize": "Drag to resize the navigation",
   "tabs": {
     "account": "Account",
+    "enterprise_worker": "Enterprise Worker",
     "general": "General",
     "provider": "Model providers",
     "mcp": "MCP",
@@ -947,6 +948,7 @@
     "loginOfficial": "Sign in with official account",
     "enterpriseTitle": "Enterprise account",
     "enterpriseIntro": "Sign in to the enterprise portal to collaborate in Cloud Rooms. Authorization opens in the system browser and this window updates when it completes. Independent from the official account above.",
+    "manageWorker": "Manage local task pickup in Enterprise Worker",
     "logoutEnterprise": "Sign out of enterprise",
     "portalUrl": "Enterprise portal URL",
     "waitingAuth": "Waiting for browser authorization…",
@@ -973,6 +975,39 @@
     "errBusy": "The service is busy. Try again later.",
     "errGeneric": "Could not start official account sign-in. Try again later."
   },
+  "enterpriseWorker": {
+    "title": "Enterprise Worker",
+    "intro": "This computer can run enterprise agent tasks. Tasks stay on this machine, and model calls go through the enterprise gateway.",
+    "acceptTitle": "Let this computer pick up enterprise agent tasks",
+    "state": {
+      "running": "Running",
+      "paused": "Paused. Tasks already running will finish",
+      "stopped": "Not running"
+    },
+    "maTitle": "Pick up managed agent tasks",
+    "maHint": "When on, this computer claims tasks with the enterprise protocol: model calls go through the enterprise gateway, and each task gets its own working directory.",
+    "environments": "Environments",
+    "noEnvironments": "No execution environment is available. Ask an administrator to add you to an environment's worker list.",
+    "maOff": "Turn on managed agent tasks to see this",
+    "work": "Running tasks",
+    "noWork": "No tasks are running",
+    "col": {
+      "agent": "Agent",
+      "startedAt": "Started",
+      "source": "Source",
+      "workdir": "Working directory"
+    },
+    "source": {
+      "interactive": "Local chat",
+      "dispatched": "Assigned by the enterprise"
+    },
+    "lastHeartbeat": "Last heartbeat",
+    "lastError": "Last error",
+    "legacy": "Legacy tasks",
+    "legacyAgents": "Agents this computer can run",
+    "none": "None",
+    "saveFailed": "Save failed ({{status}})"
+  },
   "avatar": {
     "titleNamed": "{{name}} · Settings",
     "fallbackName": "Avatar",
@@ -983,6 +1018,39 @@
     "tabToolsGlobal": "Tool permissions (global)",
     "tabSkills": "Skills",
     "tabSoul": "Soul",
+    "tabEnterprise": "Enterprise",
+    "enterprisePublish": {
+      "title": "Publish to enterprise",
+      "intro": "Submit this avatar as a draft enterprise agent. Assigned colleagues can use it after an admin publishes it.",
+      "savedHint": "This submits the saved avatar. Save unsaved edits on the other tabs first",
+      "model": "Model",
+      "tools": "Tools and permissions",
+      "policy": {
+        "always_allow": "Run automatically",
+        "always_ask": "Ask every time"
+      },
+      "disabled": "Disabled",
+      "excluded": "Not included",
+      "security": "Safety review",
+      "removedRefs": "Removed credential references: {{names}}",
+      "redacted": "Hid {{count}} possible secrets",
+      "paths": "Replaced {{count}} local paths with ~",
+      "clean": "Nothing needed to be hidden",
+      "notes": "Notes",
+      "notePlaceholder": "Optional: what changed",
+      "submit": "Submit to enterprise",
+      "result": {
+        "draft": "Submitted as draft v{{version}}. Colleagues can use it after an admin publishes it.",
+        "pinned": "Submitted version v{{version}}. The live version is still v{{effective}} until an admin switches it.",
+        "created": "Submitted version v{{version}}",
+        "unchanged": "This matches the latest enterprise version v{{version}}, so nothing new was submitted"
+      },
+      "err": {
+        "login": "Sign in under Settings → Account first",
+        "notFound": "Avatar not found",
+        "load": "Could not load the preview: {{message}}"
+      }
+    },
     "promptSoulHint": "System prompt sets immediate behavior. Soul holds long-term style and policy. Both apply; neither replaces the other.",
     "avatarImage": "Avatar image",
     "uploadImage": "Upload image",

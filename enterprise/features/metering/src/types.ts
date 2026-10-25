@@ -209,3 +209,36 @@ export type RequestSizeDistRow = {
 export type RequestSizeDistResult = {
   rows: RequestSizeDistRow[];
 };
+
+export type AgentUsageGroupKey = "agent" | "user" | "dept" | "model" | "day";
+
+export type AgentUsageQueryInput = {
+  tenant_id: string;
+  start: string;
+  end: string;
+  agent_id?: string[];
+  user_id?: string[];
+  group_by: AgentUsageGroupKey[];
+};
+
+export type AgentUsageRow = {
+  dims: Record<string, string | null>;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cache_read_input_tokens: number;
+  requests: number;
+  sessions: number;
+};
+
+export type AgentQuotaWindowTotals = {
+  day: number;
+  week: number;
+  month: number;
+};
+
+export type AgentQuotaWindows = {
+  day: string;
+  week: string;
+  month: string;
+};

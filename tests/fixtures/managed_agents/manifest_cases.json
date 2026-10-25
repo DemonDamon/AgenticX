@@ -1,0 +1,940 @@
+{
+  "cases": [
+    {
+      "name": "minimal_ok",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o"
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "system": "",
+        "tools": [],
+        "mcp_servers": [],
+        "skills": [],
+        "multiagent": null,
+        "runtime": {
+          "max_tool_rounds": 40,
+          "max_session_tokens": null
+        },
+        "metadata": {}
+      }
+    },
+    {
+      "name": "full_ok",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "anthropic/claude-sonnet-4",
+        "system": "You are helpful.",
+        "tools": [
+          {
+            "type": "agx_builtin",
+            "configs": [
+              {
+                "name": "bash_exec",
+                "policy": "always_ask"
+              }
+            ]
+          },
+          {
+            "type": "mcp",
+            "server": "github",
+            "default_policy": "always_ask",
+            "configs": [
+              {
+                "name": "get_issue",
+                "enabled": false
+              }
+            ]
+          },
+          {
+            "type": "custom",
+            "name": "lookup_order",
+            "description": "Look up an order",
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "mcp_servers": [
+          {
+            "name": "github",
+            "url": "https://mcp.example.com/"
+          },
+          {
+            "name": "docs",
+            "url": "http://docs.internal/",
+            "transport": "streamable-http"
+          }
+        ],
+        "skills": [
+          {
+            "source": "builtin",
+            "id": "web_search"
+          },
+          {
+            "source": "tenant",
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "version": "1.2.0"
+          }
+        ],
+        "runtime": {
+          "max_tool_rounds": 20
+        },
+        "metadata": {
+          "welcome_message": "hi",
+          "model": "should-strip"
+        }
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "schema": "agx.agent/v1",
+        "model": "anthropic/claude-sonnet-4",
+        "system": "You are helpful.",
+        "tools": [
+          {
+            "type": "agx_builtin",
+            "default_policy": "always_allow",
+            "configs": [
+              {
+                "name": "bash_exec",
+                "policy": "always_ask",
+                "enabled": true
+              }
+            ]
+          },
+          {
+            "type": "mcp",
+            "server": "github",
+            "default_policy": "always_ask",
+            "configs": [
+              {
+                "name": "get_issue",
+                "policy": null,
+                "enabled": false
+              }
+            ]
+          },
+          {
+            "type": "custom",
+            "name": "lookup_order",
+            "description": "Look up an order",
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "mcp_servers": [
+          {
+            "name": "github",
+            "url": "https://mcp.example.com/",
+            "transport": "http"
+          },
+          {
+            "name": "docs",
+            "url": "http://docs.internal/",
+            "transport": "http"
+          }
+        ],
+        "skills": [
+          {
+            "source": "builtin",
+            "id": "web_search",
+            "version": null
+          },
+          {
+            "source": "tenant",
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "version": "1.2.0"
+          }
+        ],
+        "multiagent": null,
+        "runtime": {
+          "max_tool_rounds": 20,
+          "max_session_tokens": null
+        },
+        "metadata": {
+          "welcome_message": "hi"
+        }
+      }
+    },
+    {
+      "name": "multiagent_ok",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "self"
+            },
+            {
+              "type": "agent",
+              "id": "01JB0000000000000000000ABC",
+              "version": 2
+            },
+            {
+              "type": "advisor",
+              "model": "zhipu/glm-5",
+              "instructions": "关注风险与遗漏"
+            }
+          ]
+        }
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "system": "",
+        "tools": [],
+        "mcp_servers": [],
+        "skills": [],
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "self"
+            },
+            {
+              "type": "agent",
+              "id": "01JB0000000000000000000ABC",
+              "version": 2
+            },
+            {
+              "type": "advisor",
+              "model": "zhipu/glm-5",
+              "instructions": "关注风险与遗漏"
+            }
+          ]
+        },
+        "runtime": {
+          "max_tool_rounds": 40,
+          "max_session_tokens": null
+        },
+        "metadata": {}
+      }
+    },
+    {
+      "name": "multiagent_agent_version_omitted_ok",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "agent",
+              "id": "member.a"
+            }
+          ]
+        }
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "system": "",
+        "tools": [],
+        "mcp_servers": [],
+        "skills": [],
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "agent",
+              "id": "member.a",
+              "version": null
+            }
+          ]
+        },
+        "runtime": {
+          "max_tool_rounds": 40,
+          "max_session_tokens": null
+        },
+        "metadata": {}
+      }
+    },
+    {
+      "name": "not_object",
+      "input": [],
+      "ok": false,
+      "errors": [
+        "manifest: must be a JSON object"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "unknown_top_level",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "foo": 1
+      },
+      "ok": false,
+      "errors": [
+        "manifest.foo: unknown field"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_schema",
+      "input": {
+        "schema": "agx.agent/v0",
+        "model": "openai/gpt-4o"
+      },
+      "ok": false,
+      "errors": [
+        "manifest.schema: must be \"agx.agent/v1\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "missing_model",
+      "input": {
+        "schema": "agx.agent/v1"
+      },
+      "ok": false,
+      "errors": [
+        "manifest.model: is required"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_model_format",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "gpt-4o"
+      },
+      "ok": false,
+      "errors": [
+        "manifest.model: must be \"<providerId>/<modelName>\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "system_not_string",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "system": 123
+      },
+      "ok": false,
+      "errors": [
+        "manifest.system: must be a string"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "tools_not_array",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": {}
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools: must be an array"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "tool_bad_type",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "browser"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].type: must be one of [agx_builtin,mcp,custom], got \"browser\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "tool_missing_type",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {}
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].type: must be one of [agx_builtin,mcp,custom], got null"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_policy",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "agx_builtin",
+            "default_policy": "never",
+            "configs": [
+              {
+                "name": "bash_exec",
+                "policy": "sometimes"
+              }
+            ]
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].configs[0].policy: must be one of [always_allow,always_ask]",
+        "manifest.tools[0].default_policy: must be one of [always_allow,always_ask]"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "duplicate_config_name",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "agx_builtin",
+            "configs": [
+              {
+                "name": "bash_exec"
+              },
+              {
+                "name": "bash_exec"
+              }
+            ]
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].configs[1].name: duplicate tool \"bash_exec\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "mcp_undeclared_server",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "mcp",
+            "server": "github"
+          }
+        ],
+        "mcp_servers": []
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].server: references undeclared mcp server \"github\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "mcp_duplicate_toolset",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "mcp_servers": [
+          {
+            "name": "github",
+            "url": "https://mcp.example.com/"
+          }
+        ],
+        "tools": [
+          {
+            "type": "mcp",
+            "server": "github"
+          },
+          {
+            "type": "mcp",
+            "server": "github"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[1].server: duplicate toolset for mcp server \"github\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "duplicate_builtin",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "agx_builtin"
+          },
+          {
+            "type": "agx_builtin"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[1].type: duplicate agx_builtin toolset"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "custom_bad_name",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "1abc",
+            "description": "d",
+            "input_schema": {}
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].name: must match ^[A-Za-z][A-Za-z0-9_]{0,63}$"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "custom_duplicate",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "lookup_order",
+            "description": "a",
+            "input_schema": {}
+          },
+          {
+            "type": "custom",
+            "name": "lookup_order",
+            "description": "b",
+            "input_schema": {}
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[1].name: duplicate custom tool \"lookup_order\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "custom_missing_fields",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "lookup_order",
+            "input_schema": "nope"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.tools[0].description: is required",
+        "manifest.tools[0].input_schema: must be an object"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "mcp_server_secrets",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "mcp_servers": [
+          {
+            "name": "github",
+            "url": "https://mcp.example.com/",
+            "headers": {
+              "Authorization": "x"
+            },
+            "env": {
+              "TOKEN": "y"
+            }
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.mcp_servers[0].env: secrets are not allowed in manifest",
+        "manifest.mcp_servers[0].headers: secrets are not allowed in manifest"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "mcp_server_bad_url_and_transport",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "mcp_servers": [
+          {
+            "name": "github",
+            "url": "ftp://x",
+            "transport": "grpc"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.mcp_servers[0].transport: must be one of [http,sse]",
+        "manifest.mcp_servers[0].url: must start with http:// or https://"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "skills_bad",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "skills": [
+          {
+            "source": "market",
+            "version": 1
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "manifest.skills[0].id: is required",
+        "manifest.skills[0].source: must be one of [builtin,tenant]",
+        "manifest.skills[0].version: must be a string"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_empty_object",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {}
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents: must be an array",
+        "manifest.multiagent.type: must be \"coordinator\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_not_object",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": "x"
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent: must be null or an object"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_bad_type_and_unknown_key",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "swarm",
+          "agents": [
+            {
+              "type": "self"
+            }
+          ],
+          "x": 1
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.type: must be \"coordinator\"",
+        "manifest.multiagent.x: unknown field"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_agents_empty",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": []
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents: must contain 1-20 items"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_too_many_agents",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "agent",
+              "id": "m01"
+            },
+            {
+              "type": "agent",
+              "id": "m02"
+            },
+            {
+              "type": "agent",
+              "id": "m03"
+            },
+            {
+              "type": "agent",
+              "id": "m04"
+            },
+            {
+              "type": "agent",
+              "id": "m05"
+            },
+            {
+              "type": "agent",
+              "id": "m06"
+            },
+            {
+              "type": "agent",
+              "id": "m07"
+            },
+            {
+              "type": "agent",
+              "id": "m08"
+            },
+            {
+              "type": "agent",
+              "id": "m09"
+            },
+            {
+              "type": "agent",
+              "id": "m10"
+            },
+            {
+              "type": "agent",
+              "id": "m11"
+            },
+            {
+              "type": "agent",
+              "id": "m12"
+            },
+            {
+              "type": "agent",
+              "id": "m13"
+            },
+            {
+              "type": "agent",
+              "id": "m14"
+            },
+            {
+              "type": "agent",
+              "id": "m15"
+            },
+            {
+              "type": "agent",
+              "id": "m16"
+            },
+            {
+              "type": "agent",
+              "id": "m17"
+            },
+            {
+              "type": "agent",
+              "id": "m18"
+            },
+            {
+              "type": "agent",
+              "id": "m19"
+            },
+            {
+              "type": "agent",
+              "id": "m20"
+            },
+            {
+              "type": "agent",
+              "id": "m21"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents: must contain 1-20 items"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_bad_entries",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            "x",
+            {
+              "type": "team"
+            },
+            {
+              "type": "agent"
+            },
+            {
+              "type": "agent",
+              "id": "bad id!",
+              "version": 0
+            },
+            {
+              "type": "advisor"
+            },
+            {
+              "type": "advisor",
+              "model": "gpt"
+            },
+            {
+              "type": "self",
+              "name": "x"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents[0]: must be an object",
+        "manifest.multiagent.agents[1].type: must be one of [self,agent,advisor], got \"team\"",
+        "manifest.multiagent.agents[2].id: is required",
+        "manifest.multiagent.agents[3].id: must match ^[A-Za-z0-9._-]{1,64}$",
+        "manifest.multiagent.agents[3].version: must be null or an integer >= 1",
+        "manifest.multiagent.agents[4].model: is required",
+        "manifest.multiagent.agents[5].model: must be \"<providerId>/<modelName>\"",
+        "manifest.multiagent.agents[5].type: duplicate advisor entry",
+        "manifest.multiagent.agents[6].name: unknown field"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_duplicates",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "self"
+            },
+            {
+              "type": "self"
+            },
+            {
+              "type": "agent",
+              "id": "A1"
+            },
+            {
+              "type": "agent",
+              "id": "A1",
+              "version": 2
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents[1].type: duplicate self entry",
+        "manifest.multiagent.agents[3].id: duplicate agent \"A1\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_no_delegate",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "advisor",
+              "model": "a/b"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents: must include at least one self or agent entry"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "multiagent_advisor_instructions_bad",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "multiagent": {
+          "type": "coordinator",
+          "agents": [
+            {
+              "type": "self"
+            },
+            {
+              "type": "advisor",
+              "model": "a/b",
+              "instructions": 5
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.multiagent.agents[1].instructions: must be a string"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "runtime_bad",
+      "input": {
+        "schema": "agx.agent/v1",
+        "model": "openai/gpt-4o",
+        "runtime": {
+          "max_tool_rounds": 0,
+          "max_session_tokens": 10,
+          "x": 1
+        }
+      },
+      "ok": false,
+      "errors": [
+        "manifest.runtime.max_session_tokens: must be null or an integer >= 1000",
+        "manifest.runtime.max_tool_rounds: must be an integer between 1 and 500",
+        "manifest.runtime.x: unknown field"
+      ],
+      "normalized": null
+    }
+  ]
+}

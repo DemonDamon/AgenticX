@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./services/metering";
+export * from "./services/agent-usage";
 export * from "./services/roi";
 export * from "./services/heatmap-utils";
 export * from "./services/roi-utils";

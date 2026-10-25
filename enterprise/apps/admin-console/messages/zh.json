@@ -46,9 +46,17 @@
         "quota": "额度控制",
         "quotaPlans": "Token 套餐",
         "billingSplit": "分账结算",
+        "agentUsage": "智能体用量",
         "agentTraces": "观测中心",
         "policy": "策略规则",
         "agents": "智能体",
+        "agentEnvironments": "执行环境",
+        "agentVaults": "凭证库",
+        "agentMemory": "记忆库",
+        "agentEvals": "评测",
+        "agentSchedules": "定时任务",
+        "agentWebhooks": "Webhook 通知",
+        "agentChannels": "IM 渠道",
         "models": "模型服务",
         "channels": "Channel 管理",
         "cache": "AI 缓存",
@@ -164,6 +172,7 @@
           "slug": "标识",
           "runtime": "运行方式",
           "model": "模型",
+          "version": "版本",
           "capabilities": "能力数",
           "visibility": "可见范围",
           "status": "状态",
@@ -225,7 +234,584 @@
           "edit": "编辑",
           "delete": "删除",
           "publish": "发布",
-          "recall": "回收"
+          "recall": "回收",
+          "manifest": "定义与版本"
+        },
+        "recall": {
+          "title": "回收智能体",
+          "description": "确认回收「{name}」？回收后员工侧立即不可用，可再次发布恢复。",
+          "confirm": "回收"
+        },
+        "routing": {
+          "pinnedBadge": "已固定",
+          "mode": "路由方式",
+          "followLatest": "跟随最新版本",
+          "pinned": "固定版本",
+          "pinnedVersion": "固定到",
+          "defaultEnvironment": "默认执行环境",
+          "noEnvironment": "不指定",
+          "envUnavailable": "当前默认环境已停用或类型与运行方式不一致，新会话将无法使用它",
+          "unavailableName": "{name}（不可用）",
+          "save": "保存路由",
+          "saved": "路由已更新",
+          "pinConfirmTitle": "固定版本",
+          "pinConfirmDescription": "之后新建的会话将固定使用 v{version}，发布新版本也不会自动生效。确认？",
+          "followConfirmDescription": "之后新建的会话将使用最新版本。确认？",
+          "confirm": "确认"
+        },
+        "manifest": {
+          "title": "{name} · 定义与版本",
+          "tabs": {
+            "form": "表单编辑",
+            "json": "原始 JSON",
+            "versions": "版本历史",
+            "routing": "路由与环境"
+          },
+          "notePlaceholder": "版本说明（可选）",
+          "validate": "校验",
+          "save": "保存为新版本",
+          "validateOk": "校验通过",
+          "saved": "已保存为 v{version}",
+          "unchanged": "内容未变化，未生成新版本",
+          "conflict": "版本已被他人更新，已刷新到最新，请确认后再保存",
+          "driftWarning": "基础信息中的模型或提示词与最新版本不一致，保存新版本后以版本内容为准。",
+          "rollbackNote": "基于 v{version} 回滚",
+          "json": {
+            "apply": "应用",
+            "parseError": "不是合法的 JSON 对象"
+          },
+          "form": {
+            "model": "模型",
+            "system": "系统提示词",
+            "builtin": "内置工具",
+            "builtinEnabled": "启用内置工具集",
+            "defaultPolicy": "默认权限",
+            "policy": {
+              "inherit": "继承默认",
+              "always_allow": "始终允许",
+              "always_ask": "每次询问"
+            },
+            "toolName": "工具名",
+            "enabled": "启用",
+            "addTool": "添加工具",
+            "mcp": "MCP 服务器",
+            "mcpName": "名称",
+            "mcpUrl": "地址",
+            "mcpTransport": "传输方式",
+            "mcpToolset": "单独配置工具权限",
+            "addMcp": "添加 MCP 服务器",
+            "mcpSecretHint": "凭证不写在这里，由凭证库在运行时注入",
+            "custom": "自定义工具",
+            "customName": "名称",
+            "customDescription": "描述",
+            "customSchema": "输入参数（JSON）",
+            "addCustom": "添加自定义工具",
+            "skills": "Skills",
+            "tenantSkills": "企业 Skill",
+            "builtinSkills": "内置 Skill",
+            "addBuiltinSkill": "添加内置 Skill",
+            "runtime": "运行限制",
+            "maxToolRounds": "最大工具轮次",
+            "maxSessionTokens": "单会话 token 上限",
+            "welcome": "欢迎语",
+            "suggested": "推荐问题（每行一个）",
+            "remove": "移除"
+          },
+          "versions": {
+            "version": "版本",
+            "source": "来源",
+            "note": "说明",
+            "createdBy": "创建人",
+            "createdAt": "创建时间",
+            "system": "系统",
+            "latest": "最新",
+            "effective": "生效中",
+            "view": "查看",
+            "compare": "对比",
+            "editFrom": "以此为基础编辑",
+            "pin": "固定到此版本",
+            "empty": "旧配置无法自动转换为版本，请在表单中修正后保存"
+          },
+          "source": {
+            "backfill": "自动生成",
+            "admin": "管理台",
+            "api": "接口",
+            "legacy_edit": "基础信息同步",
+            "desktop": "桌面"
+          },
+          "diff": {
+            "from": "对比基准",
+            "to": "对比目标",
+            "noChange": "两个版本内容相同"
+          }
+        }
+      },
+      "agentSchedules": {
+        "title": "定时任务",
+        "description": "按 cron 为智能体创建独立会话。每次触发一条运行记录。",
+        "create": "新建定时任务",
+        "emptyTitle": "还没有定时任务",
+        "emptyDescription": "新建一条 cron，到点后运行时会打开一个新会话。",
+        "pending": "待计算",
+        "columns": {
+          "name": "名称",
+          "agent": "智能体",
+          "plan": "计划",
+          "enabled": "启用",
+          "next": "下一次执行",
+          "last": "最近一次",
+          "actions": "操作"
+        },
+        "actions": {
+          "edit": "编辑",
+          "run": "立即运行",
+          "history": "运行记录",
+          "delete": "删除"
+        },
+        "fields": {
+          "name": "名称",
+          "description": "描述",
+          "agent": "智能体",
+          "policy": "版本策略",
+          "version": "版本号",
+          "environment": "执行环境",
+          "environmentDefault": "智能体默认环境",
+          "cron": "计划",
+          "timezone": "时区",
+          "input": "输入内容",
+          "inputHint": "可用变量 {{date}} {{datetime}} {{schedule_name}} {{run_id}}"
+        },
+        "policy": { "follow": "跟随智能体版本路由", "pinned": "固定版本" },
+        "runStatus": {
+          "scheduled": "已排期",
+          "firing": "触发中",
+          "running": "运行中",
+          "succeeded": "成功",
+          "failed": "失败",
+          "skipped": "已跳过"
+        },
+        "trigger": { "schedule": "定时", "manual": "手动" },
+        "skip": {
+          "missed": "错过",
+          "overlap": "上一轮未结束",
+          "revised": "配置已变更",
+          "disabled": "已停用",
+          "deleted": "已删除"
+        },
+        "delete": { "title": "删除定时任务", "description": "删除后不再触发，历史运行记录保留" },
+        "historyTitle": "运行记录",
+        "historyColumns": {
+          "when": "计划时间",
+          "trigger": "触发方式",
+          "status": "状态",
+          "session": "会话",
+          "error": "错误"
+        }
+      },
+      "agentWebhooks": {
+        "title": "Webhook 通知",
+        "description": "会话停下或凭证即将过期时，向接收地址推送签名通知。",
+        "create": "新建 Webhook",
+        "emptyTitle": "还没有 Webhook",
+        "emptyDescription": "登记一个 https 或 http 接收地址，并选择要订阅的事件。",
+        "columns": {
+          "name": "名称",
+          "url": "地址",
+          "events": "订阅事件",
+          "enabled": "启用",
+          "updated": "更新时间",
+          "actions": "操作"
+        },
+        "actions": {
+          "edit": "编辑",
+          "rotate": "轮换密钥",
+          "deliveries": "投递记录",
+          "delete": "删除"
+        },
+        "fields": {
+          "name": "名称",
+          "url": "地址",
+          "events": "事件",
+          "agents": "智能体范围",
+          "agentsHint": "不选表示全部智能体",
+          "sources": "来源范围",
+          "sourcesHint": "不选表示全部来源",
+          "includeResult": "附带结果文本"
+        },
+        "events": { "idle": "会话完成", "failed": "会话失败", "expiring": "凭证即将过期" },
+        "sources": {
+          "portal": "门户",
+          "desktop": "桌面",
+          "api": "API",
+          "schedule": "定时任务",
+          "channel": "IM 渠道",
+          "eval": "评测"
+        },
+        "secret": { "title": "签名密钥", "once": "关闭后不能再次查看" },
+        "delete": { "title": "删除 Webhook", "description": "删除后不再推送，历史投递记录保留。" },
+        "historyTitle": "投递记录",
+        "historyColumns": {
+          "event": "事件类型",
+          "status": "状态",
+          "attempts": "尝试次数",
+          "code": "最后状态码",
+          "error": "最后错误",
+          "when": "时间"
+        }
+      },
+      "agentChannels": {
+        "title": "IM 渠道",
+        "description": "把飞书自建应用绑定到智能体。应用密钥放在单独的凭证库里。",
+        "create": "新建渠道",
+        "createTitle": "新建 IM 渠道",
+        "editTitle": "编辑 IM 渠道",
+        "emptyTitle": "还没有 IM 渠道",
+        "emptyDescription": "绑定飞书应用后，长连接会在运行时里建立。",
+        "columns": {
+          "name": "名称",
+          "agent": "智能体",
+          "policy": "版本策略",
+          "appId": "飞书应用 ID",
+          "connection": "连接状态",
+          "enabled": "启用",
+          "actions": "操作"
+        },
+        "actions": { "edit": "编辑", "sessions": "会话", "delete": "删除" },
+        "fields": {
+          "name": "名称",
+          "agent": "智能体",
+          "policy": "版本策略",
+          "version": "固定版本号",
+          "environment": "执行环境",
+          "environmentEmpty": "不指定",
+          "appId": "飞书应用 ID",
+          "vault": "凭证库",
+          "vaultHint": "{name} · 建议单独建库",
+          "credential": "应用密钥",
+          "site": "站点",
+          "idle": "空闲多久后开新会话（小时）"
+        },
+        "policy": { "follow": "跟随最新", "pinned": "固定 v{version}", "pinnedChoice": "固定版本" },
+        "site": { "feishu": "飞书", "lark": "Lark 国际版" },
+        "status": { "pending": "待连接", "starting": "连接中", "running": "已连接", "error": "异常", "stopped": "已停止" },
+        "delete": { "title": "删除 IM 渠道", "description": "删除后机器人不再回复，已产生的会话保留" },
+        "sessionsTitle": "渠道会话",
+        "conversation": { "p2p": "私聊", "group": "群聊" },
+        "sessionColumns": { "type": "类型", "session": "会话", "version": "版本", "when": "最后消息时间" }
+      },
+      "agentEnvironments": {
+        "title": "执行环境",
+        "description": "托管智能体会话在哪里执行：云端沙箱或员工桌面。",
+        "create": "新建环境",
+        "emptyTitle": "还没有执行环境",
+        "emptyDescription": "新建后可设为智能体的默认执行环境。",
+        "columns": {
+          "name": "名称",
+          "type": "类型",
+          "status": "状态",
+          "references": "引用",
+          "actions": "操作"
+        },
+        "type": {
+          "cloud": "云端执行",
+          "desktop_worker": "员工桌面执行"
+        },
+        "status": {
+          "active": "已启用",
+          "disabled": "已停用"
+        },
+        "references": "{agents} 个智能体 · {sessions} 个进行中会话",
+        "form": {
+          "createTitle": "新建环境",
+          "editTitle": "编辑环境",
+          "name": "名称",
+          "description": "描述",
+          "type": "类型",
+          "sandboxBackend": "沙箱后端",
+          "sandbox": {
+            "docker": "容器",
+            "remote": "远程沙箱",
+            "subprocess": "本机进程（仅用于开发调试）"
+          },
+          "image": "镜像",
+          "egress": "出站白名单（每行一个域名）",
+          "idleTtl": "空闲回收时间（秒）",
+          "workers": "可承接执行的员工"
+        },
+        "actions": {
+          "edit": "编辑",
+          "disable": "停用",
+          "enable": "启用",
+          "delete": "删除"
+        },
+        "disable": {
+          "title": "停用环境",
+          "description": "确认停用「{name}」？停用后新会话不能再使用该环境，进行中的会话不受影响。",
+          "confirm": "停用"
+        },
+        "delete": {
+          "title": "删除环境",
+          "description": "确认删除「{name}」？删除后不可恢复。",
+          "confirm": "删除"
+        },
+        "toast": {
+          "created": "已创建环境",
+          "saved": "已保存",
+          "disabled": "已停用",
+          "enabled": "已启用",
+          "deleted": "已删除"
+        }
+      },
+      "agentEvals": {
+        "title": "评测",
+        "description": "用固定版本、评测集和评分标准批量验收智能体，并在人工确认后创建不生效的候选版本。",
+        "tabs": {
+          "datasets": "评测集",
+          "rubrics": "评分标准",
+          "runs": "评测任务",
+          "candidates": "候选版本"
+        }
+      },
+      "agentMemory": {
+        "title": "记忆库",
+        "description": "智能体跨会话保留的偏好与经验。会话挂载后以文件形式读写，每次变更都可追溯。",
+        "create": "新建记忆库",
+        "showArchived": "显示已归档",
+        "emptyTitle": "还没有记忆库",
+        "emptyDescription": "还没有记忆库。记忆库让智能体跨会话保留偏好与经验，会话挂载后以文件形式读写，每次变更都可追溯。",
+        "untrustedHint": "被挂载为读写的记忆库可能沉淀不可信内容，共享知识建议只读挂载。",
+        "columns": {
+          "name": "名称",
+          "description": "描述",
+          "count": "记忆条数",
+          "size": "占用大小",
+          "status": "状态",
+          "updatedAt": "更新时间",
+          "actions": "操作"
+        },
+        "status": { "active": "使用中", "archived": "已归档" },
+        "form": { "createTitle": "新建记忆库", "name": "名称", "description": "描述" },
+        "actions": {
+          "open": "查看",
+          "archive": "归档",
+          "delete": "删除",
+          "save": "保存",
+          "cancel": "取消",
+          "close": "关闭",
+          "newMemory": "新建记忆",
+          "deleteMemory": "删除记忆",
+          "viewLatest": "查看最新内容",
+          "viewVersion": "查看",
+          "redact": "脱敏"
+        },
+        "memory": {
+          "path": "路径",
+          "content": "内容",
+          "createTitle": "新建记忆",
+          "deleteTitle": "删除记忆",
+          "deleteDescription": "确认删除「{path}」？删除后该路径可以再次创建，历史版本仍会保留。"
+        },
+        "editor": {
+          "version": "版本 v{version}",
+          "lastEdit": "最后修改",
+          "agent": "智能体",
+          "user": "用户 {id}",
+          "session": "会话",
+          "pick": "从左侧选择一条记忆"
+        },
+        "versions": {
+          "title": "版本历史",
+          "version": "版本",
+          "operation": "操作",
+          "actor": "执行者",
+          "session": "来源会话",
+          "size": "大小",
+          "time": "时间",
+          "actions": "操作",
+          "redacted": "已脱敏 · {time} · {actor}",
+          "redactDisabled": "当前版本不能脱敏",
+          "redactTitle": "脱敏历史版本",
+          "redactDescription": "脱敏会永久抹除该历史版本的路径与内容，仅保留操作记录。",
+          "confirm": "脱敏",
+          "viewTitle": "历史版本"
+        },
+        "operation": { "created": "新建", "modified": "修改", "deleted": "删除" },
+        "archive": {
+          "title": "归档记忆库",
+          "description": "确认归档「{name}」？归档后不能挂到新会话，已经挂载的会话仍可继续使用。",
+          "confirm": "归档"
+        },
+        "delete": {
+          "title": "删除记忆库",
+          "description": "删除后记忆与全部版本都会清除，且不可恢复。请输入记忆库名称「{name}」以确认。",
+          "confirm": "删除",
+          "placeholder": "输入记忆库名称"
+        },
+        "toast": {
+          "created": "已创建记忆库",
+          "memoryCreated": "已新建记忆",
+          "memorySaved": "已保存记忆",
+          "memoryDeleted": "已删除记忆",
+          "archived": "已归档",
+          "deleted": "已删除",
+          "conflict": "该记忆已被其他会话或管理员修改，请刷新后再编辑",
+          "redacted": "已脱敏"
+        },
+        "dream": {
+          "start": "整理记忆",
+          "pendingBadge": "待审核",
+          "sessionHint": "可在日志中心的托管会话页复制会话 ID",
+          "sessions": "会话",
+          "sessionsPlaceholder": "每行一个会话 ID",
+          "instructions": "整理指令",
+          "defaultInstructions": "保留稳定的偏好、约定与已验证的结论；删除重复、过期和互相矛盾的内容；删除姓名、邮箱、手机号、订单号等个人身份信息；按主题组织为若干文件。",
+          "model": "模型",
+          "outputName": "输出记忆库名称",
+          "outputDescription": "描述",
+          "submit": "开始整理",
+          "history": "整理记录",
+          "columns": {
+            "status": "状态",
+            "sessions": "会话数",
+            "output": "输出记忆库",
+            "memories": "记忆条数",
+            "rejected": "被拦截条数",
+            "started": "开始时间",
+            "actions": "操作"
+          },
+          "status": {
+            "pending": "等待",
+            "running": "进行中",
+            "completed": "已完成",
+            "failed": "失败",
+            "cancelled": "已取消"
+          },
+          "cancel": "取消",
+          "missingSessions": "缺少会话：{ids}",
+          "review": {
+            "running": "正在整理，完成前不能查看或挂载。",
+            "pending": "该记忆库由记忆整理生成，请检查内容后决定。审核通过前不能挂载到会话。",
+            "approved": "已审核通过，可以挂载到会话。",
+            "archived": "整理未完成，该记忆库已归档。",
+            "approve": "通过审核",
+            "discard": "丢弃",
+            "discardTitle": "丢弃整理结果",
+            "discardDescription": "丢弃后该记忆库会被归档，不会影响原记忆库。",
+            "cancel": "取消"
+          },
+          "toast": {
+            "started": "已开始整理，完成后可在新记忆库中审核结果",
+            "approved": "已通过审核，可以挂载到会话",
+            "discarded": "已丢弃并归档"
+          }
+        }
+      },
+      "agentVaults": {
+        "title": "凭证库",
+        "description": "登记 MCP 令牌与环境变量密钥。会话引用后由运行时注入，智能体看不到原文。",
+        "create": "新建凭证库",
+        "showArchived": "显示已归档",
+        "emptyTitle": "还没有凭证库",
+        "emptyDescription": "还没有凭证库。凭证库用于保存 MCP 令牌与环境变量密钥，会话引用后由运行时注入，智能体看不到原文。",
+        "columns": {
+          "name": "名称",
+          "description": "描述",
+          "count": "有效凭证数",
+          "status": "状态",
+          "createdAt": "创建时间",
+          "actions": "操作"
+        },
+        "status": { "active": "有效", "archived": "已归档" },
+        "types": {
+          "static_bearer": "MCP 静态令牌",
+          "mcp_oauth": "MCP OAuth",
+          "bearer": "HTTPS Bearer",
+          "environment_variable": "环境变量"
+        },
+        "credColumns": {
+          "name": "名称",
+          "type": "类型",
+          "target": "匹配目标",
+          "status": "状态",
+          "expires": "过期时间",
+          "rotated": "最近轮换",
+          "used": "最近使用",
+          "actions": "操作"
+        },
+        "actions": {
+          "detail": "详情",
+          "cancel": "取消",
+          "archive": "归档",
+          "delete": "删除",
+          "rotate": "轮换",
+          "addCredential": "新增凭证",
+          "save": "保存"
+        },
+        "form": { "createTitle": "新建凭证库", "name": "名称", "description": "描述", "basic": "基本信息" },
+        "credential": {
+          "createTitle": "新增凭证",
+          "rotateTitle": "轮换凭证",
+          "type": "类型",
+          "name": "名称",
+          "mcpUrl": "MCP 地址",
+          "host": "主机",
+          "token": "令牌",
+          "accessToken": "访问令牌",
+          "refreshToken": "刷新令牌",
+          "clientId": "Client ID",
+          "clientSecret": "Client Secret",
+          "tokenEndpoint": "令牌端点",
+          "expiresAt": "过期时间",
+          "secretName": "变量名",
+          "secretValue": "密钥值",
+          "authType": "端点认证",
+          "scope": "Scope",
+          "clearRefresh": "清除自动刷新",
+          "keepBlank": "留空表示保持不变"
+        },
+        "networking": {
+          "label": "网络策略",
+          "limited": "仅限指定主机（推荐）",
+          "unrestricted": "不限主机",
+          "hosts": "主机列表",
+          "hint": "支持 *.example.com",
+          "warning": "任何出站请求都可能带上该密钥，仅在无法预先列出目标主机时使用"
+        },
+        "references": {
+          "title": "被引用",
+          "sessions": "{count} 个进行中会话",
+          "agents": "可能用到该凭证库的智能体",
+          "agentLine": "{name} · v{version}",
+          "emptySessions": "没有进行中的会话引用它",
+          "emptyAgents": "没有智能体的最新版本匹配这些 MCP 地址"
+        },
+        "authTypes": {
+          "none": "none",
+          "client_secret_basic": "client_secret_basic",
+          "client_secret_post": "client_secret_post"
+        },
+        "archive": {
+          "vaultTitle": "归档凭证库",
+          "credentialTitle": "归档凭证",
+          "vault": "归档后凭证密文会被清除且不可恢复，引用它的会话后续调用将以未认证方式进行。",
+          "credential": "归档后这条凭证的密文会被清除且不可恢复。",
+          "confirm": "归档"
+        },
+        "delete": {
+          "vaultTitle": "删除凭证库",
+          "credentialTitle": "删除凭证",
+          "vault": "删除后凭证库与其中所有凭证记录将永久移除。",
+          "credential": "删除后这条凭证记录将永久移除。",
+          "namePrompt": "输入凭证库名称以确认",
+          "confirm": "删除"
+        },
+        "toast": {
+          "created": "已创建凭证库",
+          "saved": "已保存",
+          "credentialCreated": "已添加凭证",
+          "rotated": "已轮换，新会话立即生效，进行中的会话下一轮生效",
+          "archived": "已归档",
+          "deleted": "已删除"
         }
       },
       "capabilities": {
@@ -476,6 +1062,22 @@
         "nameLabel": "名称",
         "userIdLabel": "归属用户 ID",
         "expireDaysLabel": "有效天数",
+        "maScopesLabel": "托管智能体 API 权限",
+        "maScopesHint": "不勾选则仅用于网关聊天",
+        "maScopes": {
+          "ma_agents_read": "查看智能体",
+          "ma_agents_write": "管理智能体与版本",
+          "ma_environments_read": "查看执行环境",
+          "ma_environments_write": "管理执行环境",
+          "ma_sessions_read": "查看托管会话",
+          "ma_sessions_write": "创建与驱动托管会话",
+          "ma_worker": "桌面执行节点",
+          "ma_vaults_read": "查看凭证库",
+          "ma_vaults_write": "管理凭证库",
+          "ma_memory_read": "查看记忆库",
+          "ma_memory_write": "管理记忆库",
+          "ma_admin": "托管智能体全部权限"
+        },
         "confirmRevoke": "确定吊销该 Token？",
         "copyKey": "复制 Key",
         "pasteKey": "粘贴 Key",
@@ -2060,6 +2662,124 @@
           "assigned": "绑定已创建",
           "unassigned": "绑定已解除",
           "rollover": "周期滚动完成（{count} 条）"
+        }
+      },
+      "managedSessions": {
+        "filters": {
+          "agent": "智能体",
+          "allAgents": "全部智能体",
+          "userEmail": "发起人邮箱",
+          "status": "状态",
+          "allStatus": "全部状态",
+          "source": "来源",
+          "allSources": "全部来源",
+          "range": "时间",
+          "range1d": "最近 1 天",
+          "range7d": "最近 7 天",
+          "range30d": "最近 30 天",
+          "rangeAll": "全部",
+          "apply": "查询",
+          "reset": "重置"
+        },
+        "columns": {
+          "session": "会话",
+          "agent": "智能体",
+          "user": "发起人",
+          "source": "来源",
+          "status": "状态",
+          "tokens": "Token（输入 / 输出）",
+          "toolCalls": "工具调用",
+          "runtime": "运行时长",
+          "createdAt": "创建时间"
+        },
+        "status": {
+          "idle": "空闲",
+          "running": "运行中",
+          "rescheduling": "重试中",
+          "terminated": "已终止",
+          "archived": "已归档",
+          "requiresAction": "等待确认"
+        },
+        "stopReason": {
+          "end_turn": "正常结束",
+          "requires_action": "等待确认",
+          "retries_exhausted": "重试耗尽",
+          "refusal": "模型拒答",
+          "max_tool_rounds": "达到工具轮次上限",
+          "budget_exceeded": "超出用量预算",
+          "policy_blocked": "合规拦截"
+        },
+        "source": {
+          "portal": "门户",
+          "desktop": "桌面",
+          "api": "API",
+          "schedule": "定时任务",
+          "channel": "渠道",
+          "eval": "评测"
+        },
+        "units": { "ms": "毫秒", "s": "秒", "m": "分" },
+        "empty": "暂无托管会话",
+        "forbidden": "无权查看托管会话",
+        "loadMore": "加载更多",
+        "loading": "加载中…",
+        "untitled": "未命名会话",
+        "unknownUser": "未知用户",
+        "defaultEnvironment": "默认云端环境",
+        "detail": {
+          "back": "返回列表",
+          "summary": "概览",
+          "agentVersion": "版本",
+          "environment": "执行环境",
+          "createdAt": "创建时间",
+          "updatedAt": "更新时间",
+          "inputTokens": "输入 Token",
+          "outputTokens": "输出 Token",
+          "cacheTokens": "缓存命中 Token",
+          "toolCalls": "工具调用次数",
+          "runtime": "运行时长",
+          "workItems": "桌面执行记录",
+          "timeline": "事件回放",
+          "truncated": "事件较多，仅展示前 2000 条",
+          "loadMoreEvents": "继续加载",
+          "notFound": "会话不存在或无权查看"
+        },
+        "timeline": {
+          "userMessage": "用户消息",
+          "agentMessage": "智能体回复",
+          "thinking": "思考",
+          "tool": "工具调用",
+          "mcpTool": "MCP 工具",
+          "customTool": "自定义工具（调用方执行）",
+          "input": "输入",
+          "result": "结果",
+          "succeeded": "成功",
+          "failed": "失败",
+          "pending": "未返回结果",
+          "allowed": "已批准",
+          "denied": "已拒绝",
+          "modelRequest": "模型请求",
+          "usage": "累计用量",
+          "error": "错误",
+          "interrupt": "用户中断",
+          "statusRunning": "开始运行",
+          "statusIdle": "进入空闲",
+          "statusTerminated": "已终止",
+          "expand": "展开全部",
+          "attachments": "附件 {count} 个"
+        },
+        "workItem": {
+          "status": "状态",
+          "device": "设备",
+          "claimedAt": "领取时间",
+          "heartbeat": "最后心跳",
+          "completedAt": "完成时间",
+          "error": "错误",
+          "queued": "排队中",
+          "claimed": "已领取",
+          "running": "执行中",
+          "completed": "已完成",
+          "failed": "失败",
+          "stopped": "已停止"
         }
       }
     },

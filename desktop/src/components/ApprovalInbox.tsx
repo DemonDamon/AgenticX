@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../store";
+import { useAppStore, type ManagedApprovalItem } from "../store";
 
 type ParkedApprovalItem = {
   request_id: string;
@@ -46,6 +46,16 @@ function normalizeItem(value: unknown): ParkedApprovalItem | null {
   };
 }
 
+const MANAGED_ALREADY_RESOLVED = new Set([
+  "resolution_conflict",
+  "resolution_not_found",
+  "duplicate_resolution",
+]);
+
+function managedErrorKey(item: ManagedApprovalItem): string {
+  return `ma:${item.sessionId}:${item.toolUseId}`;
+}
+
 function badgeText(count: number): string {
   return count >= 10 ? "9+" : String(count);
 }
@@ -81,6 +91,10 @@ export function ApprovalInboxButton() {
   const { t } = useTranslation("sidebar");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
+  const managed = useAppStore((s) => s.managedApprovals) ?? {};
+  const removeManagedApproval = useAppStore((s) => s.removeManagedApproval);
+  const setManagedApprovals = useAppStore((s) => s.setManagedApprovals);
+  const managedItems = Object.values(managed).flat();
   const [items, setItems] = useState<ParkedApprovalItem[]>([]);
   const [open, setOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -214,7 +228,39 @@ export function ApprovalInboxButton() {
     }
   };
 
+  const decideManaged = async (item: ManagedApprovalItem, approved: boolean) => {
+    const errorKey = managedErrorKey(item);
+    removeManagedApproval(item.sessionId, item.toolUseId);
+    setErrors((prev) => {
+      if (!prev[errorKey]) return prev;
+      const next = { ...prev };
+      delete next[errorKey];
+      return next;
+    });
+    const restore = (message: string) => {
+      const current = useAppStore.getState().managedApprovals[item.sessionId] ?? [];
+      const restored = current.some((row) => row.toolUseId === item.toolUseId) ? current : [...current, item];
+      setManagedApprovals(item.sessionId, restored);
+      setErrors((prev) => ({ ...prev, [errorKey]: message }));
+    };
+    try {
+      const res = await window.agenticxDesktop.maPostEvents(item.sessionId, [{
+        type: "user.tool_confirmation",
+        tool_use_id: item.toolUseId,
+        result: approved ? "allow" : "deny",
+      }]);
+      if (!mountedRef.current) return;
+      if (res.ok) return;
+      if (MANAGED_ALREADY_RESOLVED.has(res.code)) return;
+      restore(`${t("approvals.failed")} ${res.code}`);
+    } catch {
+      if (!mountedRef.current) return;
+      restore(t("approvals.failed"));
+    }
+  };
+
   const title = t("approvals.title");
+  const total = items.length + managedItems.length;
   const panel = open
     ? createPortal(
         <div
@@ -224,10 +270,48 @@ export function ApprovalInboxButton() {
           role="dialog"
           aria-label={title}
         >
-          {items.length === 0 ? (
+          {total === 0 ? (
             <p className="px-3 py-6 text-center text-[12px] text-text-muted">{t("approvals.empty")}</p>
           ) : (
             <div className="flex flex-col gap-2">
+              {managedItems.map((item) => {
+                const error = errors[managedErrorKey(item)];
+                return (
+                  <div key={managedErrorKey(item)} className="rounded-lg border border-border px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="font-medium text-text-strong">
+                        {t("approvals.sourceManaged", { name: item.agentName })}
+                      </span>
+                      <span className="shrink-0 text-text-muted">{t("approvals.waiting")}</span>
+                    </div>
+                    <p className="mt-1 line-clamp-3 text-[13px] text-text-strong">
+                      {t("approvals.managedQuestion", { tool: item.toolName })}
+                    </p>
+                    <p className="mt-1 line-clamp-2 font-mono text-[12px] text-text-muted">{item.inputPreview}</p>
+                    <div className="mt-2 flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1 text-[12px] text-text-strong hover:bg-surface-hover"
+                        onClick={() => {
+                          void decideManaged(item, false);
+                        }}
+                      >
+                        {t("approvals.deny")}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1 text-[12px] font-medium text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
+                        onClick={() => {
+                          void decideManaged(item, true);
+                        }}
+                      >
+                        {t("approvals.approve")}
+                      </button>
+                    </div>
+                    {error ? <p className="mt-1.5 text-[12px] text-red-500">{error}</p> : null}
+                  </div>
+                );
+              })}
               {items.map((item) => {
                 const source = item.label.startsWith("automation:")
                   ? t("approvals.sourceAutomation")
@@ -290,9 +374,9 @@ export function ApprovalInboxButton() {
         onClick={() => setOpen((value) => !value)}
       >
         <ShieldCheck className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        {items.length > 0 ? (
+        {total > 0 ? (
           <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--ui-btn-primary-bg)] px-1 text-[10px] font-semibold leading-none text-[var(--ui-btn-primary-text)]">
-            {badgeText(items.length)}
+            {badgeText(total)}
           </span>
         ) : null}
       </button>

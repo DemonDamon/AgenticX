@@ -1133,6 +1133,34 @@ declare global {
       ) => () => void;
       onEnterpriseLoginFailed: (cb: (payload: { error: string }) => void) => () => void;
       onEnterpriseLoginTimeout: (cb: () => void) => () => void;
+      maGetSession: (sessionId: string) => Promise<
+        | { ok: true; status: number; data: Record<string, unknown> }
+        | { ok: false; status: number; code: string; message: string }
+      >;
+      maCreateSession: (payload: { agentId: string; environmentId?: string; title?: string }) => Promise<
+        | { ok: true; status: number; data: Record<string, unknown> }
+        | { ok: false; status: number; code: string; message: string }
+      >;
+      maListEvents: (sessionId: string, afterSeq?: number, limit?: number) => Promise<
+        | { ok: true; status: number; data: { data: unknown[]; has_more: boolean; next_after_seq: number } }
+        | { ok: false; status: number; code: string; message: string }
+      >;
+      maPostEvents: (sessionId: string, events: unknown[]) => Promise<
+        | { ok: true; status: number; data: unknown }
+        | { ok: false; status: number; code: string; message: string }
+      >;
+      maStreamOpen: (
+        streamId: string,
+        sessionId: string,
+        afterSeq: number,
+      ) => Promise<{ ok: true } | { ok: false; code: string }>;
+      maStreamClose: (streamId: string) => Promise<{ ok: true }>;
+      onMaStreamFrame: (
+        cb: (payload: { streamId: string; id: number | null; event: string; data: unknown }) => void,
+      ) => () => void;
+      onMaStreamState: (
+        cb: (payload: { streamId: string; state: string; code?: string; message?: string }) => void,
+      ) => () => void;
       updateSplashStage: (
         stage:
           | "initializing"
