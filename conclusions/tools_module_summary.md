@@ -1,6 +1,6 @@
 # AgenticX Tools 模块完整结构分析
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/tools`
@@ -47,6 +47,10 @@ agenticx/tools/
 │   ├── __init__.py
 │   ├── api_connector_resolver.py   [MCPConnectorResolver]
 │   └── computer_use_resolver.py    [ComputerUseResolver]
+├── near_browser/            [(NEW) Near 应用内浏览器：公网 URL SSRF 基线 + 会话级 profile]
+│   ├── __init__.py
+│   ├── profile.py           [session 目录持久化 browser_profile_id]
+│   └── url_guard.py         [HTTP(S) 公网目的地校验与 IP 字面量归一]
 ├── intelligence/
 │   ├── __init__.py
 │   └── models.py
@@ -148,10 +152,17 @@ agenticx/tools/
 
 #### agenticx/tools/remote_v2.py
 **文件功能**：基于官方 SDK 的 MCP 客户端 V2 版（推荐）。
-**技术实现**：使用官方 `mcp` Python SDK 实现持久化会话，支持 `AsyncExitStack` 生命周期管理和核心的 **Sampling（反向推理）** 回调。
-**关键组件**：`MCPClientV2` (高性能客户端), `RemoteToolV2` (持久化工具类), `_handle_sampling` (采样处理器)。
-**业务逻辑**：将工具调用延迟从秒级降至毫秒级，并允许远程工具在执行过程中反向请求智能体的 LLM 能力，实现高度闭环的自动挖掘。
-**依赖关系**：继承 `BaseTool`，依赖官方 `mcp` 库和 `BaseLLMProvider`。
+**技术实现**：使用官方 `mcp` Python SDK 实现持久化会话，支持 `AsyncExitStack` 生命周期管理和核心的 **Sampling（反向推理）** 回调。stdio 环境经 `build_stdio_env()` 叠加服务端 env 并解析 `${cred:NAME}`；HTTP/SSE 传输在连接前做 `egress_denial` 与会话边界 allowlist 对齐；远程传输统一注入 `mcp_httpx_client_factory`（本机/LAN 直连、远端代理策略）；`MCPServerConfig.oauth` 时可经 `build_mcp_oauth_provider` 走标准 MCP OAuth。
+**关键组件**：`MCPClientV2` (高性能客户端), `RemoteToolV2` (持久化工具类), `_handle_sampling` (采样处理器), `build_stdio_env`, `_resolve_mcp_mapping`, `_mcp_auth_kwargs`。
+**业务逻辑**：将工具调用延迟从秒级降至毫秒级，并允许远程工具在执行过程中反向请求智能体的 LLM 能力，实现高度闭环的自动挖掘；凭证缺失时以中文 RuntimeError 提示用户在设置中补全。
+**依赖关系**：继承 `BaseTool`，依赖官方 `mcp` 库和 `BaseLLMProvider`；`runtime.credential_store.resolve_mapping`、`runtime.session_boundary`  egress 策略、`utils.proxy_policy.mcp_httpx_client_factory`、可选 `connectors.oauth`。
+
+#### agenticx/tools/near_browser/（包）
+**文件功能**：Near 应用内浏览器（`near_browser_*`）的会话 profile 与打开 URL 前的 SSRF 基线校验。
+**技术实现**：`profile.get_or_create_browser_profile_id` 在 `~/.agenticx/sessions/<session_id>/browser_profile.json`（或 `AGX_SESSIONS_ROOT`）写入稳定 UUID，优先 `O_CREAT|O_EXCL` 降低并发丢写；`url_guard.validate_public_http_url` 仅允许公网 HTTP(S)（80/443），拒绝内网主机后缀、非 global IP、非常规 IPv4 字面量（八进制/短形式/decimal），DNS 解析后逐地址校验（best-effort，存在 TOCTOU）；导出 `UrlGuardError`/`ValidatedPublicUrl`/`is_public_ip`。
+**关键组件**：`get_or_create_browser_profile_id`, `validate_public_http_url`, `UrlGuardError`。
+**业务逻辑**：同一会话重试与后续轮次复用同一 browser profile，避免无界 spawn；打开外链前阻断内网与非公网目标。
+**依赖关系**：stdlib（json/pathlib/ipaddress/socket）；经 `near_browser/__init__.py` 聚合导出。
 
 #### agenticx/tools/security.py
 **文件功能**：工具执行安全防护模块。
@@ -169,7 +180,7 @@ agenticx/tools/
 
 #### agenticx/tools/skill_bundle.py
 **文件功能**：兼容 Anthropic Agent Skills 规范的技能包加载器。
-**技术实现**：扫描 `.agent/skills` 和 `.claude/skills` 目录，解析 `SKILL.md` 的 YAML Frontmatter 提取元数据，支持多路径优先级扫描和同名技能去重。通过 `process_llm_request` 实现渐进式 Prompt 注入。**新增 `execution_backend` 参数支持（P2-1），允许指定技能执行后端（本地或沙箱）**。
+**技术实现**：扫描 `.agent/skills` 和 `.claude/skills` 目录，解析 `SKILL.md` 的 YAML Frontmatter 提取元数据，支持多路径优先级扫描和同名技能去重。通过 `process_llm_request` 实现渐进式 Prompt 注入。**新增 `execution_backend` 参数支持（P2-1），允许指定技能执行后端（本地或沙箱）**。解析 `name`/`description` 时经 `_strip_matched_quotes` 去掉 YAML 成对引号，避免 clawhub 等上游包导致按名匹配（已装判定 / preferred_sources）失效。
 **关键组件**：`SkillMetadata` (技能元数据 dataclass), `SkillBundleLoader` (扫描与解析器), `SkillTool` (list/read 操作封装)。
 **业务逻辑**：
 - 实现 Anthropic 的"渐进式披露"设计：技能指令只在 Agent 决定使用时才加载到上下文，节省 Token 开销。

@@ -1,6 +1,6 @@
 # AgenticX LLM 模块（agenticx/llms）完整结构分析
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`）
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\llms`
@@ -16,7 +16,7 @@
 ├── failover.py              [新增：LLM 主备故障转移与冷却（内化自 IronClaw）]
 ├── kimi_provider.py
 ├── litellm_provider.py
-├── llm_factory.py           [Provider 工厂 / 路由；deepseek / mimo 分支，与 knowledge.graphers 解耦]
+├── llm_factory.py           [Provider 工厂 / 路由；create 前 `resolve_model_alias`；deepseek / mimo 分支，与 knowledge.graphers 解耦]
 ├── mimo_provider.py         [新增：小米 MiMo 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.xiaomimimo.com）]
 ├── minimax_provider.py      [MiniMax OpenAI 兼容 Provider]
 ├── provider_display.py      [Provider/模型用户可见展示名与目录块；DeepSeek / 小米 MiMo 展示名]
@@ -29,7 +29,8 @@
 ├── transcript_sanitizer.py  [新增：Provider 感知的 Transcript 卫生管线（参考 OpenClaw）]
 ├── typesafe_client.py       [新增：TypeSafe System One 内部 HTTP 客户端（非聊天 Provider、非 MCP）]
 ├── typesafe_config.py       [新增：TypeSafe（Jev）运行时配置与 API Key 解析]
-├── vision.py                [视觉能力推断：按模型 slug 判定（provider 无关），GLM-5.3 系视为原生多模态；新增 MiMo 纯文本/语音 SKU 规则]
+├── vision.py                [视觉能力推断：按模型 slug 判定（provider 无关），GLM-5.3 系视为原生多模态；MiMo 纯文本/语音 SKU；DeepSeek/embedding 等通用纯文本正则]
+├── vision_cases.json        [与 Desktop 共享的视觉能力用例表（provider/model/vision 三元组契约）]
 ├── vision_fallback.py       [新增：为 analyze_image 解析可用的视觉回退模型（企业路由策略优先）]
 └── zhipu_provider.py        [智谱 GLM Provider]
 ```
@@ -45,7 +46,8 @@
 **文件功能**：阿里云百炼（DashScope）Provider `BailianProvider`，OpenAI 兼容客户端 + 部分模型走原生 HTTP（`_needs_native_request`）。  
 **enable_thinking 语义**：不再对命中原生请求的模型一律写死 `enable_thinking=False`，改由 `_resolve_enable_thinking(model, params)` 判定——仅当 `agenticx.memory.graph.json_compat.model_supports_enable_thinking_param(model)` 为真（`qwen3-*` / `qwen3.x-*` 混合思考系及 `qvq`）才下发，优先取 `extra_body.enable_thinking`，其次顶层 `enable_thinking`，缺省为 `True`；不支持的模型（如 `qwen-plus` / `qwen-turbo`）不会收到该参数（原生 payload 中会被 `pop`）。OpenAI 客户端路径经 `_apply_enable_thinking_to_openai_params` 嵌入 `extra_body`（OpenAI SDK 不接受顶层该 kwarg），原生 HTTP 路径经 `_apply_enable_thinking_to_native_params` 写顶层字段（同步/异步/流式原生请求均适用）。  
 **推理内容透出**：`stream_with_tools` 与 `_stream_with_tools_native` 通过 `_yield_reasoning_and_content_chunks` 把 delta 的 `reasoning_content` / `reasoning` 包成 `<think>…</think>` 内容块输出，遇正文、tool_call delta 或流结束时补 `</think>` 闭合；非流式 `_parse_response` 从 message 的 `reasoning_content` / `reasoning` 填充 `LLMResponse.reasoning_content`（`_convert_native_response` 同步映射该字段）。  
-**依赖关系**：`openai`、`requests`、`aiohttp`；`agenticx.runtime.usage_metadata`、`agenticx.memory.graph.json_compat`。
+**采样约束**：原生 HTTP（同步/异步/流式）与 OpenAI 客户端路径在 `_prepare_bailian_params` 前经 `_apply_sampling_constraints()` 调用 `sampling_params.sanitize_chat_call_kwargs(..., provider="bailian")`，使经百炼路由的 Kimi K3/K2.7 等 SKU 强制 `temperature=1`，避免 `invalid_parameter_error`。  
+**依赖关系**：`openai`、`requests`、`aiohttp`；`agenticx.runtime.usage_metadata`、`agenticx.memory.graph.json_compat`、`agenticx.llms.sampling_params`。
 
 ### auth_profile.py (新增，内化自 OpenClaw)
 **文件功能**：实现 API Key 轮换管理，支持多 Profile 冷却退避与状态持久化。  
@@ -182,8 +184,8 @@
 - `_zhipu_text_only_family()`：智谱 GLM 文本系（`glm-5`/`glm-4.6`/`glm-4.5`/`glm-4`/`glm-z1`/`glm-zero`，不含 `\dv`/`vision`/`vl` 标记）按非视觉处理；**GLM-5.3 系（`glm-5.3`、`glm-5.3-flash`…）是首个无 v 标记的原生多模态 GLM-5 线，明确保持 vision-capable**。原 `_zhipu_glm5_family_no_vision` 保留为向后兼容别名
 - `_bailian_qwen_text_no_vision()`：百炼/DashScope 的 Qwen 文本 SKU（不含 `vl`/`vision`/`omni`）拒绝 OpenAI 风格 image_url 内容块
 - `_mimo_text_only()`：`mimo-` 前缀下，含 `-asr` / `-tts` 的语音 SKU 以及 `mimo-v2.5-pro`（含 `mimo-v2.5-pro-*`）按非视觉处理；v2.6 Pro/Flash 与精确 `mimo-v2.5` 为全模态，保持 vision-capable  
-未知模型名保持 vision-permissive，避免误伤未来视觉 SKU。`strip_nonvision_multimodal_messages()` 基于同一判定把 image_url 块扁平化为文本。  
-**业务逻辑**：是 `view_image` / 附图链路的前置闸门——对不支持多模态的模型剥离 `image_inputs`，避免上游因 image part 报错；与 Desktop `model-vision.ts` 的前端拦截一一对应。  
+`_KNOWN_TEXT_ONLY_RE` 额外覆盖 gpt-3.5、embedding、whisper、DeepSeek chat/coder/reasoner 等通用纯文本 slug。未知模型名保持 vision-permissive，避免误伤未来视觉 SKU。`strip_nonvision_multimodal_messages()` 基于同一判定把 image_url 块扁平化为文本。同目录 `vision_cases.json` 为与 Desktop 对齐的共享用例契约（各 provider/model 的 `vision` 布尔期望）。  
+**业务逻辑**：是 `view_image` / 附图链路的前置闸门——对不支持多模态的模型剥离 `image_inputs`，避免上游因 image part 报错；与 Desktop `model-vision.ts` 及 `vision_cases.json` 一一对应。  
 **依赖关系**：被 runtime 视觉附件注入、`agent_tools.view_image` 守卫与 `vision_fallback.py` 调用。
 
 ### vision_fallback.py (新增)
@@ -208,11 +210,11 @@
 ### sampling_params.py (新增)
 **文件功能**：聊天 LLM 调用的采样参数共享助手，集中处理各厂商对 temperature 等参数的差异化约束。  
 **技术实现**：
-- `model_requires_fixed_temperature_one(model)`：OpenAI gpt-5 推理 SKU（排除 `gpt-5-chat*`）拒绝非 1 的 temperature（LiteLLM 抛 `UnsupportedParamsError`）；
-- `resolve_chat_temperature(model, provider=, default=0.2, fallback_model=)`：MiniMax 返回 `None`（省略该参数，厂商部分 SKU 拒绝任意采样值）、gpt-5 推理系强制 `1.0`、其他返回 `default`；`fallback_model` 用于会话模型名为空但 LLM 实例持有具体模型 id 的场景（如 IM 绑定会话）；
-- `sanitize_chat_call_kwargs(kwargs, model, ...)`：按上述规则改写调用 kwargs（删除或强制覆写 `temperature`），被 `LiteLLMProvider._apply_sampling_constraints` 在四个调用入口统一使用；
+- `model_requires_fixed_temperature_one(model)`：OpenAI gpt-5 推理 SKU（排除 `gpt-5-chat*`）与 Kimi K3 / K2.7 系（`kimi-k3*`、`kimi-k2.7*`，含经 Moonshot 或百炼路由）拒绝非 1 的 temperature；
+- `resolve_chat_temperature(model, provider=, default=0.2, fallback_model=)`：MiniMax 返回 `None`（省略该参数）、gpt-5 推理系与 Kimi K3/K2.7 强制 `1.0`、其他返回 `default`；`fallback_model` 用于会话模型名为空但 LLM 实例持有具体模型 id 的场景（如 IM 绑定会话）；
+- `sanitize_chat_call_kwargs(kwargs, model, ...)`：按上述规则改写调用 kwargs（删除或强制覆写 `temperature`），被 `LiteLLMProvider._apply_sampling_constraints` 与 `BailianProvider._apply_sampling_constraints` 在调用入口统一使用；
 - `provider_raw_enabled_for_fallback(raw)`：仅当配置显式 `enabled: false` 时返回 False，供聊天 LLM 自动回退跳过 config.yaml 中已禁用的条目。  
-**依赖关系**：被 `litellm_provider.py` 与 `provider_resolver.py` 引用。
+**依赖关系**：被 `litellm_provider.py`、`bailian_provider.py` 与 `provider_resolver.py` 引用。
 
 ### transcript_sanitizer.py (新增，内化自 OpenClaw)
 **文件功能**：实现 Provider 感知的 Transcript 卫生管线，在 LLM 调用前对 messages 列表做最小必要清洗。  

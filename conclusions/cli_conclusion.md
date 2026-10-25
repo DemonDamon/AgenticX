@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的变更）
 
 ## 目录路径
 
@@ -33,7 +33,7 @@ agenticx/cli/
 ├── generate_commands.py     # generate 子命令
 ├── hooks_commands.py        # hooks 子命令
 ├── harness_app.py           # harness 子命令（agx harness review 会话工作循环健康审查）
-├── skills_commands.py       # skills 子命令
+├── skills_commands.py       # skills 子命令（含 `install-from-repo` 从 GitHub tarball 安装完整技能目录 + guard）
 ├── volcengine_commands.py   # 火山引擎专属命令
 ├── log_config.py            # 日志配置
 ├── main.py                  # Typer CLI 主程序入口（含延迟注册 `wb-bridge`）
@@ -74,6 +74,9 @@ agenticx/cli/
 | `todo_manager` | TodoManager | 结构化 Todo 跟踪 |
 | `scratchpad` | Dict[str, str] | 跨轮次的临时键值存储 |
 | `provider_hard_failure_providers` | Set[str] | Session 级 LLM Provider 硬失败黑名单（计费/鉴权错误后跳过） |
+| `session_id` | str | 会话 id（供策略审计、跨进程边界校验等） |
+| `sticky_allowed_tools` | Set[str] | 本会话用户选择「不再询问」的低风险工具（内存态，受保护工具不可加入） |
+| `activated_skill_dirs` | List[str] | `skill_use` 激活的技能根目录，作为只读沙箱根以便读取/运行 bundled 脚本 |
 
 **REPL 功能**（交互模式）：
 - 支持 `/mcp`、`/skill`、`/context`、`/snapshot`、`/history` 等斜杠命令
@@ -111,10 +114,12 @@ agenticx/cli/
 | Scratchpad | `scratchpad_write`, `scratchpad_read` |
 | 记忆 | **(NEW)** `memory_search`, `memory_append`, `session_search`（跨会话 FTS5 检索） |
 | 用量诊断 | **(NEW)** `plugin_usage`（只读：按 `plugin`（`all` 默认读本地 usage 台账 / `jev` 读结构化决策卡 / provider id / 模型名）、`model`、`provider`、`from_date`/`to_date`（`YYYY-MM-DD` 或 `today`/`yesterday`）、`range`（day/week/month/total）、`scope`（all/current）、`purpose`（all/failed/timeout/retry/adopted·ok/routing/kb）、`session_id`、`limit`（1–30，默认 8）查询调用次数、超时、重试、连续失败与会话失败原因；`_tool_plugin_usage` 委托 `agenticx.runtime.plugin_usage.query_plugin_usage`，并传入当前会话 `chat_history` 与 session id 作为 live 数据，结果 JSON 返回、不注入常规对话上下文；列入 `_CONCURRENCY_SAFE_STUDIO_TOOLS`） |
-| 知识/代码索引 | **(NEW)** `knowledge_search`, `code_search`, `code_outline`, `code_index_create` / `code_index_status` / `code_index_cancel` / `code_index_clear` |
+| 知识/代码索引 | **(NEW)** `knowledge_search`（默认 compact 片段，需全文时对命中调用 `knowledge_read`）, **`knowledge_read`**, `code_search`, `code_outline`, `code_index_create` / `code_index_status` / `code_index_cancel` / `code_index_clear` |
 | 子智能体 | `spawn_subagent`, `query_subagent_status`, `cancel_subagent`, `send_message_to_subagent`（委派/接力均通过 meta_tools 暴露） |
 | MCP | `mcp_call`, **(NEW)** `mcp_connect`, `mcp_import` |
-| Skill | `skill_list`, `skill_use`, **(NEW)** `skill_manage`（create/patch/delete + guard 扫描）, `skill_import_repo`（批量从 GitHub 仓库导入） |
+| Skill | `skill_list`, `skill_use`, **(NEW)** `skill_manage`（create/patch/delete + guard 扫描）, `skill_import_repo`（批量从 GitHub 仓库导入）, **`skillhub_search` / `skillhub_install`**, **`clawhub_install`**（市场安装，禁止用 bash/curl 绕路） |
+| 用户交互 | **`present_choices`**（版本化澄清/对比面板）, `request_clarification` / `request_action_confirmation`（结构化选项与确认 verdict） |
+| 连接器 | **`connector_manage`**（REST/MCP 连接器创建与密钥收集，经 gateway MCP 暴露 actions） |
 | LSP | `lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics` |
 | 文档解析 | `liteparse` |
 | 定时/自动化 | **(NEW)** `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `cancel_scheduled_task`, `get_automation_task_logs` |
@@ -127,10 +132,13 @@ agenticx/cli/
 | Ops 只读排障 | **(NEW，2026-09)** 经 `agenticx.ops.tools.merge_ops_tools_into` 注入 `get_trace` / `get_logs` / `get_recent_changes` / `get_session_review` / `get_umodel` / `sync_changeplane` / `get_trace_parity` / `get_channel_slo`（`ops.tools_enabled` 默认开） |
 
 **dispatch_tool_async(tool_name, arguments, session, confirm_gate, event_callback, team_manager)**：
-- 按 tool_name 路由到对应工具实现
+- 按 tool_name 路由到对应工具实现；对外返回经 `credential_store.redact_text` 脱敏（内部 `_dispatch_tool_async_unredacted`）
 - 支持 `event_callback` 异步回调（用于向 Runtime 传递 confirm_required 等中间事件）
 - **(NEW，2026-09)** 入口即策略收口：先查 `tool_denied_by_session_permissions`（会话权限 deny），再查 `_dispatch_path_rule_denial`（`permissions.path_rules` 对 `path`/`from_path` 参数的 deny，读写都拦、优先于 confirm），通过后才进入具体工具
-- 安全确认：高风险工具经 `ConfirmGate` 确认；**(NEW)** `_confirm` 改为按 gate 能力（`should_emit_prompt`）决定是否发 `confirm_required` 事件，先注册 pending 请求再发布 ID 避免竞态挂起；拒绝原因经 `confirm_denial_note` 挂到 gate 的 `last_denial_note`，`_cancelled()` 文案据此区分「用户拒绝 / 无人值守拦截 / 等待超时」；`is_service_mode()` 取代 `isinstance(AsyncConfirmGate)` 判定交互态
+- **(NEW)** 会话工具结果预算 ≥80% 时 `_budget_locked_explore_denial` 拒绝探索类工具（`file_read` 大文件预检降级）；`foreign_session_denial` 拦截跨会话路径
+- **(NEW)** Enterprise `load_enterprise_agent_policy()`：`enterprise_denied_subject` 直接 ERROR + `action_audit`；`enterprise_ask_subject` 走 `_confirm(enterprise_policy=True)` 且同轮 `_enterprise_ask_satisfied_tool` 免重复弹窗
+- 安全确认：高风险工具经 `ConfirmGate` 确认；**(NEW)** `_confirm` 改为按 gate 能力（`should_emit_prompt`）决定是否发 `confirm_required` 事件，先注册 pending 请求再发布 ID 避免竞态挂起；拒绝原因经 `confirm_denial_note` 挂到 gate 的 `last_denial_note`，`_cancelled()` 文案据此区分「用户拒绝 / 无人值守拦截 / 等待超时」；`is_service_mode()` 取代 `isinstance(AsyncConfirmGate)` 判定交互态；本会话 `sticky_allowed_tools` 可对非受保护工具自动放行确认
+- **(NEW)** `near_browser_open`：`validate_public_http_url` + 会话级 `profile_id` 附着；`mcp_connect` / `mcp_import` 经确认包装后再连接
 
 **(NEW，2026-09) bash_exec 安全模型重写**（commits `b0d2f0b4` / `3742f8f9` / `f007c2c3` 等）：
 - 旧的 `SAFE_COMMANDS` 白名单集合已删除，改为 `agenticx.runtime.command_safety.assess_command` 对命令做风险分类（`destructive_filesystem` / `arbitrary_code_execution` / `version_control_change` / `external_publish` 等 code + 中文证据），`_bash_exec_safety_confirm` 据此给出 `high` / `non_whitelisted` 两档中文确认文案；`NEVER_AUTO_APPROVED_CATEGORIES` 类别永不可被豁免
@@ -232,7 +240,8 @@ agenticx/cli/
 
 **(NEW，2026-09) 读取路径两处重构**（commits `cc45657d` / `e334ea6b`）：
 - `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析 `Path.home()`——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
-- `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 写入后主动 `_invalidate_yaml_cache`，不依赖时间戳精度。实测消除 `get_value` 读路径上约 96% 的重复 YAML 解析耗时
+- `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 原子写入（tmp + fsync + `os.replace`，可选 `.bak`、保留 mode）后 `_invalidate_yaml_cache`
+- **(NEW)** `AgxConfig.get_provider` 对 `api_key` / `secret_key` 经 `runtime.credential_store.resolve_refs` 解析 `${...}` 引用后再构造 `ProviderConfig`
 
 **Provider 清单**：**(NEW)** `SUPPORTED_PROVIDERS` / `ENV_PROVIDER_MAP` 新增 `deepseek`（`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-pro`）与 **(NEW)** `mimo`（必填 `api_key`，环境变量 `MIMO_API_KEY`，默认模型 `mimo-v2.6-pro`）。
 
@@ -268,8 +277,12 @@ agenticx/cli/
 - `skills`：Skill 管理（来自 skills_commands.py）
 - **(NEW)** `harness`：会话工作循环健康审查（来自 harness_app.py，延迟导入注册）
 - **(NEW，2026-09)** `wb-bridge`：延迟导入 `wb_bridge_commands.wb_bridge_app`，`agx wb-bridge serve`（`--host`/`--port`/`--token`，默认 9743）
+- **(NEW)** `case`：`compile`（plan.mdc → 本地 case-entry，可选 `--push` context-service）、`search`（本地/`--remote`）、`init`（从 case 初始化项目并注入 wiki/skills）
+- **(NEW)** `wiki`：`push` 推送 `./wiki` 至企业 context-service（可选 `--no-compile`）
 
 **(NEW，2026-09)** `loop` 命令构造系统提示时传 `include_volatile=False`（`build_meta_agent_system_prompt`），保持系统前缀稳定以利于 prompt 缓存。
+
+**(NEW)** `agx serve` 默认 `--host 127.0.0.1`（写 `AGX_SERVE_BIND` 保留 bind 地址）；未设 `AGX_DESKTOP_TOKEN` 时自动生成并写入 `~/.agenticx/serve.token`（`serve.port`/`serve.token` 权限 `0600`），控制台不再打印 token 明文。
 
 ### harness_app.py — 会话工作循环健康审查（NEW）
 

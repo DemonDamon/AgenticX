@@ -1,6 +1,6 @@
 # AgenticX Avatar 模块总结
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 之后至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的变更）
 
 ## 目录路径
 
@@ -61,6 +61,7 @@ agenticx/avatar/
 - `create_avatar(name, role, ..., portrait_style="")`：创建 Avatar，自动初始化 workspace（含 IDENTITY.md / MEMORY.md / memory/）；未传 `avatar_url` 时调 `generate_avatar_portrait_url(color=..., taken_colorways=self._occupied_colorways())` 生成唯一配色款立方体并标记 `near-cube-v3`；自带 URL 时，若 `portrait_style` 属于 `COLLECTION_STYLE_IDS`（且非 `near-cube-v3`）则保留该合集标记，否则标记 `custom`
 - `update_avatar(avatar_id, patch)`：增量更新；`id`、`created_at`、`workspace_dir` 为不可变字段；对 `skills_enabled` / `brains_enabled` 走专门的归一化分支；`portrait_style` 不直接 setattr，按以下规则解析：patch 含 `avatar_url` 时——清空则按占用配色重新生成立方体（`near-cube-v3`），请求的 `portrait_style` 为合集 id 或 `near-cube-v3` 则采用之，否则 URL 变化标记 `custom`；仅含 `portrait_style` 时接受合集 id 或 `custom`；仅 `color` 变化且当前不是 custom/其他合集头像时，按新颜色重新生成立方体
 - `delete_avatar(avatar_id)`：删除 avatar 目录及所有文件（`shutil.rmtree`）；删除前先调用 `BrainRegistry.instance().delete_private_brains_for_avatar(avatar_id)` 清理该分身的 private brain
+- `_sync_enterprise(config)`：**(NEW)** `create_avatar` / `update_avatar` 在 `_write_config`（及 create 侧的 `_ensure_avatar_workspace`）之后调用；best-effort 调 `agenticx.runtime.enterprise_agent_sync.sync_local_avatar`，当 `~/.agenticx/config.yaml` 中 `enterprise.enabled` 为真且 token / `base_url` 齐备时，向 `{base_url}/api/desktop/agents/register` POST 登记本地分身（`local_avatar_id`、显示名、`system_prompt`、合成后的 `model`、`description`）；任意异常或企业未启用时静默 no-op；`delete_avatar` 不触发
 
 **存储根目录惰性解析（NEW）**：`AVATARS_ROOT` 不再是 import 时被 `Path.home()` 定死的模块级常量，改为 `_avatars_root()` 按调用时的 HOME 解析（`agenticx/utils/agx_home.py` 的 `lazy_home_path`），并保留 PEP 562 `__getattr__` 供外部读取——避免测试重定向 HOME 后数据仍写进开发者真实的 `~/.agenticx`。
 
@@ -158,6 +159,7 @@ agenticx/avatar/
 - **Meta-Agent 系统提示**：`prompts/meta_agent.py` 调用 `AvatarRegistry().list_avatars()` 动态注入 Avatars 上下文
 - **Desktop Store**：通过 IPC `agx:avatar:*` / `agx:group:*` 通道同步状态到前端；委派触发后前端自动打开对应 Avatar 窗格
 - **Brain 知识脑（NEW）**：`agenticx/brain` 模块据 `AvatarConfig.brains_enabled` 决定分身可挂载的知识脑；`knowledge_search` / `code_search` 工具按挂载 brain 路由（可选 `brain_id`）；删除分身时联动清理其 private brain
+- **Enterprise 本地分身登记（NEW）**：`AvatarRegistry` 创建/更新落盘后经 `_sync_enterprise` → `sync_local_avatar` 与已登录企业账号同步专家元数据；未开 enterprise 或未配置凭据时不发请求
 
 ---
 

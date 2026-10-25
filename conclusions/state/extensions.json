@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "extensions",
-  "generation": "1727805c03084597ae2df801249efa24",
+  "generation": "5bd410d9691a404fafe0346946f7acdc",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:d93c69d0b62d406dbb8df38794275455367869a9a8f902afaf5788e6b1b70f0c",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:9aacf8aed29805073e6bea841f5a360666c1d4e36aece081ee1c94c5068ec8b4",
   "summary_path": "conclusions/extensions_module_conclusion.md",
-  "summary_sha256": "sha256:7c8a7a2391ac7fc8db76c4cdfcf9518e27fa77dbee7e8be7e9f3cda3d7ee6aa1",
-  "updated_at": "2026-09-30T00:54:07.913028+00:00"
+  "summary_sha256": "sha256:e7cbaa9875a58562a853008a885a4516af5a15851f983daee421ca32c3a88bc0",
+  "updated_at": "2026-10-25T03:42:12.555301+00:00"
 }

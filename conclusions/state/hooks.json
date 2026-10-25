@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "hooks",
-  "generation": "4469c113331548eab9d1879662844ca8",
+  "generation": "b7e82039d2a146b3b5e841e82e2fb0c1",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
   "source_fingerprint": "sha256:a7c3041ce0b1d16b937c274bfb4dddd0310bd1219eeb1e234fcc4e7227d034c4",
   "summary_path": "conclusions/hooks_module_conclusion.md",
   "summary_sha256": "sha256:8cf9241887ebea468013b3573db3159cfef87cdb4ecf9b20656180b031aabdba",
-  "updated_at": "2026-09-30T00:54:13.808898+00:00"
+  "updated_at": "2026-10-24T13:53:20.323161+00:00"
 }

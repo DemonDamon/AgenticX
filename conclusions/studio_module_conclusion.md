@@ -1,6 +1,6 @@
 # AgenticX Studio 模块总结
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` → `22d051f5d18ad83a4c6083683342ab41d7850149`）
 
 ## 目录路径
 
@@ -37,6 +37,9 @@ agenticx/studio/
 ├── command_resolve.py     # (NEW) 按上下文解析可见命令（builtin < global < subject < session pin）
 ├── command_routes.py      # (NEW) /api/commands* CRUD、会话 pin 与 /api/sessions/<sid>/perf
 ├── typesafe_routes.py     # (NEW) TypeSafe（Jev）设置读写与连通性探测（非聊天 provider）
+├── avatar_url_compact.py  # (NEW) 持久化前压缩 avatar_url（剔除 data: / 超长 URL）
+├── credentials_routes.py  # (NEW) 本地凭据库 HTTP（不落盘 secret）
+├── enterprise_worker_routes.py  # (NEW) 企业桌面 Worker 状态/开关 + 已发布 Agent 列表
 ├── code_index/            # (NEW) 代码索引 HTTP 路由（config/status，serve 期模型预载）
 ├── web_search/            # (NEW) 内置 Web 搜索子包（contracts/providers/service/routes）
 └── kb/                    # 本地知识库（manager/runtime/routes；job 可 cancel；chunk_strategy 标题感知/父子分块）
@@ -260,7 +263,7 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 
 ### protocols.py
 
-定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。`speaker_user_id`：群聊房间发言人（空则视为桌面主人 `"user"`）。`command_name`：Composer 命令 chip，与 `client_turn_id` 一起写入该轮用户行的 `history_user_metadata`（空值不写），供历史重载回显。
+定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。`speaker_user_id`：群聊房间发言人（空则视为桌面主人 `"user"`）。`command_name`：Composer 命令 chip，与 `client_turn_id` 一起写入该轮用户行的 `history_user_metadata`（空值不写），供历史重载回显。**(2026-10)** `max_tool_rounds`：单轮工具轮次上限覆盖（10–120，优先于 env/config）。`ConfirmResponse.remember`：`"session"` 时批准非受保护确认可把工具名写入 `sticky_allowed_tools`。`ClarifyResponse` 扩展 `panel_id`/`candidate_set_version`/`option_id`（版本化选项卡，过期 409）与 `secret_values`（仅交给等待中的工具，持久化只记 `secret_fields` 名）。
 
 ---
 
@@ -366,6 +369,42 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 ### server.py / session_manager.py
 
 `/chat` 前置：`plan_mode` + `isolate_run`（`ensure_isolate`；另有 adopt/discard isolate 路由）。`session_manager` 本区间约 +406 行：与 replay 落账、续跑切开、用量窗口对齐。`subagent_review.py` 随 resolver live overlay 小幅修订。
+
+---
+
+## 2026-10-25 增量（ca9d92b → 22d051f5）
+
+### 凭据库 — credentials_routes.py
+
+`register_credentials_routes(app, _check_token)`：`GET /api/credentials` 列出元数据并附带 `referenced_by`（扫描 `~/.agenticx/mcp.json` 的 env/headers 与全局 `providers.*.api_key|secret_key` 中的 `${cred:name}`）；`PUT /api/credentials/{name}` 写入 secret；`DELETE` 返回删除前引用标签。响应永不包含 secret 明文。
+
+### 企业 Worker — enterprise_worker_routes.py + lifespan
+
+`GET /api/enterprise-agents` → `fetch_published_agents()`；`GET/PUT /api/enterprise-worker(/status)` 读写在跑 Worker 与 `enterprise.worker.enabled`。`create_studio_app()` lifespan 启动 `EnterpriseWorker.run_forever()` 挂 `app.state.enterprise_worker`，shutdown 取消 task。
+
+### avatar_url_compact + message_forward
+
+`compact_stored_avatar_url()`：丢弃 `data:` 与长度 >2048 的 URL，避免 `messages.json` 膨胀。`session_manager._normalize_messages()` 与 `message_forward.normalize_forward_items()` 落盘前统一调用。
+
+### SessionManager 持久化与安全
+
+`create()` 设置 `studio_session.session_id` 并 `ensure_session_workdir(sid)`。`persist` 写盘前用 `default_store()` + `redact_text()` 替换 `${cred:…}`，内存副本在 `finally` 还原；失败时跳过 summary/FTS 并打 error。`list_sessions` / summary metadata 增加 `workspace_dir`（移动端活跃项目列表）。`scan_interrupted_sessions` 后 `register_interrupted_sessions`（effect guard）。`sessions_with_scratchpad_flag(key)` 批量读 scratchpad 真值。
+
+### Server 行为增量（本区间）
+
+- 全局 HTTP middleware：非豁免路径校验 `X-Agx-Desktop-Token`（`secrets.compare_digest`）；仅 loopback bind 时 Host 非本机 → 421。
+- `POST /api/session/interrupt` 改 `abort_chat_turn`（`scope=turn`，不取消 durable job）；新增 `GET /api/approvals/pending`。
+- `/api/confirm` 支持 session 级 remember；`/api/clarify` 对接 choice panel store + secret 字段分流。
+- `/chat`（及续跑路径）`_resolve_max_tool_rounds(override)`；命中 SkillHub forbidden_meta 文案时 SSE 拦截（非普通 @skill 安装意图）。
+- `register_credentials_routes` + `register_enterprise_worker_routes` 与 command 路由同级注册。
+
+### automation_scheduler.py
+
+首 tick 调用 `mark_interrupted_on_startup` 清理崩溃遗留 `runningSince`；触发与收束改用 `automation_run_health.mark_run_started` / `apply_run_outcome`（含 `trigger=schedule`）。
+
+### supervisor.py
+
+每轮 tick 用 `sessions_with_scratchpad_flag(SESSION_META_UNATTENDED)` 一次 SQLite 查询替代逐 session scratchpad 读，避免冷启动后数百会话拖死事件循环。
 
 ---
 

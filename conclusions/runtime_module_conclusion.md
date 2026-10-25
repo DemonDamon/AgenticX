@@ -1,6 +1,6 @@
 # AgenticX Runtime 模块总结
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的 runtime 变更）
 
 ## 目录路径
 
@@ -82,8 +82,24 @@ agenticx/runtime/
 ├── plan_mode.py            # (NEW) Plan mode 回合意图：工具白名单 + 系统提示块
 ├── plan_artifacts.py       # (NEW) 项目本地 Markdown Plan 产物
 ├── work_items.py           # (NEW) 群级 work items（非 session todos）
-├── replay_ledger/          # (NEW) 耐久语义回放账本（store/recorder/export/branch）
-└── subagent_runs/resolver.py  # (NEW) 磁盘 run + 同会话 live overlay
+├── replay_ledger/          # 耐久语义回放账本（store/recorder/export/branch）
+├── subagent_runs/resolver.py  # 磁盘 run + 同会话 live overlay
+├── action_audit.py         # 企业桌面动作审计 outbox（~/.agenticx/action_audit/outbox.jsonl）
+├── action_proposals/       # 耐久 ActionProposal 审阅（SQLite + outcome_unknown 恢复）
+├── automation_run_health.py # 定时任务运行健康（与 Desktop automation-run-health.ts 同语义）
+├── choice_panels/          # 版本化澄清/对比选择面板（进程内 store）
+├── connector_templates.json # 连接器模板目录（与 Desktop connector-supply  parity）
+├── connectors_store.py     # ~/.agenticx/mcp.json 连接器实例 CRUD（与 Desktop 去重模型对齐）
+├── credential_store.py     # ~/.agenticx/credentials.yaml + ${cred:NAME} 引用解析
+├── durable_jobs/           # 跨进程可恢复任务（SQLite CAS 租约 + Worker）
+├── effect_guard.py         # 派发前副作用账本（CallLedger）与崩溃后 orphan 防护
+├── enterprise_agent_policy.py # 企业登录态下的工具 subject 策略（deny/always_ask）
+├── enterprise_agent_sync.py # 本地 avatar 注册 / 拉取已发布企业 agent
+├── enterprise_trace.py     # replay 回合摘要上传企业 trace inbox（outbox  drained）
+├── enterprise_worker.py    # 企业任务 claim + 本地执行循环
+├── parked_approvals.py     # 无人值守挂起确认注册表
+├── session_boundary.py     # 会话私有 work 目录 + 出站域名 allowlist
+└── turn_abort.py           # 聊天 turn 中止 vs durable job 取消（作用域分离）
 ```
 
 ---
@@ -291,7 +307,8 @@ Meta-Agent 通过 `delegate_to_avatar(avatar_id, task)` 将任务注入目标分
 - `normalize_confirm_risk()`：缺省/拼错的 risk 一律按受保护处理（fail-closed，新工具默认不会绕过确认）
 - `protected_confirm_reason()`：返回一行中文理由（如「这条操作会删除或覆盖已有内容」），解释全自动模式下为何仍弹确认
 - `is_global_auto_confirm_mode()`：显式 `run_mode` / `confirm_strategy` 优先，遗留 `permissions.mode` 仅作兜底
-- `confirm_denial_note()`：区分「用户拒绝」「无人值守运行不批准受保护操作」「等待确认超时」三种拒绝来源
+- `confirm_denial_note()`：区分「用户拒绝」「无人值守运行不批准受保护操作」「无人值守等待审批超时（parked_timeout）」「等待确认超时」等拒绝来源
+- `ParkedApprovalConfirmGate`：无人值守模式下低风险仍自动放行；受保护操作注册到 `parked_approvals` 并经 session 的 `AsyncConfirmGate` 等待 `POST /api/confirm`；超时写入 `decision=parked_timeout`（文案含分钟数）。开关与超时：`approval_parking_enabled()` / `approval_timeout_seconds()`（`AGX_UNATTENDED_APPROVAL_PARKING`、`unattended.approval_parking` 默认开；`AGX_UNATTENDED_APPROVAL_TIMEOUT_SEC` / `unattended.approval_timeout_seconds`，clamp 60–7200s，默认 1200s）
 
 ---
 
@@ -329,6 +346,9 @@ Meta-Agent 通过 `delegate_to_avatar(avatar_id, task)` 将任务注入目标分
 - **command_safety.py**：把复合命令拆成简单命令逐段分类，全部安全才整体安全。`READ_ONLY_COMMANDS`（ls/cat/rg/jq/diff 等）不再打扰确认；`GUARDED_COMMANDS`（find/sed/awk/git/xargs/tar 等）按参数判定（`find . -delete` 会被拦）；`COMMAND_RISK_CATEGORIES` 把命令名映射到风险类别，`NEVER_AUTO_APPROVED_CATEGORIES`（destructive_filesystem / system_disruption / host_full_access / external_publish / dependency_change / arbitrary_code_execution）永不自动放行。入口 `assess_command()` 返回 `SafetyVerdict`；无法解析的形式（命令替换、进程替换、后台 `&`）按不可判定处理——宁可多问一次。被 `cli/agent_tools.py` 的 bash_exec 链路调用。
 - **command_sandbox.py**：三档权限 `READ_ONLY` / `WORKSPACE_WRITE` / `DANGER_FULL_ACCESS`（`normalize_command_permissions`）。`build_command_sandbox_plan()` 生成完整启动计划（argv/env/可写根/可读根/deny 规则），后端按平台分派：macOS seatbelt、Linux bubblewrap、Windows ProcessContainer（mxc，schema `0.7.0-alpha`，`AGX_WINDOWS_SANDBOX_EXECUTABLE` 指定运行器）。macOS/Linux 读写双隔离（home 目录不可读，`cat ~/.ssh/id_rsa` 被拒）；Windows 暂无读隔离，`shell_read_isolation_for_host()` / `path_deny_enforcement_for_host()` 分开如实上报能力缺口，供 UI 措辞。调用方：`cli/agent_tools.py:_apply_command_sandbox`、`studio/server.py`、`project_state/verify.py`。
 - **path_policy.py**：落地 `permissions.path_rules` 用户路径规则。deny 全局优先（任何命中即绝对拒绝，短路在确认门之前）；allow 是「跳过确认」的常设豁免，不能把工作区边界拆掉（`/**` 不会瓦解沙箱）。`normalize_path_rules()` 容忍手写坏规则（跳过而非炸掉执行路径），`match_path_rules()` 对 Windows 路径同时按原样与正斜杠形式匹配。
+- **command_sandbox.py（2026-10 补强）**：沙箱子进程环境剥离 `AGX_DESKTOP_TOKEN` / `AGX_CC_BRIDGE_TOKEN`，防止脚本回调本机 Studio 扩权；默认 deny 写 `**/.agx-mounts.json`；macOS 将 git 凭据 helper 指到会话 temp 内文件，避免 Keychain 弹窗挂死；纯 `git`（或 `cd … && git …` 单段脚本）可读 grant `~/.ssh` 等 git 凭据路径；原生连接器（腾讯会议/TAPD 等）按模板追加读写根；deny 扫描根不再遍历 `/usr` 等大前缀，避免 512 路径上限挤掉工作区规则。
+- **command_safety.py（2026-10）**：分类与 verdict 语义微调，配合 `enterprise_agent_policy.match_subject()` 对 `bash_exec` 内 `git push` 等 subject 做企业策略匹配。
+- **session_boundary.py**：`ensure_session_workdir()` 创建 `<sessions>/<id>/work`；`foreign_session_denial()` 禁止跨会话私有目录读写；`egress_denial()` + `configured_egress_allowlist()` 对 `runtime.egress_allow_domains` 出站 URL 做 host 后缀匹配（空列表=不额外限制）。
 
 ---
 
@@ -452,6 +472,11 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 | `AGX_WINDOWS_SANDBOX_EXECUTABLE` | （空） | Windows mxc 沙箱运行器路径 |
 | `AGX_SESSIONS_ROOT` | `~/.agenticx/sessions` | `plugin_usage` 扫描 Jev 卡片的会话根目录 |
 | `TYPESAFE_API_KEY` | （空） | Jev 密钥（优先级次于 `typesafe.api_key`，高于 `~/.config/typesafe/key`） |
+| `AGX_EFFECT_GUARD` | （默认开） | 派发前副作用账本（`runtime.effect_guard` 可覆盖） |
+| `AGX_UNATTENDED_APPROVAL_PARKING` | （默认开） | 无人值守受保护操作是否挂起等人批（`unattended.approval_parking`） |
+| `AGX_UNATTENDED_APPROVAL_TIMEOUT_SEC` | 1200 | 挂起审批等待上限（clamp 60–7200） |
+
+企业桌面相关（非 env，见 `config.yaml`）：`enterprise.enabled` + `enterprise.token` + `enterprise.base_url` 为 worker/trace/audit 前置；`enterprise.worker.enabled` 控制本地 worker；`enterprise.trace_upload` 显式 `false` 才关 trace；`enterprise.agent_action_policy` 映射为 `EnterpriseAgentPolicy`（`denied_tools` / `always_ask_tools` / `disable_session_allow`）。
 
 Jev（TypeSafe）其余参数在 `config.yaml` 的 `typesafe:` 节（由 `agenticx/llms/typesafe_config.py` 解析）：`enabled`（默认关）、`group_routing`（默认开）、`kb_auto`（默认关）、`model`（默认 `jev-latest`）、`base_url`（默认 `https://api.typesafe.ai`）、`timeout_sec`（默认 8）、`soft_timeout_sec`（默认 2）、`act_above`（0.8）、`review_above`（0.5）。
 
@@ -585,6 +610,89 @@ GroupChatRouter.run_group_turn(routing="team")
 - **truncated_final.py**：截断终答检测增强——厂商显式 `finish_reason`（`length` / `max_tokens` / `max_output_tokens` / `max_completion_tokens`）必续一次（公开判定函数 `is_length_finish_reason()`，被 runtime 与 LoopDetector 调用链复用）；新增未闭合 Markdown（奇数个 ``` 或 `**`）与路径中间截断（如 `补 T4/T`）启发式。
 - **assistant_output.py**：`<followups>` 保留标签兼容 MiniMax 等模型的别名拼写（`followflows` / `follow-ups` / `follow_ups` / `followup`），统一归一为 `followups` 且不再把已知别名误判为非规范标签。
 - **tool_search.py**：默认模式从 `off` 改为 `auto`；`CORE_ALWAYS_LOAD_TOOLS` 新增 `web_search` 与 `update_self_identity`（`show_widget` 移出延迟白名单）；模型直接调用未加载工具时自动 load 并提示下轮重试（`TOOL_AUTO_LOADED_TEMPLATE`，无需先调 `tool_search`）。
+
+---
+
+## 2026-10-25 增量（ca9d92b → 22d051f5）
+
+本区间约 +7980 行，按能力域归纳；**Go Enterprise Gateway 不参与**下列桌面本地执行路径——云端交互一律经 `enterprise.base_url` 的 HTTP API（Bearer `enterprise.token`），与 `apps/gateway` 模型代理/策略快照链路分离。
+
+### 审批、ActionProposal 与结构化选择
+
+| 能力 | 公开入口 | 持久化 / 契约 | Studio 边界 |
+|------|----------|---------------|-------------|
+| 挂起审批 | `parked_approvals.register/list_pending`；`ParkedApprovalConfirmGate` | 进程内 dict；字段含 `request_id/session_id/tool/risk/expires_at/remaining_seconds` | `GET /api/approvals/pending`；无人值守会话 `_resolve_confirm_gate(unattended=True)` 注入 |
+| ActionProposal | `action_proposals.ActionProposalService`：`propose` / `decide` / `execute` / `assert_no_silent_retry`；`recover_interrupted_proposals()` | SQLite `~/.agenticx/action_proposals.sqlite`；状态机 `awaiting_review→executing→{succeeded,failed,outcome_unknown,denied,expired}`；payload 哈希 `compute_proposal_hash`；TTL 默认 30min | `create_studio_app()` lifespan 启动时 recovery（`executing→outcome_unknown`）；工具层（如 `agent_tools` 外部写）持久化后再弹 UI |
+| 选择面板 | `choice_panels.get_choice_panel_store()`：`create` / `select` | 进程内版本化 `candidate_set_version`；`clarification` / `comparison`（对比须 http(s) source，≤3 选项） | `POST /api/clarify` 在 `panel_id` 存在时先 `select()`，409=`StaleChoiceError` |
+
+`OutcomeUnknownError` / `SilentRetryDeniedError` 强制「结果未知不得静默重放」；可选挂接 `CallLedger`（与 `reliability.call_ledger` 同一指纹，不另造算法）。
+
+### 耐久任务（durable_jobs）
+
+- **入口**：`get_durable_job_store()`、`DurableJobStore`（claim/heartbeat/complete/control）、`DurableJobWorker.tick()`；`turn_abort.create_durable_job` / `cancel_durable_job`。
+- **契约**：SQLite `~/.agenticx/durable_jobs.sqlite`；列相等 CAS 租约（`LostLeaseError`）；状态含 `waiting_input` / `waiting_external` / `paused` 等；可桥接 `automation_task_id`。
+- **Studio**：聊天 `POST /api/session/interrupt` **仅** turn abort（`abort_chat_turn` → `request_interrupt`），响应固定 `durable_jobs_cancelled=false`；耐久任务需显式 `cancel_durable_job` 或 store `control(cancel)`。`AgentRuntime` 工具派发用 `cancel_turn_scoped_dispatch` 取消当轮 asyncio 任务，不触达 job store。
+- **Gateway**：无。
+
+### 企业桌面 Worker、Trace 与审计
+
+```mermaid
+flowchart LR
+  subgraph local [本机 agx serve + Desktop]
+    RT[AgentRuntime / tools]
+    EW[EnterpriseWorker]
+    TA[action_audit outbox]
+    TR[enterprise_trace outbox]
+  end
+  subgraph cloud [enterprise.base_url]
+    API["/api/desktop/* tasks & agents"]
+    INBOX[agent-trace inbox]
+    AUDIT[audit ingest]
+  end
+  RT --> TA
+  RT --> TR
+  EW --> API
+  TR --> INBOX
+  TA --> AUDIT
+```
+
+- **EnterpriseWorker**（`enterprise_worker.py`）：`worker_enabled()`；claim/heartbeat/complete 企业任务并在本地 avatar session 跑 `AgentRuntime`；设备 id 落 `~/.agenticx/enterprise_worker/`。Studio：`register_enterprise_worker_routes` → `GET/PUT /api/enterprise-worker`、`GET /api/enterprise-agents`（`fetch_published_agents`）。
+- **enterprise_agent_sync**：`sync_local_avatar` → `POST {base}/api/desktop/agents/register`；`fetch_published_agents` → `GET …/agents`（best-effort，未登录 no-op）。
+- **enterprise_trace**：`replay_ledger.recorder` 在 run 完成时 `enqueue_completed_run`；outbox `~/.agenticx/enterprise_trace/outbox.jsonl`；上传 spans（无 tool args/result 正文，用户/助手 preview ≤500 字）；`trace_upload_enabled()` 需企业登录且未显式关 `enterprise.trace_upload`。
+- **action_audit**：`emit_action_audit()`（`effect_guard` / 工具路径调用）；outbox `~/.agenticx/action_audit/outbox.jsonl`，20MB 上限丢弃；`audit_enabled()` 同企业 token 门控。Desktop/Electron 负责 drain 上云，runtime 只 append。
+- **enterprise_agent_policy**：`load_enterprise_agent_policy()` 读 `enterprise.agent_action_policy`；subject 为 tool 名、`mcp:<tool>`、`git:push` 等 fnmatch；与确认门/allowlist 协同（`disable_session_allow` 可禁会话 sticky allow）。
+
+### 连接器与凭据
+
+- **credential_store**：密钥仅 `~/.agenticx/credentials.yaml`；配置侧存 `${cred:NAME}`；`CredentialStore.list/upsert/delete`、`resolve_text`、`redact_text`。Studio **`register_credentials_routes`**（`/api/credentials/*`，响应永不含 secret）；`session_manager` 快照与导出经 `redact_text`。
+- **connectors_store** + **connector_templates.json**：读写 `~/.agenticx/mcp.json` 中 `_agenticx.source=connector` 实例；模板去重指纹与 Desktop TS `mcpCredentialFingerprint` 字节兼容；`public_instance()` 仅 `has_credential` + 打码 URL。聊天侧 `connector_manage` 与设置 UI 共用同一文件。
+- **Gateway**：无（凭据不出本机 YAML/mcp.json，不上 PG）。
+
+### Turn 中止、副作用防护与循环检测
+
+- **effect_guard**：默认开；`before_dispatch` / `after_result` 写 session 级 `CallLedger`；启动时 `session_manager` 调 `register_interrupted_sessions` 标记 orphan；对用户返回中文「结果未知 / 已复用中断结果 / 账本写入失败」三类短路文案；企业登录时 `emit_action_audit` 记摘要。
+- **loop_detector**：新增确定性错误提示（patch token、skill 已存在、path escapes workspace）；同类沙箱失败（skillhub_home_eperm、allowlist_rejection、malformed_tool_name 等）跨参数聚合 critical；HTTP 405 / 多行 404 探测类早停。
+- **automation_run_health**：纯函数 `mark_run_started` / `apply_run_outcome` / `match_needs_user_action`；与 Desktop/Electron 定时任务 JSON 字段对齐（`runningSince`、`consecutiveFailures`、中断不计失败）；`_automation_tasks_io` 读写桥接。
+
+### AgentRuntime / Meta / 回放（本区间接线要点）
+
+- 工具派发链：企业策略 subject 判定 → `effect_guard` → 确认门（含 parked）→ 沙箱 plan；turn-scoped cancel 与 durable job 生命周期解耦。
+- **replay_ledger/recorder**：run 终态后可选 enqueue enterprise trace（不阻塞主流程）。
+- **meta_tools** / **prompts/meta_agent**：企业 worker 执行态与 connector/credential 纪律块；**plan_artifacts** 小改；**token_budget** 预算事件微调；**group_context** 附件字段透传。
+
+### 模块导出（增量包，未全部挂 `agenticx.runtime` 根 `__init__`）
+
+```python
+from agenticx.runtime.action_proposals import ActionProposalService, get_default_service, recover_interrupted_proposals
+from agenticx.runtime.durable_jobs import get_durable_job_store, DurableJobWorker
+from agenticx.runtime.choice_panels import get_choice_panel_store
+from agenticx.runtime.turn_abort import abort_chat_turn, TurnAbortHandle, cancel_durable_job, create_durable_job
+from agenticx.runtime.enterprise_worker import EnterpriseWorker, worker_enabled
+from agenticx.runtime.credential_store import CredentialStore, default_store, CRED_REF_RE
+from agenticx.runtime.connectors_store import load_connector_templates, public_instance
+from agenticx.runtime.effect_guard import effect_guard_enabled, register_interrupted_sessions
+from agenticx.runtime.confirm import ParkedApprovalConfirmGate
+```
 
 ---
 

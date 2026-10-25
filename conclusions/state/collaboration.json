@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "collaboration",
-  "generation": "c433343c7e494f5fbd9c1d0f9361faae",
+  "generation": "620d8f3730f74e9b95b3bb82646b79f3",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:c40221dabae2f53ce69eb7978a942d7038e00e96f5c08f9c791b0b52eef5692a",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:c3f357416bd435fb649923a0542f012ed8b02c97ac9ae35b1949e5d0a6944ef4",
   "summary_path": "conclusions/collaboration_module_conclusion.md",
-  "summary_sha256": "sha256:a6db5c1a0da7230e137cd9cdae928bbc4d3dc4f83ea5363be4cef62d2832cb5f",
-  "updated_at": "2026-09-30T00:54:06.160935+00:00"
+  "summary_sha256": "sha256:39cf744f9e1d52554e5ef53ef0b52c5bd66a4ab50ef977c23b3650447a06b4d0",
+  "updated_at": "2026-10-25T03:42:11.917469+00:00"
 }
