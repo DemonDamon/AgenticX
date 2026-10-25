@@ -1,12 +1,12 @@
 # @agenticx/feature-metering 模块总结
 
-> 结论生成时间：2026-07-21（基于 `enterprise/features/metering` 当前源码重生成）
+> 结论生成时间：2026-10-25（基于 `enterprise/features/metering` 当前源码重生成）
 
 > 说明：本文档描述**计量 · 四维查询 feature 包**（`@agenticx/feature-metering`），由 `apps/admin-console` 在 `/metering` 页面消费。仅基于真实源码，区分**真查询/UI** 与 **stub**。
 
 ## 模块概述
 
-`@agenticx/feature-metering` 是 admin-console **token 消耗计量与 ROI 分析的核心 feature 包**。口号"四维查询（部门-员工-厂商-时间）"，实际维度更广：dept / user / provider / model / day / pat（PAT）/ api_token_id 都可作分组键或过滤项。基于 `usage_records` 表（来自 `@agenticx/db-schema`），提供三类**真实 DB 查询**：分组聚合（`MeteringService.query`）、热力图矩阵（`MeteringService.queryHeatmap`）、ROI 报表（`RoiService.computeReport`），外加业务营收 CRUD 与 CSV 导出。
+`@agenticx/feature-metering` 是 admin-console **token 消耗计量与 ROI 分析的核心 feature 包**。口号"四维查询（部门-员工-厂商-时间）"，实际维度更广：dept / user / provider / model / day / pat（PAT）/ api_token_id 都可作分组键或过滤项。基于 `usage_records` 表（来自 `@agenticx/db-schema`），提供**真实 DB 查询**：分组聚合（`MeteringService.query`）、热力图矩阵（`MeteringService.queryHeatmap`）、ROI 报表（`RoiService.computeReport`），以及诊断向四类聚合——Overview KPI（`queryOverviewStats`）、按 `trace_id` 下钻（`queryTraceList`）、0–24 时模型堆叠（`queryHourlyModelRidge`）、按模型的请求体量分位数（`queryRequestSizeDistribution`），外加业务营收 CRUD 与 CSV 导出。
 
 **真 vs stub 判定**：本包**无 mock/stub**——所有 service 方法都走真实 SQL（PG 或 MySQL）；admin-console 侧 `lib/metering-service.ts` 是真 wrapper（直接 `new MeteringService()` / `new RoiService()`），`/api/metering/*` 路由与 `/metering` 页面均真接线。唯一"硬编码"是 `tenant_id`：由 `DEFAULT_TENANT_ID` env 或兜底常量 `01J00000000000000000000001` 解析（单租户简化，非 stub）。
 
@@ -51,6 +51,10 @@ features/metering/
 | `BusinessRevenueRecord / Input` | 业务营收记录（scenario_label + period + revenue_usd） |
 | `RoiReportInput / Result / Row` | 把 token 成本与营收按维度对齐（`roi: number \| null`） |
 | `UsageRecordInput / WriteResult` | 写 `usage_records`（ulid 主键，可带 `route`/`pricing_version`） |
+| `OverviewQueryInput / OverviewStatsResult` | 与时间窗 + 多维 IN 过滤一致的 KPI 输入；输出含 `daily_avg_tokens`、`session_count`（`count(distinct trace_id)`）、`io_ratio`、`cache_hit_rate`（`cache_read_input_tokens / input_tokens`）等 |
+| `TraceListRow / TraceListResult` | 按 `trace_id` 聚合的单条调用链摘要（token、成本、`step_count`、`first_seen`、涉及 `models[]`） |
+| `HourlyRidgeResult` | `{ hours: 0..23, models[], series: Record<model, number[24]> }` —— Top N 模型按小时 token 堆叠 |
+| `RequestSizeDistRow / RequestSizeDistResult` | 按模型统计 `request_count`、`avg_tokens` 与 `p50`/`p90`/`p99`（JS 线性插值分位数） |
 
 ## SQL 抽象层（`src/services/sql/`）—— 双方言真查询
 
@@ -75,8 +79,12 @@ features/metering/
 - `query(input) → MeteringQueryResult`：按 `group_by` 动态拼 SQL（`groupColumn` 映射每个 key 的 SQL 列，`day` 走 `sql.dateBucket("day", "time_bucket")`）；多重 IN 过滤；`day` 分组结果在 JS 侧把 pg 的 `Date` 转 ISO 短日期（避免前端 X 轴出现本地化长串）。
 - `queryHeatmap(input) → HeatmapQueryResult`：拼 SQL 取原始 `(dim, time, total_tokens, cost_usd)`，`limit = max(limitDimensions * maxTimeSlots, 1)` 行，再 `buildHeatmapMatrix` 塑形。
 - `recordUsage(input) → UsageRecordWriteResult | null`：写一条 `usage_records`（ulid 主键，`insertIgnore` 幂等）；失败返回 `null`（吞异常，不抛）。
-- **JSONL 兜底**（真查询的降级路径，非 mock）：DB 查询抛错时，若 `GATEWAY_USAGE_JSONL_FALLBACK === "1"`，`query` / `queryHeatmap` 回退到 `queryFromUsageLog` / `queryHeatmapFromUsageLog`，读取 `GATEWAY_USAGE_LOG`（默认 `../../apps/gateway/.runtime/usage.jsonl`）按行 JSON 解析、内存聚合。读不到文件返回空集。
-- **约束**：`MAX_HEATMAP_TIME_SLOTS` hour=168（一周）、day=90（三月）；`HEATMAP_DIM_COLUMN` 映射 `pat → api_token_id`、`user → user_id` 等；`limit_dimensions` 默认 30。
+- `queryOverviewStats(input) → OverviewStatsResult`：单条 SQL 汇总 token/成本/记录数；`day_count` 为 distinct 日桶数，驱动 `daily_avg_tokens`；失败返回全零 KPI（**无 JSONL 兜底**）。
+- `queryTraceList(input & { limit? }) → TraceListResult`：过滤 `trace_id is not null`，按 `trace_id` 分组；PG 用 `STRING_AGG(DISTINCT model, …)`、MySQL 用 `GROUP_CONCAT` 拼 `models`；`limit` 默认 200、上限 1000，按 `total_tokens desc`；失败返回 `{ rows: [] }`。
+- `queryHourlyModelRidge(input & { top_n? }) → HourlyRidgeResult`：按 `EXTRACT(HOUR FROM time_bucket)` 与 `model` 聚合，JS 侧取 token 总量 Top N（默认 10、上限 30），填充 24 小时 `series`；失败返回空 `models`/`series`。
+- `queryRequestSizeDistribution(input & { top_n? }) → RequestSizeDistResult`：先按模型 token 总量取 Top N（默认 15、上限 50），再逐模型拉取 `total_tokens` 升序列表，模块内 `percentile()` 算 p50/p90/p99；失败返回 `{ rows: [] }`。
+- **JSONL 兜底**（真查询的降级路径，非 mock）：DB 查询抛错时，若 `GATEWAY_USAGE_JSONL_FALLBACK === "1"`，**仅** `query` / `queryHeatmap` 回退到 `queryFromUsageLog` / `queryHeatmapFromUsageLog`，读取 `GATEWAY_USAGE_LOG`（默认 `../../apps/gateway/.runtime/usage.jsonl`）按行 JSON 解析、内存聚合。读不到文件返回空集。
+- **约束**：`MAX_HEATMAP_TIME_SLOTS` hour=168（一周）、day=90（三月）；`HEATMAP_DIM_COLUMN` 映射 `pat → api_token_id`、`user → user_id` 等；`limit_dimensions` 默认 30。Overview/Trace/Ridge/分位数查询共用私有 `buildUsageFilters()`（tenant + 时间窗 + 多维 IN）。
 
 ### `RoiService` (`services/roi.ts`)
 
@@ -99,6 +107,10 @@ features/metering/
 每个 API 类把 service 返回值包装为 `{code: "00000", message: "ok", data: T}` 信封：
 
 - `MeteringApi.query(input)` → 信封
+- `MeteringApi.overview(input)` → 调 `queryOverviewStats`，信封
+- `MeteringApi.traceList(input)` → 调 `queryTraceList`，信封
+- `MeteringApi.hourlyRidge(input)` → 调 `queryHourlyModelRidge`，信封
+- `MeteringApi.requestDistribution(input)` → 调 `queryRequestSizeDistribution`，信封
 - `HeatmapApi.query(input)` → 信封
 - `RoiApi`：
   - `report(input)` → 信封
@@ -137,12 +149,16 @@ re-export：types / 4 个 service（`MeteringService`、`RoiService`、heatmap-u
 
 | 关联 | 形态 | 说明 |
 |---|---|---|
-| `lib/metering-service.ts` | **真 wrapper** | 直接 `new MeteringService()` / `new RoiService()`，`tenant_id` 由 `DEFAULT_TENANT_ID` env 或兜底 `01J00000000000000000000001` 解析；导出 `queryMetering` / `queryHeatmap` / `queryRoiReport` / `exportRoiReportCsv` / 营收 CRUD |
+| `lib/metering-service.ts` | **真 wrapper** | 直接 `new MeteringService()` / `new RoiService()` / `MeteringApi`，`tenant_id` 由 `DEFAULT_TENANT_ID` env 或兜底 `01J00000000000000000000001` 解析；导出 `queryMetering` / `queryHeatmap` / `queryRoiReport` / `exportRoiReportCsv` / 营收 CRUD，以及 `queryOverviewStats` / `queryTraceList` / `queryHourlyModelRidge` / `queryRequestSizeDistribution` |
 | `/api/metering/query` (POST) | **真路由** | `requireAdminScope(["metering:read"])` 鉴权 → `queryMetering`；默认时间窗近 7 天 |
 | `/api/metering/heatmap` (POST) | **真路由** | 校验 dimension/granularity/metric 白名单 → `queryHeatmap` |
 | `/api/metering/roi` (GET/POST/PUT/DELETE) | **真路由** | GET：`mode=revenues` 列营收 或 ROI 报表（`format=csv` 导出）；POST/PUT/DELETE：`metering:manage` 鉴权 + 字段校验后营收 CRUD |
 | `/api/metering/export` (POST) | **真路由** | `queryMetering` 后在路由侧拼 CSV（含 dims + 6 token 字段 + cost） |
-| `/metering` 页面 | **真 UI** | 筛选 chip（dept/user/pat/provider/model + 日期）→ summary 卡片 → Tabs（charts/heatmap/roi/table）：`LineCard` 趋势 + `BarCard` 日量 + `TokenHeatmap`（OKLCH color-mix 热力图）+ ROI 表 + 营收 CRUD 表单 + CSV 导出；全部 `adminFetch` 真请求，i18n via `useTranslations("pages.ops.metering")` |
+| `/api/metering/overview` (POST) | **真路由** | `metering:read` → `queryOverviewStats`（默认近 7 天窗） |
+| `/api/metering/traces` (POST) | **真路由** | `metering:read` → `queryTraceList`（body 可传 `limit`） |
+| `/api/metering/hourly-ridge` (POST) | **真路由** | `metering:read` → `queryHourlyModelRidge`（body 可传 `top_n`） |
+| `/api/metering/request-distribution` (POST) | **真路由** | `metering:read` → `queryRequestSizeDistribution`（body 可传 `top_n`） |
+| `/metering` 页面 | **真 UI** | 筛选 chip（dept/user/pat/provider/model + 日期）→ summary 卡片 → Tabs（charts/heatmap/roi/table）：`LineCard` 趋势 + `BarCard` 日量 + `TokenHeatmap`（OKLCH color-mix 热力图）+ ROI 表 + 营收 CRUD 表单 + CSV 导出；诊断区另拉 overview / hourly-ridge / request-distribution；全部 `adminFetch` 真请求，i18n via `useTranslations("pages.ops.metering")` |
 | `apps/gateway`（Go） | **数据生产者** | 每次 LLM 调用后写 `usage_records`；本包 query 这张表；JSONL 兜底读 gateway 的 `usage.jsonl` |
 | `packages/db-schema` | **schema 依赖** | 读 `usage_records` + 读写 `enterprise_business_revenue` |
 | `packages/feature-billing` | **协同** | billing 消费同一份 `usage_records` 做分账；metering 做查询/可视化 |

@@ -4,7 +4,7 @@
 >
 > **原则**：只覆盖到一级目录 / 一级子模块，不下钻到文件级。需要文件级细节时，查阅对应 `conclusions/<dimension>/<module>_conclusion.md`。
 >
-> **最近增量刷新**：2026-09-18（target `30e57496`，相对基线 `8ebec3b5`）。控制面 `layout: custom`。映射补 `skill-registry`、`enterprise-root`；`exclude_paths` 收仓外路径与 `enterprise/docs`。
+> **最近增量刷新**：2026-10-25（target `22d051f5`，相对基线 `30e57496`）。控制面 `layout: custom`。映射新增 `context-service`，`enterprise-root` 不再拥有该 app；`exclude_paths` 补上仓外新树（`mobile`、`connector-runtime`、`plans`、`cases`、`diagrams`、`paper`、`results`、`wiki` 等）。
 
 ---
 
@@ -25,12 +25,13 @@
 
 ```
 enterprise/
-├── apps/                      🎯 可部署整机（4 个）
+├── apps/                      🎯 可部署整机（6 个）
 │   ├── web-portal/            #  员工前台（Next.js 15，端口 3000）
 │   ├── admin-console/         #  管理后台（Next.js 15，端口 3001）
 │   ├── gateway/               #  AI 网关（Go，端口 8088，OpenAI 兼容）
 │   ├── skill-registry/        #  窄技能注册服务（Python，端口 8090）
-│   └── edge-agent/            #  端侧 sidecar（Go，端口 127.0.0.1:7420）
+│   ├── edge-agent/            #  端侧 sidecar（Go，端口 127.0.0.1:7420）
+│   └── context-service/       #  企业共享知识上下文（FastAPI，端口 8091）
 │
 ├── features/                  🧩 业务功能域 workspace 包（11 个）
 │   ├── chat/                  对话工作区（最大，~18 文件）
@@ -48,8 +49,8 @@ enterprise/
 ├── packages/                  📦 技术零件 workspace 包（11 个）
 │   ├── auth/                  认证抽象（password / OIDC / SAML / JWT / 加密）
 │   ├── iam-core/              IAM 数据访问层（PG + MySQL 双方言 repos）
-│   ├── db-schema/             Drizzle 双方言 schema（PG 23 域文件 + MySQL 镜像）
-│   ├── ui/                    shadcn 设计系统（OKLCH indigo/violet）
+│   ├── db-schema/             Drizzle 双方言 schema（双方言 73 表；PG journal 60）
+│   ├── ui/                    shadcn 设计系统（OKLCH 近黑品牌色）
 │   ├── policy-engine/         Go 规则引擎（gateway replace 嵌入；TS 侧 stub）
 │   ├── core-api/              类型契约
 │   ├── sdk-ts/                TS 客户端 SDK（SSE / 多模态，可演示）
@@ -97,6 +98,7 @@ enterprise/
 | **gateway** | AI 控制平面网关（Go + Chi）：多 vendor adaptor / channel 池 / 配额 / 缓存 / wasm 插件 / MCP host&proxy / 防篡改审计 | Go | 8088 | [apps/gateway_conclusion.md](apps/gateway_conclusion.md) |
 | **skill-registry** | 窄技能注册服务：search + fetch/scan，不连租户库 | Python | 8090 | [apps/skill-registry_conclusion.md](apps/skill-registry_conclusion.md) |
 | **edge-agent** | 端侧 sidecar（Go）：沙箱执行 + trace 落盘/上送（v0.2.0 MVP；Desktop 尚未接线）| Go | 127.0.0.1:7420 | [apps/edge-agent_conclusion.md](apps/edge-agent_conclusion.md) |
+| **context-service** | 企业共享知识上下文：入库、wiki 编译、L0/L1 读取与案例检索；不持有租户库 | Python | 8091 | [apps/context-service_conclusion.md](apps/context-service_conclusion.md) |
 
 ---
 
@@ -124,9 +126,9 @@ enterprise/
 
 | 子模块 | 一句话定位 | 结论文档 |
 |---|---|---|
-| **db-schema** | Drizzle 双方言 schema —— PG/MySQL 各 23 域文件；PG journal ~29 次迁移；MySQL baseline 建全量表 | [packages/db-schema_conclusion.md](packages/db-schema_conclusion.md) |
+| **db-schema** | Drizzle 双方言 schema —— 双方言 73 表；PG journal 60 / MySQL journal 35 | [packages/db-schema_conclusion.md](packages/db-schema_conclusion.md) |
 | **auth** | 认证抽象 —— password / OIDC（discovery cache）/ SAML 2.0 SP / JWT RS256 / 信封加密 / Next.js 中间件（无 LDAP/Supabase 实现） | [packages/auth_conclusion.md](packages/auth_conclusion.md) |
-| **iam-core** | IAM 数据访问层 —— 双方言 repos（users/depts/roles/SSO/PAT/session-grant/compliance/quota）+ provider-key 加密 + legacy 迁移 | [packages/iam-core_conclusion.md](packages/iam-core_conclusion.md) |
+| **iam-core** | IAM 数据访问层 —— 双方言 repos（用户/部门/角色/配额，以及 agents、cases、projects）+ provider-key 加密 + legacy 迁移 | [packages/iam-core_conclusion.md](packages/iam-core_conclusion.md) |
 | **config** | 配置加载器（brand / feature flags YAML → Zod；apps 多半只消费默认常量）| [packages/config_conclusion.md](packages/config_conclusion.md) |
 
 ### 协议与契约
@@ -197,7 +199,7 @@ enterprise/
 **关键设计**：
 - **admin-console 是控制平面**：所有运行时配置（providers / policy / pricing / budget / channels / PAT 吊销 / compliance）通过 `/api/internal/*` 端点暴露
 - **gateway 是数据平面**：5-10s 轮询 admin internal endpoints **热加载所有配置**（无需重启）
-- **PG 是真理之源**：所有持久化都在 `packages/db-schema` 定义的 23 张表里
+- **PG 是真理之源**：持久化表由 `packages/db-schema` 定义（双方言当前 73 张表）
 - **优雅降级**：网关每个外部依赖都可缺（无 PG → file sink；无 Redis → 内存；无 key → mock；无 admin URL → 本地 JSON）
 - **跨语言契约对齐**：`session-title` 启发式、错误码、审计事件结构在 TS / Go / Python 三端保持一致
 

@@ -57,7 +57,7 @@ interface AuditStore {
   - 含 `audit:read:dept` 且 `actor.deptId` → `eq(departmentId, deptId)`；
   - 其他 → `eq(userId, actor.userId)`（只看自己）。
 - **合规保留窗口**：`applyRetentionWindow` 调 `getAuditRetentionCutoff(tenantId)`（`@agenticx/iam-core`），早于 cutoff 的数据不可见。
-- **过滤维度**：`user_id` / `department_id` / `provider` / `model` / `policy_hit`（jsonb `@>` 包含匹配，`safePolicyId` 校验长度 ≤128 + 白名单 `[a-zA-Z0-9._-]`）/ `cross_border=true` / `start` / `end`。
+- **过滤维度**：`user_id` / `trace_id` / `session_id` / `department_id` / `provider` / `model` / `policy_hit`（jsonb `@>` 包含匹配，`safePolicyId` 校验长度 ≤128 + 白名单 `[a-zA-Z0-9._-]`）/ `event_type` / `cross_border=true` / `start` / `end`。
 - **分页**：`limit` 夹到 `[1, 1000]`（默认 100），`offset` 钳到 ≥0；先 `count()` 再 `select()` 两次查询，按 `eventTime desc, id desc` 排序。
 - **返回**：`total` + `items` + 链状态（`chain_valid` / `chain_error_at` / `chain_error_reason` / `chain_verification: full|partial` / `chain_verified_count` / `chain_legacy_unverified`）。
 
@@ -148,5 +148,11 @@ interface AuditStore {
 
 ## 增量（8ebec3b5 → 30e57496）
 
-- PG / MySQL / Local store：查询支持 `trace_id` 过滤（`local-store.trace-filter.test.ts`）。
+- PG / MySQL / Local store：查询支持 `trace_id` / `session_id` 过滤（`local-store.trace-filter.test.ts`）。
 - `factory.ts`：`createAuditStore()` **仅** `postgresql` | `mysql`（`never` 穷尽）；`verifyConfiguredAuditChain` 按方言走全表链校验。Local 仍在包内，但不再作为 factory 默认回退。
+
+## 增量（30e57496 → 22d051f5）
+
+- `PgAuditStore` / `MysqlAuditStore`：`query` 与 `exportCsv` 在传入 `input.event_type` 时追加 `eq(gatewayAuditEvents.eventType, input.event_type)`。
+- `LocalAuditStore.query`：内存过滤 `input.event_type && event.event_type !== input.event_type` 时排除。
+- `local-store.trace-filter.test.ts`：新增 `event_type` 用例（如仅保留 `desktop_agent_action`）。

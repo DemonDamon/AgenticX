@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "admin-console",
-  "generation": "dcc1db1c524b4c10b8129da30f1a4e1c",
+  "generation": "99deb3b7bd164a4a8d539d065cfcfe53",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
-  "source_fingerprint": "sha256:b5d49f1bbcca9c8cce51ff95928a2fa29085d1d0d4d76a816f50caa7394d9fa7",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:016bd72a985640bf026915359bdbd7f4300c767099fec64dfae6484a773afadf",
   "summary_path": "enterprise/conclusions/apps/admin-console_conclusion.md",
-  "summary_sha256": "sha256:6027ec085b12adb0a2e923454b949b648c83241122281960198711ad2eb2051b",
-  "updated_at": "2026-09-17T23:53:54.065795+00:00"
+  "summary_sha256": "sha256:6d96b0828b677aea3b4ea595af199597556ce178bed3820dbbd3e106d5622585",
+  "updated_at": "2026-10-25T03:42:33.795550+00:00"
 }

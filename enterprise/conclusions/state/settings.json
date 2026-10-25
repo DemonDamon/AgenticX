@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "settings",
-  "generation": "64827ce0e8de4632acbc68ce74135056",
+  "generation": "befdb9c0c85e43738b5fd5d56fddc795",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
   "source_fingerprint": "sha256:aa70813480c446e344fe4b07e18470a736825264ac920818ffba5cff5bb90eec",
   "summary_path": "enterprise/conclusions/features/settings_conclusion.md",
   "summary_sha256": "sha256:6a080e2ce9fabc713adb86ef871a12cc79f385b47814e7607c2f6732e4e2c614",
-  "updated_at": "2026-09-17T23:54:00.416250+00:00"
+  "updated_at": "2026-10-24T13:52:54.359261+00:00"
 }

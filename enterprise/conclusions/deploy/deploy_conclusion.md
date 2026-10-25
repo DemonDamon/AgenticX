@@ -71,13 +71,13 @@ deploy/
 |---|---|---|
 | `nginx` | `nginx:1.27-alpine` | 公网入口 80/443；挂 `gateway.conf` + `certs/`（只读） |
 | `gateway-a` + `gateway-b` | `ghcr.io/agenticx/enterprise-gateway:latest` | **双副本网关**；挂 `config/policies.yaml` + `../../plugins` 只读 + `gateway_runtime` 共享卷 |
-| `web-portal` | `ghcr.io/agenticx/enterprise-web-portal:latest` | 端口 3000（容器内） |
+| `web-portal` | `ghcr.io/agenticx/enterprise-web-portal:latest` | 端口 3000（容器内）；必填 `GATEWAY_INTERNAL_TOKEN`（服务端调网关 internal API，与 gateway/admin 共用 compose 级变量） |
 | `admin-console` | `ghcr.io/agenticx/enterprise-admin-console:latest` | 端口 3001；挂 `gateway_runtime` + `../../plugins` |
 | `postgres-primary` | `postgres:16-alpine`（profile `postgresql`） | 主库；`pg_isready` healthcheck |
 | `postgres-replica` | `postgres:16-alpine`（profile `postgresql`） | 从库；`depends_on` primary healthy |
 | `redis` | `redis:7-alpine` | AOF 持久化（`--appendonly yes --save 900/300`） |
 
-强制环境变量（`${VAR:?...}` 语法）：`DATABASE_URL`、`ADMIN_CONSOLE_LOGIN_PASSWORD`；`POSTGRES_PASSWORD`、`JWT_PUBLIC_KEY`、`JWT_PRIVATE_KEY` 由调用方注入。gateway 关键 env：`GATEWAY_PORT=8088`、`GATEWAY_CONFIG_PATH=/app/config/policies.yaml`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_QUOTA_USAGE_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE=/runtime/admin/policy-snapshot.json`、`GATEWAY_POLICY_OVERRIDE_FILE`。
+强制环境变量（`${VAR:?...}` 语法）：`DATABASE_URL`、`ADMIN_CONSOLE_LOGIN_PASSWORD`、`GATEWAY_INTERNAL_TOKEN`（gateway-a/b、admin-console、web-portal 均必填）；`POSTGRES_PASSWORD`、`JWT_PUBLIC_KEY`、`JWT_PRIVATE_KEY` 由调用方注入。gateway 关键 env：`GATEWAY_PORT=8088`、`GATEWAY_CONFIG_PATH=/app/config/policies.yaml`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_QUOTA_USAGE_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE=/runtime/admin/policy-snapshot.json`、`GATEWAY_POLICY_OVERRIDE_FILE`。
 
 > 诚实缺口：(1) **`postgres-replica` 的主从复制参数（`wal_level` / `primary_conninfo` 等）未在 compose 内配置**，注释明确「由客户环境初始化脚本注入」——即 replica 当前只是骨架容器，开箱不会自动复制。(2) **`prod.yml` 仅定义 `postgresql` profile，没有 `mysql` 生产 profile**（`dev.yml` 有 mysql，prod 没有）；README 排障项明确「MySQL 生产 profile 尚未并入该模板」。(3) 镜像 tag 硬编码 `latest`，生产需通过覆盖层替换为不可变 tag。
 
@@ -182,3 +182,9 @@ deploy/
 - 压测/集成 compose：`docker-compose/{test,portal,portal_test,admin_test,gateway_test,nginx_test}.yml` + `load-test-runtime-env.sh`。
 - `prod.yml`：补 portal 相关服务块。
 - `nginx/gateway.conf`：入口小改（仍无 TLS server 块）。
+
+## 增量（30e57496 → 22d051f5）
+
+- **`prod.yml`**：`web-portal` 新增 **`GATEWAY_INTERNAL_TOKEN`**（`${GATEWAY_INTERNAL_TOKEN:?...}`）；服务/端口/nginx 依赖链不变（仍 `80/443` 入口、`NEXT_PUBLIC_GATEWAY_BASE: http://nginx`）。
+- **`portal.yml`**（覆盖层，`web-portal` 宿主机 **3000:3000**）：同步必填 **`GATEWAY_INTERNAL_TOKEN`**；注释预留 **`PORTAL_HSTS_MAX_AGE`**（仅 HTTPS 且证书稳定后手动开启，默认不注入）。
+- **`gateway_test.yml`**（覆盖层，`gateway-a` **8088:8088**、`gateway-b` **8089:8088**）：`gateway-a`/`gateway-b` 各增可选 **`GATEWAY_REMOTE_BUDGET_CONFIG_URL`**、**`GATEWAY_BUDGET_BACKEND`**（`${...:-}` 空默认，不配则走网关进程内默认）；其余 remote/internal/JWT 必填项与端口映射不变。
