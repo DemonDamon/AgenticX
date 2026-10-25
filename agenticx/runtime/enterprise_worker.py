@@ -22,6 +22,16 @@ import httpx
 
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.managed.gateway_llm import GatewayLLMFactory
+from agenticx.managed.worker.client import (
+    MAWorkerClient,
+    MAWorkerError,
+    WorkAssignment,
+    WorkerAuthError,
+)
+from agenticx.managed.worker.runner import MAWorker, WorkItemRunner
+from agenticx.runtime.enterprise_agent_policy import load_enterprise_agent_policy
+from agenticx.runtime.session_boundary import sessions_root
 from agenticx.utils.agx_home import agx_home
 
 logger = logging.getLogger(__name__)
@@ -73,6 +83,105 @@ def _enterprise_settings() -> tuple[str, str] | None:
     if not token or not base_url:
         return None
     return token, base_url
+
+
+def _login_settings() -> tuple[str, str] | None:
+    """Return ``(token, base_url)`` when enterprise login is present.
+
+    Unlike ``_enterprise_settings``, this ignores ``enterprise.worker.enabled``.
+    """
+    try:
+        if ConfigManager.get_value("enterprise.enabled") is not True:
+            return None
+        token = ConfigManager.get_value("enterprise.token")
+        base_url = ConfigManager.get_value("enterprise.base_url")
+    except Exception:
+        logger.debug("enterprise login config read failed")
+        return None
+    if not isinstance(token, str) or not isinstance(base_url, str):
+        return None
+    token = token.strip()
+    base_url = base_url.strip().rstrip("/")
+    if not token or not base_url:
+        return None
+    return token, base_url
+
+
+enterprise_login_settings = _login_settings
+
+MA_ENV_MISSING = "未配置 MA 工作环境"
+_WORKER_PROTOCOLS = ("legacy", "ma", "dual")
+MA_ENV_DISCOVERY_TTL_S = 300
+INTERACTIVE_ENV_TTL_S = 1800
+_ENV_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def worker_protocol() -> str:
+    """Return ``ma`` or ``dual`` when configured; any other value is ``legacy``."""
+    try:
+        raw = ConfigManager.get_value("enterprise.worker.protocol")
+    except Exception:
+        return "legacy"
+    if not isinstance(raw, str):
+        return "legacy"
+    normalized = raw.strip().lower()
+    if normalized not in _WORKER_PROTOCOLS:
+        return "legacy"
+    return normalized
+
+
+def _ma_environment_ids() -> list[str]:
+    """``enterprise.worker.ma_environment_ids``: non-empty strings, order kept."""
+    try:
+        raw = ConfigManager.get_value("enterprise.worker.ma_environment_ids")
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    found: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        found.append(text)
+    return found
+
+
+def _ma_base_url(default_base: str) -> str:
+    """``enterprise.worker.ma_base_url`` when set, otherwise ``default_base``."""
+    try:
+        raw = ConfigManager.get_value("enterprise.worker.ma_base_url")
+    except Exception:
+        raw = None
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip().rstrip("/")
+    return default_base.rstrip("/")
+
+
+def _ma_environment_mode() -> str:
+    """Return ``auto`` only when the setting is exactly ``auto``."""
+    try:
+        raw = ConfigManager.get_value("enterprise.worker.ma_environment_mode")
+    except Exception:
+        return "manual"
+    if isinstance(raw, str) and raw.strip().lower() == "auto":
+        return "auto"
+    return "manual"
+
+
+def _ma_gateway_url(default_base: str) -> str:
+    """Gateway root for managed-agent model calls. Trailing slashes are removed."""
+    try:
+        raw = ConfigManager.get_value("enterprise.worker.gateway_url")
+    except Exception:
+        raw = None
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip().rstrip("/")
+    return f"{default_base.rstrip('/')}/v1"
 
 
 def _state_dir() -> Path:
@@ -240,6 +349,21 @@ async def _iter_sse(response: httpx.Response):
             yield event
 
 
+class _TrackedRunner(WorkItemRunner):
+    """Records the active MA work item on the owning EnterpriseWorker for status()."""
+
+    def __init__(self, *, owner: "EnterpriseWorker", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._owner = owner
+
+    async def run(self, assignment: WorkAssignment) -> None:
+        self._owner._ma_work_started(assignment)
+        try:
+            await super().run(assignment)
+        finally:
+            self._owner._ma_work_finished(assignment.work.id)
+
+
 class EnterpriseWorker:
     """Polls enterprise for one desktop task at a time and answers locally."""
 
@@ -262,6 +386,12 @@ class EnterpriseWorker:
         self._claim_pause_until = 0.0
         self._last_heartbeat_mono = 0.0
         self._device_id = ""
+        self._ma_worker: MAWorker | None = None
+        self._ma_worker_key: tuple[str, str, str, tuple[str, ...]] | None = None
+        self._ma_work: dict[str, dict[str, Any]] = {}
+        self._ma_client: MAWorkerClient | None = None
+        self._ma_env_cache: tuple[float, list[dict[str, str]]] | None = None
+        self._interactive_envs: dict[str, float] = {}
 
     def status(self) -> dict[str, Any]:
         enabled = worker_enabled()
@@ -273,6 +403,18 @@ class EnterpriseWorker:
             "last_heartbeat_at": self._last_heartbeat_at,
             "current_task_id": self._current_task_id,
             "last_error": self._last_error,
+            "protocol": worker_protocol(),
+            "ma_enabled": worker_protocol() in ("ma", "dual"),
+            "ma_environment_mode": _ma_environment_mode(),
+            "ma_environments": (
+                list(self._ma_env_cache[1])
+                if self._ma_env_cache
+                else [{"id": item, "name": item} for item in _ma_environment_ids()]
+            ),
+            "ma_work": [dict(item) for item in self._ma_work.values()],
+            "interactive_environments": sorted(
+                key for key, expires in self._interactive_envs.items() if expires > time.monotonic()
+            ),
         }
 
     async def run_forever(self) -> None:
@@ -281,7 +423,7 @@ class EnterpriseWorker:
             while True:
                 executed = False
                 try:
-                    if not worker_enabled():
+                    if not worker_enabled() and not self._interactive_active():
                         await asyncio.sleep(DISABLED_SLEEP_S)
                         continue
                     executed = await self.run_once()
@@ -306,10 +448,18 @@ class EnterpriseWorker:
     async def run_once(self) -> bool:
         """Heartbeat when due, then claim and run at most one task."""
 
+        handled_interactive = await self._run_once_interactive()
+        if handled_interactive:
+            return True
         settings = _enterprise_settings()
         if settings is None:
             return False
         token, base = settings
+        proto = worker_protocol()
+        if proto == "ma":
+            return await self._run_once_ma(token, base)
+        if proto == "dual" and await self._run_once_ma(token, base):
+            return True
         now = time.monotonic()
         heartbeat_due = (
             self._last_heartbeat_mono == 0.0
@@ -338,6 +488,114 @@ class EnterpriseWorker:
             return False
         await self._execute(token, base, task)
         return True
+
+    def _ma_worker_for(self, token: str, base: str, env_ids: list[str]) -> MAWorker:
+        gateway = _ma_gateway_url(base)
+        key = (token, _ma_base_url(base), gateway, tuple(env_ids))
+        if self._ma_worker is None or self._ma_worker_key != key:
+            client = MAWorkerClient(_ma_base_url(base), token, http=self._client())
+            device_id = self._ensure_device_id()
+            runner = _TrackedRunner(
+                owner=self,
+                client=client,
+                device_id=device_id,
+                llm_factory=GatewayLLMFactory(base_url=gateway, token=token),
+                workdir_root=sessions_root(),
+                enterprise_policy_loader=load_enterprise_agent_policy,
+            )
+            self._ma_worker = MAWorker(
+                client=client,
+                environment_ids=env_ids,
+                device_id=device_id,
+                runner=runner,
+            )
+            self._ma_worker_key = key
+            self._ma_client = client
+        return self._ma_worker
+
+    async def _ma_environments(self, token: str, base: str) -> list[dict[str, str]]:
+        if _ma_environment_mode() != "auto":
+            return [{"id": item, "name": item} for item in _ma_environment_ids()]
+        now = time.monotonic()
+        if self._ma_env_cache is not None and now - self._ma_env_cache[0] < MA_ENV_DISCOVERY_TTL_S:
+            return self._ma_env_cache[1]
+        client = self._ma_client or MAWorkerClient(_ma_base_url(base), token, http=self._client())
+        try:
+            envs = await client.list_eligible_environments()
+        except WorkerAuthError:
+            raise
+        except MAWorkerError:
+            self._last_error = "托管环境列表获取失败"
+            if self._ma_env_cache is not None:
+                return list(self._ma_env_cache[1])
+            return []
+        self._ma_env_cache = (now, envs)
+        return envs
+
+    def _interactive_active(self) -> bool:
+        now = time.monotonic()
+        self._interactive_envs = {
+            key: expires for key, expires in self._interactive_envs.items() if expires > now
+        }
+        return bool(self._interactive_envs)
+
+    def add_interactive_environment(self, environment_id: str) -> None:
+        if not _ENV_ID_RE.match(environment_id):
+            raise ValueError("invalid environment id")
+        self._interactive_envs[environment_id] = time.monotonic() + INTERACTIVE_ENV_TTL_S
+
+    async def _run_once_interactive(self) -> bool:
+        if not self._interactive_active():
+            return False
+        settings = _login_settings()
+        if settings is None or time.monotonic() < self._claim_pause_until:
+            return False
+        token, base = settings
+        worker = self._ma_worker_for(token, base, sorted(self._interactive_envs))
+        try:
+            return await worker.run_once(max_wait_seconds=0)
+        except WorkerAuthError:
+            self._pause_for_auth()
+            return False
+
+    def _ma_work_started(self, assignment: WorkAssignment) -> None:
+        session_id = assignment.session.id
+        self._ma_work[assignment.work.id] = {
+            "work_id": assignment.work.id,
+            "session_id": session_id,
+            "agent_id": assignment.agent_id,
+            "agent_version": assignment.agent_version,
+            "environment_id": assignment.work.environment_id,
+            "started_at": _utc_stamp(),
+            "workdir": f"~/.agenticx/sessions/{session_id}/work",
+            "interactive": assignment.work.environment_id in self._interactive_envs,
+        }
+
+    def _ma_work_finished(self, work_id: str) -> None:
+        self._ma_work.pop(work_id, None)
+
+    async def _run_once_ma(self, token: str, base: str) -> bool:
+        if time.monotonic() < self._claim_pause_until:
+            return False
+        try:
+            envs = await self._ma_environments(token, base)
+        except WorkerAuthError:
+            self._pause_for_auth()
+            return False
+        env_ids = [item["id"] for item in envs]
+        if not env_ids:
+            if _ma_environment_mode() == "manual":
+                self._last_error = MA_ENV_MISSING
+            return False
+        worker = self._ma_worker_for(token, base, env_ids)
+        try:
+            handled = await worker.run_once(max_wait_seconds=0)
+        except WorkerAuthError:
+            self._pause_for_auth()
+            return False
+        if handled and self._last_error in (MA_ENV_MISSING, AUTH_ERROR):
+            self._last_error = None
+        return handled
 
     def _client(self) -> httpx.AsyncClient:
         if self._http is None:
