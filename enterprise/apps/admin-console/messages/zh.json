@@ -382,9 +382,12 @@
           "cron": "计划",
           "timezone": "时区",
           "input": "输入内容",
-          "inputHint": "可用变量 {{date}} {{datetime}} {{schedule_name}} {{run_id}}"
+          "inputHint": "定时触发时发给智能体的内容。可用占位符：'{{date}}' '{{datetime}}' '{{schedule_name}}' '{{run_id}}'。"
         },
-        "policy": { "follow": "跟随智能体版本路由", "pinned": "固定版本" },
+        "policy": {
+          "follow": "跟随智能体版本路由",
+          "pinned": "固定版本"
+        },
         "runStatus": {
           "scheduled": "已排期",
           "firing": "触发中",
@@ -393,7 +396,10 @@
           "failed": "失败",
           "skipped": "已跳过"
         },
-        "trigger": { "schedule": "定时", "manual": "手动" },
+        "trigger": {
+          "schedule": "定时",
+          "manual": "手动"
+        },
         "skip": {
           "missed": "错过",
           "overlap": "上一轮未结束",
@@ -401,7 +407,10 @@
           "disabled": "已停用",
           "deleted": "已删除"
         },
-        "delete": { "title": "删除定时任务", "description": "删除后不再触发，历史运行记录保留" },
+        "delete": {
+          "title": "删除定时任务",
+          "description": "删除后不再触发，历史运行记录保留"
+        },
         "historyTitle": "运行记录",
         "historyColumns": {
           "when": "计划时间",
@@ -502,8 +511,14 @@
           "channel": "IM 渠道",
           "eval": "评测"
         },
-        "secret": { "title": "签名密钥", "once": "关闭后不能再次查看" },
-        "delete": { "title": "删除 Webhook", "description": "删除后不再推送，历史投递记录保留。" },
+        "secret": {
+          "title": "签名密钥",
+          "once": "关闭后不能再次查看"
+        },
+        "delete": {
+          "title": "删除 Webhook",
+          "description": "删除后不再推送，历史投递记录保留。"
+        },
         "historyTitle": "投递记录",
         "historyColumns": {
           "event": "事件类型",
@@ -531,7 +546,11 @@
           "enabled": "启用",
           "actions": "操作"
         },
-        "actions": { "edit": "编辑", "sessions": "会话", "delete": "删除" },
+        "actions": {
+          "edit": "编辑",
+          "sessions": "会话",
+          "delete": "删除"
+        },
         "fields": {
           "name": "名称",
           "agent": "智能体",
@@ -546,13 +565,37 @@
           "site": "站点",
           "idle": "空闲多久后开新会话（小时）"
         },
-        "policy": { "follow": "跟随最新", "pinned": "固定 v{version}", "pinnedChoice": "固定版本" },
-        "site": { "feishu": "飞书", "lark": "Lark 国际版" },
-        "status": { "pending": "待连接", "starting": "连接中", "running": "已连接", "error": "异常", "stopped": "已停止" },
-        "delete": { "title": "删除 IM 渠道", "description": "删除后机器人不再回复，已产生的会话保留" },
+        "policy": {
+          "follow": "跟随最新",
+          "pinned": "固定 v{version}",
+          "pinnedChoice": "固定版本"
+        },
+        "site": {
+          "feishu": "飞书",
+          "lark": "Lark 国际版"
+        },
+        "status": {
+          "pending": "待连接",
+          "starting": "连接中",
+          "running": "已连接",
+          "error": "异常",
+          "stopped": "已停止"
+        },
+        "delete": {
+          "title": "删除 IM 渠道",
+          "description": "删除后机器人不再回复，已产生的会话保留"
+        },
         "sessionsTitle": "渠道会话",
-        "conversation": { "p2p": "私聊", "group": "群聊" },
-        "sessionColumns": { "type": "类型", "session": "会话", "version": "版本", "when": "最后消息时间" }
+        "conversation": {
+          "p2p": "私聊",
+          "group": "群聊"
+        },
+        "sessionColumns": {
+          "type": "类型",
+          "session": "会话",
+          "version": "版本",
+          "when": "最后消息时间"
+        }
       },
       "agentEnvironments": {
         "title": "执行环境",
@@ -625,6 +668,123 @@
           "rubrics": "评分标准",
           "runs": "评测任务",
           "candidates": "候选版本"
+        },
+        "empty": "暂无数据",
+        "actions": {
+          "view": "查看",
+          "createDataset": "新建评测集",
+          "createRubric": "新建评分标准",
+          "startRun": "发起评测",
+          "addItems": "添加用例",
+          "addRule": "添加规则",
+          "iterate": "自迭代",
+          "applyCandidate": "创建候选版本",
+          "compare": "与另一次评测对比",
+          "viewSession": "查看会话",
+          "start": "发起"
+        },
+        "columns": {
+          "name": "名称",
+          "itemCount": "用例数",
+          "updatedAt": "更新时间",
+          "actions": "操作",
+          "agentVersion": "智能体与版本",
+          "dataset": "评测集",
+          "rubric": "评分标准",
+          "status": "状态",
+          "progress": "进度",
+          "passRate": "通过率",
+          "meanScore": "均分",
+          "startedAt": "发起时间",
+          "agent": "智能体",
+          "baseVersion": "基线版本",
+          "sourceRun": "来源任务",
+          "createdAt": "创建时间"
+        },
+        "fields": {
+          "name": "名称",
+          "agent": "智能体",
+          "version": "版本",
+          "environment": "环境",
+          "dataset": "评测集",
+          "rubric": "评分标准",
+          "memoryStores": "记忆库（评测时只读挂载）",
+          "concurrency": "并发数",
+          "criteria": "评判说明",
+          "mode": "评判方式",
+          "threshold": "通过阈值",
+          "judgeModel": "裁判模型",
+          "sessionId": "会话 ID",
+          "useAnswerAsExpected": "把该会话的最终回答作为期望回答"
+        },
+        "placeholders": {
+          "selectAgent": "选择智能体",
+          "selectDataset": "选择评测集",
+          "selectRubric": "选择评分标准",
+          "noJudge": "不使用裁判",
+          "optimizerModel": "优化模型（provider/model）"
+        },
+        "datasets": {
+          "createTitle": "新建评测集",
+          "deleteTitle": "删除评测集",
+          "deleteConfirm": "确认删除这个评测集？已有评测任务不会受影响。",
+          "addItemsTitle": "添加用例",
+          "pasteJson": "粘贴 JSON",
+          "uploadFile": "上传文件",
+          "importSession": "从会话导入",
+          "hasExpected": "有期望回答",
+          "noExpected": "无期望回答",
+          "sourceSession": "来源会话",
+          "saveFailed": "保存失败",
+          "parseFailed": "解析失败"
+        },
+        "rubrics": {
+          "createTitle": "新建评分标准",
+          "dialogTitle": "评分标准",
+          "modeBinary": "是否通过",
+          "modeScore": "打分",
+          "saveFailed": "保存失败"
+        },
+        "runs": {
+          "startTitle": "发起评测",
+          "defaultCloud": "默认云端",
+          "startFailed": "发起失败",
+          "iterateStarted": "已发起自迭代",
+          "iterateFailed": "自迭代未开始"
+        },
+        "candidates": {
+          "diffTitle": "候选差异",
+          "applyTitle": "创建候选版本",
+          "applyConfirm": "将基于该候选创建智能体的新版本。当前生效版本不变（若智能体跟随最新版本，会先固定在当前生效版本）。确认后可在新版本上回测，再到智能体页面手动切换生效版本。",
+          "applyFailed": "创建失败",
+          "applySuccess": "已创建版本 v{version}，当前生效仍为 v{effective}",
+          "appliedVersion": "已创建版本 v{version}",
+          "status": {
+            "proposed": "待处理",
+            "applied": "已创建版本",
+            "discarded": "已丢弃"
+          }
+        },
+        "detail": {
+          "title": "评测详情",
+          "meanScore": "均分",
+          "passRate": "通过率",
+          "failed": "未通过",
+          "errored": "执行异常",
+          "errorNote": "执行异常不计入通过率与均分",
+          "progress": "进度",
+          "filterAll": "全部",
+          "filterFailed": "未通过",
+          "filterError": "执行异常",
+          "judgeReason": "裁判理由：{reason}",
+          "noReason": "无"
+        },
+        "compare": {
+          "title": "版本对比",
+          "passRate": "通过率 {base} → {target}（{delta}）",
+          "meanScore": "均分 {base} → {target}（{delta}）",
+          "counts": "修复 {fixed} / 退化 {regressed} / 不变 {unchanged} / 异常 {errored}",
+          "hint": "选择同评测集、同评分标准的另一次已完成评测。"
         }
       },
       "agentMemory": {
@@ -644,8 +804,15 @@
           "updatedAt": "更新时间",
           "actions": "操作"
         },
-        "status": { "active": "使用中", "archived": "已归档" },
-        "form": { "createTitle": "新建记忆库", "name": "名称", "description": "描述" },
+        "status": {
+          "active": "使用中",
+          "archived": "已归档"
+        },
+        "form": {
+          "createTitle": "新建记忆库",
+          "name": "名称",
+          "description": "描述"
+        },
         "actions": {
           "open": "查看",
           "archive": "归档",
@@ -690,7 +857,11 @@
           "confirm": "脱敏",
           "viewTitle": "历史版本"
         },
-        "operation": { "created": "新建", "modified": "修改", "deleted": "删除" },
+        "operation": {
+          "created": "新建",
+          "modified": "修改",
+          "deleted": "删除"
+        },
         "archive": {
           "title": "归档记忆库",
           "description": "确认归档「{name}」？归档后不能挂到新会话，已经挂载的会话仍可继续使用。",
@@ -776,7 +947,10 @@
           "createdAt": "创建时间",
           "actions": "操作"
         },
-        "status": { "active": "有效", "archived": "已归档" },
+        "status": {
+          "active": "有效",
+          "archived": "已归档"
+        },
         "types": {
           "static_bearer": "MCP 静态令牌",
           "mcp_oauth": "MCP OAuth",
@@ -802,7 +976,12 @@
           "addCredential": "新增凭证",
           "save": "保存"
         },
-        "form": { "createTitle": "新建凭证库", "name": "名称", "description": "描述", "basic": "基本信息" },
+        "form": {
+          "createTitle": "新建凭证库",
+          "name": "名称",
+          "description": "描述",
+          "basic": "基本信息"
+        },
         "credential": {
           "createTitle": "新增凭证",
           "rotateTitle": "轮换凭证",
@@ -1649,7 +1828,11 @@
         "featureRemaining": "{window}剩余 {remaining} / {limit}"
       },
       "limits": {
-        "tabs": { "spending": "Token / 美元", "search": "联网搜索", "research": "深度研究" },
+        "tabs": {
+          "spending": "Token / 美元",
+          "search": "联网搜索",
+          "research": "深度研究"
+        },
         "enable": "单独设置上限",
         "inherit": "关闭后恢复继承，不会留下一条看不见的零额度。",
         "unitTokens": "Token 上限",
@@ -1673,7 +1856,11 @@
         "sharedCount": "这一次数由范围内的人共同消耗。关闭后不再单独设置。",
         "personalCount": "这一次数分别计算到每个人。关闭后恢复继承。",
         "noLimit": "未设上限",
-        "window": { "day": "每日", "week": "每周", "month": "每月" },
+        "window": {
+          "day": "每日",
+          "week": "每周",
+          "month": "每月"
+        },
         "ring": {
           "day": "今日已用",
           "week": "本周已用",
@@ -2567,13 +2754,83 @@
         "title": "观测中心",
         "description": "Web 前台和桌面的运行记录在同一处：总览、调用链、会话。",
         "backToList": "返回列表",
-        "tabs": { "overview": "总览", "traces": "调用链", "sessions": "会话" },
-        "source": { "desktop": "桌面", "web": "Web" },
-        "filter": { "all": "全部", "errors": "仅错误", "search": "搜索 Trace、会话或输入", "clearSession": "清除会话筛选" },
-        "columns": { "status": "状态", "errorType": "错误类型", "time": "时间", "source": "来源", "operation": "操作", "model": "模型", "input": "输入", "output": "输出", "duration": "耗时", "session": "Session ID", "createdAt": "创建时间", "traces": "Trace 数", "tokens": "Tokens" },
-        "errors": { "tool": "TOOL 调用失败", "model": "LLM 调用失败", "subagent": "AGENT 执行失败", "run": "Root span 状态异常" },
-        "ledger": { "filters": "过滤项", "range": "时间", "day": "最近 1 天", "week": "最近 7 天", "allTime": "全部已加载", "dayShort": "1 天", "weekShort": "7 天", "allShort": "全部", "traces": "Traces", "observations": "Observations", "count": "共 {count} 项", "prev": "上一页", "next": "下一页", "maxDuration": "Duration (ms)", "inputTokens": "Input Tokens", "outputTokens": "Output Tokens", "maxTokens": "Total Tokens", "maxCost": "Cost (USD)", "min": "最小", "max": "最大", "tracesCount": "Traces Count", "sessionDuration": "Session Duration (ms)", "errorSource": "该 Trace 被标记为错误（由以下上浮到 Trace 的节点错误触发）", "tags": "Tags", "formatted": "Formatted", "json": "JSON", "sessionDetail": "会话详情", "round": "第 {index} 轮" },
-        "overview": { "traces": "调用次数", "errors": "错误次数", "modelCalls": "模型调用", "toolCalls": "工具调用", "tokens": "Token 总量", "p50": "耗时 P50", "p90": "耗时 P90", "avg": "平均耗时", "topModels": "模型 Token Top" },
+        "tabs": {
+          "overview": "总览",
+          "traces": "调用链",
+          "sessions": "会话"
+        },
+        "source": {
+          "desktop": "桌面",
+          "web": "Web"
+        },
+        "filter": {
+          "all": "全部",
+          "errors": "仅错误",
+          "search": "搜索 Trace、会话或输入",
+          "clearSession": "清除会话筛选"
+        },
+        "columns": {
+          "status": "状态",
+          "errorType": "错误类型",
+          "time": "时间",
+          "source": "来源",
+          "operation": "操作",
+          "model": "模型",
+          "input": "输入",
+          "output": "输出",
+          "duration": "耗时",
+          "session": "Session ID",
+          "createdAt": "创建时间",
+          "traces": "Trace 数",
+          "tokens": "Tokens"
+        },
+        "errors": {
+          "tool": "TOOL 调用失败",
+          "model": "LLM 调用失败",
+          "subagent": "AGENT 执行失败",
+          "run": "Root span 状态异常"
+        },
+        "ledger": {
+          "filters": "过滤项",
+          "range": "时间",
+          "day": "最近 1 天",
+          "week": "最近 7 天",
+          "allTime": "全部已加载",
+          "dayShort": "1 天",
+          "weekShort": "7 天",
+          "allShort": "全部",
+          "traces": "Traces",
+          "observations": "Observations",
+          "count": "共 {count} 项",
+          "prev": "上一页",
+          "next": "下一页",
+          "maxDuration": "Duration (ms)",
+          "inputTokens": "Input Tokens",
+          "outputTokens": "Output Tokens",
+          "maxTokens": "Total Tokens",
+          "maxCost": "Cost (USD)",
+          "min": "最小",
+          "max": "最大",
+          "tracesCount": "Traces Count",
+          "sessionDuration": "Session Duration (ms)",
+          "errorSource": "该 Trace 被标记为错误（由以下上浮到 Trace 的节点错误触发）",
+          "tags": "Tags",
+          "formatted": "Formatted",
+          "json": "JSON",
+          "sessionDetail": "会话详情",
+          "round": "第 {index} 轮"
+        },
+        "overview": {
+          "traces": "调用次数",
+          "errors": "错误次数",
+          "modelCalls": "模型调用",
+          "toolCalls": "工具调用",
+          "tokens": "Token 总量",
+          "p50": "耗时 P50",
+          "p90": "耗时 P90",
+          "avg": "平均耗时",
+          "topModels": "模型 Token Top"
+        },
         "recentTraces": "最近 Trace",
         "recentTracesHint": "来自网关计量与 edge-agent 上报的 trace",
         "traceDetail": "Trace 详情",
@@ -2678,9 +2935,20 @@
         "assignDesc": "绑定 tenant / 部门 / 用户；升档可勾选「下周期生效」。",
         "empty": "暂无套餐",
         "pendingUpgrade": "待升档",
-        "period": { "month": "按月", "week": "按周" },
-        "status": { "draft": "草稿", "active": "已发布", "archived": "已归档" },
-        "scope": { "tenant": "租户", "dept": "部门", "user": "用户" },
+        "period": {
+          "month": "按月",
+          "week": "按周"
+        },
+        "status": {
+          "draft": "草稿",
+          "active": "已发布",
+          "archived": "已归档"
+        },
+        "scope": {
+          "tenant": "租户",
+          "dept": "部门",
+          "user": "用户"
+        },
         "fields": {
           "name": "套餐名称",
           "monthlyTokens": "月 Token 额度",
@@ -2772,7 +3040,11 @@
           "channel": "渠道",
           "eval": "评测"
         },
-        "units": { "ms": "毫秒", "s": "秒", "m": "分" },
+        "units": {
+          "ms": "毫秒",
+          "s": "秒",
+          "m": "分"
+        },
         "empty": "暂无托管会话",
         "forbidden": "无权查看托管会话",
         "loadMore": "加载更多",
@@ -2972,6 +3244,38 @@
         "packDisabledNamed": "已禁用 {name}",
         "rollbackFailed": "回滚失败",
         "rolledBack": "已回滚到该版本"
+      }
+    },
+    "metering": {
+      "agents": {
+        "captionLead": "按 {timezone} 统计，数据来自托管会话",
+        "captionPeriod": "本日 {day} 起，本周（周一）{week} 起，本月 {month} 起",
+        "captionJoin": "。",
+        "empty": "当前查询没有用量数据",
+        "tabs": {
+          "usage": "用量",
+          "quota": "配额"
+        },
+        "filters": "筛选",
+        "start": "开始",
+        "end": "结束",
+        "query": "查询",
+        "querying": "查询中",
+        "dims": {
+          "agent": "智能体",
+          "agent_name": "名称",
+          "user": "用户",
+          "dept": "部门",
+          "model": "模型",
+          "day": "日"
+        },
+        "columns": {
+          "input": "输入",
+          "output": "输出",
+          "total": "合计",
+          "requests": "请求",
+          "sessions": "会话"
+        }
       }
     }
   }

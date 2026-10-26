@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label, Textarea, toast } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 import { adminFetch } from "../../lib/admin-client-auth";
 
@@ -10,6 +11,8 @@ type Rubric = { id: string; name: string; version: number; content: Record<strin
 const RULE_TYPES = ["contains", "not_contains", "regex", "tool_called", "tool_not_called", "max_tool_calls", "stop_reason"] as const;
 
 export function RubricsTab() {
+  const t = useTranslations("pages.admin.agentEvals");
+  const tc = useTranslations("common");
   const [rows, setRows] = useState<Rubric[]>([]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -40,7 +43,9 @@ export function RubricsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end"><Button type="button" onClick={() => { setErrors([]); setOpen(true); }}>新建评分标准</Button></div>
+      <div className="flex justify-end">
+        <Button type="button" onClick={() => { setErrors([]); setOpen(true); }}>{t("actions.createRubric")}</Button>
+      </div>
       <table className="w-full text-sm">
         <tbody>
           {rows.map((row) => (
@@ -50,25 +55,25 @@ export function RubricsTab() {
       </table>
       <Dialog open={open} onOpenChange={(next) => { if (next || errors.length === 0) setOpen(next); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>评分标准</DialogTitle></DialogHeader>
-          <Label>名称</Label>
+          <DialogHeader><DialogTitle>{t("rubrics.dialogTitle")}</DialogTitle></DialogHeader>
+          <Label>{t("fields.name")}</Label>
           <Input value={name} onChange={(event) => setName(event.target.value)} />
-          <Label>评判说明</Label>
+          <Label>{t("fields.criteria")}</Label>
           <Textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} />
-          <Label>评判方式</Label>
+          <Label>{t("fields.mode")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={mode} onChange={(event) => setMode(event.target.value === "score" ? "score" : "binary")}>
-            <option value="binary">是否通过</option>
-            <option value="score">打分</option>
+            <option value="binary">{t("rubrics.modeBinary")}</option>
+            <option value="score">{t("rubrics.modeScore")}</option>
           </select>
           {mode === "score" ? (
             <>
-              <Label>通过阈值</Label>
+              <Label>{t("fields.threshold")}</Label>
               <Input value={threshold} onChange={(event) => setThreshold(event.target.value)} />
             </>
           ) : null}
-          <Label>裁判模型</Label>
+          <Label>{t("fields.judgeModel")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={judgeModel} onChange={(event) => setJudgeModel(event.target.value)}>
-            <option value="">不使用裁判</option>
+            <option value="">{t("placeholders.noJudge")}</option>
             {models.map((model) => <option key={model} value={model}>{model}</option>)}
           </select>
           <div className="space-y-2">
@@ -80,11 +85,11 @@ export function RubricsTab() {
                 <Input value={rule.value} onChange={(event) => setRules(rules.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} />
               </div>
             ))}
-            <Button type="button" variant="outline" onClick={() => setRules([...rules, { type: "contains", value: "" }])}>添加规则</Button>
+            <Button type="button" variant="outline" onClick={() => setRules([...rules, { type: "contains", value: "" }])}>{t("actions.addRule")}</Button>
           </div>
           {errors.length > 0 ? <ul className="text-sm text-destructive">{errors.map((item) => <li key={item}>{item}</li>)}</ul> : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>{tc("actions.cancel")}</Button>
             <Button
               type="button"
               onClick={() => {
@@ -107,8 +112,8 @@ export function RubricsTab() {
                 }).then(async (res) => {
                   const json = (await res.json()) as { message?: string; errors?: string[] };
                   if (!res.ok) {
-                    setErrors(json.errors ?? [json.message ?? "保存失败"]);
-                    toast.error(json.message ?? "保存失败");
+                    setErrors(json.errors ?? [json.message ?? t("rubrics.saveFailed")]);
+                    toast.error(json.message ?? t("rubrics.saveFailed"));
                     return;
                   }
                   setOpen(false);
@@ -117,7 +122,7 @@ export function RubricsTab() {
                 });
               }}
             >
-              保存
+              {tc("actions.save")}
             </Button>
           </DialogFooter>
         </DialogContent>

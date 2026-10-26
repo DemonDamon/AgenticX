@@ -100,6 +100,7 @@ function envelopeMessage(body: unknown, fallback: string): string {
 
 export default function AgentUsagePage() {
   const t = useTranslations("shell");
+  const tm = useTranslations("pages.metering.agents");
   const { isZh } = useLocale();
   const [tab, setTab] = useState("usage");
   const [start, setStart] = useState(() => isoDaysAgo(30));
@@ -260,16 +261,15 @@ export default function AgentUsagePage() {
   }, [userQuery]);
 
   const caption = useMemo(() => {
-    const period = windows
-      ? isZh
-        ? `本日 ${formatLocal(windows.day, timezone)} 起，本周（周一）${formatLocal(windows.week, timezone)} 起，本月 ${formatLocal(windows.month, timezone)} 起`
-        : `Day from ${formatLocal(windows.day, timezone)}, week (Monday) from ${formatLocal(windows.week, timezone)}, month from ${formatLocal(windows.month, timezone)}`
-      : "";
-    const lead = isZh
-      ? `按 ${timezone} 统计，数据来自托管会话`
-      : `Totals follow ${timezone}. Data comes from managed sessions`;
-    return period ? `${lead}。${period}` : lead;
-  }, [isZh, timezone, windows]);
+    const lead = tm("captionLead", { timezone });
+    if (!windows) return lead;
+    const period = tm("captionPeriod", {
+      day: formatLocal(windows.day, timezone),
+      week: formatLocal(windows.week, timezone),
+      month: formatLocal(windows.month, timezone),
+    });
+    return `${lead}${tm("captionJoin")}${period}`;
+  }, [tm, timezone, windows]);
 
   function toggleAgent(id: string) {
     setSelectedAgents((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -436,6 +436,13 @@ export default function AgentUsagePage() {
                     <td className="px-3 py-2">{row.sessions}</td>
                   </tr>
                 ))}
+                {!loadingUsage && rows.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-6 text-muted-foreground" colSpan={visibleDims.length + 5}>
+                      {tm("empty")}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

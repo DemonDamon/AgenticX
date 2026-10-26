@@ -491,7 +491,7 @@ export default function AgentMemorySection() {
         </label>
         <Button onClick={() => setCreating(true)}>{t("create")}</Button>
       </div>
-      {loading ? null : rows.length === 0 ? (
+      {loading ? <p className="text-sm text-muted-foreground">{tc("states.loading")}</p> : rows.length === 0 ? (
         <EmptyState icon={<BrainCircuit className="size-5" />} title={t("emptyTitle")} description={t("emptyDescription")} />
       ) : (
         <Table>

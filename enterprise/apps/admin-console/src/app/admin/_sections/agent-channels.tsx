@@ -340,7 +340,7 @@ export default function AgentChannelsSection() {
         <Button onClick={openCreate}>{t("create")}</Button>
       </div>
       {pageError ? <p className="text-sm text-destructive">{pageError}</p> : null}
-      {loading ? null : rows.length === 0 ? (
+      {loading ? <p className="text-sm text-muted-foreground">{tc("states.loading")}</p> : rows.length === 0 ? (
         <EmptyState icon={<MessagesSquare className="size-5" />} title={t("emptyTitle")} description={t("emptyDescription")} />
       ) : (
         <Table>

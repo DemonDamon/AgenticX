@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label, Progress, toast } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 import { adminFetch } from "../../lib/admin-client-auth";
 import { evalProgressPercent, type EvalResultView, type EvalRunView } from "../../lib/ma/eval-records";
@@ -10,11 +11,13 @@ import { RunDetailSheet } from "./RunDetailSheet";
 type Option = { id: string; name: string };
 
 export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
+  const t = useTranslations("pages.admin.agentEvals");
+  const tc = useTranslations("common");
   const [runs, setRuns] = useState<EvalRunView[]>(initialRuns ?? []);
   const [open, setOpen] = useState(false);
   const [agents, setAgents] = useState<Array<Option & { effectiveVersion?: number }>>([]);
   const [versions, setVersions] = useState<number[]>([]);
-  const [environments, setEnvironments] = useState<Option[]>([{ id: "local", name: "默认云端" }]);
+  const [environments, setEnvironments] = useState<Option[]>([]);
   const [datasets, setDatasets] = useState<Option[]>([]);
   const [rubrics, setRubrics] = useState<Option[]>([]);
   const [stores, setStores] = useState<Option[]>([]);
@@ -39,6 +42,10 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
   }, [load, runs]);
 
   useEffect(() => {
+    setEnvironments([{ id: "local", name: t("runs.defaultCloud") }]);
+  }, [t]);
+
+  useEffect(() => {
     if (initialRuns) return;
     void adminFetch("/api/admin/agents", { cache: "no-store" }).then(async (res) => {
       const json = (await res.json()) as { data?: { agents?: Array<{ id: string; displayName?: string; name?: string; effectiveVersion?: number }> } };
@@ -47,7 +54,7 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
     void adminFetch("/api/admin/ma-environments", { cache: "no-store" }).then(async (res) => {
       const json = (await res.json()) as { data?: { environments?: Array<{ id: string; name: string; type: string }> } };
       const cloud = (json.data?.environments ?? []).filter((item) => item.type === "cloud").map((item) => ({ id: item.id, name: item.name }));
-      setEnvironments([{ id: "local", name: "默认云端" }, ...cloud]);
+      setEnvironments([{ id: "local", name: t("runs.defaultCloud") }, ...cloud]);
     });
     void adminFetch("/api/admin/ma-evals/datasets", { cache: "no-store" }).then(async (res) => {
       const json = (await res.json()) as { data?: { datasets?: Option[] } };
@@ -61,15 +68,23 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
       const json = (await res.json()) as { data?: { memory_stores?: Array<{ id: string; name: string }> } };
       setStores((json.data?.memory_stores ?? []).map((item) => ({ id: item.id, name: item.name })));
     });
-  }, [initialRuns]);
+  }, [initialRuns, t]);
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end"><Button type="button" onClick={() => setOpen(true)}>发起评测</Button></div>
+      <div className="flex justify-end"><Button type="button" onClick={() => setOpen(true)}>{t("actions.startRun")}</Button></div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-muted-foreground">
-            <th>智能体与版本</th><th>评测集</th><th>评分标准</th><th>状态</th><th>进度</th><th>通过率</th><th>均分</th><th>发起时间</th><th>操作</th>
+            <th>{t("columns.agentVersion")}</th>
+            <th>{t("columns.dataset")}</th>
+            <th>{t("columns.rubric")}</th>
+            <th>{t("columns.status")}</th>
+            <th>{t("columns.progress")}</th>
+            <th>{t("columns.passRate")}</th>
+            <th>{t("columns.meanScore")}</th>
+            <th>{t("columns.startedAt")}</th>
+            <th>{t("columns.actions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -94,22 +109,22 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
                       const json = (await res.json()) as { data?: { run?: EvalRunView; results?: EvalResultView[] } };
                       if (json.data?.run) setDetail({ run: json.data.run, results: json.data.results ?? [] });
                     });
-                  }}>查看</Button>
+                  }}>{t("actions.view")}</Button>
                   <Button type="button" size="sm" variant="outline" onClick={() => {
                     void adminFetch(`/api/admin/ma-evals/runs/${run.id}/cancel`, { method: "POST" }).then(() => load());
-                  }}>取消</Button>
+                  }}>{tc("actions.cancel")}</Button>
                   <Button type="button" size="sm" variant="outline" onClick={() => {
-                    const model = window.prompt("优化模型（provider/model）") ?? "";
+                    const model = window.prompt(t("placeholders.optimizerModel")) ?? "";
                     if (!model) return;
                     void adminFetch(`/api/admin/ma-evals/runs/${run.id}/iterate`, {
                       method: "POST",
                       headers: { "content-type": "application/json" },
                       body: JSON.stringify({ optimizer_model: model }),
                     }).then(async (res) => {
-                      if (!res.ok) toast.error("自迭代未开始");
-                      else toast.success("已发起自迭代");
+                      if (!res.ok) toast.error(t("runs.iterateFailed"));
+                      else toast.success(t("runs.iterateStarted"));
                     });
-                  }}>自迭代</Button>
+                  }}>{t("actions.iterate")}</Button>
                 </td>
               </tr>
             );
@@ -118,8 +133,8 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
       </table>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>发起评测</DialogTitle></DialogHeader>
-          <Label>智能体</Label>
+          <DialogHeader><DialogTitle>{t("runs.startTitle")}</DialogTitle></DialogHeader>
+          <Label>{t("fields.agent")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={form.agentId} onChange={(event) => {
             const agentId = event.target.value;
             const agent = agents.find((item) => item.id === agentId);
@@ -129,28 +144,28 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
               setVersions((json.data?.versions ?? []).map((item) => item.version));
             });
           }}>
-            <option value="">选择智能体</option>
+            <option value="">{t("placeholders.selectAgent")}</option>
             {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
           </select>
-          <Label>版本</Label>
+          <Label>{t("fields.version")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={form.version} onChange={(event) => setForm({ ...form, version: event.target.value })}>
             {versions.map((version) => <option key={version} value={version}>v{version}</option>)}
           </select>
-          <Label>环境</Label>
+          <Label>{t("fields.environment")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={form.environmentId} onChange={(event) => setForm({ ...form, environmentId: event.target.value })}>
             {environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <Label>评测集</Label>
+          <Label>{t("fields.dataset")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={form.datasetId} onChange={(event) => setForm({ ...form, datasetId: event.target.value })}>
-            <option value="">选择评测集</option>
+            <option value="">{t("placeholders.selectDataset")}</option>
             {datasets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <Label>评分标准</Label>
+          <Label>{t("fields.rubric")}</Label>
           <select className="h-9 rounded-md border border-border bg-background px-2" value={form.rubricId} onChange={(event) => setForm({ ...form, rubricId: event.target.value })}>
-            <option value="">选择评分标准</option>
+            <option value="">{t("placeholders.selectRubric")}</option>
             {rubrics.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <Label>记忆库（评测时只读挂载）</Label>
+          <Label>{t("fields.memoryStores")}</Label>
           <div className="space-y-1">
             {stores.map((store) => (
               <label key={store.id} className="flex items-center gap-2 text-sm">
@@ -166,10 +181,10 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
               </label>
             ))}
           </div>
-          <Label>并发数</Label>
+          <Label>{t("fields.concurrency")}</Label>
           <Input value={form.concurrency} onChange={(event) => setForm({ ...form, concurrency: event.target.value })} />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>{tc("actions.cancel")}</Button>
             <Button type="button" onClick={() => {
               void adminFetch("/api/admin/ma-evals/runs", {
                 method: "POST",
@@ -186,13 +201,13 @@ export function RunsTab({ initialRuns }: { initialRuns?: EvalRunView[] }) {
               }).then(async (res) => {
                 const json = (await res.json()) as { message?: string };
                 if (!res.ok) {
-                  toast.error(json.message ?? "发起失败");
+                  toast.error(json.message ?? t("runs.startFailed"));
                   return;
                 }
                 setOpen(false);
                 await load();
               });
-            }}>发起</Button>
+            }}>{t("actions.start")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
