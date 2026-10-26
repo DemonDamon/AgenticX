@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -108,12 +108,14 @@ class ScheduleTicker:
         service: Any,
         settings: Settings,
         clock: Callable[[], datetime] = utc_now,
+        on_run_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._engine = engine
         self._client = client
         self._service = service
         self._settings = settings
         self._clock = clock
+        self._on_run_event = on_run_event
 
     async def tick(self) -> None:
         """One full pass. A failure on one schedule does not stop the others."""
@@ -176,18 +178,22 @@ class ScheduleTicker:
             stop = str(reason.get("type")) if isinstance(reason, dict) and reason.get("type") else "unknown"
         if stop == "requires_action":
             await self._interrupt_session(tenant_id, session_id)
-            await self._mark(str(row["id"]), from_status=("running",), status="failed", now=now, error="requires_action")
+            if await self._mark(str(row["id"]), from_status=("running",), status="failed", now=now, error="requires_action") == 1:
+                await self._emit_run_event("schedule_run.failed", row, session_id, "requires_action")
             return
         if stop in _SUCCESS_STOPS:
-            await self._mark(str(row["id"]), from_status=("running",), status="succeeded", now=now)
+            if await self._mark(str(row["id"]), from_status=("running",), status="succeeded", now=now) == 1:
+                await self._emit_run_event("schedule_run.succeeded", row, session_id, None)
             return
-        await self._mark(
+        error = (stop or "unknown")[:500]
+        if await self._mark(
             str(row["id"]),
             from_status=("running",),
             status="failed",
             now=now,
-            error=(stop or "unknown")[:500],
-        )
+            error=error,
+        ) == 1:
+            await self._emit_run_event("schedule_run.failed", row, session_id, error)
 
     async def _sync_schedule(self, schedule: RuntimeSchedule, now: datetime) -> None:
         async with self._engine.begin() as conn:
@@ -390,10 +396,18 @@ class ScheduleTicker:
             title=title,
             source="schedule",
         )
+        session_id: str | None = None
+        identity = {
+            "id": run_id,
+            "tenant_id": schedule.tenant_id,
+            "schedule_id": schedule.id,
+            "agent_id": schedule.agent_id,
+        }
         try:
             record = await self._service.create_session(principal, request)
+            session_id = record.id
             async with self._engine.begin() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     update(ma_schedule_runs)
                     .where(ma_schedule_runs.c.id == run_id, ma_schedule_runs.c.status == "firing")
                     .values(
@@ -404,6 +418,8 @@ class ScheduleTicker:
                         updated_at=now,
                     )
                 )
+            if _rowcount(result) == 1:
+                await self._emit_run_event("schedule_run.started", identity, session_id, None)
             text = render_template(
                 schedule.input_template,
                 scheduled_for=_aware(row["scheduled_for"]),
@@ -417,16 +433,25 @@ class ScheduleTicker:
                 {"events": [{"type": "user.message", "content": [{"type": "text", "text": text}]}]},
             )
         except MAError as exc:
-            await self._mark(
+            error = f"{exc.code}: {exc.message}"[:500]
+            if await self._mark(
                 run_id,
                 from_status=("firing", "running"),
                 status="failed",
                 now=now,
-                error=f"{exc.code}: {exc.message}"[:500],
-            )
+                error=error,
+            ) == 1:
+                await self._emit_run_event("schedule_run.failed", identity, session_id, error)
         except Exception:
             logger.exception("schedule fire failed schedule=%s run=%s", schedule.id, run_id)
-            await self._mark(run_id, from_status=("firing", "running"), status="failed", now=now, error="internal_error")
+            if await self._mark(
+                run_id,
+                from_status=("firing", "running"),
+                status="failed",
+                now=now,
+                error="internal_error",
+            ) == 1:
+                await self._emit_run_event("schedule_run.failed", identity, session_id, "internal_error")
         if row["trigger"] == "schedule":
             await self._plan_after(schedule, _aware(row["scheduled_for"]), now)
 
@@ -446,9 +471,11 @@ class ScheduleTicker:
                 )
             ).mappings().all()
         for row in rows:
-            if row["session_id"]:
-                await self._interrupt_session(str(row["tenant_id"]), str(row["session_id"]))
-            await self._mark(str(row["id"]), from_status=("running",), status="failed", now=now, error="timeout")
+            session_id = str(row["session_id"]) if row["session_id"] else None
+            if session_id:
+                await self._interrupt_session(str(row["tenant_id"]), session_id)
+            if await self._mark(str(row["id"]), from_status=("running",), status="failed", now=now, error="timeout") == 1:
+                await self._emit_run_event("schedule_run.failed", row, session_id, "timeout")
 
     async def _interrupt_session(self, tenant_id: str, session_id: str) -> None:
         try:
@@ -479,7 +506,7 @@ class ScheduleTicker:
         now: datetime,
         error: str | None = None,
         skip_reason: str | None = None,
-    ) -> None:
+    ) -> int:
         values: dict[str, Any] = {"status": status, "updated_at": now}
         if status in {"succeeded", "failed", "skipped"}:
             values["finished_at"] = now
@@ -488,11 +515,57 @@ class ScheduleTicker:
         if skip_reason is not None:
             values["skip_reason"] = skip_reason
         async with self._engine.begin() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 update(ma_schedule_runs)
                 .where(and_(ma_schedule_runs.c.id == run_id, ma_schedule_runs.c.status.in_(from_status)))
                 .values(**values)
             )
+        return _rowcount(result)
+
+    async def _emit_run_event(
+        self,
+        event_type: str,
+        row_or_ids: Mapping[str, Any],
+        session_id: str | None,
+        error: str | None,
+    ) -> None:
+        if self._on_run_event is None:
+            return
+        try:
+            run_id = str(row_or_ids.get("schedule_run_id") or row_or_ids.get("id") or "")
+            tenant_id = str(row_or_ids.get("tenant_id") or "")
+            schedule_id = str(row_or_ids.get("schedule_id") or "")
+            agent_raw = row_or_ids.get("agent_id")
+            agent_id = agent_raw if isinstance(agent_raw, str) and agent_raw else ""
+            if not agent_id:
+                agent_id = await self._session_agent_id(tenant_id, session_id)
+            data = {
+                "type": event_type,
+                "tenant_id": tenant_id,
+                "schedule_id": schedule_id,
+                "schedule_run_id": run_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "error": error,
+            }
+            await self._on_run_event(data)
+        except Exception:
+            logger.exception("schedule run event failed type=%s", event_type)
+
+    async def _session_agent_id(self, tenant_id: str, session_id: str | None) -> str:
+        if not session_id:
+            return ""
+        store = getattr(self._service, "store", None)
+        get_session = getattr(store, "get_session", None)
+        if get_session is None:
+            return ""
+        try:
+            session = await get_session(tenant_id, session_id)
+        except Exception:
+            logger.exception("schedule run event lookup failed session=%s", session_id)
+            return ""
+        agent_id = getattr(session, "agent_id", None) if session is not None else None
+        return agent_id if isinstance(agent_id, str) else ""
 
 
 __all__ = [

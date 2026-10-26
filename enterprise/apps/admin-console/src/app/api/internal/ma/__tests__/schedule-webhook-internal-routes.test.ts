@@ -5,19 +5,23 @@ import { __resetMaInternalTokenCacheForTests } from "../../../../../lib/ma/inter
 const listSchedulesMock = vi.fn();
 const listWebhooksMock = vi.fn();
 const listExpiringMock = vi.fn();
+const autoDisableMock = vi.fn();
 
 vi.mock("server-only", () => ({}));
 vi.mock("@agenticx/iam-core", () => ({
   listEnabledMaSchedulesForRuntime: (...args: unknown[]) => listSchedulesMock(...args),
   listEnabledMaWebhooksForRuntime: (...args: unknown[]) => listWebhooksMock(...args),
   listExpiringMaCredentials: (...args: unknown[]) => listExpiringMock(...args),
+  autoDisableMaWebhook: (...args: unknown[]) => autoDisableMock(...args),
 }));
 
 const { GET: schedules } = await import("../schedules/route");
 const { GET: webhooks } = await import("../webhooks/route");
 const { GET: expiring } = await import("../credentials/expiring/route");
+const { POST: autoDisable } = await import("../webhooks/[webhookId]/auto-disable/route");
 
 const SECRET = "whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; // gitleaks:allow
+const WEBHOOK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 function withToken(url: string, token = "ma-token") { // gitleaks:allow
   return new Request(url, { headers: { authorization: `Bearer ${token}` } });
@@ -31,6 +35,7 @@ describe("internal schedule and webhook routes", () => {
     listSchedulesMock.mockReset();
     listWebhooksMock.mockReset();
     listExpiringMock.mockReset();
+    autoDisableMock.mockReset();
   });
 
   it("rejects the wrong internal token", async () => {
@@ -120,6 +125,54 @@ describe("internal schedule and webhook routes", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     const payload = (await response.json()) as { data: Array<{ signing_secret: string }> };
     expect(payload.data[0]?.signing_secret).toBe(SECRET);
+    expect(payload.data[0]).toHaveProperty("failure_reset_at", null);
+  });
+
+  it("returns failure_reset_at on the internal webhook list", async () => {
+    listWebhooksMock.mockResolvedValue([
+      {
+        id: WEBHOOK_ID,
+        tenantId: "tenant_a",
+        url: "https://hooks.example.com/ma",
+        eventTypes: ["session.idle"],
+        agentIds: [],
+        sources: [],
+        includeResultText: false,
+        failureResetAt: "2026-10-26T03:00:00.000Z",
+        signingSecret: SECRET,
+      },
+    ]);
+    const response = await webhooks(withToken("http://localhost/api/internal/ma/webhooks"));
+    const payload = (await response.json()) as { data: Array<{ failure_reset_at: string | null }> };
+    expect(payload.data[0]?.failure_reset_at).toBe("2026-10-26T03:00:00.000Z");
+  });
+
+  it("rejects auto-disable without an internal token", async () => {
+    const response = await autoDisable(
+      new Request(`http://localhost/api/internal/ma/webhooks/${WEBHOOK_ID}/auto-disable`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tenant_id: "tenant_a", reason: "consecutive_failures" }),
+      }),
+      { params: Promise.resolve({ webhookId: WEBHOOK_ID }) },
+    );
+    expect(response.status).toBe(401);
+    expect(autoDisableMock).not.toHaveBeenCalled();
+  });
+
+  it("auto-disables a webhook when the internal token is valid", async () => {
+    autoDisableMock.mockResolvedValue(true);
+    const response = await autoDisable(
+      new Request(`http://localhost/api/internal/ma/webhooks/${WEBHOOK_ID}/auto-disable`, {
+        method: "POST",
+        headers: { authorization: "Bearer ma-token", "content-type": "application/json" },
+        body: JSON.stringify({ tenant_id: "tenant_a", reason: "gone" }),
+      }),
+      { params: Promise.resolve({ webhookId: WEBHOOK_ID }) },
+    );
+    expect(response.status).toBe(200);
+    expect(autoDisableMock).toHaveBeenCalledWith("tenant_a", WEBHOOK_ID, "gone");
+    expect(await response.json()).toEqual({ data: { disabled: true } });
   });
 
   it("forwards a 72 hour window and rejects within_hours=0", async () => {

@@ -176,6 +176,21 @@ class AdminConsoleClient:
         body = await self._read("GET", "/api/internal/ma/webhooks", allow_404=False)
         return list((body or {}).get("data") or [])
 
+    async def auto_disable_webhook(self, tenant_id: str, webhook_id: str, reason: str) -> bool:
+        """POST /api/internal/ma/webhooks/{id}/auto-disable. True when the row changed."""
+        body = await self._read(
+            "POST",
+            f"/api/internal/ma/webhooks/{webhook_id}/auto-disable",
+            allow_404=False,
+            json={"tenant_id": tenant_id, "reason": reason},
+        )
+        if not isinstance(body, dict):
+            return False
+        data = body.get("data")
+        if not isinstance(data, dict):
+            return False
+        return bool(data.get("disabled"))
+
     async def list_expiring_credentials(self, within_hours: int) -> list[dict[str, Any]]:
         body = await self._read(
             "GET",

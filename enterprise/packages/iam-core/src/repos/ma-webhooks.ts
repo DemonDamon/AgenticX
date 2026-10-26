@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import { MA_WEBHOOK_EVENT_TYPES, type MaWebhookEventType } from "@agenticx/core-api";
 import { maCredentials as pgCredentials, maWebhookDeliveries as pgDeliveries, maWebhooks as pgWebhooks } from "@agenticx/db-schema";
 import { and, desc, eq, gt, isNotNull, lte, sql } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -13,6 +14,7 @@ import {
   mysqlFindMaWebhook,
   mysqlFindMaWebhookByName,
   mysqlInsertMaWebhook,
+  mysqlAutoDisableMaWebhook,
   mysqlListEnabledMaWebhooks,
   mysqlListExpiringCredentialRows,
   mysqlListMaWebhookDeliveries,
@@ -20,24 +22,31 @@ import {
   mysqlUpdateMaWebhook,
 } from "./mysql/ma-webhooks";
 
+export { MA_WEBHOOK_EVENT_TYPES };
+export type { MaWebhookEventType };
+
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const WEBHOOK_KEYS = ["name", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
+const WEBHOOK_KEYS = ["name", "description", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
 const SESSION_SOURCES = ["portal", "desktop", "api", "schedule", "channel", "eval"] as const;
 const WEBHOOK_LIMIT = 20;
+const AUTO_DISABLE_REASONS = ["consecutive_failures", "gone"] as const;
 
-export const MA_WEBHOOK_EVENT_TYPES = ["session.idle", "session.failed", "credential.expiring"] as const;
-export type MaWebhookEventType = (typeof MA_WEBHOOK_EVENT_TYPES)[number];
+export type MaWebhookDisableReason = (typeof AUTO_DISABLE_REASONS)[number];
 
 export type MaWebhook = {
   id: string;
   tenantId: string;
   name: string;
+  description: string;
   url: string;
   eventTypes: string[];
   agentIds: string[];
   sources: string[];
   includeResultText: boolean;
   enabled: boolean;
+  disabledReason: string | null;
+  disabledAt: string | null;
+  failureResetAt: string | null;
   secretRotatedAt: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -60,6 +69,7 @@ export type MaWebhookDelivery = {
 
 export type NormalizedWebhookInput = {
   name?: string;
+  description?: string;
   url?: string;
   eventTypes?: string[];
   agentIds?: string[];
@@ -72,12 +82,16 @@ type WebhookRow = {
   id: string;
   tenantId: string;
   name: string;
+  description?: string | null;
   url: string;
   eventTypes: unknown;
   agentIds: unknown;
   sources: unknown;
   includeResultText: unknown;
   enabled: unknown;
+  disabledReason?: string | null;
+  disabledAt?: unknown;
+  failureResetAt?: unknown;
   secretCiphertext: string;
   wrappedDek: string;
   kekId: string;
@@ -203,12 +217,16 @@ function mapWebhook(row: WebhookRow): MaWebhook {
     id: row.id,
     tenantId: row.tenantId,
     name: row.name,
+    description: typeof row.description === "string" ? row.description : "",
     url: row.url,
     eventTypes: asStringArray(row.eventTypes),
     agentIds: asStringArray(row.agentIds),
     sources: asStringArray(row.sources),
     includeResultText: asFlag(row.includeResultText),
     enabled: asFlag(row.enabled),
+    disabledReason: typeof row.disabledReason === "string" && row.disabledReason ? row.disabledReason : null,
+    disabledAt: isoOrNull(row.disabledAt),
+    failureResetAt: isoOrNull(row.failureResetAt),
     secretRotatedAt: isoOrNull(row.secretRotatedAt),
     createdBy: row.createdBy,
     createdAt: iso(row.createdAt),
@@ -322,6 +340,14 @@ function readSources(value: unknown): string[] {
   return out;
 }
 
+function readDescription(value: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value !== "string") throw new MaWebhookValidationError("description: is invalid");
+  const description = value.trim();
+  if (description.length > 2048) throw new MaWebhookValidationError("description: is too long");
+  return description;
+}
+
 function readFlag(value: unknown, field: string, fallback: boolean): boolean {
   if (value == null) return fallback;
   if (typeof value !== "boolean") throw new MaWebhookValidationError(`${field}: is invalid`);
@@ -332,6 +358,7 @@ export function normalizeWebhookInput(body: Record<string, unknown>, mode: "crea
   assertKnownKeys(body);
   const input: NormalizedWebhookInput = {};
   if (mode === "create" || "name" in body) input.name = readName(body.name);
+  if (mode === "create" || "description" in body) input.description = readDescription(body.description);
   if (mode === "create" || "url" in body) input.url = readUrl(body.url);
   if (mode === "create" || "event_types" in body) input.eventTypes = readEventTypes(body.event_types);
   if ("agent_ids" in body || mode === "create") input.agentIds = readAgentIds(body.agent_ids);
@@ -409,6 +436,7 @@ export async function createMaWebhook(
     id: ulid(),
     tenantId,
     name: input.name,
+    description: input.description ?? "",
     url: input.url,
     eventTypes: input.eventTypes,
     agentIds: input.agentIds ?? [],
@@ -434,15 +462,20 @@ export async function createMaWebhook(
 export async function updateMaWebhook(tenantId: string, id: string, body: Record<string, unknown>): Promise<MaWebhook> {
   const current = await getMaWebhook(tenantId, id);
   const patch = normalizeWebhookInput(body, "update");
+  const now = new Date();
+  const enabled = patch.enabled ?? current.enabled;
+  const reenabled = current.enabled === false && enabled === true;
   const next = {
     name: patch.name ?? current.name,
+    description: patch.description ?? current.description,
     url: patch.url ?? current.url,
     eventTypes: patch.eventTypes ?? current.eventTypes,
     agentIds: patch.agentIds ?? current.agentIds,
     sources: patch.sources ?? current.sources,
     includeResultText: patch.includeResultText ?? current.includeResultText,
-    enabled: patch.enabled ?? current.enabled,
-    updatedAt: new Date(),
+    enabled,
+    ...(reenabled ? { disabledReason: null, disabledAt: null, failureResetAt: now } : {}),
+    updatedAt: now,
   };
   if (next.name !== current.name) await assertNameAvailable(tenantId, next.name, id);
   try {
@@ -455,6 +488,25 @@ export async function updateMaWebhook(tenantId: string, id: string, body: Record
     throw error;
   }
   return getMaWebhook(tenantId, id);
+}
+
+export async function autoDisableMaWebhook(
+  tenantId: string,
+  webhookId: string,
+  reason: MaWebhookDisableReason,
+): Promise<boolean> {
+  if (!(AUTO_DISABLE_REASONS as readonly string[]).includes(reason)) {
+    throw new MaWebhookValidationError("reason: is invalid");
+  }
+  const now = new Date();
+  const patch = { enabled: false, disabledReason: reason, disabledAt: now, updatedAt: now };
+  if (isMysql()) return mysqlAutoDisableMaWebhook(tenantId, webhookId, patch);
+  const updated = await getIamDb()
+    .update(pgWebhooks)
+    .set(patch)
+    .where(and(eq(pgWebhooks.tenantId, tenantId), eq(pgWebhooks.id, webhookId), eq(pgWebhooks.enabled, true)))
+    .returning({ id: pgWebhooks.id });
+  return updated.length > 0;
 }
 
 export async function rotateMaWebhookSecret(
@@ -490,6 +542,7 @@ export async function listEnabledMaWebhooksForRuntime(): Promise<
     agentIds: string[];
     sources: string[];
     includeResultText: boolean;
+    failureResetAt: string | null;
     signingSecret: string;
   }>
 > {
@@ -515,6 +568,7 @@ export async function listEnabledMaWebhooksForRuntime(): Promise<
         agentIds: mapped.agentIds,
         sources: mapped.sources,
         includeResultText: mapped.includeResultText,
+        failureResetAt: mapped.failureResetAt,
         signingSecret,
       });
     } catch {

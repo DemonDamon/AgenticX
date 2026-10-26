@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAgentVersion, getAgentWithMa, listAgentVersions, previewAgentManifest } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
+import { emitMaResourceEvent } from "../../../../../../lib/ma/webhook-events";
 import { agentErrorResponse, requiredTenantId } from "../../shared";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,14 @@ export async function POST(request: Request, context: { params: Promise<{ agentI
       createdBy: auth.session.userId,
       source: "admin",
     });
+    if (created.created) {
+      emitMaResourceEvent({
+        tenantId,
+        type: "agent.version_published",
+        resourceId: agentId,
+        extra: { agent_id: agentId, version: created.version.version },
+      });
+    }
     const agent = await getAgentWithMa(tenantId, agentId);
     return NextResponse.json({
       code: "00000",

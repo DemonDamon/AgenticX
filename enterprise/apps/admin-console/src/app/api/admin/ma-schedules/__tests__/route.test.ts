@@ -109,7 +109,7 @@ describe("admin ma-schedules routes", () => {
     });
     expect(denied.status).toBe(403);
     expect(requireAdminScopeMock).toHaveBeenCalledWith(["provider:delete"]);
-    deleteMaScheduleMock.mockResolvedValue(undefined);
+    deleteMaScheduleMock.mockResolvedValue({ id: SCHEDULE_ID, agentId: "01BX5ZZKBKACTAV9WEVGEMMVSX" });
     requireAdminScopeMock.mockResolvedValue({ ok: true, session: { userId: "user_1", tenantId: "tenant_test" } });
     const allowed = await DELETE(new Request("http://localhost/api/admin/ma-schedules/" + SCHEDULE_ID, { method: "DELETE" }), {
       params: Promise.resolve({ scheduleId: SCHEDULE_ID }),

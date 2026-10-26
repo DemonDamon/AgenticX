@@ -12,6 +12,7 @@ import { maErrorFromException } from "../../../../../lib/ma/errors";
 import { assertOnlyKeys, MaRequestError, readJsonObject } from "../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../lib/ma/pat-auth";
 import { toMaAgentEnvelope, toMaAgentVersionRecord } from "../../../../../lib/ma/records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,12 @@ export async function POST(request: Request) {
         source: "api",
       },
     );
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "agent.created",
+      resourceId: created.agent.id,
+      extra: { agent_id: created.agent.id },
+    });
     return NextResponse.json(
       {
         ...toMaAgentEnvelope(created.agent),

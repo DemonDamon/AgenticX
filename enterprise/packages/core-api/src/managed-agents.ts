@@ -63,6 +63,52 @@ export const PAT_SCOPES = [
   "ma:admin",
 ] as const;
 
+export const MA_WEBHOOK_EVENT_GROUPS = [
+  { key: "session", types: ["session.status_run_started", "session.status_idled", "session.idle", "session.failed"] },
+  { key: "thread", types: ["session.thread_created", "session.thread_idled", "session.thread_terminated"] },
+  { key: "agent", types: ["agent.created", "agent.version_published", "agent.deleted"] },
+  { key: "environment", types: ["environment.created", "environment.updated", "environment.deleted"] },
+  {
+    key: "vault",
+    types: [
+      "vault.created",
+      "vault.archived",
+      "vault.deleted",
+      "vault_credential.created",
+      "vault_credential.archived",
+      "vault_credential.deleted",
+      "credential.expiring",
+    ],
+  },
+  { key: "memory_store", types: ["memory_store.created", "memory_store.archived", "memory_store.deleted"] },
+  { key: "schedule", types: ["schedule.created", "schedule.updated", "schedule.deleted"] },
+  { key: "schedule_run", types: ["schedule_run.started", "schedule_run.succeeded", "schedule_run.failed"] },
+] as const;
+export type MaWebhookEventGroupKey = (typeof MA_WEBHOOK_EVENT_GROUPS)[number]["key"];
+export type MaWebhookEventType = (typeof MA_WEBHOOK_EVENT_GROUPS)[number]["types"][number];
+export const MA_WEBHOOK_EVENT_TYPES: readonly MaWebhookEventType[] = MA_WEBHOOK_EVENT_GROUPS.flatMap((group) => group.types);
+export const MA_WEBHOOK_RESOURCE_EVENT_TYPES = [
+  "agent.created",
+  "agent.version_published",
+  "agent.deleted",
+  "environment.created",
+  "environment.updated",
+  "environment.deleted",
+  "vault.created",
+  "vault.archived",
+  "vault.deleted",
+  "vault_credential.created",
+  "vault_credential.archived",
+  "vault_credential.deleted",
+  "memory_store.created",
+  "memory_store.archived",
+  "memory_store.deleted",
+  "schedule.created",
+  "schedule.updated",
+  "schedule.deleted",
+] as const satisfies readonly MaWebhookEventType[];
+export type MaWebhookResourceEventType = (typeof MA_WEBHOOK_RESOURCE_EVENT_TYPES)[number];
+
 export const MAX_EVENTS_PER_BATCH = 10 as const;
 export const SSE_PING_INTERVAL_SECONDS = 15 as const;
 export const WORK_LEASE_TTL_SECONDS = 120 as const;

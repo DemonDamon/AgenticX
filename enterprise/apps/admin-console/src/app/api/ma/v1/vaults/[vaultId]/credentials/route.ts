@@ -6,6 +6,7 @@ import { assertOnlyKeys, readJsonObject, ULID_RE } from "../../../../../../../li
 import { requireMaPat } from "../../../../../../../lib/ma/pat-auth";
 import { noStore, readIncludeArchived } from "../../../../../../../lib/ma/vault-input";
 import { toCredentialRecord } from "../../../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,12 @@ export async function POST(request: Request, context: { params: Promise<{ vaultI
     const body = await readJsonObject(request);
     assertOnlyKeys(body, ["display_name", "auth"]);
     const credential = await createMaCredential(auth.identity.tenantId, vaultId, body, auth.identity.userId);
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "vault_credential.created",
+      resourceId: credential.id,
+      extra: { vault_id: vaultId },
+    });
     return noStore(NextResponse.json({ credential: toCredentialRecord(credential) }, { status: 201 }));
   } catch (error) {
     return noStore(maErrorFromException(error));

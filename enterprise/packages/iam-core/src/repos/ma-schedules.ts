@@ -637,13 +637,14 @@ export async function updateMaSchedule(
   return getMaSchedule(tenantId, id);
 }
 
-export async function deleteMaSchedule(tenantId: string, id: string): Promise<void> {
-  await getMaSchedule(tenantId, id);
+export async function deleteMaSchedule(tenantId: string, id: string): Promise<MaSchedule> {
+  const current = await getMaSchedule(tenantId, id);
   if (isMysql()) {
     await mysqlDeleteMaSchedule(tenantId, id);
-    return;
+    return current;
   }
   await getIamDb().delete(pgSchedules).where(and(eq(pgSchedules.tenantId, tenantId), eq(pgSchedules.id, id)));
+  return current;
 }
 
 export async function requestMaScheduleRun(tenantId: string, id: string): Promise<MaSchedule> {

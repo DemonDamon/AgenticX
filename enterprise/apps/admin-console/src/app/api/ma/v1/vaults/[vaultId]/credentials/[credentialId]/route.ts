@@ -6,6 +6,7 @@ import { assertOnlyKeys, readJsonObject, ULID_RE } from "../../../../../../../..
 import { requireMaPat } from "../../../../../../../../lib/ma/pat-auth";
 import { noStore } from "../../../../../../../../lib/ma/vault-input";
 import { toCredentialRecord } from "../../../../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ vaul
     const invalid = missing(vaultId, credentialId);
     if (invalid) return invalid;
     await deleteMaCredential(auth.identity.tenantId, vaultId, credentialId, auth.identity.userId);
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "vault_credential.deleted",
+      resourceId: credentialId,
+      extra: { vault_id: vaultId },
+    });
     return noStore(NextResponse.json({ id: credentialId, deleted: true }));
   } catch (error) {
     return noStore(maErrorFromException(error));

@@ -10,6 +10,7 @@ import { maError, maErrorFromException } from "../../../../../../lib/ma/errors";
 import { assertOnlyKeys, MaRequestError, readJsonObject, ULID_RE } from "../../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../../lib/ma/pat-auth";
 import { toMaEnvironmentRecord } from "../../../../../../lib/ma/records";
+import { emitMaResourceEvent } from "../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ envId
     const body = await readJsonObject(request);
     assertOnlyKeys(body, ["name", "config", "description", "status", "type"]);
     const environment = await updateMaEnvironment(auth.identity.tenantId, envId, readPatch(body));
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "environment.updated", resourceId: environment.id });
     return NextResponse.json({ environment: toMaEnvironmentRecord(environment) });
   } catch (error) {
     return maErrorFromException(error);
@@ -79,6 +81,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ envI
     const { envId } = await context.params;
     if (!ULID_RE.test(envId)) return maError("environment_not_found", "environment not found");
     await deleteMaEnvironment(auth.identity.tenantId, envId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "environment.deleted", resourceId: envId });
     return NextResponse.json({ id: envId, deleted: true });
   } catch (error) {
     return maErrorFromException(error);

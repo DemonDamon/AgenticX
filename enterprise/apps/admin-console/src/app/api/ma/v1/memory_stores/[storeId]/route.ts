@@ -4,6 +4,7 @@ import { deleteMemoryStore, getMemoryStore, updateMemoryStore } from "@agenticx/
 import { maError, maErrorFromException } from "../../../../../../lib/ma/errors";
 import { assertOnlyKeys, readJsonObject, ULID_RE } from "../../../../../../lib/ma/http";
 import { toMemoryStoreRecord } from "../../../../../../lib/ma/memory-records";
+import { emitMaResourceEvent } from "../../../../../../lib/ma/webhook-events";
 import { requireMaPat } from "../../../../../../lib/ma/pat-auth";
 import { noStore } from "../../../../../../lib/ma/vault-input";
 
@@ -44,6 +45,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ stor
     const { storeId } = await context.params;
     if (!ULID_RE.test(storeId)) return noStore(maError("memory_store_not_found", "memory store not found"));
     await deleteMemoryStore(auth.identity.tenantId, storeId, auth.identity.userId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "memory_store.deleted", resourceId: storeId });
     return noStore(NextResponse.json({ id: storeId, deleted: true }));
   } catch (error) {
     return noStore(maErrorFromException(error));

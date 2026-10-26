@@ -6,6 +6,7 @@ import { assertOnlyKeys, readJsonObject } from "../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../lib/ma/pat-auth";
 import { noStore, readIncludeArchived } from "../../../../../lib/ma/vault-input";
 import { toVaultRecord } from "../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     const body = await readJsonObject(request);
     assertOnlyKeys(body, ["display_name", "description", "metadata"]);
     const vault = await createMaVault(auth.identity.tenantId, body, auth.identity.userId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "vault.created", resourceId: vault.id });
     return noStore(NextResponse.json({ vault: toVaultRecord(vault) }, { status: 201 }));
   } catch (error) {
     return noStore(maErrorFromException(error));

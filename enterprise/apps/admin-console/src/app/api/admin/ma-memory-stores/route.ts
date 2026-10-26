@@ -3,6 +3,7 @@ import { createMemoryStore, listMemoryStores } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../lib/admin-auth";
 import { toMemoryStoreRecord } from "../../../../lib/ma/memory-records";
+import { emitMaResourceEvent } from "../../../../lib/ma/webhook-events";
 import { readIncludeArchived } from "../../../../lib/ma/vault-input";
 import { assertAdminKeys, memoryErrorResponse, readAdminJson, requiredTenantId } from "./shared";
 
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     const body = await readAdminJson(request);
     assertAdminKeys(body, ["name", "description", "metadata"]);
     const store = await createMemoryStore(requiredTenantId(), body, auth.session.userId);
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "memory_store.created", resourceId: store.id });
     return NextResponse.json({ code: "00000", message: "ok", data: { memory_store: toMemoryStoreRecord(store) } });
   } catch (error) {
     return memoryErrorResponse(error);

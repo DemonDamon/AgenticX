@@ -6,7 +6,7 @@ import { assertAdminKeys, automationErrorResponse, ok, readAdminJson, requiredTe
 
 export const dynamic = "force-dynamic";
 
-const KEYS = ["name", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
+const KEYS = ["name", "description", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
 
 export async function GET(_request: Request, context: { params: Promise<{ webhookId: string }> }) {
   const auth = await requireAdminScope(["provider:read"]);

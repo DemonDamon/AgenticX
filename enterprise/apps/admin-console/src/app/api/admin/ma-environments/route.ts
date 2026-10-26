@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { countMaEnvironmentReferences, createMaEnvironment, listMaEnvironments } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../lib/admin-auth";
+import { emitMaResourceEvent } from "../../../../lib/ma/webhook-events";
 import { requiredTenantId } from "../agents/shared";
 import { environmentErrorResponse, readEnvironmentInput, readEnvironmentListFilter } from "./shared";
 
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
       readEnvironmentInput(body, "create"),
       auth.session.userId,
     );
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "environment.created", resourceId: environment.id });
     return NextResponse.json({ code: "00000", message: "ok", data: { environment } });
   } catch (error) {
     return environmentErrorResponse(error);

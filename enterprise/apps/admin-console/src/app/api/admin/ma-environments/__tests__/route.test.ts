@@ -7,8 +7,12 @@ const createMaEnvironmentMock = vi.fn();
 const updateMaEnvironmentMock = vi.fn();
 const deleteMaEnvironmentMock = vi.fn();
 const getMaEnvironmentMock = vi.fn();
+const emitMock = vi.fn();
 
 vi.mock("server-only", () => ({}));
+vi.mock("../../../../../lib/ma/webhook-events", () => ({
+  emitMaResourceEvent: (...args: unknown[]) => emitMock(...args),
+}));
 vi.mock("../../../../../lib/admin-auth", () => ({
   requireAdminScope: (...args: unknown[]) => requireAdminScopeMock(...args),
 }));
@@ -85,6 +89,7 @@ describe("admin ma-environments routes", () => {
     updateMaEnvironmentMock.mockReset();
     deleteMaEnvironmentMock.mockReset();
     getMaEnvironmentMock.mockReset();
+    emitMock.mockReset();
     process.env.DEFAULT_TENANT_ID = "tenant_test";
     requireAdminScopeMock.mockResolvedValue({ ok: true, session: { userId: "user_1", tenantId: "tenant_test" } });
   });
@@ -111,6 +116,11 @@ describe("admin ma-environments routes", () => {
       expect.objectContaining({ name: "云端", type: "cloud" }),
       "user_1",
     );
+    expect(emitMock).toHaveBeenCalledWith({
+      tenantId: "tenant_test",
+      type: "environment.created",
+      resourceId: "env_1",
+    });
   });
 
   it("POST maps MaEnvironmentValidationError to 400", async () => {
@@ -120,6 +130,7 @@ describe("admin ma-environments routes", () => {
       jsonRequest("http://localhost/api/admin/ma-environments", "POST", { name: "云端", type: "cloud" }),
     );
     expect(response.status).toBe(400);
+    expect(emitMock).not.toHaveBeenCalled();
   });
 
   it("PATCH maps MaEnvironmentNameConflictError to 409", async () => {
@@ -157,5 +168,6 @@ describe("admin ma-environments routes", () => {
     const body = (await response.json()) as { message?: string };
     expect(body.message).toContain("不支持的字段：foo");
     expect(createMaEnvironmentMock).not.toHaveBeenCalled();
+    expect(emitMock).not.toHaveBeenCalled();
   });
 });

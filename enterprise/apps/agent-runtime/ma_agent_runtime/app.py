@@ -54,7 +54,9 @@ from ma_agent_runtime.pg_work_queue import PgWorkQueue
 from ma_agent_runtime.quota import AgentQuotaEnforcer, wrap_executors_with_quota
 from ma_agent_runtime.scheduler import ScheduleTicker
 from ma_agent_runtime.session_hooks import HookedPgEventStore
+from ma_agent_runtime.webhook_events_routes import build_internal_router
 from ma_agent_runtime.webhooks import (
+    SESSION_EVENT_MAP,
     CredentialExpiryScanner,
     WebhookConfigCache,
     WebhookDeliverer,
@@ -225,20 +227,32 @@ def build_app(
         # Registered before the cancel hooks so shutdown (reverse order) drains last.
         app.state.ma.shutdown_hooks.append(_drain_listeners)
 
+    outbox: WebhookOutbox | None = None
+    cache: WebhookConfigCache | None = None
+    if settings.webhooks_enabled:
+        cache = WebhookConfigCache(client, ttl=settings.webhook_config_cache_seconds)
+        outbox = WebhookOutbox(engine=async_engine, cache=cache, store=store)
+
     if settings.scheduler_enabled:
         ticker = ScheduleTicker(
             engine=async_engine,
             client=client,
             service=app.state.ma.service,
             settings=settings,
+            on_run_event=None if outbox is None else outbox.enqueue_schedule_run_event,
         )
         store.add_terminal_listener(ticker.on_terminal)
         _add_background("schedule_ticker", ticker.run_forever)
-    if settings.webhooks_enabled:
-        cache = WebhookConfigCache(client, ttl=settings.webhook_config_cache_seconds)
-        outbox = WebhookOutbox(engine=async_engine, cache=cache, store=store)
+    if outbox is not None and cache is not None:
         store.add_terminal_listener(outbox.on_terminal)
-        deliverer = WebhookDeliverer(engine=async_engine, cache=cache, settings=settings)
+        store.add_event_listener(outbox.on_session_event, frozenset(SESSION_EVENT_MAP))
+        deliverer = WebhookDeliverer(
+            engine=async_engine,
+            cache=cache,
+            settings=settings,
+            client=client,
+        )
+        app.include_router(build_internal_router(settings, outbox, async_engine))
         _add_background("webhook_deliverer", deliverer.run_forever)
         _add_background(
             "credential_expiry_scanner",

@@ -5,6 +5,7 @@ import { maError, maErrorFromException } from "../../../../../../../lib/ma/error
 import { assertOnlyKeys, MaRequestError, readJsonObject, ULID_RE } from "../../../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../../../lib/ma/pat-auth";
 import { toMaAgentVersionRecord } from "../../../../../../../lib/ma/records";
+import { emitMaResourceEvent } from "../../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,14 @@ export async function POST(request: Request, context: { params: Promise<{ agentI
       createdBy: auth.identity.userId,
       source: "api",
     });
+    if (result.created) {
+      emitMaResourceEvent({
+        tenantId: auth.identity.tenantId,
+        type: "agent.version_published",
+        resourceId: agentId,
+        extra: { agent_id: agentId, version: result.version.version },
+      });
+    }
     return NextResponse.json(
       { version: toMaAgentVersionRecord(result.version), created: result.created },
       { status: result.created ? 201 : 200 },

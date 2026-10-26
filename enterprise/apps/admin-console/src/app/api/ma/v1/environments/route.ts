@@ -11,6 +11,7 @@ import { maErrorFromException } from "../../../../../lib/ma/errors";
 import { assertOnlyKeys, MaRequestError, readJsonObject } from "../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../lib/ma/pat-auth";
 import { toMaEnvironmentRecord } from "../../../../../lib/ma/records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
     const body = await readJsonObject(request);
     assertOnlyKeys(body, ["name", "type", "config", "description", "status"]);
     const environment = await createMaEnvironment(auth.identity.tenantId, readCreateInput(body), auth.identity.userId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "environment.created", resourceId: environment.id });
     return NextResponse.json({ environment: toMaEnvironmentRecord(environment) }, { status: 201 });
   } catch (error) {
     return maErrorFromException(error);

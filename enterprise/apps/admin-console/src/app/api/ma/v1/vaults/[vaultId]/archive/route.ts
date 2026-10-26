@@ -6,6 +6,7 @@ import { ULID_RE } from "../../../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../../../lib/ma/pat-auth";
 import { noStore } from "../../../../../../../lib/ma/vault-input";
 import { toVaultRecord } from "../../../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ vaultI
     const { vaultId } = await context.params;
     if (!ULID_RE.test(vaultId)) return noStore(maError("vault_not_found", "vault not found"));
     const vault = await archiveMaVault(auth.identity.tenantId, vaultId, auth.identity.userId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "vault.archived", resourceId: vault.id });
     return noStore(NextResponse.json({ vault: toVaultRecord(vault) }));
   } catch (error) {
     return noStore(maErrorFromException(error));

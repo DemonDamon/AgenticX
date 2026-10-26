@@ -5,6 +5,7 @@ import { maError, maErrorFromException } from "../../../../../../lib/ma/errors";
 import { assertOnlyKeys, readJsonObject, ULID_RE } from "../../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../../lib/ma/pat-auth";
 import { toMaScheduleRecord, type ScheduleSummary } from "../../../../../../lib/ma/schedule-records";
+import { emitMaResourceEvent } from "../../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ sched
     if (!ULID_RE.test(scheduleId)) return maError("schedule_not_found", "schedule not found");
     const body = await readJsonObject(request);
     assertOnlyKeys(body, KEYS);
-    await updateMaSchedule(auth.identity.tenantId, scheduleId, body);
+    const schedule = await updateMaSchedule(auth.identity.tenantId, scheduleId, body);
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "schedule.updated",
+      resourceId: schedule.id,
+      extra: { agent_id: schedule.agentId },
+    });
     return NextResponse.json({ schedule: await present(auth.identity.tenantId, scheduleId) });
   } catch (error) {
     return maErrorFromException(error);
@@ -65,7 +72,13 @@ export async function DELETE(request: Request, context: { params: Promise<{ sche
   try {
     const { scheduleId } = await context.params;
     if (!ULID_RE.test(scheduleId)) return maError("schedule_not_found", "schedule not found");
-    await deleteMaSchedule(auth.identity.tenantId, scheduleId);
+    const removed = await deleteMaSchedule(auth.identity.tenantId, scheduleId);
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "schedule.deleted",
+      resourceId: removed.id,
+      extra: { agent_id: removed.agentId },
+    });
     return NextResponse.json({ deleted: true });
   } catch (error) {
     return maErrorFromException(error);

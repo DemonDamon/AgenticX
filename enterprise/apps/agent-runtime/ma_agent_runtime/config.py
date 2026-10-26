@@ -192,6 +192,8 @@ class Settings:
     webhook_allow_loopback: bool = False
     webhook_block_private: bool = False
     webhook_config_cache_seconds: float = 30.0
+    webhook_auto_disable_failures: int = 20
+    webhook_auto_disable_hours: int = 24
     channels_enabled: bool = False
     channel_reply_timeout_seconds: float = 300.0
     channel_max_concurrency: int = 8
@@ -383,6 +385,20 @@ class Settings:
                 lambda value: 0 <= value <= 300,
                 fallback=True,
                 reason="must be between 0 and 300",
+            ),
+            webhook_auto_disable_failures=_int_ok(
+                env,
+                "MA_WEBHOOK_AUTO_DISABLE_FAILURES",
+                20,
+                lambda value: 1 <= value <= 1000,
+                reason="must be an integer between 1 and 1000",
+            ),
+            webhook_auto_disable_hours=_int_ok(
+                env,
+                "MA_WEBHOOK_AUTO_DISABLE_HOURS",
+                24,
+                lambda value: 0 <= value <= 720,
+                reason="must be an integer between 0 and 720",
             ),
             channels_enabled=_raw(env, "MA_RUNTIME_CHANNELS_ENABLED") == "1",
             channel_reply_timeout_seconds=_float_ok(

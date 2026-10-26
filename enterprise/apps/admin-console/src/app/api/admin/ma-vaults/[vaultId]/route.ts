@@ -3,6 +3,7 @@ import { deleteMaVault, getMaVault, updateMaVault } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { toVaultRecord } from "../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { assertAdminKeys, readAdminJson, requiredTenantId, vaultErrorResponse } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ vaul
   try {
     const { vaultId } = await context.params;
     await deleteMaVault(requiredTenantId(), vaultId, auth.session.userId);
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "vault.deleted", resourceId: vaultId });
     return NextResponse.json({ code: "00000", message: "ok", data: { id: vaultId, deleted: true } });
   } catch (error) {
     return vaultErrorResponse(error);

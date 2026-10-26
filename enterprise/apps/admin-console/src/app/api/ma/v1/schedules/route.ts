@@ -5,6 +5,7 @@ import { maErrorFromException } from "../../../../../lib/ma/errors";
 import { assertOnlyKeys, readJsonObject } from "../../../../../lib/ma/http";
 import { requireMaPat } from "../../../../../lib/ma/pat-auth";
 import { toMaScheduleRecord, type ScheduleSummary } from "../../../../../lib/ma/schedule-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,12 @@ export async function POST(request: Request) {
     const body = await readJsonObject(request);
     assertOnlyKeys(body, KEYS);
     const schedule = await createMaSchedule(auth.identity.tenantId, body, auth.identity.userId);
+    emitMaResourceEvent({
+      tenantId: auth.identity.tenantId,
+      type: "schedule.created",
+      resourceId: schedule.id,
+      extra: { agent_id: schedule.agentId },
+    });
     const summary = await getMaScheduleRunSummary(auth.identity.tenantId, [schedule.id]);
     return NextResponse.json(
       { schedule: toMaScheduleRecord(schedule, summary.get(schedule.id) ?? EMPTY_SUMMARY) },

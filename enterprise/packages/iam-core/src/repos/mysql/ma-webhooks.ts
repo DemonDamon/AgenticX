@@ -41,6 +41,25 @@ export async function mysqlUpdateMaWebhook(tenantId: string, id: string, patch: 
   await db.update(maWebhooks).set(patch).where(and(eq(maWebhooks.tenantId, tenantId), eq(maWebhooks.id, id)));
 }
 
+function readAffectedRows(result: unknown): number {
+  const header = Array.isArray(result) ? result[0] : result;
+  if (header && typeof header === "object" && "affectedRows" in header) {
+    const value = (header as { affectedRows: unknown }).affectedRows;
+    return typeof value === "number" ? value : 0;
+  }
+  return 0;
+}
+
+/** 仅当当前 enabled=true 时停用，返回是否改动了行。 */
+export async function mysqlAutoDisableMaWebhook(tenantId: string, id: string, patch: WebhookPatch): Promise<boolean> {
+  const db = await getMysqlRepositoryDb();
+  const result = await db
+    .update(maWebhooks)
+    .set(patch)
+    .where(and(eq(maWebhooks.tenantId, tenantId), eq(maWebhooks.id, id), eq(maWebhooks.enabled, true)));
+  return readAffectedRows(result) > 0;
+}
+
 export async function mysqlDeleteMaWebhook(tenantId: string, id: string): Promise<void> {
   const db = await getMysqlRepositoryDb();
   await db.delete(maWebhooks).where(and(eq(maWebhooks.tenantId, tenantId), eq(maWebhooks.id, id)));

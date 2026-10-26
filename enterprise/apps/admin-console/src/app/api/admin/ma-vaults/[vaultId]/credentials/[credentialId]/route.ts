@@ -3,6 +3,7 @@ import { deleteMaCredential, getMaCredential, rotateMaCredential } from "@agenti
 
 import { requireAdminScope } from "../../../../../../../lib/admin-auth";
 import { toCredentialRecord } from "../../../../../../../lib/ma/vault-records";
+import { emitMaResourceEvent } from "../../../../../../../lib/ma/webhook-events";
 import { assertAdminKeys, readAdminJson, requiredTenantId, vaultErrorResponse } from "../../../shared";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ vaul
   try {
     const { vaultId, credentialId } = await context.params;
     await deleteMaCredential(requiredTenantId(), vaultId, credentialId, auth.session.userId);
+    emitMaResourceEvent({
+      tenantId: requiredTenantId(),
+      type: "vault_credential.deleted",
+      resourceId: credentialId,
+      extra: { vault_id: vaultId },
+    });
     return NextResponse.json({ code: "00000", message: "ok", data: { id: credentialId, deleted: true } });
   } catch (error) {
     return vaultErrorResponse(error);

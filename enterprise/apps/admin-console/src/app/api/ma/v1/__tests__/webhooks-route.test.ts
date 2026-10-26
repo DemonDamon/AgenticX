@@ -116,6 +116,41 @@ describe("public webhook routes", () => {
     expect(payload.signing_secret).toBe(second);
   });
 
+  it("echoes description and disabled_reason", async () => {
+    const { generateSigningSecret, normalizeWebhookInput } = await import("@agenticx/iam-core");
+    createMaWebhookMock.mockImplementation(async (_tenant: string, body: Record<string, unknown>) => {
+      const input = normalizeWebhookInput(body, "create");
+      return {
+        webhook: webhook({
+          name: input.name,
+          url: input.url,
+          eventTypes: input.eventTypes,
+          description: input.description,
+          disabledReason: "gone",
+          disabledAt: "2026-10-26T00:00:00.000Z",
+        }),
+        signingSecret: generateSigningSecret(),
+      };
+    });
+    const created = await POST(
+      authed("http://localhost/api/ma/v1/webhooks", ["ma:webhooks:write"], {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "通知",
+          url: "https://hooks.example.com/ma",
+          event_types: ["session.idle"],
+          description: "  值班端点  ",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const payload = (await created.json()) as { webhook: Record<string, unknown> };
+    expect(payload.webhook.description).toBe("值班端点");
+    expect(payload.webhook.disabled_reason).toBe("gone");
+    expect(payload.webhook.disabled_at).toBe("2026-10-26T00:00:00.000Z");
+  });
+
   it("rejects empty or unknown event types and credentialed urls", async () => {
     const { normalizeWebhookInput, MaWebhookValidationError } = await import("@agenticx/iam-core");
     createMaWebhookMock.mockImplementation(async (_tenant: string, body: Record<string, unknown>) => {

@@ -29,7 +29,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agenticx.managed.events.store import StoredEvent
@@ -44,6 +44,52 @@ logger = logging.getLogger(__name__)
 
 IDLE_STOP_TYPES = frozenset({"end_turn", "max_tool_rounds", "requires_action"})
 FAILED_STOP_TYPES = frozenset({"retries_exhausted", "refusal", "budget_exceeded", "policy_blocked"})
+SESSION_EVENT_MAP: dict[str, str] = {
+    "session.status_running": "session.status_run_started",
+    "session.status_idle": "session.status_idled",
+    "session.thread_created": "session.thread_created",
+    "session.thread_status_idle": "session.thread_idled",
+    "session.thread_status_terminated": "session.thread_terminated",
+}
+SCHEDULE_RUN_EVENT_TYPES = frozenset(
+    {
+        "schedule_run.started",
+        "schedule_run.succeeded",
+        "schedule_run.failed",
+    }
+)
+RESOURCE_EVENT_TYPES = frozenset(
+    {
+        "agent.created",
+        "agent.version_published",
+        "agent.deleted",
+        "environment.created",
+        "environment.updated",
+        "environment.deleted",
+        "vault.created",
+        "vault.archived",
+        "vault.deleted",
+        "vault_credential.created",
+        "vault_credential.archived",
+        "vault_credential.deleted",
+        "memory_store.created",
+        "memory_store.archived",
+        "memory_store.deleted",
+        "schedule.created",
+        "schedule.updated",
+        "schedule.deleted",
+    }
+)
+LEGACY_WEBHOOK_EVENT_TYPES = frozenset(
+    {
+        "session.idle",
+        "session.failed",
+        "credential.expiring",
+    }
+)
+_SOURCE_EVENT_TYPES = frozenset(SESSION_EVENT_MAP.values()) | frozenset(
+    {"session.idle", "session.failed"}
+)
 BACKOFF_SECONDS = (10, 30, 120, 600, 1800)
 RESULT_TEXT_LIMIT = 4000
 _METADATA_HOSTS = frozenset(
@@ -254,6 +300,100 @@ def _is_tls(exc: BaseException) -> bool:
     return False
 
 
+def all_webhook_event_types() -> frozenset[str]:
+    """Session map values, schedule runs, resource events, and the original three."""
+    return (
+        frozenset(SESSION_EVENT_MAP.values())
+        | SCHEDULE_RUN_EVENT_TYPES
+        | RESOURCE_EVENT_TYPES
+        | LEGACY_WEBHOOK_EVENT_TYPES
+    )
+
+
+def _iso(value: datetime) -> str:
+    current = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _resource_agent_id(event_type: str, resource_id: str, raw_agent_id: Any) -> str | None:
+    if event_type.startswith("agent."):
+        return resource_id
+    if event_type.startswith("schedule.") and isinstance(raw_agent_id, str) and raw_agent_id:
+        return raw_agent_id
+    return None
+
+
+def _resource_data(
+    event_type: str,
+    tenant_id: str,
+    resource_id: str,
+    agent_id: str | None,
+    body: Mapping[str, Any],
+) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "type": event_type,
+        "tenant_id": tenant_id,
+        "resource_type": _resource_type(event_type),
+        "resource_id": resource_id,
+    }
+    if agent_id is not None:
+        data["agent_id"] = agent_id
+    version = body.get("version")
+    if (
+        event_type == "agent.version_published"
+        and isinstance(version, int)
+        and not isinstance(version, bool)
+    ):
+        data["version"] = version
+    if event_type.startswith("vault_credential."):
+        vault_id = body.get("vault_id")
+        if isinstance(vault_id, str) and vault_id:
+            data["vault_id"] = vault_id
+    return data
+
+
+def _resource_type(event_type: str) -> str:
+    if event_type.startswith("vault_credential."):
+        return "vault_credential"
+    prefix, _sep, _rest = event_type.partition(".")
+    return prefix
+
+
+def _stop_type(event: StoredEvent) -> str | None:
+    reason = event.payload.get("stop_reason")
+    if not isinstance(reason, Mapping):
+        return None
+    stop = reason.get("type")
+    if isinstance(stop, str) and stop:
+        return stop
+    return None
+
+
+def _thread_id(event: StoredEvent) -> str | None:
+    """``thread_id`` is an envelope key, so the store keeps it off ``payload``."""
+    payload_id = event.payload.get("thread_id")
+    if isinstance(payload_id, str) and payload_id:
+        return payload_id
+    if isinstance(event.thread_id, str) and event.thread_id:
+        return event.thread_id
+    return None
+
+
+def _thread_agent_id(event: StoredEvent) -> str | None:
+    direct = event.payload.get("thread_agent_id")
+    if isinstance(direct, str) and direct:
+        return direct
+    top = event.payload.get("agent_id")
+    if isinstance(top, str) and top:
+        return top
+    agent = event.payload.get("agent")
+    if isinstance(agent, Mapping):
+        nested = agent.get("agent_id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None
+
+
 def _result_text(event: StoredEvent | None) -> str:
     if event is None:
         return ""
@@ -290,6 +430,10 @@ class WebhookConfigCache:
             self._rows = await self._client.list_runtime_webhooks()
             self._loaded_at = now
         return list(self._rows)
+
+    def invalidate(self) -> None:
+        self._loaded_at = None
+        self._rows = []
 
 
 class WebhookOutbox:
@@ -366,6 +510,141 @@ class WebhookOutbox:
                     )
                 )
 
+    async def on_session_event(self, tenant_id: str, session_id: str, event: StoredEvent) -> None:
+        webhook_type = SESSION_EVENT_MAP.get(event.type)
+        if webhook_type is None:
+            return
+        session = await self._store.get_session(tenant_id, session_id)
+        if session is None:
+            return
+        webhooks = await self._matching(
+            tenant_id=tenant_id,
+            event_type=webhook_type,
+            agent_id=session.agent_id,
+            source=session.source,
+        )
+        if not webhooks:
+            return
+        data = self._catalog_data(webhook_type, session, event)
+        now = self._clock()
+        async with self._engine.begin() as conn:
+            for item in webhooks:
+                payload = {
+                    "type": "event",
+                    "id": new_ulid(),
+                    "created_at": event.created_at,
+                    "data": dict(data),
+                }
+                await self._insert_delivery(
+                    conn,
+                    tenant_id=tenant_id,
+                    webhook_id=str(item.get("id") or ""),
+                    event_type=webhook_type,
+                    event_key=f"{webhook_type}:{event.id}",
+                    payload=payload,
+                    now=now,
+                )
+
+    async def enqueue_schedule_run_event(self, data: Mapping[str, Any]) -> None:
+        event_type = data.get("type")
+        tenant_id = data.get("tenant_id")
+        schedule_run_id = data.get("schedule_run_id")
+        if not isinstance(event_type, str) or event_type not in SCHEDULE_RUN_EVENT_TYPES:
+            return
+        if not isinstance(tenant_id, str) or not tenant_id:
+            return
+        if not isinstance(schedule_run_id, str) or not schedule_run_id:
+            return
+        agent_raw = data.get("agent_id")
+        agent_id = agent_raw if isinstance(agent_raw, str) and agent_raw else None
+        session_raw = data.get("session_id")
+        session_id = session_raw if isinstance(session_raw, str) and session_raw else None
+        error_raw = data.get("error")
+        error = error_raw if isinstance(error_raw, str) else None
+        schedule_raw = data.get("schedule_id")
+        schedule_id = schedule_raw if isinstance(schedule_raw, str) else ""
+        webhooks = await self._matching(
+            tenant_id=tenant_id,
+            event_type=event_type,
+            agent_id=agent_id,
+            source=None,
+        )
+        if not webhooks:
+            return
+        now = self._clock()
+        inner = {
+            "type": event_type,
+            "tenant_id": tenant_id,
+            "schedule_id": schedule_id,
+            "schedule_run_id": schedule_run_id,
+            "agent_id": agent_id or "",
+            "session_id": session_id,
+            "error": error,
+        }
+        async with self._engine.begin() as conn:
+            for item in webhooks:
+                payload = {
+                    "type": "event",
+                    "id": new_ulid(),
+                    "created_at": _iso(now),
+                    "data": dict(inner),
+                }
+                await self._insert_delivery(
+                    conn,
+                    tenant_id=tenant_id,
+                    webhook_id=str(item.get("id") or ""),
+                    event_type=event_type,
+                    event_key=f"{event_type}:{schedule_run_id}",
+                    payload=payload,
+                    now=now,
+                )
+
+    async def enqueue_resource_event(self, body: Mapping[str, Any]) -> int:
+        event_type = body.get("type")
+        tenant_id = body.get("tenant_id")
+        resource_id = body.get("resource_id")
+        event_id = body.get("id")
+        if not isinstance(event_type, str) or event_type not in RESOURCE_EVENT_TYPES:
+            return 0
+        if not isinstance(tenant_id, str) or not tenant_id:
+            return 0
+        if not isinstance(resource_id, str) or not resource_id:
+            return 0
+        if not isinstance(event_id, str) or not event_id:
+            return 0
+        agent_id = _resource_agent_id(event_type, resource_id, body.get("agent_id"))
+        webhooks = await self._matching(
+            tenant_id=tenant_id,
+            event_type=event_type,
+            agent_id=agent_id,
+            source=None,
+        )
+        if not webhooks:
+            return 0
+        occurred = body.get("occurred_at")
+        created_at = occurred if isinstance(occurred, str) and occurred else _iso(self._clock())
+        inner = _resource_data(event_type, tenant_id, resource_id, agent_id, body)
+        now = self._clock()
+        inserted = 0
+        async with self._engine.begin() as conn:
+            for item in webhooks:
+                payload = {
+                    "type": "event",
+                    "id": event_id,
+                    "created_at": created_at,
+                    "data": dict(inner),
+                }
+                inserted += await self._insert_delivery(
+                    conn,
+                    tenant_id=tenant_id,
+                    webhook_id=str(item.get("id") or ""),
+                    event_type=event_type,
+                    event_key=f"{event_type}:{event_id}",
+                    payload=payload,
+                    now=now,
+                )
+        return inserted
+
     async def enqueue_credential_expiring(self, items: list[dict[str, Any]]) -> int:
         now = self._clock()
         inserted = 0
@@ -430,6 +709,93 @@ class WebhookOutbox:
     def _matches_source(item: Mapping[str, Any], source: str) -> bool:
         sources = item.get("sources") or []
         return not sources or source in sources
+
+    async def _matching(
+        self,
+        *,
+        tenant_id: str,
+        event_type: str,
+        agent_id: str | None,
+        source: str | None,
+    ) -> list[Mapping[str, Any]]:
+        found: list[Mapping[str, Any]] = []
+        for item in await self._cache.get():
+            if item.get("tenant_id") != tenant_id:
+                continue
+            if event_type not in (item.get("event_types") or []):
+                continue
+            if agent_id is not None and not self._matches_agent(item, agent_id):
+                continue
+            if event_type in _SOURCE_EVENT_TYPES and not self._matches_source(item, source or ""):
+                continue
+            found.append(item)
+        return found
+
+    async def _insert_delivery(
+        self,
+        conn: Any,
+        *,
+        tenant_id: str,
+        webhook_id: str,
+        event_type: str,
+        event_key: str,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> int:
+        stmt = _insert_ignore(
+            conn.dialect.name,
+            ma_webhook_deliveries,
+            ("webhook_id", "event_key"),
+        )
+        result = await conn.execute(
+            stmt.values(
+                id=new_ulid(),
+                tenant_id=tenant_id,
+                webhook_id=webhook_id,
+                event_id=payload["id"],
+                event_type=event_type,
+                event_key=event_key,
+                payload=payload,
+                status="pending",
+                attempts=0,
+                next_attempt_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return _rowcount(result)
+
+    @staticmethod
+    def _catalog_data(webhook_type: str, session: Any, event: StoredEvent) -> dict[str, Any]:
+        if webhook_type in {"session.status_run_started", "session.status_idled"}:
+            data: dict[str, Any] = {
+                "type": webhook_type,
+                "tenant_id": session.tenant_id,
+                "session_id": session.id,
+                "agent_id": session.agent_id,
+                "agent_version": session.agent_version,
+                "source": session.source,
+            }
+            if webhook_type == "session.status_idled":
+                stop = _stop_type(event)
+                if stop is not None:
+                    data["stop_reason"] = {"type": stop}
+            return data
+        data = {
+            "type": webhook_type,
+            "tenant_id": session.tenant_id,
+            "session_id": session.id,
+            "agent_id": session.agent_id,
+            "thread_id": _thread_id(event),
+        }
+        thread_agent = _thread_agent_id(event)
+        if thread_agent is not None:
+            data["thread_agent_id"] = thread_agent
+        if webhook_type == "session.thread_terminated":
+            reason = event.payload.get("reason")
+            if isinstance(reason, str):
+                data["reason"] = reason
+        return data
 
     async def _schedule_refs(self, source: str, session_id: str) -> tuple[str | None, str | None]:
         if source != "schedule":
@@ -505,11 +871,13 @@ class WebhookDeliverer:
         settings: Settings,
         http: httpx.AsyncClient | None = None,
         clock: Callable[[], datetime] = utc_now,
+        client: AdminConsoleClient | None = None,
     ) -> None:
         self._engine = engine
         self._cache = cache
         self._settings = settings
         self._clock = clock
+        self._client = client
         self._http = http or httpx.AsyncClient(
             timeout=httpx.Timeout(10.0),
             follow_redirects=False,
@@ -630,6 +998,7 @@ class WebhookDeliverer:
         if reason:
             await self._finish(delivery_id, status="failed", now=now, error=reason, from_status=("sending",))
             logger.info("webhook delivery id=%s status=failed error=%s", delivery_id, reason)
+            await self._maybe_auto_disable(row, error=reason, status_code=None)
             return
         payload = _as_object(row["payload"])
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -644,6 +1013,7 @@ class WebhookDeliverer:
                 error="invalid_secret",
                 from_status=("sending",),
             )
+            await self._maybe_auto_disable(row, error="invalid_secret", status_code=None)
             return
         headers = {
             "content-type": "application/json",
@@ -665,6 +1035,7 @@ class WebhookDeliverer:
                     from_status=("sending",),
                 )
                 logger.info("webhook delivery id=%s status=failed error=tls_error", delivery_id)
+                await self._maybe_auto_disable(row, error="tls_error", status_code=None)
                 return
             await self._retry_or_fail(row, secret, now, type(exc).__name__)
             return
@@ -692,6 +1063,7 @@ class WebhookDeliverer:
                 from_status=("sending",),
             )
             logger.info("webhook delivery id=%s status=failed error=%s", delivery_id, error)
+            await self._maybe_auto_disable(row, error=error, status_code=response.status_code)
             return
         await self._retry_or_fail(row, secret, now, f"http_{response.status_code}", status_code=response.status_code)
 
@@ -716,6 +1088,7 @@ class WebhookDeliverer:
                 from_status=("sending",),
             )
             logger.info("webhook delivery id=%s status=failed error=%s", row["id"], safe)
+            await self._maybe_auto_disable(row, error=safe, status_code=status_code)
             return
         delay = backoff_delay(attempts)
         await self._finish(
@@ -763,6 +1136,101 @@ class WebhookDeliverer:
                 .values(**values)
             )
 
+    async def _maybe_auto_disable(
+        self,
+        row: Mapping[str, Any],
+        *,
+        error: str,
+        status_code: int | None,
+    ) -> None:
+        if self._client is None or error == "webhook_disabled":
+            return
+        try:
+            tenant_id = str(row["tenant_id"])
+            webhook_id = str(row["webhook_id"])
+            if status_code == 410:
+                await self._disable(tenant_id, webhook_id, "gone")
+                return
+            now = self._clock()
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=timezone.utc)
+            if await self._consecutive_limit_reached(webhook_id, now):
+                await self._disable(tenant_id, webhook_id, "consecutive_failures")
+        except Exception:
+            logger.exception("webhook auto-disable check failed id=%s", row.get("id"))
+
+    async def _disable(self, tenant_id: str, webhook_id: str, reason: str) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            disabled = await client.auto_disable_webhook(tenant_id, webhook_id, reason)
+        except Exception:
+            logger.exception("webhook auto-disable failed webhook=%s reason=%s", webhook_id, reason)
+            return
+        if not disabled:
+            return
+        invalidate = getattr(self._cache, "invalidate", None)
+        if callable(invalidate):
+            invalidate()
+
+    async def _failure_floor(self, webhook_id: str) -> datetime | None:
+        reset_at: datetime | None = None
+        for item in await self._cache.get():
+            if str(item.get("id") or "") != webhook_id:
+                continue
+            raw = item.get("failure_reset_at")
+            if raw:
+                try:
+                    reset_at = _aware(raw)
+                except (TypeError, ValueError):
+                    reset_at = None
+            break
+        async with self._engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    select(func.max(ma_webhook_deliveries.c.delivered_at)).where(
+                        ma_webhook_deliveries.c.webhook_id == webhook_id,
+                        ma_webhook_deliveries.c.status == "succeeded",
+                    )
+                )
+            ).first()
+        last_success: datetime | None = None
+        if row is not None and row[0] is not None:
+            last_success = _aware(row[0])
+        if reset_at is not None and last_success is not None:
+            return max(reset_at, last_success)
+        return reset_at if reset_at is not None else last_success
+
+    async def _consecutive_limit_reached(self, webhook_id: str, now: datetime) -> bool:
+        threshold = int(self._settings.webhook_auto_disable_failures)
+        hours = int(self._settings.webhook_auto_disable_hours)
+        floor = await self._failure_floor(webhook_id)
+        conditions: list[Any] = [
+            ma_webhook_deliveries.c.webhook_id == webhook_id,
+            ma_webhook_deliveries.c.status == "failed",
+            or_(
+                ma_webhook_deliveries.c.last_error.is_(None),
+                ma_webhook_deliveries.c.last_error != "webhook_disabled",
+            ),
+        ]
+        if floor is not None:
+            conditions.append(ma_webhook_deliveries.c.created_at > floor)
+        async with self._engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    select(func.count(), func.min(ma_webhook_deliveries.c.created_at)).where(*conditions)
+                )
+            ).first()
+        if row is None or row[1] is None:
+            return False
+        if int(row[0] or 0) < threshold:
+            return False
+        if hours <= 0:
+            return True
+        earliest = _aware(row[1])
+        return earliest < now - timedelta(hours=hours)
+
 
 class CredentialExpiryScanner:
     """Asks the control plane for credentials expiring within 72 hours."""
@@ -797,9 +1265,14 @@ __all__ = [
     "FAILED_STOP_TYPES",
     "IDLE_STOP_TYPES",
     "RESULT_TEXT_LIMIT",
+    "LEGACY_WEBHOOK_EVENT_TYPES",
+    "RESOURCE_EVENT_TYPES",
+    "SCHEDULE_RUN_EVENT_TYPES",
+    "SESSION_EVENT_MAP",
     "WebhookConfigCache",
     "WebhookDeliverer",
     "WebhookOutbox",
+    "all_webhook_event_types",
     "backoff_delay",
     "classify_response",
     "classify_session_event",

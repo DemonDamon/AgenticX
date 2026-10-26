@@ -2,6 +2,7 @@ import { deleteMaSchedule, getMaSchedule, getMaScheduleRunSummary, updateMaSched
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { toMaScheduleRecord, type ScheduleSummary } from "../../../../../lib/ma/schedule-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { assertAdminKeys, automationErrorResponse, ok, readAdminJson, requiredTenantId } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +55,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ sched
     const body = await readAdminJson(request);
     assertAdminKeys(body, KEYS);
     const tenantId = requiredTenantId();
-    await updateMaSchedule(tenantId, scheduleId, body);
+    const schedule = await updateMaSchedule(tenantId, scheduleId, body);
+    emitMaResourceEvent({
+      tenantId,
+      type: "schedule.updated",
+      resourceId: schedule.id,
+      extra: { agent_id: schedule.agentId },
+    });
     return ok({ schedule: await present(tenantId, scheduleId) });
   } catch (error) {
     return automationErrorResponse(error);
@@ -66,7 +73,13 @@ export async function DELETE(_request: Request, context: { params: Promise<{ sch
   if (!auth.ok) return auth.response;
   try {
     const { scheduleId } = await context.params;
-    await deleteMaSchedule(requiredTenantId(), scheduleId);
+    const removed = await deleteMaSchedule(requiredTenantId(), scheduleId);
+    emitMaResourceEvent({
+      tenantId: requiredTenantId(),
+      type: "schedule.deleted",
+      resourceId: removed.id,
+      extra: { agent_id: removed.agentId },
+    });
     return ok({ deleted: true });
   } catch (error) {
     return automationErrorResponse(error);

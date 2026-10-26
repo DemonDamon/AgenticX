@@ -25,6 +25,7 @@ export async function GET(request: Request) {
           agent_ids: item.agentIds,
           sources: item.sources,
           include_result_text: item.includeResultText,
+          failure_reset_at: item.failureResetAt ?? null,
           signing_secret: item.signingSecret,
         })),
       }),

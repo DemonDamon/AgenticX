@@ -7,6 +7,7 @@ import {
 } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { requiredTenantId } from "../../agents/shared";
 import { environmentErrorResponse, readEnvironmentInput } from "../shared";
 
@@ -40,6 +41,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ envId
       return NextResponse.json({ code: "40000", message: "请求体不是合法 JSON" }, { status: 400 });
     }
     const environment = await updateMaEnvironment(requiredTenantId(), envId, readEnvironmentInput(body, "patch"));
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "environment.updated", resourceId: environment.id });
     return NextResponse.json({ code: "00000", message: "ok", data: { environment } });
   } catch (error) {
     return environmentErrorResponse(error);
@@ -52,6 +54,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ env
   try {
     const { envId } = await context.params;
     await deleteMaEnvironment(requiredTenantId(), envId);
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "environment.deleted", resourceId: envId });
     return NextResponse.json({ code: "00000", message: "ok", data: { id: envId } });
   } catch (error) {
     return environmentErrorResponse(error);

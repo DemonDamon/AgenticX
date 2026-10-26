@@ -4,6 +4,7 @@ import { createMemoryStore, listMemoryStores } from "@agenticx/iam-core";
 import { maErrorFromException } from "../../../../../lib/ma/errors";
 import { assertOnlyKeys, readJsonObject } from "../../../../../lib/ma/http";
 import { toMemoryStoreRecord } from "../../../../../lib/ma/memory-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { requireMaPat } from "../../../../../lib/ma/pat-auth";
 import { noStore, readIncludeArchived } from "../../../../../lib/ma/vault-input";
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     const body = await readJsonObject(request);
     assertOnlyKeys(body, ["name", "description", "metadata"]);
     const store = await createMemoryStore(auth.identity.tenantId, body, auth.identity.userId);
+    emitMaResourceEvent({ tenantId: auth.identity.tenantId, type: "memory_store.created", resourceId: store.id });
     return noStore(NextResponse.json({ memory_store: toMemoryStoreRecord(store) }, { status: 201 }));
   } catch (error) {
     return noStore(maErrorFromException(error));

@@ -160,6 +160,7 @@ describe("mysql baseline migration inventory", () => {
       "0041_ma_agent_quotas.sql",
       "0042_ma_evals.sql",
       "0043_ma_memory_dreams.sql",
+      "0044_ma_webhook_catalog.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -221,6 +222,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 41, tag: "0041_ma_agent_quotas" }),
       expect.objectContaining({ idx: 42, tag: "0042_ma_evals" }),
       expect.objectContaining({ idx: 43, tag: "0043_ma_memory_dreams" }),
+      expect.objectContaining({ idx: 44, tag: "0044_ma_webhook_catalog" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

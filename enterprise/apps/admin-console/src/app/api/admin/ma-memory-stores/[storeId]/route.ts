@@ -3,6 +3,7 @@ import { deleteMemoryStore, getMemoryStore, updateMemoryStore } from "@agenticx/
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { toMemoryStoreRecord } from "../../../../../lib/ma/memory-records";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { assertAdminKeys, memoryErrorResponse, readAdminJson, requiredTenantId } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ sto
   try {
     const { storeId } = await context.params;
     await deleteMemoryStore(requiredTenantId(), storeId, auth.session.userId);
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "memory_store.deleted", resourceId: storeId });
     return NextResponse.json({ code: "00000", message: "ok", data: { id: storeId, deleted: true } });
   } catch (error) {
     return memoryErrorResponse(error);

@@ -525,7 +525,53 @@ webhook-signature: v1,<base64(HMAC-SHA256(key, "<webhook-id>.<webhook-timestamp>
 
 `key` 是 `whsec_` 之后的标准 base64（含填充）解码结果。签名与发送使用同一份 JSON 字节（`ensure_ascii=false`，无多余空格）。重试保持 `webhook-id` 不变，并重新生成时间戳和签名。
 
-事件名为 `session.idle`、`session.failed`、`credential.expiring`。`session.idle` 对应 `stop_reason.type` 为 `end_turn`、`max_tool_rounds`、`requires_action`。`session.failed` 对应 `retries_exhausted`、`refusal`、`budget_exceeded`、`policy_blocked`，以及 `session.status_terminated`（此时 `stop_reason` 为 `{"type":"terminated"}`）。
+事件目录如下。管理台在对应资源写库成功后入队；运行时在对应会话、线程或定时运行状态写入成功后入队。端点可选 `description`，最长 2048，缺省空字符串。
+
+| 类型 | 触发 |
+|---|---|
+| `session.status_run_started` | 追加 `session.status_running` 之后 |
+| `session.status_idled` | 追加 `session.status_idle` 之后（任意 `stop_reason`） |
+| `session.idle` | 回合正常结束。`stop_reason.type` 为 `end_turn`、`max_tool_rounds`、`requires_action` |
+| `session.failed` | 回合异常结束。`stop_reason.type` 为 `retries_exhausted`、`refusal`、`budget_exceeded`、`policy_blocked`，以及 `session.status_terminated`（此时 `stop_reason` 为 `{"type":"terminated"}`） |
+| `session.thread_created` | 追加 `session.thread_created` 之后 |
+| `session.thread_idled` | 追加 `session.thread_status_idle` 之后 |
+| `session.thread_terminated` | 追加 `session.thread_status_terminated` 之后 |
+| `agent.created` | 创建智能体成功后 |
+| `agent.version_published` | 发布新版本成功后 |
+| `agent.deleted` | 删除智能体成功后 |
+| `environment.created` | 创建执行环境成功后 |
+| `environment.updated` | 更新执行环境成功后 |
+| `environment.deleted` | 删除执行环境成功后 |
+| `vault.created` | 创建凭证库成功后 |
+| `vault.archived` | 归档凭证库成功后 |
+| `vault.deleted` | 删除凭证库成功后 |
+| `vault_credential.created` | 创建凭证成功后 |
+| `vault_credential.archived` | 归档凭证成功后。随凭证库归档的级联不单独发 |
+| `vault_credential.deleted` | 删除凭证成功后 |
+| `credential.expiring` | 凭证即将过期 |
+| `memory_store.created` | 创建记忆库成功后 |
+| `memory_store.archived` | 归档记忆库成功后 |
+| `memory_store.deleted` | 删除记忆库成功后 |
+| `schedule.created` | 创建定时任务成功后 |
+| `schedule.updated` | 更新定时任务成功后（含启停） |
+| `schedule.deleted` | 删除定时任务成功后 |
+| `schedule_run.started` | 定时运行置为 `running` 之后 |
+| `schedule_run.succeeded` | 定时运行置为 `succeeded` 之后 |
+| `schedule_run.failed` | 定时运行置为 `failed` 之后（含超时、创建会话失败、需审批） |
+
+通知外层不变：`{"type":"event","id":<ULID>,"created_at":<ISO8601 Z>,"data":{...}}`。`webhook-id` 头等于外层 `id`。
+
+`data`：
+
+- `session.status_run_started`、`session.status_idled`：`{type, tenant_id, session_id, agent_id, agent_version, source}`。`session.status_idled` 另带 `stop_reason: {"type": <stop type>}`。不带 `schedule_*`，不带 `result_text`。
+- `session.idle`、`session.failed`：沿用既有字段。`include_result_text` 只对这两种生效。
+- 线程类：`{type, tenant_id, session_id, agent_id, thread_id, thread_agent_id?}`。没有 `thread_agent_id` 就不带。`session.thread_terminated` 在来源事件带 `reason` 时另带 `reason`。
+- 定时运行类：`{type, tenant_id, schedule_id, schedule_run_id, agent_id, session_id|null, error|null}`。
+- 资源类：`{type, tenant_id, resource_type, resource_id}`。`agent.version_published` 另带 `version`；`vault_credential.*` 另带 `vault_id`；`schedule.*` 另带 `agent_id`；`agent.*` 的 `agent_id` 等于 `resource_id`。不带密钥、明文配置或凭证值。
+
+订阅过滤：租户必须相同；`event_types` 必须包含该类型。`agent_ids` 非空时只过滤带 `agent_id` 的事件，事件的 `agent_id` 须在列表中；不带 `agent_id` 的事件（执行环境、凭证库、凭证、记忆库）照常投递。`sources` 非空时只过滤会话类与线程类（按会话 `source`），其它类型忽略。`include_result_text` 只对 `session.idle` / `session.failed` 生效。
+
+自动停用：收到 `410` 时本次投递仍记为 `failed`，并立即停用，原因 `gone`。其它最终失败（不含 `last_error` 为 `webhook_disabled`，不含 `abandoned`）从 `max(最近一次成功投递的 delivered_at, failure_reset_at)` 之后计数；条数达到 `MA_WEBHOOK_AUTO_DISABLE_FAILURES`（默认 20，范围 1–1000），且 `MA_WEBHOOK_AUTO_DISABLE_HOURS`（默认 24，范围 0–720，0 表示不看时间跨度）为 0 或其中最早一条的 `created_at` 早于当前时间减去该小时数时，停用原因写 `consecutive_failures`。把 `enabled` 从 false 改回 true 会清空 `disabled_reason` 与 `disabled_at`，并把 `failure_reset_at` 设为当前时间。停用请求失败只记日志。停用后的端点不再出现在内部启用列表中，尚未发出的投递按既有逻辑记为 `webhook_disabled`。
 
 投递地址默认允许内网（RFC1918）和 `http://`。回环（127.0.0.0/8、::1）、链路本地（169.254.0.0/16、fe80::/10）和云元数据地址始终拒绝，除非 `MA_WEBHOOK_ALLOW_LOOPBACK=1`。`MA_WEBHOOK_BLOCK_PRIVATE=1` 再拒绝 RFC1918 和 `http://`。
 

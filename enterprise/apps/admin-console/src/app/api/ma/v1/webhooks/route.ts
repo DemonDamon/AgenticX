@@ -8,7 +8,7 @@ import { toMaWebhookRecord } from "../../../../../lib/ma/webhook-records";
 
 export const dynamic = "force-dynamic";
 
-const KEYS = ["name", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
+const KEYS = ["name", "description", "url", "event_types", "agent_ids", "sources", "include_result_text", "enabled"] as const;
 
 export async function GET(request: Request) {
   const auth = await requireMaPat(request, "ma:webhooks:read");
