@@ -1,0 +1,16 @@
+{
+  "name": "enterprise-admin-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "e2e run"
+  },
+  "devDependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.0",
+    "@e2e-dev/web": "^0.15.3",
+    "@types/node": "^24.0.0",
+    "ai": "^7.0.0",
+    "e2e": "0.21.3",
+    "typescript": "^5.9.0"
+  }
+}
