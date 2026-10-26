@@ -47,6 +47,7 @@ import {
   BrainCircuit,
   FlaskConical,
   CalendarClock,
+  MessageSquareText,
   MessagesSquare,
   LockKeyhole,
   Languages,
@@ -112,7 +113,30 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/metering/quota", labelKey: "quota", icon: Sliders },
       { href: "/metering/plans", labelKey: "quotaPlans", icon: Package },
       { href: "/metering/split", labelKey: "billingSplit", icon: Gauge },
+    ],
+  },
+  {
+    id: "agentRuntime",
+    label: "agentRuntime",
+    items: [
+      { href: "/admin/agents", labelKey: "agents", icon: Bot },
+      { href: "/ops/logs/managed", labelKey: "agentSessions", icon: MessageSquareText },
+      ...(process.env.NEXT_PUBLIC_MA_EVALS_UI_ENABLED === "1"
+        ? [{ href: "/admin/agent-evals", labelKey: "agentEvals", icon: FlaskConical }]
+        : []),
+      { href: "/admin/agent-schedules", labelKey: "agentSchedules", icon: CalendarClock },
       { href: "/metering/agents", labelKey: "agentUsage", icon: Bot },
+    ],
+  },
+  {
+    id: "agentResources",
+    label: "agentResources",
+    items: [
+      { href: "/admin/agent-environments", labelKey: "agentEnvironments", icon: Server },
+      { href: "/admin/agent-vaults", labelKey: "agentVaults", icon: LockKeyhole },
+      { href: "/admin/agent-memory", labelKey: "agentMemory", icon: BrainCircuit },
+      { href: "/admin/agent-webhooks", labelKey: "agentWebhooks", icon: Webhook },
+      { href: "/admin/agent-channels", labelKey: "agentChannels", icon: MessagesSquare },
     ],
   },
   {
@@ -120,16 +144,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "platform",
     items: [
       { href: "/policy", labelKey: "policy", icon: Shield },
-      { href: "/admin/agents", labelKey: "agents", icon: Bot },
-      { href: "/admin/agent-environments", labelKey: "agentEnvironments", icon: Server },
-      { href: "/admin/agent-vaults", labelKey: "agentVaults", icon: LockKeyhole },
-      { href: "/admin/agent-memory", labelKey: "agentMemory", icon: BrainCircuit },
-      ...(process.env.NEXT_PUBLIC_MA_EVALS_UI_ENABLED === "1"
-        ? [{ href: "/admin/agent-evals", labelKey: "agentEvals", icon: FlaskConical }]
-        : []),
-      { href: "/admin/agent-schedules", labelKey: "agentSchedules", icon: CalendarClock },
-      { href: "/admin/agent-webhooks", labelKey: "agentWebhooks", icon: Webhook },
-      { href: "/admin/agent-channels", labelKey: "agentChannels", icon: MessagesSquare },
       { href: "/admin/models", labelKey: "models", icon: Package },
       { href: "/admin/channels", labelKey: "channels", icon: Activity },
       { href: "/admin/cache", labelKey: "cache", icon: Database },
