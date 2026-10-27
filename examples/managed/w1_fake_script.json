@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {"content": "Running the check.", "tool_calls": [{"id": "call-1", "name": "bash_exec", "arguments": {"command": "echo ma-w1-ok"}}]},
+    {"content": "Looking up the order.", "tool_calls": [{"id": "call-2", "name": "lookup_order", "arguments": {"order_id": "A-1"}}]},
+    {"content": "Order A-1 is shipped and the check printed ma-w1-ok."}
+  ],
+  "fallback_text": "done"
+}

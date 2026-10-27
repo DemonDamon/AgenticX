@@ -4,8 +4,13 @@ import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import { Loader2, X } from "lucide-react";
 
+/** mobile：Near 手机 App 扫码配对；im：飞书/企微机器人扫码绑定。 */
+export type QrConnectMode = "mobile" | "im";
+
 export type QrConnectModalProps = {
   open: boolean;
+  /** 决定弹窗文案视角，默认 im（保持既有 IM 绑定语义）。 */
+  mode?: QrConnectMode;
   gatewayBaseUrl: string;
   deviceId: string;
   token: string;
@@ -27,6 +32,7 @@ type ConnectSessionResponse = {
 
 export function QrConnectModal({
   open,
+  mode = "im",
   gatewayBaseUrl,
   deviceId,
   token,
@@ -140,14 +146,17 @@ export function QrConnectModal({
   const leftSec =
     expiresAt > 0 ? Math.max(0, Math.floor(expiresAt - nowMs / 1000)) : 0;
 
+  // 手机 App 配对与 IM 绑定的文案视角必须区分：手机端用户不应看到飞书/企微字样。
+  const isMobile = mode === "mobile";
+  const ns = isMobile ? "qrConnectMobile" : "qrConnect";
   const statusLabel =
     status === "bound"
-      ? t("qrConnect.bound")
+      ? t(`${ns}.bound`)
       : status === "expired"
-        ? t("qrConnect.expired")
+        ? t(`${ns}.expired`)
         : status === "scanned"
-          ? t("qrConnect.scanned")
-          : t("qrConnect.scanHint");
+          ? t(`${ns}.scanned`)
+          : t(`${ns}.scanHint`);
 
   if (!open) return null;
 
@@ -171,43 +180,43 @@ export function QrConnectModal({
           <X className="h-4 w-4" />
         </button>
         <h2 id="qr-connect-title" className="pr-8 text-[16px] font-medium text-text-strong">
-          {t("qrConnect.title")}
+          {t(`${ns}.title`)}
         </h2>
         <p className="mt-2 text-xs text-text-faint">
-          {t("qrConnect.hint")}
+          {t(`${ns}.hint`)}
         </p>
 
         {phase === "creating" && (
           <div className="mt-8 flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-text-faint" />
-            <span className="text-sm text-text-subtle">{t("qrConnect.generating")}</span>
+            <span className="text-sm text-text-subtle">{t(`${ns}.generating`)}</span>
           </div>
         )}
 
         {phase === "error" && (
           <div className="mt-4 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">
-            {error || t("qrConnect.createFailed")}
+            {error || t(`${ns}.createFailed`)}
           </div>
         )}
 
         {phase === "ready" && qrDataUrl && (
           <div className="mt-4 flex flex-col items-center">
-            <img src={qrDataUrl} alt={t("qrConnect.qrAlt")} className="rounded-lg border border-border bg-white p-2" />
+            <img src={qrDataUrl} alt={t(`${ns}.qrAlt`)} className="rounded-lg border border-border bg-white p-2" />
             <p className="mt-3 text-center text-sm text-text-subtle">{statusLabel}</p>
-            {bindingCode && (
+            {!isMobile && bindingCode && (
               <p className="mt-1 text-center text-xs text-text-faint">
-                {t("qrConnect.bindingCode")}<span className="font-mono text-text-muted">{bindingCode}</span>
+                {t(`${ns}.bindingCode`)}<span className="font-mono text-text-muted">{bindingCode}</span>
               </p>
             )}
             <p className="mt-2 text-center text-xs text-amber-500/90">
               {leftSec > 0
-                ? t("qrConnect.secondsLeft", { seconds: leftSec })
+                ? t(`${ns}.secondsLeft`, { seconds: leftSec })
                 : status !== "bound"
-                  ? t("qrConnect.maybeExpired")
+                  ? t(`${ns}.maybeExpired`)
                   : ""}
             </p>
             {status === "bound" && (
-              <p className="mt-2 text-center text-sm text-green-500">{t("qrConnect.boundSuccess")}</p>
+              <p className="mt-2 text-center text-sm text-green-500">{t(`${ns}.boundSuccess`)}</p>
             )}
           </div>
         )}

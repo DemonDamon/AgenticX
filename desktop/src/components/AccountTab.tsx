@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type SVGAttributes } from "react";
+import { useEffect, useState, type ComponentType, type SVGAttributes } from "react";
 import {
   Building2 as _Building2,
   LogIn as _LogIn,
@@ -11,21 +11,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "./ds/Button";
 import { useAppStore } from "../store";
 import { i18n } from "../i18n/i18n";
-
-type WorkerStatus = {
-  enabled?: boolean;
-  running?: boolean;
-  agents?: Array<{ displayName?: string; slug?: string; id?: string }>;
-  last_heartbeat_at?: string | null;
-  last_error?: string | null;
-};
-
-function formatHeartbeat(value: string | null | undefined): string {
-  if (!value) return "暂无";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
 
 type IconProps = SVGAttributes<SVGSVGElement> & { className?: string };
 function safeLucide(icon: ComponentType<IconProps> | undefined, fallbackLabel: string): ComponentType<IconProps> {
@@ -95,17 +80,6 @@ export function AccountTab() {
   const [entWaiting, setEntWaiting] = useState(false);
   const [entVerifyUrl, setEntVerifyUrl] = useState("");
   const [entError, setEntError] = useState("");
-  const apiBase = useAppStore((s) => s.apiBase);
-  const apiToken = useAppStore((s) => s.apiToken);
-  const [workerEnabled, setWorkerEnabled] = useState(false);
-  const [workerRunning, setWorkerRunning] = useState(false);
-  const [workerAgents, setWorkerAgents] = useState<string[]>([]);
-  const [workerHeartbeat, setWorkerHeartbeat] = useState("");
-  const [workerLastError, setWorkerLastError] = useState("");
-  const [workerToggleError, setWorkerToggleError] = useState("");
-  const [workerBusy, setWorkerBusy] = useState(false);
-  const workerSaveGen = useRef(0);
-
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -254,135 +228,6 @@ export function AccountTab() {
     setEntDisplayName("");
   };
 
-  useEffect(() => {
-    if (!entLoggedIn) return;
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      void refreshWorkerStatus();
-    }, 10000);
-    void refreshWorkerStatus();
-
-    async function studioAuth(): Promise<{ base: string; headers: Record<string, string> } | null> {
-      let base = String(apiBase ?? "").trim().replace(/\/$/, "");
-      let token = String(apiToken ?? "").trim();
-      if (!base) {
-        try {
-          base = String((await window.agenticxDesktop.getApiBase()) || "")
-            .trim()
-            .replace(/\/$/, "");
-        } catch {
-          base = "";
-        }
-      }
-      if (!token) {
-        try {
-          token = String((await window.agenticxDesktop.getApiAuthToken()) || "").trim();
-        } catch {
-          token = "";
-        }
-      }
-      if (!base) return null;
-      const headers: Record<string, string> = {};
-      if (token) headers["x-agx-desktop-token"] = token;
-      return { base, headers };
-    }
-
-    function applyWorkerStatus(data: {
-      enabled?: boolean;
-      running?: boolean;
-      agents?: Array<{ displayName?: string; slug?: string; id?: string }>;
-      last_heartbeat_at?: string | null;
-      last_error?: string | null;
-    }) {
-      setWorkerEnabled(Boolean(data.enabled));
-      setWorkerRunning(Boolean(data.running));
-      const names = (data.agents ?? [])
-        .map((agent) => String(agent.displayName || agent.slug || agent.id || "").trim())
-        .filter(Boolean);
-      setWorkerAgents(names);
-      setWorkerHeartbeat(formatHeartbeat(data.last_heartbeat_at));
-      setWorkerLastError(String(data.last_error || ""));
-    }
-
-    async function refreshWorkerStatus() {
-      const gen = workerSaveGen.current;
-      const auth = await studioAuth();
-      if (!auth || cancelled) return;
-      try {
-        const response = await fetch(`${auth.base}/api/enterprise-worker/status`, {
-          headers: auth.headers,
-        });
-        if (!response.ok || cancelled || gen !== workerSaveGen.current) return;
-        const data = (await response.json()) as {
-          enabled?: boolean;
-          running?: boolean;
-          agents?: Array<{ displayName?: string; slug?: string; id?: string }>;
-          last_heartbeat_at?: string | null;
-          last_error?: string | null;
-        };
-        if (cancelled || gen !== workerSaveGen.current) return;
-        applyWorkerStatus(data);
-      } catch {
-        // Keep the last visible status when a refresh fails.
-      }
-    }
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [entLoggedIn, apiBase, apiToken]);
-
-  const onWorkerToggle = async (next: boolean) => {
-    if (workerBusy) return;
-    const previous = workerEnabled;
-    const gen = workerSaveGen.current + 1;
-    workerSaveGen.current = gen;
-    setWorkerEnabled(next);
-    setWorkerToggleError("");
-    setWorkerBusy(true);
-    try {
-      let base = String(apiBase ?? "").trim().replace(/\/$/, "");
-      let token = String(apiToken ?? "").trim();
-      if (!base) {
-        base = String((await window.agenticxDesktop.getApiBase()) || "")
-          .trim()
-          .replace(/\/$/, "");
-      }
-      if (!token) {
-        token = String((await window.agenticxDesktop.getApiAuthToken()) || "").trim();
-      }
-      if (!base) throw new Error("保存失败");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["x-agx-desktop-token"] = token;
-      const response = await fetch(`${base}/api/enterprise-worker`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({ enabled: next }),
-      });
-      if (!response.ok) throw new Error(`保存失败（${response.status}）`);
-      const data = (await response.json()) as {
-        enabled?: boolean;
-        running?: boolean;
-        last_error?: string | null;
-      };
-      if (gen !== workerSaveGen.current) return;
-      setWorkerEnabled(Boolean(data.enabled));
-      setWorkerRunning(Boolean(data.running));
-      if (typeof data.last_error === "string") setWorkerLastError(data.last_error);
-      if (next && data.enabled === false) {
-        setWorkerToggleError("未能开启，请确认企业账号仍有效");
-      }
-    } catch (error) {
-      if (gen !== workerSaveGen.current) return;
-      setWorkerEnabled(previous);
-      const message = error instanceof Error ? error.message : "保存失败";
-      setWorkerToggleError(message || "保存失败");
-    } finally {
-      if (gen === workerSaveGen.current) setWorkerBusy(false);
-    }
-  };
-
   return (
     <div className="space-y-6 text-sm text-text-strong">
       <div className="flex items-start gap-3">
@@ -474,40 +319,13 @@ export function AccountTab() {
                 {t("account.logoutEnterprise")}
               </Button>
             </div>
-            <div className="mt-4 rounded-lg border border-border bg-surface-card px-4 py-3 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-medium">让这台电脑承接企业智能体任务</div>
-                  <p className="mt-1 text-xs text-text-subtle leading-relaxed">
-                    开启后，房间里点名『员工桌面执行』类智能体的任务会在这台电脑上用本机模型执行
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-label="让这台电脑承接企业智能体任务"
-                  aria-checked={workerEnabled}
-                  disabled={workerBusy}
-                  onClick={() => void onWorkerToggle(!workerEnabled)}
-                  className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-focus,rgba(59,130,246,0.5))] ${
-                    workerEnabled ? "bg-[var(--ui-btn-primary-bg)]" : "bg-surface-hover"
-                  } ${workerBusy ? "opacity-50" : ""}`}
-                >
-                  <span
-                    className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow transition-transform ${
-                      workerEnabled ? "translate-x-4 bg-[var(--ui-btn-primary-text)]" : "bg-white"
-                    }`}
-                  />
-                </button>
-              </div>
-              <div className="space-y-1 text-xs text-text-subtle">
-                <div>状态：{workerRunning ? "运行中" : "已停止"}</div>
-                <div>可承接智能体：{workerAgents.length > 0 ? workerAgents.join("、") : "暂无"}</div>
-                <div>最近心跳：{workerHeartbeat || "暂无"}</div>
-                {workerLastError ? <div className="text-amber-500">最近错误：{workerLastError}</div> : null}
-              </div>
-              {workerToggleError ? <p className="text-xs text-amber-500">{workerToggleError}</p> : null}
-            </div>
+            <button
+              type="button"
+              className="mt-3 text-xs text-text-subtle underline-offset-2 hover:underline"
+              onClick={() => useAppStore.getState().openSettings("enterprise_worker")}
+            >
+              {t("account.manageWorker")}
+            </button>
           </>
         ) : (
           <div className="mt-4 rounded-lg border border-border bg-surface-card px-4 py-4 space-y-3">

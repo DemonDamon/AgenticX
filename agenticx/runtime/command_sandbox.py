@@ -195,17 +195,24 @@ def build_command_sandbox_plan(
     environ: Optional[Mapping[str, str]] = None,
     platform_name: Optional[str] = None,
     denied_path_patterns: Iterable[str] = (),
+    network: str = "inherit",
 ) -> CommandSandboxPlan:
     """Wrap ``argv`` in the host sandbox required by ``permissions``.
 
     ``workspace-write`` never degrades to unrestricted execution. A missing
     backend raises :class:`CommandSandboxUnavailable`; the caller may then ask
     the user to approve a new invocation with ``danger-full-access``.
+
+    ``network="deny"`` cuts all IP networking for the child. Only confined
+    tiers honor it; ``danger-full-access`` and platforms without a network
+    namespace refuse instead of running with the network left open.
     """
 
     raw_argv = tuple(str(part) for part in argv)
     if not raw_argv or not raw_argv[0]:
         raise CommandSandboxError("command argv must not be empty")
+    if network not in {"inherit", "deny"}:
+        raise CommandSandboxError("invalid network mode")
 
     resolved_permissions = normalize_command_permissions(permissions)
     base_env = dict(os.environ if environ is None else environ)
@@ -215,6 +222,10 @@ def build_command_sandbox_plan(
     base_env.pop("AGX_DESKTOP_TOKEN", None)
     base_env.pop("AGX_CC_BRIDGE_TOKEN", None)
     if resolved_permissions == DANGER_FULL_ACCESS:
+        if network == "deny":
+            raise CommandSandboxUnavailable(
+                "network isolation requires a confined permission tier"
+            )
         # This tier wraps nothing, so ``denied_path_patterns`` do not apply.
         # That is the definition, not a gap: the name means a one-shot break
         # of every file isolation.
@@ -325,6 +336,7 @@ def build_command_sandbox_plan(
             deny_patterns,
             readable_roots=confined_read_roots,
             readable_files=confined_read_files,
+            deny_network=(network == "deny"),
         )
         wrapped = (str(executable), "-p", profile, *raw_argv)
         backend = "macos-sandbox-exec"
@@ -350,6 +362,7 @@ def build_command_sandbox_plan(
             denied_paths=denied_paths,
             readable_roots=confined_read_roots,
             readable_files=confined_read_files,
+            unshare_net=(network == "deny"),
         )
         backend = "linux-bubblewrap"
         # bubblewrap takes concrete paths, not globs. Files created after
@@ -366,6 +379,10 @@ def build_command_sandbox_plan(
                 ", ".join(str(root) for root in deny_scan_roots),
             )
     elif host == "win32" or host.startswith("win"):
+        if network == "deny":
+            raise CommandSandboxUnavailable(
+                "network isolation is not supported on this platform"
+            )
         executable = _windows_mxc_executable(base_env)
         base_env["TEMP"] = str(temp_dir)
         base_env["TMP"] = str(temp_dir)
@@ -396,6 +413,10 @@ def build_command_sandbox_plan(
         # Same as Linux: ProcessContainer readonlyPaths are concrete paths.
         deny_enforcement = "none" if not deny_patterns else "partial"
     else:
+        if network == "deny":
+            raise CommandSandboxUnavailable(
+                "network isolation is not supported on this platform"
+            )
         raise CommandSandboxUnavailable(
             f"workspace-write has no supported OS sandbox backend on {host or 'this host'}"
         )
@@ -1158,6 +1179,7 @@ def _macos_profile(
     deny_patterns: Sequence[str] = (),
     readable_roots: Sequence[Path] = (),
     readable_files: Sequence[Path] = (),
+    deny_network: bool = False,
 ) -> str:
     """Build the seatbelt profile: reads and writes are both confined.
 
@@ -1220,6 +1242,8 @@ def _macos_profile(
         "(deny process-exec process-exec-interpreter "
         '(regex #"/(osascript|osacompile|launchctl|crontab)$"))'
     )
+    if deny_network:
+        lines.append("(deny network-outbound (remote ip))")
     return "\n".join(lines)
 
 
@@ -1232,6 +1256,7 @@ def _bubblewrap_argv(
     denied_paths: Sequence[Path] = (),
     readable_roots: Sequence[Path] = (),
     readable_files: Sequence[Path] = (),
+    unshare_net: bool = False,
 ) -> tuple[str, ...]:
     """Build the bubblewrap argv: nothing is visible unless it is bound in.
 
@@ -1259,12 +1284,18 @@ def _bubblewrap_argv(
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-uts",
+    ]
+    if unshare_net:
+        wrapped.append("--unshare-net")
+    wrapped.extend(
+        [
         "--new-session",
         "--proc",
         "/proc",
         "--dev",
         "/dev",
-    ]
+        ]
+    )
     for root in readable_roots:
         path = str(root)
         wrapped.extend(("--ro-bind-try", path, path))

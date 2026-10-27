@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 73 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(73);
+  it("mirrors all 100 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(100);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -151,6 +151,16 @@ describe("mysql baseline migration inventory", () => {
       "0032_chat_message_feedback.sql",
       "0033_gateway_budget_ledger.sql",
       "0034_enterprise_feature_usage.sql",
+      "0035_ma_control_plane.sql",
+      "0036_ma_work_inbox.sql",
+      "0037_ma_vaults.sql",
+      "0038_ma_memory_stores.sql",
+      "0039_ma_schedules_webhooks.sql",
+      "0040_ma_channels.sql",
+      "0041_ma_agent_quotas.sql",
+      "0042_ma_evals.sql",
+      "0043_ma_memory_dreams.sql",
+      "0044_ma_webhook_catalog.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -203,6 +213,16 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 32, tag: "0032_chat_message_feedback" }),
       expect.objectContaining({ idx: 33, tag: "0033_gateway_budget_ledger" }),
       expect.objectContaining({ idx: 34, tag: "0034_enterprise_feature_usage" }),
+      expect.objectContaining({ idx: 35, tag: "0035_ma_control_plane" }),
+      expect.objectContaining({ idx: 36, tag: "0036_ma_work_inbox" }),
+      expect.objectContaining({ idx: 37, tag: "0037_ma_vaults" }),
+      expect.objectContaining({ idx: 38, tag: "0038_ma_memory_stores" }),
+      expect.objectContaining({ idx: 39, tag: "0039_ma_schedules_webhooks" }),
+      expect.objectContaining({ idx: 40, tag: "0040_ma_channels" }),
+      expect.objectContaining({ idx: 41, tag: "0041_ma_agent_quotas" }),
+      expect.objectContaining({ idx: 42, tag: "0042_ma_evals" }),
+      expect.objectContaining({ idx: 43, tag: "0043_ma_memory_dreams" }),
+      expect.objectContaining({ idx: 44, tag: "0044_ma_webhook_catalog" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

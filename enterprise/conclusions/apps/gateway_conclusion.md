@@ -14,12 +14,16 @@
 apps/gateway/
 ├── README.md                  # 构建/运行/环境变量文档（部分内容已陈旧，见"诚实缺口"）
 ├── Dockerfile                 # Distroless 多阶段构建，依赖 ../../packages/policy-engine
-├── go.mod                     # go 1.25; chi, jwt, pgx, mysql-driver, redis, prometheus, wazero, fsnotify, blake2b, yaml
+├── go.mod                     # go 1.26; chi, jwt, pgx, mysql-driver, redis, prometheus, wazero, fsnotify, blake2b, yaml, connector-runtime
 ├── cmd/gateway/main.go        # 入口：config.Load → server.New → http.ListenAndServe(srv.Router())
 ├── scripts/build-image.sh
 └── internal/
     ├── server/                # HTTP 层（Server struct, chi 路由注册, 请求生命周期）
     │   ├── server.go              # Server + New() + Router() + handleChatCompletions/handleStream/handleEmbeddings
+    │   ├── connector_handlers.go  # /internal/connectors/*（OpenAPI 导入、连接 CRUD，GATEWAY_INTERNAL_TOKEN）
+    │   ├── desktop_audit_handlers.go  # POST /v1/desktop/action-audit（PAT desktop:managed → audit）
+    │   ├── retrieval_policy.go    # 公开检索签名 + evaluateChatRequestPolicy（PolicyContext 分层策略）
+    │   ├── request_timeout.go     # Chi 全局 GATEWAY_REQUEST_TIMEOUT（默认 10m）
     │   ├── protocol_handlers.go   # /v1/messages (Claude) / /v1beta/.../generateContent (Gemini) / /v1/responses
     │   ├── protocol_config.go     # GATEWAY_INBOUND_CLAUDE/GEMINI/RESPONSES 开关
     │   ├── mcp_handlers.go        # MCP host 端点（/mcp/registry、/mcp/{server}/streamable-http|sse|messages）
@@ -49,6 +53,10 @@ apps/gateway/
     ├── outbound/              # OpenAI 响应 → vendor 协议（claude/gemini/responses）
     ├── transform/             # tools_mapping、reasoning_effort、thinking-mode 归一化
     ├── openai/                # 共享 OpenAI 请求/响应类型 + 流式 reasoning 状态
+    │   ├── types.go               # ChatCompletionRequest + PolicyContext（__policy_context，relay 前剥离）
+    │   └── request_compatibility.go  # CompatibleRequest（system 合并、Kimi 模板 wire 修正）
+    ├── connectorstore/        # 连接器定义/连接 PG 存储（AES-GCM 凭据列；OpenAPI 导入单源）
+    │   ├── store.go / importer.go / connections.go / admin.go / env.go
     ├── provider/              # 旧路径"单 provider"直连（非 channel relay）
     │   ├── provider.go            # ChatProvider 接口
     │   ├── openai_http.go         # OpenAICompatibleProvider（env-key 回退链 → mock）
@@ -100,7 +108,7 @@ apps/gateway/
     │   ├── host.go                # Host 编排（resolve + quota + policy + audit + backends）
     │   ├── protocol.go            # JSON-RPC 2.0 + initialize/list/call
     │   ├── transport.go / transport_sse.go  # Streamable-HTTP / SSE 传输
-    │   ├── backend.go / backend_echo.go / backend_openapi.go / openapi_loader.go
+    │   ├── backend.go / backend_echo.go / backend_openapi.go / backend_connector.go / openapi_loader.go
     │   ├── registry.go            # ServerRecord（pgx-backed）
     │   ├── scopes.go              # CanListTools / CanCallTool
     │   └── types.go
@@ -132,7 +140,7 @@ apps/gateway/
 5. **wasm 请求 hook**：`runWasmRequestHooks` 可短路返回（命中即写 audit 后 return）
 6. **配额+预算闸门**：`runChatQuotaGate` 预占 tokens，`billingService.ReleaseContext` defer 兜底
 7. **缓存查找**：`tryServeFromCache` 命中即回放 SSE/JSON
-8. **policy 前置**：`evaluatePolicy(latestUserText, "request")` —— 仅扫最后一条 user 消息（`latestUserMessageContent`），避免历史 PII 污染整轮；block 写 audit + 返回 `90001`；redact 替换最后一条 user content
+8. **policy 前置**：`evaluateChatRequestPolicy` —— 默认仍对最后一条 user 文本（`latestUserMessageContent`）做 `evaluatePolicy(..., "request")`；若请求携带已验签的 `__policy_context`（公开检索，`trustedPublicRetrieval` + `X-AgenticX-Policy-*` HMAC），则对**原始 user 文本**与普通 prompt **分层评估**（`PublicRetrieval` 上下文仅 warn 命中另写 audit）；block 写 audit + 返回 `90001`；redact 可回写 messages。`PolicyContext` 在 relay 前从请求体剥离
 9. **执行**：`useChannelRelay()` 为真走 `handleChatCompleteRelay`（`relay.Executor`），否则 `provider.Complete`
 10. **policy 后置**：`evaluatePolicy(responseContent, "response")`，block 返回 `90002`，redact 替换；再 `applyResponseFieldPolicy` 做字段级脱敏
 11. **wasm 响应 hook**：`transformChatResponseJSON`
@@ -144,7 +152,8 @@ apps/gateway/
 
 | 通道 | 触发点 | 代码位置 |
 |---|---|---|
-| **请求前置** | `evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))` | `server.go:741` |
+| **请求前置** | `evaluateChatRequestPolicy` → `evaluatePolicy`（含公开检索分层） | `retrieval_policy.go` / `server.go` |
+| **公开检索 warn** | `writePublicRetrievalWarnings`（仅 `ActionWarn`） | `retrieval_policy.go` |
 | **响应后置** | `evaluatePolicy(responseContent, makeEvalContext(identity, "response"))` + `applyResponseFieldPolicy` | `server.go:835` / `server.go:870` |
 | **流式 per-chunk** | `evaluatePolicy(merged, makeEvalContext(identity, "response"))` 在 `push` 回调内 | `server.go:1107` |
 
@@ -174,14 +183,16 @@ apps/gateway/
 
 ### quota + billing
 
-- `quota.Tracker`（`tracker.go`）—— 多维度限制：`MonthlyTokens` / `DailyTokens` / `WeeklyTokens` / `TPM` / `RPM` / `MaxConcurrency` / `ToolCallsPerMinute` / `RequestsPerDay/Week/Month`；remote URL 10s 缓存（`tracker.go:369`）
+- `quota.Tracker`（`tracker.go`）—— 多维度限制：`MonthlyTokens` / `DailyTokens` / `WeeklyTokens` / `TPM` / `RPM` / `MaxConcurrency` / `ToolCallsPerMinute` / `RequestsPerDay/Week/Month`；`Config.agents` + `RequestContext.AgentID` 可走分身/Agent 级规则（`appliedAgentRule`）；remote URL 10s 缓存
 - `quota.RedisLimiter`（`limiter_redis.go`）—— 分布式限流（fixed-window Lua 脚本，key 前缀 `agx-gateway-rl:`，60s 窗口），Redis 不可用时回退 in-process
+- **预算 v2**（`budget.go`，`budgetConfigVersion = 2`）—— 同时评估 `companyLimits`（公司月硬顶）→ tenant → dept → user / group（`groups` + `userGroups`，同 unit/period 取最严）多层；远程配置按租户缓存，拉取时附加 `X-AgenticX-Tenant-Id`（`HTTPGetWithHeaders`）。`GATEWAY_BUDGET_BACKEND=database` 时走 PG ledger（`gateway_budget_usage` + `BudgetReceipt` 多行预占/结算，`budget_database.go`），配置或存储不可用 **fail-closed**；文件模式仍保留历史 fail-open
+- `Tracker.RemainingBudget` —— 查询 company/tenant/dept 共享预算余量（`remaining.go`）
 - `quota.BudgetAlertReporter` —— 预算告警写 PG
-- `billing.Service` —— **Reserve/Settle/Rollback 三段式**：流式开始前 `ReserveContext` 估算配额，结束时 `SettleContext(reserved, actual)` 对账（返回 `Delta`），错误 `RollbackContext`——解决流式 token 数估算偏差
+- `billing.Service` —— **Reserve/Settle/Rollback 三段式**：流式开始前 `ReserveContext` 估算配额，结束时 `SettleContext(reserved, actual)` 对账（返回 `Delta`），错误 `RollbackContext`——解决流式 token 数估算偏差；配额闸门可携带 `BudgetReceipt` 贯穿结算
 
 ### audit 包（防篡改，`audit/writer.go`）
 
-`audit.Event` 字段非常宽：tenant / user / model / route / channel / channel_key_ref / tokens / latency / policy hits / cache layer / MCP 字段 / 跨境字段 / 插件链 / **blake2b prev_checksum 链**。
+`audit.Event` 字段非常宽：tenant / user / model / route / channel / channel_key_ref / tokens / latency / policy hits / cache layer / MCP 字段 / **connector_execution_id / connector_action_id / connector_connection_id** / 跨境字段 / 插件链 / **blake2b prev_checksum 链**；Desktop 侧 `POST /v1/desktop/action-audit` 写入 `event_type=desktop_agent_action`（`client_type=near-desktop`）。
 
 - **哈希链实现**（`writer.go:124`）：`blake2b.Sum512(prevChecksum + "|" + rawEvent)`，截取前 64 hex 字符（256-bit）作为 `Checksum`；首条事件 `PrevChecksum = "GENESIS"`；`ChecksumVersion = "v2"`
 - `FileWriter` —— 按日 `audit-YYYYMMDD.jsonl` 落盘 + 哈希链
@@ -192,7 +203,7 @@ apps/gateway/
 ### mcp + mcphost（双模 MCP）
 
 - **`mcp` = MCP 代理模式**（`mcp/handler.go`）：`Handler` 是 `httputil.ReverseProxy`，重写 auth header，调 quota，响应后写审计；10min 超时
-- **`mcphost` = MCP host 模式**（`mcphost/host.go`）：网关自己说 MCP（Streamable-HTTP + SSE 两种传输）；`BackendEcho` 是 demo，`BackendOpenAPI` 自动从 OpenAPI 3 spec **推导出 MCP tools**；每工具配额 + 工具参数 policy 评估 + 审计；`Registry` pgx-backed
+- **`mcphost` = MCP host 模式**（`mcphost/host.go`）：网关自己说 MCP（Streamable-HTTP + SSE 两种传输）；`BackendEcho` 是 demo，`BackendOpenAPI` 自动从 OpenAPI 3 spec **推导出 MCP tools**；**`BackendConnector`**（`backend_connector.go`，需 PG）：五个发现型工具 + `execute_action` 调 `connector-runtime` Executor（SSRF 守护；私网默认拒绝，`GATEWAY_CONNECTOR_ALLOW_PRIVATE_NETWORK`）；`execute_action` 额外走 `Stage: connector` 策略；每工具配额 + policy + 审计（含 connector_* 字段）；`Registry` pgx-backed
 
 ### wasmhost 包（插件链，`wasmhost/`）
 
@@ -216,11 +227,11 @@ apps/gateway/
 
 ## 外部依赖与集成点
 
-**Go 依赖**（`go.mod`）：`chi/v5` · `golang-jwt/jwt/v5` · `jackc/pgx/v5` · `go-sql-driver/mysql` · `redis/go-redis/v9` · `prometheus/client_golang` · `tetratelabs/wazero` · `fsnotify` · `golang.org/x/crypto/blake2b` · `gopkg.in/yaml.v3` · `google.golang.org/protobuf` · `alicebob/miniredis/v2`（测试）。
+**Go 依赖**（`go.mod`）：`chi/v5` · `golang-jwt/jwt/v5` · `jackc/pgx/v5` · `go-sql-driver/mysql` · `redis/go-redis/v9` · `prometheus/client_golang` · `tetratelabs/wazero` · `fsnotify` · `golang.org/x/crypto` · `gopkg.in/yaml.v3` · `github.com/agenticx/connector-runtime` · `alicebob/miniredis/v2`（测试）。
 
-**本地 replace**：`github.com/agenticx/enterprise/policy-engine → ../../packages/policy-engine`（`go.mod:42`）。
+**本地 replace**：`policy-engine → ../../packages/policy-engine`；`connector-runtime → ../../../connector-runtime`。
 
-**数据库**：`database/` 包支持 **PostgreSQL（pgx）与 MySQL 双方言**（`dialect.go`，`DATABASE_DIALECT` env 控制，默认 postgres）。PG 表：`usage_records`（metering）、`gateway_audit_events`（audit，与 IAM CRUD 用的 `audit_events` **分表**）、PAT / session_grants / compliance。Redis：分布式限流、cache L1/L2。本地 `.runtime/` jsonl：优雅降级兜底。
+**数据库**：`database/` 包支持 **PostgreSQL（pgx）与 MySQL 双方言**（`dialect.go`，`DATABASE_DIALECT` env 控制，默认 postgres）。PG 表：`usage_records`（metering）、`gateway_audit_events`（audit，与 IAM CRUD 用的 `audit_events` **分表**）、`gateway_budget_usage` / budget ledger（`GATEWAY_BUDGET_BACKEND=database`）、`connector_definitions` / `connector_connections`、PAT / session_grants / compliance。Redis：分布式限流、cache L1/L2。本地 `.runtime/` jsonl：优雅降级兜底。
 
 **与 admin-console 的内部集成**（通过 `GATEWAY_INTERNAL_TOKEN` Bearer 鉴权的 HTTPS GET，`gatewayinternal/http.go`）：
 
@@ -230,7 +241,11 @@ apps/gateway/
 | `GATEWAY_REMOTE_PROVIDERS_URL` | 等价 `providers.json` | 5s |
 | `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | 等价 `quotas.json` | 10s |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | 计价快照 | 10s |
-| `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | 成本/词元预算 | 10s |
+| `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | 成本/词元预算（v2；可按 `X-AgenticX-Tenant-Id` 分租户） | 10s |
+| `GATEWAY_BUDGET_BACKEND` | `database` 启用 PG budget ledger（否则文件 fail-open） | — |
+| `GATEWAY_CONNECTOR_MASTER_KEY` | 连接器连接凭据 AES 主密钥（base64 32B） | — |
+| `GATEWAY_CONNECTOR_ALLOW_PRIVATE_NETWORK` | 连接器上游私网/环回放行 | — |
+| `GATEWAY_REQUEST_TIMEOUT` | 全局 HTTP 请求 context 超时（默认 10m） | — |
 | `GATEWAY_REMOTE_PAT_REVOCATION_URL` | 吊销 hash 列表 | 按需 |
 | `GATEWAY_REMOTE_SESSION_GRANTS_URL` | 会话临时 scope | 按需 |
 | `GATEWAY_REMOTE_COMPLIANCE_URL` | 数据驻留 / 跨境策略 | 按需 |
@@ -282,6 +297,12 @@ apps/gateway/
 | 防篡改审计链（blake2b-512→256）+ File+PG 双写 + backfill | ✅ |
 | 跨境数据驻留判定（allow/block/require_approval） | ✅ |
 | 多维度配额（tokens/RPM/TPM/RPD/RPW/RPM/并发/MCP 限速）+ Redis 分布式限流 | ✅ |
+| Agent 维度配额（`Config.agents` / `AgentID`） | ✅ |
+| 预算 v2 多层（company/tenant/dept/user/group）+ PG ledger 可选 fail-closed | ✅（需 `GATEWAY_BUDGET_BACKEND=database` + 迁移表） |
+| 连接器 OpenAPI 导入 + MCP connector backend + 内部管理 API | ✅（需 PG + 主密钥） |
+| Desktop 托管动作审计上报（`/v1/desktop/action-audit`） | ✅ |
+| 公开检索分层策略（签名 `PolicyContext`） | ✅ |
+| 全局请求超时（`GATEWAY_REQUEST_TIMEOUT`） | ✅ |
 | Reserve/Settle/Rollback 流式预算对账 | ✅ |
 | PAT + Session Grant + 近实时吊销 | ✅ |
 | Prometheus 指标 + Pyroscope 连续剖析 | ✅ |
@@ -294,17 +315,20 @@ apps/gateway/
 1. **policy-engine 规则种类有限**：`packages/policy-engine/types.go:5` 仅定义 4 种 `RuleKind` —— `keyword` / `regex` / `pii` / `field`，**不含 `keyword-list`**；Go `loader.go` 的 `Extends` 字段是**单字符串**（`types.go:43`），自定义 manifest 用数组会反序列化失败或只取首项。
 2. **PII 基线仅 5 类**：`engine.go:192` 的 `baselinePIIRegex` 只覆盖 `mobile` / `email` / `id-card` / `bank-card` / `api-key`。**"17 种密钥检测"仍留在 AgenticX Python 框架，未进 Go 网关**——客户方案中如需完整密钥扫描，需明确这不在网关侧。
 3. **文本 Evaluate 不处理 field 规则**：`engine.go:75` 的 `EvaluateWithContext` 只 switch `keyword/regex/pii`；`field` 规则需经 `fields.go:25` 的 `EvaluateJSONFields` 单独入口（`server.go` 的 `applyResponseFieldPolicy` 已正确分流调用）。
-4. **README 部分内容陈旧**：`README.md:9` 称审计写 "ClickHouse / 本地文件"，但实际代码写 PG `gateway_audit_events`（或 jsonl），**无 ClickHouse 集成**；`README.md:15` 称 "Go 1.22+"，`go.mod:3` 实为 `go 1.25.0`。
+4. **README 部分内容陈旧**：`README.md:9` 称审计写 "ClickHouse / 本地文件"，但实际代码写 PG `gateway_audit_events`（或 jsonl），**无 ClickHouse 集成**；`README.md:15` 称 "Go 1.22+"，`go.mod` 已为 `go 1.26.0`。
 5. **edge-agent 侧未硬接**：默认 `local` 路由指向 Ollama 风格的 `http://127.0.0.1:11434/v1`；`packaging/edge-agent` Go 单二进制是空壳 skeleton，网关进程内**没有**专门对接 edge-agent sidecar 的代码路径，描述端侧闭环时宜用「本地后端服务」等中性措辞。
-6. **配额维度以租户/角色/模型为主**：`quota/Config` 支持 `users` / `departments` / `apiTokens` map，但 admin-console「额度控制」页仍偏查询展示；按部门/用户级 TPM/QPM/并发**真正限流落地**需独立 plan，不可在客户对接中口头承诺「已支持」。
+6. **配额与预算的「控制面」仍偏 admin 发布 + 网关执行**：网关侧已支持 `users` / `departments` / `apiTokens` / `agents` 配额，以及预算 v2 的 company/tenant/dept/user/group 多层（PG ledger 模式 fail-closed）；但 admin-console「额度控制」页仍以查询/展示为主，远程 budget 拉取依赖 admin 按租户返回正确 bundle——**不可仅凭 UI 现状口头承诺「部门/用户级 TPM 已在控制台可配」**。
 
 
-## 增量（8ebec3b5 → 30e57496）
+## 增量（30e57496 → 22d051f5）
 
-- `internal/mcphost/entitlement.go`：MCP 能力授权链（schema/chain 单测齐全）；`secret_envelope.go` 信封密钥。
-- `internal/gatewayinternal/secret.go`：内部凭据从 env / file 读取。
-- `server.go` / `cache_integration.go` / `health.go`：缓存与健康检查加厚；流式 usage 结算测试。
-- `trace_context.go`：入站 trace / span 贯通；审计 writer 写 `trace_id`。
-- `metering/redact.go`：计量日志脱敏；`pricing.go` 计费乘数测试。
-- `database/missing_relation.go`：缺表/缺关系可诊断，避免裸 SQL 报错。
-- `provider/openai_http.go`：上游 HTTP 客户端行为收紧。
+- `internal/connectorstore/`：OpenAPI 导入（`ImportOpenAPI`，destructive 需 `confirm_destructive`）、定义/连接 PG 持久化（凭据 AES-GCM，`GATEWAY_CONNECTOR_MASTER_KEY`）；`EnsureConnectorServer` 写入 `mcp_servers`（`name=connector`，`backend_type=connector`）。
+- `server/connector_handlers.go`：`/internal/connectors` 列表/导入/删除、连接 list/create/rotate/revoke（`gatewayInternalAuthorized`）。
+- `mcphost/backend_connector.go` + `host.go`：连接器 MCP 工具面；`execute_action` 的 `Stage: connector` 策略与 connector 审计字段。
+- `server/retrieval_policy.go` + `openai.PolicyContext`：公开检索 HMAC 验签与 `evaluateChatRequestPolicy` 双层 request 策略。
+- `server/desktop_audit_handlers.go`：`POST /v1/desktop/action-audit`（PAT + scope `desktop:managed`）。
+- `server/request_timeout.go`：Router 全局 `requestTimeout(GATEWAY_REQUEST_TIMEOUT)`。
+- `quota/budget.go` v2 + `budget_database.go`：多层预算与可选 PG ledger；`tracker.go` / `check_request.go` 增加 `agents` 维度与 `BudgetReceipt`。
+- `openai/request_compatibility.go`：relay/adaptor 出站前 `CompatibleRequest`；OpenAI SSE `[DONE]` 不完整流报错。
+- `gatewayinternal/http.go`：`HTTPGetWithHeaders`（budget 租户头）；`audit` PG 列扩展 connector_*。
+- `go.mod`：`go 1.26.0`，引入 `connector-runtime` replace。

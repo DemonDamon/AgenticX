@@ -2,7 +2,7 @@
 
 > 结论生成时间：2026-07-21（重新生成，覆盖当前代码 v0.1.0）
 
-> 说明：本文档描述 **企业多租户平台的 Drizzle ORM 数据库 schema 包**（`@agenticx/db-schema`），是 admin-console、web-portal、auth、iam-core 共享的唯一 Schema 源头。**当前代码同时定义 PostgreSQL 与 MySQL 两套 schema**，并各自维护独立的迁移链。本次重新生成相对旧版的主要订正：(1) 旧版仅描述 PostgreSQL，当前已支持双方言；(2) `runtime-config.ts` 实含 **12** 张运行时配置表（旧版误记为 9）；(3) PG 迁移 journal 实为 **29** 条（最高 tag `0029`，`0025` 缺号），磁盘 **31** 个 SQL 文件含 **2 个 orphan**；(4) MySQL 迁移链现有 **2** 条，baseline 一次性建 **42** 张表 + 1 个 VIEW。
+> 说明：本文档描述 **企业多租户平台的 Drizzle ORM 数据库 schema 包**（`@agenticx/db-schema`），是 admin-console、web-portal、auth、iam-core 共享的唯一 Schema 源头。**当前代码同时定义 PostgreSQL 与 MySQL 两套 schema**，并各自维护独立的迁移链。以 `schema-parity.test.ts` 为准：双方言共 **73** 张表；`runtime-config.ts` 内 **15** 张运行时/认证相关表；PG journal **60** 条（最高 tag `0060_enterprise_feature_usage`），磁盘 **62** 个 `.sql`（含 **2** 个已知 orphan，`0025` 在 journal 中仍缺号）；MySQL journal **35** 条（`0000` baseline + `0001`…`0034`），baseline 仍一次性建 **42** 张表 + 1 VIEW，增量迁移与 PG 对齐补表/改列。
 
 ## 模块概述
 
@@ -25,22 +25,23 @@ packages/db-schema/
 │   ├── iam-demo-seed.mjs            # IAM demo 数据
 │   ├── pg-seed-client-config.mjs    # 客户配置 seed
 │   └── db-migrate.mjs               # 迁移执行入口
-├── drizzle/                         # 生成的 PG SQL 迁移（31 个 .sql + meta/）
-│   ├── 0000_friendly_rictor.sql ... 0029_audit_checksum_payload.sql
-│   └── meta/                        # snapshot + _journal.json（29 条 entry）
-├── drizzle-mysql/                   # 生成的 MySQL SQL 迁移（2 个 .sql + meta/）
-│   ├── 0000_mysql_baseline.sql
-│   ├── 0001_audit_checksum_payload.sql
-│   └── meta/                        # _journal.json（2 条 entry）
+├── drizzle/                         # 生成的 PG SQL 迁移（62 个 .sql + meta/）
+│   ├── 0000_friendly_rictor.sql … 0060_enterprise_feature_usage.sql
+│   └── meta/                        # snapshot + _journal.json（60 条 entry）
+├── drizzle-mysql/                   # 生成的 MySQL SQL 迁移（35 个 .sql + meta/）
+│   ├── 0000_mysql_baseline.sql … 0034_enterprise_feature_usage.sql
+│   └── meta/                        # _journal.json（35 条 entry）
 └── src/
-    ├── index.ts                     # export * from "./schema"; export * from "./dialect"; export * as postgres / mysql
+    ├── index.ts                     # export schema + case-status + store-zip + dialect; export * as postgres / mysql
+    ├── case-status.ts               # 案例库状态机与包路径辅助（非 Drizzle 表）
+    ├── store-zip.ts                 # STORE 法 ZIP 读取（案例预览）
     ├── dialect.ts                   # DATABASE_DIALECTS / DatabaseDialect / inferDialectFromUrl / resolveDatabaseDialect
     ├── postgres.ts                  # re-export src/schema + src/dialect
     ├── mysql.ts                     # re-export src/mysql-schema + src/dialect
     ├── contracts/
     │   └── index.ts                 # 方言中立 DTO（Tenant/Department/User/Role/ChatSession/ChatMessage/AuditEvent/UsageRecord）
-    ├── schema/                      # PostgreSQL 定义（25 文件 = 23 域 + index + _shared）
-    │   ├── index.ts                 # barrel：re-export 全部 23 个域文件
+    ├── schema/                      # PostgreSQL 定义（43 文件 = 41 域 + index + _shared）
+    │   ├── index.ts                 # barrel：re-export 全部 41 个域文件
     │   ├── _shared.ts               # ulid / auditColumns(timestamptz) / softDeleteColumns / nowTimestamp
     │   ├── tenants.ts / organizations.ts / departments.ts / users.ts
     │   ├── roles.ts / user-roles.ts / api-tokens.ts / sso-providers.ts
@@ -48,16 +49,20 @@ packages/db-schema/
     │   ├── usage-records.ts / agent-token-traces.ts
     │   ├── audit-events.ts / gateway-audit-events.ts
     │   ├── policy.ts
-    │   ├── runtime-config.ts        # ⚡ 12 张运行时配置表（旧版误记 9）
-    │   ├── gateway-channels.ts / mcp-servers.ts / mcp-tools.ts
+    │   ├── runtime-config.ts        # ⚡ 15 张运行时/认证表（含 web-search、scope 默认模型、desktop agent policy）
+    │   ├── gateway-channels.ts / gateway-budget.ts / connector-gateway.ts
+    │   ├── mcp-servers.ts / mcp-tools.ts
+    │   ├── agents.ts / agent-tasks.ts / case-library.ts / collab-projects.ts
+    │   ├── chat-message-feedback.ts / feature-usage.ts
     │   ├── business-revenue.ts / billing-split.ts
     │   └── quota-pool.ts / quota-plans.ts
-    ├── mysql-schema/                # MySQL 定义（25 文件 = 23 域 + index + _shared，与 PG 镜像）
+    ├── mysql-schema/                # MySQL 定义（43 文件，与 PG 镜像）
     │   ├── index.ts / _shared.ts    # _shared 用 datetime(6) + UTC_TIMESTAMP(6)
-    │   └── （与 schema/ 同名的 23 个域文件）
+    │   └── （与 schema/ 同名的 41 个域文件）
     └── __tests__/
-        ├── schema-parity.test.ts            # 校验 MySQL 镜像全部 42 张 PG 表
-        └── migration-inventory.test.ts      # 校验迁移条目数与 orphan 规则
+        ├── schema-parity.test.ts            # 校验 MySQL 镜像全部 73 张 PG 表
+        ├── migration-inventory.test.ts      # 校验 PG/MySQL journal 与 orphan 规则
+        ├── case-status.test.ts / store-zip.test.ts
 ```
 
 ## 双方言与方言解析（`dialect.ts`）
@@ -101,6 +106,7 @@ packages/db-schema/
 |---|---|
 | `chat_sessions` | 复合 FK→user+tenant；`active_model`、`message_count`；`deleted_at` 软删 |
 | `chat_messages` | 复合 FK→session+tenant+user；CHECK role∈{system,user,assistant,tool}；status∈{complete,streaming,failed} |
+| `chat_message_feedback` | 用户对 assistant 消息 like/dislike；`source`∈{web,desktop}，CHECK 约束 web 必绑 session+message、desktop 必绑 external_*；可选 trace/provider/model 快照 |
 
 ### Metering / Trace
 
@@ -114,7 +120,7 @@ packages/db-schema/
 | 表 | 关键设计 |
 |---|---|
 | `audit_events` | IAM / admin 事件；jsonb `detail`；index on (tenant, target_kind, target_id) |
-| `gateway_audit_events` | LLM / policy 事件；**append-only 防篡改**：`prev_checksum` + `checksum` + `checksum_version` + `checksum_payload` + `signature` 哈希链；跨境字段 (`src_region` / `dst_region` / `cross_border`)；MCP 执行字段；GIN index on `policies_hit` |
+| `gateway_audit_events` | LLM / policy 事件；**append-only 防篡改**：`prev_checksum` + `checksum` + `checksum_version` + `checksum_payload` + `signature` 哈希链；跨境字段；MCP 执行字段；连接器维度 `connector_execution_id` / `connector_action_id` / `connector_connection_id`；GIN index on `policies_hit` |
 
 ### Policy
 
@@ -142,12 +148,56 @@ packages/db-schema/
 | `mcp_servers` | 租户级 MCP server 注册表；`transport` 默认 streamable-http；`backend_type` + `backend_config`；`required_scopes` text[] |
 | `mcp_tools` | FK→mcp_servers；uq (server, tool_name)；jsonb `input_schema` / `output_schema` |
 
-### Gateway 运行时（`runtime-config.ts`，共 12 张表）
+### Connector Gateway（`connector-gateway.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `connector_definitions` | 复合 PK (tenant_id, connector_id)；jsonb `definition`；租户级连接器目录 |
+| `connector_connections` | 命名连接实例；`auth_type` + `granted_scopes` jsonb；`encrypted_secret` 密文 |
+
+### Enterprise Agents / 桌面任务（`agents.ts` / `agent-tasks.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `enterprise_agents` | 租户 Agent 注册；slug uq；`model`（provider/model）；`runtime` cloud/desktop_worker；capability/assignment/worker keys 数组；`status` / `lifecycle` / `origin`；可选 owner + local_avatar uq |
+| `enterprise_agent_workers` | 桌面 Worker 心跳；uq (agent, user, device) |
+| `enterprise_agent_tasks` | 协作房间触发的任务队列；租约 `lease_expires_at`；status/attempts/result_message_id |
+
+### 案例库（`case-library.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `enterprise_cases` | 提交→审核→归档→发布；`manifest` jsonb + `package_path`；状态 submitted/reviewing/archived/published（逻辑见 `case-status.ts`） |
+
+### 协作项目 / 房间（`collab-projects.ts` / `collab-rooms.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `enterprise_projects` | 租户项目；owner FK→users；`settings` jsonb（connectors/experts/skills）；`main_room_id` |
+| `enterprise_collab_rooms` | 房间；可选 `project_id`；`parent_room_id` + `room_kind`（默认 room） |
+| `enterprise_collab_room_members` / `enterprise_collab_room_messages` | 成员与 seq 消息；消息可选 `client_msg_id` uq (room, client_msg_id) |
+
+### 计量特性用量（`feature-usage.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `enterprise_feature_usage_daily` | 按用户 UTC 日计数；feature 如 search_provider_calls / deep_research_runs |
+| `enterprise_feature_usage_shared_daily` | 公司/部门共享日计数；scope + scope_id |
+
+### Gateway 预算台账（`gateway-budget.ts`）
+
+| 表 | 关键设计 |
+|---|---|
+| `gateway_budget_usage` | 多维度（company/org/dept/personal）周期用量；numeric used_value |
+| `gateway_budget_reservations` | receipt 幂等预占/结算；`lines_json` + actual_tokens/cost |
+
+### Gateway 运行时（`runtime-config.ts`，共 15 张表）
 
 | 表 | 关键设计 |
 |---|---|
 | `enterprise_runtime_model_providers` | per-tenant provider 配置；`api_key_cipher` AES-256-GCM；uq (tenant, provider) |
 | `enterprise_runtime_user_visible_models` | PK (tenant, assignment_key, model_id) 可见性映射 |
+| `enterprise_runtime_scope_default_models` | PK (tenant, assignment_key)；部门默认模型（assignment_key 仅 `dept:<id>`） |
 | `enterprise_runtime_token_quotas` | 一行一租户的 jsonb 配置 |
 | `enterprise_runtime_policy_snapshots` | 已发布 policy JSON，每租户一行 |
 | `enterprise_runtime_pricing` | 动态计价配置 |
@@ -157,9 +207,11 @@ packages/db-schema/
 | `enterprise_runtime_pat_revocation` | 版本化哈希列表，供 PAT 吊销拉取 |
 | `enterprise_runtime_compliance` | 数据驻留、跨境策略、审计保留年数；append-only |
 | `enterprise_runtime_mcp_servers` | MCP 反向代理配置 bundle |
+| `enterprise_runtime_web_search` | 联网搜索开关/provider/密钥密文/deep_research 开关 |
+| `enterprise_desktop_agent_policies` | 租户桌面 Agent 动作策略 JSON（与 budgets 分表，避免整包覆盖丢失） |
 | `auth_refresh_sessions` | 无服务器 refresh token sessions |
 
-> 另有 `gateway_channels`（`gateway-channels.ts`）、`gateway_quota_pool_usage` + `gateway_quota_ledger`（`quota-pool.ts`）、`enterprise_quota_plans` + `enterprise_quota_plan_assignments`（`quota-plans.ts`）等表分属各自域文件，合计全包 **42 张表**（由 `schema-parity.test.ts` 校验 MySQL 镜像一致）。
+> 另有 `gateway_channels`、`gateway_budget_*`（上表）、`gateway_quota_pool_usage` + `gateway_quota_ledger`、`enterprise_quota_plans` + `enterprise_quota_plan_assignments`，以及 chat/collab/capability 等域文件中的表，合计全包 **73 张表**（由 `schema-parity.test.ts` 校验 MySQL 镜像一致）。
 
 ## 关键约定
 
@@ -178,20 +230,20 @@ packages/db-schema/
 
 ### PostgreSQL（`drizzle/`，`drizzle.pg.config.ts`）
 - **工具**：`drizzle-kit` ^0.31.10；`out: ./drizzle`；`dialect: postgresql`；schema `src/schema/index.ts`
-- **Journal**：`drizzle/meta/_journal.json` 含 **29 条** entry（idx 0–28），tag 从 `0000_friendly_rictor` 到 `0029_audit_checksum_payload`；**`0025` 缺号**（journal 从 `0024_enterprise_quota_plans` 直接跳到 `0026_users_tenant_email_active_uq`）
-- **磁盘 SQL**：**31 个** `.sql` 文件，其中 29 个被 journal 跟踪，另 **2 个 orphan** 不在 journal：`0016_mcp_hosting.sql`（与 journal 内 `0016_gateway_dynamic_pricing` 同号冲突）、`0025_enterprise_runtime_mcp_servers.sql`（与 journal 内 `0028_enterprise_runtime_mcp_servers` 重复语义）
+- **Journal**：`drizzle/meta/_journal.json` 含 **60 条** entry（idx 0–59），末 tag `0060_enterprise_feature_usage`；**`0025` 在 journal 中仍缺号**；最近一批 `0050_enterprise_scope_default_models` … `0060_enterprise_feature_usage`
+- **磁盘 SQL**：**62 个** `.sql` 文件，其中 60 个被 journal 跟踪，另 **2 个 orphan** 不在 journal：`0016_mcp_hosting.sql`、`0025_enterprise_runtime_mcp_servers.sql`
 - **脚本**：`db:generate:pg`、`db:migrate:pg`、`db:seed:pg`
 
 ### MySQL（`drizzle-mysql/`，`drizzle.mysql.config.ts`）
 - **工具**：`drizzle-kit`；`out: ./drizzle-mysql`；`dialect: mysql`；schema `src/mysql-schema/index.ts`
-- **Journal**：`drizzle-mysql/meta/_journal.json` 含 **2 条** entry：`0000_mysql_baseline`、`0001_audit_checksum_payload`
-- **Baseline**：`0000_mysql_baseline.sql` 一次性建 **42 张表 + 1 个 VIEW**（与 PG 全表对齐）
+- **Journal**：`drizzle-mysql/meta/_journal.json` 含 **35 条** entry（idx 0–34），末 tag `0034_enterprise_feature_usage`；与 PG 同批增量 `0024`…`0034` 对齐 connector/agents/cases/projects/feedback/budget/feature-usage
+- **Baseline**：`0000_mysql_baseline.sql` 一次性建 **42 张表 + 1 个 VIEW**（历史快照；其后靠增量迁移追平至 73 表）
 - **Orphan 规则**：`migration-inventory.test.ts` **明确禁止**把 PG 的 orphan SQL 文件（`0016_mcp_hosting.sql`、`0025_enterprise_runtime_mcp_servers.sql`）移植进 MySQL 迁移链
 - **脚本**：`db:generate:mysql`、`db:migrate:mysql`、`db:seed:mysql`
 
 ### 一致性校验
-- `db:check:parity`（`schema-parity.test.ts`）：确认 MySQL 镜像全部 **42 张** PG 表，并保持逻辑列、可空性、数据类型对齐
-- `migration-inventory.test.ts`：确认 PG journal 29 条、磁盘 31 个 SQL 含 2 个已知 orphan；MySQL baseline 42 个 CREATE TABLE + 1 view
+- `db:check:parity`（`schema-parity.test.ts`）：确认 MySQL 镜像全部 **73 张** PG 表，并保持逻辑列、可空性、数据类型对齐
+- `migration-inventory.test.ts`：确认 PG journal **60** 条、磁盘 **62** 个 SQL 含 2 个已知 orphan；MySQL journal **35** 条且不含 PG orphan 文件名
 
 ### 通用
 - **环境**：`DATABASE_URL` + `DATABASE_DIALECT`（参见 `dialect.ts`）；非 prod 下 PG 默认 `postgresql://postgres:postgres@127.0.0.1:5432/agenticx`
@@ -201,6 +253,8 @@ packages/db-schema/
 
 ```ts
 export * from "./schema";
+export * from "./case-status";
+export * from "./store-zip";
 export * from "./dialect";
 export * as postgres from "./postgres";
 export * as mysql from "./mysql";
@@ -208,7 +262,7 @@ export * as mysql from "./mysql";
 
 `package.json#exports` 显式暴露 5 个入口：`.`、`./postgres`、`./mysql`、`./dialect`、`./contracts`。
 
-`src/schema/index.ts` barrel re-export 全部 23 个 PG 域文件；`src/mysql-schema/index.ts` 平行 re-export 23 个 MySQL 域文件。每个 schema 文件导出其 `pgTable`/`mysqlTable` 常量 + `$inferSelect` / `$inferInsert` 行类型，例如：
+`src/schema/index.ts` barrel re-export 全部 **41** 个 PG 域文件；`src/mysql-schema/index.ts` 平行 re-export。每个 schema 文件导出其 `pgTable`/`mysqlTable` 常量 + `$inferSelect` / `$inferInsert` 行类型，例如：
 - `Tenant` / `NewTenant`
 - `User` / `NewUser`
 - `ChatSessionRow` / `NewChatSessionRow`
@@ -237,13 +291,19 @@ export * as mysql from "./mysql";
 - 本包是 **Enterprise 专用**的一套生产级双方言（PostgreSQL + MySQL）Drizzle schema，承载企业平台业务事实，并通过 `contracts/` 提供方言中立 DTO
 
 
-## 增量（8ebec3b5 → 30e57496）
+## 增量（30e57496 → 22d051f5）
 
-双方言同步新增域（`src/schema/index.ts` 现导出这些文件）：
+双方言同步新增域文件并写入 `src/schema/index.ts` / `mysql-schema/index.ts`：
 
-- `desktop-device-auth`、`capability-packs`、`user-groups`、`user-opt-outs`、`collab-rooms`
-- `chat-artifacts`、`chat-attachments`、`chat-history-operations`、`deep-research-runs`、`portal-request-logs`
-- `users.mustChangePassword` / `chat-sessions.pinned_at` / `gateway-audit-events.trace_id`
-- `runtime-config`：web-search / deep-research 开关列
+- `connector-gateway`、`gateway-budget`、`agents`、`agent-tasks`、`case-library`、`collab-projects`、`chat-message-feedback`、`feature-usage`
+- `collab-rooms`：`project_id` / `parent_room_id` / `room_kind`；消息 `client_msg_id` 唯一约束
+- `gateway-audit-events`：连接器审计三列
+- `runtime-config`：`enterprise_runtime_scope_default_models`、`enterprise_desktop_agent_policies`（`enterprise_runtime_web_search` 等仍在同文件）
 
-PG 迁移自 `0030_*` 起；MySQL 自 `0002_*` 起，journal 同步加长。旧文「23 域 / journal 29 / MySQL 2 条」已过时，以 `schema/index.ts` + 两边 `meta/_journal.json` 为准。
+包根导出：`src/index.ts` 新增 `case-status`（案例状态机、`casePackageFile`）、`store-zip`（STORE ZIP 预览）。
+
+**PG 迁移**（journal +11，共 60 条）：`0050_enterprise_scope_default_models` … `0060_enterprise_feature_usage`。
+
+**MySQL 迁移**（journal +11，共 35 条）：`0024_enterprise_scope_default_models` … `0034_enterprise_feature_usage`（tag 序号与 PG 不同步属既有约定）。
+
+**表规模**：`schema-parity.test.ts` 自 **59** 升至 **73** 张；`migration-inventory.test.ts` 同步 PG 60/62 与 MySQL 35 条 journal 断言。

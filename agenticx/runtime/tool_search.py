@@ -93,6 +93,7 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "desktop_keyboard_type",
         "desktop_mouse_click",
         "desktop_screenshot",
+        "enterprise_agent_builder",
         "get_automation_task_logs",
         "hook_manage",
         "knowledge_synthesize",

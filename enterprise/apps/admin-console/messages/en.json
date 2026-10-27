@@ -30,6 +30,8 @@
         "overview": "Overview",
         "iam": "IAM",
         "ops": "Operations",
+        "agentRuntime": "Agent runtime",
+        "agentResources": "Agent resources",
         "platform": "Platform",
         "content": "Collaboration",
         "observability": "Observability"
@@ -46,9 +48,18 @@
         "quota": "Quota Control",
         "quotaPlans": "Token Plans",
         "billingSplit": "Billing Split",
+        "agentUsage": "Agent Usage",
         "agentTraces": "Observability",
         "policy": "Policy Rules",
         "agents": "Agents",
+        "agentSessions": "Sessions",
+        "agentEnvironments": "Execution environments",
+        "agentVaults": "Vaults",
+        "agentMemory": "Memory stores",
+        "agentEvals": "Evaluations",
+        "agentSchedules": "Schedules",
+        "agentWebhooks": "Webhooks",
+        "agentChannels": "IM Channels",
         "models": "Model Services",
         "channels": "Channel Management",
         "cache": "AI Cache",
@@ -164,6 +175,7 @@
           "slug": "Slug",
           "runtime": "Runtime",
           "model": "Model",
+          "version": "Version",
           "capabilities": "Capabilities",
           "visibility": "Visibility",
           "status": "Status",
@@ -225,7 +237,815 @@
           "edit": "Edit",
           "delete": "Delete",
           "publish": "Publish",
-          "recall": "Recall"
+          "recall": "Recall",
+          "manifest": "Definition & versions"
+        },
+        "recall": {
+          "title": "Recall agent",
+          "description": "Recall “{name}”? Employees lose access immediately. You can publish it again later.",
+          "confirm": "Recall"
+        },
+        "routing": {
+          "pinnedBadge": "Pinned",
+          "mode": "Routing",
+          "followLatest": "Follow latest version",
+          "pinned": "Pin a version",
+          "pinnedVersion": "Pin to",
+          "defaultEnvironment": "Default execution environment",
+          "noEnvironment": "Not set",
+          "envUnavailable": "The current default environment is disabled or does not match the runtime, so new sessions cannot use it",
+          "unavailableName": "{name} (unavailable)",
+          "save": "Save routing",
+          "saved": "Routing updated",
+          "pinConfirmTitle": "Pin version",
+          "pinConfirmDescription": "New sessions will stay on v{version}. Publishing a newer version will not take effect automatically. Continue?",
+          "followConfirmDescription": "New sessions will use the latest version. Continue?",
+          "confirm": "Confirm"
+        },
+        "manifest": {
+          "title": "{name} · Definition & versions",
+          "tabs": {
+            "form": "Form",
+            "json": "Raw JSON",
+            "versions": "Version history",
+            "routing": "Routing & environment"
+          },
+          "notePlaceholder": "Version note (optional)",
+          "validate": "Validate",
+          "save": "Save as new version",
+          "validateOk": "Validation passed",
+          "saved": "Saved as v{version}",
+          "unchanged": "Nothing changed, so no new version was created",
+          "conflict": "Someone else saved a newer version. The latest copy is loaded — review it before saving again",
+          "driftWarning": "The model or prompt in basic settings differs from the latest version. Saving a new version keeps the version contents.",
+          "rollbackNote": "Rollback based on v{version}",
+          "json": {
+            "apply": "Apply",
+            "parseError": "Not a valid JSON object"
+          },
+          "form": {
+            "model": "Model",
+            "system": "System prompt",
+            "builtin": "Built-in tools",
+            "builtinEnabled": "Enable built-in toolset",
+            "defaultPolicy": "Default permission",
+            "policy": {
+              "inherit": "Inherit default",
+              "always_allow": "Always allow",
+              "always_ask": "Ask every time"
+            },
+            "toolName": "Tool name",
+            "enabled": "Enabled",
+            "addTool": "Add tool",
+            "mcp": "MCP servers",
+            "mcpName": "Name",
+            "mcpUrl": "URL",
+            "mcpTransport": "Transport",
+            "mcpToolset": "Configure tool permissions separately",
+            "addMcp": "Add MCP server",
+            "mcpSecretHint": "Credentials are not stored here. The vault injects them at runtime.",
+            "custom": "Custom tools",
+            "customName": "Name",
+            "customDescription": "Description",
+            "customSchema": "Input parameters (JSON)",
+            "addCustom": "Add custom tool",
+            "skills": "Skills",
+            "tenantSkills": "Enterprise skills",
+            "builtinSkills": "Built-in skills",
+            "addBuiltinSkill": "Add built-in skill",
+            "runtime": "Runtime limits",
+            "maxToolRounds": "Max tool rounds",
+            "maxSessionTokens": "Token cap per session",
+            "welcome": "Welcome message",
+            "suggested": "Suggested questions (one per line)",
+            "remove": "Remove"
+          },
+          "versions": {
+            "version": "Version",
+            "source": "Source",
+            "note": "Note",
+            "createdBy": "Created by",
+            "createdAt": "Created at",
+            "system": "System",
+            "latest": "Latest",
+            "effective": "Effective",
+            "view": "View",
+            "compare": "Compare",
+            "editFrom": "Edit from this version",
+            "pin": "Pin to this version",
+            "empty": "The previous setup could not be converted into a version. Fix it in the form and save."
+          },
+          "source": {
+            "backfill": "Generated automatically",
+            "admin": "Admin console",
+            "api": "API",
+            "legacy_edit": "Synced from basic settings",
+            "desktop": "Desktop"
+          },
+          "diff": {
+            "from": "Base",
+            "to": "Target",
+            "noChange": "The two versions are identical"
+          }
+        }
+      },
+      "agentSchedules": {
+        "title": "Schedules",
+        "description": "Each cron fire opens an independent session and leaves a run record.",
+        "create": "New schedule",
+        "emptyTitle": "No schedules yet",
+        "emptyDescription": "Add a cron. The runtime opens a new session when it is due.",
+        "pending": "Pending",
+        "columns": {
+          "name": "Name",
+          "agent": "Agent",
+          "plan": "Plan",
+          "enabled": "Enabled",
+          "next": "Next run",
+          "last": "Last run",
+          "actions": "Actions"
+        },
+        "actions": {
+          "edit": "Edit",
+          "run": "Run now",
+          "history": "Runs",
+          "delete": "Delete"
+        },
+        "fields": {
+          "name": "Name",
+          "description": "Description",
+          "agent": "Agent",
+          "policy": "Version policy",
+          "version": "Version",
+          "environment": "Environment",
+          "environmentDefault": "Agent default environment",
+          "cron": "Cron",
+          "timezone": "Time zone",
+          "input": "Input",
+          "inputHint": "Sent to the agent when the cron fires. Placeholders: '{{date}}' '{{datetime}}' '{{schedule_name}}' '{{run_id}}'."
+        },
+        "policy": {
+          "follow": "Follow the agent version route",
+          "pinned": "Pinned version"
+        },
+        "runStatus": {
+          "scheduled": "Scheduled",
+          "firing": "Firing",
+          "running": "Running",
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "skipped": "Skipped"
+        },
+        "trigger": {
+          "schedule": "Schedule",
+          "manual": "Manual"
+        },
+        "skip": {
+          "missed": "Missed",
+          "overlap": "Previous run still active",
+          "revised": "Configuration changed",
+          "disabled": "Disabled",
+          "deleted": "Deleted"
+        },
+        "delete": {
+          "title": "Delete schedule",
+          "description": "It will not fire again. Past run records are kept."
+        },
+        "historyTitle": "Runs",
+        "historyColumns": {
+          "when": "Scheduled for",
+          "trigger": "Trigger",
+          "status": "Status",
+          "session": "Session",
+          "error": "Error"
+        }
+      },
+      "agentWebhooks": {
+        "title": "Webhooks",
+        "description": "Signed notifications for the events an endpoint subscribes to.",
+        "create": "New webhook",
+        "emptyTitle": "No webhooks yet",
+        "emptyDescription": "Register an http or https receiver and choose the events to subscribe to.",
+        "columns": {
+          "name": "Name",
+          "url": "URL",
+          "events": "Events",
+          "enabled": "Enabled",
+          "updated": "Updated",
+          "actions": "Actions"
+        },
+        "actions": {
+          "edit": "Edit",
+          "rotate": "Rotate secret",
+          "deliveries": "Deliveries",
+          "delete": "Delete"
+        },
+        "fields": {
+          "name": "Name",
+          "url": "Endpoint URL",
+          "urlPlaceholder": "https://example.com/webhooks",
+          "description": "Description (optional)",
+          "descriptionPlaceholder": "Which events this endpoint receives, and who maintains it",
+          "eventTypes": "Event types",
+          "agents": "Limit to agents",
+          "agentsHint": "Leave empty for every agent",
+          "sources": "Limit to sources",
+          "sourcesHint": "Leave empty for every source",
+          "includeResult": "Include reply text"
+        },
+        "selectAll": "Select all",
+        "selectedCount": "Selected {selected} / {total} event types",
+        "eventsRequired": "Select at least one event",
+        "advanced": "Advanced",
+        "submitCreate": "Create webhook endpoint",
+        "events": {
+          "session_status_run_started": "Run started",
+          "session_status_idled": "Stopped (incl. awaiting approval)",
+          "session_idle": "Turn completed",
+          "session_failed": "Turn failed",
+          "session_thread_created": "Thread created",
+          "session_thread_idled": "Thread stopped",
+          "session_thread_terminated": "Thread terminated",
+          "agent_created": "Created",
+          "agent_version_published": "Version published",
+          "agent_deleted": "Deleted",
+          "environment_created": "Created",
+          "environment_updated": "Updated",
+          "environment_deleted": "Deleted",
+          "vault_created": "Vault created",
+          "vault_archived": "Vault archived",
+          "vault_deleted": "Vault deleted",
+          "vault_credential_created": "Credential created",
+          "vault_credential_archived": "Credential archived",
+          "vault_credential_deleted": "Credential deleted",
+          "credential_expiring": "Credential expiring",
+          "memory_store_created": "Created",
+          "memory_store_archived": "Archived",
+          "memory_store_deleted": "Deleted",
+          "schedule_created": "Created",
+          "schedule_updated": "Updated (incl. enable/disable)",
+          "schedule_deleted": "Deleted",
+          "schedule_run_started": "Started",
+          "schedule_run_succeeded": "Succeeded",
+          "schedule_run_failed": "Failed"
+        },
+        "eventGroups": {
+          "session": "Sessions",
+          "thread": "Multi-agent threads",
+          "agent": "Agents",
+          "environment": "Environments",
+          "vault": "Vaults",
+          "memory_store": "Memory stores",
+          "schedule": "Schedules",
+          "schedule_run": "Schedule runs"
+        },
+        "disabledReason": {
+          "consecutive_failures": "Auto-disabled: consecutive delivery failures",
+          "gone": "Auto-disabled: receiver returned 410"
+        },
+        "sources": {
+          "portal": "Portal",
+          "desktop": "Desktop",
+          "api": "API",
+          "schedule": "Schedule",
+          "channel": "IM channel",
+          "eval": "Eval"
+        },
+        "secret": {
+          "title": "Signing secret",
+          "once": "You cannot view this again after closing."
+        },
+        "delete": {
+          "title": "Delete webhook",
+          "description": "Delivery stops. Past delivery records are kept."
+        },
+        "historyTitle": "Deliveries",
+        "historyColumns": {
+          "event": "Event",
+          "status": "Status",
+          "attempts": "Attempts",
+          "code": "Last status",
+          "error": "Last error",
+          "when": "Time"
+        }
+      },
+      "agentChannels": {
+        "title": "IM Channels",
+        "description": "Bind a Feishu app to an agent. Keep the app secret in its own vault.",
+        "create": "New channel",
+        "createTitle": "New IM channel",
+        "editTitle": "Edit IM channel",
+        "emptyTitle": "No IM channels yet",
+        "emptyDescription": "After you bind a Feishu app, the runtime opens a long connection.",
+        "columns": {
+          "name": "Name",
+          "agent": "Agent",
+          "policy": "Version policy",
+          "appId": "Feishu app ID",
+          "connection": "Connection",
+          "enabled": "Enabled",
+          "actions": "Actions"
+        },
+        "actions": {
+          "edit": "Edit",
+          "sessions": "Sessions",
+          "delete": "Delete"
+        },
+        "fields": {
+          "name": "Name",
+          "agent": "Agent",
+          "policy": "Version policy",
+          "version": "Pinned version",
+          "environment": "Environment",
+          "environmentEmpty": "None",
+          "appId": "Feishu app ID",
+          "vault": "Vault",
+          "vaultHint": "{name} · use a dedicated vault",
+          "credential": "App secret",
+          "site": "Site",
+          "idle": "Hours of silence before a new session"
+        },
+        "policy": {
+          "follow": "Follow latest",
+          "pinned": "Pinned v{version}",
+          "pinnedChoice": "Pinned version"
+        },
+        "site": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        },
+        "status": {
+          "pending": "Pending",
+          "starting": "Connecting",
+          "running": "Connected",
+          "error": "Error",
+          "stopped": "Stopped"
+        },
+        "delete": {
+          "title": "Delete IM channel",
+          "description": "The bot stops replying. Sessions already created are kept."
+        },
+        "sessionsTitle": "Channel sessions",
+        "conversation": {
+          "p2p": "Direct",
+          "group": "Group"
+        },
+        "sessionColumns": {
+          "type": "Type",
+          "session": "Session",
+          "version": "Version",
+          "when": "Last message"
+        }
+      },
+      "agentEnvironments": {
+        "title": "Execution environments",
+        "description": "Where a managed-agent session runs: a cloud sandbox or an employee desktop.",
+        "create": "New environment",
+        "emptyTitle": "No execution environments yet",
+        "emptyDescription": "Create one, then set it as an agent's default environment.",
+        "columns": {
+          "name": "Name",
+          "type": "Type",
+          "status": "Status",
+          "references": "References",
+          "actions": "Actions"
+        },
+        "type": {
+          "cloud": "Cloud",
+          "desktop_worker": "Employee desktop"
+        },
+        "status": {
+          "active": "Enabled",
+          "disabled": "Disabled"
+        },
+        "references": "{agents} agents · {sessions} active sessions",
+        "form": {
+          "createTitle": "New environment",
+          "editTitle": "Edit environment",
+          "name": "Name",
+          "description": "Description",
+          "type": "Type",
+          "sandboxBackend": "Sandbox backend",
+          "sandbox": {
+            "docker": "Container",
+            "remote": "Remote sandbox",
+            "subprocess": "Local process (development only)"
+          },
+          "image": "Image",
+          "egress": "Outbound allowlist (one domain per line)",
+          "idleTtl": "Idle recycle time (seconds)",
+          "workers": "Employees who can run sessions"
+        },
+        "actions": {
+          "edit": "Edit",
+          "disable": "Disable",
+          "enable": "Enable",
+          "delete": "Delete"
+        },
+        "disable": {
+          "title": "Disable environment",
+          "description": "Disable “{name}”? New sessions cannot use it. Sessions already running are unaffected.",
+          "confirm": "Disable"
+        },
+        "delete": {
+          "title": "Delete environment",
+          "description": "Delete “{name}”? This cannot be undone.",
+          "confirm": "Delete"
+        },
+        "toast": {
+          "created": "Environment created",
+          "saved": "Saved",
+          "disabled": "Disabled",
+          "enabled": "Enabled",
+          "deleted": "Deleted"
+        }
+      },
+      "agentEvals": {
+        "title": "Evaluations",
+        "description": "Run a pinned agent version against a dataset and rubric, then create a candidate version that stays inactive until you switch it.",
+        "tabs": {
+          "datasets": "Datasets",
+          "rubrics": "Rubrics",
+          "runs": "Runs",
+          "candidates": "Candidates"
+        },
+        "empty": "No items yet",
+        "actions": {
+          "view": "View",
+          "createDataset": "New dataset",
+          "createRubric": "New rubric",
+          "startRun": "Start evaluation",
+          "addItems": "Add cases",
+          "addRule": "Add rule",
+          "iterate": "Self-iterate",
+          "applyCandidate": "Create candidate version",
+          "compare": "Compare with another run",
+          "viewSession": "View session",
+          "start": "Start"
+        },
+        "columns": {
+          "name": "Name",
+          "itemCount": "Cases",
+          "updatedAt": "Updated",
+          "actions": "Actions",
+          "agentVersion": "Agent & version",
+          "dataset": "Dataset",
+          "rubric": "Rubric",
+          "status": "Status",
+          "progress": "Progress",
+          "passRate": "Pass rate",
+          "meanScore": "Mean score",
+          "startedAt": "Started",
+          "agent": "Agent",
+          "baseVersion": "Baseline version",
+          "sourceRun": "Source run",
+          "createdAt": "Created"
+        },
+        "fields": {
+          "name": "Name",
+          "agent": "Agent",
+          "version": "Version",
+          "environment": "Environment",
+          "dataset": "Dataset",
+          "rubric": "Rubric",
+          "memoryStores": "Memory stores (read-only during eval)",
+          "concurrency": "Concurrency",
+          "criteria": "Judge instructions",
+          "mode": "Judge mode",
+          "threshold": "Pass threshold",
+          "judgeModel": "Judge model",
+          "sessionId": "Session ID",
+          "useAnswerAsExpected": "Use the session's final answer as the expected answer"
+        },
+        "placeholders": {
+          "selectAgent": "Select an agent",
+          "selectDataset": "Select a dataset",
+          "selectRubric": "Select a rubric",
+          "noJudge": "No judge model",
+          "optimizerModel": "Optimizer model (provider/model)"
+        },
+        "datasets": {
+          "createTitle": "New dataset",
+          "deleteTitle": "Delete dataset",
+          "deleteConfirm": "Delete this dataset? Existing evaluation runs are not affected.",
+          "addItemsTitle": "Add cases",
+          "pasteJson": "Paste JSON",
+          "uploadFile": "Upload file",
+          "importSession": "Import from session",
+          "hasExpected": "Has expected answer",
+          "noExpected": "No expected answer",
+          "sourceSession": "Source session",
+          "saveFailed": "Save failed",
+          "parseFailed": "Parse failed"
+        },
+        "rubrics": {
+          "createTitle": "New rubric",
+          "dialogTitle": "Rubric",
+          "modeBinary": "Pass / fail",
+          "modeScore": "Score",
+          "saveFailed": "Save failed"
+        },
+        "runs": {
+          "startTitle": "Start evaluation",
+          "defaultCloud": "Default cloud",
+          "startFailed": "Failed to start",
+          "iterateStarted": "Self-iteration started",
+          "iterateFailed": "Self-iteration did not start"
+        },
+        "candidates": {
+          "diffTitle": "Candidate diff",
+          "applyTitle": "Create candidate version",
+          "applyConfirm": "This creates a new agent version from the candidate. The currently effective version stays unchanged (if the agent follows latest, it is pinned to the current effective version first). After confirm you can re-run evals on the new version, then switch the effective version on the Agents page.",
+          "applyFailed": "Create failed",
+          "applySuccess": "Created version v{version}; effective remains v{effective}",
+          "appliedVersion": "Created version v{version}",
+          "status": {
+            "proposed": "Pending",
+            "applied": "Version created",
+            "discarded": "Discarded"
+          }
+        },
+        "detail": {
+          "title": "Evaluation detail",
+          "meanScore": "Mean score",
+          "passRate": "Pass rate",
+          "failed": "Failed",
+          "errored": "Errors",
+          "errorNote": "Execution errors are excluded from pass rate and mean score",
+          "progress": "Progress",
+          "filterAll": "All",
+          "filterFailed": "Failed",
+          "filterError": "Errors",
+          "judgeReason": "Judge reason: {reason}",
+          "noReason": "None"
+        },
+        "compare": {
+          "title": "Version compare",
+          "passRate": "Pass rate {base} → {target} ({delta})",
+          "meanScore": "Mean score {base} → {target} ({delta})",
+          "counts": "Fixed {fixed} / Regressed {regressed} / Unchanged {unchanged} / Errors {errored}",
+          "hint": "Pick another completed run with the same dataset and rubric."
+        }
+      },
+      "agentMemory": {
+        "title": "Memory stores",
+        "description": "Preferences and experience kept across sessions. Mounted sessions read and write them as files, and every change is traceable.",
+        "create": "New memory store",
+        "showArchived": "Show archived",
+        "emptyTitle": "No memory stores yet",
+        "emptyDescription": "No memory stores yet. A memory store lets agents keep preferences and experience across sessions. Once mounted, a session reads and writes them as files, and every change stays traceable.",
+        "untrustedHint": "A memory store mounted for reading and writing can retain untrusted content. Share knowledge with a read-only mount.",
+        "columns": {
+          "name": "Name",
+          "description": "Description",
+          "count": "Memories",
+          "size": "Size",
+          "status": "Status",
+          "updatedAt": "Updated",
+          "actions": "Actions"
+        },
+        "status": {
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "form": {
+          "createTitle": "New memory store",
+          "name": "Name",
+          "description": "Description"
+        },
+        "actions": {
+          "open": "Open",
+          "archive": "Archive",
+          "delete": "Delete",
+          "save": "Save",
+          "cancel": "Cancel",
+          "close": "Close",
+          "newMemory": "New memory",
+          "deleteMemory": "Delete memory",
+          "viewLatest": "View latest content",
+          "viewVersion": "View",
+          "redact": "Redact"
+        },
+        "memory": {
+          "path": "Path",
+          "content": "Content",
+          "createTitle": "New memory",
+          "deleteTitle": "Delete memory",
+          "deleteDescription": "Delete “{path}”? The path can be created again. Older versions stay."
+        },
+        "editor": {
+          "version": "Version v{version}",
+          "lastEdit": "Last edit",
+          "agent": "Agent",
+          "user": "User {id}",
+          "session": "session",
+          "pick": "Select a memory on the left"
+        },
+        "versions": {
+          "title": "Version history",
+          "version": "Version",
+          "operation": "Operation",
+          "actor": "Actor",
+          "session": "Source session",
+          "size": "Size",
+          "time": "Time",
+          "actions": "Actions",
+          "redacted": "Redacted · {time} · {actor}",
+          "redactDisabled": "The current version cannot be redacted",
+          "redactTitle": "Redact a historical version",
+          "redactDescription": "Redaction permanently removes the path and content of this historical version and keeps only the operation record.",
+          "confirm": "Redact",
+          "viewTitle": "Historical version"
+        },
+        "operation": {
+          "created": "Created",
+          "modified": "Modified",
+          "deleted": "Deleted"
+        },
+        "archive": {
+          "title": "Archive memory store",
+          "description": "Archive “{name}”? It cannot be mounted on new sessions. Sessions that already mount it can keep using it.",
+          "confirm": "Archive"
+        },
+        "delete": {
+          "title": "Delete memory store",
+          "description": "Deleting removes the memories and every version. This cannot be undone. Type the store name “{name}” to confirm.",
+          "confirm": "Delete",
+          "placeholder": "Type the store name"
+        },
+        "toast": {
+          "created": "Memory store created",
+          "memoryCreated": "Memory created",
+          "memorySaved": "Memory saved",
+          "memoryDeleted": "Memory deleted",
+          "archived": "Archived",
+          "deleted": "Deleted",
+          "conflict": "This memory was changed by another session or an administrator. Refresh before editing again.",
+          "redacted": "Redacted"
+        },
+        "dream": {
+          "start": "Consolidate memory",
+          "pendingBadge": "Pending review",
+          "sessionHint": "Copy a session ID from the managed sessions page in the log center",
+          "sessions": "Sessions",
+          "sessionsPlaceholder": "One session ID per line",
+          "instructions": "Instructions",
+          "defaultInstructions": "Keep stable preferences, conventions, and verified conclusions. Remove duplicates, outdated items, and contradictions. Remove names, email addresses, phone numbers, and order numbers. Organize the result by topic.",
+          "model": "Model",
+          "outputName": "Output memory store name",
+          "outputDescription": "Description",
+          "submit": "Start",
+          "history": "Consolidation history",
+          "columns": {
+            "status": "Status",
+            "sessions": "Sessions",
+            "output": "Output store",
+            "memories": "Memories",
+            "rejected": "Blocked",
+            "started": "Started",
+            "actions": "Actions"
+          },
+          "status": {
+            "pending": "Waiting",
+            "running": "Running",
+            "completed": "Completed",
+            "failed": "Failed",
+            "cancelled": "Cancelled"
+          },
+          "cancel": "Cancel",
+          "missingSessions": "Missing sessions: {ids}",
+          "review": {
+            "running": "Consolidation is still running. You cannot view or mount this store yet.",
+            "pending": "This memory store was produced by consolidation. Review the contents before mounting it on a session.",
+            "approved": "Approved. This store can be mounted on a session.",
+            "archived": "Consolidation did not finish. This store has been archived.",
+            "approve": "Approve",
+            "discard": "Discard",
+            "discardTitle": "Discard consolidation result",
+            "discardDescription": "Discarding archives this memory store. The original store is left unchanged.",
+            "cancel": "Cancel"
+          },
+          "toast": {
+            "started": "Consolidation started. Review the result in the new memory store when it finishes.",
+            "approved": "Approved. This store can now be mounted.",
+            "discarded": "Discarded and archived"
+          }
+        }
+      },
+      "agentVaults": {
+        "title": "Vaults",
+        "description": "Store MCP tokens and environment-variable secrets. Sessions reference them; the agent never sees the plaintext.",
+        "create": "New vault",
+        "showArchived": "Show archived",
+        "emptyTitle": "No vaults yet",
+        "emptyDescription": "A vault stores MCP tokens and environment-variable secrets. After a session references it, the runtime injects them and the agent never sees the plaintext.",
+        "columns": {
+          "name": "Name",
+          "description": "Description",
+          "count": "Active credentials",
+          "status": "Status",
+          "createdAt": "Created",
+          "actions": "Actions"
+        },
+        "status": {
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "types": {
+          "static_bearer": "MCP static token",
+          "mcp_oauth": "MCP OAuth",
+          "bearer": "HTTPS Bearer",
+          "environment_variable": "Environment variable"
+        },
+        "credColumns": {
+          "name": "Name",
+          "type": "Type",
+          "target": "Match target",
+          "status": "Status",
+          "expires": "Expires",
+          "rotated": "Last rotation",
+          "used": "Last used",
+          "actions": "Actions"
+        },
+        "actions": {
+          "detail": "Details",
+          "cancel": "Cancel",
+          "archive": "Archive",
+          "delete": "Delete",
+          "rotate": "Rotate",
+          "addCredential": "Add credential",
+          "save": "Save"
+        },
+        "form": {
+          "createTitle": "New vault",
+          "name": "Name",
+          "description": "Description",
+          "basic": "Basics"
+        },
+        "credential": {
+          "createTitle": "Add credential",
+          "rotateTitle": "Rotate credential",
+          "type": "Type",
+          "name": "Name",
+          "mcpUrl": "MCP URL",
+          "host": "Host",
+          "token": "Token",
+          "accessToken": "Access token",
+          "refreshToken": "Refresh token",
+          "clientId": "Client ID",
+          "clientSecret": "Client secret",
+          "tokenEndpoint": "Token endpoint",
+          "expiresAt": "Expires at",
+          "secretName": "Variable name",
+          "secretValue": "Secret value",
+          "authType": "Endpoint auth",
+          "scope": "Scope",
+          "clearRefresh": "Clear automatic refresh",
+          "keepBlank": "Leave blank to keep the current value"
+        },
+        "networking": {
+          "label": "Network policy",
+          "limited": "Specific hosts only (recommended)",
+          "unrestricted": "Any host",
+          "hosts": "Host list",
+          "hint": "*.example.com is supported",
+          "warning": "Any outbound request may carry this secret. Use this only when the target hosts cannot be listed in advance."
+        },
+        "references": {
+          "title": "References",
+          "sessions": "{count} active sessions",
+          "agents": "Agents that may use this vault",
+          "agentLine": "{name} · v{version}",
+          "emptySessions": "No active session references it",
+          "emptyAgents": "No agent’s latest version matches these MCP URLs"
+        },
+        "authTypes": {
+          "none": "none",
+          "client_secret_basic": "client_secret_basic",
+          "client_secret_post": "client_secret_post"
+        },
+        "archive": {
+          "vaultTitle": "Archive vault",
+          "credentialTitle": "Archive credential",
+          "vault": "Archiving clears credential ciphertext permanently. Later calls from sessions that reference it will go out unauthenticated.",
+          "credential": "Archiving clears this credential’s ciphertext permanently.",
+          "confirm": "Archive"
+        },
+        "delete": {
+          "vaultTitle": "Delete vault",
+          "credentialTitle": "Delete credential",
+          "vault": "The vault and every credential record in it will be removed permanently.",
+          "credential": "This credential record will be removed permanently.",
+          "namePrompt": "Type the vault name to confirm",
+          "confirm": "Delete"
+        },
+        "toast": {
+          "created": "Vault created",
+          "saved": "Saved",
+          "credentialCreated": "Credential added",
+          "rotated": "Rotated. New sessions pick it up immediately; in-flight sessions pick it up on the next turn.",
+          "archived": "Archived",
+          "deleted": "Deleted"
         }
       },
       "capabilities": {
@@ -476,6 +1296,22 @@
         "nameLabel": "Name",
         "userIdLabel": "Owner user ID",
         "expireDaysLabel": "Valid days",
+        "maScopesLabel": "Managed agent API permissions",
+        "maScopesHint": "Leave unchecked to use the token only for gateway chat",
+        "maScopes": {
+          "ma_agents_read": "View agents",
+          "ma_agents_write": "Manage agents and versions",
+          "ma_environments_read": "View execution environments",
+          "ma_environments_write": "Manage execution environments",
+          "ma_sessions_read": "View managed sessions",
+          "ma_sessions_write": "Create and drive managed sessions",
+          "ma_worker": "Desktop execution node",
+          "ma_vaults_read": "View vaults",
+          "ma_vaults_write": "Manage vaults",
+          "ma_memory_read": "View memory stores",
+          "ma_memory_write": "Manage memory stores",
+          "ma_admin": "Full managed-agent access"
+        },
         "confirmRevoke": "Revoke this token?",
         "copyKey": "Copy key",
         "pasteKey": "Paste key",
@@ -992,7 +1828,11 @@
         "featureRemaining": "{remaining} / {limit} left {window}"
       },
       "limits": {
-        "tabs": { "spending": "Token / USD", "search": "Web search", "research": "Deep research" },
+        "tabs": {
+          "spending": "Token / USD",
+          "search": "Web search",
+          "research": "Deep research"
+        },
         "enable": "Set a separate limit",
         "inherit": "When off, this level inherits again instead of keeping a hidden zero.",
         "unitTokens": "Token limit",
@@ -1016,7 +1856,11 @@
         "sharedCount": "People in this scope share this count. Turn off to remove the separate limit.",
         "personalCount": "This count is tracked for each person. Turn off to inherit again.",
         "noLimit": "No limit",
-        "window": { "day": "Daily", "week": "Weekly", "month": "Monthly" },
+        "window": {
+          "day": "Daily",
+          "week": "Weekly",
+          "month": "Monthly"
+        },
         "ring": {
           "day": "Used today",
           "week": "Used this week",
@@ -1910,13 +2754,83 @@
         "title": "Observability",
         "description": "Web and desktop runs in one place: overview, traces, and sessions.",
         "backToList": "Back to list",
-        "tabs": { "overview": "Overview", "traces": "Traces", "sessions": "Sessions" },
-        "source": { "desktop": "Desktop", "web": "Web" },
-        "filter": { "all": "All", "errors": "Errors", "search": "Search trace, session, or input", "clearSession": "Clear session filter" },
-        "columns": { "status": "Status", "errorType": "Error type", "time": "Time", "source": "Source", "operation": "Operation", "model": "Model", "input": "Input", "output": "Output", "duration": "Duration", "session": "Session ID", "createdAt": "Created at", "traces": "Traces count", "tokens": "Tokens" },
-        "errors": { "tool": "TOOL call failed", "model": "LLM call failed", "subagent": "AGENT execution failed", "run": "Root span status error" },
-        "ledger": { "filters": "Filters", "range": "Time", "day": "Last 24 hours", "week": "Last 7 days", "allTime": "Loaded records", "dayShort": "1d", "weekShort": "7d", "allShort": "All", "traces": "Traces", "observations": "Observations", "count": "{count} items", "prev": "Previous", "next": "Next", "maxDuration": "Duration (ms)", "inputTokens": "Input Tokens", "outputTokens": "Output Tokens", "maxTokens": "Total Tokens", "maxCost": "Cost (USD)", "min": "Min", "max": "Max", "tracesCount": "Traces Count", "sessionDuration": "Session Duration (ms)", "errorSource": "This trace is marked as ERROR (triggered by the following observation error)", "tags": "Tags", "formatted": "Formatted", "json": "JSON", "sessionDetail": "Session detail", "round": "Round {index}" },
-        "overview": { "traces": "Runs", "errors": "Errors", "modelCalls": "Model calls", "toolCalls": "Tool calls", "tokens": "Tokens", "p50": "Duration P50", "p90": "Duration P90", "avg": "Avg duration", "topModels": "Token use by model" },
+        "tabs": {
+          "overview": "Overview",
+          "traces": "Traces",
+          "sessions": "Sessions"
+        },
+        "source": {
+          "desktop": "Desktop",
+          "web": "Web"
+        },
+        "filter": {
+          "all": "All",
+          "errors": "Errors",
+          "search": "Search trace, session, or input",
+          "clearSession": "Clear session filter"
+        },
+        "columns": {
+          "status": "Status",
+          "errorType": "Error type",
+          "time": "Time",
+          "source": "Source",
+          "operation": "Operation",
+          "model": "Model",
+          "input": "Input",
+          "output": "Output",
+          "duration": "Duration",
+          "session": "Session ID",
+          "createdAt": "Created at",
+          "traces": "Traces count",
+          "tokens": "Tokens"
+        },
+        "errors": {
+          "tool": "TOOL call failed",
+          "model": "LLM call failed",
+          "subagent": "AGENT execution failed",
+          "run": "Root span status error"
+        },
+        "ledger": {
+          "filters": "Filters",
+          "range": "Time",
+          "day": "Last 24 hours",
+          "week": "Last 7 days",
+          "allTime": "Loaded records",
+          "dayShort": "1d",
+          "weekShort": "7d",
+          "allShort": "All",
+          "traces": "Traces",
+          "observations": "Observations",
+          "count": "{count} items",
+          "prev": "Previous",
+          "next": "Next",
+          "maxDuration": "Duration (ms)",
+          "inputTokens": "Input Tokens",
+          "outputTokens": "Output Tokens",
+          "maxTokens": "Total Tokens",
+          "maxCost": "Cost (USD)",
+          "min": "Min",
+          "max": "Max",
+          "tracesCount": "Traces Count",
+          "sessionDuration": "Session Duration (ms)",
+          "errorSource": "This trace is marked as ERROR (triggered by the following observation error)",
+          "tags": "Tags",
+          "formatted": "Formatted",
+          "json": "JSON",
+          "sessionDetail": "Session detail",
+          "round": "Round {index}"
+        },
+        "overview": {
+          "traces": "Runs",
+          "errors": "Errors",
+          "modelCalls": "Model calls",
+          "toolCalls": "Tool calls",
+          "tokens": "Tokens",
+          "p50": "Duration P50",
+          "p90": "Duration P90",
+          "avg": "Avg duration",
+          "topModels": "Token use by model"
+        },
         "recentTraces": "Recent traces",
         "recentTracesHint": "From gateway metering and edge-agent ingest",
         "traceDetail": "Trace detail",
@@ -2021,9 +2935,20 @@
         "assignDesc": "Bind tenant / department / user; upgrades can apply next period only.",
         "empty": "No plans yet",
         "pendingUpgrade": "Pending upgrade",
-        "period": { "month": "Monthly", "week": "Weekly" },
-        "status": { "draft": "Draft", "active": "Active", "archived": "Archived" },
-        "scope": { "tenant": "Tenant", "dept": "Department", "user": "User" },
+        "period": {
+          "month": "Monthly",
+          "week": "Weekly"
+        },
+        "status": {
+          "draft": "Draft",
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "scope": {
+          "tenant": "Tenant",
+          "dept": "Department",
+          "user": "User"
+        },
         "fields": {
           "name": "Plan name",
           "monthlyTokens": "Monthly token limit",
@@ -2060,6 +2985,128 @@
           "assigned": "Assignment created",
           "unassigned": "Assignment removed",
           "rollover": "Rollover completed ({count} assignments)"
+        }
+      },
+      "managedSessions": {
+        "filters": {
+          "agent": "Agent",
+          "allAgents": "All agents",
+          "userEmail": "Requester email",
+          "status": "Status",
+          "allStatus": "All statuses",
+          "source": "Source",
+          "allSources": "All sources",
+          "range": "Time",
+          "range1d": "Last 1 day",
+          "range7d": "Last 7 days",
+          "range30d": "Last 30 days",
+          "rangeAll": "All",
+          "apply": "Search",
+          "reset": "Reset"
+        },
+        "columns": {
+          "session": "Session",
+          "agent": "Agent",
+          "user": "Requester",
+          "source": "Source",
+          "status": "Status",
+          "tokens": "Tokens (input / output)",
+          "toolCalls": "Tool calls",
+          "runtime": "Runtime",
+          "createdAt": "Created"
+        },
+        "status": {
+          "idle": "Idle",
+          "running": "Running",
+          "rescheduling": "Retrying",
+          "terminated": "Terminated",
+          "archived": "Archived",
+          "requiresAction": "Waiting for confirmation"
+        },
+        "stopReason": {
+          "end_turn": "Completed",
+          "requires_action": "Waiting for confirmation",
+          "retries_exhausted": "Retries exhausted",
+          "refusal": "Model refusal",
+          "max_tool_rounds": "Tool round limit",
+          "budget_exceeded": "Usage budget exceeded",
+          "policy_blocked": "Policy blocked"
+        },
+        "source": {
+          "portal": "Portal",
+          "desktop": "Desktop",
+          "api": "API",
+          "schedule": "Schedule",
+          "channel": "Channel",
+          "eval": "Evaluation"
+        },
+        "units": {
+          "ms": "ms",
+          "s": "s",
+          "m": "m"
+        },
+        "empty": "No managed sessions",
+        "forbidden": "You do not have permission to view managed sessions",
+        "loadMore": "Load more",
+        "loading": "Loading…",
+        "untitled": "Untitled session",
+        "unknownUser": "Unknown user",
+        "defaultEnvironment": "Default cloud environment",
+        "detail": {
+          "back": "Back to list",
+          "summary": "Overview",
+          "agentVersion": "Version",
+          "environment": "Environment",
+          "createdAt": "Created",
+          "updatedAt": "Updated",
+          "inputTokens": "Input tokens",
+          "outputTokens": "Output tokens",
+          "cacheTokens": "Cache tokens",
+          "toolCalls": "Tool calls",
+          "runtime": "Runtime",
+          "workItems": "Desktop runs",
+          "timeline": "Event replay",
+          "truncated": "Too many events; showing the first 2000",
+          "loadMoreEvents": "Load more",
+          "notFound": "Session not found or not permitted"
+        },
+        "timeline": {
+          "userMessage": "User message",
+          "agentMessage": "Agent reply",
+          "thinking": "Thinking",
+          "tool": "Tool call",
+          "mcpTool": "MCP tool",
+          "customTool": "Custom tool (caller executes)",
+          "input": "Input",
+          "result": "Result",
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "pending": "No result",
+          "allowed": "Approved",
+          "denied": "Denied",
+          "modelRequest": "Model request",
+          "usage": "Cumulative usage",
+          "error": "Error",
+          "interrupt": "User interrupt",
+          "statusRunning": "Started",
+          "statusIdle": "Idle",
+          "statusTerminated": "Terminated",
+          "expand": "Show all",
+          "attachments": "{count} attachments"
+        },
+        "workItem": {
+          "status": "Status",
+          "device": "Device",
+          "claimedAt": "Claimed at",
+          "heartbeat": "Last heartbeat",
+          "completedAt": "Completed at",
+          "error": "Error",
+          "queued": "Queued",
+          "claimed": "Claimed",
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed",
+          "stopped": "Stopped"
         }
       }
     },
@@ -2197,6 +3244,38 @@
         "packDisabledNamed": "Disabled {name}",
         "rollbackFailed": "Rollback failed",
         "rolledBack": "Rolled back to this version"
+      }
+    },
+    "metering": {
+      "agents": {
+        "captionLead": "Totals follow {timezone}. Data comes from managed sessions",
+        "captionPeriod": "Day from {day}, week (Monday) from {week}, month from {month}",
+        "captionJoin": ". ",
+        "empty": "No usage rows for this query",
+        "tabs": {
+          "usage": "Usage",
+          "quota": "Quotas"
+        },
+        "filters": "Filters",
+        "start": "Start",
+        "end": "End",
+        "query": "Query",
+        "querying": "Loading",
+        "dims": {
+          "agent": "Agent",
+          "agent_name": "Name",
+          "user": "User",
+          "dept": "Dept",
+          "model": "Model",
+          "day": "Day"
+        },
+        "columns": {
+          "input": "Input",
+          "output": "Output",
+          "total": "Total",
+          "requests": "Requests",
+          "sessions": "Sessions"
+        }
       }
     }
   }

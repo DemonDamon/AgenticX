@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteAgent, getAgent, updateAgent } from "@agenticx/iam-core";
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
+import { emitMaResourceEvent } from "../../../../../lib/ma/webhook-events";
 import { agentErrorResponse, preparePatchInput, requiredTenantId } from "../shared";
 
 export async function GET(_req: Request, context: { params: Promise<{ agentId: string }> }) {
@@ -34,6 +35,7 @@ export async function DELETE(_req: Request, context: { params: Promise<{ agentId
   try {
     const { agentId } = await context.params;
     await deleteAgent(requiredTenantId(), agentId);
+    emitMaResourceEvent({ tenantId: requiredTenantId(), type: "agent.deleted", resourceId: agentId, extra: { agent_id: agentId } });
     return NextResponse.json({ code: "00000", message: "ok", data: { id: agentId } });
   } catch (error) {
     return agentErrorResponse(error);

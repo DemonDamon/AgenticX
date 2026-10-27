@@ -24,6 +24,7 @@ import { VoiceFocusMode } from "./components/VoiceFocusMode";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
+import { isManagedPaneAvatarId } from "./utils/ma-pane";
 import { filterDurablePanes, persistActivePaneId } from "./utils/compose-preview";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
@@ -896,6 +897,12 @@ export function App() {
           const claimedSessionIds = new Set<string>();
           for (const pane of saved.panes) {
             try {
+              if (isManagedPaneAvatarId(pane.avatarId)) {
+                const kept = String(pane.sessionId ?? "").trim();
+                if (kept) claimedSessionIds.add(kept);
+                hydratedPanes.push({ ...pane, sessionId: kept });
+                continue;
+              }
               const isGroupPane = String(pane.avatarId ?? "").startsWith("group:");
               const isAutomationTaskPane = String(pane.avatarId ?? "").startsWith("automation:");
               const lazyEligible = !isGroupPane && !isAutomationTaskPane;
@@ -1011,7 +1018,7 @@ export function App() {
               let hintProvider: string | undefined;
               let hintModel: string | undefined;
               const sid = String(pane.sessionId ?? "").trim();
-              if (sid) {
+              if (sid && !isManagedPaneAvatarId(pane.avatarId)) {
                 const rows = await getSessionsForAvatar(pane.avatarId ?? undefined).catch(() => []);
                 const row = rows.find((r) => String(r.session_id ?? "").trim() === sid);
                 hintProvider = row?.provider?.trim() || undefined;
@@ -1038,10 +1045,21 @@ export function App() {
               }
             }
             const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
-            const nextSessionId =
-              (metaPane?.sessionId ?? "").trim() ||
-              (hydratedPanes.find((pane) => pane.id === nextActivePaneId)?.sessionId ?? "").trim() ||
-              saved.sessionId;
+            const managedSessionIds = new Set(
+              hydratedPanes
+                .filter((pane) => isManagedPaneAvatarId(pane.avatarId))
+                .map((pane) => String(pane.sessionId ?? "").trim())
+                .filter(Boolean),
+            );
+            const metaSid = metaPane && !isManagedPaneAvatarId(metaPane.avatarId)
+              ? String(metaPane.sessionId ?? "").trim()
+              : "";
+            const activeRestored = hydratedPanes.find((pane) => pane.id === nextActivePaneId);
+            const activeSid = activeRestored && !isManagedPaneAvatarId(activeRestored.avatarId)
+              ? String(activeRestored.sessionId ?? "").trim()
+              : "";
+            const savedSid = String(saved.sessionId ?? "").trim();
+            const nextSessionId = metaSid || activeSid || (managedSessionIds.has(savedSid) ? "" : savedSid);
             if (nextSessionId) {
               setSessionId(nextSessionId);
               await refreshMcpStatus(nextSessionId).catch(() => {});

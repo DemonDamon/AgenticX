@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "rl",
+  "generation": "f08e1688826340baad3ea534066a4283",
+  "mapping_revision": 1,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:e6984647383442f7f56cfa7a3c004315cdd6443a9eb803a623b7249f427ccdb1",
+  "summary_path": "conclusions/rl_module_conclusion.md",
+  "summary_sha256": "sha256:27037d1bdd95d4487d859ab15cf9806f2a4184312a0d049530066acfae8dd886",
+  "updated_at": "2026-10-25T03:42:14.822822+00:00"
+}

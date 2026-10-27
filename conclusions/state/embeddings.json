@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "embeddings",
-  "generation": "cddba51733ef4165a6524c16e0692a02",
+  "generation": "2571736eac7e4fcd921c4f83c5179c71",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
   "source_fingerprint": "sha256:c97e28626e6dbd7cc839e395680b1b6478f86d4945c8746f9b3a5c47c531662a",
   "summary_path": "conclusions/embeddings_module_conclusion.md",
   "summary_sha256": "sha256:a1e359cbc23f55c6c2e608c406daed17538b58458053ec10cbd13a0119013323",
-  "updated_at": "2026-09-30T00:54:07.049151+00:00"
+  "updated_at": "2026-10-24T13:53:13.886685+00:00"
 }

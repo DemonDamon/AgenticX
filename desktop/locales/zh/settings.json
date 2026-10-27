@@ -3,6 +3,7 @@
   "navResize": "拖拽调整导航栏宽度",
   "tabs": {
     "account": "用户账号",
+    "enterprise_worker": "企业 Worker",
     "general": "通用偏好",
     "provider": "模型服务",
     "mcp": "MCP",
@@ -805,11 +806,16 @@
     "enableFeishuLong": "启用飞书长连接",
     "feishuSaveHint": "保存后 Near 自动在后台启动飞书长连接，无需额外开终端。",
     "feishuEventHint": "飞书应用须开启「机器人」能力，订阅 <code>im.message.receive_v1</code> 长连接事件。",
-    "webhookHint": "需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Near 绑定。",
+    "gatewayConn": "网关连接",
+    "gatewayConnHint": "扫码配对前需先在云端或本机启动网关，并填写网关地址、设备 ID 与设备 Token。",
     "gatewayUrl": "网关地址",
     "deviceId": "设备 ID",
     "deviceToken": "设备 Token",
-    "qrBind": "扫码连接（飞书/企微）",
+    "mobileApp": "Near 手机 App",
+    "mobileAppHint": "用手机上的 Near App 扫码配对，配对后可在手机上查看任务、收发消息。",
+    "qrBindMobile": "扫码绑定手机端",
+    "webhookHint": "需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Near 绑定。",
+    "qrBindIm": "扫码绑定 IM 机器人",
     "refreshing": "刷新中…",
     "refreshBindings": "刷新已绑定账号",
     "bindingsError": "无法拉取绑定列表：{{error}}",
@@ -942,6 +948,7 @@
     "loginOfficial": "使用官网账号登录",
     "enterpriseTitle": "企业账号",
     "enterpriseIntro": "登录企业门户后，即可在「云房间」里与同事协作。点击登录将在系统浏览器中完成授权，授权通过后本窗口会自动更新状态。与上方官网账号相互独立。",
+    "manageWorker": "在「企业 Worker」中管理本机承接任务",
     "logoutEnterprise": "退出企业账号",
     "portalUrl": "企业门户地址",
     "waitingAuth": "等待浏览器中完成授权…",
@@ -968,6 +975,39 @@
     "errBusy": "服务暂时繁忙，无法开始登录。请稍后再试。",
     "errGeneric": "无法开始官网账号登录。请稍后再试。"
   },
+  "enterpriseWorker": {
+    "title": "企业 Worker",
+    "intro": "让这台电脑为企业执行智能体任务。任务在本机运行，模型调用经企业网关。",
+    "acceptTitle": "让这台电脑承接企业智能体任务",
+    "state": {
+      "running": "运行中",
+      "paused": "已暂停接单，进行中的任务会继续跑完",
+      "stopped": "未运行"
+    },
+    "maTitle": "承接托管智能体任务",
+    "maHint": "开启后按企业新协议领取任务：模型经企业网关调用，每个任务使用独立工作目录",
+    "environments": "所属环境",
+    "noEnvironments": "暂无可承接的执行环境，请联系管理员把你加入环境的执行名单",
+    "maOff": "开启「承接托管智能体任务」后显示",
+    "work": "运行中的任务",
+    "noWork": "当前没有运行中的任务",
+    "col": {
+      "agent": "智能体",
+      "startedAt": "开始时间",
+      "source": "来源",
+      "workdir": "工作目录"
+    },
+    "source": {
+      "interactive": "本机对话",
+      "dispatched": "企业分派"
+    },
+    "lastHeartbeat": "最近心跳",
+    "lastError": "最近错误",
+    "legacy": "旧版任务",
+    "legacyAgents": "可承接智能体",
+    "none": "暂无",
+    "saveFailed": "保存失败（{{status}}）"
+  },
   "avatar": {
     "titleNamed": "{{name}} · 设置",
     "fallbackName": "分身",
@@ -978,6 +1018,39 @@
     "tabToolsGlobal": "工具权限（全局）",
     "tabSkills": "技能",
     "tabSoul": "灵魂",
+    "tabEnterprise": "企业",
+    "enterprisePublish": {
+      "title": "发布到企业",
+      "intro": "把这个分身作为企业智能体的草稿版本提交，管理员审核发布后，被分配的同事可以使用。",
+      "savedHint": "提交的是已保存的分身配置；如有未保存的修改，请先在其它 tab 保存",
+      "model": "模型",
+      "tools": "工具与权限",
+      "policy": {
+        "always_allow": "自动执行",
+        "always_ask": "每次询问"
+      },
+      "disabled": "已禁用",
+      "excluded": "未纳入",
+      "security": "安全处理",
+      "removedRefs": "已移除凭证引用：{{names}}",
+      "redacted": "已隐去 {{count}} 处疑似密钥",
+      "paths": "已把 {{count}} 处本机路径替换为 ~",
+      "clean": "未发现需要隐去的内容",
+      "notes": "说明",
+      "notePlaceholder": "选填：这次改了什么",
+      "submit": "提交到企业",
+      "result": {
+        "draft": "已提交为草稿 v{{version}}，管理员发布后员工可见",
+        "pinned": "已提交新版本 v{{version}}，当前生效仍是 v{{effective}}，管理员切换后生效",
+        "created": "已提交新版本 v{{version}}",
+        "unchanged": "内容与企业侧最新版本 v{{version}} 一致，无需重复提交"
+      },
+      "err": {
+        "login": "请先在 设置 → 账号 登录企业账号",
+        "notFound": "分身不存在",
+        "load": "加载预览失败：{{message}}"
+      }
+    },
     "promptSoulHint": "「系统提示」用于定义该分身的即时行为规则；「灵魂」用于长期风格偏好与策略。两者会一起生效，互不替代。",
     "avatarImage": "分身头像",
     "uploadImage": "上传图片",

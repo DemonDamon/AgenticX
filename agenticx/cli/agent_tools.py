@@ -23,13 +23,13 @@ import tempfile
 import time
 import traceback
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from agenticx.cli.config_manager import ConfigManager
-from agenticx.runtime.session_boundary import foreign_session_denial
+from agenticx.runtime.session_boundary import current_egress_guard, foreign_session_denial
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
 from agenticx.cli.studio_mcp import (
     import_mcp_config,
@@ -1906,6 +1906,32 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 },
                 "required": ["action", "name"],
                 "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enterprise_agent_builder",
+            "description": (
+                "Create or modify enterprise managed-agent DRAFTS owned by the current user. "
+                "Actions: list (my enterprise agents), get (manifest of a version), "
+                "preview (validate a manifest and diff it against the latest version; no write), "
+                "submit (after user confirmation, submit the manifest as a draft version; never publishes). "
+                "Use only with the agenticx-enterprise-agent-builder skill."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "get", "preview", "submit"]},
+                    "agent_id": {"type": "string", "description": "Existing enterprise agent id (get/preview/submit to modify)."},
+                    "version": {"type": "integer", "minimum": 1, "description": "For get; default latest."},
+                    "manifest": {"type": "object", "description": "agx.agent/v1 manifest (preview/submit)."},
+                    "display_name": {"type": "string", "description": "Required for submit of a new agent; 1-64 chars."},
+                    "description": {"type": "string"},
+                    "note": {"type": "string", "description": "Version note, <= 500 chars."},
+                },
+                "required": ["action"],
             },
         },
     },
@@ -6047,6 +6073,21 @@ async def _bash_bg_drain(job: _BashBgJob) -> None:
                 job.exit_code = -1
 
 
+def _managed_command_environ(session: Optional[StudioSession]) -> Optional[Dict[str, str]]:
+    """Managed sessions overlay placeholder env vars; None keeps os.environ inheritance."""
+    overlay = getattr(session, "managed_command_env", None) if session is not None else None
+    if not isinstance(overlay, dict) or not overlay:
+        return None
+    env = dict(os.environ)
+    env.update({str(key): str(value) for key, value in overlay.items()})
+    return env
+
+
+def _managed_command_network(session: Optional[StudioSession]) -> str:
+    value = getattr(session, "managed_command_network", None) if session is not None else None
+    return "deny" if value == "deny" else "inherit"
+
+
 async def _apply_command_sandbox(
     argv: List[str],
     session: Optional[StudioSession],
@@ -6066,6 +6107,10 @@ async def _apply_command_sandbox(
     )
 
     permissions = _configured_command_permissions(session)
+    if _managed_command_network(session) == "deny" and permissions == DANGER_FULL_ACCESS:
+        return (
+            "ERROR: danger-full-access is not allowed in a network-restricted environment"
+        )
     if permissions == DANGER_FULL_ACCESS:
         if not await _confirm(
             "这条命令将在没有操作系统文件隔离的情况下运行，仍要继续吗？",
@@ -6098,8 +6143,15 @@ async def _apply_command_sandbox(
             scope_id=scope_id,
             cwd=cwd,
             platform_name=sys.platform,
+            environ=_managed_command_environ(session),
+            network=_managed_command_network(session),
         )
     except CommandSandboxUnavailable as exc:
+        if _managed_command_network(session) == "deny":
+            return (
+                "ERROR: command sandbox unavailable; this environment restricts "
+                "network egress and requires the OS sandbox"
+            )
         if not await _confirm(
             f"命令沙箱不可用（{exc}）。要在没有操作系统隔离的情况下运行吗？",
             confirm_gate=confirm_gate,
@@ -9776,12 +9828,27 @@ def _parse_data_image_url(target: str) -> tuple[bytes, str] | None:
 async def _fetch_http_bytes(url: str, *, timeout: float, max_bytes: int) -> tuple[bytes, str, str]:
     import httpx
 
+    guard = current_egress_guard()
     transport = _httpx_transport_for_url(url)
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=True,
-        transport=transport,
-    ) as client:
+    client_kwargs: Dict[str, Any] = {
+        "timeout": timeout,
+        "follow_redirects": True,
+        "transport": transport,
+    }
+    if guard is not None:
+        async def _guard_request(request: httpx.Request) -> None:
+            denial = guard.check(str(request.url))
+            if denial:
+                raise ValueError(denial)
+            rewritten = guard.rewrite_url(str(request.url))
+            if rewritten != str(request.url):
+                request.url = httpx.URL(rewritten)
+            request.headers.pop("authorization", None)
+            for key, value in guard.headers_for(str(request.url)).items():
+                request.headers[key] = value
+
+        client_kwargs["event_hooks"] = {"request": [_guard_request]}
+    async with httpx.AsyncClient(**client_kwargs) as client:
         response = await client.get(url)
         final_url = str(response.url)
         if response.status_code != 200:
@@ -9899,6 +9966,8 @@ async def _tool_web_fetch(arguments: Dict[str, Any], session: Optional[StudioSes
         if reason == "too-large":
             return "ERROR: page exceeds 2MB limit"
         if reason.startswith("http "):
+            return f"ERROR: {reason}"
+        if reason.startswith("egress blocked"):
             return f"ERROR: {reason}"
         return f"ERROR: network"
     except Exception:
@@ -11752,6 +11821,173 @@ async def _tool_skill_manage(
     return "ERROR: unknown action"
 
 
+def _publish_error_text(exc: Any) -> str:
+    text = f"ERROR: HTTP {exc.status} · {exc.message}"
+    errors = getattr(exc, "errors", None)
+    if errors:
+        text += "\n" + "\n".join(str(item) for item in errors)
+    return text
+
+
+def _optional_positive_version(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if value < 1:
+        return None
+    return value
+
+
+def _submit_success_text(result: Dict[str, Any], summary: List[str]) -> str:
+    created = bool(result.get("created"))
+    lifecycle = result.get("lifecycle")
+    routing_mode = result.get("routing_mode")
+    version = result.get("version")
+    effective = result.get("effective_version")
+    agent_id = result.get("agent_id")
+    if created and lifecycle == "draft":
+        head = (
+            f"已提交为草稿 v{version}（智能体 {agent_id}）。"
+            "管理员在管理台「智能体」中发布后，才会对员工生效。"
+        )
+    elif created and routing_mode == "pinned" and effective != version:
+        head = (
+            f"已提交新版本 v{version}，当前生效仍是 v{effective}。"
+            "需管理员在管理台切换生效版本。"
+        )
+    elif not created:
+        head = f"内容与企业侧最新版本 v{version} 相同，未产生新版本。"
+    else:
+        head = (
+            f"已提交 v{version}（{lifecycle}，路由 {routing_mode}，"
+            f"当前生效 v{effective}）。"
+        )
+    bullets = "\n".join(f"- {line}" for line in summary)
+    return f"{head}\n\n变更摘要：\n{bullets}"
+
+
+async def _tool_enterprise_agent_builder(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    """Draft an enterprise agent. Never publishes.
+
+    The builder module is imported here, not at module scope: it imports
+    ``compile_spec``, and ``agenticx.managed.spec`` imports ``STUDIO_TOOLS``
+    from this module while it is still loading.
+    """
+
+    from agenticx.runtime import enterprise_agent_builder as builder
+
+    settings = builder.enterprise_publish_settings()
+    if settings is None:
+        return builder.NOT_LOGGED_IN_TEXT
+    action = arguments.get("action")
+    if action not in ("list", "get", "preview", "submit"):
+        return "ERROR: action must be one of list, get, preview, submit"
+    try:
+        if action == "list":
+            agents = builder.list_my_agents(settings=settings)
+            payload: Dict[str, Any] = {"agents": [asdict(item) for item in agents]}
+            if not agents:
+                payload["hint"] = "还没有通过 Near 提交的企业智能体，可以直接描述需求来新建。"
+            return json.dumps(payload, ensure_ascii=False)
+        if action == "get":
+            agent_id = str(arguments.get("agent_id") or "").strip()
+            if not agent_id:
+                return "ERROR: agent_id is required"
+            detail = builder.get_my_agent(
+                agent_id,
+                _optional_positive_version(arguments.get("version")),
+                settings=settings,
+            )
+            return json.dumps(detail, ensure_ascii=False)
+        manifest = arguments.get("manifest")
+        if not isinstance(manifest, dict):
+            return "ERROR: manifest must be an object"
+        agent_id = str(arguments.get("agent_id") or "").strip()
+        base_manifest: Optional[Dict[str, Any]] = None
+        base_version: Optional[int] = None
+        local_avatar_id = ""
+        display_name = ""
+        if action == "submit" and agent_id:
+            owned = next(
+                (item for item in builder.list_my_agents(settings=settings) if item.agent_id == agent_id),
+                None,
+            )
+            if owned is None:
+                return "ERROR: 只能修改自己通过 Near 提交的企业智能体"
+            if owned.lifecycle == "recalled":
+                return "ERROR: 该智能体已被管理员回收，不能再提交"
+            detail = builder.get_my_agent(agent_id, None, settings=settings)
+            agent = detail.get("agent") if isinstance(detail.get("agent"), dict) else {}
+            if agent.get("lifecycle") == "recalled":
+                return "ERROR: 该智能体已被管理员回收，不能再提交"
+            version_obj = detail.get("version") if isinstance(detail.get("version"), dict) else {}
+            raw_base = version_obj.get("manifest")
+            if isinstance(raw_base, dict):
+                base_manifest = raw_base
+            raw_version = version_obj.get("version")
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool):
+                base_version = raw_version
+            local_avatar_id = owned.local_avatar_id
+            provided = arguments.get("display_name")
+            if isinstance(provided, str) and provided.strip():
+                display_name = provided.strip()
+            else:
+                display_name = owned.display_name
+        elif action == "preview" and agent_id:
+            detail = builder.get_my_agent(agent_id, None, settings=settings)
+            version_obj = detail.get("version") if isinstance(detail.get("version"), dict) else {}
+            raw_base = version_obj.get("manifest")
+            if isinstance(raw_base, dict):
+                base_manifest = raw_base
+            raw_version = version_obj.get("version")
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool):
+                base_version = raw_version
+        elif action == "submit":
+            provided = arguments.get("display_name")
+            display_name = provided.strip() if isinstance(provided, str) else ""
+            if not display_name or len(display_name) > 64:
+                return "ERROR: display_name is required (1-64 characters)"
+            local_avatar_id = builder.synth_local_id(display_name)
+        report = builder.preview_manifest(
+            manifest,
+            base_manifest=base_manifest,
+            base_version=base_version,
+        )
+        if action == "preview" or not report.ok:
+            return builder.render_preview(report)
+        question = (
+            "将以下配置作为企业智能体的**草稿版本**提交（不会发布，管理员发布后才生效）：\n"
+            + "\n".join(f"- {line}" for line in report.summary)
+        )
+        approved = await _confirm(
+            question,
+            confirm_gate=confirm_gate,
+            context={"tool": "enterprise_agent_builder", "risk": "enterprise_write"},
+            emit_event=emit_event,
+            session=session,
+        )
+        if not approved:
+            return _cancelled("企业智能体草稿未提交", confirm_gate)
+        description = arguments.get("description")
+        note = arguments.get("note")
+        result = builder.submit_draft(
+            manifest=manifest,
+            display_name=display_name,
+            description=description if isinstance(description, str) else None,
+            note=note if isinstance(note, str) else None,
+            local_avatar_id=local_avatar_id,
+            settings=settings,
+        )
+        return _submit_success_text(result, report.summary)
+    except builder.EnterprisePublishError as exc:
+        return _publish_error_text(exc)
+
+
 def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     if not _skill_manage_enabled():
@@ -12925,6 +13161,11 @@ async def _dispatch_tool_async_unredacted(
             return f"CANCELLED: 企业策略要求的确认未通过（{note}）"
         setattr(session, "_enterprise_ask_satisfied_tool", name)
     try:
+        managed_overrides = getattr(session, "managed_tool_overrides", None)
+        if isinstance(managed_overrides, dict) and name in managed_overrides:
+            return await managed_overrides[name](
+                arguments, session, confirm_gate=gate, emit_event=event_callback
+            )
         if name in META_TOOL_NAMES:
             tm = team_manager or getattr(session, "_team_manager", None)
             import logging as _logging
@@ -13030,6 +13271,8 @@ async def _dispatch_tool_async_unredacted(
             return _tool_skill_list(session)
         if name == "hook_manage":
             return _tool_hook_manage(arguments, session)
+        if name == "enterprise_agent_builder":
+            return await _tool_enterprise_agent_builder(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_manage":
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":

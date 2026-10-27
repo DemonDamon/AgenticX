@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@agenticx/auth": "workspace:*",
+    "@agenticx/core-api": "workspace:*",
     "@agenticx/db-schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.20.0",

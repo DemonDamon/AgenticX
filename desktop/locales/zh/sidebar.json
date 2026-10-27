@@ -78,7 +78,10 @@
     "remaining": "{{minutes}} 分钟后自动拒绝",
     "approve": "批准",
     "deny": "拒绝",
-    "failed": "提交失败"
+    "failed": "提交失败",
+    "sourceManaged": "企业智能体 · {{name}}",
+    "waiting": "等待处理",
+    "managedQuestion": "允许执行「{{tool}}」？"
   },
   "topbar": {
     "switchToLight": "切换到亮色",
@@ -319,7 +322,62 @@
     "nearSettings": "设置",
     "nearCubeHint": "当前是方块风格，可以改 Near 的配色。",
     "nearStyleHint": "Near 正跟这一页的专家用同一套头像。换回方块后可以改配色。",
-    "nearIdentity": "身份与人格"
+    "nearIdentity": "身份与人格",
+    "enterprise": {
+      "title": "企业智能体",
+      "badge": "企业",
+      "version": "v{{version}}",
+      "pinnedHint": "管理员固定的版本",
+      "cloud": "云端执行",
+      "desktop": "本机执行",
+      "mine": "我发布的",
+      "viewDefinition": "查看定义",
+      "noEnvironment": "管理员尚未为该智能体指定执行环境",
+      "drawer": {
+        "description": "描述",
+        "execution": "执行位置",
+        "defaultCloud": "默认云端环境",
+        "model": "模型",
+        "system": "系统提示",
+        "tools": "工具与权限",
+        "builtin": "内置工具",
+        "defaultPolicy": "默认策略",
+        "mcp": "MCP 服务",
+        "custom": "自定义工具",
+        "customHost": "由业务系统执行",
+        "skills": "技能",
+        "welcome": "欢迎语",
+        "suggestions": "推荐问题",
+        "alwaysAllow": "自动执行",
+        "alwaysAsk": "每次询问",
+        "disabled": "已禁用",
+        "inherit": "继承默认",
+        "loadFailed": "加载失败，请稍后重试",
+        "retry": "重试",
+        "loginRequired": "请先登录企业账号",
+        "notFound": "智能体不存在或未分配给你"
+      }
+    }
+  },
+  "managedPane": {
+    "newChat": "新对话",
+    "definition": "定义",
+    "close": "关闭窗格",
+    "localBanner": "本机执行：任务在这台电脑上运行，模型经企业网关调用",
+    "localStall": "本机执行尚未开始，请在设置 → 企业 Worker 查看状态",
+    "placeholder": "向 {{name}} 提问",
+    "requiresAction": "请先处理待审批的工具调用",
+    "send": "发送",
+    "stop": "停止",
+    "err": {
+      "agentNotFound": "该智能体已下线或不再分配给你",
+      "environmentNotFound": "你的电脑不在该智能体的执行名单中",
+      "forbiddenScope": "企业尚未开放桌面托管会话，请联系管理员",
+      "loginRequired": "请先登录企业账号",
+      "createFailed": "创建会话失败（{{code}}）",
+      "noEnvironment": "管理员尚未为该智能体指定执行环境",
+      "workerStart": "无法启动本机执行，请在「企业 Worker」中查看状态"
+    }
   },
   "sessionQueries": {
     "title": "本会话提问",

@@ -5,7 +5,7 @@
  * 能力引用沿用 `mcp:<ulid>` / `skill:<ulid>`。可见范围沿用
  * `all` / 用户 ulid / `email:<x>` / `dept:<id>` / `group:<ulid>`。
  */
-import { index, jsonb, pgTable, text, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 import { auditColumns, ulid } from "./_shared";
 import { tenants } from "./tenants";
@@ -42,6 +42,14 @@ export const enterpriseAgents = pgTable(
     ownerUserId: varchar("owner_user_id", { length: 26 }),
     localAvatarId: varchar("local_avatar_id", { length: 64 }),
     metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
+    /** 最新版本号（enterprise_agent_versions.version 的最大值），追加版本时 CAS。没有版本行时为 1。 */
+    latestVersion: integer("latest_version").notNull().default(1),
+    /** 默认执行环境（ma_environments.id）。不加外键，删除环境时由应用层检查引用。 */
+    defaultEnvironmentId: varchar("default_environment_id", { length: 26 }),
+    /** `follow_latest` / `pinned`。 */
+    versionRouting: varchar("version_routing", { length: 16 }).notNull().default("follow_latest"),
+    /** version_routing = pinned 时生效。 */
+    pinnedVersion: integer("pinned_version"),
     ...auditColumns,
   },
   (table) => ({

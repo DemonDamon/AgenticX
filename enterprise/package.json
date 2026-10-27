@@ -17,6 +17,8 @@
     "e2e:iam": "tsx scripts/e2e-iam.ts",
     "e2e:sso": "tsx scripts/e2e-sso.ts",
     "migrate:legacy-runtime": "tsx scripts/migrate-runtime-legacy.ts",
+    "ma:backfill-agent-versions": "tsx scripts/backfill-agent-versions.ts",
+    "ma:provision-dev-tokens": "tsx scripts/ma-provision-dev-tokens.ts",
     "db:compat:list": "tsx scripts/db-compat/list-schema-capabilities.ts",
     "db:compat:test": "vitest run scripts/db-compat/__tests__/dialect-contract.test.ts packages/db-schema/src/__tests__/migration-inventory.test.ts",
     "sso:oidc-smoke": "tsx scripts/sso/oidc-smoke.ts",

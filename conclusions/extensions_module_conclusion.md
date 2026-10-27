@@ -1,6 +1,6 @@
 # AgenticX Extensions 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 之后至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的变更）
 
 ## 模块概述
 
@@ -15,7 +15,8 @@ agenticx/extensions/
 ├── installer.py           # 本地安装 / 卸载 / 列举已装 Bundle
 ├── registry_hub.py        # 多源注册表（agx / clawhub）聚合搜索与安装
 ├── skill_watcher.py       # 监听 SKILL.md 文件变更（基于 watchdog，去抖回调）
-└── skillhub_adapter.py    # 腾讯 SkillHub 市场搜索（CLI 优先 + ClawHub 回退）
+├── skillhub_adapter.py    # SkillHub 市场搜索 / 确定性安装（CLI + HTTP API + ClawHub 回退）
+└── skillhub_install_guard.py  # SkillHub 安装意图与旧版 Meta 死路径提示词拦截
 ```
 
 ## 核心组件分析
@@ -65,9 +66,12 @@ agenticx/extensions/
 - `RegistryHub.from_config()`：从用户配置构建实例
 - `search(query)`：跨所有配置源搜索，按 `source_type:name` 去重；**若全部源失败则抛 `RuntimeError`**，避免把「全部失败」误当「无结果」
 - `_search_agx` / `_search_clawhub`：分别对接两类源；ClawHub 侧带 429 限流重试与 `retry-after`/`ratelimit-reset` 等待计算
-- `fetch_skill_markdown` / `install`：下载 SKILL.md 正文；ClawHub 安装走「versions → version detail → download（zip 解包取 SKILL.md）」三步链路
+- `fetch_skill_markdown` / `fetch_skill_package` / `install`：ClawHub 走「versions → version detail → download（整包 zip）」；安装时写入 SKILL.md 及包内附属文件，并支持 `ownerHandle` 消歧
 - `write_registry_skill`：将技能写入 `~/.agenticx/skills/registry/<name>/SKILL.md`
-- `SearchResult` / `InstallResult`：搜索与安装结果数据类
+- `SearchResult` / `InstallResult`：搜索与安装结果数据类；ClawHub 搜索结果额外携带 `owner`（publisher handle）
+- `split_clawhub_ref` / `format_clawhub_conflict`：解析 `@owner/slug` 并在 HTTP 409 时给出可读冲突说明
+- `fetch_skill_package` / `_extract_skill_package_zip`：ClawHub 下载整包 zip（含 `cli.js`/`scripts/` 等），带文件数与体积上限；`scan_skill_package` 对整包做 guard 扫描
+- `write_registry_skill_dir` / `write_registry_skill_package`：将 SKILL.md 与附属文件写入 `~/.agenticx/skills/registry/<name>/`
 
 **网络要点**：所有 httpx 请求使用 `trust_env=False`，刻意不继承环境中的 `HTTP(S)_PROXY`/SOCKS，避免代理破坏对公开 HTTPS 注册表的 TLS 访问。
 
@@ -81,11 +85,22 @@ agenticx/extensions/
 
 ### SkillHub 市场适配 (skillhub_adapter.py)
 
-**文件功能**：为 Desktop/Studio 提供腾讯 SkillHub 风格的市场搜索
+**文件功能**：为 Desktop/Studio 提供 SkillHub 风格的市场搜索与**确定性安装**（须先解析 `namespace`，否则下载 API 易 404）
 
 **核心组件**：
-- `search_skillhub_market(query)`：优先尝试本机 `skillhub` CLI（JSON 输出），不可用时回退到用户已配置注册表中的 ClawHub 结果（SkillHub 镜像该目录），并在无结果时给出可读的中文 hint
+- `search_skillhub_market(query)`：CLI → SkillHub HTTP 搜索 API → 内置目录 → ClawHub 回退；结果行含 `namespace`/`canonical`
+- `resolve_skillhub_namespace` / `parse_skillhub_ref`：从 `@ns/slug` 或搜索行解析 publisher namespace
+- `install_skillhub_skill` / `uninstall_market_skill`：拉取整包、guard 扫描、经 `RegistryHub.write_registry_skill_package` 落盘；支持内置 `agenticx-agent-obs` 本地目录短路
 - `_search_via_skillhub_cli`：调用 `skillhub search --json`/`--format json` 解析结果
+
+### SkillHub 安装守卫 (skillhub_install_guard.py)
+
+**文件功能**：与 Desktop `skillhub-install-prompt.ts` 对齐，拦截 Settings Meta 种子中复用的旧版 `POST /api/registry/install` 等死路径文案；普通聊天 `@ns/slug` /「安装 xxx skill」不拦截，由对话侧工具处理。
+
+**核心组件**：
+- `classify_skillhub_inbound_install_prompt`：仅对 `forbidden_meta` 类文案返回 `hit`
+- `market_install_tool_for_intent`：将明确安装意图映射为 `skillhub_install` / `clawhub_install`，供运行时 `tool_choice` 强制首轮调用
+- `extract_skillhub_install_slug` / `is_clear_skillhub_install_intent`：从用户文案提取 slug 或 `@ns/slug`
 
 ## 设计模式
 
@@ -107,6 +122,8 @@ agenticx/extensions/
 3. **多源聚合 + 失败可见**：跨注册表去重聚合，全部失败时显式报错而非静默返回空，便于排障
 4. **路径穿越防护**：清单解析阶段强制相对路径校验，安装阶段校验解析路径不越界
 5. **代理无关网络访问**：注册表请求绕开环境代理，规避 SOCKS/代理导致的 TLS 失败
+6. **多文件技能整包安装**：ClawHub/SkillHub 路径解压并校验 zip 后整目录写入 registry，避免只装 SKILL.md 导致脚本类技能不可用
+7. **安装意图与死路径治理**：Python/TS 双侧 guard 拒绝过时 Meta 安装提示，并将明确市场安装意图路由到专用工具
 
 ## 应用场景
 
@@ -117,4 +134,4 @@ agenticx/extensions/
 
 ## 总结
 
-AgenticX Extensions 模块以 AGX Bundle 为核心，构建了「定义 → 搜索 → 扫描 → 安装 → 监听」的完整扩展生命周期闭环。它将技能、工具、人设与记忆模板统一为可分发的扩展资产，并通过安全前置、原子写入与多源聚合保障了扩展安装的安全性与可靠性，是 AgenticX 扩展生态的基础设施层。
+AgenticX Extensions 模块以 AGX Bundle 为核心，构建了「定义 → 搜索 → 扫描 → 安装 → 监听」的完整扩展生命周期闭环；SkillHub/ClawHub 侧进一步支持 publisher namespace、整包落盘与安装意图守卫，使社区技能安装从「仅 Markdown」升级为可执行的多文件包。它将技能、工具、人设与记忆模板统一为可分发的扩展资产，并通过安全前置、原子写入与多源聚合保障了扩展安装的安全性与可靠性，是 AgenticX 扩展生态的基础设施层。

@@ -1,6 +1,6 @@
 # AgenticX Agents 模块总结
 
-> 结论更新时间：2026-09-18（覆盖基线 `e932742c3c44c2c1a704c8e57f1749fabee4d1f1`；保留此前对 ReActAgent / InterruptedEvent 的手写修订）
+> 结论更新时间：2026-10-25（覆盖基线 `22d051f5d18ad83a4c6083683342ab41d7850149`；保留此前对 ReActAgent / InterruptedEvent 的手写修订）
 
 ## 模块概述
 
@@ -11,6 +11,7 @@ AgenticX Agents 模块提供专门化的智能体实现，封装特定领域的�
 ```
 agenticx/agents/
 ├── __init__.py                    # 模块导出接口（规范 ReActAgent 为首选导出，TextReActAgent 为 legacy 别名）
+├── decision_router.py (NEW)       # SP27 loop 级 tool_selection 一致性校验（observe/nudge，fail-open）
 ├── react_agent_async.py (NEW)     # 规范异步 FC ReActAgent（可嵌入 SDK 原语）
 ├── agent_events.py (NEW)          # ReActAgent 流式事件类型联合（<=6 类）
 ├── react_agent.py (NEW)           # legacy 文本-JSON ReAct 门面（AgentExecutor 薄封装，内化自 AgentScope v2 P0）
@@ -37,6 +38,7 @@ agenticx/agents/
   - `add_tool()` / `stop()`：动态注册工具 / 请求优雅中断
   - 工具调度：`asyncio.gather` + `run_in_executor` 并行执行同一轮的多个 `tool_calls`（避免 `BaseTool._is_running` 串行化）
   - 可选注入：`compactor`（上下文压缩）、`offloader`（超阈值工具结果落盘并回填占位符，依赖 `core.offload`）、`loop_detector`（`runtime.loop_detector.LoopDetector`，循环检测后注入 nudge system 消息）
+  - 可选 `decision_gate: dict | None`（默认 `None`，与未开启时行为等价）：对 LLM 本轮首个可执行工具选择做独立打分校验；`mode=observe` 仅遥测，`mode=nudge` 在错配且 `confidence≥tau_high` 时在工具结果落盘后追加 system 提示（只影响下一轮，不 block 本轮）；`scorer`/`model`/`base_url` 经 `rl.decision_scorers.make_scorer` 构造；`out` 路径在 `astream`/`aresume` 的 `_loop` `finally` 覆盖写入 JSONL 遥测
 - `ReActResult` 数据类：`success` / `output` / `error` / `messages`（历史进出）/ `iterations` / `events`
 - 取消语义：透传 `asyncio.CancelledError`，并在事件流中产出 `InterruptedEvent`（可续跑）
   - 可选耐久：`run_store` / `call_ledger` 为 keyword-only，默认关闭时行为与无持久化时一致
@@ -45,7 +47,23 @@ agenticx/agents/
 
 **业务逻辑**：作为对外 SDK 的「一等公民」ReAct 原语，覆盖原生工具调用、流式可观测、循环检测、上下文压缩/卸载等能力，且与产品运行时解耦，便于在 FastAPI SSE、嵌入式集成等场景复用。
 
-**依赖关系**：依赖 `core.agent_executor.ToolRegistry`、`core.offload.protocol`（Offloader/should_offload）、`llms.base.BaseLLMProvider`、`runtime.loop_detector.LoopDetector`、`tools.base.BaseTool` 与本模块 `agent_events`。
+**依赖关系**：依赖 `core.agent_executor.ToolRegistry`、`core.offload.protocol`（Offloader/should_offload）、`llms.base.BaseLLMProvider`、`runtime.loop_detector.LoopDetector`、`tools.base.BaseTool` 与本模块 `agent_events`；启用 `decision_gate` 时懒加载 `agents.decision_router.DecisionRouter`、`rl.decision_scorers.make_scorer`、`learning.trajectory.decision_mining.compress_state`。
+
+**测试边界**：`tests/agents/test_decision_router.py`（`DecisionRouter` 阈值/退化/fail-open/遥测；`ReActAgent` 在 gate off / observe / nudge 下的接入与消息序列）。
+
+### DecisionRouter (decision_router.py, 新增)
+
+**文件功能**：SP27 loop 级 gating——对 LLM 已选工具名做独立决策头一致性校验；不替代 LLM 选工具，不 block 本轮执行。
+
+**关键组件**：
+- `RouterVerdict`：`action`（`pass` | `nudge`）、`expected` / `argmax` / `confidence` / `probs`、`degraded`（异常 fail-open）、`reason`、`latency_ms`
+- `DecisionRouter(scorer, *, tau_high=0.8, decision_type="tool_selection", state_compressor="msg-tail-1200-v1")`
+  - `check(state, expected, symbols) -> RouterVerdict`：候选 `<2` 直接 pass；`scorer` 异常 → pass + `degraded=True`
+  - `nudge_message(verdict) -> str`：供 ReActAgent 注入 system 提示
+  - `telemetry` / `n_degraded` / `dump(path) -> int`：JSONL 行遥测落盘
+- 模块常量 `PASS` / `NUDGE`
+
+**依赖关系**：`rl.decision.DecisionQuestion` / `DecisionRecord`、`rl.decision_scorers.Scorer`；由 `ReActAgent._run_decision_gate` 调用，**未**在 `agents.__init__` 公开导出。
 
 ### AgentEvent 事件类型 (agent_events.py, 新增)
 
@@ -165,5 +183,5 @@ agenticx/agents/
 
 AgenticX Agents 模块通过 MiningPlannerAgent 引入了 DeerFlow 的核心机制，实现了从自由探索到结构化计划的转变。该模块为智能体自动挖掘提供了强大的规划能力，平衡了探索效率和成本控制，是 AgenticX 在智能探索领域的重要增强。
 
-**最新增强（2026-05-29）**：新增规范的可嵌入 ReActAgent SDK 原语（`react_agent_async.py`）——原生函数调用循环、`arun`/`astream` 双接口、类型化 `AgentEvent` 流（`agent_events.py`）、多轮历史进出、`asyncio.gather` 并行工具执行，并可选注入 `LoopDetector` / 上下文压缩器 / `Offloader`，全程零 Studio/CLI 耦合；同时新增 legacy 文本-JSON `TextReActAgent` 门面（`react_agent.py`，内化自 AgentScope v2 P0）作为向后兼容入口，`TextReActAgent` 与其 `ReActResult` 在 `__init__.py` 以别名导出（`TextReActResult`）。
+**最新增强（2026-05-29）**：新增规范的可嵌入 ReActAgent SDK 原语（`react_agent_async.py`）——原生函数调用循环、`arun`/`astream` 双接口、类型化 `AgentEvent` 流（`agent_events.py`）、多轮历史进出、`asyncio.gather` 并行工具执行，并可选注入 `LoopDetector` / 上下文压缩器 / `Offloader`，全程零 Studio/CLI 耦合；同时新增 legacy 文本-JSON `TextReActAgent` 门面（`react_agent.py`，内化自 AgentScope v2 P0）作为向后兼容入口，`TextReActAgent` 与其 `ReActResult` 在 `__init__.py` 以别名导出（`TextReActResult`）。**SP27**：`decision_router.py` + `ReActAgent.decision_gate` 可选 observe/nudge 工具选择一致性门控（fail-open，默认关闭）。
 

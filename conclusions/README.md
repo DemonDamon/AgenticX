@@ -11,7 +11,7 @@
 | 属性 | 值 |
 |------|-----|
 | 名称 | AgenticX |
-| 版本 | 0.3.0 |
+| 版本 | 0.6.5 |
 | 定位 | 统一、可扩展、生产就绪的多智能体应用开发框架 |
 | 语言 | Python 3.10+ |
 | 许可 | Apache-2.0 / AGPL-3.0 |
@@ -94,6 +94,7 @@ AgenticX/
 | 子模块 | 一句话定位 | 结论文档 |
 |--------|-----------|---------|
 | **runtime** | 智能体运行时：meta_agent / meta_tools、团队调度、上下文清洗、子智能体委派、token SSE | [runtime_module_conclusion.md](runtime_module_conclusion.md) |
+| **connectors** | 连接器执行面：REST gateway 客户端、database MCP、OAuth；`mcp.json` 契约在 runtime | [connectors_module_conclusion.md](connectors_module_conclusion.md) |
 | **sessions** | 会话管理：持久化、恢复、分布式会话状态、多租户隔离 | [sessions_module_conclusion.md](sessions_module_conclusion.md) |
 | **longrun** | 长任务运行/续跑编排：多任务源轮询、工作区隔离、停滞自愈、续跑/失败退避 | [longrun_module_conclusion.md](longrun_module_conclusion.md) |
 | **project_state** | 项目级状态机：磁盘单一事实来源、版本化模型、文件锁/原子写、长周期编码闭环 | [project_state_module_conclusion.md](project_state_module_conclusion.md) |
@@ -130,7 +131,9 @@ AgenticX/
 | **desktop** | Near 桌面应用（Electron + React）：多窗格、群聊、工作区、焦点语音、远程后端 | [desktop_conclusion.md](../desktop/conclusions/desktop_conclusion.md) |
 | **integrations** | 第三方适配层：Volcengine AgentKit 桥接与 vendored mem0 记忆引擎 | [integrations_module_conclusion.md](integrations_module_conclusion.md) |
 | **delivery** | Near Desktop 交付 POC：git worktree 沙箱 + 五阶段 `plan.mdc` 流水线 | [delivery_module_conclusion.md](delivery_module_conclusion.md) |
-| **trainer** | 训练器命名空间占位（当前仅空 `__init__.py`） | [trainer_module_conclusion.md](trainer_module_conclusion.md) |
+| **cases** | 案例库：Markdown case-entry 沉淀、本地检索与按案例初始化项目 | [cases_module_conclusion.md](cases_module_conclusion.md) |
+| **trainer** | RSI 离线蒸馏：轨迹质量门、SFT/DPO 导出与模型别名回灌 | [trainer_module_conclusion.md](trainer_module_conclusion.md) |
+| **rl** | GRPO / rollout / 决策头与 Harbor 奖励通路；不负责 SFT 导出与轨迹采集 | [rl_module_conclusion.md](rl_module_conclusion.md) |
 
 ---
 
@@ -204,7 +207,7 @@ AgenticX 从多个开源项目内化了核心能力，以下是已整理的内�
 
 ## 如何维护
 
-本目录由 `.cursor/skills/code-module-summaries/` skill 管理（`layout: custom`，控制面为 `conclusions/registry.json` + `conclusions/state/`）。日常增量：
+本目录由 `.cursor/skills/code-module-summaries/` skill 管理（`layout: custom`，控制面为 `conclusions/registry.json` + `conclusions/state/`）。`connector-runtime/` 与 `mobile/` 不在本控制面，与 `desktop/`、`enterprise/` 一样排除。日常增量：
 
 ```bash
 python .cursor/skills/code-module-summaries/scripts/scan_changes.py plan \

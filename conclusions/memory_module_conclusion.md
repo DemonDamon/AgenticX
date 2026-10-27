@@ -1,6 +1,6 @@
 # agenticx.memory 目录完整结构分析
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖至冻结基线 `22d051f5d18ad83a4c6083683342ab41d7850149`）
 
 ## 目录路径
 `d:/myWorks/AgenticX/agenticx/memory`
@@ -125,6 +125,8 @@
 **本轮变更（2026-09-01，基线 `f3ba65001c29` 之后）**：
 - **库路径惰性解析（commit `cc45657d`）**：`DEFAULT_SESSION_DB_PATH` 由模块级常量改为 `default_session_db_path()` 函数 + PEP 562 `__getattr__`，按**调用时**的 HOME 解析。原常量在 import 时被 `Path.home()` 定死，测试的 HOME 沙箱重定向拦不住，会话元数据会写进开发者真实的 `~/.agenticx/memory/sessions.sqlite`（症状：sqlite 里有记录、磁盘无会话目录，桌面端历史出现点不开的空白对话）。`SessionStore.__init__` 经模块属性读取回退值，`monkeypatch.setattr(module, "DEFAULT_SESSION_DB_PATH", ...)` 旧写法仍生效。
 - **列表按 avatar 过滤（commit `42230d1b`）**：`_list_latest_sessions_sync` 新增可选 `avatar_id` 参数，SQL 层用 `json_extract(s.metadata, '$.avatar_id') = ?` 过滤；新增 `_list_all_session_ids_sync()` 返回 DISTINCT session_id 集合，供过滤列表跳过仅有 sqlite 记录的目录。
+- **连接关闭与 scratchpad 批量读（commit `42cede79`）**：`_ClosingConnection` 使 `with self._connect()` 在提交/回滚后 `close()`，消除句柄泄漏；新增 `_session_ids_with_scratchpad_key_sync(key)`，单条 SQL 返回 `{session_id: 解码值}`，供 Studio Supervisor 按 key（如 `unattended_enabled`）轮询，替代逐会话建连。
+- **FTS 增量索引与自修复（commit `daaf5362`）**：`_index_session_messages_sync` 比对 `(role, content, timestamp)` 未变前缀，仅删/插尾部行，避免持久化周期全量重写触发 FTS 分词与 tombstone 膨胀；`backfill_from_sessions_root` 非 overwrite 路径结束后调用 `_repair_fts_index_if_inconsistent_sync`（integrity-check 失败则 `rebuild`），回填结果可带 `fts_rebuilt`。
 **历史变更（2026-03-18 之后）**：
 - **跨会话 FTS5 检索（commit `cc0ba170`）**：新增 `session_messages` + `session_messages_fts` 外部内容表（FTS5 + 触发器）；方法 `index_session_messages` / `search_session_messages` / `backfill_from_sessions_root`；`_sanitize_fts5_query` 清洗用户查询；`AGX_SESSION_FTS` 开关默认 `1`。`SessionManager` 在 `_persist_session_state` 挂钩自动索引，并在启动时 fire-and-forget 增量回填历史 `messages.json`。该层是 `session_search` 工具的底座。
 - **消息正文检索（commit `c79212c6`）**：补充对 session 消息（含助手回复）的 FTS 检索 + LIKE 回退，供 Desktop 历史面板「Search Sessions」命中后展示消息摘要。

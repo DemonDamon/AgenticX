@@ -4,6 +4,7 @@ import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
 import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
+import { AvatarEnterprisePublishTab } from "./AvatarEnterprisePublishTab";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 import { ThemedAvatarImage } from "./ds/ThemedAvatarImage";
 import { i18n } from "../i18n/i18n";
@@ -74,7 +75,7 @@ const DEFAULT_TOOLS: ToolItem[] = [
   { id: "imagemagick", name: "ImageMagick", description: st("avatar.toolImagemagick") },
 ];
 
-type Tab = "general" | "tools" | "skills" | "soul";
+type Tab = "general" | "tools" | "skills" | "soul" | "enterprise";
 
 type Props =
   | { mode: "avatar"; avatar: Avatar; onClose: () => void; onSaved: () => void }
@@ -118,6 +119,7 @@ export function AvatarSettingsPanel(props: Props) {
   // SOUL
   const [soulValue, setSoulValue] = useState("");
   const [loadingSoul, setLoadingSoul] = useState(false);
+  const [enterpriseLoggedIn, setEnterpriseLoggedIn] = useState(false);
 
   const title = mode === "avatar" ? st("avatar.titleNamed", { name: avatar?.name ?? st("avatar.fallbackName") }) : st("avatar.titleNear");
 
@@ -382,12 +384,33 @@ export function AvatarSettingsPanel(props: Props) {
     }
   }, [mode, tab]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const account = await window.agenticxDesktop.loadEnterpriseAccount();
+        if (cancelled || !account.ok) return;
+        setEnterpriseLoggedIn(Boolean(account.loggedIn));
+      } catch {
+        // Enterprise login is optional; a read failure keeps the tab hidden.
+      }
+    })();
+    const offChanged = window.agenticxDesktop.onEnterpriseAccountChanged((payload) => {
+      setEnterpriseLoggedIn(Boolean(payload.loggedIn));
+    });
+    return () => {
+      cancelled = true;
+      offChanged();
+    };
+  }, []);
+
   const tabs: { id: Tab; label: string }[] =
     mode === "avatar"
       ? [
           { id: "general", label: st("avatar.tabGeneral") },
           { id: "tools", label: st("avatar.tabTools") },
           { id: "skills", label: st("avatar.tabSkills") },
+          ...(enterpriseLoggedIn ? [{ id: "enterprise" as Tab, label: st("avatar.tabEnterprise") }] : []),
         ]
       : [
           { id: "tools", label: st("avatar.tabToolsGlobal") },
@@ -814,6 +837,10 @@ export function AvatarSettingsPanel(props: Props) {
                 </button>
               </div>
             </div>
+          )}
+
+          {activeTab === "enterprise" && mode === "avatar" && avatar && (
+            <AvatarEnterprisePublishTab avatarId={avatar.id} avatarName={avatar.name} />
           )}
 
           {activeTab === "soul" && mode === "machi" && (

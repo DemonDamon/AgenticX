@@ -26,7 +26,7 @@ packages/ui/
     │   └── charts/             # ChartCard + theme.ts（chartPalette + chartColors）
     ├── branding/               # MachiAvatar.tsx, locale.tsx, useUiTheme.ts, locale-constants.ts
     └── themes/
-        ├── base.css            # 唯一 token 源：OKLCH · indigo/violet · Tailwind v4 @theme inline
+        ├── base.css            # 唯一 token 源：OKLCH · 近黑品牌色 · Tailwind v4 @theme inline
         └── runtime-brand.ts    # buildBrandThemeVars()：HSL 品牌色覆盖（primary/secondary/accent）
 ```
 
@@ -36,13 +36,13 @@ packages/ui/
 - **shadcn 原语**（24 个）：button / card / input / textarea / scroll-area / tooltip / select / separator / avatar / dropdown-menu / tabs / label / dialog / badge / table / alert / sheet / skeleton / popover / checkbox / switch / progress / command / sonner
 - **布局**：`GridBackdrop, PageHeader, Breadcrumb, EmptyState, StatCard`
 - **数据**：`DataTable`（基于 `@tanstack/react-table`）
-- **图表**：`ChartCard, chartPalette, chartColors`
+- **图表**：`ChartCard`；`chartPalette` / `chartColors` 及 `chartTooltipStyle`、`chartLabelStyle`、`chartAxisTickProps`、`chartLegendWrapperStyle`（`components/charts/theme.ts`）
 - **品牌 / 主题**：`MachiAvatar`、locale provider、`useUiTheme`、`buildBrandThemeVars`
 
 ## 显著模式
 
 - **Source-only 消费**：`main` 指 `./src/index.ts`，不打包；消费 app 走 Next.js `transpilePackages`，无独立产物
-- **OKLCH + indigo/violet token 单一来源**：`base.css` 用 `@theme inline` 把 CSS vars 暴露为 Tailwind v4 utility（`bg-background` / `text-foreground` / `border-border`…），`@custom-variant dark` 让 `dark:` 在 `<html class="dark">` 命中；保留 `--machi-*` alias 做向后兼容
+- **OKLCH 品牌 token 单一来源**：`base.css` 主色为近黑/近白（与官网一致），`accent` / `--sidebar-accent` 为中性浅底用于悬停与选中，非整块饱和色；`@theme inline` 暴露 Tailwind v4 utility（`bg-background` / `text-foreground` / `border-border`…），`@custom-variant dark` 让 `dark:` 在 `<html class="dark">` 命中；保留 `--machi-*` alias 做向后兼容
 - **三态主题**：`useUiTheme` 支持 `system / dark / light`，持久化到 localStorage `agenticx-ui-theme`，暴露 `resolved` 与 `toggle()`，`system` 模式订阅 `matchMedia` 变化
 - **CVA + tailwind-merge** 实现 variant 组合；Radix 作 headless 层
 - **运行时品牌覆盖**：`buildBrandThemeVars` 把 `BrandConfig` 的 `primary/secondary/accent_color` 转成 `--ui-color-*` CSS vars（HSL，带 fallback），与 `@agenticx/branding`（空 stub）互补——真实 branding 组件都在本包
@@ -59,3 +59,10 @@ packages/ui/
 ## 增量（8ebec3b5 → 30e57496）
 
 - `src/components/data/DataTable.tsx`：表格交互增强（分页/空态与列状态；仍为 `@tanstack/react-table` 包装）。无新原语、无 token 体系变更。
+
+## 增量（30e57496 → 22d051f5）
+
+- `src/themes/base.css`：品牌 token 从 indigo/violet 切到近黑主色 + 中性强调（`--primary*`、`--accent*`、`--ring`；侧栏 `--sidebar-accent*`）；`--chart-1` / `--chart-5` 等图表色在亮/暗两套同步调整。
+- `src/branding/MachiAvatar.tsx`：默认 `src="/near-logo.png"`；图片 `object-contain`；移除默认 logo 的 `rounded-md` 与 `dark:invert`；`aria-label` / `alt` 为 Near（组件导出名仍为 `MachiAvatar`）。
+- `src/components/charts/ChartCard.tsx`：`BarCard` / `BarChartCardProps` 新增 `horizontal?: boolean`；为 true 时用 Recharts `layout="vertical"`（类目在 `YAxis`、`width={148}`，数值在 `XAxis type="number"`），适合较长名称的 Top 列表；纵向柱图路径不变（仍支持 `stacked`）。
+- `src/index.ts`：barrel 额外导出 `chartTooltipStyle`、`chartLabelStyle`、`chartAxisTickProps`、`chartLegendWrapperStyle`。

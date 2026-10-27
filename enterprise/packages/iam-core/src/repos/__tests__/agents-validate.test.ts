@@ -66,6 +66,14 @@ describe("validateAgentInput", () => {
     expect(isVisibleToEmployees({ status: "active", lifecycle: "published" })).toBe(true);
   });
 
+  it("accepts a 20000-char system prompt", () => {
+    expect(() => validateAgentInput({ ...valid, systemPrompt: "a".repeat(20000) })).not.toThrow();
+  });
+
+  it("rejects a 65537-char system prompt", () => {
+    expect(() => validateAgentInput({ ...valid, systemPrompt: "a".repeat(65537) })).toThrow(AgentValidationError);
+  });
+
   it("accepts an http knowledge search address and rejects other schemes", () => {
     expect(() =>
       validateAgentInput({ ...valid, metadata: { knowledgeSearchUrl: "https://kb.example/search" } }),

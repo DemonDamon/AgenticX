@@ -282,6 +282,23 @@ if [ "$MODE" = "local" ]; then
   else
     ok "gateway internal token already exists"
   fi
+  MA_INTERNAL_TOKEN_FILE="$SECRETS_DIR/ma_internal.token"
+  if [ ! -f "$MA_INTERNAL_TOKEN_FILE" ]; then
+    random_hex 16 > "$MA_INTERNAL_TOKEN_FILE"
+    chmod 600 "$MA_INTERNAL_TOKEN_FILE"
+    ok "generated managed-agents internal token at $MA_INTERNAL_TOKEN_FILE"
+  else
+    ok "managed-agents internal token already exists"
+  fi
+  MA_VAULT_MASTER_KEY_FILE="$SECRETS_DIR/ma_vault_master.key"
+  if [ ! -s "$MA_VAULT_MASTER_KEY_FILE" ]; then
+    random_hex 32 > "$MA_VAULT_MASTER_KEY_FILE"
+    chmod 600 "$MA_VAULT_MASTER_KEY_FILE"
+    ok "generated vault master key at $MA_VAULT_MASTER_KEY_FILE"
+  fi
+  : "${MA_RUNTIME_URL:=http://127.0.0.1:8092}"
+  : "${MA_RUNTIME_GATEWAY_TOKEN_FILE:=$SECRETS_DIR/ma_runtime_gateway.pat}"
+  : "${MA_RUNTIME_SERVICE_TOKEN_FILE:=$SECRETS_DIR/ma_portal_service.pat}"
   : "${GATEWAY_REMOTE_PROVIDERS_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/providers}"
   : "${GATEWAY_REMOTE_QUOTA_CONFIG_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/quotas}"
   : "${GATEWAY_REMOTE_POLICY_SNAPSHOT_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/policy-snapshot}"
@@ -373,6 +390,13 @@ GATEWAY_REMOTE_BUDGET_CONFIG_URL='${GATEWAY_REMOTE_BUDGET_CONFIG_URL:-}'
 GATEWAY_INTERNAL_BASE_URL='${GATEWAY_INTERNAL_BASE_URL:-}'
 GATEWAY_CHANNEL_REGISTRY='${GATEWAY_CHANNEL_REGISTRY:-}'
 GATEWAY_MCP_HOSTING='${GATEWAY_MCP_HOSTING:-}'
+
+MA_INTERNAL_TOKEN_FILE='${MA_INTERNAL_TOKEN_FILE:-}'
+MA_RUNTIME_URL='${MA_RUNTIME_URL:-}'
+MA_RUNTIME_ENABLED='${MA_RUNTIME_ENABLED:-0}'
+MA_RUNTIME_GATEWAY_TOKEN_FILE='${MA_RUNTIME_GATEWAY_TOKEN_FILE:-}'
+MA_RUNTIME_SERVICE_TOKEN_FILE='${MA_RUNTIME_SERVICE_TOKEN_FILE:-}'
+MA_VAULT_MASTER_KEY_FILE='${MA_VAULT_MASTER_KEY_FILE:-}'
 
 NEXT_PUBLIC_SSO_PROVIDERS='${NEXT_PUBLIC_SSO_PROVIDERS:-}'
 SSO_STATE_SIGNING_SECRET='$SSO_STATE_SIGNING_SECRET'
@@ -470,6 +494,14 @@ log "running migrate:legacy-runtime (log: $BOOTSTRAP_LOG)"
     pnpm migrate:legacy-runtime
 )
 ok "migrate:legacy-runtime done"
+
+log "running ma:backfill-agent-versions (log: $BOOTSTRAP_LOG)"
+(
+  cd "$ENTERPRISE_DIR"
+  agx_run_with_log "ma:backfill-agent-versions" "$BOOTSTRAP_LOG" \
+    pnpm ma:backfill-agent-versions
+)
+ok "ma:backfill-agent-versions done"
 
 #################################
 # 8. 结尾提示

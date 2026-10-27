@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "delivery",
-  "generation": "a764aacb1a4e46e79f3585ace1285f7f",
+  "generation": "4e178141b7aa497f803c73049b62fec8",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:d3c83ad64df26eac8a0af75662652437eaa60e2ca2e0c60f2308656e7c0d1591",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:557d84db5c40eb3e9f67a479116056503baae544ff949bbd04c3f32efb35f224",
   "summary_path": "conclusions/delivery_module_conclusion.md",
-  "summary_sha256": "sha256:c03386c6851c6ab28ed3138721cc7a7f645c5c117965c6dcd22cee420d4acd26",
-  "updated_at": "2026-09-30T00:54:13.240330+00:00"
+  "summary_sha256": "sha256:9dceae5f39cad6a6cec8e87c2189aa54aa73d46e51efd535270f6e2c50826674",
+  "updated_at": "2026-10-25T03:42:16.653611+00:00"
 }
