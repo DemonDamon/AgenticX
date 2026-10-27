@@ -33,7 +33,7 @@
     "lucide-react": "^1.61.0",
     "mysql2": "^3.14.1",
     "next": "^16.4.2",
-    "next-intl": "^3",
+    "next-intl": "^4",
     "openid-client": "^6.0.0",
     "papaparse": "^5.5.3",
     "pg": "^8.20.0",
