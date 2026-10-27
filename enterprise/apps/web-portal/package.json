@@ -53,6 +53,6 @@
     "eslint-plugin-i18next": "^6.1.4",
     "tailwindcss": "^4.2.4",
     "typescript-eslint": "^8.59.4",
-    "vitest": "^4.1.5"
+    "vitest": "^5.0.5"
   }
 }
