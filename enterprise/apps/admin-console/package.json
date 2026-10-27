@@ -28,7 +28,7 @@
     "@agenticx/feature-tools-mcp": "workspace:*",
     "@agenticx/iam-core": "workspace:*",
     "@agenticx/ui": "workspace:*",
-    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-table": "^9.3.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.61.0",
     "mysql2": "^3.14.1",
