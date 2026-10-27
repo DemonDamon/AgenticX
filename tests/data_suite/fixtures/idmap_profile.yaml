@@ -1,0 +1,9 @@
+name: default
+id_types:
+  - name: phone
+    priority: 10
+  - name: crm_id
+    priority: 20
+merge:
+  priority: [crm_id, phone]
+  on_conflict: prefer_priority

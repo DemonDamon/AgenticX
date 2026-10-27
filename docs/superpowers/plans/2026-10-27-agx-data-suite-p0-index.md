@@ -59,3 +59,10 @@ class IdMappingEngine:
 ## After P0
 
 Update parent plan status; open P1 index only when A1–A3 Done criteria are evidenced by tests in CI/local.
+
+## Status
+
+- **P0-A1:** complete on `feat/agx-data-suite-p0` (protocol, grants, registry, fake, ClickHouse unit, credentials).
+- **P0-A2:** complete (JobSpec DSL, lineage, runner E2E on FakeChannel, schedule due-checker).
+- **P0-A3:** complete (profile, merge+conflict, snapshot replay; wired into DataFlow transform).
+- Evidence: `pytest tests/data_suite/ -m "not integration"`.
