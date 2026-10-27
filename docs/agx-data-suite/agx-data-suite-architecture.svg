@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="980" viewBox="0 0 1440 980" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f1b2d"/><stop offset="1" stop-color="#0a1320"/>
+    </linearGradient>
+    <linearGradient id="suite" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123055" stop-opacity=".55"/><stop offset="1" stop-color="#0d2440" stop-opacity=".35"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b45309"/><stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6d28d9"/><stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#047857"/><stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="gray" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#334155"/><stop offset="1" stop-color="#475569"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000" flood-opacity=".45"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="980" fill="url(#bg)"/>
+
+  <!-- 标题 -->
+  <text x="60" y="58" fill="#e2e8f0" font-size="28" font-weight="700">AGX Data Suite · 目标架构（企业数据智能通用底座）</text>
+  <text x="60" y="88" fill="#7dd3fc" font-size="15">原则：算力层在客户侧，AGX 只做「接入 · 编排 · 治理 · 应用」，计算下推客户中台，数据不出域</text>
+
+  <!-- 图例 -->
+  <g font-size="13" transform="translate(1010,32)">
+    <rect x="0" y="0" width="12" height="12" rx="3" fill="url(#amber)"/><text x="18" y="11" fill="#cbd5e1">P0 · 硬闸门（立项批复前）</text>
+    <rect x="240" y="0" width="12" height="12" rx="3" fill="url(#blue)"/><text x="258" y="11" fill="#cbd5e1">P1 · 一阶段交付主体</text>
+    <rect x="0" y="22" width="12" height="12" rx="3" fill="url(#purple)"/><text x="18" y="33" fill="#cbd5e1">P2 · 二阶段 / 差异化</text>
+    <rect x="240" y="22" width="12" height="12" rx="3" fill="url(#green)"/><text x="258" y="33" fill="#cbd5e1">已有资产 · 直接复用</text>
+    <rect x="0" y="44" width="12" height="12" rx="3" fill="url(#gray)"/><text x="18" y="55" fill="#cbd5e1">客户侧环境</text>
+  </g>
+
+  <!-- ═══════ 顶部：业务层 ═══════ -->
+  <g transform="translate(60,112)">
+    <rect width="1010" height="64" rx="10" fill="#0c4a6e" opacity=".9" filter="url(#sh)"/>
+    <text x="24" y="28" fill="#7dd3fc" font-size="15" font-weight="700">业务决策层</text>
+    <text x="24" y="50" fill="#e0f2fe" font-size="13.5">L1 品牌层 · L2 细分市场 · L3 车型层 · L4 配置版本 ——「用户识别 → 用户洞察 → 策略落地」统一口径决策支撑</text>
+    <text x="960" y="38" fill="#38bdf8" font-size="20" text-anchor="end" opacity=".5">360°</text>
+  </g>
+
+  <!-- ═══════ 右侧：Managed Agent 增值层 ═══════ -->
+  <g transform="translate(1090,112)" filter="url(#sh)">
+    <rect width="290" height="470" rx="12" fill="url(#suite)" stroke="#7c3aed" stroke-width="1.6"/>
+    <rect width="290" height="44" rx="12" fill="url(#purple)"/>
+    <text x="16" y="28" fill="#fff" font-size="15" font-weight="700">M1 · Managed Agent 增值层</text>
+    <text x="16" y="66" fill="#c4b5fd" font-size="12.5">托管智能体运行与治理（P2 · 差异化卖点）</text>
+    <g font-size="13" fill="#ede9fe">
+      <rect x="16" y="82" width="258" height="52" rx="8" fill="#2e1065" stroke="#7c3aed"/>
+      <text x="30" y="103" font-weight="700">数据质量巡检 Agent</text><text x="30" y="122" font-size="11.5" fill="#a78bfa">schedule 定时巡检 → webhook 事件通知业务方</text>
+      <rect x="16" y="144" width="258" height="52" rx="8" fill="#2e1065" stroke="#7c3aed"/>
+      <text x="30" y="165" font-weight="700">口径巡检 Agent</text><text x="30" y="184" font-size="11.5" fill="#a78bfa">字典口径 vs 实际数据漂移检测 → 治理待办</text>
+      <rect x="16" y="206" width="258" height="52" rx="8" fill="#2e1065" stroke="#7c3aed"/>
+      <text x="30" y="227" font-weight="700">画像问答 Agent</text><text x="30" y="246" font-size="11.5" fill="#a78bfa">NL2SQL / 标签圈选问答 · write guards 只读安全</text>
+    </g>
+    <g font-size="12" fill="#a78bfa">
+      <rect x="16" y="272" width="120" height="30" rx="15" fill="#1e1b4b" stroke="#4c1d95"/>
+      <text x="76" y="291" text-anchor="middle">schedule · 定时作业</text>
+      <rect x="146" y="272" width="128" height="30" rx="15" fill="#1e1b4b" stroke="#4c1d95"/>
+      <text x="210" y="291" text-anchor="middle">webhook · 事件通知</text>
+      <rect x="16" y="310" width="120" height="30" rx="15" fill="#1e1b4b" stroke="#4c1d95"/>
+      <text x="76" y="329" text-anchor="middle">write guards</text>
+      <rect x="146" y="310" width="128" height="30" rx="15" fill="#1e1b4b" stroke="#4c1d95"/>
+      <text x="210" y="329" text-anchor="middle">metering · evals</text>
+    </g>
+    <text x="16" y="380" fill="#ddd6fe" font-size="12">已有底座（managed-agents.ts · managed/host）</text>
+    <text x="16" y="400" fill="#a78bfa" font-size="11.5">PAT 权限域 · 事件协议 · 托管宿主 · 治理面</text>
+    <text x="16" y="444" fill="#fbbf24" font-size="11.5">▲ 差异化：会说话的数据资产</text>
+  </g>
+
+  <!-- ═══════ 左列主体：AGX Data Suite 四层 ═══════ -->
+  <g transform="translate(60,196)">
+    <rect width="1010" height="560" rx="12" fill="url(#suite)" stroke="#1d4ed8" stroke-width="1.6" filter="url(#sh)"/>
+    <rect width="1010" height="40" rx="12" fill="#1e3a8a"/>
+    <text x="18" y="27" fill="#fff" font-size="15" font-weight="700">AGX Data Suite（本期补齐主体）</text>
+    <text x="992" y="27" fill="#93c5fd" font-size="12.5" text-anchor="end">研发投入约 20~23 人月 · 沉淀为可复用产品线</text>
+
+    <!-- L4 应用层 -->
+    <g transform="translate(20,56)">
+      <rect width="970" height="112" rx="10" fill="#0e2a52" stroke="#2563eb" stroke-width="1.2"/>
+      <rect width="8" height="112" rx="4" fill="url(#blue)"/>
+      <text x="24" y="26" fill="#93c5fd" font-size="14" font-weight="700">L4 · 标签与画像应用层（P1 · 一阶段交付主体）</text>
+      <g font-size="12.5" fill="#dbeafe">
+        <rect x="24" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="113" y="64" text-anchor="middle" font-weight="700">标签引擎 · 字典管理</text>
+        <text x="113" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">3级分层 · 四要素 · Owner裁决</text>
+        <rect x="212" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="301" y="64" text-anchor="middle" font-weight="700">人群圈选引擎</text>
+        <text x="301" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">圈选 DSL → 宽表/CH 下推查询</text>
+        <rect x="400" y="42" width="280" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="540" y="64" text-anchor="middle" font-weight="700">360 用户画像看板（可配置图表框架）</text>
+        <text x="540" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">L1-L4 四层视图 · 企划 vs 上市后 · 车型/配置对比下钻</text>
+        <rect x="690" y="42" width="256" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="818" y="64" text-anchor="middle" font-weight="700">自助取数 · 数据服务</text>
+        <text x="818" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">宽表 API 封装 · 自助 BI 对接</text>
+      </g>
+    </g>
+
+    <!-- L3 治理层 -->
+    <g transform="translate(20,176)">
+      <rect width="970" height="112" rx="10" fill="#0e2a52" stroke="#2563eb" stroke-width="1.2"/>
+      <rect width="8" height="112" rx="4" fill="url(#blue)"/>
+      <text x="24" y="26" fill="#93c5fd" font-size="14" font-weight="700">L3 · 数据治理层（P1）——四类清洗规则 + S/A/B/C 分级 + 质量看板</text>
+      <g font-size="12.5" fill="#dbeafe">
+        <rect x="24" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="113" y="64" text-anchor="middle" font-weight="700">元数据目录 · 字典</text>
+        <text x="113" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">扩展 data_sources/catalog</text>
+        <rect x="212" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="301" y="64" text-anchor="middle" font-weight="700">清洗规则引擎</text>
+        <text x="301" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">配置化 · 异常隔离待审 · 留痕</text>
+        <rect x="400" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="489" y="64" text-anchor="middle" font-weight="700">多源比对仲裁</text>
+        <text x="489" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">S&gt;A&gt;B&gt;C · 出口规则五步链路</text>
+        <rect x="588" y="42" width="178" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="677" y="64" text-anchor="middle" font-weight="700">数据质量看板</text>
+        <text x="677" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">完整/准确/及时/留痕 · 日更新</text>
+        <rect x="776" y="42" width="170" height="54" rx="8" fill="#172554" stroke="#1e40af"/>
+        <text x="861" y="64" text-anchor="middle" font-weight="700">轻量血缘</text>
+        <text x="861" y="84" text-anchor="middle" font-size="11" fill="#60a5fa">作业依赖图 · SQL 解析</text>
+      </g>
+    </g>
+
+    <!-- L2 数据工程层 -->
+    <g transform="translate(20,296)">
+      <rect width="970" height="112" rx="10" fill="#2a1a05" stroke="#d97706" stroke-width="1.2"/>
+      <rect width="8" height="112" rx="4" fill="url(#amber)"/>
+      <text x="24" y="26" fill="#fcd34d" font-size="14" font-weight="700">L2 · 数据工程层（P0 · 硬闸门）——ID-Mapping + 宽表 + T+1 快照</text>
+      <g font-size="12.5" fill="#fef3c7">
+        <rect x="24" y="42" width="220" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="134" y="64" text-anchor="middle" font-weight="700">ETL 作业节点化（flow 扩展）</text>
+        <text x="134" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">抽取/清洗/转换/加载/快照 · 作业 DSL</text>
+        <rect x="254" y="42" width="220" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="364" y="64" text-anchor="middle" font-weight="700">T+1 调度 · 可回放</text>
+        <text x="364" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">automation_scheduler + managed schedule</text>
+        <rect x="484" y="42" width="220" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="594" y="64" text-anchor="middle" font-weight="700">ID-Mapping 引擎</text>
+        <text x="594" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">任意 ID 关联图谱 · 合并策略 · 快照回放</text>
+        <rect x="714" y="42" width="232" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="830" y="64" text-anchor="middle" font-weight="700">宽表生成器</text>
+        <text x="830" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">主题域 YAML 定义驱动 · 出口规则 · 可回放</text>
+      </g>
+    </g>
+
+    <!-- L1 连接层 -->
+    <g transform="translate(20,416)">
+      <rect width="970" height="112" rx="10" fill="#2a1a05" stroke="#d97706" stroke-width="1.2"/>
+      <rect width="8" height="112" rx="4" fill="url(#amber)"/>
+      <text x="24" y="26" fill="#fcd34d" font-size="14" font-weight="700">L1 · 大数据连接层（P0 · 硬闸门）——连接器扩展 + 凭据托管，计算下推客户中台</text>
+      <g font-size="12.5" fill="#fef3c7">
+        <rect x="24" y="42" width="150" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="99" y="64" text-anchor="middle" font-weight="700">ClickHouse 连接器</text>
+        <text x="99" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">新增</text>
+        <rect x="184" y="42" width="150" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="259" y="64" text-anchor="middle" font-weight="700">Hive / JDBC</text>
+        <text x="259" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">Spark Thrift · 新增</text>
+        <rect x="344" y="42" width="150" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="419" y="64" text-anchor="middle" font-weight="700">Kafka 批/流通道</text>
+        <text x="419" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">车联网流式 · 新增</text>
+        <rect x="504" y="42" width="150" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="579" y="64" text-anchor="middle" font-weight="700">文件 · OSS/SFTP</text>
+        <text x="579" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">双云专线 · 新增</text>
+        <rect x="664" y="42" width="150" height="54" rx="8" fill="#064e3b" stroke="#047857"/>
+        <text x="739" y="64" text-anchor="middle" font-weight="700">credential_store</text>
+        <text x="739" y="84" text-anchor="middle" font-size="11" fill="#34d399">凭据托管 · 已有</text>
+        <rect x="824" y="42" width="122" height="54" rx="8" fill="#1f1300" stroke="#b45309"/>
+        <text x="885" y="64" text-anchor="middle" font-weight="700">写模式支持</text>
+        <text x="885" y="84" text-anchor="middle" font-size="11" fill="#f59e0b">默认只读·授权可写</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ═══════ 安全合规纵贯条（左） ═══════ -->
+  <g transform="translate(60,772)" filter="url(#sh)">
+    <rect width="1010" height="66" rx="10" fill="#052e2b" stroke="#047857" stroke-width="1.4"/>
+    <rect width="8" height="66" rx="4" fill="url(#green)"/>
+    <text x="24" y="26" fill="#6ee7b7" font-size="13.5" font-weight="700">L5 · 安全合规纵贯（等保三级 · 密级5级 · 一期验收项）</text>
+    <g font-size="12.5" font-weight="700" fill="#d1fae5">
+      <rect x="24" y="36" width="140" height="22" rx="11" fill="#064e3b" stroke="#059669"/><text x="94" y="51" text-anchor="middle">OIDC SSO ✔已有</text>
+      <rect x="174" y="36" width="150" height="22" rx="11" fill="#064e3b" stroke="#059669"/><text x="249" y="51" text-anchor="middle">IAM · RBAC ✔已有</text>
+      <rect x="334" y="36" width="130" height="22" rx="11" fill="#064e3b" stroke="#059669"/><text x="399" y="51" text-anchor="middle">操作审计 ✔已有</text>
+      <rect x="474" y="36" width="160" height="22" rx="11" fill="#2a1a05" stroke="#d97706"/><text x="554" y="51" text-anchor="middle" fill="#fcd34d">客户认证适配器 P2</text>
+      <rect x="644" y="36" width="166" height="22" rx="11" fill="#2a1a05" stroke="#d97706"/><text x="727" y="51" text-anchor="middle" fill="#fcd34d">字段级脱敏引擎 P2</text>
+      <rect x="820" y="36" width="160" height="22" rx="11" fill="#2a1a05" stroke="#d97706"/><text x="900" y="51" text-anchor="middle" fill="#fcd34d">页面水印组件 P2</text>
+    </g>
+  </g>
+
+  <!-- ═══════ 底部：客户侧 ═══════ -->
+  <g transform="translate(60,854)" filter="url(#sh)">
+    <rect width="1320" height="96" rx="10" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+    <rect width="8" height="96" rx="4" fill="url(#gray)"/>
+    <text x="24" y="26" fill="#94a3b8" font-size="13.5" font-weight="700">客户侧环境（灰）——不自建大数据平台，数据不出域</text>
+    <g font-size="12" fill="#cbd5e1">
+      <rect x="24" y="40" width="410" height="42" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="34" y="57" fill="#e2e8f0" font-weight="700">客户大数据平台（流批一体）</text>
+      <text x="34" y="74" fill="#94a3b8">Kafka · Flink · Spark · HDFS · HBase · Redis · 等保三级</text>
+      <rect x="448" y="40" width="400" height="42" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="458" y="57" fill="#e2e8f0" font-weight="700">客户 CDP 平台（双云部署）</text>
+      <text x="458" y="74" fill="#94a3b8">ClickHouse · Hive/Tez · HDFS · RabbitMQ · 专线对接</text>
+      <rect x="862" y="40" width="440" height="42" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="872" y="57" fill="#e2e8f0" font-weight="700">数据源：15 个业务系统</text>
+      <text x="872" y="74" fill="#94a3b8">DMS · 多品牌 APP · 车联网 · CDP · 订单/金融 · 调研 · 投流</text>
+    </g>
+  </g>
+
+  <!-- 连接箭头：L1 → 客户侧 -->
+  <g stroke="#64748b" stroke-width="1.6" fill="#64748b">
+    <path d="M 560 852 l 0 0" />
+    <path d="M 900 770 L 900 838 l -5 -8 m 5 8 l 5 -8" fill="none"/>
+    <path d="M 300 770 L 300 838 l -5 -8 m 5 8 l 5 -8" fill="none"/>
+  </g>
+</svg>
