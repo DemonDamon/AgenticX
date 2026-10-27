@@ -115,6 +115,17 @@ Status: implementation-ready（P0 可先行）
 3. P0 是硬闸门：未完成前数据类项目一阶段不可开工。
 4. 脱敏 / 水印若为项目一期验收项，A7 需从 P2 前移。
 
+## P0 执行拆分（已落地）
+
+按序执行，勿并行开多条产品线：
+
+1. [P0 Index](./2026-10-27-agx-data-suite-p0-index.plan.md)
+2. [P0-A1 Channels](./2026-10-27-agx-data-suite-p0-a1-channels.plan.md)
+3. [P0-A2 DataFlow](./2026-10-27-agx-data-suite-p0-a2-dataflow.plan.md)
+4. [P0-A3 ID-Mapping](./2026-10-27-agx-data-suite-p0-a3-idmapping.plan.md)
+
+同步副本：`docs/superpowers/plans/2026-10-27-agx-data-suite-p0-*.md`
+
 ## 关联文档
 
 - 需求背景（脱敏）：`docs/agx-data-suite/requirement-background.md`
