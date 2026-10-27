@@ -1,0 +1,21 @@
+name: sample_oneid_job
+schedule: "0 2 * * *"
+nodes:
+  - id: extract_src
+    type: extract
+    channel: src
+    statement: "SELECT * FROM raw_users"
+  - id: clean_nulls
+    type: clean
+    drop_null: ["id"]
+  - id: transform_idmap
+    type: transform
+    idmap: default
+  - id: load_dst
+    type: load
+    channel: dst
+    table: users_out
+    grant_id: g_load
+  - id: snap
+    type: snapshot
+    target: memory
