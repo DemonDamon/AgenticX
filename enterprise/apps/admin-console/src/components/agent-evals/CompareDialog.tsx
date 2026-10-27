@@ -1,6 +1,7 @@
 "use client";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 import type { EvalComparison } from "../../lib/ma/eval-compare";
 
@@ -13,6 +14,7 @@ export function CompareDialog({
   onOpenChange: (open: boolean) => void;
   comparison: EvalComparison | null;
 }) {
+  const t = useTranslations("pages.admin.agentEvals.compare");
   const baseRate = comparison?.base.summary.pass_rate;
   const targetRate = comparison?.target.summary.pass_rate;
   const baseMean = comparison?.base.summary.mean_score;
@@ -21,18 +23,23 @@ export function CompareDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>版本对比</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
         </DialogHeader>
         {comparison ? (
           <div className="space-y-3 text-sm">
             <p>
-              通过率 {baseRate ?? "—"} → {targetRate ?? "—"}（{comparison.delta.pass_rate ?? "—"}）
+              {t("passRate", { base: baseRate ?? "—", target: targetRate ?? "—", delta: comparison.delta.pass_rate ?? "—" })}
             </p>
             <p>
-              均分 {baseMean ?? "—"} → {targetMean ?? "—"}（{comparison.delta.mean_score ?? "—"}）
+              {t("meanScore", { base: baseMean ?? "—", target: targetMean ?? "—", delta: comparison.delta.mean_score ?? "—" })}
             </p>
             <p>
-              修复 {comparison.counts.fixed} / 退化 {comparison.counts.regressed} / 不变 {comparison.counts.unchanged} / 异常 {comparison.counts.errored}
+              {t("counts", {
+                fixed: comparison.counts.fixed,
+                regressed: comparison.counts.regressed,
+                unchanged: comparison.counts.unchanged,
+                errored: comparison.counts.errored,
+              })}
             </p>
             <div className="max-h-80 overflow-auto">
               {comparison.items.map((item) => (
@@ -44,7 +51,7 @@ export function CompareDialog({
             </div>
           </div>
         ) : (
-          <p>选择同评测集、同评分标准的另一次已完成评测。</p>
+          <p>{t("hint")}</p>
         )}
       </DialogContent>
     </Dialog>

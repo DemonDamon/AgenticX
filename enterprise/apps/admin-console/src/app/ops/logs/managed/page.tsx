@@ -6,9 +6,17 @@ import { useTranslations } from "next-intl";
 import { Button, PageHeader } from "@agenticx/ui";
 import { RefreshCcw } from "lucide-react";
 
+function ManagedSessionsLoading() {
+  const tc = useTranslations("common");
+  return <p className="text-sm text-muted-foreground">{tc("states.loading")}</p>;
+}
+
 const ManagedSessionsPanel = dynamic(
   () => import("../../../../components/managed-sessions/ManagedSessionsPanel"),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <ManagedSessionsLoading />,
+  },
 );
 
 export default function ManagedSessionsPage() {

@@ -21,6 +21,7 @@ import {
   Textarea,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 import { adminFetch } from "../../lib/admin-client-auth";
 
@@ -38,6 +39,8 @@ async function readJson(res: Response): Promise<{ message?: string; errors?: str
 }
 
 export function DatasetsTab() {
+  const t = useTranslations("pages.admin.agentEvals");
+  const tc = useTranslations("common");
   const [rows, setRows] = useState<Dataset[]>([]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -72,12 +75,15 @@ export function DatasetsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button type="button" onClick={() => setOpen(true)}>新建评测集</Button>
+        <Button type="button" onClick={() => setOpen(true)}>{t("actions.createDataset")}</Button>
       </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-muted-foreground">
-            <th>名称</th><th>用例数</th><th>更新时间</th><th>操作</th>
+            <th>{t("columns.name")}</th>
+            <th>{t("columns.itemCount")}</th>
+            <th>{t("columns.updatedAt")}</th>
+            <th>{t("columns.actions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -87,8 +93,8 @@ export function DatasetsTab() {
               <td>{row.itemCount}</td>
               <td>{row.updatedAt}</td>
               <td className="space-x-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => void openDataset(row)}>查看</Button>
-                <Button type="button" size="sm" variant="outline" onClick={() => setDeleteId(row.id)}>删除</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => void openDataset(row)}>{t("actions.view")}</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setDeleteId(row.id)}>{tc("actions.delete")}</Button>
               </td>
             </tr>
           ))}
@@ -96,11 +102,11 @@ export function DatasetsTab() {
       </table>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>新建评测集</DialogTitle></DialogHeader>
-          <Label>名称</Label>
+          <DialogHeader><DialogTitle>{t("datasets.createTitle")}</DialogTitle></DialogHeader>
+          <Label>{t("fields.name")}</Label>
           <Input value={name} onChange={(event) => setName(event.target.value)} />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>{tc("actions.cancel")}</Button>
             <Button
               type="button"
               onClick={() => {
@@ -110,7 +116,7 @@ export function DatasetsTab() {
                   body: JSON.stringify({ name }),
                 }).then(async (res) => {
                   if (!res.ok) {
-                    toast.error((await readJson(res)).message ?? "保存失败");
+                    toast.error((await readJson(res)).message ?? t("datasets.saveFailed"));
                     return;
                   }
                   setOpen(false);
@@ -119,7 +125,7 @@ export function DatasetsTab() {
                 });
               }}
             >
-              保存
+              {tc("actions.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -127,14 +133,14 @@ export function DatasetsTab() {
       <Sheet open={active != null} onOpenChange={(next) => { if (!next) setActive(null); }}>
         <SheetContent className="w-[min(860px,96vw)] overflow-y-auto sm:max-w-none">
           <SheetHeader><SheetTitle>{active?.name}</SheetTitle></SheetHeader>
-          <Button type="button" className="my-3" onClick={() => { setErrors([]); setAddOpen(true); }}>添加用例</Button>
+          <Button type="button" className="my-3" onClick={() => { setErrors([]); setAddOpen(true); }}>{t("actions.addItems")}</Button>
           <table className="w-full text-sm">
             <tbody>
               {items.map((item) => (
                 <tr key={item.id} className="border-t border-border">
                   <td>{item.query.slice(0, 80)}</td>
-                  <td>{item.expectedAnswer ? "有期望回答" : "无期望回答"}</td>
-                  <td>{item.sourceSessionId ? <a href={`/ops/logs/managed/${item.sourceSessionId}`}>来源会话</a> : "—"}</td>
+                  <td>{item.expectedAnswer ? t("datasets.hasExpected") : t("datasets.noExpected")}</td>
+                  <td>{item.sourceSessionId ? <a href={`/ops/logs/managed/${item.sourceSessionId}`}>{t("datasets.sourceSession")}</a> : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -143,12 +149,12 @@ export function DatasetsTab() {
       </Sheet>
       <Dialog open={addOpen} onOpenChange={(next) => { if (next || errors.length === 0) setAddOpen(next); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>添加用例</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("datasets.addItemsTitle")}</DialogTitle></DialogHeader>
           <Tabs defaultValue="paste">
             <TabsList>
-              <TabsTrigger value="paste">粘贴 JSON</TabsTrigger>
-              <TabsTrigger value="file">上传文件</TabsTrigger>
-              <TabsTrigger value="session">从会话导入</TabsTrigger>
+              <TabsTrigger value="paste">{t("datasets.pasteJson")}</TabsTrigger>
+              <TabsTrigger value="file">{t("datasets.uploadFile")}</TabsTrigger>
+              <TabsTrigger value="session">{t("datasets.importSession")}</TabsTrigger>
             </TabsList>
             <TabsContent value="paste">
               <Textarea value={text} onChange={(event) => setText(event.target.value)} rows={8} />
@@ -165,17 +171,17 @@ export function DatasetsTab() {
               />
             </TabsContent>
             <TabsContent value="session" className="space-y-2">
-              <Label>会话 ID</Label>
+              <Label>{t("fields.sessionId")}</Label>
               <Input value={sessionId} onChange={(event) => setSessionId(event.target.value)} />
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={useAnswer} onChange={(event) => setUseAnswer(event.target.checked)} />
-                把该会话的最终回答作为期望回答
+                {t("fields.useAnswerAsExpected")}
               </label>
             </TabsContent>
           </Tabs>
           {errors.length > 0 ? <ul className="text-sm text-destructive">{errors.map((item) => <li key={item}>{item}</li>)}</ul> : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>{tc("actions.cancel")}</Button>
             <Button
               type="button"
               onClick={() => {
@@ -193,7 +199,7 @@ export function DatasetsTab() {
                 }).then(async (res) => {
                   const json = await readJson(res);
                   if (!res.ok) {
-                    setErrors(json.errors ?? [json.message ?? "解析失败"]);
+                    setErrors(json.errors ?? [json.message ?? t("datasets.parseFailed")]);
                     return;
                   }
                   setAddOpen(false);
@@ -203,17 +209,17 @@ export function DatasetsTab() {
                 });
               }}
             >
-              添加
+              {tc("actions.add")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={deleteId != null} onOpenChange={(next) => { if (!next) setDeleteId(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>删除评测集</DialogTitle></DialogHeader>
-          <p>确认删除这个评测集？已有评测任务不会受影响。</p>
+          <DialogHeader><DialogTitle>{t("datasets.deleteTitle")}</DialogTitle></DialogHeader>
+          <p>{t("datasets.deleteConfirm")}</p>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => setDeleteId(null)}>{tc("actions.cancel")}</Button>
             <Button
               type="button"
               onClick={() => {
@@ -224,7 +230,7 @@ export function DatasetsTab() {
                 });
               }}
             >
-              删除
+              {tc("actions.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

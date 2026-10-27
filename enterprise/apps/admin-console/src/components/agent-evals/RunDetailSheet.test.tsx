@@ -1,8 +1,10 @@
 import React from "react";
 // @ts-expect-error react-dom/server is present at runtime but has no local declaration.
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it } from "vitest";
 
+import zh from "../../../messages/zh.json";
 import type { EvalResultView, EvalRunView } from "../../lib/ma/eval-records";
 import { RunDetailSheet } from "./RunDetailSheet";
 
@@ -53,13 +55,15 @@ function result(id: string, status: EvalResultView["status"]): EvalResultView {
 
 function render(filter: "all" | "error" = "all", expanded: string | null = null) {
   return renderToStaticMarkup(
-    <RunDetailSheet
-      embed
-      run={run}
-      results={[result("F", "failed"), result("E", "error")]}
-      initialFilter={filter}
-      initialExpandedId={expanded}
-    />,
+    <NextIntlClientProvider locale="zh" timeZone="Asia/Shanghai" messages={zh}>
+      <RunDetailSheet
+        embed
+        run={run}
+        results={[result("F", "failed"), result("E", "error")]}
+        initialFilter={filter}
+        initialExpandedId={expanded}
+      />
+    </NextIntlClientProvider>,
   );
 }
 

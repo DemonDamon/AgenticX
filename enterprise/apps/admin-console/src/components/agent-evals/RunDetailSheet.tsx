@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Badge, Button, Progress, Sheet, SheetContent, SheetHeader, SheetTitle, StatCard } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 import { evalProgressPercent, type EvalResultView, type EvalRunView } from "../../lib/ma/eval-records";
 
@@ -26,6 +27,7 @@ export function RunDetailSheet({
   initialExpandedId?: string | null;
   onCompare?: () => void;
 }) {
+  const t = useTranslations("pages.admin.agentEvals.detail");
   const body = (
     <RunDetailBody
       run={run}
@@ -40,7 +42,7 @@ export function RunDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-[min(960px,96vw)] overflow-y-auto sm:max-w-none">
         <SheetHeader>
-          <SheetTitle>评测详情</SheetTitle>
+          <SheetTitle>{t("title")}</SheetTitle>
         </SheetHeader>
         {body}
       </SheetContent>
@@ -61,6 +63,7 @@ function RunDetailBody({
   initialExpandedId: string | null;
   onCompare?: () => void;
 }) {
+  const t = useTranslations("pages.admin.agentEvals");
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [expanded, setExpanded] = useState<string | null>(initialExpandedId);
   const summary = run?.summary ?? {};
@@ -73,26 +76,26 @@ function RunDetailBody({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="均分" value={summary.mean_score ?? "—"} />
-        <StatCard label="通过率" value={summary.pass_rate ?? "—"} />
-        <StatCard label="未通过" value={summary.failed ?? 0} />
-        <StatCard label="执行异常" value={summary.errored ?? 0} />
+        <StatCard label={t("detail.meanScore")} value={summary.mean_score ?? "—"} />
+        <StatCard label={t("detail.passRate")} value={summary.pass_rate ?? "—"} />
+        <StatCard label={t("detail.failed")} value={summary.failed ?? 0} />
+        <StatCard label={t("detail.errored")} value={summary.errored ?? 0} />
       </div>
-      <p className="text-sm text-muted-foreground">执行异常不计入通过率与均分</p>
-      <Progress value={percent} data-value={percent} aria-label="进度" />
+      <p className="text-sm text-muted-foreground">{t("detail.errorNote")}</p>
+      <Progress value={percent} data-value={percent} aria-label={t("detail.progress")} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")}>
-          全部
+          {t("detail.filterAll")}
         </Button>
         <Button type="button" size="sm" variant={filter === "failed" ? "default" : "outline"} onClick={() => setFilter("failed")}>
-          未通过
+          {t("detail.filterFailed")}
         </Button>
         <Button type="button" size="sm" variant={filter === "error" ? "default" : "outline"} onClick={() => setFilter("error")}>
-          执行异常
+          {t("detail.filterError")}
         </Button>
         {onCompare ? (
           <Button type="button" size="sm" variant="outline" onClick={onCompare}>
-            与另一次评测对比
+            {t("actions.compare")}
           </Button>
         ) : null}
       </div>
@@ -106,7 +109,7 @@ function RunDetailBody({
             {expanded === row.id ? (
               <div className="mt-3 space-y-2 text-sm">
                 <p>{row.answer}</p>
-                <p>裁判理由：{row.judge?.reason ?? "无"}</p>
+                <p>{t("detail.judgeReason", { reason: row.judge?.reason ?? t("detail.noReason") })}</p>
                 <ul>
                   {row.rule_results.map((rule) => (
                     <li key={`${rule.type}-${rule.detail}`} className={rule.passed ? "text-green-600" : "text-red-600"}>
@@ -114,7 +117,7 @@ function RunDetailBody({
                     </li>
                   ))}
                 </ul>
-                {row.session_id ? <a href={`/ops/logs/managed/${row.session_id}`}>查看会话</a> : null}
+                {row.session_id ? <a href={`/ops/logs/managed/${row.session_id}`}>{t("actions.viewSession")}</a> : null}
               </div>
             ) : null}
           </div>
