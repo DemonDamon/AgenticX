@@ -64,7 +64,7 @@ dependencies = [
     # 核心工具库
     "docstring-parser>=0.11,<0.16",  # FunctionTool 需要解析 docstring；0.15+ 为 agentkit-sdk-python 所需
     # 通用工具
-    "ujson>=5.8.0,<6",
+    "ujson>=5.8.0,<7",
     "tqdm>=4.65.0,<5",
     "joblib>=1.3.0,<2",
     "chardet>=5.0.0,<6",
