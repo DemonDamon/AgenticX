@@ -87,6 +87,9 @@ services:
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
+      MA_RUNTIME_ENABLED: ${MA_RUNTIME_ENABLED:-0}
+      MA_RUNTIME_URL: ${MA_RUNTIME_URL:-http://agent-runtime:8092}
+      MA_RUNTIME_SERVICE_TOKEN: ${MA_RUNTIME_SERVICE_TOKEN:-}
     networks:
       - agenticx-backbone
 
@@ -108,6 +111,10 @@ services:
       ADMIN_CONSOLE_SESSION_SECRET: ${ADMIN_CONSOLE_SESSION_SECRET:?ADMIN_CONSOLE_SESSION_SECRET is required}
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
+      MA_INTERNAL_TOKEN: ${MA_INTERNAL_TOKEN:-}
+      MA_VAULT_MASTER_KEY: ${MA_VAULT_MASTER_KEY:-}
+      MA_VAULT_MASTER_KEY_PREVIOUS: ${MA_VAULT_MASTER_KEY_PREVIOUS:-}
+      MA_VAULT_RESOLVE_ENABLED: ${MA_VAULT_RESOLVE_ENABLED:-1}
       ENTERPRISE_ADMIN_RUNTIME_DIR: /runtime/admin
       ENTERPRISE_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       ENTERPRISE_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
@@ -115,6 +122,29 @@ services:
     volumes:
       - gateway_runtime:/runtime
       - ../../plugins:/app/plugins:ro
+    networks:
+      - agenticx-backbone
+
+  agent-runtime:
+    profiles: ["managed-agents"]
+    image: ghcr.io/agenticx/enterprise-agent-runtime:latest
+    container_name: agenticx-agent-runtime
+    restart: unless-stopped
+    environment:
+      DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
+      DATABASE_URL: ${DATABASE_URL:-}
+      MA_INTERNAL_TOKEN: ${MA_INTERNAL_TOKEN:-}
+      MA_RUNTIME_ADMIN_URL: http://admin-console:3001
+      MA_RUNTIME_GATEWAY_URL: http://gateway-a:8088/v1
+      MA_RUNTIME_GATEWAY_TOKEN: ${MA_RUNTIME_GATEWAY_TOKEN:-}
+      MA_RUNTIME_COMMAND_SANDBOX: ${MA_RUNTIME_COMMAND_SANDBOX:-required}
+      MA_RUNTIME_DESKTOP_WORKER_ENABLED: ${MA_RUNTIME_DESKTOP_WORKER_ENABLED:-0}
+    # bubblewrap 需要在容器内创建用户 / PID 命名空间；默认 seccomp / apparmor 会拒绝。
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    volumes:
+      - agent_runtime_data:/data
     networks:
       - agenticx-backbone
 
@@ -173,6 +203,7 @@ networks:
 
 volumes:
   gateway_runtime:
+  agent_runtime_data:
   pg_primary_data:
   pg_replica_data:
   redis_data:

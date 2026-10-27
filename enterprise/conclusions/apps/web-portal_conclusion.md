@@ -77,6 +77,8 @@ apps/web-portal/
 | `/` | 服务端 redirect —— 有 session 跳 `/workspace`，否则跳 `/auth`（`src/app/page.tsx`）|
 | `/auth` | 登录 + 注册表单 + WeChat / 企业 SSO / GitHub 按钮；读 `?sso_error=` 和 `?returnTo=`（`src/app/auth/page.tsx`，410 行）|
 | `/workspace` | 鉴权后的员工 workspace —— 服务端 `getSessionFromCookies()` gate，渲染 `<WorkspaceShell userEmail userScopes/>` |
+| `/projects` | 协作项目列表 —— `getWorkspaceSessionFromCookies()` gate，未登录跳 `/auth`，须改密跳 `/auth/change-password`，渲染 `<ProjectListView/>` |
+| `/projects/[projectId]` | 单项目详情 —— 同上 gate，渲染 `<ProjectDetailView/>` |
 
 ### API 路由（`src/app/api/**/route.ts`）
 
@@ -84,22 +86,32 @@ apps/web-portal/
 - `login` —— 邮箱 + 密码 → `loginWithPassword()` → 设置 `agenticx_access_token` & `agenticx_refresh_token` cookie；错误码 `40100/50300`
 - `register` —— 自助注册
 - `logout` —— 清 cookie + 吊销 refresh token
+- `refresh` —— GET（`format=json`）用 refresh cookie 换新 access/refresh 并回写 cookie；供 `session-keepalive.ts` 在 access 临期时主动续签
 - `session` —— 当前 session 探测（GET）
 - `sso/oidc/start` & `sso/oidc/callback` —— OIDC PKCE 流程（state cookie `agenticx_oidc_state_portal`，含审计 + provider-disabled / fallback 测试）
 - `sso/saml/start` & `sso/saml/callback` —— SAML SP 流程（cookie policy + 失败审计测试）
 
 **Chat（`/api/chat/*`）**
-- `completions` —— 转发 chat 流式响应到 gateway；含 session 归属校验 + 实时模型可见性收窄 + `provider/model` 拆分到 `x-agenticx-provider` 头
-- `sessions` —— 列出 / 创建会话（ULID）
+- `completions` —— 转发 chat 流式响应到 gateway；含 session 归属校验 + 实时模型可见性收窄 + `provider/model` 拆分到 `x-agenticx-provider` 头；联网搜索 / 深度研究走能力包开关 + `feature-usage/gate` 计量（429/503 用户可读文案）；可注入 enterprise skill 提示与历史 feedback 召回
+- `feedback` —— GET / PUT / DELETE 单条 assistant 消息 like/dislike（`lib/chat-feedback.ts`，归属与会话校验）
+- `deep-research/cancel` · `deep-research/continue` —— 取消运行中的研究任务 / 澄清后继续（配合 `run-store`）
+- `sessions` —— GET 全量列表或 `limit`+`cursor` 分页（`session-list-cursor.ts`）；POST 创建会话（ULID）
 - `sessions/[sessionId]` —— PATCH（title / active_model）/ DELETE（软删）
 - `sessions/[sessionId]/messages` —— GET 取消息 / POST 追加或全量替换（经 `sanitizeInboundMessages` 校验）
 
 **Me（`/api/me/*`）**
-- `models` —— 返回 admin 配置的 providers 中**对当前用户可见**的子集（部门 + 用户级联收窄）
+- `models` —— 可见模型子集（部门 + 用户级联收窄）+ `deptDefaultModelId`（`readDeptDefaultModelForUser`）
+- `agents` —— 当前用户 assignment keys 下可见的企业 Agent 列表（iam-core `listAgentsVisibleToKeys`）
+- `skills` —— 能力包视图中 `kind=skill` 且扫描为 safe、state=on 的可选技能（供会话侧选用）
 - `api-tokens` —— 个人访问令牌（PAT）CRUD，委托 iam-core `createPat` / `listPats` / `revokePat`
+
+**Projects（`/api/projects/*`）**
+- `projects` —— GET 列出当前用户可见协作项目（`collab-room` `listProjects`）
+- `projects/[projectId]` —— GET 单项目详情（`getProject`：project + 关联 rooms）
 
 **Workspace（`/api/workspace/*`）**
 - `quota/summary` —— 用户 + 部门 token 配额剩余，委托 iam-core `getQuotaSummaryForSession()`（含单元测试）
+- `feature-usage` —— GET `@agenticx/config` 的 `METERED_FEATURES`（联网搜索、深度研究等）剩余额度摘要（`feature-usage/gate` + `featureUsageSubject`）
 
 **Admin（`/api/admin/*`）**
 - `users` —— admin 创建用户（注册表单在 caller 是 admin 时回退到这里，走 `provisionUserFromAdmin`）
@@ -110,13 +122,13 @@ apps/web-portal/
 
 两栏 hero + tab 切换的登录/注册卡。通过 `getPortalSsoProviderOptions()` 读 SSO providers，`pickPreferredSsoProvider()` 偏好 OIDC，跳到 `/api/auth/sso/{oidc,saml}/start?provider=…&returnTo=…`。处理 `sso_error` query → 从 `@agenticx/auth/src/services/oidc-error-codes` 本地化错误（`getPortalSsoErrorMessageZh/En`）。语言切换器用 `@agenticx/ui` 的 `useLocale()`。默认登录卡预填 `admin@agenticx.local`。
 
-### 2. Workspace Shell (`src/components/WorkspaceShell.tsx`，555 行)
+### 2. Workspace Shell (`src/components/WorkspaceShell.tsx`)
 
-可折叠左侧栏：chat 历史按日期分组（今日 / 昨日 / 本周 / 本月 / 更早，按 `createdAt` 排序避免切换 session 时 updated_at 跳动）、new-chat 按钮、用户下拉菜单（主题切换 sun/moon/monitor、语言切换、登出）。根据 `PanelMode` 挂载 `MachiChatView` 或 `SettingsPanel`，侧栏底部挂 `QuotaCard`。用 `@agenticx/feature-chat` 的 `useChatStore` 管 session 状态，用 `@agenticx/sdk-ts` 的 `HttpChatClient` / `MockChatClient`（`NEXT_PUBLIC_CHAT_CLIENT_MODE=mock` 时用 Mock）。折叠状态持久化到 `agenticx-portal-sidebar-collapsed`。
+可折叠左侧栏：chat 历史按日期分组（今日 / 昨日 / 本周 / 本月 / 更早，按 `createdAt` 排序避免切换 session 时 updated_at 跳动）、new-chat 按钮、用户下拉菜单（主题切换 sun/moon/monitor、语言切换、登出）；窄屏用 `visualViewport` 修正 `--chat-viewport-height`。根据 `PanelMode` 挂载 `MachiChatView` 或 `SettingsPanel`，侧栏底部挂 `QuotaCard`；有 `admin:enter` scope 时可进管理台。新建会话时按 `/api/me/models` 的 `deptDefaultModelId` 与当前 picker 可见列表选默认模型。可见页在 access 临期（10 分钟内）调用 `/api/auth/refresh`（`session-keepalive.ts`）。用 `@agenticx/feature-chat` 的 `useChatStore` 管 session 状态，用 `@agenticx/sdk-ts` 的 `HttpChatClient` / `MockChatClient`（`NEXT_PUBLIC_CHAT_CLIENT_MODE=mock` 时用 Mock）。折叠状态持久化到 `agenticx-portal-sidebar-collapsed`。
 
-### 3. Chat (`src/components/MachiChatView.tsx`，722 行)
+### 3. Chat (`src/components/MachiChatView.tsx`)
 
-品牌化"Machi"对话界面，包裹 `feature-chat` 的 `MessageList` + `InputArea` + `MessageQueuePanel`。动态 model picker 拉 `/api/me/models`（admin 分配的模型，含 provider/route 元数据：`local` / `private-cloud` / `third-party`，含 `capabilities` 视觉能力位）。无可见模型时 fallback formatter 提示「请联系管理员分配模型」。工具栏：web 搜索、附件（`extractClipboardImageFiles` / `withClipboardImageNames`，视觉模型校验 `modelSupportsVision`）、deep research、分享、重试、历史版本切换（`showPrevious/NextResponseVersion`、`showPrevious/NextRetryVersion`）。合规错误（`isComplianceError`）与 Gateway 错误分别展示。
+品牌化"Machi"对话界面，包裹 `feature-chat` 的 `MessageList` + `InputArea` + `MessageQueuePanel`。动态 model picker 拉 `/api/me/models`（admin 分配的模型，含 provider/route 元数据：`local` / `private-cloud` / `third-party`，含 `capabilities` 视觉能力位）。无可见模型时 fallback formatter 提示「请联系管理员分配模型」。工具栏：web 搜索、附件（`extractClipboardImageFiles` / `withClipboardImageNames`，视觉模型校验 `modelSupportsVision`）、deep research、分享、重试、历史版本切换（`showPrevious/NextResponseVersion`、`showPrevious/NextRetryVersion`）。`FeatureUsageNotice` + `useFeatureUsage()` 展示联网搜索 / 深度研究剩余次数并在发送结束后刷新；消息 like/dislike 走 `/api/chat/feedback`（`createPortalChatFeedbackClient`）。合规错误（`isComplianceError`）与 Gateway 错误分别展示（`chat-error-i18n.ts`）。
 
 ### 4. Settings (`src/components/settings/SettingsPanel.tsx`，605 行)
 
@@ -185,9 +197,10 @@ apps/web-portal/
 
 ### Chat API 流
 1. 浏览器 `HttpChatClient` POST `/api/chat/completions`，带 `x-chat-session-id` 头
-2. `completions/route.ts`：`getSessionFromCookies()` 鉴权 → `isChatSessionOwned()` 校验会话归属 → 解析 body.model（`provider/model`）→ `listAvailableModelsForUser()` 实时收窄可见性（不可见则 403）→ 拆出 provider 放 `x-agenticx-provider` 头，body.model 仅保留模型名
-3. 转发到 `GATEWAY_COMPLETIONS_URL`（默认 `http://127.0.0.1:8088/v1/chat/completions`），带 `authorization: Bearer <accessToken>` + `x-tenant-id` / `x-user-id` / `x-dept-id` / `x-user-email` / `x-session-id` 头
-4. 上游响应原样透传（SSE `text/event-stream`，`cache-control: no-cache`，`connection: keep-alive`）；gateway 不可达时 503 + 提示「请确认已执行 bash scripts/start-dev.sh 且 :8088 网关进程正常」
+2. `completions/route.ts`：`getSessionFromCookies()` 鉴权（须改密则 `passwordChangeRequiredResponse`）→ `isChatSessionOwned()` 校验会话归属 → 解析 body.model（`provider/model`）→ `listAvailableModelsForUser()` 实时收窄可见性（不可见则 403）→ 能力包拒绝未开通的 `web_search` / `deep_research` → 联网搜索 provider 调用前 `admitFeatureUsage` / `reserveMemberSearchProviderCall`；深度研究 run 写入 `researchUsagePolicy` → 可选 `applyAssignedSkillPrompt` + `recallFeedbackMessages` → 拆 provider 到 `x-agenticx-provider` 头
+3. 长研究任务可能在转发前 `refreshTokens` 并 `withRotatedAuthCookies`；本地 thinking 预算经 `local-thinking-budget` / `local-thinking-fetch` 约束
+4. 转发到 `GATEWAY_COMPLETIONS_URL`（默认 `http://127.0.0.1:8088/v1/chat/completions`），带 `authorization: Bearer <accessToken>` + 四主体头 + `x-session-id`
+5. 上游响应原样透传（SSE）；gateway 不可达时 503；功能额度用尽 429（`42904`），计量配置不可用 503（`50305`）
 
 ### 设置流
 - `SettingsPanel` 各 tab 多为前端本地 state + localStorage（chat style、provider 偏好、web-search/streaming/auto-title 开关）
@@ -198,7 +211,7 @@ apps/web-portal/
 
 ## 关键跨切关注点
 
-- **服务端 page 走 `getSessionFromCookies()` → `redirect()` 做 auth gate**（不依赖 middleware）：`/` 与 `/workspace` 都是服务端鉴权重定向
+- **鉴权 gate 仍在服务端 page / API**（`getSessionFromCookies()` / `getWorkspaceSessionFromCookies()` → `redirect()`）；`src/middleware.ts` 仅按请求注入 HSTS（`PORTAL_HSTS_MAX_AGE` / `PORTAL_HSTS_DEFAULT_MAX_AGE` → `lib/hsts.ts`），不做登录拦截。静态安全头（CSP `frame-ancestors`、X-Frame-Options、nosniff、Referrer-Policy）在 `next.config.ts` `headers()` 全局下发
 - **Chat 数据流**：浏览器 → `/api/chat/*` → `chat-history.ts` 门面 → `SqlChatHistoryStore`（PG 或 MySQL 原始 SQL）+ ULID session ID；`normalizeChatMessageOrder` 修正同轮时间戳倒挂
 - **模型可见性**：admin-console 写 `enterprise_runtime_model_providers` + `enterprise_runtime_user_visible_models`；portal 通过 `admin-providers-reader.ts` 读 → `effective-models.ts` 做部门祖先链 + 用户级级联收窄 → `/api/me/models` → MachiChatView picker；`completions` 路由还会**实时**复算可见性，防止客户端未刷新时仍转发已失效模型
 - **SSO**：portal 只拥有 `start` / `callback` 路由 + `returnTo` 安全 + state cookie；协议逻辑全部委托 `@agenticx/auth`（OIDC PKCE / SAML SP），JIT 创建用户走 `loginWithOidcClaims` + 角色允许列表（`SSO_JIT_ROLE_ALLOWLIST` / `SSO_DEFAULT_ROLE_CODES`）
@@ -225,13 +238,18 @@ apps/web-portal/
 
 **真实落库 / 真实链路（可现场演示）**：
 - 账密登录 / 注册 / 登出 / session 探测（PG/MySQL，JWT + refresh token）
+- GET `/api/auth/refresh` 主动续签 cookie（与 `session-keepalive` 配合）
 - OIDC PKCE SSO `start`/`callback` + SAML SP `start`/`callback`（含 state cookie、审计、JIT 创建、provider-disabled / fallback 测试）
-- Chat 会话 CRUD + 消息追加 / 全量替换 / 软删（`SqlChatHistoryStore`，PG + MySQL 双方言，ULID，归属校验，入站 sanitize）
-- Chat completions 转发到 gateway（实时模型可见性收窄 + provider 拆头 + 四主体透传 + SSE 透传 + 503 兜底）
-- `/api/me/models`（部门 + 用户级级联收窄，PG/MySQL 双方言，legacy email 兜底）
+- Chat 会话 CRUD + 消息追加 / 全量替换 / 软删（`SqlChatHistoryStore`，PG + MySQL 双方言，ULID，归属校验，入站 sanitize）；会话列表 cursor 分页
+- 消息 feedback like/dislike（`/api/chat/feedback`）
+- Chat completions 转发到 gateway（能力包 + 功能计量 gate、skill/feedback 上下文、实时模型可见性、provider 拆头、SSE 透传）
+- `/api/me/models`（含 `deptDefaultModelId`）、`/api/me/agents`、`/api/me/skills`
+- `/api/workspace/feature-usage` 与 UI `FeatureUsageNotice` 展示计量剩余
 - PAT CRUD（iam-core `createPat` / `listPats` / `revokePat`）
 - `/api/workspace/quota/summary`（iam-core `getQuotaSummaryForSession`）
 - `/api/admin/users`（`provisionUserFromAdmin` + 角色分配）
+- 协作项目 `/projects` 页 + `/api/projects*`；collab 房间 @ Agent 时云端 loop（`agent-executor`）或 Desktop worker 队列（`worker-tasks` + `/api/desktop/worker/*`）
+- Desktop 侧案例库 `/api/desktop/cases*`（iam-core `enterprise_cases`，发布态列表 + 我的提交 + 包上传）
 
 **偏 stub / 本地态 / 未上链**：
 - `SettingsPanel` 的 provider 配置 tab：前端本地 state + localStorage，未真正写库（真实 provider 配置由 admin-console 负责）
@@ -257,3 +275,15 @@ apps/web-portal/
 - Workspace UI：`HistorySessionsPanel`、`ComposerPlusMenu`、`NearEmptyWordmark`；completions 补 platform-features / sanitize / current-time。
 
 旧「portal 故意做得很薄」需修正：会话与登录仍薄，但 web-search / deep-research / collab / desktop-auth 已是本 app 内的一等实现。
+
+## 增量（30e57496 → 22d051f5）
+
+- **安全头**：`next.config.ts` 全局 CSP/XFO/nosniff/Referrer-Policy；`middleware.ts` + `lib/hsts.ts` 按 env 可选 HSTS。
+- **Session 续签**：`/api/auth/refresh`；`WorkspaceShell` 可见时临期 refresh（`session-keepalive.ts`）。
+- **功能计量**：`lib/feature-usage/*`（gate/counters/config-reader）；completions 对搜索 provider 与 deep-research run 计数；`/api/workspace/feature-usage` + `FeatureUsageNotice` / `use-feature-usage.ts`。
+- **Chat 体验**：`/api/chat/feedback` + 上下文召回；会话 GET 分页 cursor；deep-research `cancel`/`continue`、报告 checkpoint / 取消态；completions 注入 enterprise skill（`enterprise-skill-*`）与 local thinking 预算。
+- **模型默认**：`/api/me/models` 返回 `deptDefaultModelId`；`admin-providers-reader` / `dept-default-model.ts`。
+- **协作项目 UI**：`/projects`、`/projects/[projectId]`、`components/projects/*`、REST `/api/projects*`；Desktop 镜像 `/api/desktop/projects*`（成员、直聊 room）。
+- **Collab Agent**：`collab-room/agent-reply.ts` — 有在线 Desktop worker 则 `enqueueAgentTask`，否则 `runCloudAgentLoop`（MCP 经 `gateway-mcp-client`）。
+- **Desktop 扩展**：worker claim/complete/fail + heartbeat；`agent-traces`、`action-audit`；目录 `/api/desktop/directory/users`；房间 merge/sub-rooms/summarize；agents register 列表。
+- **品牌资源**：`public/favicon.ico`、`near-logo.png`、`near-mark.png`。

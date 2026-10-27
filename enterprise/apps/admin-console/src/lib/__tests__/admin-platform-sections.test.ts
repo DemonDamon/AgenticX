@@ -5,6 +5,13 @@ describe("isPlatformSection", () => {
   it("accepts the platform slugs that share /admin/[section]", () => {
     expect(PLATFORM_SECTION_IDS).toEqual([
       "agents",
+      "agent-environments",
+      "agent-vaults",
+      "agent-memory",
+      "agent-evals",
+      "agent-schedules",
+      "agent-webhooks",
+      "agent-channels",
       "models",
       "channels",
       "cache",

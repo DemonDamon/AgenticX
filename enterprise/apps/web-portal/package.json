@@ -41,13 +41,13 @@
     "server-only": "^0.0.1",
     "ulid": "^2.3.0",
     "unpdf": "^1.8.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/pg": "^8.15.6",
-    "@types/react": "19.2.14",
+    "@types/react": "19.3.0",
     "eslint": "^10.4.0",
     "eslint-config-next": "^16.2.6",
     "eslint-plugin-i18next": "^6.1.4",

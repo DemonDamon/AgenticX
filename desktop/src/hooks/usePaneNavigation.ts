@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { useAppStore } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import { getLastManagedSession, managedPaneAvatarId, type EnterpriseAgentCard } from "../utils/ma-pane";
 import {
   existingGroupPaneNeedsBind,
   pickConfirmedGroupSessionId,
@@ -280,6 +281,20 @@ export function usePaneNavigation() {
     }, 0);
   }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);
 
+  const openManagedAgentPane = useCallback((agent: EnterpriseAgentCard) => {
+    setMainView("chat");
+    const avatarId = managedPaneAvatarId(agent.id);
+    const existing = panes.find((item) => item.avatarId === avatarId && !item.composePreview);
+    if (existing) {
+      setActivePaneId(existing.id);
+      setActiveAvatarId(null);
+      return;
+    }
+    const paneId = addPane(avatarId, agent.displayName, getLastManagedSession(agent.id) ?? "");
+    setActivePaneId(paneId);
+    setActiveAvatarId(null);
+  }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);
+
   /**
    * 专家指令直达：打开/聚焦专家专属 pane 并把指令送进其对话。
    * autoSend=true 时在新话题里自动发送（专家直接执行）；pane 尚未挂载时
@@ -322,5 +337,5 @@ export function usePaneNavigation() {
     [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]
   );
 
-  return { openMetaOrAvatarPane, openGroupPane, newMetaTask, deliverExpertInstruction };
+  return { openMetaOrAvatarPane, openGroupPane, openManagedAgentPane, newMetaTask, deliverExpertInstruction };
 }

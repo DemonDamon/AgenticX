@@ -42,7 +42,17 @@
     "enterprise/.runtime",
     "enterprise/customers",
     "enterprise/page@",
-    "enterprise/w4-"
+    "enterprise/w4-",
+    "cases",
+    "connector-runtime",
+    "diagrams",
+    "gateway_config.dev.example.yaml",
+    "mobile",
+    "paper",
+    "plans",
+    "results",
+    "SECURITY.md",
+    "wiki"
   ],
   "modules": [
     {
@@ -336,6 +346,16 @@
       "mapping_revision": 1
     },
     {
+      "id": "context-service",
+      "name": "context-service",
+      "roots": [
+        "enterprise/apps/context-service"
+      ],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/context-service_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
       "id": "enterprise-root",
       "name": "enterprise-root",
       "roots": [
@@ -343,7 +363,7 @@
       ],
       "shared_paths": [],
       "summary_path": "enterprise/conclusions/enterprise_root_conclusion.md",
-      "mapping_revision": 1
+      "mapping_revision": 2
     }
   ],
   "retired_modules": []

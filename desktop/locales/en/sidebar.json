@@ -78,7 +78,10 @@
     "remaining": "Auto-deny in {{minutes}} min",
     "approve": "Approve",
     "deny": "Deny",
-    "failed": "Submit failed"
+    "failed": "Submit failed",
+    "sourceManaged": "Enterprise agent · {{name}}",
+    "waiting": "Waiting",
+    "managedQuestion": "Allow \"{{tool}}\"?"
   },
   "topbar": {
     "switchToLight": "Switch to light",
@@ -319,7 +322,62 @@
     "nearSettings": "Settings",
     "nearCubeHint": "Cube style is on, so you can change Near's colorway.",
     "nearStyleHint": "Near is using the same portrait style as the experts on this page. Switch back to cubes to edit the colorway.",
-    "nearIdentity": "Identity and persona"
+    "nearIdentity": "Identity and persona",
+    "enterprise": {
+      "title": "Enterprise agents",
+      "badge": "Enterprise",
+      "version": "v{{version}}",
+      "pinnedHint": "Version pinned by an administrator",
+      "cloud": "Runs in the cloud",
+      "desktop": "Runs on this computer",
+      "mine": "Published by me",
+      "viewDefinition": "View definition",
+      "noEnvironment": "An administrator has not assigned an execution environment",
+      "drawer": {
+        "description": "Description",
+        "execution": "Where it runs",
+        "defaultCloud": "Default cloud environment",
+        "model": "Model",
+        "system": "System prompt",
+        "tools": "Tools and permissions",
+        "builtin": "Built-in tools",
+        "defaultPolicy": "Default policy",
+        "mcp": "MCP servers",
+        "custom": "Custom tools",
+        "customHost": "Runs in the business system",
+        "skills": "Skills",
+        "welcome": "Welcome",
+        "suggestions": "Suggested questions",
+        "alwaysAllow": "Run automatically",
+        "alwaysAsk": "Ask every time",
+        "disabled": "Disabled",
+        "inherit": "Inherit default",
+        "loadFailed": "Couldn't load. Try again shortly.",
+        "retry": "Retry",
+        "loginRequired": "Sign in to your enterprise account first",
+        "notFound": "This agent does not exist or is not assigned to you"
+      }
+    }
+  },
+  "managedPane": {
+    "newChat": "New chat",
+    "definition": "Definition",
+    "close": "Close pane",
+    "localBanner": "Runs on this computer. The model is called through the enterprise gateway.",
+    "localStall": "Local execution has not started. Check Settings → Enterprise Worker.",
+    "placeholder": "Ask {{name}}",
+    "requiresAction": "Resolve the pending tool approval first",
+    "send": "Send",
+    "stop": "Stop",
+    "err": {
+      "agentNotFound": "This agent is offline or no longer assigned to you",
+      "environmentNotFound": "This computer is not allowed to run the agent",
+      "forbiddenScope": "Desktop managed sessions are not enabled. Contact an administrator.",
+      "loginRequired": "Sign in to your enterprise account first",
+      "createFailed": "Could not create the session ({{code}})",
+      "noEnvironment": "An administrator has not assigned an execution environment",
+      "workerStart": "Couldn't start local execution. Check Enterprise Worker."
+    }
   },
   "sessionQueries": {
     "title": "Questions in this chat",

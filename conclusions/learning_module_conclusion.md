@@ -1,6 +1,6 @@
 # AgenticX Learning 模块总结
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更：新增证据模型 `evidence.py` 与确定性会话复盘 `loop_review.py`，信号提取/质量门禁/复盘 Hook 接入证据分级）
+> 结论更新时间：2026-10-25（覆盖至 commit `22d051f5`：在 `ca9d92be` 基线上的证据/loop review 能力之上，新增 `trajectory/` 采集层与离线策略飞轮；技能自进化主链路不变）
 
 ## 模块概述
 
@@ -24,8 +24,49 @@ agenticx/learning/
 ├── skill_quality_gate.py       # 技能质量门禁（5 项检查）
 ├── skill_usage_tracker.py      # 技能使用统计与淘汰候选
 ├── skill_deprecation.py        # 低效技能淘汰报告
-└── skill_condition_filter.py   # 按 frontmatter 条件过滤技能可见性
+├── skill_condition_filter.py   # 按 frontmatter 条件过滤技能可见性
+└── trajectory/                 # RSI 轨迹采集、回放评测与策略演化（与运行时 Hook 解耦）
+    ├── __init__.py             # 导出 RSITrajectory / RewardRecord / ToolCallRecord / DecisionStep
+    ├── __main__.py             # CLI：collect | stats | evolve
+    ├── schema.py               # 归一化轨迹 dataclass 与 trajectory_id
+    ├── store.py                # TrajectoryStore：分片 jsonl + _index 去重
+    ├── harbor_collector.py     # harbor trial → RSITrajectory
+    ├── session_collector.py    # ~/.agenticx/sessions → RSITrajectory（常带未标注 reward）
+    ├── forest.py / replay.py / policy.py   # TrialForest 与零推理成本的 attempt 回放评分
+    ├── evolution.py / scheduler.py         # 可 exec 的策略源码演化与调度策略演化
+    ├── decision_mining.py / decision_policy.py  # 轨迹 → DecisionLog；Scorer 驱动的 continue/abort
+    ├── memory.py / regularization.py       # Lesson 经验库与泄漏/回放准入
+    └── task_pool.py / task_split.py        # 任务池解析与 train/eval 任务划分辅助
 ```
+
+## Trajectory 采集与策略飞轮（trajectory/）
+
+与「技能自进化」并行的一条 **离线 RSI 数据与策略改进** 链路：把 harbor 评测 trial 或 Desktop 会话归一化为 `RSITrajectory`，入库后在 `TrialForest` 上做确定性回放（不重新跑 agent），对 **continue/abort 类策略** 或调度策略做评分与演化。容器内 agent 执行与 token 级 rollout 录制不在本目录实现。
+
+**对外入口**
+
+| 层级 | 入口 | 作用 |
+|------|------|------|
+| 包 API | `from agenticx.learning.trajectory import RSITrajectory, RewardRecord, ToolCallRecord, DecisionStep` | 轨迹数据契约 |
+| CLI | `python -m agenticx.learning.trajectory collect\|stats\|evolve` | `collect`（`--source harbor\|session`）→ `TrajectoryStore.append`；`stats` 聚合库内计数；`evolve` 在 train 分区上 `evolve_loop` + `PolicyRegistry` |
+| 采集 | `collect_jobs` / `collect_sessions`（及 `collect_trial` / `collect_session`） | 解析 job 或 session 目录为轨迹 |
+| 存储 | `TrajectoryStore(root)` | `append` / `iter_trajectories` / `stats`；按 `source/YYYYMM/traj.jsonl` 分片，`trajectory_id` 去重 |
+| 回放与演化 | `TrialForest.from_trajectories`、`evaluate_policy`、`forest_score`、`compile_policy`、`evolve_loop` | 策略对象需实现 `act(obs: StepFeatures, ctx: AttemptContext) -> str` |
+| 决策监督 | `mine_tool_decisions` / `mine_error_decisions` → `DecisionLog`；`DecisionHeadPolicy(scorer)` | 消费 `agenticx.rl.decision*` 的结构，产出 sidecar 或回放策略 |
+| 经验 | `ExperienceMemory`、`extract_lessons`、`admission_gate` / `prune_with_replay` | 文本 Lesson 与准入/剪枝（依赖轨迹库做回放统计） |
+
+**数据契约（schema.py + store.py）**
+
+- **`RSITrajectory`**：`source`（如 `harbor-tb40` / `agenticx-session`）、`task_id`、`session_id`、`model`、`status`（pass/fail/partial/unlabeled）、`messages`、`tool_calls`、`decision_lineage`、`token_usage`、`metadata`；可选 **`rollout_id`** 与 `agenticx.rl.rollout.TokenRollout` 对齐（轨迹侧保留 **reward**，rollout 侧不含 reward，经 id 关联）。
+- **`RewardRecord.label`**：`0~1` 为已标注；**`-1.0` 表示未标注**（session 源常见），下游构建器应只消费已标注轨迹。
+- **`ToolCallRecord` / `DecisionStep`**：工具序列与 knowledge_ref / verification / correction 沿袭摘要。
+- **持久化**：每条轨迹 `to_dict()` 一行 JSONL；`trajectory_id = sha256(source|session_id|task_id|model)[:16]`。
+
+**边界（本目录不拥有）**
+
+- **`agenticx/rl`**：`DecisionLog` / `DecisionQuestion` / `DecisionLabel` 数据模型，`decision_scorers.Scorer` 的打分数学，以及运行时 **`TokenRollout`** 采集；trajectory 只做 post-hoc 挖掘（`decision_mining`）或把 Scorer 接进回放策略（`DecisionHeadPolicy`），**不实现训练循环或权重更新**。
+- **`agenticx/trainer`**：held-out 划分（`heldout_split`，evolve/policy_report 复用）与更完整的训练管线；trajectory 的 `evolve` 是 **源码策略 + 回放模拟器** 的 Dream-RSI 式改进，不是 NN trainer。
+- **Harbor / 沙盒**：trial 内 agent 在镜像中运行；本层仅在 driver 侧读 `agenticx.trajectory.json` 等落盘结果（`harbor_collector`）。
 
 ## 核心组件分析
 
@@ -111,4 +152,4 @@ agenticx/learning/
 
 ## 总结
 
-Learning 模块把「运行时观察」转化为「可复用技能」，以 ObservationHook 采集、analyzer 提取确定性信号、SessionReviewHook 后台 LLM 复盘直写技能为主链路，再以质量门禁、使用统计、淘汰报告与条件过滤构成技能生命周期管理闭环；证据模型（evidence.py）与五维会话复盘（loop_review.py）在此基础上提供无 LLM 的确定性健康检查，以证据强度为分数封顶。整套机制配置驱动、成本可控、信号可复现，是 AgenticX 实现「越用越聪明」的技能自进化基础设施。
+Learning 模块包含两条可独立启用的能力：**（1）技能自进化**——ObservationHook 采集、analyzer 提取确定性信号、SessionReviewHook 后台 LLM 复盘直写技能，辅以证据模型与 loop review、质量门禁与使用统计/淘汰/条件过滤；**（2）trajectory 飞轮**——归一化 RSI 轨迹入库、TrialForest 回放评分与策略/registry 演化，并为 `agenticx.rl` 决策监督提供挖掘与策略宿主。前者面向在线会话与 SKILL.md 沉淀，后者面向离线评测数据与 continue/abort 类策略改进；训练数学与 token rollout 录制分别留在 `agenticx/rl` 与 `agenticx/trainer`。

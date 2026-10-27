@@ -496,6 +496,13 @@ try:
 except Exception:
     pass
 
+# 注册 ma 子命令 (延迟加载)
+try:
+    from agenticx.cli.ma_commands import ma_app
+    app.add_typer(ma_app)
+except Exception:
+    pass
+
 console = Console()
 
 sandbox_app = typer.Typer(name="sandbox", help="沙箱管理", no_args_is_help=True)

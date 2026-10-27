@@ -68,7 +68,7 @@ dependencies = [
     "tqdm>=4.65.0,<5",
     "joblib>=1.3.0,<2",
     "chardet>=5.0.0,<6",
-    "psutil>=5.9.0,<6",
+    "psutil>=5.9.0,<8",
     "structlog>=23.1.0,<25",
     "watchdog>=3.0.0,<5",
 ]
@@ -102,7 +102,7 @@ desktop-runtime = [
     # 缺失时 MCPClientV2._create_session 里 stdio_client=None，所有连接
     # 会以 "TypeError: 'NoneType' object is not callable" 静默失败。
     "mcp>=1.0.0,<2",
-    "semble>=0.1.10,<0.2.0",
+    "semble>=0.1.10,<0.8.0",
     "pathspec>=1.0.0",
     # 本机 shell / agx serve 继承 ALL_PROXY=socks5://… 时，httpx / OpenAI SDK / LiteLLM
     # 向量化会走 SOCKS；缺 socksio 则入库阶段才抛 ImportError。
@@ -114,7 +114,7 @@ data-sources = [
 ]
 # ── 额外 LLM 提供者 ──
 llm = [
-    "anthropic>=0.40.0,<1",
+    "anthropic>=0.40.0,<2",
     "ollama>=0.3.0,<1",
 ]
 # ── 记忆系统（向量存储 / 持久化）──
@@ -128,7 +128,7 @@ memory = [
 ]
 # ── Graphiti temporal memory graph (Near memory graph panel) ──
 graphiti = [
-    "graphiti-core[kuzu]>=0.29.1,<0.30",
+    "graphiti-core[kuzu]>=0.29.1,<0.32",
 ]
 # ── 文档处理 ──
 # 注意：pytesseract 需要 tesseract (brew install tesseract)
@@ -184,7 +184,7 @@ database = [
 ]
 # ── 代码语义索引（Semble）──
 code_index = [
-    "semble>=0.1.10,<0.2.0",
+    "semble>=0.1.10,<0.8.0",
     "pathspec>=1.0.0",
 ]
 # ── MCP 协议 ──
@@ -207,7 +207,7 @@ server = [
 ]
 # ── 火山引擎 AgentKit ──
 volcengine = [
-    "agentkit-sdk-python>=0.2.0,<0.6",
+    "agentkit-sdk-python>=0.2.0,<0.9",
 ]
 # ── 文档构建 ──
 docs = [

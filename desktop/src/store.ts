@@ -1,5 +1,6 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
+import type { MaPendingApproval } from "./utils/ma-event-adapter";
 import { isSettingsFocus, isSettingsTab } from "./settings-tab";
 import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
@@ -631,6 +632,8 @@ type DeliveryPanelState = {
   selectedTaskId: string | null;
 };
 
+export type ManagedApprovalItem = MaPendingApproval & { agentName: string };
+
 type AppState = {
   apiBase: string;
   apiToken: string;
@@ -1076,6 +1079,10 @@ type AppState = {
   openDeliveryPanel: (taskId?: string | null) => void;
   closeDeliveryPanel: () => void;
   setDeliverySelectedTaskId: (taskId: string | null) => void;
+  /** In-memory managed-session approvals. Not persisted with panes. */
+  managedApprovals: Record<string, ManagedApprovalItem[]>;
+  setManagedApprovals: (sessionId: string, items: ManagedApprovalItem[]) => void;
+  removeManagedApproval: (sessionId: string, toolUseId: string) => void;
 };
 
 function uid(): string {
@@ -1469,6 +1476,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
   collabRooms: { open: false, activeRoomId: null },
   deliveryPanel: { open: false, selectedTaskId: null },
+  managedApprovals: {},
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -3347,4 +3355,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       deliveryPanel: { ...state.deliveryPanel, selectedTaskId: taskId },
     })),
+  setManagedApprovals: (sessionId, items) =>
+    set((state) => {
+      if (items.length === 0) {
+        if (!(sessionId in state.managedApprovals)) return state;
+        const managedApprovals = { ...state.managedApprovals };
+        delete managedApprovals[sessionId];
+        return { managedApprovals };
+      }
+      return { managedApprovals: { ...state.managedApprovals, [sessionId]: items } };
+    }),
+  removeManagedApproval: (sessionId, toolUseId) =>
+    set((state) => {
+      const current = state.managedApprovals[sessionId];
+      if (!current) return state;
+      const next = current.filter((item) => item.toolUseId !== toolUseId);
+      const managedApprovals = { ...state.managedApprovals };
+      if (next.length === 0) delete managedApprovals[sessionId];
+      else managedApprovals[sessionId] = next;
+      return { managedApprovals };
+    }),
 }));

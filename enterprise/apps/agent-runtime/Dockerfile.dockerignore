@@ -1,0 +1,11 @@
+# Build context is the repository root (about 16 GB). Allow-list only what the
+# Dockerfile copies; BuildKit reads this file because it sits next to the Dockerfile.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!agenticx/
+!enterprise/apps/agent-runtime/requirements.txt
+!enterprise/apps/agent-runtime/ma_agent_runtime/
+**/__pycache__
+**/*.pyc

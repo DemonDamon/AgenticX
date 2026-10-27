@@ -20,6 +20,7 @@ packages/policy-engine/
 ├── fields.go                   # EvaluateJSONFields（field kind，JSON path + [*] 通配，allow/deny/redact）
 ├── keyword_trie.go             # 基础前缀树（trie，非 Aho-Corasick，无 failure 链）
 ├── engine_test.go              # 引擎评估测试
+├── engine_retrieval_test.go    # PublicRetrieval 下 PII 降级与边界测试
 ├── engine_fields_test.go       # 字段规则测试
 ├── engine_applies_to_test.go   # AppliesTo 维度匹配测试
 └── loader_test.go              # extends 解析 / 循环检测测试
@@ -34,7 +35,7 @@ packages/policy-engine/
 - `Engine.EvaluateJSONFields(raw, ctx)`——字段类规则评估（field kind）
 - `LoadRulePacks(glob)` / `LoadRulePacksWithDisabled(glob, disabledPacks)`
 
-**类型**：`Rule`、`RulePackManifest`、`AppliesTo`、`EvalContext`、`HitEvent`、`EvaluateResult`、`compiledRule`（私有）
+**类型**：`Rule`、`RulePackManifest`、`AppliesTo`、`EvalContext`（含 `PublicRetrieval`，仅可信调用方写入，不从用户元数据带入）、`HitEvent`、`EvaluateResult`、`compiledRule`（私有）
 
 **枚举**：
 - `RuleKind` = `keyword | regex | pii | field`
@@ -46,7 +47,7 @@ packages/policy-engine/
 - **Pack 继承（extends 为单字符串）**：`RulePackManifest.Extends` 在 `types.go` 中是 `string`（**非数组**），`loader.go` 用 DFS 解析继承链，`stack`/`visited` 做循环检测，父 pack 的 `Rules` 前置 append；`disabledPacks` 中的 pack 跳过
 - **规则一次编译**：`compileRule` 按 `Kind` 编译成 `compiledRule`——keyword → `keywordTrie`；regex → `regexp.Compile`；pii → `baselinePIIRegex`（mobile / email / id-card / bank-card / api-key 五类基线正则）；field → 校验 `JSONPath` 非空
 - **keyword_trie 是基础前缀树，不是 Aho-Corasick**：`findAll` 用双层循环（外层每个起点、内层沿 trie 下行），大小写不敏感，**没有 failure 链**，复杂度 O(n·m)；不要误认为 Aho 自动机
-- **EvaluateWithContext 流程**：先按 `tenant_id` 过滤（任一端空则跳过该过滤）→ `matchesAppliesTo`（依次：`UserExcludeIDs` 命中则弃 → `Stages` 必匹配 → `ClientTypes` 必匹配 → `UserIDs` 非空则必须包含 → `deptMatch || roleMatch` 并集）→ switch 仅处理 `keyword/regex/pii`（**field kind 在此路径不处理，需走 `EvaluateJSONFields`**）→ 命中送 `applyHit`
+- **EvaluateWithContext 流程**：先按 `tenant_id` 过滤（任一端空则跳过该过滤）→ `matchesAppliesTo`（依次：`UserExcludeIDs` 命中则弃 → `Stages` 必匹配 → `ClientTypes` 必匹配 → `UserIDs` 非空则必须包含 → `deptMatch || roleMatch` 并集）→ switch 仅处理 `keyword/regex/pii`（**field kind 在此路径不处理，需走 `EvaluateJSONFields`**）→ 命中送 `applyHit`；**PII 分支**：当 `EvalContext.PublicRetrieval == true` 且 `Stage` 为 `request`（大小写不敏感）且 `pii_type` 去空白后不等于 `api-key` 时，对该次命中在局部 `Rule` 副本上将 `Action` 降为 `warn`（不修改 `compiledRule` 内持久规则），`api-key` 与 keyword/regex/field 动作不变；`response` 阶段或未设 `PublicRetrieval` 时 PII 仍按 manifest 原 `action`
 - **applyHit 动作语义**：`block` 置 `Blocked=true`；`redact` 把命中片段替换为 `[REDACTED]`；`warn` 仅记录 `HitEvent`，不改文本
 - **字段规则（fields.go）**：`EvaluateJSONFields` 只处理 `field kind`，按 `target`（request/response，默认 response）与 stage 匹配，`splitJSONPath` 支持 `[*]` 数组通配，`collectFieldMatches` 递归定位；`deny` 置 `Blocked`，`redact` 直接改写 `parent[key] = "[REDACTED]"`，`allow` 仅记录命中不改值
 - **Go 引擎能力边界**：只识别 `keyword/regex/pii/field`（不含 `keyword-list`）；17 种密钥检测仍留在主仓 AgenticX Python 框架，**未进** Go 网关

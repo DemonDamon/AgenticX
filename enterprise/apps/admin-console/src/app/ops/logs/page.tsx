@@ -12,11 +12,13 @@ const AuditPage = dynamic(() => import("../../audit/page"), { ssr: false });
 const PortalLogsPage = dynamic(() => import("../../portal-logs/page"), { ssr: false });
 const ErrorsPage = dynamic(() => import("../../admin/errors/page"), { ssr: false });
 const PerfPage = dynamic(() => import("../../admin/perf/page"), { ssr: false });
+const ManagedSessionsPanel = dynamic(() => import("../../../components/managed-sessions/ManagedSessionsPanel"), { ssr: false });
 
 const TABS = [
   { id: "overview", label: "总览" },
   { id: "traces", label: "调用链" },
   { id: "sessions", label: "会话" },
+  { id: "managed", label: "托管会话" },
   { id: "audit", label: "审计" },
   { id: "portal", label: "Portal" },
   { id: "errors", label: "错误聚类" },
@@ -94,6 +96,11 @@ function LogObserve() {
       <div className={tab === "traces" || tab === "sessions" ? undefined : "hidden"}>
         <ObservePage embedded section={observeSection === "sessions" ? "sessions" : "traces"} onSection={open} reloadToken={reloadToken} />
       </div>
+      {visited.has("managed") ? (
+        <div className={tab === "managed" ? "px-6 pt-4 pb-6" : "hidden"}>
+          <ManagedSessionsPanel reloadToken={reloadToken} />
+        </div>
+      ) : null}
       {visited.has("audit") ? (
         <div className={tab === "audit" ? undefined : "hidden"}>
           <AuditPage embedded />

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "branding",
-  "generation": "c8cad7e4046345dba726e49e90017789",
+  "generation": "551f6daabadf49979851fec58af5c3fe",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
   "source_fingerprint": "sha256:d67f95346f37d8810ef0d152dde2fd2b4c3b85793a3527ddec2eaf12eb3257ea",
   "summary_path": "enterprise/conclusions/packages/branding_conclusion.md",
   "summary_sha256": "sha256:a0ac8753eb1b71f04338bae1e83ea3db6b928a21e41459dc5fe6f83f2a27ee0f",
-  "updated_at": "2026-09-17T23:54:02.010814+00:00"
+  "updated_at": "2026-10-24T13:52:55.522647+00:00"
 }

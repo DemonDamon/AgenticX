@@ -1,0 +1,325 @@
+{
+  "cases": [
+    {
+      "name": "minimal_rules_ok",
+      "input": {
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "ok"
+          }
+        ]
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "criteria": "",
+        "mode": "binary",
+        "pass_threshold": 0.7,
+        "judge_model": null,
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "ok",
+            "case_sensitive": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "full_ok",
+      "input": {
+        "criteria": "回答必须给出月度汇总表；缺数据时说明缺失原因",
+        "mode": "score",
+        "pass_threshold": 0.7,
+        "judge_model": "zhipu/glm-5",
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "汇总",
+            "case_sensitive": false
+          },
+          {
+            "type": "tool_called",
+            "name": "file_write"
+          },
+          {
+            "type": "max_tool_calls",
+            "value": 20
+          },
+          {
+            "type": "stop_reason",
+            "value": "end_turn"
+          }
+        ]
+      },
+      "ok": true,
+      "errors": [],
+      "normalized": {
+        "criteria": "回答必须给出月度汇总表；缺数据时说明缺失原因",
+        "mode": "score",
+        "pass_threshold": 0.7,
+        "judge_model": "zhipu/glm-5",
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "汇总",
+            "case_sensitive": false
+          },
+          {
+            "type": "tool_called",
+            "name": "file_write"
+          },
+          {
+            "type": "max_tool_calls",
+            "value": 20
+          },
+          {
+            "type": "stop_reason",
+            "value": "end_turn"
+          }
+        ]
+      }
+    },
+    {
+      "name": "not_object",
+      "input": [
+        "nope"
+      ],
+      "ok": false,
+      "errors": [
+        "rubric: must be a JSON object"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "unknown_key",
+      "input": {
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "a"
+          }
+        ],
+        "extra": 1
+      },
+      "ok": false,
+      "errors": [
+        "rubric.extra: unknown field"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_mode_threshold",
+      "input": {
+        "mode": "x",
+        "pass_threshold": 2,
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "a"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "rubric.mode: must be one of [binary,score]",
+        "rubric.pass_threshold: must be a number between 0 and 1"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "judge_without_criteria",
+      "input": {
+        "judge_model": "zhipu/glm-5"
+      },
+      "ok": false,
+      "errors": [
+        "rubric.criteria: is required when judge_model is set"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_judge_model",
+      "input": {
+        "judge_model": "glm-5",
+        "criteria": "need a judge",
+        "rule_checks": []
+      },
+      "ok": false,
+      "errors": [
+        "rubric.judge_model: must be null or \"<providerId>/<modelName>\""
+      ],
+      "normalized": null
+    },
+    {
+      "name": "rule_checks_not_array",
+      "input": {
+        "rule_checks": {
+          "type": "contains"
+        }
+      },
+      "ok": false,
+      "errors": [
+        "rubric.rule_checks: must be an array"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "too_many_rules",
+      "input": {
+        "rule_checks": [
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          },
+          {
+            "type": "contains",
+            "value": "a"
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "rubric.rule_checks: must contain at most 20 items"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "bad_rule_entries",
+      "input": {
+        "rule_checks": [
+          "x",
+          {
+            "type": "len"
+          },
+          {
+            "type": "contains"
+          },
+          {
+            "type": "contains",
+            "value": "a",
+            "case_sensitive": "no"
+          },
+          {
+            "type": "regex"
+          },
+          {
+            "type": "tool_called"
+          },
+          {
+            "type": "max_tool_calls",
+            "value": -1
+          },
+          {
+            "type": "stop_reason",
+            "value": "done"
+          },
+          {
+            "type": "contains",
+            "value": "a",
+            "x": 1
+          }
+        ]
+      },
+      "ok": false,
+      "errors": [
+        "rubric.rule_checks[0]: must be an object",
+        "rubric.rule_checks[1].type: must be one of [contains,not_contains,regex,tool_called,tool_not_called,max_tool_calls,stop_reason], got \"len\"",
+        "rubric.rule_checks[2].value: must be a non-empty string of at most 1000 bytes",
+        "rubric.rule_checks[3].case_sensitive: must be a boolean",
+        "rubric.rule_checks[4].pattern: must be a non-empty string of at most 500 bytes",
+        "rubric.rule_checks[5].name: is required",
+        "rubric.rule_checks[6].value: must be an integer between 0 and 1000",
+        "rubric.rule_checks[7].value: must be one of [end_turn,requires_action,retries_exhausted,refusal,max_tool_rounds,budget_exceeded,policy_blocked]",
+        "rubric.rule_checks[8].x: unknown field"
+      ],
+      "normalized": null
+    },
+    {
+      "name": "empty_rubric",
+      "input": {},
+      "ok": false,
+      "errors": [
+        "rubric: must define judge_model or at least one rule check"
+      ],
+      "normalized": null
+    }
+  ]
+}

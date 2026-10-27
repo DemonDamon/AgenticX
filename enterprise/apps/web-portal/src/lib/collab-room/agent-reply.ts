@@ -7,6 +7,15 @@ import { enqueueAgentTask, hasOnlineWorker } from "../worker-tasks";
 import type { TaskInput } from "../worker-tasks/types";
 import type { CollabRoomContext, CollabRoomMessage, CollabRoomStore, CollabSenderType } from "./types";
 import { requestMetaReply } from "./meta-reply";
+import { log } from "../observability/logger";
+import { isManagedEligible, runManagedAgentReply } from "./ma-agent-reply";
+import {
+  resolveMaDesktopRoutingConfig,
+  resolveMaRuntimeConfig,
+  type MaDesktopRoutingConfig,
+  type MaRuntimeConfig,
+} from "./ma-runtime-client";
+import { isManagedDesktopEligible, runManagedDesktopReply } from "./ma-desktop-reply";
 
 export type AgentReplyDeps = {
   listMessages: CollabRoomStore["listMessages"];
@@ -28,6 +37,11 @@ export type AgentReplyDeps = {
     input: TaskInput;
   }) => Promise<unknown>;
   hasOnlineWorker?: (tenantId: string, agentId: string, withinSeconds?: number) => Promise<boolean>;
+  /** null 表示托管运行时关闭；undefined 时由 resolveAgentReplyDeps 从环境变量解析。 */
+  maRuntime?: MaRuntimeConfig | null;
+  listAvailableModels?: (session: AuthContext) => Promise<string[]>;
+  /** null 表示桌面切换关闭；undefined 时由 resolveAgentReplyDeps 从环境变量解析。 */
+  maDesktop?: MaDesktopRoutingConfig | null;
 };
 
 const CONTENT_LIMIT = 4000;
@@ -111,6 +125,24 @@ async function enqueueDesktopWorkerTask(
   deps: AgentReplyDeps,
 ): Promise<void> {
   const history = await deps.listMessages(ctx, roomId, { limit: 30 });
+  if (deps.maRuntime && deps.maDesktop && isManagedDesktopEligible(agent)) {
+    const outcome = await runManagedDesktopReply({
+      ctx,
+      roomId,
+      session,
+      agent,
+      trigger: triggerMessage,
+      history,
+      deps: {
+        config: deps.maRuntime,
+        desktop: deps.maDesktop,
+        fetchImpl: deps.fetchImpl ?? fetch,
+        appendMessage: deps.appendMessage,
+      },
+    });
+    if (outcome.kind === "handled") return;
+    log("warn", { event: "room.agent_reply.ma_desktop_fallback", room_id: roomId, agent_id: agent.id, reason: outcome.reason });
+  }
   const queued = deps.enqueueAgentTask ?? enqueueAgentTask;
   const online = deps.hasOnlineWorker ?? hasOnlineWorker;
   await queued({
@@ -146,6 +178,7 @@ async function resolveAgentReplyDeps(overrides?: Partial<AgentReplyDeps>): Promi
   // index 会拉起数据库适配器；测试注入了存储依赖时不加载，避免环和真实连接。
   const store = needsStore ? await import("./index") : null;
   const sessionMod = needsToken ? await import("../session") : null;
+  const maRuntime = overrides?.maRuntime !== undefined ? overrides.maRuntime : resolveMaRuntimeConfig();
   return {
     listMessages: overrides?.listMessages ?? store!.listMessages,
     appendMessage: overrides?.appendMessage ?? store!.appendMessage,
@@ -164,6 +197,9 @@ async function resolveAgentReplyDeps(overrides?: Partial<AgentReplyDeps>): Promi
     loadMcpServers: overrides?.loadMcpServers,
     enqueueAgentTask: overrides?.enqueueAgentTask,
     hasOnlineWorker: overrides?.hasOnlineWorker,
+    maRuntime,
+    listAvailableModels: overrides?.listAvailableModels ?? defaultListAvailableModels,
+    maDesktop: overrides?.maDesktop !== undefined ? overrides.maDesktop : resolveMaDesktopRoutingConfig(maRuntime),
   };
 }
 
@@ -179,6 +215,13 @@ async function defaultLoadMcpServers(
   return loadActiveMcpServers(tenantId, capabilityIds);
 }
 
+async function defaultListAvailableModels(session: AuthContext): Promise<string[]> {
+  // 延迟加载：该模块会读运行时配置表；测试注入 listAvailableModels 时不触达数据库（同 defaultLoadMcpServers）。
+  const { listAvailableModelsForUser } = await import("../admin-providers-reader");
+  const options = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? null);
+  return options.map((option) => option.id);
+}
+
 async function triggerCloudAgentReply(
   ctx: CollabRoomContext,
   roomId: string,
@@ -188,6 +231,24 @@ async function triggerCloudAgentReply(
   deps: AgentReplyDeps,
 ): Promise<void> {
   const history = await deps.listMessages(ctx, roomId, { limit: 30 });
+  if (deps.maRuntime && isManagedEligible(agent)) {
+    const outcome = await runManagedAgentReply({
+      ctx,
+      roomId,
+      session,
+      agent,
+      trigger: triggerMessage,
+      history,
+      deps: {
+        config: deps.maRuntime,
+        fetchImpl: deps.fetchImpl ?? fetch,
+        appendMessage: deps.appendMessage,
+        listAvailableModels: deps.listAvailableModels ?? defaultListAvailableModels,
+      },
+    });
+    if (outcome.kind === "handled") return;
+    log("warn", { event: "room.agent_reply.ma_fallback", room_id: roomId, agent_id: agent.id, reason: outcome.reason });
+  }
   const accessToken = await deps.getAccessToken();
   if (!accessToken) {
     await appendSystemNotice(ctx, roomId, unavailable(agent.displayName), deps.appendMessage);

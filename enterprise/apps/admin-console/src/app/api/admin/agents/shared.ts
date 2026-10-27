@@ -33,6 +33,20 @@ export function agentErrorResponse(error: unknown): NextResponse {
   if (error instanceof AgentNotFoundError) {
     return NextResponse.json({ code: "40400", message: error.message }, { status: 404 });
   }
+  if (error instanceof Error && error.name === "AgentManifestInvalidError") {
+    const errors = (error as Error & { errors?: string[] }).errors ?? [];
+    return NextResponse.json({ code: "40000", message: "定义校验未通过", data: { errorCode: "manifest_invalid", errors } }, { status: 400 });
+  }
+  if (error instanceof Error && error.name === "AgentVersionConflictError") {
+    const current = (error as Error & { currentLatestVersion?: number }).currentLatestVersion ?? null;
+    return NextResponse.json({ code: "40900", message: "版本已被他人更新，请刷新后重试", data: { errorCode: "agent_version_conflict", currentLatestVersion: current } }, { status: 409 });
+  }
+  if (error instanceof Error && error.name === "AgentVersionNotFoundError") {
+    return NextResponse.json({ code: "40400", message: "版本不存在" }, { status: 404 });
+  }
+  if (error instanceof Error && error.name === "AgentHasSessionsError") {
+    return NextResponse.json({ code: "40900", message: error.message }, { status: 409 });
+  }
   const message = error instanceof Error ? error.message : "request failed";
   if (isMissingAgentsTable(message)) {
     return NextResponse.json({ code: "50000", message: MIGRATE_HINT }, { status: 500 });

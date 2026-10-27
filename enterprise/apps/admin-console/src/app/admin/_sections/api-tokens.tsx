@@ -15,6 +15,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -27,6 +28,7 @@ import {
 } from "@agenticx/ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { MA_PAT_SCOPE_OPTIONS } from "../../../lib/ma/pat-scope-options";
 import {
   getPatPlainFromVault,
   plainMatchesTokenPrefix,
@@ -61,7 +63,7 @@ export default function ApiTokensPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [plainToken, setPlainToken] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", userId: "", expireDays: "90" });
+  const [form, setForm] = useState({ name: "", userId: "", expireDays: "90", maScopes: [] as string[] });
   const [vaultVersion, setVaultVersion] = useState(0);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteTarget, setPasteTarget] = useState<PatRow | null>(null);
@@ -127,6 +129,7 @@ export default function ApiTokensPage() {
           name: form.name,
           userId: form.userId,
           expireDays: Number(form.expireDays) || 90,
+          ...(form.maScopes.length > 0 ? { scopes: ["workspace:chat", ...form.maScopes] } : {}),
         }),
       });
       const json = await readJsonBody(res, { code: "50000", message: "empty response", data: {} as { token?: string; record?: PatRow } });
@@ -144,7 +147,7 @@ export default function ApiTokensPage() {
       }
       setPlainToken(plain || null);
       setOpen(false);
-      setForm({ name: "", userId: "", expireDays: "90" });
+      setForm({ name: "", userId: "", expireDays: "90", maScopes: [] });
       await load();
       toast.success(t("toast.createSuccess"));
     } catch (e) {
@@ -291,6 +294,26 @@ export default function ApiTokensPage() {
             <div>
               <Label>{t("expireDaysLabel")}</Label>
               <Input value={form.expireDays} onChange={(e) => setForm({ ...form, expireDays: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">{t("maScopesLabel")}</div>
+              <p className="text-xs text-muted-foreground">{t("maScopesHint")}</p>
+              {MA_PAT_SCOPE_OPTIONS.map((scope) => (
+                <label key={scope} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={form.maScopes.includes(scope)}
+                    onCheckedChange={(checked) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        maScopes: checked
+                          ? [...prev.maScopes, scope]
+                          : prev.maScopes.filter((item) => item !== scope),
+                      }))
+                    }
+                  />
+                  <span>{t(`maScopes.${scope.replaceAll(":", "_")}`)}</span>
+                </label>
+              ))}
             </div>
           </div>
           <DialogFooter>

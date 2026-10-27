@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -87,3 +88,48 @@ def fetch_published_agents() -> list[dict[str, Any]]:
     except Exception:
         logger.debug("enterprise agent catalog skipped", exc_info=True)
         return []
+
+
+class EnterpriseCatalogError(Exception):
+    """Portal catalog failed for a reason other than logout or not-found."""
+
+
+def enterprise_login_configured() -> bool:
+    """True when enterprise login has both a token and a base URL."""
+
+    return _settings() is not None
+
+
+def fetch_enterprise_agent_detail(agent_id: str) -> dict[str, Any] | None:
+    """GET {base}/api/desktop/agents/{agent_id}. None when logged out or not visible (404).
+
+    Raises EnterpriseCatalogError for other failures so the route can answer 502.
+    """
+
+    settings = _settings()
+    if settings is None:
+        return None
+    token, base = settings
+    url = f"{base}/api/desktop/agents/{quote(agent_id, safe='')}"
+    try:
+        response = httpx.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8.0,
+            trust_env=False,
+        )
+    except Exception:
+        logger.warning("enterprise agent detail request failed")
+        raise EnterpriseCatalogError("network") from None
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200:
+        logger.warning("enterprise agent detail status %s", response.status_code)
+        raise EnterpriseCatalogError(f"status {response.status_code}")
+    try:
+        payload = response.json()
+    except Exception:
+        raise EnterpriseCatalogError("status 200") from None
+    if not isinstance(payload, dict):
+        raise EnterpriseCatalogError("status 200")
+    return payload
