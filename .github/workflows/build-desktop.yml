@@ -42,7 +42,7 @@ jobs:
           - os: macos-15-intel
             arch: x64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -134,7 +134,7 @@ jobs:
     # Pin to windows-2022: node-gyp + node-pty needs stable VS2022 C++ workload.
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -197,7 +197,7 @@ jobs:
     env:
       ARCH: ${{ github.event.inputs.arch }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -299,7 +299,7 @@ jobs:
     # Pin to windows-2022: avoid toolchain drift on windows-latest images.
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
