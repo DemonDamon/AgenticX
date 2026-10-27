@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "@agenticx/iam-core": "workspace:*",
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.6.5",
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",
     "turbo": "^2.9.6",
