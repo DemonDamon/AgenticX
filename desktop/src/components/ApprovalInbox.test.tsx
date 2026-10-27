@@ -5,14 +5,57 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../i18n/i18n";
 import { ApprovalInboxButton } from "./ApprovalInbox";
 
-const store = {
-  apiBase: "http://127.0.0.1:9",
-  apiToken: "desktop-token",
+type ManagedItem = {
+  sessionId: string;
+  toolUseId: string;
+  toolName: string;
+  inputPreview: string;
+  createdAt: number | undefined;
+  agentName: string;
 };
 
-vi.mock("../store", () => ({
-  useAppStore: (selector: (state: typeof store) => unknown) => selector(store),
-}));
+const listeners = new Set<() => void>();
+
+const store: {
+  apiBase: string;
+  apiToken: string;
+  managedApprovals: Record<string, ManagedItem[]>;
+  removeManagedApproval: (sessionId: string, toolUseId: string) => void;
+  setManagedApprovals: (sessionId: string, items: ManagedItem[]) => void;
+} = {
+  apiBase: "http://127.0.0.1:9",
+  apiToken: "desktop-token",
+  managedApprovals: {},
+  removeManagedApproval: (sessionId, toolUseId) => {
+    const current = store.managedApprovals[sessionId] ?? [];
+    const next = current.filter((item) => item.toolUseId !== toolUseId);
+    if (next.length === 0) delete store.managedApprovals[sessionId];
+    else store.managedApprovals[sessionId] = next;
+    listeners.forEach((listener) => listener());
+  },
+  setManagedApprovals: (sessionId, items) => {
+    if (items.length === 0) delete store.managedApprovals[sessionId];
+    else store.managedApprovals[sessionId] = items;
+    listeners.forEach((listener) => listener());
+  },
+};
+
+vi.mock("../store", () => {
+  const React = require("react") as typeof import("react");
+  const useAppStore = (selector: (state: typeof store) => unknown) => {
+    const [, setTick] = React.useState(0);
+    React.useEffect(() => {
+      const listener = () => setTick((value) => value + 1);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    }, []);
+    return selector(store);
+  };
+  useAppStore.getState = () => store;
+  return { useAppStore };
+});
 
 type Item = {
   request_id: string;
@@ -75,8 +118,8 @@ function installFetch(items: Item[], confirm?: (init?: RequestInit) => Promise<R
   return fetchMock;
 }
 
-function t(key: string): string {
-  return i18n.t(key, { ns: "sidebar" });
+function t(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, { ns: "sidebar", ...options });
 }
 
 afterEach(() => {
@@ -88,6 +131,7 @@ afterEach(() => {
 describe("ApprovalInboxButton", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("zh");
+    store.managedApprovals = {};
   });
 
   it("shows a numeric badge when approvals are waiting", async () => {
@@ -198,5 +242,79 @@ describe("ApprovalInboxButton", () => {
     expect(screen.getByText(t("approvals.sourceUnattended"))).toBeTruthy();
     expect(screen.getByText("Run the backup")).toBeTruthy();
     expect(screen.getByText("Run the shell")).toBeTruthy();
+  });
+
+  it("shows managed approvals with agent name", async () => {
+    installFetch([]);
+    store.managedApprovals = {
+      "01HMASESSION0000000000000A": [{
+        sessionId: "01HMASESSION0000000000000A",
+        toolUseId: "01HMATOOLUSE0000000000001A",
+        toolName: "bash_exec",
+        inputPreview: "{\"command\":\"ls\"}",
+        createdAt: 1,
+        agentName: "报告助手",
+      }],
+    };
+    render(<ApprovalInboxButton />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: t("approvals.title") }).textContent).toContain("1");
+    });
+    fireEvent.click(screen.getByRole("button", { name: t("approvals.title") }));
+    expect(screen.getByText(t("approvals.sourceManaged", { name: "报告助手" }))).toBeTruthy();
+    expect(screen.getByText(t("approvals.managedQuestion", { tool: "bash_exec" }))).toBeTruthy();
+  });
+
+  it("approving a managed item posts tool_confirmation", async () => {
+    installFetch([]);
+    const maPostEvents = vi.fn(async () => ({ ok: true, status: 200, data: {} }));
+    Object.assign(window, { agenticxDesktop: { maPostEvents } });
+    store.managedApprovals = {
+      "01HMASESSION0000000000000A": [{
+        sessionId: "01HMASESSION0000000000000A",
+        toolUseId: "01HMATOOLUSE0000000000001A",
+        toolName: "bash_exec",
+        inputPreview: "{\"command\":\"ls\"}",
+        createdAt: 1,
+        agentName: "报告助手",
+      }],
+    };
+    render(<ApprovalInboxButton />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: t("approvals.title") }).textContent).toContain("1");
+    });
+    fireEvent.click(screen.getByRole("button", { name: t("approvals.title") }));
+    fireEvent.click(screen.getByRole("button", { name: t("approvals.approve") }));
+    await waitFor(() => expect(maPostEvents).toHaveBeenCalledWith("01HMASESSION0000000000000A", [{
+      type: "user.tool_confirmation",
+      tool_use_id: "01HMATOOLUSE0000000000001A",
+      result: "allow",
+    }]));
+  });
+
+  it("failed managed decision restores the item", async () => {
+    installFetch([]);
+    const maPostEvents = vi.fn(async () => ({ ok: false, status: 500, code: "internal_error", message: "x" }));
+    Object.assign(window, { agenticxDesktop: { maPostEvents } });
+    store.managedApprovals = {
+      "01HMASESSION0000000000000A": [{
+        sessionId: "01HMASESSION0000000000000A",
+        toolUseId: "01HMATOOLUSE0000000000001A",
+        toolName: "bash_exec",
+        inputPreview: "{\"command\":\"ls\"}",
+        createdAt: 1,
+        agentName: "报告助手",
+      }],
+    };
+    render(<ApprovalInboxButton />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: t("approvals.title") }).textContent).toContain("1");
+    });
+    fireEvent.click(screen.getByRole("button", { name: t("approvals.title") }));
+    fireEvent.click(screen.getByRole("button", { name: t("approvals.approve") }));
+    await waitFor(() => {
+      expect(screen.getByText(`${t("approvals.failed")} internal_error`)).toBeTruthy();
+    });
+    expect(screen.getByText(t("approvals.managedQuestion", { tool: "bash_exec" }))).toBeTruthy();
   });
 });

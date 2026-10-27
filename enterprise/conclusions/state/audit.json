@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "audit",
-  "generation": "e557ddffa286408eb6f327ee114362d7",
+  "generation": "55eeb8bf624743579fac938cb03c4c2b",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
-  "source_fingerprint": "sha256:c49c05a61204323fac478da9732d297f64b6f5166d6410cf325403a5e29750a6",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:e4dd08802cd82daea1b933721ae7d8eef31ba4c78bd1eb767b25a3bc87975a04",
   "summary_path": "enterprise/conclusions/features/audit_conclusion.md",
-  "summary_sha256": "sha256:f15a148220d5ed483b05510ce3c822764050b11606b6db28e83ec7c55cc8484b",
-  "updated_at": "2026-09-17T23:53:56.167665+00:00"
+  "summary_sha256": "sha256:f90d97086dae478f9a505cebf7561f23c970c1c7915726e1548ae76591d2c8f2",
+  "updated_at": "2026-10-25T03:42:34.484427+00:00"
 }

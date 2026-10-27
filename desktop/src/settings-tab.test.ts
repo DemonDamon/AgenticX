@@ -23,4 +23,8 @@ describe("settings deep-link", () => {
     expect(isSettingsTab("hooks")).toBe(false);
     expect(isSettingsTab("workspace")).toBe(false);
   });
+
+  it("knows the enterprise worker tab", () => {
+    expect(isSettingsTab("enterprise_worker")).toBe(true);
+  });
 });

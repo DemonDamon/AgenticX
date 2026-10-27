@@ -51,6 +51,7 @@ import {
   ShieldCheck,
   KeyRound,
   Mail,
+  Laptop,
 } from "lucide-react";
 import { CommandsSettings } from "./settings/commands/CommandsSettings";
 import { Panel } from "./ds/Panel";
@@ -124,6 +125,7 @@ import {
   type TokenBudgetConfig,
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
+import { EnterpriseWorkerPanel } from "./settings/enterprise/EnterpriseWorkerPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { CredentialsTab } from "./settings/credentials/CredentialsTab";
 import { GatewayAdaptersPanel } from "./settings/server/GatewayAdaptersPanel";
@@ -1091,6 +1093,7 @@ function ModelCapabilityBadges({
 
 const TAB_DEFS: { id: SettingsTab; icon: typeof Settings2 }[] = [
   { id: "account", icon: User },
+  { id: "enterprise_worker", icon: Laptop },
   { id: "general", icon: Settings2 },
   { id: "provider", icon: Cpu },
   { id: "mcp", icon: Plug },
@@ -5018,9 +5021,36 @@ export function SettingsPanel({
   const typesafeSettings = useTypesafeSettings();
   const locale = useAppStore((s) => s.locale);
   const setLocale = useAppStore((s) => s.setLocale);
+  const [enterpriseLoggedIn, setEnterpriseLoggedIn] = useState(false);
+  const [enterpriseAccountReady, setEnterpriseAccountReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const account = await window.agenticxDesktop.loadEnterpriseAccount();
+        if (!cancelled) setEnterpriseLoggedIn(Boolean(account.ok && account.loggedIn));
+      } catch {
+        if (!cancelled) setEnterpriseLoggedIn(false);
+      } finally {
+        if (!cancelled) setEnterpriseAccountReady(true);
+      }
+    })();
+    const off = window.agenticxDesktop.onEnterpriseAccountChanged((payload) => {
+      setEnterpriseLoggedIn(Boolean(payload.loggedIn));
+      setEnterpriseAccountReady(true);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
   const tabs = useMemo(
-    () => TAB_DEFS.map((def) => ({ ...def, label: t(`tabs.${def.id}`) })),
-    [t],
+    () =>
+      TAB_DEFS.filter((def) => def.id !== "enterprise_worker" || enterpriseLoggedIn).map((def) => ({
+        ...def,
+        label: t(`tabs.${def.id}`),
+      })),
+    [t, enterpriseLoggedIn],
   );
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
@@ -5054,6 +5084,10 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const securityTabRef = useRef<SecurityCenterTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  useEffect(() => {
+    if (!enterpriseAccountReady) return;
+    if (tab === "enterprise_worker" && !enterpriseLoggedIn) setTab("account");
+  }, [enterpriseAccountReady, enterpriseLoggedIn, tab]);
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
@@ -5292,6 +5326,8 @@ export function SettingsPanel({
   const [gwShowToken, setGwShowToken] = useState(false);
   const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
   const [gwQrOpen, setGwQrOpen] = useState(false);
+  // 二维码弹窗文案视角：mobile = Near 手机 App 配对；im = 飞书/企微机器人绑定
+  const [gwQrMode, setGwQrMode] = useState<"mobile" | "im">("mobile");
   // WeChat iLink sidecar
   const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "stale" | "recovering" | "expired" | "error">("idle");
   const [wechatBotId, setWechatBotId] = useState("");
@@ -7216,6 +7252,7 @@ export function SettingsPanel({
             }`}
           >
             {tab === "account" && <AccountTab />}
+            {tab === "enterprise_worker" && <EnterpriseWorkerPanel />}
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
@@ -9170,6 +9207,65 @@ export function SettingsPanel({
                   </fieldset>
                 </Panel>
 
+                <Panel title={t("server.gatewayConn")}>
+                  <p className="text-xs text-text-faint">{t("server.gatewayConnHint")}</p>
+                  <div className="mt-3 space-y-3">
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.gatewayUrl")}
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        placeholder="https://gateway.example.com"
+                        value={gwUrl}
+                        onChange={(e) => setGwUrl(e.target.value)}
+                      />
+                    </label>
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.deviceId")}
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        placeholder="my-macbook"
+                        value={gwDeviceId}
+                        onChange={(e) => setGwDeviceId(e.target.value)}
+                      />
+                    </label>
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+                      {t("server.deviceToken")}
+                      <div className="relative mt-1">
+                        <input
+                          className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                          type={gwShowToken ? "text" : "password"}
+                          value={gwToken}
+                          onChange={(e) => setGwToken(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                          onClick={() => setGwShowToken(!gwShowToken)}
+                        >
+                          {gwShowToken ? tCommon("hide") : tCommon("show")}
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                </Panel>
+
+                <Panel title={t("server.mobileApp")}>
+                  <p className="text-xs text-text-faint">{t("server.mobileAppHint")}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                      disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
+                      onClick={() => {
+                        setGwQrMode("mobile");
+                        setGwQrOpen(true);
+                      }}
+                    >
+                      {t("server.qrBindMobile")}
+                    </button>
+                  </div>
+                </Panel>
+
                 <Panel title={t("server.feishu")}>
                   {/* Tab switcher */}
                   <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
@@ -9242,59 +9338,20 @@ export function SettingsPanel({
                     </div>
                   )}
 
-                  {/* Webhook mode tab */}
+                  {/* Webhook 模式子页：仅保留 IM（飞书/企微）机器人扫码绑定 */}
                   {imTab === "webhook" && (
-                    <div className="space-y-3">
-                      <p className="text-xs text-text-faint">
-                        {t("server.webhookHint")}
-                      </p>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.gatewayUrl")}
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                          placeholder="https://gateway.example.com"
-                          value={gwUrl}
-                          onChange={(e) => setGwUrl(e.target.value)}
-                        />
-                      </label>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.deviceId")}
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                          placeholder="my-macbook"
-                          value={gwDeviceId}
-                          onChange={(e) => setGwDeviceId(e.target.value)}
-                        />
-                      </label>
-                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-                        {t("server.deviceToken")}
-                        <div className="relative mt-1">
-                          <input
-                            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
-                            type={gwShowToken ? "text" : "password"}
-                            value={gwToken}
-                            onChange={(e) => setGwToken(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
-                            onClick={() => setGwShowToken(!gwShowToken)}
-                          >
-                            {gwShowToken ? tCommon("hide") : tCommon("show")}
-                          </button>
-                        </div>
-                      </label>
-                    </div>
-                  )}
-                  {imTab === "webhook" && (
-                  <><div className="mt-3 flex flex-wrap items-center gap-2">
+                  <><p className="text-xs text-text-faint">{t("server.webhookHint")}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
                       disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
-                      onClick={() => setGwQrOpen(true)}
+                      onClick={() => {
+                        setGwQrMode("im");
+                        setGwQrOpen(true);
+                      }}
                     >
-                      {t("server.qrBind")}
+                      {t("server.qrBindIm")}
                     </button>
                     <button
                       type="button"
@@ -9659,6 +9716,7 @@ export function SettingsPanel({
 
                 <QrConnectModal
                   open={gwQrOpen}
+                  mode={gwQrMode}
                   gatewayBaseUrl={gwUrl.trim().replace(/\/+$/, "")}
                   deviceId={gwDeviceId.trim()}
                   token={gwToken.trim()}

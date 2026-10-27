@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "name": "single_message_ok",
+      "input": {
+        "events": [
+          {
+            "type": "user.message",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ]
+          }
+        ]
+      },
+      "ok": true,
+      "code": null,
+      "index": null
+    },
+    {
+      "name": "all_four_types_ok",
+      "input": {
+        "events": [
+          {
+            "type": "user.message",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ]
+          },
+          {
+            "type": "user.interrupt"
+          },
+          {
+            "type": "user.tool_confirmation",
+            "tool_use_id": "tu_1",
+            "result": "allow"
+          },
+          {
+            "type": "user.custom_tool_result",
+            "custom_tool_use_id": "ct_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "ok"
+              }
+            ],
+            "is_error": false
+          }
+        ]
+      },
+      "ok": true,
+      "code": null,
+      "index": null
+    },
+    {
+      "name": "not_list",
+      "input": {
+        "events": {}
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": null
+    },
+    {
+      "name": "empty",
+      "input": {
+        "events": []
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": null
+    },
+    {
+      "name": "too_many",
+      "input": {
+        "events": [
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"},
+          {"type": "user.interrupt"}
+        ]
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": null
+    },
+    {
+      "name": "unknown_type",
+      "input": {
+        "events": [
+          {
+            "type": "user.interrupt"
+          },
+          {
+            "type": "user.foo"
+          }
+        ]
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": 1
+    },
+    {
+      "name": "empty_content",
+      "input": {
+        "events": [
+          {
+            "type": "user.message",
+            "content": []
+          }
+        ]
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": 0
+    },
+    {
+      "name": "allow_with_deny_message",
+      "input": {
+        "events": [
+          {
+            "type": "user.tool_confirmation",
+            "tool_use_id": "tu_1",
+            "result": "allow",
+            "deny_message": "no"
+          }
+        ]
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": 0
+    },
+    {
+      "name": "bad_image_url",
+      "input": {
+        "events": [
+          {
+            "type": "user.message",
+            "content": [
+              {
+                "type": "image",
+                "source": {
+                  "type": "url",
+                  "url": "http://x"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "ok": false,
+      "code": "invalid_event_batch",
+      "index": 0
+    },
+    {
+      "name": "duplicate_confirmation",
+      "input": {
+        "events": [
+          {
+            "type": "user.tool_confirmation",
+            "tool_use_id": "tu_1",
+            "result": "deny",
+            "deny_message": "no"
+          },
+          {
+            "type": "user.tool_confirmation",
+            "tool_use_id": "tu_1",
+            "result": "allow"
+          }
+        ]
+      },
+      "ok": false,
+      "code": "duplicate_resolution",
+      "index": 1
+    },
+    {
+      "name": "duplicate_custom_result",
+      "input": {
+        "events": [
+          {
+            "type": "user.custom_tool_result",
+            "custom_tool_use_id": "ct_1"
+          },
+          {
+            "type": "user.custom_tool_result",
+            "custom_tool_use_id": "ct_1",
+            "is_error": true
+          }
+        ]
+      },
+      "ok": false,
+      "code": "duplicate_resolution",
+      "index": 1
+    }
+  ]
+}

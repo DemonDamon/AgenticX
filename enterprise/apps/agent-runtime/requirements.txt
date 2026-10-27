@@ -1,0 +1,9 @@
+# agent-runtime 额外依赖；agenticx 本体由 Dockerfile 以源码安装（含核心依赖）。
+SQLAlchemy[asyncio]>=2.0.30,<3
+asyncpg>=0.29,<1
+psycopg2-binary>=2.9.9,<3
+aiosqlite>=0.20,<1
+httpx>=0.25.0,<1
+tzdata>=2024.1
+lark-oapi>=1.3.0,<2
+setuptools<81

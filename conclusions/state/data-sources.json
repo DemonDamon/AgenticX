@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "data-sources",
-  "generation": "1cce4096ef884dd09b31bf17d386fa51",
+  "generation": "9a8e8f77cf2d4918a9b5ca76ef050e1a",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
   "source_fingerprint": "sha256:1742da204427c30d38e9fe01cf026b50401a5c3665428e019d08c264994e9129",
   "summary_path": "conclusions/data_sources_module_conclusion.md",
   "summary_sha256": "sha256:09f06160bcf6ea5ad2357d722a1cc0c2cdbdeacc8cc6650a04678db2685dbfd8",
-  "updated_at": "2026-09-30T00:54:12.951711+00:00"
+  "updated_at": "2026-10-24T13:53:19.576617+00:00"
 }

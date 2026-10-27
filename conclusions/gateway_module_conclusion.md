@@ -1,12 +1,12 @@
 # AgenticX Gateway 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论生成时间：2026-05-29；代码基线覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`（相对 `ca9d92bec05627539228094cacc30dd6d4879f47` 的 gateway 增量以移动端桥接为主）。
 
 > 说明：本文档描述的是 **IM 远程指令网关**（飞书/企业微信/钉钉/Slack/Telegram/QQ/微信 → 云端 Gateway → 本机 Agent），与 `conclusions/server_gateway_conclusion.md`（API 服务网关）是不同模块，不要混淆。
 
 ## 模块概述
 
-AgenticX Gateway 模块实现「IM 远程指令网关」：让用户从手机端 IM（飞书、企业微信、钉钉、Slack、Telegram、QQ 官方机器人、个人微信 iLink，以及 Siri/HTTP 快捷指令）下达指令，经由云端 Gateway 中转，通过 WebSocket 下发到本机运行的 Agent（`agx serve`）执行，再把回复回传到原 IM 会话。其核心价值是把「桌面端 Agent」延伸为「随身可远程驱动」的能力，支持设备绑定、离线消息队列、跨 IM 的待确认（confirm）流转与回复摘要。
+AgenticX Gateway 模块实现「IM 远程指令网关」：让用户从手机端 IM（飞书、企业微信、钉钉、Slack、Telegram、QQ 官方机器人、个人微信 iLink，以及 Siri/HTTP 快捷指令）或 **Near 移动端 App**（`/api/mobile/*` + `/ws/mobile`）下达指令，经由云端 Gateway 中转，通过 WebSocket 下发到本机运行的 Agent（`agx serve`）执行，再把回复回传到原 IM 会话或手机端。其核心价值是把「桌面端 Agent」延伸为「随身可远程驱动」的能力，支持设备绑定、离线消息队列、跨 IM/移动端的待确认（confirm）流转、手机真流式输出与回复摘要。
 
 ## 目录结构
 
@@ -17,7 +17,9 @@ agenticx/gateway/
 ├── router.py              # 归一化消息路由：绑定/状态/取消命令 + 设备下发与回复
 ├── models.py              # GatewayMessage / GatewayReply / PendingMessage 统一模型
 ├── config.py              # 网关 YAML 配置加载与设备/绑定码表
-├── device_manager.py      # WebSocket 设备注册表 + 离线消息队列 + 回复 future
+├── device_manager.py      # WebSocket 设备注册表 + 离线消息队列 + IM 回复 / 设备 RPC future
+├── mobile_tokens.py       # 手机 install_id → mobile_token 持久化（JSON 原子写）
+├── mobile_stream.py       # 桌面 turn_progress → 订阅会话的手机 WS 广播
 ├── connect_session.py     # 二维码绑定的临时 connect session（TTL）
 ├── connect_page.py        # 扫码落地页 HTML 渲染
 ├── user_device_map.py     # (platform, sender_id) → device_id 绑定持久化
@@ -50,8 +52,18 @@ agenticx/gateway/
 - `POST /api/command`：Siri/HTTP 快捷指令入口，支持共享密钥（`command_api_secret`）或设备 token 鉴权，同步等待设备回复
 - `POST /api/connect/session` + `GET /api/connect/session/{id}` + `GET /connect/{id}`：二维码绑定会话创建、状态轮询与扫码落地页
 - `GET/DELETE /api/device/{device_id}/bindings`：查询/解除某设备的 IM 绑定
-- `WebSocket /ws/device/{device_id}`：本机设备长连接，注册后下发离线积压消息，并接收 `auth`/`im_reply`/`im_progress`
+- **移动端公开契约（鉴权见下）**：
+  - `POST /api/mobile/bind`：body `{connect_session_id, install_id}` → `{device_id, mobile_token, desktop_name}`；要求 connect session 仍有效；`install_id` 已绑其他 device 时 409；同 device 重复 bind 覆盖重签 token
+  - 其余 `/api/mobile/*`：请求头 **`x-agx-install-id`** + **`x-agx-mobile-token`**；网关校验 `(platform=mobile, install_id) → device_id` 与 token 后，经 **`device_rpc` → 本机 `rpc_reply`** 桥接 Studio（离线 503、发送失败 503、超时 504；RPC 等待 `max(reply_timeout_seconds, 600s)`）
+  - `GET /api/mobile/status` → `{online, device_id, desktop_name}`；`GET/POST /api/mobile/sessions`；`GET .../sessions/{id}/messages`；`GET .../context_usage`；`POST .../send`（body 含 `text`/`sender_name`/`image_inputs`/`skill_slugs`/`doc_refs`，至少 text、图片或 doc_refs 之一）
+  - 只读桥：`GET /api/mobile/tools|mcp|models|workspaces|skills`；`GET /api/mobile/docs?q=`；`PUT /api/mobile/models/active` `{provider, model}`
+  - 待确认：`GET /api/mobile/confirms`；`POST /api/mobile/confirms/{request_id}` `{approved, reason?}`
+  - `DELETE /api/mobile/bindings`：解绑并 `revoke` token
+  - **`WebSocket /ws/mobile?install_id=&token=`**：鉴权同 HTTP；客户端发 `{type:"subscribe", session_id}` → 服务端 `{type:"subscribed", session_id}`；服务端推送 `{type:"turn_delta", session_id, delta}` 与 `{type:"turn_done", session_id}`（来自桌面 WS 的 `turn_progress`/`turn_progress_end`）
+- `WebSocket /ws/device/{device_id}`：本机设备长连接，注册后下发离线积压消息，并接收 `auth`/`im_reply`/`rpc_reply`/`turn_progress`/`turn_progress_end`/`im_progress`
 - `GET /health`：健康检查
+
+**二维码对外 URL**：`POST /api/connect/session` 生成 QR 时优先 `gateway.server.public_base_url`，未配置则退回 `request.base_url`（桌面用 localhost 时手机不可扫）。
 
 **生命周期**：`startup`/`shutdown` 钩子负责启停 `WeChatILinkAdapter`；各适配器按配置 `enabled` 条件实例化并挂到 `app.state`。
 
@@ -79,7 +91,7 @@ agenticx/gateway/
 **文件功能**：加载网关 YAML 配置（对应 `~/.agenticx/config.yaml` 的 `gateway` 节及云端示例）
 
 **核心组件**：
-- `GatewayServerConfig`：含 `server`（host/port）、`adapters`（feishu/wecom/dingtalk/slack/telegram/qqbot/wechat_ilink 各自 enabled（默认 false）+ 凭据；新增 `SlackAdapterConfig`（`bot_token`/`signing_secret`）、`TelegramAdapterConfig`（`bot_token`/`webhook_secret`）、`QQBotAdapterConfig`（`app_id`/`app_secret`））、`devices.auth_tokens`、`command_api_secret`、`reply_timeout_seconds`
+- `GatewayServerConfig`：含 `server`（host/port、`public_base_url` 供扫码链接对外暴露）、`adapters`（feishu/wecom/dingtalk/slack/telegram/qqbot/wechat_ilink 各自 enabled（默认 false）+ 凭据；新增 `SlackAdapterConfig`（`bot_token`/`signing_secret`）、`TelegramAdapterConfig`（`bot_token`/`webhook_secret`）、`QQBotAdapterConfig`（`app_id`/`app_secret`））、`devices.auth_tokens`、`command_api_secret`、`reply_timeout_seconds`
 - `device_token_table` / `binding_code_table` / `binding_code_for_device`：从配置派生 device→token、绑定码→device 等查表
 
 ### 设备管理 (device_manager.py)
@@ -89,7 +101,13 @@ agenticx/gateway/
 **核心组件 `DeviceManager`**：
 - `register`/`unregister`/`is_online`/`send_to_device`：WebSocket 连接注册与下发（新连接会踢掉旧连接）
 - `enqueue_pending`/`drain_pending`/`pending_count`：离线队列，上限 `MAX_PENDING=100`、TTL `86400s`
-- `wait_for_reply`/`resolve_reply`：以 `asyncio.Future` + `correlation_id` 实现请求-回复关联与超时
+- `wait_for_reply`/`resolve_reply`：以 `asyncio.Future` + `correlation_id` 实现 IM 请求-回复关联与超时
+- `wait_for_rpc_reply`/`resolve_rpc_reply`：平行 future 通道，承载移动端 `device_rpc` 的 `{ok, data|error}` 回复
+
+### 移动端令牌与流式 (mobile_tokens.py / mobile_stream.py)
+
+- **`MobileTokenStore`**：`install_id → {device_id, token, issued_at}` 持久化至 `AGX_MOBILE_TOKEN_FILE` 或 `~/.agenticx/gateway/mobile_tokens.json`（亦可 config 邻接 `*.mobile_tokens.json`）；`issue`/`verify`（`compare_digest` + device_id 一致）/`revoke`
+- **`MobileStreamHub`**：按 `session_id` 维护手机 WS 订阅集合，`broadcast` 推送 `turn_delta`/`turn_done`，失败连接就地剔除
 
 ### 绑定会话与落地页 (connect_session.py / connect_page.py)
 
@@ -110,9 +128,10 @@ agenticx/gateway/
 
 **核心组件 `GatewayClient`**：
 - `load_gateway_client_settings()`：从 `gateway` 配置节/环境变量解析 ws URL、device_id、token、Studio base、desktop token
-- `run_forever` / `_consume_loop`：带指数退避重连，收到 `im_message` 后并发执行
-- `_execute_turn`：为每个 IM 发送者派生稳定 `session_id`（`im-<source>-<hash>`），调用本机 `/api/session` 与流式 `/api/chat`，聚合 `token`/`final`/`tool_call`/`tool_result`/`tool_progress`/`confirm_required` 事件并回传；从 `/api/session` 响应读取 `avatar_id`，若为群聊会话（`group:<id>`）则经 `im_group_speaker` 补群字段、尽力注册人类成员，并把 `group_reply`/`group_clarification` 事件按发言人合并进最终回复
-- `_handle_confirm_command`：处理 `/approve`、`/deny`、`/pending` 等待确认指令，调用 `/api/confirm`
+- `run_forever` / `_consume_loop`：带指数退避重连；收到 `im_message` 串行执行；收到 **`device_rpc`** 异步分发（只读可并发，`session.send` 与 IM 在 Studio 侧自然串行）
+- `_execute_turn` / `_execute_chat_turn_core`：为每个 IM 发送者派生稳定 `session_id`（`im-<source>-<hash>`），调用本机 `/api/session` 与流式 `/api/chat`，聚合 SSE 事件；可选 **`TurnProgressForwarder`** 将 token 增量节流后上行 `turn_progress`/`turn_progress_end` 供手机真流式
+- **`_dispatch_device_rpc`**：移动端桥接方法表——`sessions.list|create`、`session.messages|context_usage|send`、`tools.registry`、`mcp.servers`、`models.list`、`model.set_active`、`workspaces.list`、`skills.list`、`docs.search`（经本机 lark-cli 用户身份）、`confirm.pending|respond`；统一回 `{type:rpc_reply, correlation_id, ok, data|error}`
+- `_handle_confirm_command`：处理 `/approve`、`/deny`、`/pending` 等待确认指令，调用 `/api/confirm`（移动端 `confirm.*` RPC 共用同一 pending store，sender_key 为 `mobile:{install_id}`）
 
 ### IM 待确认流转 (im_confirm.py)
 
@@ -176,11 +195,11 @@ agenticx/gateway/
 
 ## 应用场景
 
-1. **移动远程办公**：出门在外用飞书/企业微信给本机 Agent 下达任务并接收结果
+1. **移动远程办公**：出门在外用飞书/企业微信或 Near App（扫码 bind + `/api/mobile/*`）给本机 Agent 下达任务并接收结果（含 WS 流式）
 2. **Siri/快捷指令触发**：通过 `POST /api/command` 让语音/快捷指令驱动本机 Agent
 3. **个人微信助手**：经 iLink sidecar 把微信消息接入 Agent 运行时
 4. **远程审批**：在 IM 侧远程批准 Agent 的高风险操作确认
 
 ## 总结
 
-AgenticX Gateway 模块构建了「手机 IM → 云端网关 → 本机 Agent」的远程指令链路，以统一消息模型、适配器协议、设备 WebSocket 中继与请求-回复关联为骨架，叠加二维码绑定、离线队列、跨端待确认与回复摘要等能力，把桌面端 Agent 扩展为可随身远程驱动的入口。它是 AgenticX「IM 远程指令」能力的服务端与本机客户端实现，与 API 服务网关相互独立、各司其职。
+AgenticX Gateway 模块构建了「手机 IM / 移动 App → 云端网关 → 本机 Agent」的远程指令链路，以统一消息模型、适配器协议、设备 WebSocket 中继与 IM/RPC 双通道请求-回复关联为骨架，叠加二维码绑定、移动端 token、device RPC 桥接、真流式 `MobileStreamHub`、离线队列、跨端待确认与回复摘要等能力，把桌面端 Agent 扩展为可随身远程驱动的入口。它是 AgenticX「IM 远程指令」能力的服务端与本机客户端实现，与 API 服务网关相互独立、各司其职。

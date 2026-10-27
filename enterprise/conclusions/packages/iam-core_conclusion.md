@@ -42,7 +42,15 @@ packages/iam-core/
     │   ├── roles.ts                      # PG 实现 + 委托 mysqlRolesRepo（MySQL）
     │   ├── sso-providers.ts              # PG 实现 + 委托 mysqlSsoRepository（MySQL）
     │   ├── audit.ts                      # 通过 AuditRepository 抽象委托 mysqlAuditRepository / postgresqlAuditRepository
-    │   └── __tests__/sso-providers.test.ts
+    │   ├── agents.ts                     # 企业 Agent 注册表（PG + MySQL 方言分支；MySQL CRUD 委托 repos/mysql/agents.ts）
+    │   ├── cases.ts                      # 企业案例库（enterprise_cases；状态机用 db-schema 的 canTransitionCase）
+    │   ├── projects.ts                   # 管理台只读项目/协作房间视图（enterprise_projects + collab 表；可见性 SQL）
+    │   ├── mysql/
+    │   │   └── agents.ts                 # MySQL enterprise_agents 读写
+    │   └── __tests__/
+    │       ├── sso-providers.test.ts
+    │       ├── agents-validate.test.ts
+    │       └── projects.test.ts
     └── __tests__/
         ├── quota-remaining.test.ts
         └── runtime-legacy-migrate.test.ts
@@ -133,6 +141,31 @@ packages/iam-core/
 - `sanitizeSsoAuditDetail` —— **从 SSO 事件中脱敏 PII**
 - `insertAuditEvent` —— 接受可选 `IamDb`（支持事务复用）
 
+### `repos/agents.ts`
+**职责**：租户级企业 Agent 注册表，读写 `@agenticx/db-schema` 的 `enterprise_agents`（MySQL 走 `repos/mysql/agents.ts` + `getMysqlRepositoryDb`）
+
+**类型**：`EnterpriseAgent`、`AgentInput`；枚举 `AgentRuntime` / `AgentStatus` / `AgentLifecycle` / `AgentOrigin`
+
+**校验**：`validateAgentInput`（slug、模型、runtime/status/lifecycle/origin、能力 id `mcp|skill:` ULID/Base32、`assignmentKeys` 非空、`metadata.knowledgeSearchUrl` 仅 http/https）；能力 id 是否已登记 Skill/MCP **不在本包**校验
+
+**错误类**：`AgentValidationError`、`AgentNotFoundError`、`AgentSlugConflictError`（PG 23505 / MySQL 1062 唯一约束）
+
+**函数**：`listAgents`、`getAgent`、`getAgentBySlug`、`createAgent`、`updateAgent`、`deleteAgent`、`registerEmployeeAgent`（桌面员工分身登记/更新，不复活已 recalled）、`listAgentsVisibleToKeys`（已发布且未停用 + `assignmentKeys` 交集）、`isVisibleToEmployees`
+
+### `repos/cases.ts`
+**职责**：企业案例库，读写 `enterprise_cases`（PG / MySQL 双方言，`resolveDatabaseConfig` + `getIamDb` / `createMysqlDb`）
+
+**类型**：`EnterpriseCase`；错误 `CaseNotFoundError`、`CaseTransitionError`
+
+**函数**：`listEnterpriseCases`（可选 `status` / `submitterUserId`）、`getEnterpriseCase`、`createEnterpriseCase`（初始 `submitted`）、`transitionEnterpriseCase`（委托 `@agenticx/db-schema` 的 `canTransitionCase` / `isCaseStatus`）
+
+### `repos/projects.ts`
+**职责**：管理台**只读**项目与协作数据聚合（`enterprise_projects`、`enterprise_collab_rooms`、`enterprise_collab_room_members`、`enterprise_collab_room_messages`，联表 `users` / `departments`；PG 与 MySQL 共用 `adminProjectScopeSql`）
+
+**可见性**：`ProjectVisibility` — `all` / `dept`（按 `dept_id`）/ `self`（主房间 human 成员 EXISTS 子查询）；列表在 SQL 与结果层双重过滤；`dept`/`self` 模式可读 direct 房间元数据但 **`listAdminProjectMessages` 对 direct 抛 `ProjectForbiddenError`**，`all` 可读
+
+**导出**：`listAdminProjects`、`getAdminProject`、`listAdminProjectMessages`；`adminProjectScopeSql` 供测试编译 SQL；`__setAdminProjectsFixtureForTests` 内存 fixture 供单测
+
 ## 特殊服务
 
 ### `provider-api-key-crypto.ts`
@@ -173,8 +206,10 @@ packages/iam-core/
 
 ### `quota-remaining.ts`
 **计算 token 配额剩余**（按方言分支）：
-- 类型：`QuotaUsageScope`、`QuotaRuleSnapshot`、`QuotaConfigSnapshot`、`RemainingUsage`、`QuotaSummary`
-- 函数：`resolveRuntimeGatewayDir`、`loadQuotaConfigSnapshot`、`getQuotaUsageForScope`、`getQuotaSummaryForSession`
+- 类型：`QuotaUsageScope`、`QuotaRuleSnapshot`、`QuotaConfigSnapshot`、`RemainingUsage`、`QuotaSummary`、`UsageRecordSlice`、`QuotaWindowUsageTotals`
+- 函数：`resolveRuntimeGatewayDir`、`loadQuotaConfigSnapshot`、`getQuotaUsageForScope`、`getQuotaWindowUsageForScope`、`getQuotaSummaryForSession`
+- **批量用量**：`getQuotaWindowUsagesForUsers` — 多成员 day/week/month 的 token 与 `costUsd`；无 `DATABASE_URL` 或 `recordsOverride` 时走 `foldUsageRecordSlices`；否则按方言对 `usage_records`（PG `@agenticx/db-schema` / MySQL `@agenticx/db-schema/mysql`）分组聚合（每 chunk 100 个 userId，`time_bucket >=` 当月起点）；辅助 `usageWindowStart`、`foldUsageRecordSlices`
+- 周期字符串辅助（`currentPeriod` / `periodForWindow` 等）支持可选 `now` 参数便于测试
 
 ### `scope-registry.ts`
 **静态 SCOPE_REGISTRY**（resource→verbs 映射）+ `ALL_REGISTERED_SCOPES`、`isRegisteredScope`、`expandRoleScopes`、`mergeUserScopes`、`hasEveryScope`、`hasSomeScope`
@@ -202,9 +237,11 @@ vitest，运行 `pnpm --filter @agenticx/iam-core test`：
 
 | 文件 | 覆盖 |
 |---|---|
-| `src/__tests__/quota-remaining.test.ts` | 配额 config 加载 + per-scope 汇总 |
+| `src/__tests__/quota-remaining.test.ts` | 配额 config 加载 + per-scope 汇总 + `getQuotaWindowUsagesForUsers` 多用户多窗口 |
 | `src/__tests__/runtime-legacy-migrate.test.ts` | legacy JSON → DB 迁移 |
 | `src/repos/__tests__/sso-providers.test.ts` | SSO provider repo CRUD |
+| `src/repos/__tests__/agents-validate.test.ts` | `validateAgentInput` / `isVisibleToEmployees`（无 DB） |
+| `src/repos/__tests__/projects.test.ts` | 项目可见性 fixture + PG/MySQL `adminProjectScopeSql` 编译 |
 
 包根没有 mock DB 层；测试通过 `getRepositoryRegistry()` / `getIamDb()` 单例真打 Drizzle（`__resetDatabaseForTests` / `__resetIamDbForTests` 用于隔离）。
 
@@ -227,3 +264,11 @@ vitest，运行 `pnpm --filter @agenticx/iam-core test`：
 - `repos/assignment-keys.ts`：分配键规范化。
 - users / refresh-token store：补 `mustChangePassword` 等列读写。
 - barrel 导出上述服务与 repo。
+
+## 增量（30e57496 → 22d051f5）
+
+- `repos/agents.ts` + `repos/mysql/agents.ts`：`enterprise_agents` CRUD、输入校验、员工分身 `registerEmployeeAgent`、`listAgentsVisibleToKeys`；barrel 导出。
+- `repos/cases.ts`：`enterprise_cases` 列表/创建/状态迁移（`canTransitionCase`）。
+- `repos/projects.ts`：管理台只读项目列表/详情/房间消息，三档可见性与 direct 消息权限；测试 fixture API。
+- `quota-remaining.ts`：`getQuotaWindowUsagesForUsers` 等，读 PG/MySQL `usage_records` 批量聚合 token 与 cost。
+- `index.ts` 导出 `agents` / `cases` / `projects`；单测 `agents-validate.test.ts`、`projects.test.ts`，配额测试补多用户窗口用例。

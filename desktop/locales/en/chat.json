@@ -1059,5 +1059,22 @@
     "input": "{{count}} awaiting your input",
     "open": "View",
     "summarizing": "Summarizing sub-agent results…"
+  },
+  "managed": {
+    "thinking": "Working…",
+    "reconnecting": "Connection lost, reconnecting…",
+    "loadFailed": "Couldn't load the session: {{message}}",
+    "retry": "Retry",
+    "customToolPending": "Waiting for the business system",
+    "confirmQuestion": "Allow \"{{tool}}\"?",
+    "requiresActionBlocked": "Resolve the pending tool approval first",
+    "terminated": "Session ended",
+    "stop": {
+      "retries": "This turn failed and retries have stopped",
+      "refusal": "The model refused this request",
+      "policy": "This turn was stopped by an enterprise compliance policy",
+      "rounds": "Maximum tool rounds reached",
+      "budget": "Managed usage limit exceeded"
+    }
   }
 }

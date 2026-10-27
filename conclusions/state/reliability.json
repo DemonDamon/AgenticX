@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "reliability",
-  "generation": "cccabf2e04a540c9bb499c02180e2e66",
+  "generation": "6cfa6780c62d472386c5bd2b5ece010a",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:4b3133405cdc7b2ef1c58c4d6fda271a0e965ae9c5b5f7b42e915f00eee22fd3",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:e2568d512077865e5ab41a3d35359b1f18db3b511d3a798c04fc6df560f890d2",
   "summary_path": "conclusions/reliability_module_conclusion.md",
-  "summary_sha256": "sha256:cbca087e79f4db8573796c4b317aef0048819d2e970250313094af1b453bb66f",
-  "updated_at": "2026-09-30T00:54:10.191568+00:00"
+  "summary_sha256": "sha256:9a76e9b82d88e05481752ccbbfc6fd3cbb43757b907d1fff1ff69086de722eea",
+  "updated_at": "2026-10-25T03:42:14.539415+00:00"
 }

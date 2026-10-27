@@ -1,0 +1,23 @@
+{
+  "valid": ["0 9 * * 1-5", "*/15 * * * *", "5,35 8-18 * * *", "0 0 1 * *", "30 2 * * 0", "0 12 15 * 7", "0 9 1-7 * 1"],
+  "invalid": [
+    {"expr": "* * * * *", "error": "cron: minute field fires more than 12 times per hour"},
+    {"expr": "*/2 * * * *", "error": "cron: minute field fires more than 12 times per hour"},
+    {"expr": "0 9 * *", "error": "cron: expected 5 fields"},
+    {"expr": "60 9 * * *", "error": "cron: minute is invalid"},
+    {"expr": "0 24 * * *", "error": "cron: hour is invalid"},
+    {"expr": "0 9 0 * *", "error": "cron: day_of_month is invalid"},
+    {"expr": "0 9 * 13 *", "error": "cron: month is invalid"},
+    {"expr": "0 9 * * 8", "error": "cron: day_of_week is invalid"},
+    {"expr": "0 9 * * MON", "error": "cron: day_of_week is invalid"},
+    {"expr": "0 9 5-1 * *", "error": "cron: day_of_month is invalid"},
+    {"expr": "0 9 * * 1,", "error": "cron: day_of_week is invalid"}
+  ],
+  "next_fire": [
+    {"expr": "0 9 * * 1-5", "tz": "Asia/Shanghai", "after": "2026-10-23T02:00:00Z", "expect": "2026-10-26T01:00:00Z"},
+    {"expr": "*/15 * * * *", "tz": "UTC", "after": "2026-10-25T10:07:30Z", "expect": "2026-10-25T10:15:00Z"},
+    {"expr": "0 9 1-7 * 1", "tz": "UTC", "after": "2026-10-25T00:00:00Z", "expect": "2026-10-26T09:00:00Z"},
+    {"expr": "30 2 * * 0", "tz": "America/New_York", "after": "2026-03-07T00:00:00Z", "expect": "2026-03-08T07:30:00Z"},
+    {"expr": "0 0 1 * *", "tz": "UTC", "after": "2026-12-01T00:00:00Z", "expect": "2027-01-01T00:00:00Z"}
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "llms",
-  "generation": "6d0cf1b81c824241a9fcbe1c9cb41e64",
+  "generation": "752285ff775b44dfb2c09169c6a89658",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:213beac6202440193375e96b4f14514e23f42e72dce105be74c91dfc7e7b4f39",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:a10b24353fa7b61340c2fc5f62415a9071fc1802c302225704c15e91fb7f23b2",
   "summary_path": "conclusions/llms_module_conclusion.md",
-  "summary_sha256": "sha256:0d3c0248d5df3bbb1d6c107123dfcdfda9cfe6aea23f6529b6265059b5123f0c",
-  "updated_at": "2026-09-30T00:55:12.770274+00:00"
+  "summary_sha256": "sha256:3ac9bf8cac612fbd6bdf116c7f694ea6e5d5c72dd4ea92ee555f32f66426d08b",
+  "updated_at": "2026-10-25T03:42:13.579370+00:00"
 }

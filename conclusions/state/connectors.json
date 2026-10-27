@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "connectors",
+  "generation": "13397a7d973e43499f2e14e66ce36847",
+  "mapping_revision": 1,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:36d523f69951203f13ffb7e07ea39b24015a7b9faff3bbb612ae7e5e0a83f80e",
+  "summary_path": "conclusions/connectors_module_conclusion.md",
+  "summary_sha256": "sha256:e43d32b98aa3f6585e92710492afcc6ad2cfe3280b8aeee55775045fbbb2bf2a",
+  "updated_at": "2026-10-25T03:42:12.189238+00:00"
+}

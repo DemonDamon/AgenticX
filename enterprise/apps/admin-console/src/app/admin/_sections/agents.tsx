@@ -43,6 +43,7 @@ import {
   toAssignmentKeys,
   type AssignmentDraft,
 } from "../../../lib/capability-pack-form";
+import { AgentManifestDialog } from "./agent-manifest/AgentManifestDialog";
 
 type AgentRuntime = "cloud" | "desktop_worker";
 type AgentStatus = "active" | "disabled";
@@ -63,6 +64,11 @@ type AgentRecord = {
   lifecycle?: AgentLifecycle;
   origin?: "enterprise" | "employee";
   metadata?: Record<string, unknown>;
+  latestVersion?: number;
+  effectiveVersion?: number;
+  versionRouting?: "follow_latest" | "pinned";
+  pinnedVersion?: number | null;
+  defaultEnvironmentId?: string | null;
 };
 
 type ModelOption = { id: string; label: string };
@@ -150,6 +156,8 @@ export default function AgentsSection() {
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<AgentRecord | null>(null);
+  const [pendingRecall, setPendingRecall] = useState<AgentRecord | null>(null);
+  const [manifestAgent, setManifestAgent] = useState<AgentRecord | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
 
@@ -377,6 +385,7 @@ export default function AgentsSection() {
               <TableHead>{t("columns.slug")}</TableHead>
               <TableHead>{t("columns.runtime")}</TableHead>
               <TableHead>{t("columns.model")}</TableHead>
+              <TableHead>{t("columns.version")}</TableHead>
               <TableHead>{t("columns.capabilities")}</TableHead>
               <TableHead>{t("columns.visibility")}</TableHead>
               <TableHead>{t("columns.status")}</TableHead>
@@ -391,6 +400,14 @@ export default function AgentsSection() {
                 <TableCell>{t(`runtime.${isRuntime(agent.runtime) ? agent.runtime : "cloud"}`)}</TableCell>
                 <TableCell className="max-w-[220px] truncate" title={agent.model}>
                   {agent.model}
+                </TableCell>
+                <TableCell>
+                  {agent.effectiveVersion ? (
+                    <div className="flex items-center gap-1">
+                      <span>v{agent.effectiveVersion}</span>
+                      {agent.versionRouting === "pinned" ? <Badge variant="secondary">{t("routing.pinnedBadge")}</Badge> : null}
+                    </div>
+                  ) : "—"}
                 </TableCell>
                 <TableCell>{agent.capabilityIds.length}</TableCell>
                 <TableCell>
@@ -410,12 +427,15 @@ export default function AgentsSection() {
                         {t("actions.publish")}
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" onClick={() => void setLifecycle(agent, "recalled")}>
+                      <Button size="sm" variant="outline" onClick={() => setPendingRecall(agent)}>
                         {t("actions.recall")}
                       </Button>
                     )}
                     <Button size="sm" variant="outline" onClick={() => openEdit(agent)}>
                       {t("actions.edit")}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setManifestAgent(agent)}>
+                      {t("actions.manifest")}
                     </Button>
                     <Button
                       size="sm"
@@ -523,7 +543,7 @@ export default function AgentsSection() {
                 <Textarea
                   id="agent-prompt"
                   rows={6}
-                  maxLength={16000}
+                  maxLength={65536}
                   value={form.systemPrompt}
                   onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })}
                 />
@@ -626,6 +646,49 @@ export default function AgentsSection() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={pendingRecall !== null} onOpenChange={(open) => !open && setPendingRecall(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("recall.title")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("recall.description", { name: pendingRecall?.displayName ?? "" })}
+          </p>
+          <DialogFooter className="flex-row justify-end">
+            <Button variant="outline" onClick={() => setPendingRecall(null)}>
+              {tc("actions.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const target = pendingRecall;
+                if (!target) return;
+                void (async () => {
+                  await setLifecycle(target, "recalled");
+                  setPendingRecall(null);
+                })();
+              }}
+            >
+              {t("recall.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {manifestAgent ? (
+        <AgentManifestDialog
+          agentId={manifestAgent.id}
+          agentName={manifestAgent.displayName}
+          runtime={manifestAgent.runtime}
+          models={models}
+          open
+          onOpenChange={(open) => {
+            if (!open) setManifestAgent(null);
+          }}
+          onChanged={() => void load()}
+        />
+      ) : null}
     </div>
   );
 }

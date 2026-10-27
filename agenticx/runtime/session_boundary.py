@@ -6,7 +6,10 @@ Author: Damon Li
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 
@@ -87,3 +90,31 @@ def configured_egress_allowlist() -> list[str]:
     if isinstance(raw, list):
         return [str(part).strip() for part in raw if str(part).strip()]
     return []
+
+
+@dataclass(frozen=True)
+class EgressGuard:
+    """Per-task outbound policy for framework-issued HTTP requests.
+
+    Managed sessions bind one for the duration of a turn. Personal mode leaves
+    the context variable unset, and callers keep their previous behavior.
+    """
+
+    check: Callable[[str], str | None]
+    rewrite_url: Callable[[str], str]
+    headers_for: Callable[[str], dict[str, str]]
+
+
+_EGRESS_GUARD: ContextVar[EgressGuard | None] = ContextVar("agx_egress_guard", default=None)
+
+
+def current_egress_guard() -> EgressGuard | None:
+    return _EGRESS_GUARD.get()
+
+
+def bind_egress_guard(guard: EgressGuard) -> Token[EgressGuard | None]:
+    return _EGRESS_GUARD.set(guard)
+
+
+def unbind_egress_guard(token: Token[EgressGuard | None]) -> None:
+    _EGRESS_GUARD.reset(token)

@@ -1059,5 +1059,22 @@
     "input": "{{count}} 个等待你的输入",
     "open": "查看",
     "summarizing": "正在汇总子智能体的结果…"
+  },
+  "managed": {
+    "thinking": "正在处理…",
+    "reconnecting": "连接中断，正在重连…",
+    "loadFailed": "加载会话失败：{{message}}",
+    "retry": "重试",
+    "customToolPending": "等待业务系统处理",
+    "confirmQuestion": "允许执行「{{tool}}」？",
+    "requiresActionBlocked": "请先处理待审批的工具调用",
+    "terminated": "会话已结束",
+    "stop": {
+      "retries": "本轮执行失败，已停止重试",
+      "refusal": "模型拒绝了本次请求",
+      "policy": "本轮内容触发企业合规策略，已停止",
+      "rounds": "已达到最大工具调用轮数",
+      "budget": "本轮已超出托管用量上限"
+    }
   }
 }

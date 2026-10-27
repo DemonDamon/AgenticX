@@ -21,7 +21,7 @@ summary_schema: code-module-summaries/v1
 
 明确不拥有：
 
-- 各 app/feature/package 的实现与 schema（更深 root 优先）。
+- 各 app/feature/package 的实现与 schema（更深 root 优先）；`apps/context-service` 已拆为独立模块，见 `enterprise/conclusions/apps/context-service_conclusion.md`（根结论不展开其内部实现）。
 - `enterprise/docs/**`（控制面 `exclude_paths`）。
 - 客户仓 `customers/*`（独立 git；workspace 仅声明 glob）。
 - 根目录截图 / webm 验收产物（已 exclude 前缀）。
@@ -35,19 +35,20 @@ summary_schema: code-module-summaries/v1
 | npm scripts | `enterprise/package.json` | `visual-tour`、`e2e:iam|sso`、`db:compat:*`、`db:migrate:pg-to-mysql`、`sso:*` |
 | 开发栈 | `scripts/start-dev.sh` | 默认 portal:3000 + admin:3001；`--all` 才含 customers |
 | 含中间件 | `scripts/start-dev-with-infra.sh` | compose 拉 PG/Redis 后再起应用 |
-| 架构图 | `enterprise/assets/enterprise-architecture-{zh,en}.png` | 文档插图，非运行时 |
+| 架构图 | `enterprise/assets/enterprise-architecture-{zh,en}.png` | 文档插图，非运行时（映射刷新期已替换二进制，不描述像素） |
 
 ## Core execution path
 
 1. `pnpm` 按 workspace glob 解析包；Go gateway / Python sdk-py / skill-registry **不**进 pnpm 包图。
-2. `start-dev.sh` 起 Next apps；需要 PG 时走 `start-dev-with-infra.sh`。
-3. 方言合同：`db:compat:list|test`；PG→MySQL：`db:migrate:pg-to-mysql`（`--dry-run` 为 verify）。
+2. `start-dev.sh` 起 Next apps；需要 PG 时走 `start-dev-with-infra.sh`。local 的 `bootstrap.sh` 默认写入 `GATEWAY_REMOTE_BUDGET_CONFIG_URL`（admin `/api/internal/budget-snapshot`）；旧 `.env.local` 若缺该键，`start-dev.sh` 会由 `GATEWAY_REMOTE_PROVIDERS_URL` 推导同路径，避免管理台预算到不了 gateway。
+3. 方言合同：`db:compat:list|test`；PG→MySQL：`db:migrate:pg-to-mysql`（`--dry-run` 为 verify）。`scripts/db-portability/table-manifest.ts` 显式 **47** 表（较 45 表新增 `connector_definitions` / `connector_connections`），`SENSITIVE_COLUMNS` 含 `encrypted_secret`。
 4. 压测脚本在 `scripts/perf/`（k6 + mock-upstream + mint-perf-jwt），不进各 app 模块。
 
 ## Data and configuration
 
 - 根 `packageManager: pnpm@9.12.0`，`engines.node >= 20`。
-- JWT / SSO / admin 密码等由脚本与 turbo `dev.env` 声明，本模块不实现签发。
+- JWT / SSO / admin 密码等由脚本与 turbo `dev.env` 声明，本模块不实现签发；`GATEWAY_REMOTE_BUDGET_CONFIG_URL` 与 providers/quotas 等 remote 地址一并由 `bootstrap.sh` 落 `.env.local`。
+- 仓库 README 快速开始：开发态示例登录为 `admin@agenticx.local`（admin 用 `ADMIN_CONSOLE_LOGIN_PASSWORD`，portal 用 `AUTH_DEV_OWNER_PASSWORD`）。
 - `.env.local.example` 是本地样例，不是密钥源。
 
 ## Dependencies

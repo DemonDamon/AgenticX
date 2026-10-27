@@ -69,6 +69,9 @@ features/chat/
 | `showPrevious/NextResponseVersion()` | 在 query 版本间切换（不同 query 间）|
 | `showPrevious/NextRetryVersion()` | 在 retry 版本间切换（同 query 内）|
 | `cancel(client)` | 调 `client.cancel(activeRequestId)` |
+| `continueResponse(client, assistantMessageId)` | 对带 `interruption` 的**最新**普通 assistant 续写（内部 `regenerateAssistantResponse(..., { continue: true })`） |
+| `attachReportContinuation(sessionId, runId)` | 深度调研报告断点续写：POST `/api/chat/deep-research/continue` 并挂回会话流 |
+| `loadMoreSessions()` | 游标分页拉取更多会话（`historyNextCursor` / `HISTORY_PAGE_SIZE`） |
 | `deleteMessage(messageId)` | 本地删一条 |
 
 **关键模式**：
@@ -102,6 +105,8 @@ features/chat/
 | 方法 | 端点 |
 |---|---|
 | `listSessions` | GET `/api/chat/sessions` |
+| `listSessionsPage({ limit, cursor })` | GET `/api/chat/sessions?limit=&cursor=` → `{ sessions, nextCursor }`（默认 `HISTORY_PAGE_SIZE=40`） |
+| `getSession(sid)` | GET `/api/chat/sessions/{sid}` |
 | `createSession` | POST `/api/chat/sessions` |
 | `getMessages(sid)` | GET `/api/chat/sessions/{sid}/messages` |
 | `appendMessages(sid, msgs)` | POST `/api/chat/sessions/{sid}/messages` |
@@ -193,3 +198,30 @@ export * from "./components/atoms/ToolCallCard";
 - Markdown：`assistant-markdown-components.tsx` 大改（引用/代码/链接）。
 
 Portal 的 deep-research / web-search **编排实现**在 `apps/web-portal/src/lib/*`，本包负责工作区状态与 UI。
+
+## 增量（30e57496 → 22d051f5）
+
+**普通对话「继续生成」与中断边界**
+
+- `ChatMessage.interruption`（`reason` + `contentLength`）经 `history-outbox` 的 `HistoryAppendPayload` 持久化；流式结束若 `finish_reason` 为 length 类或传输失败，store 写入 `STREAM_LENGTH_ERROR` / `STREAM_TRANSPORT_ERROR` / `STREAM_INTERRUPTED_ERROR` 等用户态文案并标记 interruption。
+- `utils/response-checkpoint.ts` + `utils/stream-text-buffer.ts`：流式中途按间隔 checkpoint 到历史（快照带 `disconnected` interruption），渲染侧节流 SSE 增量；`filterMessagesForCompletion` / `prepareAssistantContinuation` 续写时剥离 reasoning，不把 transport 提示当模型上下文。
+- `utils/turn-continuation.ts` 的 `findContinuableResponse` 只认当前会话**最后一条**可续 assistant；`InputArea` 新增 `onContinue`（非 streaming 时显示继续按钮）；`continueResponse` 委托 `regenerateAssistantResponse(..., { continue: true })`。
+- `assistant-content.ts`：`parseAssistantContent(message, streaming)` + 空正文时 `STREAM_EMPTY_RESPONSE_ERROR`；`ReasoningBlock` 用 memo 化 Markdown 减轻流式重绘。
+
+**深度调研报告续写**
+
+- 事件 `report_resume_available`：`DeepResearchContinueCard` + `DeepResearchWorkbench.onContinueReport`；`phase: done` 且存在 resume 事件时 workbench `status` 记为 `failed`（非 completed）。
+- `attachReportContinuation` 调 portal `POST /api/chat/deep-research/continue`；`isReportContinuationAvailable` / timeline label 同步章节进度文案。
+
+**历史与会话列表**
+
+- `hydrateSessions` 拆分 `historyListLoaded`（元数据先到、消息 restore 可滞后）；`loadMoreSessions` + `history-client.listSessionsPage` / `getSession`。
+- `deep-research-hydrate.ts`：`hydratedResearchMessageId` 稳定 ID、`normalizeLegacyHydratedMessageIds` 迁移旧 `dr-*` 前缀；除 latest 外最多再 hydrate 3 个历史 run（`fetchLatestDeepResearchForHydrate` 支持 `runId`）。
+- `deep-research-reconnect.ts`：`createDeepResearchReplayGate` 按已保存 events 计数跳过 SSE 重放。
+
+**反馈与其它**
+
+- 新增 `feedback-client.ts`（`createPortalChatFeedbackClient` → GET/PUT/DELETE `/api/chat/feedback`）；`MessageList` 支持 `feedbackByMessageId` 回显 like/dislike。
+- `sendMessage` 输入可带 `skillId`，`lastSkillIdBySessionId` 按会话记忆；`SendMessageOptions` 支持 `targetSessionId` / `onAccepted`，草稿首条发送有 `draftSubmissionInFlight` 互斥。
+- `model-vision.ts`：MiMo ASR/TTS/v2.5-pro 与扩展智谱 GLM 纯文本 SKU；slug 规则与 provider 解耦（对齐主仓 vision 判据）。
+- 单测：`store.continue-checkpoint.test.ts`、`store.finish-reason.test.ts`、`feedback-client.test.ts`、`DeepResearchContinueCard.test.tsx`、`response-checkpoint` / `stream-text-buffer` / `turn-continuation` 等。

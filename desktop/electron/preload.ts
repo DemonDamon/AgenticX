@@ -1203,6 +1203,25 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("enterprise-login-timeout", handler);
     return () => ipcRenderer.removeListener("enterprise-login-timeout", handler);
   },
+  maGetSession: (sessionId: string) => ipcRenderer.invoke("ma-get-session", { sessionId }),
+  maCreateSession: (payload: { agentId: string; environmentId?: string; title?: string }) =>
+    ipcRenderer.invoke("ma-create-session", payload),
+  maListEvents: (sessionId: string, afterSeq?: number, limit?: number) =>
+    ipcRenderer.invoke("ma-list-events", { sessionId, afterSeq, limit }),
+  maPostEvents: (sessionId: string, events: unknown[]) => ipcRenderer.invoke("ma-post-events", { sessionId, events }),
+  maStreamOpen: (streamId: string, sessionId: string, afterSeq: number) =>
+    ipcRenderer.invoke("ma-stream-open", { streamId, sessionId, afterSeq }),
+  maStreamClose: (streamId: string) => ipcRenderer.invoke("ma-stream-close", { streamId }),
+  onMaStreamFrame: (cb: (payload: { streamId: string; id: number | null; event: string; data: unknown }) => void) => {
+    const handler = (_event: unknown, payload: { streamId: string; id: number | null; event: string; data: unknown }) => cb(payload);
+    ipcRenderer.on("ma-stream-frame", handler as never);
+    return () => ipcRenderer.removeListener("ma-stream-frame", handler as never);
+  },
+  onMaStreamState: (cb: (payload: { streamId: string; state: string; code?: string; message?: string }) => void) => {
+    const handler = (_event: unknown, payload: { streamId: string; state: string; code?: string; message?: string }) => cb(payload);
+    ipcRenderer.on("ma-stream-state", handler as never);
+    return () => ipcRenderer.removeListener("ma-stream-state", handler as never);
+  },
   updateSplashStage: async (stage: string) =>
     ipcRenderer.invoke("update-splash-stage", stage) as Promise<{ ok: boolean }>,
   getSplashPreloadEnabled: async () =>

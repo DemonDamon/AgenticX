@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireAdminScopeMock = vi.fn();
 const listAgentsMock = vi.fn();
+const listAgentsWithMaMock = vi.fn();
 const createAgentMock = vi.fn();
 const getAgentMock = vi.fn();
 const updateAgentMock = vi.fn();
@@ -79,6 +80,7 @@ vi.mock("@agenticx/iam-core", () => {
     AgentNotFoundError,
     validateAgentInput,
     listAgents: (...args: unknown[]) => listAgentsMock(...args),
+    listAgentsWithMa: (...args: unknown[]) => listAgentsWithMaMock(...args),
     createAgent: (...args: unknown[]) => createAgentMock(...args),
     getAgent: (...args: unknown[]) => getAgentMock(...args),
     updateAgent: (...args: unknown[]) => updateAgentMock(...args),
@@ -103,6 +105,8 @@ describe("admin agents routes", () => {
   beforeEach(() => {
     requireAdminScopeMock.mockReset();
     listAgentsMock.mockReset();
+    listAgentsWithMaMock.mockReset();
+    listAgentsWithMaMock.mockImplementation((...args: unknown[]) => listAgentsMock(...args));
     createAgentMock.mockReset();
     getAgentMock.mockReset();
     updateAgentMock.mockReset();
@@ -112,13 +116,18 @@ describe("admin agents routes", () => {
   });
 
   it("GET returns agents with the success envelope", async () => {
-    listAgentsMock.mockResolvedValue([{ id: "a1", slug: "report-bot" }]);
+    listAgentsWithMaMock.mockResolvedValue([{ id: "a1", slug: "report-bot", effectiveVersion: 2 }]);
     const response = await GET();
     expect(requireAdminScopeMock).toHaveBeenCalledWith(["provider:read"]);
+    expect(listAgentsWithMaMock).toHaveBeenCalledWith("tenant_test");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { code: string; data?: { agents?: Array<{ slug: string }> } };
+    const body = (await response.json()) as {
+      code: string;
+      data?: { agents?: Array<{ slug: string; effectiveVersion?: number }> };
+    };
     expect(body.code).toBe("00000");
     expect(body.data?.agents?.[0]?.slug).toBe("report-bot");
+    expect(body.data?.agents?.[0]?.effectiveVersion).toBe(2);
   });
 
   it("GET returns 500 with a migrate hint when the table is missing", async () => {

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "cases",
+  "generation": "f2a46dd05e074ac483c93977fde7f4be",
+  "mapping_revision": 1,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:b4e1d1244592863a2813fbcddc7e79b5ee4b98b8854b93dc2890cd0b473fa2f0",
+  "summary_path": "conclusions/cases_module_conclusion.md",
+  "summary_sha256": "sha256:cfed9220d622f9b2e3f326474f734c5d6177a03d7cb2e81b89c2dd7254609ee0",
+  "updated_at": "2026-10-25T03:42:11.250522+00:00"
+}
