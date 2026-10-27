@@ -20,3 +20,19 @@ def test_query_result_truncated_flag():
 def test_write_denied_is_runtime_error():
     with pytest.raises(WriteDeniedError):
         raise WriteDeniedError("missing grant")
+
+
+from agenticx.data_suite.channels.grants import WriteGrantStore
+
+
+def test_grant_store_denies_unknown():
+    store = WriteGrantStore(grants={"g1": {"channel": "ch", "table": "events"}})
+    assert store.has_grant("g1", "ch", "events") is True
+    assert store.has_grant("g1", "ch", "other") is False
+    assert store.has_grant("missing", "ch", "events") is False
+
+
+def test_grant_store_records_audit():
+    store = WriteGrantStore(grants={"g1": {"channel": "ch", "table": "events"}})
+    store.record_write(grant_id="g1", channel="ch", table="events", row_count=3)
+    assert store.audit[-1]["row_count"] == 3
