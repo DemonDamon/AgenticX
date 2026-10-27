@@ -30,7 +30,7 @@ jobs:
     name: gitleaks (credentials)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # 扫完整历史
           fetch-depth: 0
@@ -49,7 +49,7 @@ jobs:
     # 只在需要时运行：设置了 CUSTOM_SECRETS_PATTERN 才开启
     if: ${{ github.event_name != 'schedule' || vars.CUSTOM_SCAN_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -158,7 +158,7 @@ jobs:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v7

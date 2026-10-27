@@ -58,7 +58,7 @@ jobs:
       DATABASE_DIALECT: ${{ matrix.dialect }}
       DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://postgres:postgres@127.0.0.1:5432/agenticx' || 'mysql://agenticx:agenticx@127.0.0.1:3306/agenticx' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
