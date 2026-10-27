@@ -26,9 +26,9 @@
     "mysql2": "^3.14.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.6.5",
     "@types/pg": "^8.16.0",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.5"
   }
 }
