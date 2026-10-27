@@ -7,9 +7,9 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { RuntimeObserve } from "../../../components/RuntimeObserve";
 
-const ObservePage = dynamic(() => import("../../metering/agent-traces/page"), { ssr: false });
-const AuditPage = dynamic(() => import("../../audit/page"), { ssr: false });
-const PortalLogsPage = dynamic(() => import("../../portal-logs/page"), { ssr: false });
+const ObservePage = dynamic(() => import("../../metering/agent-traces/agent-traces-page").then((m) => m.AgentTracesPage), { ssr: false });
+const AuditPage = dynamic(() => import("../../audit/audit-page").then((m) => m.AuditPage), { ssr: false });
+const PortalLogsPage = dynamic(() => import("../../portal-logs/portal-logs-page").then((m) => m.PortalLogsPage), { ssr: false });
 const ErrorsPage = dynamic(() => import("../../admin/errors/page"), { ssr: false });
 const PerfPage = dynamic(() => import("../../admin/perf/page"), { ssr: false });
 const ManagedSessionsPanel = dynamic(() => import("../../../components/managed-sessions/ManagedSessionsPanel"), { ssr: false });

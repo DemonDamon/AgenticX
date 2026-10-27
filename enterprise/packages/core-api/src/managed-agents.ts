@@ -4,7 +4,7 @@
  * Validation rules and error strings match `agenticx/managed/manifest.py`.
  */
 
-import { createHash } from "node:crypto";
+import { createHash } from "crypto";
 
 export const PROTOCOL_VERSION = "agx-ma/2026-11" as const;
 export const MANIFEST_SCHEMA = "agx.agent/v1" as const;

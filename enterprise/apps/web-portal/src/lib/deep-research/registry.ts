@@ -11,6 +11,10 @@ export type Citation = {
   snippet: string;
   /** 抓取成功的网页正文；失败时 undefined，证据包降级用 snippet。 */
   fullText?: string;
+  /** web hit vs user-uploaded attachment */
+  sourceType?: "web" | "attachment";
+  sourceLabel?: string;
+  publishedAt?: string;
 };
 
 export function normalizeCitationUrl(raw: string): string {

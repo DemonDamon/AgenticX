@@ -4,4 +4,3 @@ export * from "./errors";
 export * from "./audit";
 export * from "./trace";
 export * from "./managed-agents";
-export * from "./managed-evals";

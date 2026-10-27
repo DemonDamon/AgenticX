@@ -1,4 +1,4 @@
-import { validateRubric } from "@agenticx/core-api";
+import { validateRubric } from "@agenticx/core-api/managed-evals";
 import {
   maEvalDatasetItems as pgItems,
   maEvalDatasets as pgDatasets,

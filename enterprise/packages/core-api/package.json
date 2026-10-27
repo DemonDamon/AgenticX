@@ -9,5 +9,9 @@
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./managed-evals": "./src/managed-evals.ts"
   }
 }

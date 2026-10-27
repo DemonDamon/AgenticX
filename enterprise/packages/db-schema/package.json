@@ -2,7 +2,7 @@
   "name": "@agenticx/db-schema",
   "version": "0.1.0",
   "private": true,
-  "description": "Drizzle schema\uff08\u591a\u79df\u6237\u5b57\u6bb5\u9884\u7559\uff09",
+  "description": "Drizzle schema（多租户字段预留）",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
@@ -29,10 +29,10 @@
     "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^20.19.0",
     "drizzle-kit": "^0.31.10",
-    "vitest": "^5.0.5",
-    "typescript": "^7.0.2"
+    "typescript": "5.9.3",
+    "vitest": "^5.0.5"
   },
   "exports": {
     ".": "./src/index.ts",
