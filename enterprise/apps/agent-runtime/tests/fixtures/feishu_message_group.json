@@ -1,0 +1,20 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_type": "im.message.receive_v1"
+  },
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_x"
+      }
+    },
+    "message": {
+      "message_id": "om_1",
+      "chat_id": "oc_x",
+      "chat_type": "group",
+      "message_type": "text",
+      "content": "{\"text\":\"@_user_1 帮我总结\"}"
+    }
+  }
+}

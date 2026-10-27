@@ -1,0 +1,18 @@
+kind: agent
+slug: report-bot
+display_name: 报表助手
+description: 生成每日销售摘要
+runtime: cloud
+assignment_keys: [all]
+worker_keys: []
+note: 初次通过 CLI 发布
+manifest:
+  schema: agx.agent/v1
+  model: openai/gpt-4o-mini
+  system: 你是报表助手，回答简洁。
+  tools:
+    - type: agx_builtin
+      default_policy: always_allow
+      configs:
+        - {name: bash_exec, enabled: false}
+  runtime: {max_tool_rounds: 8}

@@ -1,0 +1,22 @@
+/** 与协议包 PAT_SCOPES 逐项一致（测试保证）。客户端组件可安全 import，且本文件不引用该包。 */
+export const MA_PAT_SCOPE_OPTIONS = [
+  "ma:agents:read",
+  "ma:agents:write",
+  "ma:environments:read",
+  "ma:environments:write",
+  "ma:sessions:read",
+  "ma:sessions:write",
+  "ma:sessions:on_behalf",
+  "ma:worker",
+  "ma:vaults:read",
+  "ma:vaults:write",
+  "ma:memory:read",
+  "ma:memory:write",
+  "ma:schedules:read",
+  "ma:schedules:write",
+  "ma:webhooks:read",
+  "ma:webhooks:write",
+  "ma:channels:read",
+  "ma:channels:write",
+  "ma:admin",
+] as const;

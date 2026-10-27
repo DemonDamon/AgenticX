@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "memory",
-  "generation": "5f356c50ea9e41a8822244ddb89b1b7f",
+  "generation": "29c9bf0c63074864a8ce1c3568eb5d2d",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:f8b9b263915275b4588196d9729d68fc9d592f50bf430f911db2c1c38f15315a",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:a0b61a6262ca2120c157e9db8a09aebdf058852a8e6b7273392db3307860a4d1",
   "summary_path": "conclusions/memory_module_conclusion.md",
-  "summary_sha256": "sha256:003dbf599ff2aad75d554b41d824995d8e0da145036c544b6f7c7ef17208a5f0",
-  "updated_at": "2026-09-30T00:54:42.825299+00:00"
+  "summary_sha256": "sha256:3f969215865a6ebc76efa8681882bc27b130f78c0bad1cb72844dc3db9b67e7f",
+  "updated_at": "2026-10-25T03:42:14.092066+00:00"
 }

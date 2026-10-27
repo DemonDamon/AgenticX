@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "context-service",
+  "generation": "c1d525037134439d8b9439b711bd376a",
+  "mapping_revision": 1,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:e234660b5cc5a2b1d9497829a55c9d557081206ee81ed01920ad02d1ed490305",
+  "summary_path": "enterprise/conclusions/apps/context-service_conclusion.md",
+  "summary_sha256": "sha256:447302ed4b96cecf0af53310736209db506d666fedcdca3e9a7658a32debd741",
+  "updated_at": "2026-10-25T03:42:38.395438+00:00"
+}

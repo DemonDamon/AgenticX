@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "deploy",
-  "generation": "e46551d7713f4e9ab9b0a05a7f10c310",
+  "generation": "c5b79611e2614382913d4e13784c08ba",
   "mapping_revision": 1,
-  "baseline_commit": "30e57496990b0e2acb18978091d9e623210eaba3",
-  "baseline_tree": "9e11bd92dc6c05fbdd0ce563ef6bb404616a70af",
-  "source_fingerprint": "sha256:02e13bbd0c447c5e74745da0127fd47ec0bb1c2bb08993c3b8b4d0fdf7f9a5c4",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:ed42098268a8c38d21b230a16f07df7100b7e3fab9fe3f83df14c7c4e568697e",
   "summary_path": "enterprise/conclusions/deploy/deploy_conclusion.md",
-  "summary_sha256": "sha256:8cbfa8de2730f45ffd84b7a4ebe4c1ebd80e7c22b66b793ef21a3bf82dc9c02e",
-  "updated_at": "2026-09-17T23:54:07.762821+00:00"
+  "summary_sha256": "sha256:3f81a6e565c9a5eded1597a8fbd8bf9914f6d9aa010aef6a0afeeb0fbdee7834",
+  "updated_at": "2026-10-25T03:42:38.084760+00:00"
 }

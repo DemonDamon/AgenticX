@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  ClipboardItem,
   dialog,
   ipcMain,
   Menu,
@@ -72,6 +73,7 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { MaStreamRegistry, buildCreateSessionBody, maRequest, resolveMaEndpoint } from "./ma-session-client";
 import { flushActionAuditOnce, startActionAuditUploader } from "./action-audit-uploader";
 import {
   buildLoginItemSettings,
@@ -2117,6 +2119,10 @@ let focusModePreviousBounds: { x: number; y: number; width: number; height: numb
 let focusModeWasMaximized = false;
 let apiPort = 8000;
 const apiToken = crypto.randomBytes(16).toString("hex");
+const maStreams = new MaStreamRegistry();
+const maStreamOwners = new Set<number>();
+const MA_SESSION_ID_RE = /^[A-Za-z0-9]{26}$/;
+const MA_STREAM_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 let serveProcess: ChildProcess | null = null;
 let feishuProcess: ChildProcess | null = null;
 let wechatSidecarProcess: ChildProcess | null = null;
@@ -7951,7 +7957,9 @@ function registerEarlyIpc(): void {
       if (image.isEmpty()) {
         return { ok: false, error: "empty image" };
       }
-      clipboard.writeImage(image);
+      await clipboard.write([
+        new ClipboardItem({ "image/png": new Blob([new Uint8Array(image.toPNG())]) }),
+      ]);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };
@@ -8813,6 +8821,100 @@ function registerEarlyIpc(): void {
   });
 }
 
+function maSessionId(value: unknown): string | null {
+  return typeof value === "string" && MA_SESSION_ID_RE.test(value) ? value : null;
+}
+
+function maInvalidRequest() {
+  return { ok: false as const, status: 400, code: "invalid_request", message: "invalid_request" };
+}
+
+function maLoginRequired() {
+  return { ok: false as const, status: 0, code: "enterprise_login_required", message: "请先登录企业账号" };
+}
+
+function clampMaLimit(value: unknown): number {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 500;
+  return Math.min(500, Math.max(1, parsed));
+}
+
+function registerManagedSessionIpc(): void {
+  ipcMain.handle("ma-get-session", async (_event, payload?: { sessionId?: unknown }) => {
+    const sessionId = maSessionId(payload?.sessionId);
+    if (!sessionId) return maInvalidRequest();
+    const gate = resolveMaEndpoint(loadAgxConfig());
+    if (!gate) return maLoginRequired();
+    return maRequest(gate, "GET", `/sessions/${encodeURIComponent(sessionId)}`);
+  });
+
+  ipcMain.handle("ma-list-events", async (_event, payload?: { sessionId?: unknown; afterSeq?: unknown; limit?: unknown }) => {
+    const sessionId = maSessionId(payload?.sessionId);
+    if (!sessionId) return maInvalidRequest();
+    const gate = resolveMaEndpoint(loadAgxConfig());
+    if (!gate) return maLoginRequired();
+    const query: Record<string, string | number | string[]> = { limit: clampMaLimit(payload?.limit) };
+    if (typeof payload?.afterSeq === "number" && Number.isFinite(payload.afterSeq)) {
+      query.after_seq = Math.max(0, Math.floor(payload.afterSeq));
+    }
+    return maRequest(gate, "GET", `/sessions/${encodeURIComponent(sessionId)}/events`, { query });
+  });
+
+  ipcMain.handle("ma-post-events", async (_event, payload?: { sessionId?: unknown; events?: unknown }) => {
+    const sessionId = maSessionId(payload?.sessionId);
+    if (!sessionId) return maInvalidRequest();
+    const events = payload?.events;
+    if (!Array.isArray(events) || events.length < 1 || events.length > 10) return maInvalidRequest();
+    const gate = resolveMaEndpoint(loadAgxConfig());
+    if (!gate) return maLoginRequired();
+    return maRequest(gate, "POST", `/sessions/${encodeURIComponent(sessionId)}/events`, { body: { events } });
+  });
+
+  ipcMain.handle("ma-stream-open", async (event, payload?: { streamId?: unknown; sessionId?: unknown; afterSeq?: unknown }) => {
+    const streamId = typeof payload?.streamId === "string" ? payload.streamId : "";
+    if (!MA_STREAM_ID_RE.test(streamId)) return { ok: false as const, code: "invalid_request" };
+    const sessionId = maSessionId(payload?.sessionId);
+    if (!sessionId) return { ok: false as const, code: "invalid_request" };
+    const gate = resolveMaEndpoint(loadAgxConfig());
+    if (!gate) return { ok: false as const, code: "enterprise_login_required" };
+    const afterSeq = typeof payload?.afterSeq === "number" && Number.isFinite(payload.afterSeq)
+      ? Math.max(0, Math.floor(payload.afterSeq))
+      : 0;
+    const sender = event.sender;
+    const ownerId = sender.id;
+    if (!maStreamOwners.has(ownerId)) {
+      maStreamOwners.add(ownerId);
+      sender.once("destroyed", () => {
+        maStreamOwners.delete(ownerId);
+        maStreams.closeOwner(ownerId);
+      });
+    }
+    maStreams.close(streamId);
+    maStreams.open(streamId, gate, sessionId, afterSeq, {
+      frame: (frame) => {
+        if (!sender.isDestroyed()) sender.send("ma-stream-frame", frame);
+      },
+      state: (state) => {
+        if (!sender.isDestroyed()) sender.send("ma-stream-state", state);
+      },
+    }, ownerId);
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("ma-stream-close", async (_event, payload?: { streamId?: unknown }) => {
+    const streamId = typeof payload?.streamId === "string" ? payload.streamId : "";
+    if (streamId) maStreams.close(streamId);
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("ma-create-session", async (_event, payload?: { agentId?: string; environmentId?: string; title?: string }) => {
+    const ep = resolveMaEndpoint(loadAgxConfig());
+    if (!ep) return maLoginRequired();
+    const built = buildCreateSessionBody(payload);
+    if (!built.ok) return built;
+    return maRequest(ep, "POST", "/sessions", { body: built.body });
+  });
+}
+
 function registerIpc(): void {
   // get-api-base, get-api-auth-token, get-platform, get-connection-mode, load-config
   // are registered early in registerEarlyIpc() — skip here to avoid duplicate handler errors.
@@ -9112,6 +9214,8 @@ function registerIpc(): void {
     });
     return { ok: true };
   });
+
+  registerManagedSessionIpc();
 
   ipcMain.handle("load-gateway-im", async () => {
     const cfg = loadAgxConfig();
@@ -11384,7 +11488,7 @@ function registerIpc(): void {
       const pdfBuffer = await offscreen.webContents.printToPDF({
         pageSize: "A4",
         printBackground: true,
-        margins: { marginType: "default" },
+        margins: { top: 0.39, bottom: 0.39, left: 0.39, right: 0.39 },
       });
       fs.writeFileSync(targetPath, pdfBuffer);
       return { ok: true, canceled: false, path: targetPath };
@@ -14415,7 +14519,7 @@ if (!gotTheLock) {
           ? path.join(process.resourcesPath, "assets", "icon.png")
           : path.resolve(process.cwd(), "assets", "icon.png");
         if (fs.existsSync(iconPath)) {
-          app.dock.setIcon(iconPath);
+          app.dock?.setIcon(iconPath);
         }
       }
 

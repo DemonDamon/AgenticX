@@ -24,6 +24,7 @@ source "$SCRIPT_DIR/lib/logging.sh"
 ALL_APPS=0
 TURBO_UI="tui"
 USE_WEBPACK=0
+WITH_AGENT_RUNTIME="${AGX_START_AGENT_RUNTIME:-0}"
 
 print_help() {
   cat <<'EOF'
@@ -39,12 +40,14 @@ start-dev.sh — 本机启动 enterprise 一条命令
                         或 stream（无交互，纯日志滚动，方便看 Ctrl+C 与日志）
   --webpack             Next 走 webpack（package.json 的 dev:webpack），不用 --turbopack。
                         本机出现「加载很久 → Failed to fetch」、next-server CPU 长期很高时可试。
+  --with-agent-runtime  同时拉起托管运行时 agent-runtime（:8092，需本机 Python 已安装 agenticx 与 apps/agent-runtime/requirements.txt）
   -h, --help            显示本帮助
 
 端口：
   web-portal     http://localhost:3000
   admin-console  http://localhost:3001
   gateway        http://localhost:8088/healthz
+  agent-runtime  http://localhost:8092/healthz（--with-agent-runtime 时）
   (--all 时) customer-hechuang portal  :3100
   (--all 时) customer-hechuang admin   :3101
 EOF
@@ -56,6 +59,7 @@ for arg in "$@"; do
     --ui=tui) TURBO_UI="tui" ;;
     --ui=stream) TURBO_UI="stream" ;;
     --webpack) USE_WEBPACK=1 ;;
+    --with-agent-runtime) WITH_AGENT_RUNTIME=1 ;;
     -h|--help) print_help; exit 0 ;;
     *) echo "[start-dev] 未知参数: $arg (可用 --help 查看)" >&2; exit 2 ;;
   esac
@@ -158,6 +162,17 @@ if [ -z "${GATEWAY_REMOTE_BUDGET_CONFIG_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROV
   export GATEWAY_REMOTE_BUDGET_CONFIG_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/budget-snapshot"
 fi
 
+# 托管智能体凭证库主密钥（本地开发自动生成；生产由部署方注入 MA_VAULT_MASTER_KEY / _FILE）。
+if [ -z "${MA_VAULT_MASTER_KEY:-}" ] && [ -z "${MA_VAULT_MASTER_KEY_FILE:-}" ]; then
+  mkdir -p "$ENTERPRISE_DIR/.local-secrets"
+  export MA_VAULT_MASTER_KEY_FILE="$ENTERPRISE_DIR/.local-secrets/ma_vault_master.key"
+  if [ ! -s "$MA_VAULT_MASTER_KEY_FILE" ]; then
+    openssl rand -base64 48 | tr -d '\n' > "$MA_VAULT_MASTER_KEY_FILE"
+    chmod 600 "$MA_VAULT_MASTER_KEY_FILE"
+    echo "[start-dev] generated $MA_VAULT_MASTER_KEY_FILE"
+  fi
+fi
+
 # 3) 可选自动迁移：仅本地 DB 默认开启，避免共享库被意外改 schema。
 AUTO_MIGRATE="${AGX_AUTO_DB_MIGRATE:-1}"
 if [[ "$AUTO_MIGRATE" = "1" ]]; then
@@ -170,12 +185,37 @@ if [[ "$AUTO_MIGRATE" = "1" ]]; then
         pnpm --filter @agenticx/db-schema db:migrate
       agx_run_with_log "migrate:legacy-runtime" "$MIGRATE_LOG" \
         pnpm migrate:legacy-runtime
+      agx_run_with_log "ma:backfill-agent-versions" "$MIGRATE_LOG" \
+        pnpm ma:backfill-agent-versions
     )
   else
     echo "[start-dev] skip auto migration (non-local DATABASE_URL)."
   fi
 else
   echo "[start-dev] skip auto migration (AGX_AUTO_DB_MIGRATE=$AUTO_MIGRATE)."
+fi
+
+# 3.5) 托管运行时准备（仅 --with-agent-runtime）：内部 token 与本地开发 PAT。
+REPO_ROOT="$(cd "$ENTERPRISE_DIR/.." && pwd)"
+if [ "$WITH_AGENT_RUNTIME" = "1" ]; then
+  SECRETS_DIR="$ENTERPRISE_DIR/.local-secrets"
+  mkdir -p "$SECRETS_DIR"
+  if [ -z "${MA_INTERNAL_TOKEN_FILE:-}" ] && [ -z "${MA_INTERNAL_TOKEN:-}" ]; then
+    export MA_INTERNAL_TOKEN_FILE="$SECRETS_DIR/ma_internal.token"
+  fi
+  if [ -n "${MA_INTERNAL_TOKEN_FILE:-}" ] && [ ! -s "$MA_INTERNAL_TOKEN_FILE" ]; then
+    openssl rand -hex 16 > "$MA_INTERNAL_TOKEN_FILE"
+    chmod 600 "$MA_INTERNAL_TOKEN_FILE"
+    echo "[start-dev] generated $MA_INTERNAL_TOKEN_FILE"
+  fi
+  : "${MA_RUNTIME_GATEWAY_TOKEN_FILE:=$SECRETS_DIR/ma_runtime_gateway.pat}"
+  : "${MA_RUNTIME_SERVICE_TOKEN_FILE:=$SECRETS_DIR/ma_portal_service.pat}"
+  export MA_RUNTIME_GATEWAY_TOKEN_FILE MA_RUNTIME_SERVICE_TOKEN_FILE
+  : "${MA_RUNTIME_URL:=http://127.0.0.1:8092}"
+  export MA_RUNTIME_URL
+  if [ ! -s "$MA_RUNTIME_GATEWAY_TOKEN_FILE" ] || [ ! -s "$MA_RUNTIME_SERVICE_TOKEN_FILE" ]; then
+    ( cd "$ENTERPRISE_DIR" && pnpm ma:provision-dev-tokens ) || echo "[start-dev] 警告：ma:provision-dev-tokens 失败，agent-runtime 将无法调用网关" >&2
+  fi
 fi
 
 # 4) 子进程管理（Ctrl+C 须能一次退出；turbo/next 会起多层子进程，只 kill 父 PID 不够）
@@ -308,11 +348,44 @@ if ! wait_for_http "gateway" "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz
   echo "[start-dev] 手动探活：curl --noproxy '*' http://127.0.0.1:8088/healthz" >&2
 fi
 
+# 7) 可选：托管运行时（Python）。HOME 必须指向隔离目录，避免读写开发者自己的 ~/.agenticx。
+if [ "$WITH_AGENT_RUNTIME" = "1" ]; then
+  AGX_PYTHON="${AGX_PYTHON:-python3}"
+  RT_HOME="$ENTERPRISE_DIR/.runtime/agent-runtime/home"
+  mkdir -p "$RT_HOME"
+  if ! "$AGX_PYTHON" -c "import agenticx, sqlalchemy, asyncpg, psycopg2" >/dev/null 2>&1; then
+    echo "[start-dev] 警告：$AGX_PYTHON 缺少 agenticx / sqlalchemy / asyncpg / psycopg2，跳过 agent-runtime。" >&2
+    echo "          先执行：pip install -e . && pip install -r enterprise/apps/agent-runtime/requirements.txt" >&2
+  elif lsof -nP -iTCP:8092 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "[start-dev] 警告：:8092 已被占用，跳过启动 agent-runtime。" >&2
+  else
+    case "$(uname -s)" in
+      Darwin) _rt_sandbox="${MA_RUNTIME_COMMAND_SANDBOX:-required}" ;;
+      *) _rt_sandbox="${MA_RUNTIME_COMMAND_SANDBOX:-best_effort}" ;;
+    esac
+    echo "[start-dev] booting agent-runtime (:8092, sandbox=$_rt_sandbox) ..."
+    (
+      cd "$ENTERPRISE_DIR/apps/agent-runtime"
+      exec env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        HOME="$RT_HOME" MA_RUNTIME_HOME="$RT_HOME" \
+        PYTHONPATH="$REPO_ROOT:$ENTERPRISE_DIR/apps/agent-runtime" \
+        MA_RUNTIME_ADMIN_URL="${MA_RUNTIME_ADMIN_URL:-http://127.0.0.1:3001}" \
+        MA_RUNTIME_GATEWAY_URL="${MA_RUNTIME_GATEWAY_URL:-${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/v1}" \
+        MA_RUNTIME_COMMAND_SANDBOX="$_rt_sandbox" \
+        "$AGX_PYTHON" -m uvicorn ma_agent_runtime.app:create_app --factory --host 127.0.0.1 --port 8092
+    ) &
+    PIDS+=("$!")
+    wait_for_http "agent-runtime" "http://127.0.0.1:8092/healthz" 60 || \
+      echo "[start-dev] 警告：agent-runtime 未在 60s 内就绪，查看上方日志（常见：MA_INTERNAL_TOKEN / 网关 PAT 缺失、沙箱探测失败）。" >&2
+  fi
+fi
+
 echo
 echo "[start-dev] all services launching. Ctrl+C 结束（约 1s 内退出；卡住可再按一次强制杀进程树）。"
 echo "  - web-portal    http://localhost:3000"
 echo "  - admin-console http://localhost:3001"
 echo "  - gateway       ${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz"
+if [ "$WITH_AGENT_RUNTIME" = "1" ]; then echo "  - agent-runtime http://localhost:8092/healthz"; fi
 if [ -n "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
   echo "    providers ← ${GATEWAY_REMOTE_PROVIDERS_URL}"
 fi

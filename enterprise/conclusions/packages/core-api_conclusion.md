@@ -21,22 +21,22 @@ packages/core-api/
 ## 关键导出
 
 ### chat.ts
-`IsoDateTime`、`EntityId`、`ChatMessageRole`（`system | user | assistant | tool`）、`ToolCallSummary`（status `queued | running | success | failed`）、`ChatMessageAttachment`（name/mime_type/size/data_url）、`ChatMessage`、`ChatSession`、`ChatRequest`、`ChatError`（`code` 注释 4xxxx 业务 / 9xxxx 策略）、`ChatChunk`（流式增量，含 delta/reasoning/tool_call/done/error）、`ChatResponse`（含 `usage` 与 `route: local | private-cloud | third-party`）、`ApiEnvelope<T>`
+`IsoDateTime`、`EntityId`、`ChatMessageRole`（`system | user | assistant | tool`）、`ToolCallSummary`（status `queued | running | success | failed`）、`ChatMessageAttachment`（name/mime_type/size/data_url）、`ChatMessage`（可选 `control: "continue_report"` 续写触发——非用户提问，transcript 隐藏且送模前丢弃；可选 `interruption`：`reason cancelled | failed | disconnected` + `contentLength` 区分模型真实输出与系统追加提示）、`DeepResearchEventPayload` 含 `report_resume_available`（报告提前结束时下发，带 `runId`/`nextRunId`/`completedSections`/`totalSections`）、`ChatSession`、`ChatRequest`、`ChatError`（`code` 注释 4xxxx 业务 / 9xxxx 策略）、`ChatChunk`（流式增量，含 delta/reasoning/tool_call/done/error）、`ChatResponse`（含 `usage` 与 `route: local | private-cloud | third-party`）、`ApiEnvelope<T>`
 
 ### audit.ts
-- `AuditEventType` = `chat_call | tool_call | mcp_tool_call | policy_hit | auth_login | auth_logout | audit_export`（**含 `mcp_tool_call`**）
+- `AuditEventType` = `chat_call | tool_call | mcp_tool_call | desktop_agent_action | policy_hit | auth_login | auth_logout | audit_export`（**含 `mcp_tool_call` 与 Desktop 侧 `desktop_agent_action`**）
 - `AuditRoute` = `local | private-cloud | third-party`
 - `AuditClientType` = `web-portal | desktop | edge-agent | admin-console`
 - `AuditPolicySeverity` = `low | medium | high | critical`；`AuditPolicyAction` = `allow | redact | block`
 - `AuditDigest`（prompt_hash / response_hash / summary）、`AuditPolicyHit`（policy_id / severity / action / matched_rule）
 - `AuditEvent`：字段丰富，含 token/cost/latency、`digest`、`tools_called`、`policies_hit`、MCP 侧（`mcp_server`/`mcp_tool_name`/`mcp_input_hash`/`mcp_output_hash`/`mcp_status`）、**哈希链**（`prev_checksum`/`checksum`/`checksum_version`/`signature`）、**跨境**（`src_region`/`dst_region`/`cross_border`/`residency_rule`）
-- `AuditQueryInput` / `AuditQueryResult`（含 `chain_valid`/`chain_error_at`/`chain_error_reason`/`chain_verification`/`chain_verified_count`/`chain_legacy_unverified`）
+- `AuditQueryInput` / `AuditQueryResult`（查询侧可选 `event_type` 按事件类型过滤；结果含 `chain_valid`/`chain_error_at`/`chain_error_reason`/`chain_verification`/`chain_verified_count`/`chain_legacy_unverified`）
 
 ### errors.ts
 - `BUSINESS_ERROR_CODES`：`40000 / 40100 / 40300 / 40400 / 42900 / 50000`
 - `POLICY_ERROR_CODES`：`90001（REQUEST_BLOCKED）/ 90002（RESPONSE_BLOCKED）`
 - `isPolicyErrorCode`（`/^9\d{4}$/`）
-- `toComplianceMessage`：中文 compliance 消息映射；额外处理 `42901`（token 配额用尽）；**若 fallback 已含「命中策略」则保留网关拼入的具体原因**，避免前端只显示泛化文案；未匹配 fallback 保留原文
+- `toComplianceMessage`：中文 compliance 消息映射；额外处理 `42901`（token 配额用尽）、`42902`（模型服务繁忙）；**若 fallback 已含「命中策略」则保留网关拼入的具体原因**，避免前端只显示泛化文案；未匹配 fallback 保留原文
 
 ### session-title.ts
 - `PLACEHOLDER_SESSION_TITLES_CF`：占位标题集合（微信/飞书/新对话/new chat 等，小写）
@@ -67,3 +67,9 @@ packages/core-api/
 - `src/errors.ts`：错误码表增量（配额/合规类）。
 - `src/audit.ts`：审计事件补 trace 字段。
 - barrel `index.ts` 增加 `export * from "./trace"`。
+
+## 增量（30e57496 → 22d051f5）
+
+- `src/audit.ts`：`AuditEventType` 增加 `desktop_agent_action`；`AuditQueryInput` 增加可选 `event_type?: string` 过滤条件。
+- `src/chat.ts`：`ChatMessage` 增加 `control?: "continue_report"` 与 `interruption?: { reason; contentLength }`；`DeepResearchEventPayload` 增加 `report_resume_available` 变体（章节续写入口）。
+- `src/errors.ts`：`toComplianceMessage` 对 `42902` 映射「模型服务繁忙，请稍后再试。」

@@ -32,7 +32,17 @@
     "CONTRIBUTING.md",
     "CONTRIBUTING_ZN.md",
     "requirements.lock",
-    "setup.py"
+    "setup.py",
+    "SECURITY.md",
+    "cases",
+    "connector-runtime",
+    "diagrams",
+    "gateway_config.dev.example.yaml",
+    "mobile",
+    "paper",
+    "plans",
+    "results",
+    "wiki"
   ],
   "modules": [
     {
@@ -57,6 +67,14 @@
       "roots": ["agenticx/brain"],
       "shared_paths": [],
       "summary_path": "conclusions/brain_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "cases",
+      "name": "Cases",
+      "roots": ["agenticx/cases"],
+      "shared_paths": [],
+      "summary_path": "conclusions/cases_module_conclusion.md",
       "mapping_revision": 1
     },
     {
@@ -89,6 +107,14 @@
       "roots": ["agenticx/collaboration"],
       "shared_paths": [],
       "summary_path": "conclusions/collaboration_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "connectors",
+      "name": "Connectors",
+      "roots": ["agenticx/connectors"],
+      "shared_paths": [],
+      "summary_path": "conclusions/connectors_module_conclusion.md",
       "mapping_revision": 1
     },
     {
@@ -233,6 +259,14 @@
       "roots": ["agenticx/retrieval"],
       "shared_paths": [],
       "summary_path": "conclusions/retrieval_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "rl",
+      "name": "RL",
+      "roots": ["agenticx/rl"],
+      "shared_paths": [],
+      "summary_path": "conclusions/rl_module_conclusion.md",
       "mapping_revision": 1
     },
     {
@@ -401,7 +435,7 @@
       "roots": ["agenticx"],
       "shared_paths": ["pyproject.toml", "requirements.txt"],
       "summary_path": "conclusions/package_root_conclusion.md",
-      "mapping_revision": 2
+      "mapping_revision": 3
     }
   ],
   "retired_modules": []

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "mobile",
+  "generation": "33613914d78046ac8be0d1c3f5960eb8",
+  "mapping_revision": 1,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:13274e45e3ba79f9303dbb95a5bf0e7e37d8e1e8344cbaa3b9e6a11877e830ae",
+  "summary_path": "mobile/conclusions/mobile_conclusion.md",
+  "summary_sha256": "sha256:f6f90c18d7abb6227693d3c8e0d8275343c108914e3efdd54aa6805b34754224",
+  "updated_at": "2026-10-25T03:43:34.290829+00:00"
+}

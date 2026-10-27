@@ -1,6 +1,6 @@
 # AgenticX Brain 模块总结
 
-> 结论更新时间：2026-09-30（覆盖基线 `30e57496990b0e2acb18978091d9e623210eaba3` 之后的变更）
+> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的变更）
 
 ## 模块概述
 
@@ -20,6 +20,7 @@ agenticx/brain/
 ├── runtime_code.py    # CodeBrainRuntime：封装 CodeIndexManager（1 脑 ↔ 1 代码库）
 ├── mount.py           # 挂载解析：可见性判定 + resolve_mounted_brain_ids
 ├── search.py          # 多脑检索聚合：search_docs_brains / search_code_brains
+├── wiki/              # SP31 结构化 wiki 页模型与 integrate-merge（page.py / merge.py）
 ├── wiki_compiler.py   # WikiCompiler：两步 LLM（分析 → 生成）把源文档编译为 wiki 页，支持进度回调与取消
 ├── wiki_compile_queue.py # WikiCompileQueue：单 worker 后台写页队列，脱离入库线程池
 ├── wiki_ops.py        # wiki 运维：单文档编译、写作说明草稿、示例 wiki、清理/维护
@@ -71,15 +72,19 @@ agenticx/brain/
 
 `search_docs_brains` 的 `hits` 把普通 chunk 命中与 wiki 页命中分开排序：wiki 命中判定为 `id` 以 `wiki::` 开头或 `metadata.wiki_page` 非空；chunk 命中按 score 降序截断 `top_k`，wiki 命中按 score 降序最多取 3 条追加在后（因此 `used_top_k` 可能超过 `top_k`）。`search_code_brains` 仍按 score 降序截断。
 
-### Wiki 编译（wiki_compiler.py / wiki_compile_queue.py / wiki_ops.py / wiki_graph.py）
+**分层检索（SP32，`detail` 参数）**：`search_docs_brains(..., detail="compact"|"full")` 默认 `full` 行为不变。`detail="compact"` 时为 L0 索引视图：每条 hit 的 `text` 经 `make_query_snippet` 截为约 280 字、以 query 关键词居中窗口；同时写入线程安全 LRU 全文缓存（上限 256 条，`{brain_id}::{hit_id}`），并附加 `read_full_text` 提示。返回体含 `detail: "compact"` 与中文 `hint`，且省略 `by_brain` 以省 token。L1 全文由 `read_kb_hit(hit_id, brain_id=None)` 从缓存读取；未命中返回 `ok: False` 与英文引导（需先 `knowledge_search`）。对外工具链对应 `knowledge_read(hit_id)`。
+
+### Wiki 编译（wiki/ / wiki_compiler.py / wiki_compile_queue.py / wiki_ops.py / wiki_graph.py）
 
 文档脑可把已入库文档编译为 `<storage_root>/wiki/` 下带 frontmatter 与 `[[wikilink]]` 的 Markdown 页，受 `KBConfig.wiki_compiler`（`enabled` / `provider` / `model`）控制。
 
-- **WikiCompiler.compile_source()**：两步 LLM（抽实体/概念 JSON → 生成 `===FILE: ... ===` 文件块），新增可选 `progress_cb(stage, message)` 与 `cancel_event: threading.Event`。阶段依次为 `reading` / `analyzing` / `generating` / `writing`；LLM 调用经 `_invoke_llm_cancellable` 在 daemon 线程中执行、每 0.25s 轮询取消事件，取消时抛 `WikiCompileCancelled` 并返回 `WikiCompileResult(ok=False, error="已取消")`（在途模型调用被放弃而非中断）。`_invoke_llm` 调用 `ProviderResolver.resolve(provider_name=..., model=...)`。
+- **结构化页模型（`agenticx.brain.wiki`）**：`WikiPage` / `Claim` 解析与渲染 SP31 契约——frontmatter（`title`/`type`/`description`/`sources`/`status`）、`## 要点`（每条须 `（来源: …）` 溯源，无来源抛 `MissingSourceError`）、可选 `## 矛盾` 与 `## 来源`。`integrate_merge(existing, incoming)` 按 claim 归一化 key 合并要点与矛盾列表（溯源去重、只增不删），有矛盾时 `status=contradicted`。`TYPE_DIR` / `slugify` 供编译器路径归一化。
+- **WikiCompiler.compile_source()（SP31 增量）**：源文档 SHA1 与 `wiki/.compile_state.json` 中 `{source_path: {sha, pages}}` 比对，未变则零 LLM 调用直接返回 `WikiCompileResult(ok=True, skipped_reason="源文档未变化…", skipped=已拥有页列表)`。生成块先 `WikiPage.parse`，经 `_resolve_target` 把根目录类型页挪入 `TYPE_DIR`、同 stem 碰撞时合并到已有路径；`_write_block` 对本文档 `owned_pages` 可覆写，跨文档结构化页走 `integrate_merge`，他人 legacy 页仅记录 `preserved` 不写。成功后更新 state 中 sha 与 owned pages。`WikiCompileResult` 另含 `skipped`（preserved 页路径列表）。生成 prompt 强制 SP31 目录与要点/矛盾结构。
+- **WikiCompiler.compile_source()（流程）**：两步 LLM（抽实体/概念 JSON → 生成 `===FILE: ... ===` 文件块），可选 `progress_cb(stage, message)` 与 `cancel_event: threading.Event`。阶段含 `skipped`（未变文档）及 `reading` / `analyzing` / `generating` / `writing`；LLM 经 `_invoke_llm_cancellable` 在 daemon 线程执行、每 0.25s 轮询取消，取消时返回 `WikiCompileResult(ok=False, error="已取消")`。`_invoke_llm` 走 `ProviderResolver.resolve`。
 - **WikiCompileQueue**：`ThreadPoolExecutor(max_workers=1)` 单 worker，使入库线程不被模型调用阻塞。按 `doc_id` 维护状态项（`document_id` / `source_name` / `status` / `message` / `stage` / `progress` / `model`），`progress` 由阶段映射（queued 0 → reading 0.15 → analyzing 0.4 → generating 0.7 → writing 0.9 → 终态 1.0）。`enqueue` 对同一文档递增 generation 并置位旧取消事件（新任务替换旧任务）；`cancel(doc_id=None)` 只取消 `queued`/`running` 项，缺省取消全部；终态为 `done`（「写入 N 页」）/ `failed` / `cancelled` / `skipped`。
 - **schedule_wiki_after_ingest(docs_rt, job)**：仅对 `IngestJobStatus.DONE` 的 job 入队并立即返回；`wiki_compiler.enabled` 为假时记为 `skipped`（「Wiki 编译未打开」）。`wiki_ops.maybe_compile_wiki_after_ingest` 现只是转调它，不再同步编译。
 - **enqueue_wiki_backfill(docs_rt, document_ids=None)**：对已 `KBDocumentStatus.DONE` 的文档补排写页任务，不重新向量化，返回已入队的 doc id 列表。
-- **wiki_ops.compile_document_wiki(docs_rt, doc_id, *, progress_cb, cancel_event)**：单文档编译，使用 `wiki_compiler.provider/model`（不再借用 embedding provider）；未开启返回 `skipped`，未配置供应商/模型返回中文错误，取消返回 `cancelled: True`，成功后刷新脑统计并返回 `written`。
+- **wiki_ops.compile_document_wiki(docs_rt, doc_id, *, progress_cb, cancel_event)**：单文档编译，使用 `wiki_compiler.provider/model`（不再借用 embedding provider）；未开启返回 `skipped`，未配置供应商/模型返回中文错误，取消返回 `cancelled: True`；源文档未变（SP31）返回 `{ok: True, skipped: True, message, written: []}` 供队列终态 `skipped`；成功写入时可选返回 `preserved`（跨文档保留的 legacy 页），并刷新脑统计。
 - **wiki_ops.draft_writing_brief(docs_rt, content="")**：基于最多 40 个已入库文件名（可带原说明做润色）让模型写 2–4 句中文写作说明（`purpose`），要求已配置 wiki 供应商/模型。
 - **wiki_ops.seed_sample_wiki / clear_sample_wiki**：写入/移除内置的 5 页「员工手册」示例 wiki（含 `purpose.md` 默认文本），清理仅删除示例页与空目录，`purpose.md` 仅在内容等于示例文本时清空。
 - **wiki_graph.wiki_graph_payload(dir)**：把 wiki 页序列化为 `{nodes: [{id,title,type,path,sources}], edges: [{source,target}]}` 供浏览 UI。

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "skills",
-  "generation": "52ff3a25613242cc991dba9d1a0769fc",
+  "generation": "34452bcb37d84ef7a07ca76b5cdc62b2",
   "mapping_revision": 1,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:db5d3cdad19e50cf65bc3b2c9d3d8911b6d4b846f92ca4132845e2fab623d04f",
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:3c6248b0fe523033bde1d380def05dc57703fa0e939b4af301176e48205cb6da",
   "summary_path": "conclusions/skills_module_conclusion.md",
-  "summary_sha256": "sha256:6c586d2ebcb253e3c428021fc372eff08974d2c953f1d02e50860a6b51073fc0",
-  "updated_at": "2026-09-30T00:54:11.696479+00:00"
+  "summary_sha256": "sha256:4098dc0177417758d6a525332d8ae4086e80559df0a87954c6635ed24816aedd",
+  "updated_at": "2026-10-25T03:42:15.524945+00:00"
 }

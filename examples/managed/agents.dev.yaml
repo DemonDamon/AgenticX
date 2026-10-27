@@ -1,0 +1,24 @@
+tenant_id: dev
+agents:
+  - id: demo
+    display_name: W1 Demo
+    default_environment_id: local
+    manifest:
+      schema: agx.agent/v1
+      model: openai/gpt-4o-mini
+      system: >-
+        You are a test agent. First run bash_exec with the command `echo ma-w1-ok`.
+        Then call lookup_order with order_id "A-1". Finally summarize both results in one sentence.
+      tools:
+        - type: agx_builtin
+          default_policy: always_allow
+          configs:
+            - {name: bash_exec, policy: always_ask}
+        - type: custom
+          name: lookup_order
+          description: Look up an order status in the caller's system.
+          input_schema:
+            type: object
+            properties: {order_id: {type: string}}
+            required: [order_id]
+      runtime: {max_tool_rounds: 8}

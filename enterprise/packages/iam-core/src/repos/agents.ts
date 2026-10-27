@@ -19,6 +19,16 @@ import {
   mysqlListAgents,
   mysqlUpdateAgent,
 } from "./mysql/agents";
+import { canonicalJson } from "@agenticx/core-api";
+import { deriveProjectionCapabilityIds, type LegacyAgentFields } from "./agent-manifest-legacy";
+import {
+  AgentManifestInvalidError,
+  ensureAgentVersionOneInTx,
+  prepareManifestWithOps,
+  updateAgentWithLegacyVersion,
+  type AgentVersion,
+} from "./agent-version-core";
+import { peekTestAgents, withAgentVersionOps } from "./agent-version-ops";
 
 export type AgentRuntime = "cloud" | "desktop_worker";
 export type AgentStatus = "active" | "disabled";
@@ -86,10 +96,40 @@ export class AgentSlugConflictError extends Error {
   }
 }
 
+export type AgentVersionRouting = "follow_latest" | "pinned";
+export type EnterpriseAgentMa = {
+  latestVersion: number;
+  defaultEnvironmentId: string | null;
+  versionRouting: AgentVersionRouting;
+  pinnedVersion: number | null;
+  /** 生效版本：pinned 且 pinnedVersion 非空时为 pinnedVersion，否则 latestVersion。 */
+  effectiveVersion: number;
+};
+export type EnterpriseAgentWithMa = EnterpriseAgent & EnterpriseAgentMa;
+
+export class AgentHasSessionsError extends Error {
+  constructor(message = "该智能体已有托管会话，不能删除，请改为停用") {
+    super(message);
+    this.name = "AgentHasSessionsError";
+  }
+}
+
+export function resolveEffectiveVersion(
+  ma: Pick<EnterpriseAgentMa, "latestVersion" | "versionRouting" | "pinnedVersion">,
+): number {
+  return ma.versionRouting === "pinned" && ma.pinnedVersion != null ? ma.pinnedVersion : ma.latestVersion;
+}
+
+export type AgentMaSettingsPatch = {
+  defaultEnvironmentId?: string | null;
+  versionRouting?: AgentVersionRouting;
+  pinnedVersion?: number | null;
+};
+
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
 // Crockford ULID，或连接器网关早期的标准 Base32 主键（含 I/L/O/U）。与 @agenticx/config 的 isCapabilityRowId 同一规则。
 const CAPABILITY_ID_RE = /^(mcp|skill):(?:[0-9A-HJKMNP-TV-Z]{26}|[A-Z2-7]{26})$/;
-const SYSTEM_PROMPT_MAX = 16000;
+const SYSTEM_PROMPT_MAX = 65536;
 const MODEL_MAX = 160;
 
 type AgentRow = {
@@ -110,6 +150,10 @@ type AgentRow = {
   ownerUserId?: string | null;
   localAvatarId?: string | null;
   metadata: unknown;
+  latestVersion?: unknown;
+  defaultEnvironmentId?: string | null;
+  versionRouting?: string;
+  pinnedVersion?: unknown;
   createdAt: unknown;
   updatedAt: unknown;
 };
@@ -208,6 +252,60 @@ function mapAgent(row: AgentRow): EnterpriseAgent {
   };
 }
 
+function mapAgentWithMa(row: AgentRow): EnterpriseAgentWithMa {
+  const latestVersion = Number(row.latestVersion ?? 1) || 1;
+  const versionRouting: AgentVersionRouting = row.versionRouting === "pinned" ? "pinned" : "follow_latest";
+  const pinnedVersion = row.pinnedVersion == null ? null : Number(row.pinnedVersion);
+  return {
+    ...mapAgent(row),
+    latestVersion,
+    defaultEnvironmentId: row.defaultEnvironmentId ?? null,
+    versionRouting,
+    pinnedVersion,
+    effectiveVersion: resolveEffectiveVersion({ latestVersion, versionRouting, pinnedVersion }),
+  };
+}
+
+function mapLockedWithMa(row: {
+  id: string;
+  tenantId: string;
+  model: string;
+  systemPrompt: string;
+  capabilityIds: string[];
+  metadata: Record<string, unknown>;
+  runtime: string;
+  latestVersion: number;
+  versionRouting: string;
+  pinnedVersion: number | null;
+  defaultEnvironmentId: string | null;
+}): EnterpriseAgentWithMa {
+  return mapAgentWithMa({
+    id: row.id,
+    tenantId: row.tenantId,
+    slug: "agent",
+    displayName: "Agent",
+    description: null,
+    systemPrompt: row.systemPrompt,
+    model: row.model,
+    runtime: row.runtime,
+    capabilityIds: row.capabilityIds,
+    assignmentKeys: ["all"],
+    workerKeys: [],
+    status: "active",
+    lifecycle: "published",
+    origin: "enterprise",
+    ownerUserId: null,
+    localAvatarId: null,
+    metadata: row.metadata,
+    latestVersion: row.latestVersion,
+    defaultEnvironmentId: row.defaultEnvironmentId,
+    versionRouting: row.versionRouting,
+    pinnedVersion: row.pinnedVersion,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  });
+}
+
 /** drizzle 把驱动错误挂在 cause 上，PG 23505 / MySQL 1062 都要顺着链找。 */
 function isUniqueViolation(error: unknown): boolean {
   const seen = new Set<unknown>();
@@ -219,6 +317,24 @@ function isUniqueViolation(error: unknown): boolean {
     if (
       typeof coded.message === "string" &&
       /duplicate key|ER_DUP_ENTRY|enterprise_agents_tenant_slug_uq/i.test(coded.message)
+    ) {
+      return true;
+    }
+    current = coded.cause;
+  }
+  return false;
+}
+
+export function isForeignKeyViolation(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const coded = current as { code?: string; errno?: number; cause?: unknown; message?: string };
+    if (coded.code === "23503" || coded.code === "ER_ROW_IS_REFERENCED_2" || coded.errno === 1451) return true;
+    if (
+      typeof coded.message === "string" &&
+      /violates foreign key constraint|ER_ROW_IS_REFERENCED|ma_sessions_agent_fk/i.test(coded.message)
     ) {
       return true;
     }
@@ -256,7 +372,7 @@ export function validateAgentInput(input: AgentInput): void {
     throw new AgentValidationError("来源不合法");
   }
   if (input.systemPrompt !== undefined && input.systemPrompt.length > SYSTEM_PROMPT_MAX) {
-    throw new AgentValidationError("系统提示词不能超过 16000 字");
+    throw new AgentValidationError("系统提示词不能超过 65536 字");
   }
   if (input.capabilityIds !== undefined) {
     if (!Array.isArray(input.capabilityIds)) throw new AgentValidationError("能力标识不合法");
@@ -326,22 +442,42 @@ async function findRow(tenantId: string, id: string): Promise<AgentRow | null> {
   return (rows[0] as AgentRow | undefined) ?? null;
 }
 
-export async function listAgents(
-  tenantId: string,
-  opts?: { status?: AgentStatus },
-): Promise<EnterpriseAgent[]> {
+async function listRows(tenantId: string, status?: AgentStatus): Promise<AgentRow[]> {
   const rows = isMysql()
-    ? await mysqlListAgents(tenantId, opts?.status)
+    ? await mysqlListAgents(tenantId, status)
     : await getIamDb()
         .select()
         .from(pgAgents)
         .where(
-          opts?.status
-            ? and(eq(pgAgents.tenantId, tenantId), eq(pgAgents.status, opts.status))
+          status
+            ? and(eq(pgAgents.tenantId, tenantId), eq(pgAgents.status, status))
             : eq(pgAgents.tenantId, tenantId),
         )
         .orderBy(desc(pgAgents.updatedAt));
-  return (rows as AgentRow[]).map(mapAgent);
+  return rows as AgentRow[];
+}
+
+export async function listAgents(
+  tenantId: string,
+  opts?: { status?: AgentStatus },
+): Promise<EnterpriseAgent[]> {
+  return (await listRows(tenantId, opts?.status)).map(mapAgent);
+}
+
+export async function listAgentsWithMa(tenantId: string): Promise<EnterpriseAgentWithMa[]> {
+  return (await listRows(tenantId)).map(mapAgentWithMa);
+}
+
+export async function getAgentWithMa(tenantId: string, id: string): Promise<EnterpriseAgentWithMa> {
+  const testAgents = peekTestAgents(tenantId);
+  if (testAgents) {
+    const hit = testAgents.find((agent) => agent.id === id.trim());
+    if (!hit) throw new AgentNotFoundError();
+    return mapLockedWithMa(hit);
+  }
+  const row = await findRow(tenantId, id.trim());
+  if (!row) throw new AgentNotFoundError();
+  return mapAgentWithMa(row);
 }
 
 export async function getAgent(tenantId: string, id: string): Promise<EnterpriseAgent> {
@@ -410,6 +546,37 @@ export async function updateAgent(
   validateAgentInput(merged);
   const normalized = normalizeForWrite(merged);
   const updatedAt = new Date();
+  const manifestFieldsChanged =
+    normalized.model !== existing.model ||
+    normalized.systemPrompt !== existing.systemPrompt ||
+    normalized.capabilityIds.join("\n") !== existing.capabilityIds.join("\n") ||
+    (patch.metadata !== undefined && canonicalJson(normalized.metadata) !== canonicalJson(existing.metadata));
+  if (manifestFieldsChanged) {
+    const legacyFields: LegacyAgentFields = {
+      model: merged.model,
+      systemPrompt: merged.systemPrompt ?? normalized.systemPrompt,
+      capabilityIds: merged.capabilityIds ?? normalized.capabilityIds,
+      metadata: merged.metadata ?? normalized.metadata,
+    };
+    let outcome: "not_found" | "updated" | "versioned";
+    try {
+      outcome = await withAgentVersionOps((ops) =>
+        updateAgentWithLegacyVersion(
+          ops,
+          tenantId,
+          existing.id,
+          { ...normalized, updatedAt },
+          legacyFields,
+          patch.metadata !== undefined,
+        ),
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new AgentSlugConflictError();
+      throw error;
+    }
+    if (outcome === "not_found") throw new AgentNotFoundError();
+    return getAgent(tenantId, existing.id);
+  }
   try {
     if (isMysql()) await mysqlUpdateAgent(tenantId, existing.id, { ...normalized, updatedAt });
     else
@@ -426,11 +593,128 @@ export async function updateAgent(
 
 export async function deleteAgent(tenantId: string, id: string): Promise<void> {
   const existing = await getAgent(tenantId, id);
-  if (isMysql()) await mysqlDeleteAgent(tenantId, existing.id);
-  else
-    await getIamDb()
-      .delete(pgAgents)
-      .where(and(eq(pgAgents.tenantId, tenantId), eq(pgAgents.id, existing.id)));
+  try {
+    if (isMysql()) await mysqlDeleteAgent(tenantId, existing.id);
+    else
+      await getIamDb()
+        .delete(pgAgents)
+        .where(and(eq(pgAgents.tenantId, tenantId), eq(pgAgents.id, existing.id)));
+  } catch (error) {
+    if (isForeignKeyViolation(error)) throw new AgentHasSessionsError();
+    throw error;
+  }
+}
+
+function normalizeVersionNote(note: string | null | undefined): string | null {
+  if (note == null) return null;
+  const trimmed = note.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 500) throw new AgentValidationError("版本说明不能超过 500 字");
+  return trimmed;
+}
+
+function parseRouting(value: string): AgentVersionRouting {
+  if (value === "follow_latest" || value === "pinned") return value;
+  throw new AgentValidationError("路由方式不合法");
+}
+
+export async function updateAgentMaSettings(
+  tenantId: string,
+  agentId: string,
+  patch: AgentMaSettingsPatch,
+): Promise<EnterpriseAgentWithMa> {
+  if (patch.pinnedVersion !== undefined && patch.versionRouting === undefined) {
+    throw new AgentValidationError("指定固定版本时须同时选择路由方式");
+  }
+  if (patch.versionRouting !== undefined) parseRouting(patch.versionRouting);
+  await withAgentVersionOps(async (ops) => {
+    const agent = await ops.lockAgent(tenantId, agentId);
+    if (!agent) throw new AgentNotFoundError();
+    const settings: {
+      defaultEnvironmentId?: string | null;
+      versionRouting?: string;
+      pinnedVersion?: number | null;
+    } = {};
+    if (patch.versionRouting === "pinned") {
+      if (!Number.isInteger(patch.pinnedVersion) || (patch.pinnedVersion ?? 0) < 1) {
+        throw new AgentValidationError("请选择要固定的版本");
+      }
+      await ensureAgentVersionOneInTx(ops, agent);
+      const pinned = patch.pinnedVersion as number;
+      const found = await ops.findVersion(tenantId, agent.id, pinned);
+      if (!found) throw new AgentValidationError("固定版本不存在");
+      settings.versionRouting = "pinned";
+      settings.pinnedVersion = pinned;
+    } else if (patch.versionRouting === "follow_latest") {
+      settings.versionRouting = "follow_latest";
+      settings.pinnedVersion = null;
+    }
+    if (patch.defaultEnvironmentId !== undefined) {
+      if (patch.defaultEnvironmentId === null || patch.defaultEnvironmentId.trim() === "") {
+        settings.defaultEnvironmentId = null;
+      } else {
+        const env = await ops.findEnvironment(tenantId, patch.defaultEnvironmentId.trim());
+        if (!env || env.status !== "active") throw new AgentValidationError("默认环境不存在或已停用");
+        if (env.type !== agent.runtime) throw new AgentValidationError("默认环境类型与运行方式不一致");
+        settings.defaultEnvironmentId = env.id;
+      }
+    }
+    await ops.setMaSettings(tenantId, agent.id, settings, new Date());
+  });
+  return getAgentWithMa(tenantId, agentId);
+}
+
+export async function createAgentWithInitialVersion(
+  tenantId: string,
+  input: AgentInput,
+  version: { manifest: unknown; note?: string | null; createdBy?: string | null; source: "admin" | "api" | "desktop" },
+): Promise<{ agent: EnterpriseAgentWithMa; version: AgentVersion }> {
+  const id = ulid();
+  let created: AgentVersion | null = null;
+  try {
+    created = await withAgentVersionOps(async (ops) => {
+      const prepared = await prepareManifestWithOps(ops, tenantId, version.manifest, { selfAgentId: id });
+      if (!prepared.ok) throw new AgentManifestInvalidError(prepared.errors);
+      const inputForWrite: AgentInput = {
+        ...input,
+        model: String(prepared.normalized.model ?? ""),
+        systemPrompt: String(prepared.normalized.system ?? ""),
+        capabilityIds: deriveProjectionCapabilityIds(prepared.normalized),
+      };
+      validateAgentInput(inputForWrite);
+      const note = normalizeVersionNote(version.note);
+      const normalized = normalizeForWrite(inputForWrite);
+      const now = new Date();
+      await ops.insertAgent({
+        id,
+        tenantId,
+        ...normalized,
+        latestVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const row: AgentVersion = {
+        id: ulid(),
+        tenantId,
+        agentId: id,
+        version: 1,
+        manifest: prepared.normalized,
+        manifestHash: prepared.manifestHash,
+        note,
+        source: version.source,
+        createdBy: version.createdBy ?? null,
+        createdAt: now.toISOString(),
+      };
+      await ops.insertVersion(row);
+      return row;
+    });
+  } catch (error) {
+    if (error instanceof AgentManifestInvalidError) throw error;
+    if (isUniqueViolation(error)) throw new AgentSlugConflictError();
+    throw error;
+  }
+  if (!created) throw new AgentNotFoundError();
+  return { agent: await getAgentWithMa(tenantId, id), version: created };
 }
 
 function employeeSlug(localAvatarId: string): string {

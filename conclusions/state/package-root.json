@@ -1,12 +1,16 @@
 {
   "schema_version": 1,
   "module_id": "package-root",
-  "generation": "d07f789dd9454ddbb747bd181b428a80",
-  "mapping_revision": 2,
-  "baseline_commit": "ca9d92bec05627539228094cacc30dd6d4879f47",
-  "baseline_tree": "71f4737c2ec6b071cb29abb2de3b301434889025",
-  "source_fingerprint": "sha256:e3a4ecff01f2a2291c5ff8303b5d087cb09c8b82c68d030064273dccd28a55c9",
+  "generation": "d710da6ee0e34f6797907660fb8faa3f",
+  "mapping_revision": 3,
+  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
+  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "source_fingerprint": "sha256:b9d5f7e893967f6ae35d98e3df28d602b6f4eb0ebe34d81b88846546efee7f3b",
   "summary_path": "conclusions/package_root_conclusion.md",
-  "summary_sha256": "sha256:bccbab964410939e15eacb373d2f9c2b5fc0925c3f0002a65daf9c32bed2001b",
-  "updated_at": "2026-09-30T00:54:15.843117+00:00"
+  "summary_sha256": "sha256:df5be52a858852918699fad76c86f13cb4cf0408b4253f6ff13a9c44a1a5b58b",
+  "updated_at": "2026-10-25T03:42:18.024896+00:00",
+  "mapping_refresh": {
+    "previous_mapping_revision": 2,
+    "reason": "split cases, connectors, and rl out of package-root"
+  }
 }

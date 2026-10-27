@@ -8,7 +8,7 @@ summary_schema: code-module-summaries/v1
 
 # AgenticX Reliability 模块总结
 
-> 结论生成时间：2026-09-18（首次创建，覆盖 `30e57496990b0e2acb18978091d9e623210eaba3`）
+> 结论生成时间：2026-10-25（更新至 `22d051f5d18ad83a4c6083683342ab41d7850149`）
 
 ## 模块概述
 
@@ -41,9 +41,11 @@ agenticx/reliability/
 
 每会话一份 append-only 账本（路径经 `agx_home()`，session_id 禁止 `..`/`/`）。
 
-- `CallState`：`dispatched` / `completed` / `failed`。
+- `CallState`：`dispatched` / `completed` / `failed`；`CallRecord.reconciled` 标记已被跨调用对账消费。
 - `Verdict`：`FRESH` / `REPLAY_SKIP` / `AMBIGUOUS` / `IDENTITY_CONFLICT`。
-- `reconcile(call_id, tool_name, arguments)`：同 id 参数不一致 → `IDENTITY_CONFLICT`（`ToolCallIdentityError`）；已完成可跳过重跑 → `REPLAY_SKIP`。
+- `reconcile` / `reconcile_safe(call_id, tool_name, arguments)`：同 id 参数不一致 → `IDENTITY_CONFLICT`（`ToolCallIdentityError`）；已完成可跳过重跑 → `REPLAY_SKIP`。
+- `find_prior_by_canonical_key(canonical_key, dispatched_before, max_age_seconds)`：在截止时间前、年龄窗口内取**最新**未 `reconciled` 的同键记录（仅 `dispatched`/`completed`；`failed` 不阻塞重试）。
+- `mark_reconciled(call_id, note)`：追加 `op: reconciled` 行并置 `reconciled=True`，避免同一历史调用被重复拦截。
 - 写失败不吞掉；损坏文件抛 `LedgerCorruptError`。
 
 ### RunState / RunStateStore（run_state.py）
