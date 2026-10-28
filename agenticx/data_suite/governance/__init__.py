@@ -4,6 +4,8 @@ from agenticx.data_suite.governance.dictionary import (
     FieldDef,
     FieldNotFoundError,
 )
+from agenticx.data_suite.governance.quality import QualityRollup, QualitySnapshot
+from agenticx.data_suite.governance.trust import TrustArbiter, TrustDecision
 
 __all__ = [
     "CleanResult",
@@ -11,4 +13,8 @@ __all__ = [
     "DictionaryCatalog",
     "FieldDef",
     "FieldNotFoundError",
+    "QualityRollup",
+    "QualitySnapshot",
+    "TrustArbiter",
+    "TrustDecision",
 ]
