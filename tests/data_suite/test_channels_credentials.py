@@ -8,6 +8,7 @@ from agenticx.data_suite.channels.credentials import (
 )
 from agenticx.data_suite.channels.fake import FakeChannel
 from agenticx.data_suite.channels.clickhouse import ClickHouseChannel
+from agenticx.data_suite.channels.jdbc import JdbcChannel
 
 
 def test_load_channel_config_missing(monkeypatch):
@@ -44,3 +45,18 @@ def test_build_clickhouse_kind_from_cfg():
 
 def test_redact_secrets():
     assert redact_secrets({"host": "h", "password": "secret"})["password"] == "***"
+
+
+def test_build_jdbc_with_url_returns_jdbc_channel():
+    ch = build_channel(
+        "pg1",
+        cfg={
+            "kind": "jdbc",
+            "url": "sqlite+pysqlite:///:memory:",
+            "dialect": "sqlite",
+        },
+    )
+    assert isinstance(ch, JdbcChannel)
+    assert ch.name == "pg1"
+    probe = ch.probe()
+    assert probe.ok is True
