@@ -29,5 +29,6 @@
 
 ## Status
 
-- **Plans:** writing
-- **Impl:** not started
+- **Plans:** done
+- **Impl:** S2-1…S2-3 landed on `feat/agx-data-suite-p3-spine`
+- **Gate:** auth resolve vitest + admin/portal sso-runtime strategy tests
