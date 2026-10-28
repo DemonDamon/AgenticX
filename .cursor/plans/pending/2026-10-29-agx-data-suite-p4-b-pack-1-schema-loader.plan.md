@@ -8,22 +8,20 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `agenticx/data_suite/pack/__init__.py` | Export PackManifest, LoadedPack, load_pack, PackError |
-| `agenticx/data_suite/pack/manifest.py` | Dataclasses |
+| `agenticx/data_suite/pack/__init__.py` | Export PackManifest, load_pack |
+| `agenticx/data_suite/pack/manifest.py` | Dataclasses: PackManifest, PackPaths |
 | `agenticx/data_suite/pack/loader.py` | `load_pack(root: Path) -> LoadedPack` |
-| `tests/data_suite/fixtures/mini_pack/pack.yaml` | Minimal fixture |
-| `tests/data_suite/test_pack_loader.py` | TDD |
+| `tests/data_suite/test_pack_loader.py` | TDD: missing pack.yaml fails; minimal pack loads |
 
 ## Interfaces
 
 ```python
-class PackError(ValueError): ...
-
 @dataclass(frozen=True)
 class PackManifest:
     id: str
     version: str
     display_name: str
+    # relative paths inside pack root
     channels: str | None = "channels"
     dictionary: str | None = "dictionary"
     quality: str | None = "quality"
@@ -36,11 +34,13 @@ class PackManifest:
 class LoadedPack:
     root: Path
     manifest: PackManifest
-    sections: dict[str, object]  # parsed YAML/JSON per section; {} if absent
+    # raw parsed YAML/JSON payloads keyed by section (empty dict if section absent)
+    sections: dict[str, dict | list]
 ```
 
 ### Task 1
 
-- [ ] Failing test: empty dir → PackError (missing pack.yaml).
-- [ ] Mini fixture + implement loader → green.
+- [ ] Failing test: `load_pack` on empty dir raises `FileNotFoundError` / `PackError` for missing `pack.yaml`.
+- [ ] Minimal fixture pack under `tests/data_suite/fixtures/mini_pack/` with `pack.yaml` only.
+- [ ] Implement manifest + loader; green tests.
 - [ ] Commit: `feat(data-suite): delivery pack manifest and loader`
