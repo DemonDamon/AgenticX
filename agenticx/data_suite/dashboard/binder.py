@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from agenticx.data_suite.dashboard.spec import WidgetSpec
+from agenticx.data_suite.masking import MaskingEngine
 
 
 @dataclass
@@ -65,8 +66,15 @@ def bind_widget(
     rows: List[Dict[str, Any]],
     *,
     filters: Optional[Dict[str, Any]] = None,
+    masking: Optional[MaskingEngine] = None,
+    role: Optional[str] = None,
 ) -> ChartSeries:
-    filtered = _apply_filters(rows, filters)
+    working = rows
+    if masking is not None:
+        if role is None:
+            raise ValueError("role is required when masking is set")
+        working = masking.apply(rows, role=role)
+    filtered = _apply_filters(working, filters)
     if widget.chart == "stat" or not widget.group_by:
         value = _metric_value(filtered, widget.metric, widget.metric_field)
         points = [ChartPoint(name=widget.title, value=value)]
