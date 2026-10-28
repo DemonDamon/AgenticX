@@ -87,3 +87,8 @@ S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交�
 
 - **Done on branch** `feat/agx-data-suite-p3-spine`: `examples/data_suite/golden_path/` one-command + pytest gate.
 - Push/PR still pending (same GitHub 443 constraint as A8).
+
+### Track 2 status (2026-10-28)
+
+- User chose **S2 A7 AuthStrategyRegistry 路由硬化** after S1.
+- Plans: `.cursor/plans/pending/2026-10-28-agx-data-suite-p3-harden-index.plan.md`.
