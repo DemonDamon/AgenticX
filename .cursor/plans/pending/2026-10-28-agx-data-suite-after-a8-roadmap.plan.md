@@ -15,7 +15,7 @@
 | A5 标签圈选 | 元模型 + compute + audience DSL | 标签滚动运营台、下推到真通道未打通 |
 | A6 看板 | 配置 board + drill/compare + admin e2e | portal 产品化、自助取数 API 权限链路未闭环 |
 | A7 安全 | masking + watermark + AuthStrategyRegistry | **路由未全面改用 registry**；密级策略运营面薄 |
-| A8 Agent 模板 | quality/dict-drift/nl2sql runners + examples | 未挂真 Managed schedule/webhook/metering；NL2SQL 无 LLM 闭环 |
+| A8 Agent 模板 | quality/dict-drift/nl2sql + **PatrolScheduleConfig / HttpWebhookSink** | metering billing；NL2SQL 无 LLM 闭环；MA admin schedules UI |
 
 **结论：** 通用引擎「能测、能 demo 切片」；下一阶段不是再开 A9，而是 **硬化 + 贯通 + 产品壳 + B 仓**。
 
@@ -98,3 +98,6 @@ S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交�
 - **S2-5 KafkaChannel done** on spine (in-memory transport + optional live bootstrap; tables-only kafka still Fake). Hive/file remain Fake.
 
 - User asked to **finish remaining S2 Track 2 without further prompts**: S2-6 → S2-7.
+- **S2-6 admin writable API done** on spine (dictionary/boards file store + admin UI).
+- **S2-7 A8 schedule done** on spine (`HttpWebhookSink` + `PatrolScheduleConfig` / `run_patrol_tick` + `patrol-schedule.yaml`; Fake default).
+- **Track 2 Harden complete** (S2-1…S2-7). Push/PR still pending; A9 not started.

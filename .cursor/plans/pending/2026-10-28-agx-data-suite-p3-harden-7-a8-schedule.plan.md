@@ -52,19 +52,19 @@ def run_patrol_tick(
 ## Tasks
 
 ### Task 1 — HttpWebhookSink + schedule config
-- [ ] Tests with stub urlopen / local HTTPServer
-- [ ] Implement sink + PatrolScheduleConfig.load + run_patrol_tick
-- [ ] Commit: `feat(managed): HTTP webhook sink and patrol schedule tick`
+- [x] Tests with stub urlopen / local HTTPServer
+- [x] Implement sink + PatrolScheduleConfig.load + run_patrol_tick
+- [x] Commit: `feat(managed): HTTP webhook sink and patrol schedule tick`
 
 ### Task 2 — Example + golden_path + e2e
-- [ ] Add `patrol-schedule.yaml`; extend `test_data_suite_e2e` or new test
-- [ ] Refactor patrol_stage to call `run_patrol_tick` (Fake when no URL)
-- [ ] Commit: `feat(managed): wire data_suite patrol schedule example`
+- [x] Add `patrol-schedule.yaml`; extend `test_data_suite_e2e` or new test
+- [x] Refactor patrol_stage to call `run_patrol_tick` (Fake when no URL)
+- [x] Commit: `feat(managed): wire data_suite patrol schedule example`
 
 ### Task 3 — Gate
-- [ ] `pytest tests/managed/templates/ tests/data_suite/test_golden_path*.py -v --override-ini='addopts='`
-- [ ] Mark S2 Track 2 complete on harden index + after-a8 roadmap
-- [ ] Docs commit
+- [x] `pytest tests/managed/templates/ tests/data_suite/test_golden_path*.py -v --override-ini='addopts='`
+- [x] Mark S2 Track 2 complete on harden index + after-a8 roadmap
+- [x] Docs commit
 
 ## Done when
 1. HttpWebhookSink POSTs JSON events

@@ -39,5 +39,5 @@
 ## Status
 
 - **Plans:** done
-- **Impl:** S2-1…S2-6 landed; **S2-7 pending** (A8 schedule — do not start until explicitly queued)
-- **Gate:** prior gates + admin data-suite-store vitest + file_store/patrol_schedule pytest
+- **Impl:** S2-1…S2-7 landed; **Track 2 Harden complete** on spine
+- **Gate:** prior gates + admin data-suite-store vitest + file_store/patrol_schedule pytest (36 managed+golden_path passed)
