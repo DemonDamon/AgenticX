@@ -96,3 +96,5 @@ S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交�
 - User chose **S2 A1 扩通道** → **JDBC** then **Kafka**. Plans: `p3-harden-4-jdbc-channel.plan.md`, `p3-harden-5-kafka-channel.plan.md`.
 - **S2-4 JdbcChannel done** on spine (SQLAlchemy; sqlite unit tests; tables-only jdbc still Fake).
 - **S2-5 KafkaChannel done** on spine (in-memory transport + optional live bootstrap; tables-only kafka still Fake). Hive/file remain Fake.
+
+- User asked to **finish remaining S2 Track 2 without further prompts**: S2-6 → S2-7.
