@@ -28,7 +28,7 @@
 | 3 | A4-3 Trust grades | `.cursor/plans/pending/2026-10-28-agx-data-suite-p1-a4-3-trust.plan.md` | Configurable S/A/B/C arbitration; conflict samples resolved by config |
 | 4 | A4-4 Quality metrics | `.cursor/plans/pending/2026-10-28-agx-data-suite-p1-a4-4-quality.plan.md` | Config metrics + daily rollup store + DataFlow hook |
 | 5 | A4-5 Lineage + admin stub | `.cursor/plans/pending/2026-10-28-agx-data-suite-p1-a4-5-lineage-admin.plan.md` | Table-level lineage graph from job logs + admin-console 数据治理 page listing dictionary |
-| 6 | A5 Tag & audience | *(open after A4)* | Define→compute→audience DSL on synthetic fixtures |
+| 6 | A5 Tag & audience | `.cursor/plans/pending/2026-10-28-agx-data-suite-p1-a5-index.plan.md` | Define→compute→audience DSL on synthetic fixtures |
 | 7 | A6 Dashboard framework | *(open after A5)* | One business board fully from config in web-portal |
 
 ## Cross-subplan contracts (lock these names)
@@ -76,4 +76,5 @@ Update parent plan status; open A5 index only when A4-1…A4-5 Done criteria are
 
 - **P0 (A1–A3):** merged to `main` via PR #137 (`ff2ba8d0`).
 - **P1-A4:** planning on `feat/agx-data-suite-p1-a4`.
-- **P1-A5 / A6:** not started.
+- **P1-A5:** done (catalog + compute + audience; same branch as A4).
+- **P1-A6:** not started.
