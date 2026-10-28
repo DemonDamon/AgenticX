@@ -37,5 +37,6 @@
 
 ## Status
 
-- **Plans:** writing
-- **Impl:** not started
+- **Plans:** done
+- **Impl:** S1-1…S1-5 landed on `feat/agx-data-suite-p3-spine`
+- **Gate:** `pytest tests/data_suite/test_golden_path_*.py` + `python examples/data_suite/golden_path/run_golden_path.py`

@@ -82,3 +82,8 @@ AgenticX 主干保持零客户名。用「配置包 + register()」吃掉 10–2
 - Branch: `feat/agx-data-suite-p3-spine` (from A8 tip until A8 merges).
   
 S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交付红利。
+
+### Track 1 status (2026-10-28)
+
+- **Done on branch** `feat/agx-data-suite-p3-spine`: `examples/data_suite/golden_path/` one-command + pytest gate.
+- Push/PR still pending (same GitHub 443 constraint as A8).

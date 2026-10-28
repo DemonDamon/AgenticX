@@ -1,0 +1,6 @@
+# Points at local quality.yaml metrics; tight ceilings so demo alerts fire on dirty slice
+metrics_ref: quality.yaml
+day: "2026-10-28"
+thresholds:
+  null_rate_member_id: 0.1
+  rule_fail_rate: 0.05
