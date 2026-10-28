@@ -1,0 +1,9 @@
+{
+  "members": [
+    {"member_id": "1", "region": "east", "tier": "gold", "status": "active", "orders": 3, "brand": "A", "line": "L1", "config": "C1"},
+    {"member_id": "2", "region": "east", "tier": "silver", "status": "active", "orders": 1, "brand": "A", "line": "L1", "config": "C2"},
+    {"member_id": "3", "region": "west", "tier": "gold", "status": "inactive", "orders": 5, "brand": "A", "line": "L2", "config": "C1"},
+    {"member_id": "4", "region": "west", "tier": "bronze", "status": "active", "orders": 2, "brand": "B", "line": "L1", "config": "C1"},
+    {"member_id": "5", "region": "north", "tier": "gold", "status": "active", "orders": 4, "brand": "B", "line": "L2", "config": "C3"}
+  ]
+}
