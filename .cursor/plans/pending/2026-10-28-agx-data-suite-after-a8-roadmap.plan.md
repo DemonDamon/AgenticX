@@ -73,5 +73,12 @@ AgenticX 主干保持零客户名。用「配置包 + register()」吃掉 10–2
 | **S3 拉 B 仓骨架** | 已有明确客户实施窗口 | scaffold 独立仓 + 第一份脱敏配置包 |
 | **S4 先包装文档/售前** | 近期投标优先于工程 | Track 4 文档为主，工程只合 A8 |
 
-默认推荐：**S1 →（穿插）S2 的 A7 路由收尾 → S3**。  
+默认推荐：**S1 →（穿插）S2 的 A7 路由收尾 → S3**。
+
+## Decision (2026-10-28)
+
+- User chose **S1 黄金路径贯通**.
+- Executable plans: `.cursor/plans/pending/2026-10-28-agx-data-suite-p3-spine-index.plan.md` (S1-1…S1-5).
+- Branch: `feat/agx-data-suite-p3-spine` (from A8 tip until A8 merges).
+  
 S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交付红利。
