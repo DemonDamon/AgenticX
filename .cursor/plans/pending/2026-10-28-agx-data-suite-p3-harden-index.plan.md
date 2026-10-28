@@ -2,17 +2,18 @@
 
 > **Parent roadmap:** `.cursor/plans/pending/2026-10-28-agx-data-suite-after-a8-roadmap.plan.md` (Track 2)
 > **Depends on:** A7 AuthStrategyRegistry already on main (#140). Branch from current spine tip.
-> Sequential: S2-1 → S2-4. Do **not** open A9 compute in this track.
+> Sequential: S2-1 → S2-5. Do **not** open A9 compute in this track.
 
-**Goal:** (1) SSO start/config paths resolve IdP via `AuthStrategyRegistry`; (2) expand A1 with a real JDBC/SQL channel.
+**Goal:** (1) SSO via `AuthStrategyRegistry`; (2) expand A1 with real JDBC + Kafka channels.
 
 **Scope:**
 1. Shared resolve helpers in `@agenticx/auth` strategies.
 2. Admin + portal `*-sso-runtime` apply strategy when building OIDC config (env `STRATEGY` / `BASE_URL`+`REALM`).
 3. OIDC/SAML start routes assert `strategy.protocol` matches the route.
-4. **S2-4:** real `JdbcChannel` (SQLAlchemy; sqlite unit tests); Kafka stays Fake.
+4. **S2-4:** real `JdbcChannel` (SQLAlchemy; sqlite unit tests).
+5. **S2-5:** real `KafkaChannel` (in-memory transport + optional live bootstrap); Hive/file stay Fake.
 
-**Out of scope:** rewriting claim mapping, new IdP protocols, B-layer customer IAM plugins, Kafka/Hive/file real drivers, A9.
+**Out of scope:** rewriting claim mapping, new IdP protocols, B-layer customer IAM plugins, Hive/file real drivers, A9.
 
 ## Subplan order
 
@@ -22,16 +23,17 @@
 | S2-2 | `2026-10-28-agx-data-suite-p3-harden-2-admin-runtime.plan.md` | admin-sso-runtime uses registry; keycloak env path green |
 | S2-3 | `2026-10-28-agx-data-suite-p3-harden-3-portal-routes.plan.md` | portal runtime + start routes protocol guard green |
 | S2-4 | `2026-10-28-agx-data-suite-p3-harden-4-jdbc-channel.plan.md` | JdbcChannel + factory + data_suite pytest green |
+| S2-5 | `2026-10-28-agx-data-suite-p3-harden-5-kafka-channel.plan.md` | KafkaChannel + factory + data_suite pytest green |
 
 ## E2E gate
 
 1. `pnpm --filter @agenticx/auth test` (or package vitest) includes new resolve tests.
 2. Admin + portal runtime unit tests for keycloak baseUrl+realm → issuer.
 3. Existing oidc/saml start tests still pass.
-4. `pytest tests/data_suite/ --override-ini='addopts='` includes JdbcChannel sqlite tests.
+4. `pytest tests/data_suite/ --override-ini='addopts='` includes JdbcChannel sqlite + KafkaChannel memory tests.
 
 ## Status
 
 - **Plans:** done
-- **Impl:** S2-1…S2-4 landed on `feat/agx-data-suite-p3-spine` (JdbcChannel + factory; Kafka stays Fake)
-- **Gate:** auth resolve vitest + admin/portal sso-runtime strategy tests; `tests/data_suite/` green (JdbcChannel sqlite)
+- **Impl:** S2-1…S2-4 landed; **S2-5 Kafka in progress** on `feat/agx-data-suite-p3-spine`
+- **Gate:** auth + SSO runtime tests; `tests/data_suite/` for JDBC + Kafka
