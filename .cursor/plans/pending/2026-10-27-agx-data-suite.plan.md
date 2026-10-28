@@ -115,6 +115,23 @@ Status: implementation-ready（P0 可先行）
 3. P0 是硬闸门：未完成前数据类项目一阶段不可开工。
 4. 脱敏 / 水印若为项目一期验收项，A7 需从 P2 前移。
 
+## P0 状态
+
+- P0（A1–A3）已合入 `main`：PR #137 / `ff2ba8d0`。
+
+## P1 执行拆分
+
+按序执行，勿并行开多条产品线：
+
+1. [P1 Index](./2026-10-28-agx-data-suite-p1-index.plan.md)
+2. [P1-A4-1 Dictionary](./2026-10-28-agx-data-suite-p1-a4-1-dictionary.plan.md)
+3. [P1-A4-2 Cleaning](./2026-10-28-agx-data-suite-p1-a4-2-cleaning.plan.md)
+4. [P1-A4-3 Trust](./2026-10-28-agx-data-suite-p1-a4-3-trust.plan.md)
+5. [P1-A4-4 Quality](./2026-10-28-agx-data-suite-p1-a4-4-quality.plan.md)
+6. [P1-A4-5 Lineage + Admin stub](./2026-10-28-agx-data-suite-p1-a4-5-lineage-admin.plan.md)
+
+A5 / A6 子计划在 A4 Done 后再开。
+
 ## P0 执行拆分（已落地）
 
 按序执行，勿并行开多条产品线：

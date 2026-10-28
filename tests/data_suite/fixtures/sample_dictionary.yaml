@@ -1,0 +1,11 @@
+fields:
+  - name: member_id
+    business_def: Stable member primary key after OneID merge
+    calc_logic: idmapping.merge primary
+    update_freq: daily
+    owner: data-platform
+  - name: mobile_hash
+    business_def: Hashed mobile used as ID edge
+    calc_logic: sha256(mobile_e164)
+    update_freq: daily
+    owner: data-platform

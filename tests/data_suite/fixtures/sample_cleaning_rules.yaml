@@ -1,0 +1,18 @@
+ruleset_id: default
+rules:
+  - id: member_id_required
+    template: not_null
+    field: member_id
+  - id: mobile_hash_format
+    template: regex
+    field: mobile_hash
+    params:
+      pattern: "^[a-f0-9]{64}$"
+  - id: status_allowed
+    template: in_set
+    field: status
+    params:
+      values: ["active", "inactive", "pending"]
+  - id: name_trim
+    template: trim
+    field: display_name

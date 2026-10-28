@@ -1,0 +1,9 @@
+metrics:
+  - id: null_rate_member_id
+    type: null_rate
+    field: member_id
+  - id: distinct_member_id
+    type: distinct_count
+    field: member_id
+  - id: rule_fail_rate
+    type: rule_fail_rate
