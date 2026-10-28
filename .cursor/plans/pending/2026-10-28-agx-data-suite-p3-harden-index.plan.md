@@ -35,5 +35,5 @@
 ## Status
 
 - **Plans:** done
-- **Impl:** S2-1…S2-4 landed; **S2-5 Kafka in progress** on `feat/agx-data-suite-p3-spine`
+- **Impl:** S2-1…S2-5 landed on `feat/agx-data-suite-p3-spine` (**S2-5 KafkaChannel done**)
 - **Gate:** auth + SSO runtime tests; `tests/data_suite/` for JDBC + Kafka

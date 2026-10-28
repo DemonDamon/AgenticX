@@ -53,26 +53,26 @@ class KafkaChannel:
 
 ### Task 1 — Tests + KafkaChannel (in-memory)
 
-- [ ] `tests/data_suite/test_channels_kafka.py`:
+- [x] `tests/data_suite/test_channels_kafka.py`:
   - probe lists seeded topics
   - query `SELECT * FROM events` returns rows / truncated
   - query non-SELECT raises
   - write_rows denied without grant; allowed with grant appends
   - from_dict with tables seeds memory transport
-- [ ] Implement `kafka.py`
-- [ ] Commit: `feat(data-suite): add KafkaChannel with in-memory transport + grants`
+- [x] Implement `kafka.py`
+- [x] Commit: `feat(data-suite): add KafkaChannel with in-memory transport + grants`
 
 ### Task 2 — Factory + exports
 
-- [ ] Wire `build_channel` kafka routing (bootstrap → KafkaChannel; tables-only → Fake)
-- [ ] Export; credential test `test_build_kafka_with_bootstrap_returns_kafka_channel` (may probe ok=False without lib — still isinstance KafkaChannel). Also keep tables-only kafka → Fake if any such test exists / add one.
-- [ ] Commit: `feat(data-suite): route kafka bootstrap configs to KafkaChannel factory`
+- [x] Wire `build_channel` kafka routing (bootstrap → KafkaChannel; tables-only → Fake)
+- [x] Export; credential test `test_build_kafka_with_bootstrap_returns_kafka_channel` (may probe ok=False without lib — still isinstance KafkaChannel). Also keep tables-only kafka → Fake if any such test exists / add one.
+- [x] Commit: `feat(data-suite): route kafka bootstrap configs to KafkaChannel factory`
 
 ### Task 3 — Gate
 
-- [ ] `pytest tests/data_suite/ -v --override-ini='addopts='` green
-- [ ] Update harden index + after-a8 Track 2; mark plan checkboxes
-- [ ] Commit: `docs(plans): mark S2-5 Kafka channel slice complete`
+- [x] `pytest tests/data_suite/ -v --override-ini='addopts='` green
+- [x] Update harden index + after-a8 Track 2; mark plan checkboxes
+- [x] Commit: `docs(plans): mark S2-5 Kafka channel slice complete`
 
 ## Done when
 
