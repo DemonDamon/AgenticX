@@ -33,5 +33,5 @@
 ## Status
 
 - **Plans:** done
-- **Impl:** S2-1…S2-3 landed; **S2-4 JDBC in progress** on `feat/agx-data-suite-p3-spine`
-- **Gate:** auth resolve vitest + admin/portal sso-runtime strategy tests; `tests/data_suite/` for JDBC
+- **Impl:** S2-1…S2-4 landed on `feat/agx-data-suite-p3-spine` (JdbcChannel + factory; Kafka stays Fake)
+- **Gate:** auth resolve vitest + admin/portal sso-runtime strategy tests; `tests/data_suite/` green (JdbcChannel sqlite)

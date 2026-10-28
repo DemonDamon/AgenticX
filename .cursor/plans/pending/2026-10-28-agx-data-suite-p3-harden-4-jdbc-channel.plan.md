@@ -55,31 +55,31 @@ Reuse `agenticx.connectors.database.check_read_only_sql`. Do **not** log passwor
 
 ### Task 1 — Failing tests + JdbcChannel (sqlite memory)
 
-- [ ] Create `tests/data_suite/test_channels_jdbc.py`:
+- [x] Create `tests/data_suite/test_channels_jdbc.py`:
   - `test_jdbc_probe_and_query_sqlite`: create table via engine, probe lists it, `SELECT *` returns rows
   - `test_jdbc_query_rejects_write_sql`: `DELETE` / `INSERT` via `query` raises ValueError (read-only gate)
   - `test_jdbc_write_requires_grant`: WriteDeniedError without grant; with grant inserts and returns count
   - `test_jdbc_from_dict_sqlite_url`: `from_dict(..., {"url": "sqlite+pysqlite:///:memory:"})` works
   - `test_jdbc_probe_missing_sqlalchemy`: if import fails path — optional; or monkeypatch engine connect error → ok=False
-- [ ] Implement `agenticx/data_suite/channels/jdbc.py`
-- [ ] Run: `pytest tests/data_suite/test_channels_jdbc.py -v --override-ini='addopts='`
-- [ ] Commit: `feat(data-suite): add JdbcChannel with SQLAlchemy + grant-gated writes`
+- [x] Implement `agenticx/data_suite/channels/jdbc.py`
+- [x] Run: `pytest tests/data_suite/test_channels_jdbc.py -v --override-ini='addopts='`
+- [x] Commit: `feat(data-suite): add JdbcChannel with SQLAlchemy + grant-gated writes`
 
 ### Task 2 — Factory + exports + credential tests
 
-- [ ] Wire `build_channel` for real jdbc when url/host present; keep Fake for tables-only
-- [ ] Export from `__init__.py`
-- [ ] Extend `test_channels_credentials.py`:
+- [x] Wire `build_channel` for real jdbc when url/host present; keep Fake for tables-only
+- [x] Export from `__init__.py`
+- [x] Extend `test_channels_credentials.py`:
   - `test_build_jdbc_with_url_returns_jdbc_channel`
   - existing `test_build_fake_kind_from_cfg` (tables-only jdbc) must still pass
-- [ ] Run: `pytest tests/data_suite/test_channels_jdbc.py tests/data_suite/test_channels_credentials.py tests/data_suite/test_channels_registry.py -v --override-ini='addopts='`
-- [ ] Commit: `feat(data-suite): route jdbc url configs to JdbcChannel factory`
+- [x] Run: `pytest tests/data_suite/test_channels_jdbc.py tests/data_suite/test_channels_credentials.py tests/data_suite/test_channels_registry.py -v --override-ini='addopts='`
+- [x] Commit: `feat(data-suite): route jdbc url configs to JdbcChannel factory`
 
 ### Task 3 — Gate
 
-- [ ] Run: `pytest tests/data_suite/ -v --override-ini='addopts='` (non-integration green)
-- [ ] Update harden index status + after-a8 Track 2 note
-- [ ] Commit: `docs(plans): mark S2-4 JDBC channel slice complete`
+- [x] Run: `pytest tests/data_suite/ -v --override-ini='addopts='` (non-integration green)
+- [x] Update harden index status + after-a8 Track 2 note
+- [x] Commit: `docs(plans): mark S2-4 JDBC channel slice complete`
 
 ## E2E / Done when
 
