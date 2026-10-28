@@ -72,7 +72,8 @@
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
         "perf": "性能分析",
-        "dataGovernance": "数据治理"
+        "dataGovernance": "数据治理",
+        "dataBoards": "数据看板"
       }
     },
     "health": {
@@ -1607,6 +1608,16 @@
           "businessDef": "业务定义"
         },
         "stubNote": "当前为只读样例数据；CRUD 与质量看板将在后续切片接入。"
+      },
+      "dataBoards": {
+        "title": "数据看板",
+        "description": "配置驱动的业务看板（P1 A6）",
+        "compareOn": "对比：开",
+        "compareOff": "对比：关",
+        "drillReset": "重置下钻",
+        "drillPath": "下钻路径",
+        "drillRoot": "全部",
+        "stubNote": "样例数据与本地绑定逻辑；后续接入 Data Suite API / 权限脱敏。"
       }
     },
     "dashboard": {

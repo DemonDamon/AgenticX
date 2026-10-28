@@ -34,6 +34,7 @@ const PLATFORM_HREFS = [
   "/admin/capabilities",
   "/admin/plugins",
   "/admin/data-governance",
+  "/admin/data-boards",
 ];
 
 function stringRecord(value: object): Record<string, string> {

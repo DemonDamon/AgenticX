@@ -72,7 +72,8 @@
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
         "perf": "Performance Profiling",
-        "dataGovernance": "Data governance"
+        "dataGovernance": "Data governance",
+        "dataBoards": "Data boards"
       }
     },
     "health": {
@@ -1607,6 +1608,16 @@
           "businessDef": "Business definition"
         },
         "stubNote": "Read-only sample data for now; CRUD and quality boards land in later slices."
+      },
+      "dataBoards": {
+        "title": "Data boards",
+        "description": "Config-driven business boards (P1 A6)",
+        "compareOn": "Compare: on",
+        "compareOff": "Compare: off",
+        "drillReset": "Reset drill",
+        "drillPath": "Drill path",
+        "drillRoot": "All",
+        "stubNote": "Sample fixture + client binder; API and masking land later."
       }
     },
     "dashboard": {
