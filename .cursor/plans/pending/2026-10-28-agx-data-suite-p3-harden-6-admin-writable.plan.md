@@ -42,25 +42,25 @@ Seed: first read copies SAMPLE_FIELDS / SAMPLE_BOARD when file missing.
 ## Tasks
 
 ### Task 1 — Python file store (TDD)
-- [ ] `test_file_store.py`: upsert field, list, persist reload; upsert board by id
-- [ ] Implement `file_store.py`
-- [ ] Commit: `feat(data-suite): JSON file store for dictionary and boards`
+- [x] `test_file_store.py`: upsert field, list, persist reload; upsert board by id
+- [x] Implement `file_store.py`
+- [x] Commit: `feat(data-suite): JSON file store for dictionary and boards`
 
 ### Task 2 — Admin store + API routes (TDD)
-- [ ] Vitest for data-suite-store read/write with tmp dir env
-- [ ] Implement store + three routes
-- [ ] Commit: `feat(admin): data-suite dictionary/boards writable file API`
+- [x] Vitest for data-suite-store read/write with tmp dir env
+- [x] Implement store + three routes
+- [x] Commit: `feat(admin): data-suite dictionary/boards writable file API`
 
 ### Task 3 — Wire UI sections
-- [ ] Governance: load fields from GET; form to PUT one field; show stubNote only on error
-- [ ] Boards: GET boards, use first or sample_member_board; keep drill/compare UX
-- [ ] Commit: `feat(admin): wire data-governance/boards UI to writable API`
+- [x] Governance: load fields from GET; form to PUT one field; show stubNote only on error
+- [x] Boards: GET boards, use first or sample_member_board; keep drill/compare UX
+- [x] Commit: `feat(admin): wire data-governance/boards UI to writable API`
 
 ### Task 4 — Gate
-- [ ] `pytest tests/data_suite/test_file_store.py -v --override-ini='addopts='`
-- [ ] `pnpm --filter admin-console exec vitest run src/lib/__tests__/data-suite-store.test.ts` (or package's test script path)
-- [ ] Existing data-board-fixture + data_suite pytest still green
-- [ ] Update harden index; commit docs
+- [x] `pytest tests/data_suite/test_file_store.py -v --override-ini='addopts='`
+- [x] `pnpm --filter admin-console exec vitest run src/lib/__tests__/data-suite-store.test.ts` (or package's test script path)
+- [x] Existing data-board-fixture + data_suite pytest still green
+- [x] Update harden index; commit docs
 
 ## Done when
 1. PUT dictionary field survives process restart (file on disk)

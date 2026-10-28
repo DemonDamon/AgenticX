@@ -39,5 +39,5 @@
 ## Status
 
 - **Plans:** done
-- **Impl:** S2-1…S2-5 landed; **S2-6/S2-7 in progress** (finish Track 2 without further user prompts)
+- **Impl:** S2-1…S2-6 landed; **S2-7 pending** (A8 schedule — do not start until explicitly queued)
 - **Gate:** prior gates + admin data-suite-store vitest + file_store/patrol_schedule pytest
