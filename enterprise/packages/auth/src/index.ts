@@ -21,3 +21,4 @@ export * from "./providers/password-provider";
 export * from "./providers/oidc-provider";
 export * from "./providers/saml-provider";
 export * from "./providers/factory";
+export * from "./strategies";

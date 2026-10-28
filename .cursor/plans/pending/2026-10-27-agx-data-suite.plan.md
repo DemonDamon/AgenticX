@@ -147,3 +147,18 @@ A5 / A6 子计划在 A4 Done 后再开。
 
 - 需求背景（脱敏）：`docs/agx-data-suite/requirement-background.md`
 - 目标架构图：`docs/agx-data-suite/agx-data-suite-architecture.svg`
+
+## P1 状态
+
+- P1（A4–A6）已合入 `main`：PR #138 / #139。
+
+## P2 执行拆分
+
+可执行子计划（顺序执行）：
+
+1. [P2 Index](./2026-10-28-agx-data-suite-p2-index.plan.md)
+2. [P2-A7 Index](./2026-10-28-agx-data-suite-p2-a7-index.plan.md)
+3. A7-1 … A7-5 under `.cursor/plans/pending/2026-10-28-agx-data-suite-p2-a7-*.plan.md`
+
+A8 子计划在 A7 Done 后再开。
+

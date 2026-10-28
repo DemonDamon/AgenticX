@@ -1,0 +1,21 @@
+id: sample_masking
+rules:
+  - field: phone
+    sensitivity: confidential
+    default_strategy: drop
+    strategies:
+      admin: full
+      analyst: partial
+      guest: drop
+  - field: email
+    sensitivity: internal
+    default_strategy: partial
+    strategies:
+      admin: full
+      analyst: partial
+  - field: member_id
+    sensitivity: restricted
+    default_strategy: hash
+    strategies:
+      admin: full
+      guest: drop

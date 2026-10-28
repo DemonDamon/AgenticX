@@ -77,4 +77,4 @@ Update parent plan status; open A5 index only when A4-1…A4-5 Done criteria are
 - **P0 (A1–A3):** merged to `main` via PR #137 (`ff2ba8d0`).
 - **P1-A4:** done (merged via PR #138).
 - **P1-A5:** done (merged via PR #138).
-- **P1-A6:** done on `feat/agx-data-suite-p1-a6` (library + admin boards + e2e).
+- **P1-A6:** merged to `main` via PR #139 (`bb90dfb5`).

@@ -24,6 +24,7 @@ describe("isPlatformSection", () => {
       "plugins",
       "data-governance",
       "data-boards",
+      "data-security",
     ]);
     for (const id of PLATFORM_SECTION_IDS) {
       expect(isPlatformSection(id)).toBe(true);

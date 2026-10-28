@@ -31,6 +31,7 @@ import {
   useUiTheme,
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
+import { PageWatermark, resolvePageWatermarkText } from "./PageWatermark";
 import { useTranslations } from "next-intl";
 import {
   Activity,
@@ -156,6 +157,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
       { href: "/admin/data-governance", labelKey: "dataGovernance", icon: BookMarked },
       { href: "/admin/data-boards", labelKey: "dataBoards", icon: LayoutDashboard },
+      { href: "/admin/data-security", labelKey: "dataSecurity", icon: Shield },
     ],
   },
   {
@@ -757,6 +759,7 @@ export function AppShell({ children }: AppShellProps) {
           </CommandList>
         </CommandDialog>
 
+        <PageWatermark text={resolvePageWatermarkText(process.env.NEXT_PUBLIC_PAGE_WATERMARK)} />
         <Toaster />
       </div>
     </TooltipProvider>
