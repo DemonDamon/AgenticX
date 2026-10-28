@@ -1,0 +1,15 @@
+id_field: member_id
+query:
+  op: and
+  args:
+    - tag: tag_status_active
+      op: eq
+      value: true
+    - op: or
+      args:
+        - tag: tag_premium
+          op: eq
+          value: true
+        - tag: channel
+          op: in
+          value: [app]
