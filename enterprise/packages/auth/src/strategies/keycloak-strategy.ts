@@ -1,7 +1,11 @@
 import type { AuthStrategy, AuthStrategyEndpoints } from "./types";
 
 function trimSlash(url: string): string {
-  return url.replace(/\/+$/, "");
+  let out = url;
+  while (out.endsWith("/")) {
+    out = out.slice(0, -1);
+  }
+  return out;
 }
 
 /** Keycloak is OIDC with realm-scoped discovery defaults. */
