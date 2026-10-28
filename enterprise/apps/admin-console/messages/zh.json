@@ -1600,7 +1600,7 @@
       },
       "dataGovernance": {
         "title": "数据治理",
-        "description": "字段字典与治理能力（P1 stub）",
+        "description": "字段字典（可写 Admin API）",
         "dictionaryTitle": "字段字典",
         "col": {
           "name": "字段",
@@ -1608,7 +1608,20 @@
           "updateFreq": "更新频率",
           "businessDef": "业务定义"
         },
-        "stubNote": "当前为只读样例数据；CRUD 与质量看板将在后续切片接入。"
+        "stubNote": "无法连接字典 API，暂时展示本地种子数据。",
+        "formTitle": "新增/更新字段",
+        "formName": "字段名",
+        "formOwner": "责任人",
+        "formUpdateFreq": "更新频率",
+        "formBusinessDef": "业务定义",
+        "formCalcLogic": "计算逻辑",
+        "save": "保存字段",
+        "saving": "保存中…",
+        "loadFailed": "加载字典失败",
+        "saveSuccess": "字段已保存",
+        "saveFailed": "保存字段失败",
+        "loading": "正在加载字典…",
+        "apiSource": "已从 API 加载"
       },
       "dataBoards": {
         "title": "数据看板",
@@ -1618,7 +1631,10 @@
         "drillReset": "重置下钻",
         "drillPath": "下钻路径",
         "drillRoot": "全部",
-        "stubNote": "样例数据与本地绑定逻辑；后续接入 Data Suite API / 权限脱敏。"
+        "stubNote": "无法连接看板 API，暂时展示本地样例看板。",
+        "loadFailed": "加载看板失败",
+        "loading": "正在加载看板…",
+        "apiSource": "已从 API 加载"
       },
       "dataSecurity": {
         "title": "数据安全",

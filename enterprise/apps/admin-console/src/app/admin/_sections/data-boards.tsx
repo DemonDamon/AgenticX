@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarCard,
   Button,
@@ -16,11 +16,13 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import { LayoutDashboard } from "lucide-react";
+import { adminFetch } from "../../../lib/admin-client-auth";
 import {
   SAMPLE_BOARD,
   SAMPLE_MEMBER_ROWS,
   applyDrill,
   bindWidget,
+  type BoardSpec,
   type BoardWidget,
   type ChartPoint,
 } from "../../../lib/data-board-fixture";
@@ -91,7 +93,6 @@ function WidgetView({
       />
     );
   }
-  // bar (+ optional compare as two series)
   const names = new Set(points.map((p) => p.name));
   if (compare && comparePoints) comparePoints.forEach((p) => names.add(p.name));
   const data = [...names].sort().map((name) => {
@@ -120,17 +121,49 @@ function WidgetView({
   );
 }
 
+function pickBoard(boards: BoardSpec[]): BoardSpec {
+  return boards.find((b) => b.id === SAMPLE_BOARD.id) ?? boards[0] ?? SAMPLE_BOARD;
+}
+
 export default function AdminDataBoardsSection() {
   const t = useTranslations("pages.admin.dataBoards");
+  const [board, setBoard] = useState<BoardSpec>(SAMPLE_BOARD);
+  const [fromApi, setFromApi] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [drillValues, setDrillValues] = useState<string[]>([]);
   const [compare, setCompare] = useState(false);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await adminFetch("/api/admin/data-suite/boards");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { data?: { boards?: BoardSpec[] } };
+      const boards = json.data?.boards ?? [];
+      setBoard(pickBoard(boards));
+      setFromApi(true);
+      setLoadError(false);
+      setDrillValues([]);
+    } catch {
+      setBoard(SAMPLE_BOARD);
+      setFromApi(false);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   const drilledRows = useMemo(
-    () => applyDrill(SAMPLE_MEMBER_ROWS, SAMPLE_BOARD.drillLevels, drillValues),
-    [drillValues],
+    () => applyDrill(SAMPLE_MEMBER_ROWS, board.drillLevels ?? [], drillValues),
+    [board.drillLevels, drillValues],
   );
 
-  const nextLevel = SAMPLE_BOARD.drillLevels[drillValues.length];
+  const nextLevel = board.drillLevels?.[drillValues.length];
   const nextOptions = useMemo(() => {
     if (!nextLevel) return [] as string[];
     return [...new Set(drilledRows.map((r) => String((r as Record<string, unknown>)[nextLevel] ?? "")))].sort();
@@ -142,7 +175,9 @@ export default function AdminDataBoardsSection() {
 
       <Card data-testid="data-boards-sample">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle data-testid="data-boards-title">{SAMPLE_BOARD.title}</CardTitle>
+          <CardTitle data-testid="data-boards-title">
+            {loading ? t("loading") : board.title}
+          </CardTitle>
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -183,7 +218,7 @@ export default function AdminDataBoardsSection() {
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-2">
-            {SAMPLE_BOARD.widgets.map((widget) => {
+            {(board.widgets ?? []).map((widget) => {
               const points = bindWidget(
                 widget,
                 drilledRows,
@@ -204,7 +239,16 @@ export default function AdminDataBoardsSection() {
               );
             })}
           </div>
-          <p className="text-xs text-muted-foreground">{t("stubNote")}</p>
+          {fromApi ? (
+            <p className="text-xs text-muted-foreground" data-testid="data-boards-api-source">
+              {t("apiSource")}
+            </p>
+          ) : null}
+          {loadError ? (
+            <p className="text-xs text-muted-foreground" data-testid="data-boards-stub">
+              {t("stubNote")}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </div>
