@@ -48,4 +48,4 @@ examples/data_suite/delivery_pack/
 ## Status
 
 - **Plans:** writing
-- **Impl:** not started
+- **Impl:** S3-1…S3-5 landed on `feat/agx-data-suite-p4-b-pack`

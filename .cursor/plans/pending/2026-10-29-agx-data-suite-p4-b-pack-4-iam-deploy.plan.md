@@ -15,5 +15,9 @@
 
 ### Task 1
 
-- [ ] Docs + iam stub + loader coverage.
-- [ ] Commit: `docs(data-suite): delivery pack IAM stub and deploy handbook`
+- [x] Docs + iam stub + loader coverage.
+- [x] Commit: `docs(data-suite): delivery pack IAM stub and deploy handbook`
+
+## Status
+
+Done on `feat/agx-data-suite-p4-b-pack`.

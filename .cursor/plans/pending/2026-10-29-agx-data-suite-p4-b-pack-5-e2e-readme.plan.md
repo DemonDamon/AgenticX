@@ -14,6 +14,10 @@
 
 ### Task 1
 
-- [ ] `python examples/data_suite/delivery_pack/apply.py` exits 0.
-- [ ] `pytest tests/data_suite/test_delivery_pack*.py tests/data_suite/test_pack_*.py -q` green.
-- [ ] Commit: `test(data-suite): delivery pack e2e apply gate`
+- [x] `python examples/data_suite/delivery_pack/apply.py` exits 0.
+- [x] `pytest tests/data_suite/test_delivery_pack*.py tests/data_suite/test_pack_*.py -q` green.
+- [x] Commit: `test(data-suite): delivery pack e2e apply gate`
+
+## Status
+
+Done on `feat/agx-data-suite-p4-b-pack`.

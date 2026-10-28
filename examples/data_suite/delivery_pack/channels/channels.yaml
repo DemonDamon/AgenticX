@@ -1,0 +1,37 @@
+# Synthetic FakeChannel bindings — no secrets
+channels:
+  src:
+    kind: fake
+    table: members
+    seed_inline:
+      - member_id: m001
+        external_id: ext-001
+        phone: "13800000001"
+        email: a001@example.com
+        region: east
+        tier: gold
+        status: active
+        brand: Brand-A
+        market: Market-X
+      - member_id: m002
+        external_id: ext-002
+        phone: "13800000002"
+        email: a002@example.com
+        region: west
+        tier: silver
+        status: active
+        brand: Brand-A
+        market: Market-X
+      - member_id: m003
+        external_id: ext-003
+        phone: "13800000003"
+        email: a003@example.com
+        region: east
+        tier: bronze
+        status: inactive
+        brand: Brand-A
+        market: Market-X
+  dst:
+    kind: fake
+    table: members_out
+    grant_id: g_pack_load

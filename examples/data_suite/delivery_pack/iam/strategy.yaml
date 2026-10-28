@@ -1,0 +1,13 @@
+# Placeholder AuthStrategy shape for a real B repo — no secrets here.
+strategy:
+  id: brand_a_oidc_stub
+  type: oidc
+  display_name: Brand-A OIDC (stub)
+  # Real issuer/client_id/client_secret live only in the separate B repo / vault.
+  endpoints:
+    authorize: https://auth.example.invalid/oauth/authorize
+    token: https://auth.example.invalid/oauth/token
+    jwks: https://auth.example.invalid/oauth/jwks
+  notes:
+    - Copy this file into the customer B repository.
+    - Wire AuthStrategyRegistry from env-backed secrets, never commit tokens.

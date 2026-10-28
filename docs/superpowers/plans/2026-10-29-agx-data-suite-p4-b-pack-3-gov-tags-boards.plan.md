@@ -18,5 +18,9 @@
 
 ### Task 1
 
-- [ ] YAML assets + register extensions + tests green.
-- [ ] Commit: `feat(data-suite): register delivery pack governance tags and boards`
+- [x] YAML assets + register extensions + tests green.
+- [x] Commit: `feat(data-suite): register delivery pack governance tags and boards`
+
+## Status
+
+Done on `feat/agx-data-suite-p4-b-pack`.

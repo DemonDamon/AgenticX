@@ -1,0 +1,9 @@
+rules:
+  - id: member_id_complete
+    field: member_id
+    kind: completeness
+    threshold: 1.0
+  - id: status_fresh
+    field: status
+    kind: freshness
+    max_lag_hours: 48

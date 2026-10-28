@@ -40,7 +40,11 @@ class LoadedPack:
 
 ### Task 1
 
-- [ ] Failing test: `load_pack` on empty dir raises `FileNotFoundError` / `PackError` for missing `pack.yaml`.
-- [ ] Minimal fixture pack under `tests/data_suite/fixtures/mini_pack/` with `pack.yaml` only.
-- [ ] Implement manifest + loader; green tests.
-- [ ] Commit: `feat(data-suite): delivery pack manifest and loader`
+- [x] Failing test: `load_pack` on empty dir raises `FileNotFoundError` / `PackError` for missing `pack.yaml`.
+- [x] Minimal fixture pack under `tests/data_suite/fixtures/mini_pack/` with `pack.yaml` only.
+- [x] Implement manifest + loader; green tests.
+- [x] Commit: `feat(data-suite): delivery pack manifest and loader`
+
+## Status
+
+Done on `feat/agx-data-suite-p4-b-pack`.

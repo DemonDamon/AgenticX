@@ -16,6 +16,10 @@
 
 ### Task 1
 
-- [ ] Skeleton YAML committed (Brand-A / Market-X wording only).
-- [ ] `register_pack` wires channels + idmapping; unit test green.
-- [ ] Commit: `feat(data-suite): register delivery pack channels and idmapping`
+- [x] Skeleton YAML committed (Brand-A / Market-X wording only).
+- [x] `register_pack` wires channels + idmapping; unit test green.
+- [x] Commit: `feat(data-suite): register delivery pack channels and idmapping`
+
+## Status
+
+Done on `feat/agx-data-suite-p4-b-pack`.
