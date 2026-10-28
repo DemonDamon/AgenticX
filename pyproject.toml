@@ -112,6 +112,10 @@ desktop-runtime = [
 data-sources = [
     "akshare>=1.14",
 ]
+# ── AGX Data Suite ClickHouse channel ──
+data-suite-ch = [
+    "clickhouse-connect>=0.7.0,<1",
+]
 # ── 额外 LLM 提供者 ──
 llm = [
     "anthropic>=0.40.0,<2",
