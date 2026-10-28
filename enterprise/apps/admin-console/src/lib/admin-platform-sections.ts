@@ -19,6 +19,7 @@ export const PLATFORM_SECTION_IDS = [
   "cases",
   "plugins",
   "data-governance",
+  "data-boards",
 ] as const;
 
 export type PlatformSectionId = (typeof PLATFORM_SECTION_IDS)[number];

@@ -27,7 +27,8 @@
     "saml:mock": "pnpm sso:saml-mock",
     "db:migrate:pg-to-mysql": "tsx scripts/db-portability/migrate-pg-to-mysql.ts",
     "db:verify:pg-to-mysql": "tsx scripts/db-portability/migrate-pg-to-mysql.ts --dry-run",
-    "db:portability:test": "vitest run scripts/db-portability/__tests__/portability.test.ts"
+    "db:portability:test": "vitest run scripts/db-portability/__tests__/portability.test.ts",
+    "e2e:data-boards": "tsx scripts/e2e-data-boards.ts"
   },
   "devDependencies": {
     "@agenticx/iam-core": "workspace:*",
