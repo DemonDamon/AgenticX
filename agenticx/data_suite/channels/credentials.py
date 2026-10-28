@@ -8,6 +8,7 @@ from agenticx.data_suite.channels.clickhouse import ClickHouseChannel
 from agenticx.data_suite.channels.fake import FakeChannel
 from agenticx.data_suite.channels.grants import WriteGrantStore
 from agenticx.data_suite.channels.jdbc import JdbcChannel
+from agenticx.data_suite.channels.kafka import KafkaChannel
 
 _SECRET_KEYS = ("password", "token", "secret", "api_key", "apikey", "access_key")
 
@@ -57,7 +58,16 @@ def build_channel(
         # url/host/path → real driver; tables-only offline fixture → Fake; else empty JdbcChannel
         if has_endpoint or not tables:
             return JdbcChannel.from_dict(name, entry, grants=store)
-    # hive/kafka/file (and tables-only jdbc) share FakeChannel with kind tag
+    if kind == "kafka":
+        has_bootstrap = bool(
+            entry.get("bootstrap_servers")
+            or entry.get("bootstrap")
+            or entry.get("servers")
+        )
+        # bootstrap → KafkaChannel; tables-only offline fixture → Fake; else empty memory
+        if has_bootstrap or not tables:
+            return KafkaChannel.from_dict(name, entry, grants=store)
+    # hive/file (and tables-only jdbc/kafka) share FakeChannel with kind tag
     return FakeChannel(
         name=name,
         tables={str(t): list(rows) if isinstance(rows, list) else [] for t, rows in tables.items()},
