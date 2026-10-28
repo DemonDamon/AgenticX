@@ -75,3 +75,8 @@ AgenticX 主干保持零客户名。用「配置包 + register()」吃掉 10–2
 
 默认推荐：**S1 →（穿插）S2 的 A7 路由收尾 → S3**。  
 S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交付红利。
+
+## Progress note (2026-10-29)
+
+- S1 spine + S2 harden merged via PR #141.
+- **S3 started:** branch `feat/agx-data-suite-p4-b-pack` + plans `2026-10-29-agx-data-suite-p4-b-pack-*.plan.md`.
