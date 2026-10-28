@@ -1,0 +1,8 @@
+# A8 patrol schedule binding (cron is metadata only; no daemon required).
+# webhook_url null → FakeWebhookSink; set an HTTP URL for HttpWebhookSink.
+tick_id: data-suite-patrol
+cron: "0 6 * * *"
+webhook_url: null
+quality_patrol_yaml: ../../../tests/data_suite/fixtures/sample_quality_patrol.yaml
+dict_drift_yaml: ../../../tests/data_suite/fixtures/sample_dict_drift.yaml
+fixtures_dir: ../../../tests/data_suite/fixtures

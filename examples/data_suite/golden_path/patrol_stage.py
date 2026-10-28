@@ -1,19 +1,11 @@
-"""Stage 5: A8 quality + dict-drift patrol with FakeWebhookSink."""
+"""Stage 5: A8 quality + dict-drift patrol via run_patrol_tick (Fake by default)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from agenticx.managed.templates.data_suite import (
-    DictDriftConfig,
-    DictDriftRunner,
-    FakeWebhookSink,
-    QualityPatrolConfig,
-    QualityPatrolRunner,
-    WebhookNotifier,
-    run_scheduled,
-)
+from agenticx.managed.templates.data_suite import PatrolScheduleConfig, run_patrol_tick
 
 ROOT = Path(__file__).resolve().parent
 SEED = ROOT / "seed"
@@ -26,13 +18,16 @@ def run_patrol_stage(
     dict_drift_yaml: Union[str, Path, None] = None,
     dirty_rows: Optional[List[Dict[str, Any]]] = None,
     quarantine: Optional[List[Dict[str, Any]]] = None,
+    webhook_url: Optional[str] = None,
+    tick_id: str = "golden-path",
+    cron: str = "0 6 * * *",
 ) -> Dict[str, Any]:
-    """Run schedule tick; use dirty_rows (default: inject nulls) so demo webhooks fire."""
+    """Run schedule tick; use dirty_rows (default: inject nulls) so demo webhooks fire.
+
+    When ``webhook_url`` is omitted, ``run_patrol_tick`` uses FakeWebhookSink.
+    """
     q_path = Path(quality_patrol_yaml) if quality_patrol_yaml is not None else SEED / "quality_patrol.yaml"
     d_path = Path(dict_drift_yaml) if dict_drift_yaml is not None else SEED / "dict_drift.yaml"
-
-    sink = FakeWebhookSink()
-    notifier = WebhookNotifier(sink)
 
     if dirty_rows is None:
         dirty = [dict(r) for r in rows[:5]]
@@ -42,22 +37,20 @@ def run_patrol_stage(
     if quarantine is None:
         quarantine = [{"rule_id": "demo_null", "row": {}, "reason": "injected"}]
 
-    def tick():
-        qcfg = QualityPatrolConfig.load(q_path, fixtures_dir=SEED)
-        QualityPatrolRunner(qcfg, notifier).run(dirty_rows, quarantine=quarantine)
-        dcfg = DictDriftConfig.load(d_path, fixtures_dir=SEED)
-        todos = DictDriftRunner(dcfg, notifier).run(dirty_rows)
-        return {"todos": len(todos)}
-
-    out = run_scheduled(tick, tick_id="golden-path")
-    kinds = [getattr(e, "kind", None) or (e.get("kind") if isinstance(e, dict) else None) for e in sink.events]
-    # FakeWebhookSink may store WebhookEvent objects
-    if kinds and kinds[0] is None:
-        kinds = [e.kind for e in sink.events]
+    cfg = PatrolScheduleConfig(
+        tick_id=tick_id,
+        cron=cron,
+        webhook_url=webhook_url,
+        quality_patrol_yaml=q_path,
+        dict_drift_yaml=d_path,
+        fixtures_dir=SEED,
+    )
+    out = run_patrol_tick(dirty_rows, cfg=cfg, quarantine=quarantine)
     return {
-        "tick_id": out.get("tick_id") if isinstance(out, dict) else "golden-path",
-        "webhook_kinds": list(kinds),
-        "webhook_count": len(sink.events),
-        "todos": out.get("todos") if isinstance(out, dict) else 0,
-        "events": sink.events,
+        "tick_id": out["tick_id"],
+        "webhook_kinds": list(out["webhook_kinds"]),
+        "webhook_count": out["webhook_count"],
+        "todos": out.get("todos", 0),
+        "events": out.get("events", []),
+        "webhook_mode": out.get("webhook_mode"),
     }
