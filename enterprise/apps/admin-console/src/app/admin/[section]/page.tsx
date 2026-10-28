@@ -19,6 +19,7 @@ import ModelsSection from "../_sections/models";
 import PluginsSection from "../_sections/plugins";
 import DataGovernanceSection from "../_sections/data-governance";
 import DataBoardsSection from "../_sections/data-boards";
+import DataSecuritySection from "../_sections/data-security";
 import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
@@ -42,6 +43,7 @@ const PLATFORM_SECTION_PAGES = {
   plugins: PluginsSection,
   "data-governance": DataGovernanceSection,
   "data-boards": DataBoardsSection,
+  "data-security": DataSecuritySection,
 } as const;
 
 export default async function AdminPlatformSectionPage({

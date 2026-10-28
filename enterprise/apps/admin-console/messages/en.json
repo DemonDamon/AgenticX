@@ -73,7 +73,8 @@
         "errors": "Error Clustering",
         "perf": "Performance Profiling",
         "dataGovernance": "Data governance",
-        "dataBoards": "Data boards"
+        "dataBoards": "Data boards",
+        "dataSecurity": "Data security"
       }
     },
     "health": {
@@ -1618,6 +1619,15 @@
         "drillPath": "Drill path",
         "drillRoot": "All",
         "stubNote": "Sample fixture + client binder; API and masking land later."
+      },
+      "dataSecurity": {
+        "title": "Data security",
+        "description": "Field masking preview and page watermark (P2 A7)",
+        "policyTitle": "Sample masking policy",
+        "policyId": "Policy ID",
+        "rawPhone": "Raw phone",
+        "maskedPhone": "Masked",
+        "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking."
       }
     },
     "dashboard": {

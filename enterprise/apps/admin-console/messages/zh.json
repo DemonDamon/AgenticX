@@ -73,7 +73,8 @@
         "errors": "错误聚类",
         "perf": "性能分析",
         "dataGovernance": "数据治理",
-        "dataBoards": "数据看板"
+        "dataBoards": "数据看板",
+        "dataSecurity": "数据安全"
       }
     },
     "health": {
@@ -1618,6 +1619,15 @@
         "drillPath": "下钻路径",
         "drillRoot": "全部",
         "stubNote": "样例数据与本地绑定逻辑；后续接入 Data Suite API / 权限脱敏。"
+      },
+      "dataSecurity": {
+        "title": "数据安全",
+        "description": "字段脱敏预览与页面水印（P2 A7）",
+        "policyTitle": "脱敏策略样例",
+        "policyId": "策略 ID",
+        "rawPhone": "原始手机号",
+        "maskedPhone": "脱敏后",
+        "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。"
       }
     },
     "dashboard": {

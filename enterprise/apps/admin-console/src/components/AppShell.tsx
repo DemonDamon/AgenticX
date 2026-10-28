@@ -157,6 +157,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
       { href: "/admin/data-governance", labelKey: "dataGovernance", icon: BookMarked },
       { href: "/admin/data-boards", labelKey: "dataBoards", icon: LayoutDashboard },
+      { href: "/admin/data-security", labelKey: "dataSecurity", icon: Shield },
     ],
   },
   {
