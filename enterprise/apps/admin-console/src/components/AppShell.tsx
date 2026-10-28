@@ -71,6 +71,7 @@ import {
   Cable,
   Database,
   Plug,
+  BookMarked,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -152,6 +153,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/connectors", labelKey: "connectors", icon: Cable },
       { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
       { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
+      { href: "/admin/data-governance", labelKey: "dataGovernance", icon: BookMarked },
     ],
   },
   {

@@ -4,6 +4,7 @@ from agenticx.data_suite.governance.dictionary import (
     FieldDef,
     FieldNotFoundError,
 )
+from agenticx.data_suite.governance.lineage_graph import LineageGraph, build_lineage_graph
 from agenticx.data_suite.governance.quality import QualityRollup, QualitySnapshot
 from agenticx.data_suite.governance.trust import TrustArbiter, TrustDecision
 
@@ -13,8 +14,10 @@ __all__ = [
     "DictionaryCatalog",
     "FieldDef",
     "FieldNotFoundError",
+    "LineageGraph",
     "QualityRollup",
     "QualitySnapshot",
     "TrustArbiter",
     "TrustDecision",
+    "build_lineage_graph",
 ]

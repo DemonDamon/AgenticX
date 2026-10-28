@@ -17,6 +17,7 @@ import ConnectorsSection from "../_sections/connectors";
 import McpServersSection from "../_sections/mcp-servers";
 import ModelsSection from "../_sections/models";
 import PluginsSection from "../_sections/plugins";
+import DataGovernanceSection from "../_sections/data-governance";
 import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
@@ -38,6 +39,7 @@ const PLATFORM_SECTION_PAGES = {
   projects: ProjectsSection,
   cases: CasesSection,
   plugins: PluginsSection,
+  "data-governance": DataGovernanceSection,
 } as const;
 
 export default async function AdminPlatformSectionPage({

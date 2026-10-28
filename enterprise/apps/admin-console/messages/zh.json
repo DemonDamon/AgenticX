@@ -71,7 +71,8 @@
         "cases": "案例库",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
-        "perf": "性能分析"
+        "perf": "性能分析",
+        "dataGovernance": "数据治理"
       }
     },
     "health": {
@@ -1594,6 +1595,18 @@
           "cooldownReset": "已重置 cooldown"
         },
         "confirmDelete": "确定删除该 Channel？"
+      },
+      "dataGovernance": {
+        "title": "数据治理",
+        "description": "字段字典与治理能力（P1 stub）",
+        "dictionaryTitle": "字段字典",
+        "col": {
+          "name": "字段",
+          "owner": "责任人",
+          "updateFreq": "更新频率",
+          "businessDef": "业务定义"
+        },
+        "stubNote": "当前为只读样例数据；CRUD 与质量看板将在后续切片接入。"
       }
     },
     "dashboard": {

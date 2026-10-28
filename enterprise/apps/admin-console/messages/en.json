@@ -71,7 +71,8 @@
         "cases": "Case Library",
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
-        "perf": "Performance Profiling"
+        "perf": "Performance Profiling",
+        "dataGovernance": "Data governance"
       }
     },
     "health": {
@@ -1594,6 +1595,18 @@
           "cooldownReset": "Cooldown reset"
         },
         "confirmDelete": "Delete this channel?"
+      },
+      "dataGovernance": {
+        "title": "Data governance",
+        "description": "Field dictionary and governance (P1 stub)",
+        "dictionaryTitle": "Field dictionary",
+        "col": {
+          "name": "Field",
+          "owner": "Owner",
+          "updateFreq": "Update frequency",
+          "businessDef": "Business definition"
+        },
+        "stubNote": "Read-only sample data for now; CRUD and quality boards land in later slices."
       }
     },
     "dashboard": {
