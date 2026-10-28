@@ -20,17 +20,32 @@ const SHOT_DIR =
   path.resolve(__dirname, "../..", "docs/agx-data-suite/shots");
 
 async function adminLogin(page: import("playwright").Page): Promise<void> {
-  await page.goto(`${ADMIN_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.locator('input[type="email"]').first().fill("admin@agenticx.local");
-  await page.locator('input[type="password"]').first().fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: /登录并进入控制台|Sign in to console/i }).click();
-  await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
+  await page.goto(`${ADMIN_BASE}/login`, { waitUntil: "networkidle", timeout: 60_000 });
+  const email = page.locator('input[type="email"]').first();
+  const password = page.locator('input[type="password"]').first();
+  await email.waitFor({ state: "visible", timeout: 20_000 });
+  await email.click();
+  await email.fill("");
+  await email.fill("admin@agenticx.local");
+  await password.click();
+  await password.fill("");
+  await password.fill(ADMIN_PASSWORD);
+  // Ensure controlled inputs picked up values after hydration
+  await page.waitForTimeout(300);
+  await Promise.all([
+    page.waitForURL(/\/dashboard/, { timeout: 45_000 }),
+    page.getByRole("button", { name: /登录并进入控制台|Sign in to console/i }).click(),
+  ]);
 }
 
 async function main() {
   fs.mkdirSync(SHOT_DIR, { recursive: true });
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
   try {
     await adminLogin(page);
     await page.goto(`${ADMIN_BASE}/admin/data-security`, {
@@ -49,6 +64,7 @@ async function main() {
     });
     console.log("[e2e-data-security] ok: policy page, masked phone, watermark");
   } finally {
+    await context.close();
     await browser.close();
   }
 }

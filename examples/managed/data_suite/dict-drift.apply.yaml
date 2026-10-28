@@ -1,0 +1,21 @@
+kind: agent
+slug: dict-drift
+display_name: Dictionary drift patrol
+description: Dictionary drift patrol
+runtime: cloud
+assignment_keys:
+- all
+worker_keys: []
+manifest:
+  schema: agx.agent/v1
+  model: openai/gpt-4o-mini
+  system: You detect dictionary drift and open governance todos.
+  tools:
+  - type: custom
+    name: data_suite_dict_drift
+    description: Run DictDriftRunner on sample rows
+    input_schema:
+      type: object
+      properties: {}
+  runtime:
+    max_tool_rounds: 6

@@ -9,3 +9,5 @@ export { oidcStrategy } from "./oidc-strategy";
 export { samlStrategy } from "./saml-strategy";
 export { keycloakStrategy } from "./keycloak-strategy";
 export { fakeCustomerIamStrategy } from "./fake-customer-iam-strategy";
+export { applyStrategyEndpoints, resolveAuthStrategyId } from "./resolve";
+export type { ResolveAuthStrategyIdInput } from "./resolve";

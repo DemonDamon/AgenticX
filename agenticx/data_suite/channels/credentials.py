@@ -7,6 +7,8 @@ from agenticx.data_suite.channels.base import DataChannel
 from agenticx.data_suite.channels.clickhouse import ClickHouseChannel
 from agenticx.data_suite.channels.fake import FakeChannel
 from agenticx.data_suite.channels.grants import WriteGrantStore
+from agenticx.data_suite.channels.jdbc import JdbcChannel
+from agenticx.data_suite.channels.kafka import KafkaChannel
 
 _SECRET_KEYS = ("password", "token", "secret", "api_key", "apikey", "access_key")
 
@@ -48,9 +50,24 @@ def build_channel(
     store = grants if grants is not None else _grants_from_cfg(entry)
     if kind == "clickhouse":
         return ClickHouseChannel.from_dict(name, entry, grants=store)
-    # P0: jdbc/hive/kafka/file share FakeChannel with kind tag
+    _JDBC_KINDS = {"jdbc", "sql", "postgres", "postgresql", "mysql", "sqlite"}
     tables = entry.get("tables") if isinstance(entry.get("tables"), dict) else {}
     dialect = str(entry.get("dialect") or kind)
+    if kind in _JDBC_KINDS:
+        has_endpoint = bool(entry.get("url") or entry.get("host") or entry.get("path"))
+        # url/host/path → real driver; tables-only offline fixture → Fake; else empty JdbcChannel
+        if has_endpoint or not tables:
+            return JdbcChannel.from_dict(name, entry, grants=store)
+    if kind == "kafka":
+        has_bootstrap = bool(
+            entry.get("bootstrap_servers")
+            or entry.get("bootstrap")
+            or entry.get("servers")
+        )
+        # bootstrap → KafkaChannel; tables-only offline fixture → Fake; else empty memory
+        if has_bootstrap or not tables:
+            return KafkaChannel.from_dict(name, entry, grants=store)
+    # hive/file (and tables-only jdbc/kafka) share FakeChannel with kind tag
     return FakeChannel(
         name=name,
         tables={str(t): list(rows) if isinstance(rows, list) else [] for t, rows in tables.items()},

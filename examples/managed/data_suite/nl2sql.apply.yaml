@@ -1,0 +1,25 @@
+kind: agent
+slug: nl2sql
+display_name: Read-only NL2SQL
+description: Read-only NL2SQL
+runtime: cloud
+assignment_keys:
+- all
+worker_keys: []
+manifest:
+  schema: agx.agent/v1
+  model: openai/gpt-4o-mini
+  system: You answer data questions with read-only SQL only.
+  tools:
+  - type: custom
+    name: data_suite_sql_query
+    description: Run a read-only SELECT
+    input_schema:
+      type: object
+      properties:
+        sql:
+          type: string
+      required:
+      - sql
+  runtime:
+    max_tool_rounds: 6

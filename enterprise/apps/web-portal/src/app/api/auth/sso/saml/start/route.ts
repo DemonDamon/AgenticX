@@ -2,6 +2,7 @@ import { SamlCallbackError, SamlConfigError, createSamlProtocolHandler, DEFAULT_
 import { NextResponse } from "next/server";
 import { isAuthCookieSecure } from "../../../../../../lib/session";
 import {
+  assertPortalSsoStrategyProtocol,
   getPortalSamlProviderConfigServer,
   resolveReturnToOrDefault,
 } from "../../../../../../lib/sso-runtime";
@@ -39,6 +40,12 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const providerId = url.searchParams.get("provider")?.trim() || "default";
   const returnTo = resolveReturnToOrDefault(url.searchParams.get("returnTo"));
+
+  try {
+    assertPortalSsoStrategyProtocol(providerId, "saml");
+  } catch (error) {
+    return NextResponse.redirect(new URL(`/auth?sso_error=${encodeURIComponent(mapStartError(error))}`, url.origin));
+  }
 
   if (isSamlGloballyDisabled()) {
     return NextResponse.redirect(

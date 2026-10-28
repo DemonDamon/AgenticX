@@ -1,6 +1,7 @@
 import { OidcConfigError, buildStateCookieValue } from "@agenticx/auth";
 import { NextResponse } from "next/server";
 import {
+  assertAdminSsoStrategyProtocol,
   getAdminSsoProviderConfigServer,
   getAdminSsoProviderOptions,
   getOidcClientService,
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const requestedProviderId = url.searchParams.get("provider")?.trim() || "default";
   try {
+    assertAdminSsoStrategyProtocol(requestedProviderId, "oidc");
     const providerCandidates = resolveProviderCandidates(requestedProviderId);
     let provider = null;
     let selectedProviderId = requestedProviderId;

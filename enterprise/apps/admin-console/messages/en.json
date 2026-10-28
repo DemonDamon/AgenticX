@@ -1600,7 +1600,7 @@
       },
       "dataGovernance": {
         "title": "Data governance",
-        "description": "Field dictionary and governance (P1 stub)",
+        "description": "Field dictionary with writable admin API",
         "dictionaryTitle": "Field dictionary",
         "col": {
           "name": "Field",
@@ -1608,7 +1608,20 @@
           "updateFreq": "Update frequency",
           "businessDef": "Business definition"
         },
-        "stubNote": "Read-only sample data for now; CRUD and quality boards land in later slices."
+        "stubNote": "Could not reach the dictionary API; showing local seed until the store is available.",
+        "formTitle": "Upsert field",
+        "formName": "Name",
+        "formOwner": "Owner",
+        "formUpdateFreq": "Update frequency",
+        "formBusinessDef": "Business definition",
+        "formCalcLogic": "Calc logic",
+        "save": "Save field",
+        "saving": "Saving…",
+        "loadFailed": "Failed to load dictionary",
+        "saveSuccess": "Field saved",
+        "saveFailed": "Failed to save field",
+        "loading": "Loading dictionary…",
+        "apiSource": "Loaded from API"
       },
       "dataBoards": {
         "title": "Data boards",
@@ -1618,7 +1631,10 @@
         "drillReset": "Reset drill",
         "drillPath": "Drill path",
         "drillRoot": "All",
-        "stubNote": "Sample fixture + client binder; API and masking land later."
+        "stubNote": "Could not reach the boards API; showing local sample board.",
+        "loadFailed": "Failed to load boards",
+        "loading": "Loading boards…",
+        "apiSource": "Loaded from API"
       },
       "dataSecurity": {
         "title": "Data security",

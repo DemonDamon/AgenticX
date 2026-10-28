@@ -1,0 +1,5 @@
+dictionary_ref: sample_dictionary.yaml
+null_rate_ceiling: 0.2
+require_fields:
+  - member_id
+  - phone

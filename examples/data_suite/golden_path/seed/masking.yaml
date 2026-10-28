@@ -1,0 +1,23 @@
+id: golden_masking
+rules:
+  - field: phone
+    sensitivity: confidential
+    default_strategy: drop
+    strategies:
+      admin: full
+      analyst: partial
+      guest: drop
+  - field: email
+    sensitivity: internal
+    default_strategy: partial
+    strategies:
+      admin: full
+      analyst: partial
+      guest: drop
+  - field: member_id
+    sensitivity: restricted
+    default_strategy: hash
+    strategies:
+      admin: full
+      analyst: hash
+      guest: drop

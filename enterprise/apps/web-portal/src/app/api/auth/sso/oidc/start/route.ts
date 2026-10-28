@@ -2,6 +2,7 @@ import { OidcConfigError, buildStateCookieValue } from "@agenticx/auth";
 import { NextResponse } from "next/server";
 import { isAuthCookieSecure } from "../../../../../../lib/session";
 import {
+  assertPortalSsoStrategyProtocol,
   getOidcClientService,
   getPortalSsoProviderConfigServer,
   getPortalSsoProviderOptions,
@@ -50,6 +51,7 @@ export async function GET(request: Request) {
   const returnTo = resolveReturnToOrDefault(url.searchParams.get("returnTo"));
 
   try {
+    assertPortalSsoStrategyProtocol(requestedProviderId, "oidc");
     const providerCandidates = resolveProviderCandidates(requestedProviderId);
     let provider = null;
     let selectedProviderId = requestedProviderId;

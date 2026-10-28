@@ -1,0 +1,6 @@
+dictionary_ref: dictionary.yaml
+null_rate_ceiling: 0.1
+require_fields:
+  - member_id
+  - email
+  - ghost_field

@@ -30,10 +30,22 @@
 
 ## After A7
 
-Update parent plan; open A8 only when A7 Done evidenced by pytest + vitest + `e2e:data-security`.
+A7 merged to main as `#140` / `0af5c6c7`. Proceed to A8 subplans in order.
+
+## A8 order
+
+| # | Subplan | Path |
+|---|---------|------|
+| 1 | Template kit | `2026-10-28-agx-data-suite-p2-a8-1-template-kit.plan.md` |
+| 2 | Quality patrol | `2026-10-28-agx-data-suite-p2-a8-2-quality-patrol.plan.md` |
+| 3 | Dictionary drift | `2026-10-28-agx-data-suite-p2-a8-3-dict-drift.plan.md` |
+| 4 | NL2SQL read-only | `2026-10-28-agx-data-suite-p2-a8-4-nl2sql.plan.md` |
+| 5 | Examples + e2e | `2026-10-28-agx-data-suite-p2-a8-5-examples-e2e.plan.md` |
+
+Index: `2026-10-28-agx-data-suite-p2-a8-index.plan.md`
 
 ## Status
 
 - **P0 / P1:** merged (`#137`–`#139`).
-- **P2-A7:** done on `feat/agx-data-suite-p2-a7` (awaiting PR merge).
-- **P2-A8:** not started.
+- **P2-A7:** merged `#140` (`0af5c6c7`).
+- **P2-A8:** implemented on `feat/agx-data-suite-p2-a8` (awaiting PR).

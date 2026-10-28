@@ -1,0 +1,21 @@
+name: golden_path_members
+schedule: "0 3 * * *"
+nodes:
+  - id: extract_src
+    type: extract
+    channel: src
+    statement: "SELECT * FROM members"
+  - id: clean_nulls
+    type: clean
+    drop_null: ["member_id"]
+  - id: transform_idmap
+    type: transform
+    idmap: default
+  - id: load_dst
+    type: load
+    channel: dst
+    table: members_out
+    grant_id: g_load
+  - id: snap
+    type: snapshot
+    target: memory

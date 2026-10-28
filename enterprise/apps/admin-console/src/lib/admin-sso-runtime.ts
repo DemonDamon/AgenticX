@@ -1,9 +1,13 @@
 import "server-only";
 import {
   OidcClientService,
+  type AuthStrategy,
   type OidcProviderConfig,
   type SamlSpProviderConfig,
+  applyStrategyEndpoints,
+  createDefaultAuthStrategyRegistry,
   registerOidcDiscoveryDegradedReporter,
+  resolveAuthStrategyId,
 } from "@agenticx/auth";
 import { decryptSecret } from "@agenticx/auth";
 import { getSsoProviderByProviderId, insertAuditEvent } from "@agenticx/iam-core";
@@ -57,6 +61,35 @@ function optionalEnv(providerId: string, suffix: string): string | undefined {
   return process.env[envKey(providerId, suffix)]?.trim() || undefined;
 }
 
+
+const authStrategyRegistry = createDefaultAuthStrategyRegistry();
+
+export function getAdminAuthStrategy(
+  providerId: string,
+  protocol?: string | null,
+): AuthStrategy {
+  const strategyId = resolveAuthStrategyId({
+    strategyId: optionalEnv(providerId, "STRATEGY"),
+    protocol,
+    providerId,
+  });
+  return authStrategyRegistry.get(strategyId);
+}
+
+export function assertAdminSsoStrategyProtocol(
+  providerId: string,
+  expected: "oidc" | "saml",
+  protocolHint?: string | null,
+): AuthStrategy {
+  const strategy = getAdminAuthStrategy(providerId, protocolHint ?? expected);
+  if (strategy.protocol !== expected) {
+    throw new Error(
+      expected === "oidc" ? "oidc.provider_not_configured" : "saml.provider_not_configured",
+    );
+  }
+  return strategy;
+}
+
 function isExampleIssuer(value: string): boolean {
   try {
     return new URL(value).hostname === "idp.example.com";
@@ -66,6 +99,7 @@ function isExampleIssuer(value: string): boolean {
 }
 
 export function getAdminSsoProviderConfig(providerId: string): OidcProviderConfig {
+  const strategy = assertAdminSsoStrategyProtocol(providerId, "oidc");
   const scopesRaw = optionalEnv(providerId, "SCOPES");
   const scopes = scopesRaw
     ? scopesRaw
@@ -74,9 +108,20 @@ export function getAdminSsoProviderConfig(providerId: string): OidcProviderConfi
         .filter(Boolean)
     : ["openid", "profile", "email"];
 
+  const endpointConfig = applyStrategyEndpoints(strategy, {
+    issuer: optionalEnv(providerId, "ISSUER"),
+    baseUrl: optionalEnv(providerId, "BASE_URL"),
+    realm: optionalEnv(providerId, "REALM"),
+  });
+  const issuer =
+    typeof endpointConfig.issuer === "string" ? endpointConfig.issuer.trim() : "";
+  if (!issuer || isExampleIssuer(issuer)) {
+    throw new Error("oidc.provider_not_configured");
+  }
+
   return {
     providerId,
-    issuer: requiredEnv(providerId, "ISSUER"),
+    issuer,
     clientId: requiredEnv(providerId, "CLIENT_ID"),
     clientSecret: optionalEnv(providerId, "CLIENT_SECRET"),
     redirectUri: optionalEnv(providerId, "ADMIN_REDIRECT_URI") ?? requiredEnv(providerId, "REDIRECT_URI"),
@@ -92,6 +137,7 @@ export function getAdminSsoProviderConfig(providerId: string): OidcProviderConfi
 }
 
 export async function getAdminSsoProviderConfigServer(providerId: string): Promise<OidcProviderConfig> {
+  assertAdminSsoStrategyProtocol(providerId, "oidc");
   const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
   const secretKey = process.env.SSO_PROVIDER_SECRET_KEY?.trim();
   if (tenantId) {
@@ -133,6 +179,7 @@ export async function getAdminSsoProviderConfigServer(providerId: string): Promi
 }
 
 export async function getAdminSamlProviderConfigServer(providerId: string): Promise<SamlSpProviderConfig> {
+  assertAdminSsoStrategyProtocol(providerId, "saml");
   const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
   if (!tenantId) {
     throw new Error("saml.provider_not_configured");

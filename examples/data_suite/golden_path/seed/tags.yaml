@@ -1,0 +1,12 @@
+computes:
+  - id: tag_status_active
+    type: equals_const
+    field: status
+    value: active
+  - id: tag_premium
+    type: in_set
+    field: tier
+    values: [gold]
+  - id: tag_ready
+    type: bool_and
+    fields: [member_id, status]

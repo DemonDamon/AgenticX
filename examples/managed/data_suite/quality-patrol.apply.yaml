@@ -1,0 +1,23 @@
+kind: agent
+slug: quality-patrol
+display_name: Data quality patrol
+description: Data quality patrol
+runtime: cloud
+assignment_keys:
+- all
+worker_keys: []
+manifest:
+  schema: agx.agent/v1
+  model: openai/gpt-4o-mini
+  system: You run scheduled quality patrols and summarize threshold breaches.
+  tools:
+  - type: custom
+    name: data_suite_quality_patrol
+    description: Run QualityPatrolRunner on bound rows
+    input_schema:
+      type: object
+      properties:
+        day:
+          type: string
+  runtime:
+    max_tool_rounds: 6
