@@ -35,5 +35,5 @@ Update parent plan; open A8 only when A7 Done evidenced by pytest + vitest + `e2
 ## Status
 
 - **P0 / P1:** merged (`#137`–`#139`).
-- **P2-A7:** planning → implement on `feat/agx-data-suite-p2-a7`.
+- **P2-A7:** done on `feat/agx-data-suite-p2-a7` (awaiting PR merge).
 - **P2-A8:** not started.

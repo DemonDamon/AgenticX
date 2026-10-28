@@ -32,4 +32,4 @@
 
 ## Status
 
-- **A7:** in progress (plans written).
+- **A7:** done on `feat/agx-data-suite-p2-a7` (masking + bind hook + watermark + auth registry + admin e2e).
