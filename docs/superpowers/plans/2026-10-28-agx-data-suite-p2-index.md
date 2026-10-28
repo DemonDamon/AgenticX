@@ -48,4 +48,4 @@ Index: `2026-10-28-agx-data-suite-p2-a8-index.plan.md`
 
 - **P0 / P1:** merged (`#137`–`#139`).
 - **P2-A7:** merged `#140` (`0af5c6c7`).
-- **P2-A8:** plans written; implementation next.
+- **P2-A8:** implemented on `feat/agx-data-suite-p2-a8` (awaiting PR).

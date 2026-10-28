@@ -40,7 +40,7 @@ def assert_read_only_tools(
         if name in policy.deny_tool_names:
             denied.append(name)
             continue
-        if name.startswith("data_suite."):
+        if name.startswith("data_suite_"):
             continue
         if any(name.startswith(p) for p in policy.allow_prefixes):
             continue

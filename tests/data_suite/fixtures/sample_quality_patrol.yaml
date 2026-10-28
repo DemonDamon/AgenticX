@@ -1,0 +1,6 @@
+# Quality patrol thresholds over sample_quality_metrics.yaml metric ids
+metrics_ref: sample_quality_metrics.yaml
+day: "2026-10-28"
+thresholds:
+  null_rate_member_id: 0.1
+  rule_fail_rate: 0.05

@@ -42,7 +42,7 @@ def test_assert_read_only_allows_data_suite_tool():
         "tools": [
             {
                 "type": "custom",
-                "name": "data_suite.sql_query",
+                "name": "data_suite_sql_query",
                 "description": "read-only sql",
                 "input_schema": {"type": "object", "properties": {}},
             }

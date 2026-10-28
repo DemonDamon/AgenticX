@@ -22,4 +22,4 @@ class GovernanceTodo:
 @dataclass(frozen=True)
 class WriteGuardPolicy:
     deny_tool_names: frozenset[str] = frozenset({"bash_exec", "file_write", "shell"})
-    allow_prefixes: frozenset[str] = frozenset({"data_suite."})
+    allow_prefixes: frozenset[str] = frozenset({"data_suite_"})

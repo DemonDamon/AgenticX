@@ -33,4 +33,4 @@
 
 ## Status
 
-- **A8:** planning (post A7 `#140` merge `0af5c6c7`).
+- **A8:** implemented on `feat/agx-data-suite-p2-a8` (kit + patrols + nl2sql + examples); PR next.
