@@ -6,7 +6,7 @@ import {
 } from "@agenticx/auth";
 import { NextResponse } from "next/server";
 import { isAdminCookieSecure } from "../../../../../../lib/admin-session";
-import { getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
+import { assertAdminSsoStrategyProtocol, getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
 
 const ADMIN_SAML_STATE_COOKIE = DEFAULT_SAML_ADMIN_STATE_COOKIE;
 
@@ -38,6 +38,12 @@ function resolveStateCookiePolicy(): { secure: boolean; sameSite: "none" | "lax"
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const providerId = url.searchParams.get("provider")?.trim() || "default";
+
+  try {
+    assertAdminSsoStrategyProtocol(providerId, "saml");
+  } catch (error) {
+    return NextResponse.redirect(new URL(`/login?sso_error=${encodeURIComponent(mapStartError(error))}`, url.origin));
+  }
 
   if (isSamlGloballyDisabled()) {
     return NextResponse.redirect(

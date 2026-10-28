@@ -70,3 +70,26 @@ describe("getAdminSsoProviderConfigServer", () => {
     await expect(getAdminSsoProviderConfigServer("default")).rejects.toThrow("oidc.provider_not_configured");
   });
 });
+
+describe("AuthStrategyRegistry wiring", () => {
+  it("builds keycloak issuer from BASE_URL+REALM when STRATEGY=keycloak", async () => {
+    process.env.SSO_OIDC_KC_STRATEGY = "keycloak";
+    process.env.SSO_OIDC_KC_BASE_URL = "https://idp.corp.example";
+    process.env.SSO_OIDC_KC_REALM = "agenticx";
+    process.env.SSO_OIDC_KC_CLIENT_ID = "agenticx-admin";
+    process.env.SSO_OIDC_KC_ADMIN_REDIRECT_URI =
+      "http://localhost:3001/api/auth/sso/oidc/callback";
+
+    const { getAdminSsoProviderConfig, getAdminAuthStrategy } = await import("../admin-sso-runtime");
+    const strategy = getAdminAuthStrategy("kc");
+    expect(strategy.id).toBe("keycloak");
+    const cfg = getAdminSsoProviderConfig("kc");
+    expect(cfg.issuer).toBe("https://idp.corp.example/realms/agenticx");
+  });
+
+  it("rejects oidc route when STRATEGY forces saml protocol", async () => {
+    process.env.SSO_OIDC_X_STRATEGY = "saml";
+    const { assertAdminSsoStrategyProtocol } = await import("../admin-sso-runtime");
+    expect(() => assertAdminSsoStrategyProtocol("x", "oidc")).toThrow("oidc.provider_not_configured");
+  });
+});
