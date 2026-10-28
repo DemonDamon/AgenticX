@@ -1,0 +1,33 @@
+id: golden_member_board
+title: Golden path member overview
+widgets:
+  - id: members_by_region
+    title: Members by region
+    chart: bar
+    dataset: members
+    x: region
+    group_by: region
+    metric: count
+    row: 0
+    col: 0
+    w: 6
+    h: 4
+  - id: members_by_tier
+    title: Members by tier
+    chart: donut
+    dataset: members
+    group_by: tier
+    metric: count
+    row: 0
+    col: 6
+    w: 6
+    h: 4
+  - id: active_count
+    title: Active members
+    chart: stat
+    dataset: members
+    metric: count
+    row: 1
+    col: 0
+    w: 4
+    h: 2
