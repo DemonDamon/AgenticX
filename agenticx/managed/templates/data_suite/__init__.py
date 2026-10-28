@@ -8,9 +8,13 @@ from agenticx.managed.templates.data_suite.nl2sql import (
     is_read_only_sql,
 )
 from agenticx.managed.templates.data_suite.quality_patrol import QualityPatrolConfig, QualityPatrolRunner
-from agenticx.managed.templates.data_suite.schedule_tick import run_scheduled
+from agenticx.managed.templates.data_suite.schedule_tick import (
+    PatrolScheduleConfig,
+    run_patrol_tick,
+    run_scheduled,
+)
 from agenticx.managed.templates.data_suite.types import GovernanceTodo, WebhookEvent, WriteGuardPolicy
-from agenticx.managed.templates.data_suite.webhook import FakeWebhookSink, WebhookNotifier
+from agenticx.managed.templates.data_suite.webhook import FakeWebhookSink, HttpWebhookSink, WebhookNotifier
 from agenticx.managed.templates.data_suite.write_guards import assert_read_only_tools
 
 __all__ = [
@@ -19,6 +23,8 @@ __all__ = [
     "FakeQueryChannel",
     "FakeWebhookSink",
     "GovernanceTodo",
+    "HttpWebhookSink",
+    "PatrolScheduleConfig",
     "QualityPatrolConfig",
     "QualityPatrolRunner",
     "ReadOnlySqlExecutor",
@@ -28,5 +34,6 @@ __all__ = [
     "assert_read_only_tools",
     "build_nl2sql_manifest_stub",
     "is_read_only_sql",
+    "run_patrol_tick",
     "run_scheduled",
 ]
