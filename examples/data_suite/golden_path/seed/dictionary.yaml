@@ -1,0 +1,36 @@
+fields:
+  - name: member_id
+    business_def: Synthetic member primary key
+    calc_logic: seed.member_id
+    update_freq: daily
+    owner: data-platform
+  - name: external_id
+    business_def: Upstream external identifier
+    calc_logic: seed.external_id
+    update_freq: daily
+    owner: data-platform
+  - name: phone
+    business_def: Contact phone (demo PII)
+    calc_logic: seed.phone
+    update_freq: daily
+    owner: data-platform
+  - name: email
+    business_def: Contact email (demo PII)
+    calc_logic: seed.email
+    update_freq: daily
+    owner: data-platform
+  - name: region
+    business_def: Sales region bucket
+    calc_logic: seed.region
+    update_freq: daily
+    owner: data-platform
+  - name: tier
+    business_def: Loyalty tier
+    calc_logic: seed.tier
+    update_freq: daily
+    owner: data-platform
+  - name: status
+    business_def: Active or inactive flag
+    calc_logic: seed.status
+    update_freq: daily
+    owner: data-platform
