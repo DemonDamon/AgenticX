@@ -93,3 +93,4 @@ S1 把已有投资变成故事；S2 堵合规/接入硬伤；S3 才开始吃交�
 - User chose **S2 A7 AuthStrategyRegistry 路由硬化** after S1.
 - Plans: `.cursor/plans/pending/2026-10-28-agx-data-suite-p3-harden-index.plan.md`.
 - A7 AuthStrategyRegistry route wiring **done** on spine branch (admin+portal runtimes + start protocol guards).
+- User next chose **S2 A1 扩通道** → **JDBC** (not Kafka). Plan: `p3-harden-4-jdbc-channel.plan.md`.
