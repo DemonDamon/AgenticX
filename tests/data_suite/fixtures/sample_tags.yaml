@@ -1,0 +1,22 @@
+tags:
+  - name: lifecycle_stage
+    layer: L1
+    business_def: Member lifecycle bucket
+    calc_logic: derived from status+orders
+    update_freq: daily
+    owner: cdp-team
+    meaning_key: default
+  - name: has_vehicle
+    layer: L2
+    business_def: Whether member is linked to at least one vehicle
+    calc_logic: vehicle_count > 0
+    update_freq: daily
+    owner: cdp-team
+    meaning_key: default
+  - name: has_vehicle
+    layer: L2
+    business_def: Alternate meaning — active vehicle only
+    calc_logic: active_vehicle_count > 0
+    update_freq: daily
+    owner: research
+    meaning_key: active_only
