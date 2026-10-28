@@ -9,7 +9,7 @@
 `FakeChannel probe → DataFlow job → OneID → dictionary/quality → tags/audience → config board → masking → A8 patrol webhook`
 
 **Deliverable layout:**
-- `examples/data_suite/golden-path/` — seed YAML/JSON + `run_golden_path.py` (one README command)
+- `examples/data_suite/golden_path/` — seed YAML/JSON + `run_golden_path.py` (one README command)
 - `tests/data_suite/test_golden_path_e2e.py` — pytest gate for the whole spine
 - Docs: README in example + shot index note under `docs/agx-data-suite/`
 
@@ -28,8 +28,8 @@
 ## E2E gate (whole S1)
 
 1. `pytest tests/data_suite/test_golden_path_e2e.py -q` green.
-2. `python examples/data_suite/golden-path/run_golden_path.py` exits 0 and prints a short stage summary.
-3. No customer / company / proposal identifiers in tree under `examples/data_suite/golden-path/`.
+2. `python examples/data_suite/golden_path/run_golden_path.py` exits 0 and prints a short stage summary.
+3. No customer / company / proposal identifiers in tree under `examples/data_suite/golden_path/`.
 
 ## Branch
 

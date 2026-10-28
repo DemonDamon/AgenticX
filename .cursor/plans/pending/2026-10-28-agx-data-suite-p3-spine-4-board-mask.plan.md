@@ -8,9 +8,9 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `examples/data_suite/golden-path/seed/board.yaml` | BoardSpec (bar/donut/stat) on `members` dataset |
-| `examples/data_suite/golden-path/seed/masking.yaml` | Mask phone/email partial|hash |
-| `examples/data_suite/golden-path/board_stage.py` | DatasetStore + bind_widget + mask export |
+| `examples/data_suite/golden_path/seed/board.yaml` | BoardSpec (bar/donut/stat) on `members` dataset |
+| `examples/data_suite/golden_path/seed/masking.yaml` | Mask phone/email partial|hash |
+| `examples/data_suite/golden_path/board_stage.py` | DatasetStore + bind_widget + mask export |
 | `tests/data_suite/test_golden_path_board_mask.py` | Bound series non-empty; masked PII not raw |
 | README note (stub OK) | `NEXT_PUBLIC_PAGE_WATERMARK` for admin watermark |
 

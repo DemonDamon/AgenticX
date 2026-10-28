@@ -8,12 +8,12 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `examples/data_suite/golden-path/seed/dictionary.yaml` | Field defs for member seed (desensitized) |
-| `examples/data_suite/golden-path/seed/quality.yaml` | QualityRollup thresholds |
-| `examples/data_suite/golden-path/seed/tags.yaml` | Tag catalog |
-| `examples/data_suite/golden-path/seed/audience.yaml` | Audience DSL expression |
-| `examples/data_suite/golden-path/governance_stage.py` | dict + quality helpers |
-| `examples/data_suite/golden-path/tags_stage.py` | tag compute + `select_audience` |
+| `examples/data_suite/golden_path/seed/dictionary.yaml` | Field defs for member seed (desensitized) |
+| `examples/data_suite/golden_path/seed/quality.yaml` | QualityRollup thresholds |
+| `examples/data_suite/golden_path/seed/tags.yaml` | Tag catalog |
+| `examples/data_suite/golden_path/seed/audience.yaml` | Audience DSL expression |
+| `examples/data_suite/golden_path/governance_stage.py` | dict + quality helpers |
+| `examples/data_suite/golden_path/tags_stage.py` | tag compute + `select_audience` |
 | `tests/data_suite/test_golden_path_gov_tags.py` | Quality snapshot + non-empty audience |
 
 ## Interfaces

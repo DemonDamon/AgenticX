@@ -1,0 +1,10 @@
+# Golden-path FakeChannel registration (no secrets)
+channels:
+  src:
+    kind: fake
+    table: members
+    seed: members.json
+  dst:
+    kind: fake
+    table: members_out
+    grant_id: g_load

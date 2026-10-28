@@ -8,9 +8,9 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `examples/data_suite/golden-path/seed/job.yaml` | JobSpec referencing src/dst + idmap profile |
-| `examples/data_suite/golden-path/seed/idmap_profile.yaml` | Id types / merge keys for synthetic members |
-| `examples/data_suite/golden-path/pipeline.py` | `run_job_stage(registry, job_path, idmap) -> JobRunResult` |
+| `examples/data_suite/golden_path/seed/job.yaml` | JobSpec referencing src/dst + idmap profile |
+| `examples/data_suite/golden_path/seed/idmap_profile.yaml` | Id types / merge keys for synthetic members |
+| `examples/data_suite/golden_path/pipeline.py` | `run_job_stage(registry, job_path, idmap) -> JobRunResult` |
 | Extend `tests/data_suite/test_golden_path_probe.py` or add `test_golden_path_job.py` | Job lands rows on dst; OneID field present |
 
 ## Interfaces

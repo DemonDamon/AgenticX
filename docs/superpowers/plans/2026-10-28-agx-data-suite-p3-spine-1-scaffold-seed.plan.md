@@ -8,11 +8,11 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `examples/data_suite/golden-path/README.md` | Stub (full one-command lands in S1-5) |
-| `examples/data_suite/golden-path/seed/members.json` | ~20 synthetic member rows (region/tier/phone/email) |
-| `examples/data_suite/golden-path/seed/channels.yaml` | FakeChannel src/dst registration config (no secrets) |
-| `examples/data_suite/golden-path/__init__.py` | Package marker |
-| `examples/data_suite/golden-path/probe.py` | `probe_src(registry) -> ChannelProbeResult` helper |
+| `examples/data_suite/golden_path/README.md` | Stub (full one-command lands in S1-5) |
+| `examples/data_suite/golden_path/seed/members.json` | ~20 synthetic member rows (region/tier/phone/email) |
+| `examples/data_suite/golden_path/seed/channels.yaml` | FakeChannel src/dst registration config (no secrets) |
+| `examples/data_suite/golden_path/__init__.py` | Package marker |
+| `examples/data_suite/golden_path/probe.py` | `probe_src(registry) -> ChannelProbeResult` helper |
 | `tests/data_suite/test_golden_path_probe.py` | Loads seed into FakeChannel; probe returns tables/ok |
 
 ## Interfaces
