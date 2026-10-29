@@ -15,11 +15,11 @@
 
 ### Tasks
 
-- [ ] e2e green; shots distinct MD5
-- [ ] README run with/without Neo4j
-- [ ] Push PR stacked on #158; do not squash-merge
-- [ ] Mark index Done
+- [x] e2e green; shots distinct MD5
+- [x] README run with/without Neo4j
+- [x] Push PR stacked on #158; do not squash-merge
+- [x] Mark index Done
 
 ## Status
 
-Pending
+Done

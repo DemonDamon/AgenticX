@@ -43,4 +43,5 @@
 ## Status
 
 - **Plans:** Done (V1–V5 written)
-- **Impl:** In progress
+- **Impl:** Done on `feat/agx-rules-knowledge-p2-k3-graph-viz`
+- **PR:** pending push
