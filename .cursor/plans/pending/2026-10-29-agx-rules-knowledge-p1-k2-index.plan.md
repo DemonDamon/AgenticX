@@ -48,4 +48,4 @@
 ## Status
 
 - **Plans:** all K2 slices written
-- **Impl:** K2-1 complete; K2-2…K2-5 pending
+- **Impl:** K2-1 + K2-2 complete; K2-3…K2-5 pending

@@ -35,10 +35,10 @@ class ChangeTrailStore:
 
 ### Task 1
 
-- [ ] Trail file `changes.jsonl` or `changes.json` under same store root.
-- [ ] Store transitions optionally record events when trail injected.
-- [ ] Commit: `feat(knowledge): knowledge object change trail`
+- [x] Trail file `changes.jsonl` or `changes.json` under same store root.
+- [x] Store transitions optionally record events when trail injected.
+- [x] Commit: `feat(knowledge): knowledge object change trail`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-k2`.
