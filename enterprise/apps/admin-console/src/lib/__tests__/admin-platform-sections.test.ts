@@ -26,6 +26,7 @@ describe("isPlatformSection", () => {
       "data-boards",
       "data-security",
       "rule-governance",
+      "knowledge-lifecycle",
     ]);
     for (const id of PLATFORM_SECTION_IDS) {
       expect(isPlatformSection(id)).toBe(true);

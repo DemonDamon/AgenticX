@@ -21,6 +21,7 @@ import DataGovernanceSection from "../_sections/data-governance";
 import DataBoardsSection from "../_sections/data-boards";
 import DataSecuritySection from "../_sections/data-security";
 import RuleGovernanceSection from "../_sections/rule-governance";
+import KnowledgeLifecycleSection from "../_sections/knowledge-lifecycle";
 import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
@@ -46,6 +47,7 @@ const PLATFORM_SECTION_PAGES = {
   "data-boards": DataBoardsSection,
   "data-security": DataSecuritySection,
   "rule-governance": RuleGovernanceSection,
+  "knowledge-lifecycle": KnowledgeLifecycleSection,
 } as const;
 
 export default async function AdminPlatformSectionPage({

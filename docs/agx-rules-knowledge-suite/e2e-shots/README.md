@@ -30,3 +30,25 @@ pnpm -C enterprise exec tsx scripts/e2e-rule-governance.ts
 | `03-rule-governance-executions.png` | Recent executions when seeded |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+# Knowledge lifecycle admin e2e shots (P1 K2)
+
+HD screenshots of admin-console **知识生命周期 / knowledge-lifecycle** under the data-governance domain.
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-knowledge-lifecycle.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `04-knowledge-lifecycle-list.png` | Object list + detail after load |
+| `05-knowledge-lifecycle-detail.png` | Detail / transitions focused |
+| `06-knowledge-lifecycle-issues.png` | Quality issues panel after run |
+
+Synthetic **Brand-A** ids only — no real customer names.
+

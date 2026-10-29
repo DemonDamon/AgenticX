@@ -75,7 +75,8 @@
         "dataGovernance": "Data governance",
         "dataBoards": "Data boards",
         "dataSecurity": "Data security",
-        "ruleGovernance": "Rule governance"
+        "ruleGovernance": "Rule governance",
+        "knowledgeLifecycle": "Knowledge lifecycle"
       }
     },
     "health": {
@@ -1645,6 +1646,35 @@
         "rawPhone": "Raw phone",
         "maskedPhone": "Masked",
         "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking."
+      },
+      "knowledgeLifecycle": {
+        "title": "Knowledge lifecycle",
+        "description": "Knowledge object status, quality issues, and change trail (P1 K2) — Brand-A samples only",
+        "listTitle": "Knowledge objects",
+        "detailTitle": "Object detail",
+        "issuesTitle": "Quality issues",
+        "trailTitle": "Change trail",
+        "noIssues": "No issues for this object",
+        "noTrail": "No trail events yet",
+        "noSelection": "Select an object",
+        "loading": "Loading knowledge objects…",
+        "apiSource": "Loaded from API",
+        "stubNote": "Could not reach the knowledge-lifecycle API; showing local seed until the store is available.",
+        "runQuality": "Run quality checks",
+        "qualitySuccess": "Quality checks completed",
+        "qualityFailed": "Quality run failed",
+        "transitionSuccess": "Status updated",
+        "transitionFailed": "Status transition failed",
+        "resolveIssue": "Resolve",
+        "issueResolved": "Issue resolved",
+        "issueFailed": "Issue update failed",
+        "col": {
+          "id": "ID",
+          "kind": "Kind",
+          "status": "Status",
+          "version": "Version",
+          "name": "Name"
+        }
       },
       "ruleGovernance": {
         "title": "Rule governance",
