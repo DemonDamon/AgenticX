@@ -193,11 +193,16 @@ export default function AdminGraphIncrementalSection() {
         </Button>
       </div>
 
-      {storeBackend ? (
-        <p className="text-sm text-muted-foreground" data-testid="graph-incremental-store-backend">
-          Graph store backend: <code>{storeBackend}</code> (publish SoT; viz deferred)
-        </p>
-      ) : null}
+      <p className="text-sm text-muted-foreground" data-testid="graph-incremental-store-backend">
+        GraphStore backend: <code>{storeBackend || "—"}</code> (publish SoT; JSON sync metadata is not graph truth){" "}
+        <a
+          href="/admin/graph-explorer"
+          className="underline"
+          data-testid="graph-incremental-link-explorer"
+        >
+          Open graph explorer
+        </a>
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card data-testid="graph-incremental-list">

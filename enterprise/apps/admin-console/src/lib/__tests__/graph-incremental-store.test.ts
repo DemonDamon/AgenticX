@@ -101,5 +101,14 @@ describe("graph-incremental-store", () => {
       "brand-a-sync-full-001",
       "brand-a-sync-incr-002",
     ]);
+    expect(seeded.graph_stats.store_backend).toBeTruthy();
+    expect(["file", "memory", "neo4j"]).toContain(String(seeded.graph_stats.store_backend));
+    expect(seeded.runs[0]?.graph_stats?.store_backend).toBe(seeded.graph_stats.store_backend);
+  });
+
+  it("mock sync reports GraphStore store_backend (not JSON-as-SoT)", async () => {
+    const report = await runMockSync({ actor: "tester" });
+    expect(report.graph_stats.store_backend).toBeTruthy();
+    expect(["file", "memory", "neo4j"]).toContain(String(report.graph_stats.store_backend));
   });
 });
