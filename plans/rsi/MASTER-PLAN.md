@@ -88,7 +88,15 @@ P0/P0.5 之后，对照 2026-09~10 行业 RSI 实践（MemoraX 经验归因、�
 | T7 | replay_spans 从 lineage 派生学习相关消息区间（P1 长轨迹 RL 消费） | LongStraw + AReaL-DTA 选择性重放 | replay_spans.py |
 
 - 红线延续：账本/漂移/manifest 三处 held-out 守卫，复用 `trainer/heldout.py`；held-out 数据仅允许出现在双判别验收报告
-- P1 前置（只记录不实施）：AReaL build-vs-borrow 对标；Macaron-V1-Tall 纳入基座横评（FinnewsHunter 首批）；REPL Harness token 收益实验
+- P1 前置（只记录不实施，2026-10 持续增补）：
+  1. AReaL build-vs-borrow 对标（训练引擎借 AReaL，中层护城河=harness/归因/验证器/adapter 注册表）
+  2. Macaron-V1-Tall 纳入基座横评（FinnewsHunter 首批）
+  3. REPL Harness token 收益实验（≥20% 再产品化）
+  4. **对比信号 vs verifier 信号一致性分析**（Harness², arXiv:2610.14224 启发）：harbor 判分在场时，
+     无真值行为对比（SP16/17 contrastive lessons）是加速器还是噪声源——双环境对照，候选论文 §5 分析小节
+  5. **预算核算**（RSIGym 启发）：轨迹/实验层补"每次自探索花费多少"口径（gateway metering 已有基础），
+     P1 开训练前必须就位，否则 AReaL 对标连成本基线都没有
+  6. **RSI-Index 归一化增益**（RSIGym 口径 (final−initial)/(1−initial)）补进 drift/SLO 报告，对外叙事对齐行业标尺
 
 ## 明确不做（YAGNI / 属后续阶段）
 

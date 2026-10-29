@@ -60,6 +60,20 @@ GRPO 训练，TB 2.0 pass@1 仅 40%→43%）。我们研究**权重层 RSI**：
 - **AIDE²**（arXiv:2609.26457）：harness 层 RSI 的标杆。其 (a) public/private
   信号分离、(b) 固定预算评估、(c) 统计性接受判据，全部移植进本工作的管线。
   其 related work 明确将权重层自适应列为 open direction。
+- **Harness²**（arXiv:2610.14224, Google Cloud AI Research）：开放世界 harness
+  层 RSI 的双层递归——任务级递归以对比式 Propose–Probe–Compose 在**无
+  ground-truth verifier** 下引导 harness 编辑（行为对比证据替代真值反馈）；
+  梳理级递归把"怎么改的+为何有效"提炼进持续改进 harness（经验库跨基准
+  迁移有效），且刻意**不直接继承**任务特化的执行 harness。单步对比改进
+  三基准全正增益（最高 +11.5pt）。与本工作的互补定位：Harness² 解决
+  "无 verifier 时如何改 harness"，我们解决"有 verifier 时如何把经验写进
+  权重"——两者的问题设定（行为对比 vs 判分信号）、改进对象（harness 文件
+  vs LoRA 权重）、信号成本模型（每候选一次执行探测 vs 每 rollout 一次判分）
+  均正交。其经验库结构与我们的归因账本（§5.2/T2：winrate×support×版本）
+  和 Lesson 提取（SP16/17 对比蒸馏）同构，且其"只提炼改进经验不继承执行
+  harness"的纪律与本工作缺口派发"只提案不自动开训"（SP30 T4）一致。
+  遗留开放问题（本工作 §5 候选分析）：对比信号与 verifier 信号何时一致、
+  何时打架——我们的双环境（harbor 判分 + session 行为对比）可做该对照。
 - **RSR**（Recursive Self-Rewrite, arXiv:2610.02826, 腾讯混元）：与本工作最近的
   邻居——同样主张"经验→权重"，但为**一次性离线翻译管道**：多 harness 采集
   成功轨迹 → planner 提炼 runbook → critic 泄漏审计 → 通用 harness 新沙箱

@@ -105,6 +105,13 @@ def main() -> int:
     print(f"pass_rate={report.pass_rate}  p50={report.length_p50:.0f}  "
           f"p90={report.length_p90:.0f}  p90_ratio={report.length_p90_ratio}  "
           f"templating={report.templating}")
+    # RSI-Index 归一化增益（RSIGym 口径）：相对基线的含金量，跨版本可比
+    from agenticx.learning.rsi_index import rsi_index
+    if (report.pass_rate is not None
+            and isinstance(baseline.get("pass_rate"), (int, float))):
+        gain = rsi_index(report.pass_rate, baseline["pass_rate"])
+        print(f"RSI-Index（相对基线 pass_rate）: "
+              f"{'N/A' if gain is None else f'{gain:+.3f}'}")
     if report.dual_judge_gap is None:
         print("双判别 gap: 未接入（reward.components 无 independent_judge）")
     else:
