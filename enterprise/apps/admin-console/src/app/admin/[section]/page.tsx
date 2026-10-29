@@ -22,6 +22,7 @@ import DataBoardsSection from "../_sections/data-boards";
 import DataSecuritySection from "../_sections/data-security";
 import RuleGovernanceSection from "../_sections/rule-governance";
 import KnowledgeLifecycleSection from "../_sections/knowledge-lifecycle";
+import DisambiguationSection from "../_sections/disambiguation";
 import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
@@ -48,6 +49,7 @@ const PLATFORM_SECTION_PAGES = {
   "data-security": DataSecuritySection,
   "rule-governance": RuleGovernanceSection,
   "knowledge-lifecycle": KnowledgeLifecycleSection,
+  "disambiguation": DisambiguationSection,
 } as const;
 
 export default async function AdminPlatformSectionPage({
