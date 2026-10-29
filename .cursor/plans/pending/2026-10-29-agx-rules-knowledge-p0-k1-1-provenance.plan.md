@@ -32,9 +32,9 @@ class Provenance:
 
 ### Task 1
 
-- [ ] Extend RetrievalResult with optional provenance; helpers to attach.
-- [ ] Commit: `feat(retrieval): standard provenance fields`
+- [x] Extend RetrievalResult with optional provenance; helpers to attach.
+- [x] Commit: `feat(retrieval): standard provenance fields`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.
