@@ -23,4 +23,4 @@
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-k2`.

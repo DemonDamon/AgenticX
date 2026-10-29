@@ -47,5 +47,5 @@
 
 ## Status
 
-- **Plans:** all K2 slices written
-- **Impl:** K2-1…K2-4 complete; K2-5 pending
+- **Plans:** all K2 slices Done
+- **Impl:** K2-1…K2-5 complete on `feat/agx-rules-knowledge-p1-k2` (PR #145)
