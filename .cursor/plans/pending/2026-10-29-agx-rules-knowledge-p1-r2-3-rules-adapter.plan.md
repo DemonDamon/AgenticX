@@ -41,11 +41,11 @@ Slot merge strategy (deterministic, no LLM): inject missing object/threshold/cha
 
 ### Task 1
 
-- [ ] Ambiguity with candidates → `candidate_select` request.
-- [ ] Empty candidates → `info_supplement`.
-- [ ] Scripted gate answers → final draft with rule non-None.
-- [ ] Commit: `feat(rules): NL disambiguation adapter on R2 protocol`
+- [x] Ambiguity with candidates → `candidate_select` request.
+- [x] Empty candidates → `info_supplement`.
+- [x] Scripted gate answers → final draft with rule non-None.
+- [x] Commit: `feat(rules): NL disambiguation adapter on R2 protocol`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-3).
