@@ -152,7 +152,21 @@ async function main() {
     await dismissNextOverlay(page);
     const storeBackendLine = page.getByTestId("graph-incremental-store-backend");
     await storeBackendLine.waitFor({ state: "visible", timeout: 20_000 });
-    const storeBackendText = (await storeBackendLine.innerText()).trim();
+    // Ensure GraphStore seed so live stats / report graph_stats are populated.
+    const incrSeed = page.getByTestId("graph-incremental-seed");
+    if (await incrSeed.isVisible().catch(() => false)) {
+      await incrSeed.click();
+      await page.waitForTimeout(1500);
+      await page.getByTestId("graph-incremental-refresh").click().catch(() => undefined);
+      await page.waitForTimeout(800);
+    }
+    let storeBackendText = (await storeBackendLine.innerText()).trim();
+    if (!/GraphStore backend:\s*(file|memory|neo4j)/i.test(storeBackendText)) {
+      // one more refresh after seed
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("graph-incremental-page").waitFor({ state: "visible", timeout: 30_000 });
+      storeBackendText = (await page.getByTestId("graph-incremental-store-backend").innerText()).trim();
+    }
     if (!/GraphStore backend:\s*(file|memory|neo4j)/i.test(storeBackendText)) {
       throw new Error(`graph-incremental missing real store_backend: ${storeBackendText}`);
     }
