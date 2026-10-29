@@ -1,0 +1,9 @@
+name: brand_a_default
+id_types:
+  - name: phone
+    priority: 10
+  - name: external_id
+    priority: 20
+merge:
+  priority: [external_id, phone]
+  on_conflict: prefer_priority

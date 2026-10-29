@@ -1,0 +1,19 @@
+tags:
+  - name: status_active
+    layer: L1
+    business_def: Member currently active
+    calc_logic: status == active
+    update_freq: daily
+    owner: crm-ops
+  - name: tier_gold
+    layer: L2
+    business_def: Gold loyalty tier
+    calc_logic: tier == gold
+    update_freq: daily
+    owner: crm-ops
+  - name: region_east
+    layer: L2
+    business_def: East region cohort
+    calc_logic: region == east
+    update_freq: daily
+    owner: crm-ops

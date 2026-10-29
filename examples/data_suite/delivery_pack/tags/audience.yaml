@@ -1,0 +1,7 @@
+audiences:
+  - id: active_gold_east
+    title: Active gold members in east
+    all:
+      - tag: status_active
+      - tag: tier_gold
+      - tag: region_east
