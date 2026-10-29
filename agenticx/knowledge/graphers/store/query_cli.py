@@ -5,6 +5,7 @@ Usage:
   echo '{"op":"subgraph","limit_nodes":200}' | python -m ...
   echo '{"op":"neighborhood","entity_id":"...", "depth":1}' | python -m ...
   echo '{"op":"seed_brand_a"}' | python -m ...
+  echo '{"op":"publish_touch","object_ids":["..."],"meta":{...}}' | python -m ...
 """
 
 from __future__ import annotations
@@ -95,6 +96,59 @@ def main() -> int:
     elif op == "seed_brand_a":
         stats = seed_brand_a(store)
         out = {"ok": True, "data": {"stats": stats, "backend": store.backend_name}}
+    elif op == "publish_touch":
+        # Incremental publish: stamp last_synced_* on touched entities (Brand-A / demo).
+        object_ids = [str(x) for x in (req.get("object_ids") or []) if x]
+        meta = req.get("meta") or {}
+        synced_at = str(meta.get("synced_at") or "")
+        run_id = str(meta.get("run_id") or "")
+        actor = str(meta.get("actor") or "")
+        source_ids = [str(x) for x in (meta.get("source_ids") or []) if x]
+        updated = []
+        for oid in object_ids:
+            # Prefer neighborhood depth-0 to fetch existing attrs when available.
+            existing = None
+            try:
+                nb = store.neighborhood(oid, depth=0, limit=1)
+                for n in nb.get("nodes") or []:
+                    if str(n.get("id")) == oid:
+                        existing = n
+                        break
+            except Exception:
+                existing = None
+            attrs = dict((existing or {}).get("attributes") or {})
+            if synced_at:
+                attrs["last_synced_at"] = synced_at
+            if run_id:
+                attrs["last_sync_run_id"] = run_id
+            if actor:
+                attrs["last_sync_actor"] = actor
+            if source_ids:
+                attrs["last_sync_source_ids"] = source_ids
+            name = str((existing or {}).get("name") or oid)
+            et_raw = (existing or {}).get("entity_type") or "unknown"
+            try:
+                et = EntityType(str(et_raw))
+            except Exception:
+                et = EntityType.UNKNOWN
+            store.upsert_entity(
+                Entity(
+                    id=oid,
+                    name=name,
+                    entity_type=et,
+                    description=(existing or {}).get("description"),
+                    attributes=attrs,
+                )
+            )
+            updated.append(oid)
+        out = {
+            "ok": True,
+            "data": {
+                "backend": store.backend_name,
+                "updated_object_ids": updated,
+                "stats": store.stats(),
+            },
+        }
     else:
         out = {"ok": False, "error": f"unknown op {op}"}
         print(json.dumps(out), flush=True)

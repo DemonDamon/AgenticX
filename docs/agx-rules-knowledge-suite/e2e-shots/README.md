@@ -157,9 +157,14 @@ Shots **17 / 18 / 19** must be visually distinct (canvas vs node detail vs backe
 set -a && source enterprise/.env.local && set +a
 # Local without Neo4j (default file GraphStore under .runtime/admin/graph-store):
 export AGX_GRAPH_STORE_BACKEND=file
-# With Neo4j (Python GraphStore bridge):
-# export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=password
-# export AGX_GRAPH_STORE_BACKEND=neo4j
+
+# Flip to Neo4j (Docker) — restart admin-console after exporting so Next sees env:
+#   docker run -d --name agx-neo4j -p 7474:7474 -p 7687:7687 \
+#     -e NEO4J_AUTH=neo4j/password neo4j:5-community
+#   export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=password
+#   export AGX_GRAPH_STORE_BACKEND=neo4j
+# Admin Neo4j path bridges via: python -m agenticx.knowledge.graphers.store.query_cli
+
 pnpm -C enterprise exec tsx scripts/e2e-graph-explorer.ts
 ```
 

@@ -110,3 +110,10 @@ pnpm -C enterprise exec tsx scripts/e2e-graph-explorer.ts
 
 `/admin/graph-incremental` shows `store_backend` from GraphStore and links to the explorer.
 JSON sync-run files are control-plane metadata — **not** graph SoT.
+
+
+### Admin closed loop (seed → sync → explorer)
+
+Admin `runMockSync` publishes touched object ids into GraphStore via `publishTouchedObjects`
+(stamps `last_synced_at` / `last_sync_run_id` on entities). `/admin/graph-incremental` shows
+`store_backend` from GraphStore stats; `/admin/graph-explorer` reads the same store.

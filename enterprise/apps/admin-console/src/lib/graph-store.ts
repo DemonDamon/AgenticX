@@ -347,6 +347,95 @@ export async function seedBrandAGraph(): Promise<{
   return { backend: stats.backend, stats };
 }
 
+
+export type PublishTouchMeta = {
+  synced_at: string;
+  run_id: string;
+  actor?: string;
+  source_ids?: string[];
+};
+
+/**
+ * Incremental publish into GraphStore SoT: stamp last_synced_* attrs on touched
+ * entities so explorer reflects sync (not JSON sync metadata alone).
+ */
+export async function publishTouchedObjects(
+  objectIds: string[],
+  meta: PublishTouchMeta,
+): Promise<{ backend: string; updated_object_ids: string[]; stats: GraphStoreStats }> {
+  const ids = [...new Set(objectIds.map(String).filter(Boolean))].sort();
+  if (ids.length === 0) {
+    const stats = await getGraphStats();
+    return { backend: String(stats.backend), updated_object_ids: [], stats };
+  }
+  const backend = resolveBackend();
+  if (backend === "neo4j") {
+    const res = await pythonBridge({
+      op: "publish_touch",
+      backend: "neo4j",
+      object_ids: ids,
+      meta: {
+        synced_at: meta.synced_at,
+        run_id: meta.run_id,
+        actor: meta.actor || "",
+        source_ids: meta.source_ids || [],
+      },
+    });
+    if (!res.ok) throw new Error(String(res.error || "neo4j publish_touch failed"));
+    const data = res.data as {
+      backend?: string;
+      updated_object_ids?: string[];
+      stats: GraphStoreStats;
+    };
+    return {
+      backend: data.backend || "neo4j",
+      updated_object_ids: data.updated_object_ids || ids,
+      stats: { ...data.stats, backend: "neo4j", store_backend: "neo4j" },
+    };
+  }
+
+  // Ensure Brand-A baseline exists before stamping (local demo backends).
+  const store = await getLocalStore();
+  if (store.stats().entity_count === 0) {
+    await seedBrandAGraph();
+  }
+  const live = await getLocalStore();
+  const updated: string[] = [];
+  for (const oid of ids) {
+    const existing = live.getNode(oid);
+    const base = existing
+      ? cloneNode(existing)
+      : ({
+          id: oid,
+          name: oid,
+          entity_type: "unknown",
+          description: null,
+          attributes: { brand: "brand-a" },
+        } satisfies GraphNode);
+    base.attributes = {
+      ...(base.attributes || {}),
+      last_synced_at: meta.synced_at,
+      last_sync_run_id: meta.run_id,
+      ...(meta.actor ? { last_sync_actor: meta.actor } : {}),
+      ...(meta.source_ids?.length
+        ? { last_sync_source_ids: [...meta.source_ids] }
+        : {}),
+    };
+    live.upsertNode(base);
+    updated.push(oid);
+  }
+  if (backend === "file") {
+    const maybe = live as MemoryGraphStore & { persist?: () => Promise<void> };
+    if (typeof maybe.persist === "function") await maybe.persist();
+  }
+  const stats = live.stats();
+  return {
+    backend: stats.backend,
+    updated_object_ids: updated,
+    stats: { ...stats, store_backend: stats.backend },
+  };
+}
+
 /** Reset memory singleton between vitest cases. */
 export function __resetMemoryGraphStoreForTests(): void {
   globalMemory.clear();
