@@ -1,5 +1,4 @@
 import React from "react";
-// @ts-expect-error react-dom/server is present at runtime but has no local declaration.
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it } from "vitest";

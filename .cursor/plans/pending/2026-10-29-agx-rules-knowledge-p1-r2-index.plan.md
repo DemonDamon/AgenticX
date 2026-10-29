@@ -18,7 +18,7 @@
 2. `ClarifyGate` remains the open-ended UI transport; R2 models *what* to ask (mode + candidates/conflicts), not Desktop SSE wiring.
 3. Session persistence mirrors R1/K2 file-store: JSON under `AGX_DISAMBIGUATION_STORE_DIR` / `.runtime/disambiguation`.
 4. No LLM in unit tests — deterministic fixtures from NL templates and synthetic retrieval hits.
-5. Admin / portal UI e2e is **out of R2-1…R2-5** (suite landing names runtime protocol only). Document deferred; no UI gate.
+5. Admin / portal UI e2e is **out of R2-1…R2-5** (library protocol only). Admin choice-panel landed separately as R2 admin (PR #148).
 6. agent_runtime deep integration (tool loop hooks) is optional thin helper in R2-5; full Desktop UI callback stays existing ClarifyGate.
 
 **A/B boundary:**
@@ -33,7 +33,7 @@
 | R2-2 | `2026-10-29-agx-rules-knowledge-p1-r2-2-session-gate.plan.md` | Session store + DisambiguationGate + multi-turn tests |
 | R2-3 | `2026-10-29-agx-rules-knowledge-p1-r2-3-rules-adapter.plan.md` | NlAmbiguity → protocol; apply resolutions → draft; tests |
 | R2-4 | `2026-10-29-agx-rules-knowledge-p1-r2-4-retrieval-adapter.plan.md` | Object-hit disambiguation via same protocol; tests |
-| R2-5 | `2026-10-29-agx-rules-knowledge-p1-r2-5-e2e.plan.md` | Dual-path e2e + README; index complete; UI deferred noted |
+| R2-5 | `2026-10-29-agx-rules-knowledge-p1-r2-5-e2e.plan.md` | Dual-path e2e + README; index complete; admin UI via R2 admin PR #148 |
 
 ## E2E gate (whole R2)
 
@@ -48,5 +48,7 @@
 ## Status
 
 - **Plans:** all R2 slices Done
-- **Impl:** R2-1…R2-5 complete on `feat/agx-rules-knowledge-p1-r2`
-- **UI:** deferred (protocol-only; no admin/portal e2e in this PR)
+- **Impl:** R2-1…R2-5 merged via PR #146 (`2f31b32e`)
+- **Admin UI:** Done via PR #148 (`44d6c050`) — `/admin/disambiguation` + shots 07–09
+- **Portal choice-panel:** still optional / later if needed
+

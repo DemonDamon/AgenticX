@@ -13,3 +13,7 @@ e2e green; shots committed; PR open against main.
 
 ## Status
 Done.
+
+## Merge
+
+Merged to `main` via PR #148.

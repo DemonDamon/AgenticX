@@ -8,6 +8,7 @@
  *   pnpm -C enterprise exec tsx scripts/e2e-rule-governance.ts
  *
  * Screenshots land in docs/agx-rules-knowledge-suite/e2e-shots/ (HD 1920x1080 @2x).
+ * Shots 01/02/03 are element captures (list / detail / executions) so MD5s differ.
  */
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -25,7 +26,6 @@ const SHOT_DIR =
   path.resolve(__dirname, "../..", "docs/agx-rules-knowledge-suite/e2e-shots");
 
 async function waitPastLoading(page: import("playwright").Page): Promise<void> {
-  // Wait until list is not in loading state and table or detail is visible.
   await page.getByTestId("rule-governance-page").waitFor({ state: "visible", timeout: 30_000 });
   const loading = page.getByText(/加载规则中|Loading rules/i);
   try {
@@ -78,6 +78,12 @@ async function main() {
     }
     console.log(`[e2e-rule-governance] list rows=${rowCount}`);
 
+    // Shot 01: list panel only (before relying on detail selection visuals)
+    const list = page.getByTestId("rule-governance-list");
+    await list.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await list.screenshot({ path: path.join(SHOT_DIR, "01-rule-governance-list.png") });
+
     // Prefer Brand-A temp threshold row; fall back to first row.
     const prefer = page.getByTestId("rule-governance-row-brand-a-temp-threshold");
     if (await prefer.isVisible().catch(() => false)) {
@@ -88,37 +94,38 @@ async function main() {
 
     await page.getByTestId("rule-governance-detail").waitFor({ state: "visible", timeout: 15_000 });
     await page.getByTestId("rule-governance-detail-id").waitFor({ state: "visible", timeout: 15_000 });
-    // Give executions panel a beat to settle
     await page.waitForTimeout(500);
 
     const sourceText = await page.getByTestId("rule-governance-source").innerText().catch(() => "");
     console.log(`[e2e-rule-governance] source note: ${sourceText}`);
 
-    await page.screenshot({
-      path: path.join(SHOT_DIR, "01-rule-governance-list.png"),
-      fullPage: true,
-    });
-
-    // Detail-focused crop via second shot after scrolling detail into view
-    await page.getByTestId("rule-governance-detail").scrollIntoViewIfNeeded();
+    // Shot 02: detail panel
+    const detail = page.getByTestId("rule-governance-detail");
+    await detail.scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
-    await page.screenshot({
-      path: path.join(SHOT_DIR, "02-rule-governance-detail.png"),
-      fullPage: true,
-    });
+    await detail.screenshot({ path: path.join(SHOT_DIR, "02-rule-governance-detail.png") });
 
+    // Shot 03: executions — must be non-empty when store is seeded (apiSource)
     const executions = page.getByTestId("rule-governance-executions");
-    if (await executions.isVisible().catch(() => false)) {
-      await executions.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(200);
-      await page.screenshot({
-        path: path.join(SHOT_DIR, "03-rule-governance-executions.png"),
-        fullPage: true,
-      });
-      console.log("[e2e-rule-governance] executions panel visible");
-    } else {
-      console.warn("[e2e-rule-governance] no executions panel (empty or stub); list+detail shots still taken");
+    const execVisible = await executions.isVisible().catch(() => false);
+    const fromApi = /已从 API 加载|Loaded from API/i.test(sourceText);
+    if (!execVisible) {
+      throw new Error(
+        fromApi
+          ? "claiming seeded/API rules but executions empty (shot 03 requires non-empty executions)"
+          : "rule-governance-executions not visible (seed Brand-A executions.json required)",
+      );
     }
+    const execItems = await executions.locator("li").count();
+    if (execItems < 1) {
+      throw new Error("claiming seeded executions but list is empty");
+    }
+    await executions.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await executions.screenshot({
+      path: path.join(SHOT_DIR, "03-rule-governance-executions.png"),
+    });
+    console.log(`[e2e-rule-governance] executions items=${execItems}`);
 
     console.log(`[e2e-rule-governance] shots → ${SHOT_DIR}`);
   } finally {

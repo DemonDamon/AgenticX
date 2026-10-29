@@ -50,7 +50,7 @@ export default function DataSecuritySection() {
           </div>
           <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
             <div>
-              {t("rawPhone")}: <code>{SAMPLE_SECURITY_ROWS[0].phone}</code>
+              {t("rawPhone")}: <code>{SAMPLE_SECURITY_ROWS[0]?.phone ?? ""}</code>
             </div>
             <div data-testid="data-security-masked-phone">
               {t("maskedPhone")}: <code>{phone === null ? "null" : phone}</code>

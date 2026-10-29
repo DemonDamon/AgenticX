@@ -13,3 +13,7 @@
 ## Status
 
 Done (e2e green + HD shots).
+
+## Merge
+
+Merged to `main` via PR #147.

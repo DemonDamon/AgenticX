@@ -28,7 +28,7 @@ Multi-turn state: `DisambiguationSession` (`open` → `completed` / `cancelled`)
 
 ## Admin / UI
 
-**Deferred.** This slice ships library protocol + adapters + pytest e2e only. No admin-console / web-portal pages or HD shots in P1 R2. A later slice may add choice-panel UI similar to rule-governance.
+**Done (P1 R2 admin).** Admin-console choice-panel at `/admin/disambiguation` covers `candidate_select` / `info_supplement` / `conflict_resolve` (PR #148, `44d6c050`). HD shots 07–09: `docs/agx-rules-knowledge-suite/e2e-shots/`. Library protocol + adapters remain the source of truth; UI maps requests onto the choice panel.
 
 ## A/B
 

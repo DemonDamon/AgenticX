@@ -4,13 +4,17 @@ import { SAMPLE_MASKING_POLICY, SAMPLE_SECURITY_ROWS, maskRows } from "../data-s
 describe("data-security-fixture", () => {
   it("masks analyst phone partially", () => {
     const out = maskRows(SAMPLE_SECURITY_ROWS, "analyst");
-    expect(out[0].phone).toBe("1*********8");
-    expect(out[0].email).toBe("a***************m");
+    const row = out[0];
+    expect(row).toBeDefined();
+    expect(row?.phone).toBe("1*********8");
+    expect(row?.email).toBe("a***************m");
   });
 
   it("keeps admin full", () => {
     const out = maskRows(SAMPLE_SECURITY_ROWS, "admin");
-    expect(out[0].phone).toBe("13812345678");
+    const row = out[0];
+    expect(row).toBeDefined();
+    expect(row?.phone).toBe("13812345678");
   });
 
   it("exposes policy id", () => {

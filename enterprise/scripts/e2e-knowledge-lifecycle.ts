@@ -8,6 +8,7 @@
  *   pnpm -C enterprise exec tsx scripts/e2e-knowledge-lifecycle.ts
  *
  * Screenshots land in docs/agx-rules-knowledge-suite/e2e-shots/ (HD 1920x1080 @2x).
+ * Shots 04/05/06 are element captures (list / detail / issues) so MD5s differ.
  */
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -77,6 +78,12 @@ async function main() {
     }
     console.log(`[e2e-knowledge-lifecycle] list rows=${rowCount}`);
 
+    // Shot 04: list panel
+    const list = page.getByTestId("knowledge-lifecycle-list");
+    await list.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await list.screenshot({ path: path.join(SHOT_DIR, "04-knowledge-lifecycle-list.png") });
+
     const prefer = page.getByTestId("knowledge-lifecycle-row-brand-a-entity-pump-02");
     if (await prefer.isVisible().catch(() => false)) {
       await prefer.click();
@@ -99,34 +106,30 @@ async function main() {
     const sourceText = await page.getByTestId("knowledge-lifecycle-source").innerText().catch(() => "");
     console.log(`[e2e-knowledge-lifecycle] source note: ${sourceText}`);
 
-    await page.screenshot({
-      path: path.join(SHOT_DIR, "04-knowledge-lifecycle-list.png"),
-      fullPage: true,
-    });
-
-    await page.getByTestId("knowledge-lifecycle-detail").scrollIntoViewIfNeeded();
+    // Shot 05: detail panel (status / transitions)
+    const detail = page.getByTestId("knowledge-lifecycle-detail");
+    await detail.scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
-    await page.screenshot({
-      path: path.join(SHOT_DIR, "05-knowledge-lifecycle-detail.png"),
-      fullPage: true,
-    });
+    await detail.screenshot({ path: path.join(SHOT_DIR, "05-knowledge-lifecycle-detail.png") });
 
+    // Shot 06: issues — require non-empty when quality/seed expected
     const issues = page.getByTestId("knowledge-lifecycle-issues");
-    if (await issues.isVisible().catch(() => false)) {
-      await issues.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(200);
-      await page.screenshot({
-        path: path.join(SHOT_DIR, "06-knowledge-lifecycle-issues.png"),
-        fullPage: true,
-      });
-      console.log("[e2e-knowledge-lifecycle] issues panel visible");
-    } else {
-      console.warn("[e2e-knowledge-lifecycle] no issues panel yet; list+detail shots still taken");
-      await page.screenshot({
-        path: path.join(SHOT_DIR, "06-knowledge-lifecycle-issues.png"),
-        fullPage: true,
-      });
+    const issuesVisible = await issues.isVisible().catch(() => false);
+    if (!issuesVisible) {
+      throw new Error(
+        "knowledge-lifecycle-issues not visible (expected non-empty issues after quality/seed for shot 06)",
+      );
     }
+    const issueItems = await issues.locator("li").count();
+    if (issueItems < 1) {
+      throw new Error("claiming seeded/quality issues but list is empty");
+    }
+    await issues.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await issues.screenshot({
+      path: path.join(SHOT_DIR, "06-knowledge-lifecycle-issues.png"),
+    });
+    console.log(`[e2e-knowledge-lifecycle] issues items=${issueItems}`);
 
     console.log(`[e2e-knowledge-lifecycle] shots → ${SHOT_DIR}`);
   } finally {

@@ -27,4 +27,4 @@
 
 ## Status
 
-Done on `feat/agx-rules-knowledge-p1-r2` (R2-5). Admin/UI deferred.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-5). Admin/UI later landed via PR #148 (R2 admin choice-panel).

@@ -41,4 +41,4 @@ store.transition("ent-1", KnowledgeStatus.PENDING_REVIEW)
 store.transition("ent-1", KnowledgeStatus.PUBLISHED)
 ```
 
-Admin-console governance UI is out of scope for K2 library slices; hang pages off this package later.
+Admin-console **数据治理 / knowledge-lifecycle** UI shipped (PR #147, `cdb601d1`) at `/admin/knowledge-lifecycle` — object list/detail, transitions, quality issues, change trail. This package remains the A-layer spine the admin store mirrors.
