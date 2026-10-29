@@ -8,6 +8,7 @@ import {
   getGraphStats,
   getNeighborhood,
   getSubgraph,
+  publishTouchedObjects,
   seedBrandAGraph,
 } from "../graph-store";
 
@@ -77,5 +78,21 @@ describe("graph-store (admin GraphStore layer)", () => {
     expect(seeded.backend).toBe("memory");
     const sub = await getSubgraph();
     expect(sub.nodes.length).toBe(3);
+  });
+
+  it("publishTouchedObjects stamps last_synced attrs on file store", async () => {
+    await seedBrandAGraph();
+    const pub = await publishTouchedObjects(["brand-a-entity-pump-01"], {
+      synced_at: "2026-10-29T15:00:00Z",
+      run_id: "brand-a-sync-test-001",
+      actor: "tester",
+      source_ids: ["brand-a-src-ledger-1"],
+    });
+    expect(pub.backend).toBe("file");
+    expect(pub.updated_object_ids).toEqual(["brand-a-entity-pump-01"]);
+    const nb = await getNeighborhood("brand-a-entity-pump-01", { depth: 0 });
+    const node = nb.nodes.find((n) => n.id === "brand-a-entity-pump-01");
+    expect(node?.attributes?.last_sync_run_id).toBe("brand-a-sync-test-001");
+    expect(node?.attributes?.last_synced_at).toBe("2026-10-29T15:00:00Z");
   });
 });

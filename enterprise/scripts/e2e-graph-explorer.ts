@@ -142,6 +142,72 @@ async function main() {
     const shot19 = path.join(SHOT_DIR, "19-graph-explorer-backend-badge.png");
     await badge.screenshot({ path: shot19 });
 
+    // Closed loop: force-change a source via incremental sync API cookie session,
+    // then reload explorer and confirm GraphStore node attrs reflect the publish.
+    await page.goto(`${ADMIN_BASE}/admin/graph-incremental`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    await page.getByTestId("graph-incremental-page").waitFor({ state: "visible", timeout: 30_000 });
+    await dismissNextOverlay(page);
+    const storeBackendLine = page.getByTestId("graph-incremental-store-backend");
+    await storeBackendLine.waitFor({ state: "visible", timeout: 20_000 });
+    const storeBackendText = (await storeBackendLine.innerText()).trim();
+    if (!/GraphStore backend:\s*(file|memory|neo4j)/i.test(storeBackendText)) {
+      throw new Error(`graph-incremental missing real store_backend: ${storeBackendText}`);
+    }
+    console.log(`[e2e-graph-explorer] incremental ${storeBackendText}`);
+
+    const syncResp = await page.request.post(`${ADMIN_BASE}/api/admin/graph-incremental/sync`, {
+      data: {
+        force_changed_ids: ["brand-a-src-ops-note"],
+        actor: "e2e-graph-explorer",
+      },
+    });
+    if (!syncResp.ok()) {
+      throw new Error(`incremental sync failed: ${syncResp.status()} ${await syncResp.text()}`);
+    }
+    const syncJson = (await syncResp.json()) as {
+      data?: {
+        report?: {
+          run_id?: string;
+          published_object_ids?: string[];
+          graph_stats?: Record<string, unknown>;
+        };
+      };
+    };
+    const report = (syncJson.data?.report || {}) as {
+      run_id?: string;
+      published_object_ids?: string[];
+      graph_stats?: Record<string, unknown>;
+    };
+    const runId = String(report.run_id || "");
+    if (!runId) throw new Error(`sync missing run_id: ${JSON.stringify(syncJson).slice(0, 300)}`);
+    console.log(
+      `[e2e-graph-explorer] synced run=${runId} published=${JSON.stringify(report.published_object_ids)} backend=${report.graph_stats?.store_backend}`,
+    );
+
+    await page.goto(`${ADMIN_BASE}/admin/graph-explorer`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    await waitPastLoading(page);
+    await dismissNextOverlay(page);
+    const valve = page.getByTestId("graph-explorer-node-brand-a-entity-valve-01");
+    await valve.waitFor({ state: "visible", timeout: 15_000 });
+    await valve.locator("circle").click({ force: true });
+    await page.waitForTimeout(800);
+    const detailAfter = await page.getByTestId("graph-explorer-detail").innerText();
+    if (!runId || !detailAfter.includes(runId)) {
+      // attrs panel may stringify JSON — require last_sync_run_id evidence
+      if (!/last_sync_run_id/i.test(detailAfter) || !detailAfter.includes(runId)) {
+        throw new Error(
+          `explorer did not reflect incremental publish run ${runId}: ${detailAfter.slice(0, 500)}`,
+        );
+      }
+    }
+    console.log("[e2e-graph-explorer] closed-loop: explorer shows last_sync_run_id after sync");
+
     const hashes = [shot17, shot18, shot19].map((f) => ({ f: path.basename(f), md5: md5File(f) }));
     console.log("[e2e-graph-explorer] shots", hashes);
     const uniq = new Set(hashes.map((h) => h.md5));

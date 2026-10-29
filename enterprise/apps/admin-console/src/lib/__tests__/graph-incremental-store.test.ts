@@ -13,6 +13,7 @@ import {
   reseedSamples,
   runMockSync,
 } from "../graph-incremental-store";
+import { getNeighborhood, seedBrandAGraph } from "../graph-store";
 
 const ORIGINAL_DIR = process.env.AGX_GRAPH_INCREMENTAL_ADMIN_STORE_DIR;
 let tempDir: string;
@@ -22,15 +23,31 @@ function restoreEnv() {
   else process.env.AGX_GRAPH_INCREMENTAL_ADMIN_STORE_DIR = ORIGINAL_DIR;
 }
 
+const ORIGINAL_GS_DIR = process.env.AGX_GRAPH_STORE_ADMIN_DIR;
+const ORIGINAL_GS_BACKEND = process.env.AGX_GRAPH_STORE_BACKEND;
+const ORIGINAL_NEO = process.env.NEO4J_URI;
+let graphDir: string;
+
 describe("graph-incremental-store", () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(tmpdir(), "agx-gi-"));
+    graphDir = await mkdtemp(path.join(tmpdir(), "agx-gs-"));
     process.env.AGX_GRAPH_INCREMENTAL_ADMIN_STORE_DIR = tempDir;
+    process.env.AGX_GRAPH_STORE_ADMIN_DIR = graphDir;
+    process.env.AGX_GRAPH_STORE_BACKEND = "file";
+    delete process.env.NEO4J_URI;
   });
 
   afterEach(async () => {
     restoreEnv();
+    if (ORIGINAL_GS_DIR === undefined) delete process.env.AGX_GRAPH_STORE_ADMIN_DIR;
+    else process.env.AGX_GRAPH_STORE_ADMIN_DIR = ORIGINAL_GS_DIR;
+    if (ORIGINAL_GS_BACKEND === undefined) delete process.env.AGX_GRAPH_STORE_BACKEND;
+    else process.env.AGX_GRAPH_STORE_BACKEND = ORIGINAL_GS_BACKEND;
+    if (ORIGINAL_NEO === undefined) delete process.env.NEO4J_URI;
+    else process.env.NEO4J_URI = ORIGINAL_NEO;
     await rm(tempDir, { recursive: true, force: true });
+    await rm(graphDir, { recursive: true, force: true });
   });
 
   it("seeds Brand-A sources and two sync runs (full + incremental)", async () => {
@@ -110,5 +127,22 @@ describe("graph-incremental-store", () => {
     const report = await runMockSync({ actor: "tester" });
     expect(report.graph_stats.store_backend).toBeTruthy();
     expect(["file", "memory", "neo4j"]).toContain(String(report.graph_stats.store_backend));
+  });
+
+  it("force-changed sync publishes into GraphStore (explorer-visible attrs)", async () => {
+    await seedBrandAGraph();
+    const report = await runMockSync({
+      actor: "tester",
+      forceChangedIds: ["brand-a-src-ops-note"],
+    });
+    expect(report.published_object_ids).toContain("brand-a-entity-valve-01");
+    expect(report.graph_stats.published_into_store).toEqual(
+      expect.arrayContaining(["brand-a-entity-valve-01"]),
+    );
+    const nb = await getNeighborhood("brand-a-entity-valve-01", { depth: 0 });
+    const node = nb.nodes.find((n) => n.id === "brand-a-entity-valve-01");
+    expect(node?.attributes?.last_sync_run_id).toBe(report.run_id);
+    expect(node?.attributes?.last_synced_at).toBeTruthy();
+    expect(String(node?.attributes?.last_sync_actor)).toBe("tester");
   });
 });

@@ -12,7 +12,11 @@ import {
   type SourceWithStatus,
   type SyncReportRow,
 } from "./graph-incremental-types";
-import { getGraphStats as getStoreStats, seedBrandAGraph } from "./graph-store";
+import {
+  getGraphStats as getStoreStats,
+  publishTouchedObjects,
+  seedBrandAGraph,
+} from "./graph-store";
 
 export type {
   ChangeSetRow,
@@ -356,6 +360,9 @@ export async function runMockSync(opts?: {
     ? [...touched]
     : [];
 
+  const runId = `brand-a-sync-${randomUUID().slice(0, 8)}`;
+  const syncedAt = nowIso();
+
   // Align display with GraphStore SoT (seed/ensure store; do not treat JSON as truth).
   let storeBackend = "file";
   let storeEntityCount = Object.values(links).flat().length || SAMPLE_GRAPH_STATS.entity_count;
@@ -372,16 +379,32 @@ export async function runMockSync(opts?: {
     storeRelCount = Number(seeded.stats.relationship_count) || storeRelCount;
   }
 
+  // Closed loop: when sources extract/publish, stamp GraphStore entities so explorer reflects sync.
+  let publishedIntoStore: string[] = [];
+  if (published.length) {
+    const pub = await publishTouchedObjects(published, {
+      synced_at: syncedAt,
+      run_id: runId,
+      actor,
+      source_ids: needsExtract,
+    });
+    publishedIntoStore = pub.updated_object_ids;
+    storeBackend = String(pub.backend || storeBackend);
+    storeEntityCount = Number(pub.stats.entity_count) || storeEntityCount;
+    storeRelCount = Number(pub.stats.relationship_count) || storeRelCount;
+  }
+
   const graph_stats: Record<string, unknown> = {
     entity_count: storeEntityCount,
     relation_count: storeRelCount,
     store_backend: storeBackend,
     skipped_unchanged: change.unchanged.length,
     actor,
+    published_into_store: publishedIntoStore,
   };
 
   const report: SyncReportRow = {
-    run_id: `brand-a-sync-${randomUUID().slice(0, 8)}`,
+    run_id: runId,
     added: change.added,
     changed: change.changed,
     removed: change.removed,
@@ -391,7 +414,7 @@ export async function runMockSync(opts?: {
     published_object_ids: published.sort(),
     retired_object_ids: [],
     graph_stats,
-    at: nowIso(),
+    at: syncedAt,
   };
 
   await writeJsonFile(sourcesPath(), { sources: nextSources });
