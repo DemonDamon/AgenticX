@@ -28,6 +28,18 @@ Section **Rule governance** at `/admin/rule-governance` lists rules and shows de
 
 UI pages beyond list/detail are deferred; data model + API are ready.
 
+## Admin UI e2e (HD screenshots)
+
+With enterprise admin-console on `:3001`:
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-rule-governance.ts
+```
+
+Shots + how-to-open notes: `docs/agx-rules-knowledge-suite/e2e-shots/`.
+Admin URL: http://127.0.0.1:3001/admin/rule-governance
+
 ## Desensitize checklist
 
 - No real customer / company / proposal names in `agenticx/rules/`, `examples/rules/`, or fixtures.
