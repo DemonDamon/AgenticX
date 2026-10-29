@@ -3,7 +3,7 @@
 Shared JSON view-model for **citation / conflict display** in web-portal and admin-console.
 Produced by `agenticx.retrieval.citation_view.to_citation_view(EvidenceBundle)`.
 
-UI pixel work is out of scope for P0; consumers bind to this shape.
+P0 shipped the serializer; UI pixels live in `@agenticx/ui` `CitationEvidencePanel` (portal `/workspace/citations`, admin `/admin/citation-evidence`) with Brand-A fixtures.
 
 ## Top-level object
 
@@ -52,6 +52,8 @@ UI pixel work is out of scope for P0; consumers bind to this shape.
 2. When `conflicts.length > 0`, show a warning panel listing each `identity` and its `values`.
 3. When `missing.length > 0`, show a soft hint (not a hard error) for incomplete evidence.
 4. Do not hard-code customer / company names; fixtures use synthetic ids only.
+5. Shared component: `CitationEvidencePanel` + `buildBrandACitationFixture` from `@agenticx/ui`.
+6. Demo mounts: portal `/workspace/citations`, admin `/admin/citation-evidence`.
 
 ## Python entry
 

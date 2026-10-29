@@ -3,7 +3,7 @@ import type { Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { AppProviders } from "../providers/AppProviders";
-import { PageWatermark, resolvePageWatermarkText } from "../components/PageWatermark";
+import { PageWatermark } from "../components/PageWatermark";
 import "./globals.css";
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
@@ -37,7 +37,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="min-h-screen bg-background text-foreground antialiased">
         <NextIntlClientProvider messages={messages}>
           <AppProviders initialLocale={locale === "en" ? "en" : "zh"}>
-            <PageWatermark text={resolvePageWatermarkText(process.env.NEXT_PUBLIC_PAGE_WATERMARK)} />
+            <PageWatermark text={(process.env.NEXT_PUBLIC_PAGE_WATERMARK || "").trim() || "demo@agenticx.local"} />
             {children}
           </AppProviders>
         </NextIntlClientProvider>

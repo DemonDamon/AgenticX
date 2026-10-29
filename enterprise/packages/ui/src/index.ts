@@ -35,6 +35,8 @@ export * from "./components/layout/StatCard";
 
 /* ======= 数据组件 ======= */
 export * from "./components/data/DataTable";
+export * from "./components/data/citation-view";
+export * from "./components/data/CitationEvidencePanel";
 
 /* ======= 图表 ======= */
 export * from "./components/charts/ChartCard";

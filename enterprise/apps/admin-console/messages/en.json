@@ -77,7 +77,8 @@
         "dataSecurity": "Data security",
         "ruleGovernance": "Rule governance",
         "knowledgeLifecycle": "Knowledge lifecycle",
-        "disambiguation": "Disambiguation"
+        "disambiguation": "Disambiguation",
+        "citationEvidence": "Citation evidence"
       }
     },
     "health": {

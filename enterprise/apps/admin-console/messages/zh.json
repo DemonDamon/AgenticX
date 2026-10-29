@@ -77,7 +77,8 @@
         "dataSecurity": "数据安全",
         "ruleGovernance": "规则治理",
         "knowledgeLifecycle": "知识生命周期",
-        "disambiguation": "消歧确认"
+        "disambiguation": "消歧确认",
+        "citationEvidence": "引用证据"
       }
     },
     "health": {

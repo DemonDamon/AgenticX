@@ -76,3 +76,23 @@ pnpm -C enterprise exec tsx scripts/e2e-disambiguation.ts
 | `09-disambiguation-conflict-resolve.png` | Conflict resolve mode |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+# Citation evidence UI shots (K1)
+
+HD screenshot of web-portal **Citation evidence** at `/workspace/citations` (Brand-A fixture via `CitationEvidencePanel`).
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-portal-citations.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `16-portal-citation-evidence.png` | Citations + conflicts + missing (Brand-A pump) |
+
+Synthetic **Brand-A** ids only — no real customer names.
+
