@@ -430,10 +430,30 @@ Key capabilities:
 
 See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
 
+### Data Suite
+
+End-to-end **enterprise data** demos on top of A1–A8 (channels → OneID → governance → tags → boards → masking → patrol) plus a desensitized **B-layer delivery pack** skeleton.
+
+```bash
+# Golden path (one command): FakeChannel → job → OneID → gov/tags → board → mask → patrol
+python examples/data_suite/golden_path/run_golden_path.py
+
+# Apply synthetic Brand-A / Market-X delivery pack (template for a separate customer B repo)
+python examples/data_suite/delivery_pack/apply.py
+```
+
+| Path | What it is |
+|------|------------|
+| [examples/data_suite/golden_path/](examples/data_suite/golden_path/) | Productized A-layer spine demo + README |
+| [examples/data_suite/delivery_pack/](examples/data_suite/delivery_pack/) | B1–B6 config skeleton (`register_pack`); copy to a separate B repo for real projects |
+
+See also: [docs/agx-data-suite/](docs/agx-data-suite/) (ops notes / Feishu manual links).
+
 ### More Application Examples
 
 | Project | Description | Path |
 |---------|-------------|------|
+| **Data Suite** | Golden-path spine + delivery pack skeleton for enterprise data governance | [examples/data_suite/](examples/data_suite/) |
 | **Agent Skills** | Skill discovery, matching, and SOP-driven skill execution for agents | [examples/agenticx-for-agent-skills/](examples/agenticx-for-agent-skills/) |
 | **AgentKit** | Volcengine AgentKit integration with Docker-ready agent deployment | [examples/agenticx-for-agentkit/](examples/agenticx-for-agentkit/) |
 | **ChatBI** | Conversational BI — natural language to data insights | [examples/agenticx-for-chatbi/](examples/agenticx-for-chatbi/) |

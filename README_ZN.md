@@ -426,10 +426,30 @@ python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
 
 详见: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
 
+### Data Suite
+
+企业数据能力端到端示例：A1–A8 黄金路径（通道 → OneID → 治理 → 标签 → 看板 → 脱敏 → 巡检），以及脱敏的 **B 层交付配置包**骨架。
+
+```bash
+# 黄金路径（一条命令）
+python examples/data_suite/golden_path/run_golden_path.py
+
+# 应用合成 Brand-A / Market-X 交付包（真实项目请拷到独立 B 仓再改）
+python examples/data_suite/delivery_pack/apply.py
+```
+
+| 路径 | 说明 |
+|------|------|
+| [examples/data_suite/golden_path/](examples/data_suite/golden_path/) | A 层贯通演示 + README |
+| [examples/data_suite/delivery_pack/](examples/data_suite/delivery_pack/) | B1–B6 配置骨架（`register_pack`）；项目定制进独立 B 仓 |
+
+另见：[docs/agx-data-suite/](docs/agx-data-suite/)（操作说明 / 飞书手册链接）。
+
 ### 更多应用示例
 
 | 项目 | 描述 | 路径 |
 |------|------|------|
+| **Data Suite** | 黄金路径贯通 + 交付配置包骨架（企业数据治理） | [examples/data_suite/](examples/data_suite/) |
 | **Agent Skills** | 技能发现、匹配与 SOP 驱动的智能体技能执行 | [examples/agenticx-for-agent-skills/](examples/agenticx-for-agent-skills/) |
 | **AgentKit** | 火山引擎 AgentKit 集成，支持 Docker 部署 | [examples/agenticx-for-agentkit/](examples/agenticx-for-agentkit/) |
 | **ChatBI** | 对话式 BI — 自然语言驱动数据洞察 | [examples/agenticx-for-chatbi/](examples/agenticx-for-chatbi/) |
