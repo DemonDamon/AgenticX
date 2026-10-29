@@ -44,4 +44,4 @@
 
 - **Plans:** Done (V1–V5 written)
 - **Impl:** Done on `feat/agx-rules-knowledge-p2-k3-graph-viz`
-- **PR:** pending push
+- **PR:** https://github.com/DemonDamon/AgenticX/pull/159
