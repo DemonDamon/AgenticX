@@ -144,3 +144,37 @@ pnpm -C enterprise exec tsx scripts/e2e-portal-citations.ts
 | `16-portal-citation-evidence.png` | Citations + conflicts + missing (Brand-A pump) |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+# Graph explorer admin e2e shots (P2 K3 viz)
+
+HD screenshots of admin-console **图谱探索 / graph-explorer** querying GraphStore.
+
+Shots **17 / 18 / 19** must be visually distinct (canvas vs node detail vs backend badge) with distinct MD5s.
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+# Local without Neo4j (default file GraphStore under .runtime/admin/graph-store):
+export AGX_GRAPH_STORE_BACKEND=file
+
+# Flip to Neo4j (Docker) — restart admin-console after exporting so Next sees env:
+#   docker run -d --name agx-neo4j -p 7474:7474 -p 7687:7687 \
+#     -e NEO4J_AUTH=neo4j/password neo4j:5-community
+#   export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=password
+#   export AGX_GRAPH_STORE_BACKEND=neo4j
+# Admin Neo4j path bridges via: python -m agenticx.knowledge.graphers.store.query_cli
+
+pnpm -C enterprise exec tsx scripts/e2e-graph-explorer.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `17-graph-explorer-canvas.png` | Force-directed canvas with Brand-A nodes/edges |
+| `18-graph-explorer-node-detail.png` | Selected node attrs panel |
+| `19-graph-explorer-backend-badge.png` | GraphStore backend label (`neo4j|memory|file`) |
+
+Synthetic **Brand-A** ids only — no real customer names. GraphStore is SoT; JSON sync metadata is not graph truth.
+
