@@ -48,4 +48,4 @@
 
 - **Plans:** all K3 slices Done
 - **Impl:** K3-1…K3-5 on `feat/agx-rules-knowledge-p2-k3` (library + e2e; admin deferred)
-- **Admin UI:** deferred (library + e2e first)
+- **Admin UI:** Done — see `2026-10-29-agx-rules-knowledge-p2-k3-admin-index.plan.md` (branch `feat/agx-rules-knowledge-p2-k3-admin-ui`)
