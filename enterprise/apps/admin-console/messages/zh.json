@@ -75,7 +75,8 @@
         "dataGovernance": "数据治理",
         "dataBoards": "数据看板",
         "dataSecurity": "数据安全",
-        "ruleGovernance": "规则治理"
+        "ruleGovernance": "规则治理",
+        "knowledgeLifecycle": "知识生命周期"
       }
     },
     "health": {
@@ -1645,6 +1646,35 @@
         "rawPhone": "原始手机号",
         "maskedPhone": "脱敏后",
         "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。"
+      },
+      "knowledgeLifecycle": {
+        "title": "知识生命周期",
+        "description": "知识对象状态、质量问题与变更追溯（P1 K2）— 仅 Brand-A 合成样例",
+        "listTitle": "知识对象",
+        "detailTitle": "对象详情",
+        "issuesTitle": "质量问题",
+        "trailTitle": "变更追溯",
+        "noIssues": "该对象暂无问题",
+        "noTrail": "暂无变更记录",
+        "noSelection": "请选择一个对象",
+        "loading": "加载知识对象中…",
+        "apiSource": "已从 API 加载",
+        "stubNote": "知识生命周期 API 不可用，显示本地种子数据。",
+        "runQuality": "运行质量检查",
+        "qualitySuccess": "质量检查完成",
+        "qualityFailed": "质量检查失败",
+        "transitionSuccess": "状态已更新",
+        "transitionFailed": "状态流转失败",
+        "resolveIssue": "标记已解决",
+        "issueResolved": "问题已解决",
+        "issueFailed": "问题更新失败",
+        "col": {
+          "id": "ID",
+          "kind": "类型",
+          "status": "状态",
+          "version": "版本",
+          "name": "名称"
+        }
       },
       "ruleGovernance": {
         "title": "规则治理",
