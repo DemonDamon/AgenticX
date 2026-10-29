@@ -3,7 +3,7 @@ import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { runQualityAndOpenIssues } from "../../../../../lib/knowledge-lifecycle-store";
 
 export async function POST() {
-  const auth = await requireAdminScope(["provider:update"]);
+  const auth = await requireAdminScope(["kb:update"]);
   if (!auth.ok) return auth.response;
   try {
     const result = await runQualityAndOpenIssues();

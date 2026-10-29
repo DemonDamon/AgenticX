@@ -1713,7 +1713,8 @@
           "status": "Status",
           "version": "Version",
           "name": "Name"
-        }
+        },
+        "writeForbidden": "Missing knowledge write scope (kb:update required)"
       },
       "ruleGovernance": {
         "title": "Rule governance",

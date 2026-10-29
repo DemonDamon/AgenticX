@@ -1713,7 +1713,8 @@
           "status": "状态",
           "version": "版本",
           "name": "名称"
-        }
+        },
+        "writeForbidden": "无知识库写权限（需要 kb:update）"
       },
       "ruleGovernance": {
         "title": "规则治理",

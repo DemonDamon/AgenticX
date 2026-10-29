@@ -31,6 +31,7 @@ export default function AdminKnowledgeLifecycleSection() {
   const [fromApi, setFromApi] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [writeForbidden, setWriteForbidden] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -91,7 +92,7 @@ export default function AdminKnowledgeLifecycleSection() {
   }, [detail]);
 
   async function doTransition(status: KnowledgeStatus) {
-    if (!detail) return;
+    if (!detail || writeForbidden) return;
     setBusy(true);
     try {
       const res = await adminFetch(
@@ -99,9 +100,14 @@ export default function AdminKnowledgeLifecycleSection() {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status, actor: "admin" }),
+          body: JSON.stringify({ status }),
         },
       );
+      if (res.status === 401 || res.status === 403) {
+        setWriteForbidden(true);
+        toast.error(t("writeForbidden"));
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
       toast.success(t("transitionSuccess"));
       await loadList();
@@ -114,9 +120,15 @@ export default function AdminKnowledgeLifecycleSection() {
   }
 
   async function runQuality() {
+    if (writeForbidden) return;
     setBusy(true);
     try {
       const res = await adminFetch("/api/admin/knowledge-lifecycle/quality", { method: "POST" });
+      if (res.status === 401 || res.status === 403) {
+        setWriteForbidden(true);
+        toast.error(t("writeForbidden"));
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
       toast.success(t("qualitySuccess"));
       if (selectedId) await loadDetail(selectedId);
@@ -128,6 +140,7 @@ export default function AdminKnowledgeLifecycleSection() {
   }
 
   async function resolveIssue(issueId: string) {
+    if (writeForbidden) return;
     setBusy(true);
     try {
       const res = await adminFetch(
@@ -135,9 +148,14 @@ export default function AdminKnowledgeLifecycleSection() {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: "resolved", actor: "admin" }),
+          body: JSON.stringify({ status: "resolved" }),
         },
       );
+      if (res.status === 401 || res.status === 403) {
+        setWriteForbidden(true);
+        toast.error(t("writeForbidden"));
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
       toast.success(t("issueResolved"));
       if (selectedId) await loadDetail(selectedId);
@@ -158,12 +176,17 @@ export default function AdminKnowledgeLifecycleSection() {
         <Button
           data-testid="knowledge-lifecycle-run-quality"
           variant="secondary"
-          disabled={busy}
+          disabled={busy || writeForbidden}
           onClick={() => void runQuality()}
         >
           {t("runQuality")}
         </Button>
       </div>
+      {writeForbidden ? (
+        <p className="text-sm text-muted-foreground" data-testid="knowledge-lifecycle-write-forbidden">
+          {t("writeForbidden")}
+        </p>
+      ) : null}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card data-testid="knowledge-lifecycle-list">
           <CardHeader>
@@ -240,7 +263,7 @@ export default function AdminKnowledgeLifecycleSection() {
                     <Button
                       key={status}
                       size="sm"
-                      disabled={busy}
+                      disabled={busy || writeForbidden}
                       data-testid={`knowledge-lifecycle-transition-${status}`}
                       onClick={() => void doTransition(status)}
                     >
@@ -265,7 +288,7 @@ export default function AdminKnowledgeLifecycleSection() {
                             <Button
                               size="sm"
                               className="mt-2"
-                              disabled={busy}
+                              disabled={busy || writeForbidden}
                               data-testid={`knowledge-lifecycle-resolve-${iss.id}`}
                               onClick={() => void resolveIssue(iss.id)}
                             >

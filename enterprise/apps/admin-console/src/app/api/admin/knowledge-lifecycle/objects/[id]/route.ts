@@ -10,7 +10,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminScope(["provider:read"]);
+  const auth = await requireAdminScope(["kb:read"]);
   if (!auth.ok) return auth.response;
   try {
     const { id } = await context.params;
