@@ -99,3 +99,29 @@ pnpm -C enterprise exec tsx scripts/e2e-graph-incremental.ts
 | `12-graph-incremental-sync-report.png` | Sync report (change set / extracted / published) |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+# Portal R2 disambiguation e2e shots (P1 R2)
+
+HD screenshots of web-portal **消歧确认** at `/workspace/disambiguation` (runtime sessions, not admin JSON store).
+
+Shots **13 / 14 / 15** must be visually distinct (candidate_select vs info_supplement vs conflict_resolve) with distinct MD5s.
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+# web-portal must be up on :3000 (login via ADMIN_CONSOLE_LOGIN_* / AUTH_DEV_OWNER_PASSWORD)
+pnpm -C enterprise exec tsx scripts/e2e-portal-disambiguation.ts
+```
+
+## Shots
+
+| File | Mode | Notes |
+|------|------|-------|
+| `13-portal-disambiguation-candidate-select.png` | Candidate select | Brand-A pump candidate checked |
+| `14-portal-disambiguation-info-supplement.png` | Info supplement | free-text filled |
+| `15-portal-disambiguation-conflict-resolve.png` | Conflict resolve | conflict candidate checked |
+
+Synthetic **Brand-A** ids only — no real customer names.
+
+Mount: `/workspace/disambiguation` + Settings→General entry. Runtime store via `AGX_DISAMBIGUATION_RUNTIME_STORE_DIR` (default `.runtime/disambiguation`).
