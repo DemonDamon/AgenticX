@@ -80,6 +80,7 @@ export const SAMPLE_SOURCE_INDEX: SourceIndexLinks = {
 
 export const SAMPLE_GRAPH_STATS: GraphStatsSnapshot = {
   entity_count: 3,
-  relation_count: 1,
+  relation_count: 2,
   updated_at: "2026-10-29T03:05:00Z",
+  store_backend: "file",
 };

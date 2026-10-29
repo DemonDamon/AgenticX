@@ -15,10 +15,10 @@
 
 ### Tasks
 
-- [ ] Section + canvas + nav + i18n
-- [ ] data-testid hooks for e2e
-- [ ] Commit: `feat(admin): graph-explorer force canvas UI`
+- [x] Section + canvas + nav + i18n
+- [x] data-testid hooks for e2e
+- [x] Commit: `feat(admin): graph-explorer force canvas UI`
 
 ## Status
 
-Pending
+Done

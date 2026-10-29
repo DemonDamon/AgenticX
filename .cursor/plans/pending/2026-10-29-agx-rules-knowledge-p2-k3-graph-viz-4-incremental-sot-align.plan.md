@@ -14,10 +14,10 @@
 
 ### Tasks
 
-- [ ] Seed/sync populate GraphStore + honest store_backend
-- [ ] UI note / link; remove “viz deferred” dead copy
-- [ ] Commit: `fix(admin): align graph-incremental seed/sync with GraphStore SoT`
+- [x] Seed/sync populate GraphStore + honest store_backend
+- [x] UI note / link; remove “viz deferred” dead copy
+- [x] Commit: `fix(admin): align graph-incremental seed/sync with GraphStore SoT`
 
 ## Status
 
-Pending
+Done

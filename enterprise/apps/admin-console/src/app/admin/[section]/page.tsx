@@ -25,6 +25,7 @@ import KnowledgeLifecycleSection from "../_sections/knowledge-lifecycle";
 import DisambiguationSection from "../_sections/disambiguation";
 import CitationEvidenceSection from "../_sections/citation-evidence";
 import GraphIncrementalSection from "../_sections/graph-incremental";
+import GraphExplorerSection from "../_sections/graph-explorer";
 import ProjectsSection from "../_sections/projects";
 
 const PLATFORM_SECTION_PAGES = {
@@ -54,6 +55,7 @@ const PLATFORM_SECTION_PAGES = {
   "disambiguation": DisambiguationSection,
   "citation-evidence": CitationEvidenceSection,
   "graph-incremental": GraphIncrementalSection,
+  "graph-explorer": GraphExplorerSection,
 } as const;
 
 export default async function AdminPlatformSectionPage({
