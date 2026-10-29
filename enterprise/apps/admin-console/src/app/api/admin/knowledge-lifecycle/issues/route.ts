@@ -3,7 +3,7 @@ import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { listIssues, type IssueStatus } from "../../../../../lib/knowledge-lifecycle-store";
 
 export async function GET(request: Request) {
-  const auth = await requireAdminScope(["provider:read"]);
+  const auth = await requireAdminScope(["kb:read"]);
   if (!auth.ok) return auth.response;
   try {
     const url = new URL(request.url);

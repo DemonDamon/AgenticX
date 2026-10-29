@@ -7,7 +7,7 @@ import {
 } from "../../../../../lib/knowledge-lifecycle-store";
 
 export async function GET() {
-  const auth = await requireAdminScope(["provider:read"]);
+  const auth = await requireAdminScope(["kb:read"]);
   if (!auth.ok) return auth.response;
   try {
     const objects = await listObjects();
@@ -19,7 +19,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const auth = await requireAdminScope(["provider:update"]);
+  const auth = await requireAdminScope(["kb:update"]);
   if (!auth.ok) return auth.response;
   try {
     const body = (await request.json()) as Partial<KnowledgeObjectRow> & {
@@ -42,7 +42,7 @@ export async function PUT(request: Request) {
         source_ids: body.source_ids,
         meta: body.meta,
       },
-      { actor: body.actor || "admin", bumpVersion: Boolean(body.bump_version) },
+      { actor: (body.actor || auth.session.email || auth.session.userId || "admin"), bumpVersion: Boolean(body.bump_version) },
     );
     return NextResponse.json({ code: "00000", message: "ok", data: { object } });
   } catch (error) {

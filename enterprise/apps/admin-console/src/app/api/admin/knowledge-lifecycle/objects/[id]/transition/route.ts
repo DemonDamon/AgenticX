@@ -9,7 +9,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminScope(["provider:update"]);
+  const auth = await requireAdminScope(["kb:update"]);
   if (!auth.ok) return auth.response;
   try {
     const { id } = await context.params;
@@ -18,7 +18,7 @@ export async function POST(
       return NextResponse.json({ code: "40000", message: "status required" }, { status: 400 });
     }
     const object = await transitionObject(id, body.status as KnowledgeStatus, {
-      actor: body.actor || "admin",
+      actor: (body.actor || auth.session.email || auth.session.userId || "admin"),
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { object } });
   } catch (error) {
