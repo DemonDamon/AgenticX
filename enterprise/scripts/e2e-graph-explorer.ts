@@ -160,14 +160,19 @@ async function main() {
       await page.getByTestId("graph-incremental-refresh").click().catch(() => undefined);
       await page.waitForTimeout(800);
     }
-    let storeBackendText = (await storeBackendLine.innerText()).trim();
-    if (!/GraphStore backend:\s*(file|memory|neo4j)/i.test(storeBackendText)) {
-      // one more refresh after seed
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.getByTestId("graph-incremental-page").waitFor({ state: "visible", timeout: 30_000 });
-      storeBackendText = (await page.getByTestId("graph-incremental-store-backend").innerText()).trim();
+    const backendValue = page.getByTestId("graph-incremental-store-backend-value");
+    await backendValue.waitFor({ state: "visible", timeout: 30_000 });
+    // Poll until GraphStore backend resolves (Neo4j bridge can take a few seconds).
+    let storeBackendText = "";
+    for (let i = 0; i < 20; i++) {
+      storeBackendText = (await backendValue.innerText()).trim();
+      if (/^(file|memory|neo4j)$/i.test(storeBackendText)) break;
+      await page.waitForTimeout(500);
+      if (i === 5 || i === 12) {
+        await page.getByTestId("graph-incremental-refresh").click().catch(() => undefined);
+      }
     }
-    if (!/GraphStore backend:\s*(file|memory|neo4j)/i.test(storeBackendText)) {
+    if (!/^(file|memory|neo4j)$/i.test(storeBackendText)) {
       throw new Error(`graph-incremental missing real store_backend: ${storeBackendText}`);
     }
     console.log(`[e2e-graph-explorer] incremental ${storeBackendText}`);
