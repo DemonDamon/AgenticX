@@ -26,7 +26,7 @@ Section **Rule governance** at `/admin/rule-governance` lists rules and shows de
 (`AGX_RULES_STORE_DIR` or `.runtime/rules` / admin default under
 `.runtime/admin/rules`).
 
-UI pages beyond list/detail are deferred; data model + API are ready.
+Admin list/detail + recent executions UI shipped (PR #144). NL draft / compile wizards beyond this slice remain future work; data model + API are ready.
 
 ## Admin UI e2e (HD screenshots)
 

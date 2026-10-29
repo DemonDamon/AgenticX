@@ -50,6 +50,7 @@
     "@types/papaparse": "^5.3.15",
     "@types/pg": "^8.15.6",
     "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "eslint": "^10.4.0",
     "eslint-config-next": "^16.2.6",
     "eslint-plugin-i18next": "^6.1.4",

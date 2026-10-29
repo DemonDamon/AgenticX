@@ -23,4 +23,6 @@
 ## Status
 
 - **Plans:** all A1–A4 Done
-- **Impl:** complete on branch; e2e + shots 07–09 green
+- **Impl:** merged to `main` via PR #148 (`44d6c050`, 2026-10-29 Asia/Shanghai); HD shots 07–09 on main
+- **Follow-up:** P0 debt cleanup on `fix/agx-rules-knowledge-p0-debt`
+

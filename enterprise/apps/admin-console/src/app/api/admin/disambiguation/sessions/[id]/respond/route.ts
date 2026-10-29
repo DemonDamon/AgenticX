@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdminScope } from "../../../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../../../../lib/admin-auth";
 import {
   applyResponse,
   type DisambiguationResponse,
-} from "../../../../../../lib/disambiguation-store";
+} from "../../../../../../../lib/disambiguation-store";
 
 export async function POST(
   request: Request,

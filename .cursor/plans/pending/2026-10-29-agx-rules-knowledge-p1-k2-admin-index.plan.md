@@ -31,4 +31,6 @@
 ## Status
 
 - **Plans:** all A1–A4 Done
-- **Impl:** complete on `feat/agx-rules-knowledge-p1-k2-admin-ui` (awaiting PR merge)
+- **Impl:** merged to `main` via PR #147 (`cdb601d1`, 2026-10-29 Asia/Shanghai)
+- **Follow-up:** e2e shot distinctness / P0 debt on `fix/agx-rules-knowledge-p0-debt`
+

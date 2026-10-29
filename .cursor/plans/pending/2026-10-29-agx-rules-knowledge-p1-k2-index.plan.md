@@ -19,7 +19,7 @@
 3. Persistence mirrors R1 `RuleFileStore` (JSON under resolve_store_dir / env / `.runtime/knowledge-lifecycle`).
 4. Quality checkers are pure functions over object(s) + optional policy config; no LLM.
 5. Idmapping integration is optional adapter (call merge/conflict surfaces), not a rewrite of `IdMappingEngine`.
-6. Admin UI e2e is **out of K2-1…K2-4**; K2-5 may add README sample + library e2e only unless UI is explicitly added later (same discipline as K1-3: contract first).
+6. Admin UI e2e is **out of K2-1…K2-5 library**; admin governance UI landed separately as K2 admin (PR #147).
 
 **A/B boundary:**
 - **In AgenticX (A):** `agenticx/knowledge/lifecycle/` model/store/quality/issues/audit; hooks to idmapping; synthetic fixtures under `tests/knowledge/lifecycle/`.
@@ -48,4 +48,6 @@
 ## Status
 
 - **Plans:** all K2 slices Done
-- **Impl:** K2-1…K2-5 complete on `feat/agx-rules-knowledge-p1-k2` (PR #145)
+- **Impl:** K2-1…K2-5 merged via PR #145 (`dce771f5`)
+- **Admin UI:** Done via PR #147 (`cdb601d1`) — `/admin/knowledge-lifecycle` + shots 04–06
+

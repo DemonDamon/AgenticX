@@ -1,6 +1,8 @@
 # Rule governance admin e2e shots (P0)
 
-HD screenshots (1920×1080 @2x) of admin-console **规则治理 / rule-governance**.
+HD screenshots (element captures at 1920×1080 @2x device scale) of admin-console **规则治理 / rule-governance**.
+
+Shots **01 / 02 / 03** must be visually distinct (list card vs detail card vs non-empty executions list). The Playwright script fails if executions are empty while the API/seed path is active.
 
 ## How to open admin
 
@@ -25,15 +27,17 @@ pnpm -C enterprise exec tsx scripts/e2e-rule-governance.ts
 
 | File | What |
 |------|------|
-| `01-rule-governance-list.png` | List + detail layout after load |
-| `02-rule-governance-detail.png` | Detail panel focused (Brand-A sample) |
-| `03-rule-governance-executions.png` | Recent executions when seeded |
+| `01-rule-governance-list.png` | List card (`rule-governance-list`) |
+| `02-rule-governance-detail.png` | Detail card (`rule-governance-detail`) after Brand-A row select |
+| `03-rule-governance-executions.png` | Non-empty executions list (`rule-governance-executions`) |
 
 Synthetic **Brand-A** ids only — no real customer names.
 
 # Knowledge lifecycle admin e2e shots (P1 K2)
 
 HD screenshots of admin-console **知识生命周期 / knowledge-lifecycle** under the data-governance domain.
+
+Shots **04 / 05 / 06** must differ (list vs detail vs non-empty issues).
 
 ## Re-run e2e
 
@@ -46,9 +50,9 @@ pnpm -C enterprise exec tsx scripts/e2e-knowledge-lifecycle.ts
 
 | File | What |
 |------|------|
-| `04-knowledge-lifecycle-list.png` | Object list + detail after load |
-| `05-knowledge-lifecycle-detail.png` | Detail / transitions focused |
-| `06-knowledge-lifecycle-issues.png` | Quality issues panel after run |
+| `04-knowledge-lifecycle-list.png` | Object list card |
+| `05-knowledge-lifecycle-detail.png` | Detail / transitions card |
+| `06-knowledge-lifecycle-issues.png` | Non-empty quality issues list |
 
 Synthetic **Brand-A** ids only — no real customer names.
 
@@ -72,4 +76,3 @@ pnpm -C enterprise exec tsx scripts/e2e-disambiguation.ts
 | `09-disambiguation-conflict-resolve.png` | Conflict resolve mode |
 
 Synthetic **Brand-A** ids only — no real customer names.
-
