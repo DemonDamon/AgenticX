@@ -11,6 +11,7 @@ from agenticx.rules.model import (
 )
 from agenticx.rules.store import RuleFileStore, resolve_store_dir
 from agenticx.rules.intents import RuleIntent
+from agenticx.rules.execution import ExecutionFileStore, ExecutionRecord
 from agenticx.rules.compile import (
     CompileBackend,
     CompileError,
@@ -61,4 +62,6 @@ __all__ = [
     "ExternalEngineBackend",
     "FlowCompileBackend",
     "compile_rule",
+    "ExecutionRecord",
+    "ExecutionFileStore",
 ]

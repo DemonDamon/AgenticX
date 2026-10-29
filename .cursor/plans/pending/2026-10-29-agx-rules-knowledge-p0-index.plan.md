@@ -37,5 +37,5 @@
 
 ## Status
 
-- **Plans:** done
-- **Impl:** R1-1…R1-4 landed; R1-5 + K1 remaining
+- **Plans:** done (R1 slices Done)
+- **Impl:** R1 complete (R1-1…R1-5); K1-1…K1-3 remaining

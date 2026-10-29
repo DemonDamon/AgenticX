@@ -31,10 +31,14 @@ class ExecutionRecord:
 
 ### Task 1
 
-- [ ] E2E pytest green; `python -m examples.rules.run_lifecycle` exits 0.
-- [ ] Mark index Status for R1 complete.
-- [ ] Commit: `feat(rules): lifecycle e2e and execution records`
+- [x] E2E pytest green; `python -m examples.rules.run_lifecycle` exits 0.
+- [x] Mark index Status for R1 complete.
+- [x] Commit: `feat(rules): lifecycle e2e and execution records`
+
+## Admin note
+
+Minimal `/admin/rule-governance` list/detail + `/api/admin/rules` wired (data-suite pattern). Full admin UX still deferred.
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.

@@ -74,7 +74,8 @@
         "perf": "性能分析",
         "dataGovernance": "数据治理",
         "dataBoards": "数据看板",
-        "dataSecurity": "数据安全"
+        "dataSecurity": "数据安全",
+        "ruleGovernance": "规则治理"
       }
     },
     "health": {
@@ -1644,6 +1645,26 @@
         "rawPhone": "原始手机号",
         "maskedPhone": "脱敏后",
         "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。"
+      },
+      "ruleGovernance": {
+        "title": "规则治理",
+        "description": "规则资产列表与详情（P0 R1）— 仅合成 Brand-A 样例",
+        "listTitle": "规则列表",
+        "detailTitle": "规则详情",
+        "executionsTitle": "最近执行",
+        "noExecutions": "暂无执行记录",
+        "noSelection": "请选择一条规则",
+        "loading": "加载规则中…",
+        "apiSource": "已从 API 加载",
+        "stubNote": "规则 API 不可用，显示本地种子数据。",
+        "col": {
+          "id": "ID",
+          "name": "名称",
+          "status": "状态",
+          "enabled": "启用",
+          "object": "对象",
+          "tags": "标签"
+        }
       }
     },
     "dashboard": {

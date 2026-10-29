@@ -74,7 +74,8 @@
         "perf": "Performance Profiling",
         "dataGovernance": "Data governance",
         "dataBoards": "Data boards",
-        "dataSecurity": "Data security"
+        "dataSecurity": "Data security",
+        "ruleGovernance": "Rule governance"
       }
     },
     "health": {
@@ -1644,6 +1645,26 @@
         "rawPhone": "Raw phone",
         "maskedPhone": "Masked",
         "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking."
+      },
+      "ruleGovernance": {
+        "title": "Rule governance",
+        "description": "List and inspect rule assets (P0 R1) — synthetic Brand-A samples only",
+        "listTitle": "Rules",
+        "detailTitle": "Rule detail",
+        "executionsTitle": "Recent executions",
+        "noExecutions": "No execution records yet",
+        "noSelection": "Select a rule",
+        "loading": "Loading rules…",
+        "apiSource": "Loaded from API",
+        "stubNote": "Could not reach the rules API; showing local seed until the store is available.",
+        "col": {
+          "id": "ID",
+          "name": "Name",
+          "status": "Status",
+          "enabled": "Enabled",
+          "object": "Object",
+          "tags": "Tags"
+        }
       }
     },
     "dashboard": {
