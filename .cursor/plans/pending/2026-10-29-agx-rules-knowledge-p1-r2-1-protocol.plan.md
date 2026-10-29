@@ -67,10 +67,10 @@ def request_to_dict / request_from_dict / response_to_dict / response_from_dict:
 
 ### Task 1
 
-- [ ] Failing tests: invalid mode payloads raise; good payloads serialize.
-- [ ] Implement model + helpers; green tests.
-- [ ] Commit: `feat(runtime): disambiguation confirm protocol model`
+- [x] Failing tests: invalid mode payloads raise; good payloads serialize.
+- [x] Implement model + helpers; green tests.
+- [x] Commit: `feat(runtime): disambiguation confirm protocol model`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-1).
