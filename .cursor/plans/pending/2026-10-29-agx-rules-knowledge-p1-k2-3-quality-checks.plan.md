@@ -40,9 +40,9 @@ stale_if_status: [retired]   # flag refs TO retired objects
 
 ### Task 1
 
-- [ ] Implement six check codes; unit tests with synthetic multi-object fixtures.
-- [ ] Commit: `feat(knowledge): knowledge object quality checkers`
+- [x] Implement six check codes; unit tests with synthetic multi-object fixtures.
+- [x] Commit: `feat(knowledge): knowledge object quality checkers`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-k2`.
