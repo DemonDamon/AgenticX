@@ -59,10 +59,10 @@ Env: `AGX_KNOWLEDGE_LIFECYCLE_STORE_DIR` else `.runtime/knowledge-lifecycle`.
 
 ### Task 1
 
-- [ ] Failing tests: invalid transition raises; missing object KeyError; empty store lists [].
-- [ ] Implement model + store; green tests (tmp_path persist/reload).
-- [ ] Commit: `feat(knowledge): knowledge object lifecycle model and file store`
+- [x] Failing tests: invalid transition raises; missing object KeyError; empty store lists [].
+- [x] Implement model + store; green tests (tmp_path persist/reload).
+- [x] Commit: `feat(knowledge): knowledge object lifecycle model and file store`
 
 ## Status
 
-Pending (K2-1).
+Done on `feat/agx-rules-knowledge-p1-k2` (K2-1).

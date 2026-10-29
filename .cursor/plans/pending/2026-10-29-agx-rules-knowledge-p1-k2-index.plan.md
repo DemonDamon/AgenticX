@@ -47,5 +47,5 @@
 
 ## Status
 
-- **Plans:** writing
-- **Impl:** not started
+- **Plans:** all K2 slices written
+- **Impl:** K2-1 complete; K2-2…K2-5 pending
