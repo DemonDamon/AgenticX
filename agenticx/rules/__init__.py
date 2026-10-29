@@ -11,6 +11,14 @@ from agenticx.rules.model import (
 )
 from agenticx.rules.store import RuleFileStore, resolve_store_dir
 from agenticx.rules.intents import RuleIntent
+from agenticx.rules.compile import (
+    CompileBackend,
+    CompileError,
+    CompiledPlan,
+    ExternalEngineBackend,
+    FlowCompileBackend,
+    compile_rule,
+)
 from agenticx.rules.nl import (
     NlAmbiguity,
     NlRuleDraft,
@@ -47,4 +55,10 @@ __all__ = [
     "NlRuleDraft",
     "NlRuleRequest",
     "draft_rule_from_nl",
+    "CompileBackend",
+    "CompileError",
+    "CompiledPlan",
+    "ExternalEngineBackend",
+    "FlowCompileBackend",
+    "compile_rule",
 ]

@@ -32,10 +32,10 @@ def compile_rule(rule: Rule, backend: CompileBackend | None = None) -> CompiledP
 
 ### Task 1
 
-- [ ] Default Flow backend maps trigger/condition/actions → ordered nodes.
-- [ ] Refuse non-active rules unless `force=True`.
-- [ ] Commit: `feat(rules): compile rule DSL to flow plan`
+- [x] Default Flow backend maps trigger/condition/actions → ordered nodes.
+- [x] Refuse non-active rules unless `force=True`.
+- [x] Commit: `feat(rules): compile rule DSL to flow plan`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.
