@@ -52,3 +52,24 @@ pnpm -C enterprise exec tsx scripts/e2e-knowledge-lifecycle.ts
 
 Synthetic **Brand-A** ids only — no real customer names.
 
+# Disambiguation choice-panel admin e2e shots (P1 R2)
+
+HD screenshots of admin-console **消歧确认 / disambiguation** choice panel.
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-disambiguation.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `07-disambiguation-candidate-select.png` | Candidate select mode |
+| `08-disambiguation-info-supplement.png` | Info supplement mode |
+| `09-disambiguation-conflict-resolve.png` | Conflict resolve mode |
+
+Synthetic **Brand-A** ids only — no real customer names.
+

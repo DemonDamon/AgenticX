@@ -76,7 +76,8 @@
         "dataBoards": "Data boards",
         "dataSecurity": "Data security",
         "ruleGovernance": "Rule governance",
-        "knowledgeLifecycle": "Knowledge lifecycle"
+        "knowledgeLifecycle": "Knowledge lifecycle",
+        "disambiguation": "Disambiguation"
       }
     },
     "health": {
@@ -1646,6 +1647,44 @@
         "rawPhone": "Raw phone",
         "maskedPhone": "Masked",
         "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking."
+      },
+      "disambiguation": {
+        "title": "Disambiguation",
+        "description": "Choice panel for candidate select / info supplement / conflict resolve (P1 R2) — Brand-A samples only",
+        "listTitle": "Sessions",
+        "panelTitle": "Choice panel",
+        "loading": "Loading disambiguation sessions…",
+        "apiSource": "Loaded from API",
+        "stubNote": "Could not reach the disambiguation API; showing local seed until the store is available.",
+        "reseed": "Reseed Brand-A samples",
+        "reseedSuccess": "Samples reseeded",
+        "reseedFailed": "Reseed failed",
+        "submit": "Submit answer",
+        "cancel": "Cancel session",
+        "submitSuccess": "Response applied",
+        "submitFailed": "Response failed",
+        "cancelled": "Session cancelled",
+        "freeText": "Free text",
+        "freeTextPlaceholder": "Enter missing value…",
+        "conflictsTitle": "Conflicts",
+        "slotsTitle": "Resolved slots",
+        "resolvedTitle": "Resolved trail",
+        "noPending": "No pending request (session completed or cancelled)",
+        "noSlots": "No slots yet",
+        "noResolved": "No resolved turns yet",
+        "noSelection": "Select a session",
+        "mode": {
+          "candidateSelect": "Candidate select",
+          "infoSupplement": "Info supplement",
+          "conflictResolve": "Conflict resolve"
+        },
+        "col": {
+          "id": "ID",
+          "source": "Source",
+          "status": "Status",
+          "pending": "Pending",
+          "mode": "Mode"
+        }
       },
       "knowledgeLifecycle": {
         "title": "Knowledge lifecycle",

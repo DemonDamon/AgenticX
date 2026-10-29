@@ -76,7 +76,8 @@
         "dataBoards": "数据看板",
         "dataSecurity": "数据安全",
         "ruleGovernance": "规则治理",
-        "knowledgeLifecycle": "知识生命周期"
+        "knowledgeLifecycle": "知识生命周期",
+        "disambiguation": "消歧确认"
       }
     },
     "health": {
@@ -1646,6 +1647,44 @@
         "rawPhone": "原始手机号",
         "maskedPhone": "脱敏后",
         "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。"
+      },
+      "disambiguation": {
+        "title": "消歧确认",
+        "description": "候选选择 / 信息补充 / 冲突裁决 choice-panel（P1 R2）— 仅 Brand-A 合成样例",
+        "listTitle": "消歧会话",
+        "panelTitle": "选择面板",
+        "loading": "加载消歧会话中…",
+        "apiSource": "已从 API 加载",
+        "stubNote": "消歧 API 不可用，显示本地种子数据。",
+        "reseed": "重置 Brand-A 样例",
+        "reseedSuccess": "样例已重置",
+        "reseedFailed": "重置失败",
+        "submit": "提交答复",
+        "cancel": "取消会话",
+        "submitSuccess": "答复已应用",
+        "submitFailed": "答复失败",
+        "cancelled": "会话已取消",
+        "freeText": "自由文本",
+        "freeTextPlaceholder": "填写缺失信息…",
+        "conflictsTitle": "冲突项",
+        "slotsTitle": "已解析槽位",
+        "resolvedTitle": "已解决轨迹",
+        "noPending": "无待处理请求（会话已完成或取消）",
+        "noSlots": "暂无槽位",
+        "noResolved": "暂无已解决轮次",
+        "noSelection": "请选择一个会话",
+        "mode": {
+          "candidateSelect": "候选选择",
+          "infoSupplement": "信息补充",
+          "conflictResolve": "冲突裁决"
+        },
+        "col": {
+          "id": "ID",
+          "source": "来源",
+          "status": "状态",
+          "pending": "待处理",
+          "mode": "模式"
+        }
       },
       "knowledgeLifecycle": {
         "title": "知识生命周期",
