@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from agenticx.knowledge.graphers.models import Entity, Relationship
 
@@ -46,4 +46,31 @@ class GraphStore(Protocol):
 
     def stats(self) -> Dict[str, Any]:
         """Return ``entity_count``, ``relationship_count``, ``backend`` (+ optional extras)."""
+        ...
+
+    def list_entities(self, *, limit: int = 500) -> List[Entity]:
+        """List entities up to ``limit`` (deterministic id order preferred)."""
+        ...
+
+    def list_relationships(self, *, limit: int = 1000) -> List[Relationship]:
+        """List relationships up to ``limit`` (deterministic id order preferred)."""
+        ...
+
+    def neighborhood(
+        self,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Return ``{center_id, nodes, edges}`` around ``entity_id``."""
+        ...
+
+    def subgraph(
+        self,
+        *,
+        entity_ids: Optional[List[str]] = None,
+        limit_nodes: int = 200,
+    ) -> Dict[str, Any]:
+        """Return ``{nodes, edges, stats}`` for a capped subgraph."""
         ...
