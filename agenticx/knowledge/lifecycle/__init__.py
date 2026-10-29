@@ -1,4 +1,4 @@
-"""Knowledge object lifecycle — status machine, store, change trail, quality checks."""
+"""Knowledge object lifecycle — status, store, trail, quality, issues."""
 
 from agenticx.knowledge.lifecycle.model import (
     ALLOWED_TRANSITIONS,
@@ -12,20 +12,32 @@ from agenticx.knowledge.lifecycle.model import (
 from agenticx.knowledge.lifecycle.store import KnowledgeObjectFileStore, resolve_store_dir
 from agenticx.knowledge.lifecycle.trail import ChangeEvent, ChangeTrailStore, record_transition
 from agenticx.knowledge.lifecycle.quality import QualityFinding, run_quality_checks
+from agenticx.knowledge.lifecycle.issues import (
+    ALLOWED_ISSUE_TRANSITIONS,
+    IssueFileStore,
+    IssueStatus,
+    IssueTransitionError,
+    KnowledgeIssue,
+)
 
 __all__ = [
+    "ALLOWED_ISSUE_TRANSITIONS",
     "ALLOWED_TRANSITIONS",
     "ChangeEvent",
     "ChangeTrailStore",
+    "IssueFileStore",
+    "IssueStatus",
+    "IssueTransitionError",
+    "KnowledgeIssue",
     "KnowledgeObject",
     "KnowledgeObjectFileStore",
     "KnowledgeStatus",
     "KnowledgeTransitionError",
+    "QualityFinding",
     "apply_transition",
     "can_transition",
-    "QualityFinding",
     "record_transition",
-    "run_quality_checks",
     "resolve_store_dir",
+    "run_quality_checks",
     "utc_now_iso",
 ]

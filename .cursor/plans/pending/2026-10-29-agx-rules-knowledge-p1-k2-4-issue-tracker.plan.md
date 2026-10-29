@@ -42,9 +42,9 @@ class IssueFileStore:
 
 ### Task 1
 
-- [ ] Dedup open issues by (object_id, code, message fingerprint) on re-ingest.
-- [ ] Commit: `feat(knowledge): knowledge quality issue tracker`
+- [x] Dedup open issues by (object_id, code, message fingerprint) on re-ingest.
+- [x] Commit: `feat(knowledge): knowledge quality issue tracker`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-k2`.
