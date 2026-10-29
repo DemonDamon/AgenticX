@@ -56,10 +56,10 @@ Helpers: `apply_response_to_session(session, resp) -> session` updates `slots` f
 
 ### Task 1
 
-- [ ] Session lifecycle + store persist/reload tests.
-- [ ] Gate records request and returns pushed response; cancel path.
-- [ ] Commit: `feat(runtime): disambiguation session store and gate`
+- [x] Session lifecycle + store persist/reload tests.
+- [x] Gate records request and returns pushed response; cancel path.
+- [x] Commit: `feat(runtime): disambiguation session store and gate`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-2).
