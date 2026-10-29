@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -311,6 +312,19 @@ export function SettingsPanel() {
                         {t("general.export")}
                       </Button>
                     </div>
+                  }
+                />
+                <SettingsRow
+                  label={t("disambiguationEntry")}
+                  description={t("disambiguationEntryHint")}
+                  control={
+                    <Link
+                      href="/workspace/disambiguation"
+                      data-testid="settings-disambiguation-entry"
+                      className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {t("disambiguationEntry")}
+                    </Link>
                   }
                 />
               </SettingsSection>

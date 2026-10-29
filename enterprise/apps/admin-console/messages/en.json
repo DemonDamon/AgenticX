@@ -78,7 +78,8 @@
         "ruleGovernance": "Rule governance",
         "knowledgeLifecycle": "Knowledge lifecycle",
         "disambiguation": "Disambiguation",
-        "citationEvidence": "Citation evidence"
+        "citationEvidence": "Citation evidence",
+        "graphIncremental": "Graph incremental"
       }
     },
     "health": {
@@ -1734,6 +1735,39 @@
           "enabled": "Enabled",
           "object": "Object",
           "tags": "Tags"
+        }
+      },
+      "graphIncremental": {
+        "title": "Graph incremental sync",
+        "description": "Source fingerprints, change sets, and sync reports (P2 K3) — Brand-A samples only",
+        "listTitle": "Sources",
+        "detailTitle": "Source detail",
+        "runsTitle": "Sync runs",
+        "reportTitle": "Sync report",
+        "noRuns": "No sync runs yet",
+        "noReport": "Select a sync run",
+        "noSelection": "Select a source",
+        "loading": "Loading graph-incremental sources…",
+        "apiSource": "Loaded from API",
+        "stubNote": "Could not reach the graph-incremental API; showing local seed until the store is available.",
+        "seed": "Reseed Brand-A",
+        "seedSuccess": "Brand-A seed restored",
+        "seedFailed": "Seed failed",
+        "runSync": "Run mock sync",
+        "runSyncForce": "Sync (force selected changed)",
+        "syncSuccess": "Sync completed",
+        "syncFailed": "Sync failed",
+        "refresh": "Refresh",
+        "changeset": "Change set",
+        "extracted": "Extracted sources",
+        "published": "Published objects",
+        "touched": "Touched objects",
+        "col": {
+          "id": "ID",
+          "status": "Last sync",
+          "objects": "Objects",
+          "hash": "Fingerprint",
+          "content": "Content"
         }
       }
     },

@@ -73,6 +73,7 @@ import {
   Database,
   Plug,
   BookMarked,
+  GitBranch,
   LayoutDashboard,
 } from "lucide-react";
 
@@ -162,6 +163,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/knowledge-lifecycle", labelKey: "knowledgeLifecycle", icon: BookMarked },
       { href: "/admin/disambiguation", labelKey: "disambiguation", icon: MessagesSquare },
       { href: "/admin/citation-evidence", labelKey: "citationEvidence", icon: BookMarked },
+      { href: "/admin/graph-incremental", labelKey: "graphIncremental", icon: GitBranch },
     ],
   },
   {

@@ -30,6 +30,8 @@ Multi-turn state: `DisambiguationSession` (`open` → `completed` / `cancelled`)
 
 **Done (P1 R2 admin).** Admin-console choice-panel at `/admin/disambiguation` covers `candidate_select` / `info_supplement` / `conflict_resolve` (PR #148, `44d6c050`). HD shots 07–09: `docs/agx-rules-knowledge-suite/e2e-shots/`. Library protocol + adapters remain the source of truth; UI maps requests onto the choice panel.
 
+**Done (P1 R2 portal).** Web-portal Near surface at `/workspace/disambiguation` consumes **runtime** sessions (`.runtime/disambiguation` / `AGX_DISAMBIGUATION_RUNTIME_STORE_DIR`), not the admin JSON store. Same three modes; Brand-A fixtures; settings entry under General.
+
 ## A/B
 
 Trunk holds generic ids/labels/scores only. Domain lexicons and industry entity dictionaries stay project (B) config.

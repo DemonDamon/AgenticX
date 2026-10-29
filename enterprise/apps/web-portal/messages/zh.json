@@ -303,7 +303,9 @@
       "autoTitleDescription": "首条消息后自动为会话生成标题",
       "defaultTemperature": "默认温度",
       "defaultTemperatureDescription": "数值越低越确定，越高越多样"
-    }
+    },
+    "disambiguationEntry": "消歧选择面板（runtime）",
+    "disambiguationEntryHint": "打开 Near 运行时消歧选择面板（Brand-A 演示）"
   },
   "rooms": {
     "title": "协作房间",
@@ -384,5 +386,45 @@
     "loadMore": "加载更多",
     "mergeFrom": "合回自「{title}」",
     "mergeUnknown": "合回记录"
+  },
+  "disambiguation": {
+    "title": "消歧选择面板",
+    "description": "Near 运行时消歧：候选选择 / 信息补充 / 冲突裁决 — 仅 Brand-A 样例；消费 runtime 会话（非 admin 存储）。",
+    "backToWorkspace": "返回工作区",
+    "listTitle": "会话列表",
+    "panelTitle": "选择面板",
+    "loading": "正在加载消歧会话…",
+    "apiSource": "已从 runtime 存储 API 加载",
+    "stubNote": "无法连接 runtime 消歧 API；显示本地 Brand-A 样例。",
+    "reseed": "重新灌入 Brand-A 样例",
+    "reseedSuccess": "样例已重置",
+    "reseedFailed": "重置失败",
+    "submit": "提交回答",
+    "cancel": "取消会话",
+    "submitSuccess": "已应用回答",
+    "submitFailed": "提交失败",
+    "cancelled": "会话已取消",
+    "freeText": "补充文本",
+    "freeTextPlaceholder": "请输入缺失信息…",
+    "conflictsTitle": "冲突项",
+    "slotsTitle": "已解析槽位",
+    "resolvedTitle": "已解决记录",
+    "noPending": "无待处理请求（会话已完成或取消）",
+    "noSlots": "尚无槽位",
+    "noResolved": "尚无解决记录",
+    "noSelection": "请选择一个会话",
+    "mountNote": "挂载于 /workspace/disambiguation — 消费 agenticx.runtime.disambiguation 会话。",
+    "mode": {
+      "candidateSelect": "候选选择",
+      "infoSupplement": "信息补充",
+      "conflictResolve": "冲突裁决"
+    },
+    "col": {
+      "id": "ID",
+      "source": "来源",
+      "status": "状态",
+      "pending": "待处理",
+      "mode": "模式"
+    }
   }
 }

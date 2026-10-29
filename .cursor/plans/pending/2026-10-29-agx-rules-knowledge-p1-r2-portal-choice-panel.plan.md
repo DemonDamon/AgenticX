@@ -1,15 +1,13 @@
-# R2 Portal — choice-panel (deferred)
+# R2 Portal — choice-panel
 
 ## Goal
 Web-portal / Near runtime surface for the same three disambiguation modes, consuming `agenticx.runtime.disambiguation` sessions (not admin JSON store).
 
-## Scope (this PR)
-**Deferred.** Admin-console choice-panel lands first on `feat/agx-rules-knowledge-p1-r2-admin-ui`. Portal UI is a follow-up once R2 library adapters (rules/retrieval) are exercised end-to-end.
+## Executable slices
+See index: `2026-10-29-agx-rules-knowledge-p1-r2-portal-index.plan.md` (P1–P4) — **Done**.
 
-## Follow-up when unblocked
-- Portal section or modal wired to runtime session gate
-- Same three modes UX; Brand-A synthetic only for demos
-- Separate branch/PR; do not block admin merge
+## Mount
+`/workspace/disambiguation` in `enterprise/apps/web-portal` (auth via workspace session cookies). Settings → General entry link. Panel component reusable for future chat embedding (DeepResearchClarifyCard-style).
 
 ## Status
-Deferred — plan only.
+Done — branch `feat/agx-rules-knowledge-p1-r2-portal-choice-panel`.
