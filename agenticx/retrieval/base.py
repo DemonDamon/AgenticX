@@ -12,6 +12,8 @@ from enum import Enum
 
 from pydantic import BaseModel  # type: ignore
 
+from agenticx.retrieval.provenance import Provenance, attach_provenance, provenance_from_legacy
+
 
 class RetrievalType(Enum):
     """Retrieval strategy types."""
@@ -50,6 +52,21 @@ class RetrievalResult:
     bm25_score: Optional[float] = None
     graph_score: Optional[float] = None
     hybrid_score: Optional[float] = None
+    # K1-1: optional systematic provenance (None keeps legacy callers working)
+    provenance: Optional[Provenance] = None
+
+    def with_provenance(self, provenance: Provenance | Dict[str, Any]) -> "RetrievalResult":
+        """Return a copy with provenance attached."""
+        return attach_provenance(self, provenance)
+
+    def ensure_provenance(self) -> "RetrievalResult":
+        """Attach provenance inferred from legacy source/chunk_id when missing."""
+        if self.provenance is not None:
+            return self
+        inferred = provenance_from_legacy(source=self.source, chunk_id=self.chunk_id)
+        if inferred is None:
+            return self
+        return attach_provenance(self, inferred)
 
 
 class BaseRetriever(ABC):

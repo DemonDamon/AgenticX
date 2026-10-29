@@ -6,6 +6,18 @@ and can be used both as core infrastructure and as agentic tools.
 """
 
 from .base import BaseRetriever, RetrievalResult, RetrievalQuery, RetrievalType, RetrievalError
+from .provenance import (
+    Provenance,
+    SourceType,
+    attach_provenance,
+    provenance_from_legacy,
+)
+from .evidence import (
+    EvidenceItem,
+    EvidenceBundle,
+    assemble_evidence,
+)
+from .citation_view import to_citation_view
 from .vector_retriever import VectorRetriever
 from .bm25_retriever import BM25Retriever
 from .hybrid_retriever import HybridRetriever, HybridConfig
@@ -46,6 +58,14 @@ __all__ = [
     "RetrievalQuery", 
     "RetrievalType",
     "RetrievalError",
+    "Provenance",
+    "SourceType",
+    "attach_provenance",
+    "provenance_from_legacy",
+    "EvidenceItem",
+    "EvidenceBundle",
+    "assemble_evidence",
+    "to_citation_view",
     
     # Core Retrievers
     "VectorRetriever",

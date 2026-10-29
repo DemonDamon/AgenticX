@@ -1,0 +1,27 @@
+# Synthetic Brand-A sample — no real customer identifiers
+id: brand-a-temp-threshold
+name: Brand-A device temperature threshold
+meta:
+  scope: workspace-brand-a
+  priority: 50
+  trigger: event
+  tags: [ops, sample, brand-a]
+body:
+  object: device
+  trigger:
+    type: event
+    event: metric.breach
+  condition:
+    field: temperature
+    op: gt
+    value: 80
+  actions:
+    - type: notify
+      target: ops-channel
+      params:
+        level: warn
+    - type: set_status
+      params:
+        status: breached
+  feedback:
+    channel: ops-channel
