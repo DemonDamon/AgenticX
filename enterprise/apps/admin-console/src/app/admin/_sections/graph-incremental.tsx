@@ -149,6 +149,13 @@ export default function AdminGraphIncrementalSection() {
     }
   }
 
+  
+  const storeBackend =
+    (report?.graph_stats?.store_backend as string | undefined) ||
+    (typeof report?.graph_stats?.backend === "string"
+      ? (report.graph_stats.backend as string)
+      : undefined);
+
   return (
     <div className="space-y-6" data-testid="graph-incremental-page">
       <PageHeader title={t("title")} description={t("description")} />
@@ -185,6 +192,12 @@ export default function AdminGraphIncrementalSection() {
           {t("refresh")}
         </Button>
       </div>
+
+      {storeBackend ? (
+        <p className="text-sm text-muted-foreground" data-testid="graph-incremental-store-backend">
+          Graph store backend: <code>{storeBackend}</code> (publish SoT; viz deferred)
+        </p>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card data-testid="graph-incremental-list">

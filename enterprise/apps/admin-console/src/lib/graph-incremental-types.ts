@@ -35,6 +35,8 @@ export type GraphStatsSnapshot = {
   entity_count: number;
   relation_count: number;
   updated_at: string;
+  /** GraphStore backend when K3 publish SoT is wired (e.g. neo4j, memory). */
+  store_backend?: string;
   [key: string]: unknown;
 };
 

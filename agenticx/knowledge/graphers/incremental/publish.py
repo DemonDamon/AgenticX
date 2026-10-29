@@ -175,3 +175,104 @@ def merge_published_into_graph(
         "skipped": skipped,
         "published_considered": len(candidates),
     }
+
+
+def publish_to_store(
+    store: KnowledgeObjectFileStore,
+    graph_store: Any,
+    *,
+    object_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Upsert published KnowledgeObjects into a GraphStore (entities then relations).
+
+    ``graph_store`` is the publish source of truth when provided. Returns stats
+    including ``store_backend`` and upsert counts.
+    """
+    if object_ids is None:
+        candidates = store.list_objects(status=KnowledgeStatus.PUBLISHED)
+    else:
+        candidates = []
+        for oid in object_ids:
+            try:
+                obj = store.get_object(oid)
+            except KeyError:
+                continue
+            if obj.status is KnowledgeStatus.PUBLISHED:
+                candidates.append(obj)
+
+    entities = [o for o in candidates if o.kind == "entity"]
+    relations = [o for o in candidates if o.kind == "relation"]
+    others = [o for o in candidates if o.kind not in ("entity", "relation")]
+
+    entities_upserted = 0
+    relations_upserted = 0
+    skipped = 0
+
+    for obj in entities:
+        try:
+            graph_store.upsert_entity(knowledge_object_to_entity(obj))
+            entities_upserted += 1
+        except Exception:
+            skipped += 1
+
+    for obj in relations:
+        try:
+            graph_store.upsert_relationship(knowledge_object_to_relationship(obj))
+            relations_upserted += 1
+        except Exception:
+            skipped += 1
+
+    skipped += len(others)
+    backend = getattr(graph_store, "backend_name", type(graph_store).__name__)
+    store_stats: Dict[str, Any] = {}
+    try:
+        store_stats = dict(graph_store.stats() or {})
+    except Exception:
+        store_stats = {}
+
+    return {
+        "entities_upserted": entities_upserted,
+        "relations_upserted": relations_upserted,
+        "skipped": skipped,
+        "published_considered": len(candidates),
+        "store_backend": backend,
+        "store_stats": store_stats,
+        # aliases for SyncReport compatibility with prior graph_stats keys
+        "entities_added": entities_upserted,
+        "relations_added": relations_upserted,
+        "entity_count": store_stats.get("entity_count"),
+        "relationship_count": store_stats.get("relationship_count"),
+    }
+
+
+def retire_from_store(
+    store: KnowledgeObjectFileStore,
+    graph_store: Any,
+    object_ids: Iterable[str],
+) -> Dict[str, Any]:
+    """Delete retired objects from GraphStore by kind."""
+    deleted_entities = 0
+    deleted_relations = 0
+    for oid in object_ids:
+        try:
+            obj = store.get_object(oid)
+        except KeyError:
+            # Still try delete by id as entity then relation
+            if graph_store.delete_entity(oid):
+                deleted_entities += 1
+            elif graph_store.delete_relationship(oid):
+                deleted_relations += 1
+            continue
+        if obj.kind == "entity":
+            if graph_store.delete_entity(oid):
+                deleted_entities += 1
+        elif obj.kind == "relation":
+            if graph_store.delete_relationship(oid):
+                deleted_relations += 1
+    backend = getattr(graph_store, "backend_name", type(graph_store).__name__)
+    return {
+        "deleted_entities": deleted_entities,
+        "deleted_relations": deleted_relations,
+        "store_backend": backend,
+    }
+
