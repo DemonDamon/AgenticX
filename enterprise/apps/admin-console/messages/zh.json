@@ -77,7 +77,8 @@
         "dataSecurity": "数据安全",
         "ruleGovernance": "规则治理",
         "knowledgeLifecycle": "知识生命周期",
-        "disambiguation": "消歧确认"
+        "disambiguation": "消歧确认",
+        "graphIncremental": "图谱增量同步"
       }
     },
     "health": {
@@ -1733,6 +1734,39 @@
           "enabled": "启用",
           "object": "对象",
           "tags": "标签"
+        }
+      },
+      "graphIncremental": {
+        "title": "图谱增量同步",
+        "description": "源指纹、变更集与同步报告（P2 K3）— 仅 Brand-A 合成样例",
+        "listTitle": "源文档",
+        "detailTitle": "源详情",
+        "runsTitle": "同步运行",
+        "reportTitle": "同步报告",
+        "noRuns": "暂无同步运行",
+        "noReport": "请选择一次同步运行",
+        "noSelection": "请选择一个源",
+        "loading": "加载图谱增量源中…",
+        "apiSource": "已从 API 加载",
+        "stubNote": "图谱增量 API 不可用，显示本地种子数据。",
+        "seed": "重置 Brand-A 种子",
+        "seedSuccess": "Brand-A 种子已恢复",
+        "seedFailed": "重置失败",
+        "runSync": "运行模拟同步",
+        "runSyncForce": "同步（强制选中为变更）",
+        "syncSuccess": "同步完成",
+        "syncFailed": "同步失败",
+        "refresh": "刷新",
+        "changeset": "变更集",
+        "extracted": "已抽取源",
+        "published": "已发布对象",
+        "touched": "触及对象",
+        "col": {
+          "id": "ID",
+          "status": "最近同步",
+          "objects": "对象",
+          "hash": "指纹",
+          "content": "内容"
         }
       }
     },

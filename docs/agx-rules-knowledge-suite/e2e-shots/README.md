@@ -76,3 +76,26 @@ pnpm -C enterprise exec tsx scripts/e2e-disambiguation.ts
 | `09-disambiguation-conflict-resolve.png` | Conflict resolve mode |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+# Graph incremental admin e2e shots (P2 K3)
+
+HD screenshots of admin-console **图谱增量同步 / graph-incremental** under the data-governance domain.
+
+Shots **10 / 11 / 12** must differ (list vs detail vs sync report).
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-graph-incremental.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `10-graph-incremental-list.png` | Source list card |
+| `11-graph-incremental-detail.png` | Source detail / sync runs card |
+| `12-graph-incremental-sync-report.png` | Sync report (change set / extracted / published) |
+
+Synthetic **Brand-A** ids only — no real customer names.
