@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from agenticx.knowledge.graphers.models import Entity, KnowledgeGraph, Relationship
 from agenticx.knowledge.graphers.store.memory import InMemoryGraphStore
@@ -79,3 +79,29 @@ class FileGraphStore:
         s["backend"] = self.backend_name
         s["path"] = str(self.path)
         return s
+
+    def list_entities(self, *, limit: int = 500) -> List[Entity]:
+        return self._mem.list_entities(limit=limit)
+
+    def list_relationships(self, *, limit: int = 1000) -> List[Relationship]:
+        return self._mem.list_relationships(limit=limit)
+
+    def neighborhood(
+        self,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        return self._mem.neighborhood(entity_id, depth=depth, limit=limit)
+
+    def subgraph(
+        self,
+        *,
+        entity_ids: Optional[List[str]] = None,
+        limit_nodes: int = 200,
+    ) -> Dict[str, Any]:
+        out = self._mem.subgraph(entity_ids=entity_ids, limit_nodes=limit_nodes)
+        out["stats"]["backend"] = self.backend_name
+        out["stats"]["path"] = str(self.path)
+        return out
