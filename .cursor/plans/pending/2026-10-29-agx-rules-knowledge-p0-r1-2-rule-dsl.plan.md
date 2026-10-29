@@ -44,10 +44,10 @@ def validate_rule_body(body: RuleBody) -> None:  # raises RuleDslError
 
 ### Task 1
 
-- [ ] Failing tests for missing object / empty actions / bad op.
-- [ ] Implement dsl.py; green tests; store can round-trip `Rule.body` as dict via `asdict`.
-- [ ] Commit: `feat(rules): rule DSL parse and validation`
+- [x] Failing tests for missing object / empty actions / bad op.
+- [x] Implement dsl.py; green tests; store can round-trip `Rule.body` as dict via `asdict`.
+- [x] Commit: `feat(rules): rule DSL parse and validation`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.
