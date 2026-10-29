@@ -12,6 +12,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const PORTAL_BASE = process.env.PORTAL_BASE_URL ?? "http://127.0.0.1:3000";
 const PORTAL_EMAIL =
@@ -47,6 +48,23 @@ async function portalLogin(page: import("playwright").Page): Promise<void> {
   ]);
 }
 
+async function openMode(
+  page: import("playwright").Page,
+  row: string,
+  mode: string,
+): Promise<void> {
+  await dismissNextOverlay(page);
+  await page.getByTestId(`portal-disambiguation-row-${row}`).click({ force: true });
+  // Panel may already be visible with the previous mode — wait for data-mode flip.
+  await page
+    .locator(`[data-testid="portal-disambiguation-choice-panel"][data-mode="${mode}"]`)
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByTestId("portal-disambiguation-detail-id")
+    .filter({ hasText: row })
+    .waitFor({ state: "visible", timeout: 10_000 });
+}
+
 async function main() {
   fs.mkdirSync(SHOT_DIR, { recursive: true });
   const browser = await chromium.launch();
@@ -72,40 +90,51 @@ async function main() {
         await page.waitForTimeout(250);
       }
       await reseed.click({ force: true });
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(1000);
+      await page.getByTestId("portal-disambiguation-table").waitFor({
+        state: "visible",
+        timeout: 15_000,
+      });
     }
 
-    const modes: Array<{ row: string; shot: string; mode: string }> = [
-      {
-        row: "das-brand-a-candidate",
-        shot: "13-portal-disambiguation-candidate-select.png",
-        mode: "candidate_select",
-      },
-      {
-        row: "das-brand-a-supplement",
-        shot: "14-portal-disambiguation-info-supplement.png",
-        mode: "info_supplement",
-      },
-      {
-        row: "das-brand-a-conflict",
-        shot: "15-portal-disambiguation-conflict-resolve.png",
-        mode: "conflict_resolve",
-      },
-    ];
+    // Shot 13: candidate_select — check a candidate so pixels differ from empty
+    await openMode(page, "das-brand-a-candidate", "candidate_select");
+    await page
+      .getByTestId("portal-disambiguation-candidate-brand-a-pump-01")
+      .check({ force: true });
+    await page.waitForTimeout(250);
+    const shot13 = "13-portal-disambiguation-candidate-select.png";
+    await page.screenshot({ path: path.join(SHOT_DIR, shot13), fullPage: true });
+    console.log("shot", shot13, "mode", "candidate_select");
 
-    for (const m of modes) {
-      await page.getByTestId(`portal-disambiguation-row-${m.row}`).click({ force: true });
-      const panel = page.getByTestId("portal-disambiguation-choice-panel");
-      await panel.waitFor({ state: "visible", timeout: 15_000 });
-      const modeAttr = await panel.getAttribute("data-mode");
-      if (modeAttr !== m.mode) {
-        throw new Error(`expected mode ${m.mode}, got ${modeAttr}`);
-      }
-      await page.screenshot({
-        path: path.join(SHOT_DIR, m.shot),
-        fullPage: true,
-      });
-      console.log("shot", m.shot, "mode", m.mode);
+    // Shot 14: info_supplement
+    await openMode(page, "das-brand-a-supplement", "info_supplement");
+    await page
+      .getByTestId("portal-disambiguation-free-text")
+      .fill("ops-channel-brand-a");
+    await page.waitForTimeout(250);
+    const shot14 = "14-portal-disambiguation-info-supplement.png";
+    await page.screenshot({ path: path.join(SHOT_DIR, shot14), fullPage: true });
+    console.log("shot", shot14, "mode", "info_supplement");
+
+    // Shot 15: conflict_resolve
+    await openMode(page, "das-brand-a-conflict", "conflict_resolve");
+    await page
+      .getByTestId("portal-disambiguation-candidate-val-plant-a")
+      .check({ force: true });
+    await page.waitForTimeout(250);
+    const shot15 = "15-portal-disambiguation-conflict-resolve.png";
+    await page.screenshot({ path: path.join(SHOT_DIR, shot15), fullPage: true });
+    console.log("shot", shot15, "mode", "conflict_resolve");
+
+    const hashes = [shot13, shot14, shot15].map((name) => {
+      const buf = fs.readFileSync(path.join(SHOT_DIR, name));
+      const md5 = crypto.createHash("md5").update(buf).digest("hex");
+      console.log("md5", name, md5);
+      return md5;
+    });
+    if (new Set(hashes).size !== hashes.length) {
+      throw new Error(`portal shots 13-15 must have distinct MD5s: ${hashes.join(",")}`);
     }
     console.log("portal-disambiguation e2e ok; sessions modes exercised");
   } finally {
