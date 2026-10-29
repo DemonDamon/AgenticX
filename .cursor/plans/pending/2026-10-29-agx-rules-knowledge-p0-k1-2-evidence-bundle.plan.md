@@ -33,9 +33,9 @@ def assemble_evidence(entity_id: str, sources: list[EvidenceItem], *, policy: di
 
 ### Task 1
 
-- [ ] Assemble sorts by confidence/time; emits missing/conflicts.
-- [ ] Commit: `feat(retrieval): object-centric evidence bundle`
+- [x] Assemble sorts by confidence/time; emits missing/conflicts.
+- [x] Commit: `feat(retrieval): object-centric evidence bundle`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.

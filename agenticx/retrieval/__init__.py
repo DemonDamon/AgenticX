@@ -12,6 +12,11 @@ from .provenance import (
     attach_provenance,
     provenance_from_legacy,
 )
+from .evidence import (
+    EvidenceItem,
+    EvidenceBundle,
+    assemble_evidence,
+)
 from .vector_retriever import VectorRetriever
 from .bm25_retriever import BM25Retriever
 from .hybrid_retriever import HybridRetriever, HybridConfig
@@ -56,6 +61,9 @@ __all__ = [
     "SourceType",
     "attach_provenance",
     "provenance_from_legacy",
+    "EvidenceItem",
+    "EvidenceBundle",
+    "assemble_evidence",
     
     # Core Retrievers
     "VectorRetriever",
