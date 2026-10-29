@@ -40,6 +40,7 @@ export default function AdminGraphIncrementalSection() {
   const [fromApi, setFromApi] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [liveStoreBackend, setLiveStoreBackend] = useState<string>("");
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -50,12 +51,22 @@ export default function AdminGraphIncrementalSection() {
       ]);
       if (!srcRes.ok) throw new Error(`HTTP ${srcRes.status}`);
       if (!runsRes.ok) throw new Error(`HTTP ${runsRes.status}`);
-      const srcJson = (await srcRes.json()) as { data?: { sources?: SourceWithStatus[] } };
+      const srcJson = (await srcRes.json()) as {
+        data?: {
+          sources?: SourceWithStatus[];
+          graph_stats?: { store_backend?: string; backend?: string } | null;
+        };
+      };
       const runsJson = (await runsRes.json()) as { data?: { runs?: SyncReportRow[] } };
       const nextSources = srcJson.data?.sources?.length
         ? srcJson.data.sources
         : sampleWithStatus();
       const nextRuns = runsJson.data?.runs ?? [];
+      const liveBackend =
+        (srcJson.data?.graph_stats?.store_backend as string | undefined) ||
+        (srcJson.data?.graph_stats?.backend as string | undefined) ||
+        "";
+      setLiveStoreBackend(liveBackend);
       setSources(nextSources);
       setRuns(nextRuns);
       setFromApi(Boolean(srcJson.data?.sources?.length));
@@ -71,6 +82,7 @@ export default function AdminGraphIncrementalSection() {
       setSources(sampleWithStatus());
       setRuns([]);
       setFromApi(false);
+      setLiveStoreBackend("");
       setSelectedSourceId(SAMPLE_SOURCES[0]?.id ?? "");
     } finally {
       setLoading(false);
@@ -151,6 +163,7 @@ export default function AdminGraphIncrementalSection() {
 
   
   const storeBackend =
+    liveStoreBackend ||
     (report?.graph_stats?.store_backend as string | undefined) ||
     (typeof report?.graph_stats?.backend === "string"
       ? (report.graph_stats.backend as string)

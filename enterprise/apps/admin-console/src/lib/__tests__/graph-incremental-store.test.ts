@@ -6,6 +6,7 @@ import {
   SAMPLE_SOURCES,
   getAffectedForSource,
   getFingerprints,
+  getGraphStats,
   getSyncRun,
   listSources,
   listSourcesWithStatus,
@@ -127,6 +128,13 @@ describe("graph-incremental-store", () => {
     const report = await runMockSync({ actor: "tester" });
     expect(report.graph_stats.store_backend).toBeTruthy();
     expect(["file", "memory", "neo4j"]).toContain(String(report.graph_stats.store_backend));
+  });
+
+  it("getGraphStats returns live GraphStore store_backend", async () => {
+    await seedBrandAGraph();
+    const stats = await getGraphStats();
+    expect(stats?.store_backend).toBe("file");
+    expect(stats?.entity_count).toBeGreaterThan(0);
   });
 
   it("force-changed sync publishes into GraphStore (explorer-visible attrs)", async () => {

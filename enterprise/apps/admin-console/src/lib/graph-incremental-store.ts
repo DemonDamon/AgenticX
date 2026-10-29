@@ -252,15 +252,26 @@ export async function getAffectedForSource(sourceId: string): Promise<{
 
 export async function getGraphStats(): Promise<GraphStatsSnapshot | null> {
   await ensureSeeded();
+  // Prefer live GraphStore SoT; JSON graph_stats.json is a cache/display aid only.
   try {
-    await readFile(graphStatsPath(), "utf-8");
-    return await readJsonFile<GraphStatsSnapshot>(graphStatsPath(), {
-      entity_count: 0,
-      relation_count: 0,
+    const st = await getStoreStats();
+    return {
+      entity_count: Number(st.entity_count) || 0,
+      relation_count: Number(st.relationship_count) || 0,
       updated_at: nowIso(),
-    });
+      store_backend: String(st.backend || st.store_backend || "file"),
+    };
   } catch {
-    return null;
+    try {
+      await readFile(graphStatsPath(), "utf-8");
+      return await readJsonFile<GraphStatsSnapshot>(graphStatsPath(), {
+        entity_count: 0,
+        relation_count: 0,
+        updated_at: nowIso(),
+      });
+    } catch {
+      return null;
+    }
   }
 }
 
