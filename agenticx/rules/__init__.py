@@ -10,6 +10,13 @@ from agenticx.rules.model import (
     can_transition,
 )
 from agenticx.rules.store import RuleFileStore, resolve_store_dir
+from agenticx.rules.intents import RuleIntent
+from agenticx.rules.nl import (
+    NlAmbiguity,
+    NlRuleDraft,
+    NlRuleRequest,
+    draft_rule_from_nl,
+)
 from agenticx.rules.dsl import (
     Action,
     Condition,
@@ -35,4 +42,9 @@ __all__ = [
     "RuleDslError",
     "parse_rule_body",
     "validate_rule_body",
+    "RuleIntent",
+    "NlAmbiguity",
+    "NlRuleDraft",
+    "NlRuleRequest",
+    "draft_rule_from_nl",
 ]

@@ -39,10 +39,10 @@ def draft_rule_from_nl(text: str, *, lexicon: dict | None = None) -> NlRuleDraft
 
 ### Task 1
 
-- [ ] Deterministic extractor for structured NL templates (no network LLM in unit tests).
-- [ ] Ambiguity list when object/threshold missing; confirm_context set.
-- [ ] Commit: `feat(rules): NL to rule draft pipeline skeleton`
+- [x] Deterministic extractor for structured NL templates (no network LLM in unit tests).
+- [x] Ambiguity list when object/threshold missing; confirm_context set.
+- [x] Commit: `feat(rules): NL to rule draft pipeline skeleton`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.

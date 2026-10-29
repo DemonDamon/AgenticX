@@ -38,4 +38,4 @@
 ## Status
 
 - **Plans:** done
-- **Impl:** R1-1 + R1-2 landed; R1-3…K1-3 remaining
+- **Impl:** R1-1…R1-3 landed; R1-4…K1-3 remaining
