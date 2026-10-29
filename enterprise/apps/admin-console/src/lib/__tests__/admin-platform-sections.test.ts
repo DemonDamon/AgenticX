@@ -28,6 +28,7 @@ describe("isPlatformSection", () => {
       "rule-governance",
       "knowledge-lifecycle",
       "disambiguation",
+      "citation-evidence",
       "graph-incremental",
     ]);
     for (const id of PLATFORM_SECTION_IDS) {

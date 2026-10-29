@@ -24,6 +24,7 @@ export const PLATFORM_SECTION_IDS = [
   "rule-governance",
   "knowledge-lifecycle",
   "disambiguation",
+  "citation-evidence",
   "graph-incremental",
 ] as const;
 

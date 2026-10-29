@@ -125,3 +125,22 @@ pnpm -C enterprise exec tsx scripts/e2e-portal-disambiguation.ts
 Synthetic **Brand-A** ids only — no real customer names.
 
 Mount: `/workspace/disambiguation` + Settings→General entry. Runtime store via `AGX_DISAMBIGUATION_RUNTIME_STORE_DIR` (default `.runtime/disambiguation`).
+
+# Citation evidence UI shots (K1)
+
+HD screenshot of web-portal **Citation evidence** at `/workspace/citations` (Brand-A fixture via `CitationEvidencePanel`).
+
+## Re-run e2e
+
+```bash
+set -a && source enterprise/.env.local && set +a
+pnpm -C enterprise exec tsx scripts/e2e-portal-citations.ts
+```
+
+## Shots
+
+| File | What |
+|------|------|
+| `16-portal-citation-evidence.png` | Citations + conflicts + missing (Brand-A pump) |
+
+Synthetic **Brand-A** ids only — no real customer names.

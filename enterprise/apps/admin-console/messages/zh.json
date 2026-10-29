@@ -78,6 +78,7 @@
         "ruleGovernance": "规则治理",
         "knowledgeLifecycle": "知识生命周期",
         "disambiguation": "消歧确认",
+        "citationEvidence": "引用证据",
         "graphIncremental": "图谱增量同步"
       }
     },

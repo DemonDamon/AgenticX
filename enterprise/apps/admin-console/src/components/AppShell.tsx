@@ -162,6 +162,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/rule-governance", labelKey: "ruleGovernance", icon: BookMarked },
       { href: "/admin/knowledge-lifecycle", labelKey: "knowledgeLifecycle", icon: BookMarked },
       { href: "/admin/disambiguation", labelKey: "disambiguation", icon: MessagesSquare },
+      { href: "/admin/citation-evidence", labelKey: "citationEvidence", icon: BookMarked },
       { href: "/admin/graph-incremental", labelKey: "graphIncremental", icon: GitBranch },
     ],
   },
