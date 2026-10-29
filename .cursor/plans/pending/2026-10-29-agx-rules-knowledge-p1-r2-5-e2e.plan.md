@@ -27,4 +27,4 @@
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-5). Admin/UI deferred.

@@ -47,5 +47,6 @@
 
 ## Status
 
-- **Plans:** drafted
-- **Impl:** pending
+- **Plans:** all R2 slices Done
+- **Impl:** R2-1…R2-5 complete on `feat/agx-rules-knowledge-p1-r2`
+- **UI:** deferred (protocol-only; no admin/portal e2e in this PR)

@@ -1,6 +1,15 @@
 """Runtime core exports."""
 
 from agenticx.runtime.clarify import AsyncClarifyGate, AutoSuspendClarifyGate, ClarifyGate
+from agenticx.runtime.disambiguation import (
+    DisambiguationCandidate,
+    DisambiguationGate,
+    DisambiguationMode,
+    DisambiguationRequest,
+    DisambiguationResponse,
+    DisambiguationSession,
+    SyncDisambiguationGate,
+)
 from agenticx.runtime.confirm import (
     CONFIRM_RISK_LOW,
     PROTECTED_CONFIRM_RISKS,
@@ -78,6 +87,13 @@ __all__ = [
     "ClarifyGate",
     "AsyncClarifyGate",
     "AutoSuspendClarifyGate",
+    "DisambiguationMode",
+    "DisambiguationRequest",
+    "DisambiguationResponse",
+    "DisambiguationCandidate",
+    "DisambiguationSession",
+    "DisambiguationGate",
+    "SyncDisambiguationGate",
     "EventType",
     "RuntimeEvent",
     "TodoManager",
