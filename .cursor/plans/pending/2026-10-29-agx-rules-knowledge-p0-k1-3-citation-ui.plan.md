@@ -21,9 +21,9 @@ def to_citation_view(bundle: EvidenceBundle) -> dict:
 
 ### Task 1
 
-- [ ] Serializer + docs; index marked complete when R1+K1 gates green.
-- [ ] Commit: `feat(retrieval): citation view-model contract`
+- [x] Serializer + docs; index marked complete when R1+K1 gates green.
+- [x] Commit: `feat(retrieval): citation view-model contract`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.

@@ -17,6 +17,7 @@ from .evidence import (
     EvidenceBundle,
     assemble_evidence,
 )
+from .citation_view import to_citation_view
 from .vector_retriever import VectorRetriever
 from .bm25_retriever import BM25Retriever
 from .hybrid_retriever import HybridRetriever, HybridConfig
@@ -64,6 +65,7 @@ __all__ = [
     "EvidenceItem",
     "EvidenceBundle",
     "assemble_evidence",
+    "to_citation_view",
     
     # Core Retrievers
     "VectorRetriever",

@@ -27,7 +27,7 @@
 ## E2E gate (whole P0)
 
 1. `pytest tests/rules/ -q` green.
-2. `pytest tests/retrieval/test_provenance*.py tests/retrieval/test_evidence*.py -q` green (once K1 lands).
+2. `pytest tests/retrieval/test_provenance*.py tests/retrieval/test_evidence*.py tests/retrieval/test_citation*.py -q` green.
 3. One sample rule path: create (DSL or NL draft) → validate → activate → compile stub → status update, exits 0.
 4. No real customer / company / proposal identifiers under `agenticx/rules/`, `agenticx/retrieval/evidence*`, or related fixtures.
 
@@ -37,5 +37,5 @@
 
 ## Status
 
-- **Plans:** done (R1 slices Done)
-- **Impl:** R1 complete; K1-1…K1-2 landed; K1-3 remaining
+- **Plans:** all R1 + K1 slices Done
+- **Impl:** R1 (R1-1…R1-5) + K1 (K1-1…K1-3) complete on `feat/agx-rules-knowledge-p0` (PR #144). P0 index complete.
