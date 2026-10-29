@@ -86,8 +86,27 @@ Incremental upserts use `MERGE` by id (no full clear+export). Retired lifecycle
 objects are deleted from the store. `SyncReport.graph_stats` includes
 `store_backend`, counts, and optional `retire` stats.
 
-### Visualization (deferred)
+### Visualization (admin graph explorer)
 
-Graph visualization UI is **out of scope** for this change. Admin
-`/admin/graph-incremental` continues to show sync runs; store backend appears in
-report `graph_stats` when present. Viz should read from Neo4j / GraphStore next.
+Admin **`/admin/graph-explorer`** queries GraphStore (force-directed canvas):
+
+| Mode | How |
+|------|-----|
+| Local without Neo4j | `AGX_GRAPH_STORE_BACKEND=file` (default) or `memory`; seed Brand-A via UI or `POST /api/admin/graph-explorer/seed` |
+| With Neo4j | set `NEO4J_URI` (+ `NEO4J_USER` / `NEO4J_PASSWORD`); optional `AGX_GRAPH_STORE_BACKEND=neo4j`. Admin uses Python `query_cli` bridge to the same GraphStore SoT |
+
+```bash
+# without Neo4j
+export AGX_GRAPH_STORE_BACKEND=file
+pnpm -C enterprise exec tsx scripts/e2e-graph-explorer.ts
+
+# with Neo4j
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=password
+export AGX_GRAPH_STORE_BACKEND=neo4j
+pnpm -C enterprise exec tsx scripts/e2e-graph-explorer.ts
+```
+
+`/admin/graph-incremental` shows `store_backend` from GraphStore and links to the explorer.
+JSON sync-run files are control-plane metadata — **not** graph SoT.
