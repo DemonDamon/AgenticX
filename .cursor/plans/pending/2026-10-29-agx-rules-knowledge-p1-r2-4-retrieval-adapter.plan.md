@@ -51,11 +51,11 @@ No industry ontology — hits are generic ids/labels/scores.
 
 ### Task 1
 
-- [ ] One clear hit → no request.
-- [ ] Two near-score hits → candidate_select; gate pick → chosen hit.
-- [ ] Conflicting attr values → conflict_resolve.
-- [ ] Commit: `feat(retrieval): object disambiguation adapter on R2 protocol`
+- [x] One clear hit → no request.
+- [x] Two near-score hits → candidate_select; gate pick → chosen hit.
+- [x] Conflicting attr values → conflict_resolve.
+- [x] Commit: `feat(retrieval): object disambiguation adapter on R2 protocol`
 
 ## Status
 
-Pending.
+Done on `feat/agx-rules-knowledge-p1-r2` (R2-4).
