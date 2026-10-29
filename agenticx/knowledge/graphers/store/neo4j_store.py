@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 
@@ -284,6 +284,85 @@ class Neo4jGraphStore:
             "uri": self.uri,
             "database": self.database,
         }
+
+
+    def list_entities(self, *, limit: int = 500) -> List[Entity]:
+        limit = max(1, int(limit))
+        cypher = """
+        MATCH (e:AgxEntity {tenant_id: $tenant_id})
+        WHERE coalesce(e.retired, false) = false
+        RETURN e
+        ORDER BY e.id
+        LIMIT $limit
+        """
+        with self._session() as session:
+            result = session.run(cypher, tenant_id=self.tenant_id, limit=limit)
+            out = []
+            for record in result:
+                out.append(self._node_to_entity(dict(record["e"])))
+            return out
+
+    def list_relationships(self, *, limit: int = 1000) -> List[Relationship]:
+        limit = max(1, int(limit))
+        cypher = """
+        MATCH (s:AgxEntity)-[r:AgxRel {tenant_id: $tenant_id}]->(t:AgxEntity)
+        WHERE coalesce(r.retired, false) = false
+        RETURN r, s.id AS source_id, t.id AS target_id
+        ORDER BY r.id
+        LIMIT $limit
+        """
+        with self._session() as session:
+            result = session.run(cypher, tenant_id=self.tenant_id, limit=limit)
+            out = []
+            for record in result:
+                out.append(
+                    self._rel_to_relationship(
+                        dict(record["r"]),
+                        source_id=record["source_id"],
+                        target_id=record["target_id"],
+                    )
+                )
+            return out
+
+    def neighborhood(
+        self,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        # Prefer shared algorithm over variable-length Cypher for backend parity.
+        from agenticx.knowledge.graphers.store.query import build_neighborhood
+
+        ents = {e.id: e for e in self.list_entities(limit=max(limit * 4, 500))}
+        rels = {r.id: r for r in self.list_relationships(limit=max(limit * 8, 1000))}
+        return build_neighborhood(
+            center_id=entity_id,
+            entities=ents,
+            relationships=rels,
+            depth=depth,
+            limit=limit,
+        )
+
+    def subgraph(
+        self,
+        *,
+        entity_ids: Optional[List[str]] = None,
+        limit_nodes: int = 200,
+    ) -> Dict[str, Any]:
+        from agenticx.knowledge.graphers.store.query import build_subgraph
+
+        ents = {e.id: e for e in self.list_entities(limit=max(limit_nodes * 2, 500))}
+        rels = {r.id: r for r in self.list_relationships(limit=max(limit_nodes * 4, 1000))}
+        out = build_subgraph(
+            entities=ents,
+            relationships=rels,
+            entity_ids=entity_ids,
+            limit_nodes=limit_nodes,
+            backend=self.backend_name,
+        )
+        out["stats"]["tenant_id"] = self.tenant_id
+        return out
 
     @staticmethod
     def _node_to_entity(props: Dict[str, Any]) -> Entity:

@@ -30,6 +30,7 @@ describe("isPlatformSection", () => {
       "disambiguation",
       "citation-evidence",
       "graph-incremental",
+      "graph-explorer",
     ]);
     for (const id of PLATFORM_SECTION_IDS) {
       expect(isPlatformSection(id)).toBe(true);

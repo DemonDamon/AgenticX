@@ -79,7 +79,8 @@
         "knowledgeLifecycle": "Knowledge lifecycle",
         "disambiguation": "Disambiguation",
         "citationEvidence": "Citation evidence",
-        "graphIncremental": "Graph incremental"
+        "graphIncremental": "Graph incremental",
+        "graphExplorer": "Graph explorer"
       }
     },
     "health": {
@@ -1769,6 +1770,29 @@
           "objects": "Objects",
           "hash": "Fingerprint",
           "content": "Content"
+        }
+      },
+      "graphExplorer": {
+        "title": "Graph explorer",
+        "description": "Browse GraphStore nodes and edges (Brand-A seed). Backend is the publish SoT — not a JSON snapshot.",
+        "canvasTitle": "Graph canvas",
+        "detailTitle": "Node attributes",
+        "loading": "Loading graph from GraphStore…",
+        "empty": "No nodes yet — seed Brand-A or publish via graph incremental.",
+        "seed": "Seed Brand-A into GraphStore",
+        "seedSuccess": "Brand-A graph seeded into GraphStore",
+        "seedFailed": "Seed failed",
+        "loadFailed": "Failed to load graph",
+        "refresh": "Refresh",
+        "backendLabel": "GraphStore backend",
+        "sotNote": "queries GraphStore (neo4j | memory | file)",
+        "linkIncremental": "Open graph incremental sync",
+        "noSelection": "Click a node to inspect attributes",
+        "col": {
+          "id": "ID",
+          "name": "Name",
+          "type": "Type",
+          "description": "Description"
         }
       }
     },

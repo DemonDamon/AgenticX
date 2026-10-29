@@ -12,6 +12,7 @@ import {
   type SourceWithStatus,
   type SyncReportRow,
 } from "./graph-incremental-types";
+import { getGraphStats as getStoreStats, seedBrandAGraph } from "./graph-store";
 
 export type {
   ChangeSetRow,
@@ -167,13 +168,30 @@ export async function reseedSamples(): Promise<{
   for (const [k, v] of Object.entries(SAMPLE_SOURCE_INDEX)) {
     links[k] = [...v];
   }
-  const graph_stats: GraphStatsSnapshot = { ...SAMPLE_GRAPH_STATS };
+  // Publish SoT: Brand-A entities/edges live in GraphStore (not JSON alone).
+  const seeded = await seedBrandAGraph();
+  const storeStats = seeded.stats;
+  const graph_stats: GraphStatsSnapshot = {
+    entity_count: Number(storeStats.entity_count) || SAMPLE_GRAPH_STATS.entity_count,
+    relation_count: Number(storeStats.relationship_count) || SAMPLE_GRAPH_STATS.relation_count,
+    updated_at: nowIso(),
+    store_backend: String(storeStats.backend || seeded.backend),
+  };
+  const runsWithBackend = runs.map((r) => ({
+    ...r,
+    graph_stats: {
+      ...r.graph_stats,
+      store_backend: graph_stats.store_backend,
+      entity_count: graph_stats.entity_count,
+      relation_count: graph_stats.relation_count,
+    },
+  }));
   await writeJsonFile(sourcesPath(), { sources });
   await writeJsonFile(fingerprintsPath(), { fingerprints });
-  await writeJsonFile(syncRunsPath(), { runs });
+  await writeJsonFile(syncRunsPath(), { runs: runsWithBackend });
   await writeJsonFile(sourceIndexPath(), { links });
   await writeJsonFile(graphStatsPath(), graph_stats);
-  return { sources, runs, links, graph_stats };
+  return { sources, runs: runsWithBackend, links, graph_stats };
 }
 
 async function ensureSeeded(): Promise<void> {
@@ -338,9 +356,26 @@ export async function runMockSync(opts?: {
     ? [...touched]
     : [];
 
+  // Align display with GraphStore SoT (seed/ensure store; do not treat JSON as truth).
+  let storeBackend = "file";
+  let storeEntityCount = Object.values(links).flat().length || SAMPLE_GRAPH_STATS.entity_count;
+  let storeRelCount = SAMPLE_GRAPH_STATS.relation_count;
+  try {
+    const st = await getStoreStats();
+    storeBackend = String(st.backend || st.store_backend || "file");
+    storeEntityCount = Number(st.entity_count) || storeEntityCount;
+    storeRelCount = Number(st.relationship_count) || storeRelCount;
+  } catch {
+    const seeded = await seedBrandAGraph();
+    storeBackend = String(seeded.backend);
+    storeEntityCount = Number(seeded.stats.entity_count) || storeEntityCount;
+    storeRelCount = Number(seeded.stats.relationship_count) || storeRelCount;
+  }
+
   const graph_stats: Record<string, unknown> = {
-    entity_count: Object.values(links).flat().length || SAMPLE_GRAPH_STATS.entity_count,
-    relation_count: SAMPLE_GRAPH_STATS.relation_count,
+    entity_count: storeEntityCount,
+    relation_count: storeRelCount,
+    store_backend: storeBackend,
     skipped_unchanged: change.unchanged.length,
     actor,
   };
@@ -368,6 +403,7 @@ export async function runMockSync(opts?: {
     entity_count: Number(graph_stats.entity_count) || 0,
     relation_count: Number(graph_stats.relation_count) || 0,
     updated_at: report.at,
+    store_backend: String(graph_stats.store_backend || storeBackend),
   } satisfies GraphStatsSnapshot);
 
   return cloneReport(report);

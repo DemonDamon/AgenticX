@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agenticx.knowledge.graphers.models import Entity, Relationship
+from agenticx.knowledge.graphers.store.query import build_neighborhood, build_subgraph
 
 
 class InMemoryGraphStore:
@@ -59,3 +60,42 @@ class InMemoryGraphStore:
             "entity_count": len(self._entities),
             "relationship_count": len(self._relationships),
         }
+
+    def list_entities(self, *, limit: int = 500) -> List[Entity]:
+        limit = max(1, int(limit))
+        return [deepcopy(self._entities[k]) for k in sorted(self._entities.keys())[:limit]]
+
+    def list_relationships(self, *, limit: int = 1000) -> List[Relationship]:
+        limit = max(1, int(limit))
+        return [
+            deepcopy(self._relationships[k]) for k in sorted(self._relationships.keys())[:limit]
+        ]
+
+    def neighborhood(
+        self,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        return build_neighborhood(
+            center_id=entity_id,
+            entities=self._entities,
+            relationships=self._relationships,
+            depth=depth,
+            limit=limit,
+        )
+
+    def subgraph(
+        self,
+        *,
+        entity_ids: Optional[List[str]] = None,
+        limit_nodes: int = 200,
+    ) -> Dict[str, Any]:
+        return build_subgraph(
+            entities=self._entities,
+            relationships=self._relationships,
+            entity_ids=entity_ids,
+            limit_nodes=limit_nodes,
+            backend=self.backend_name,
+        )
