@@ -24,6 +24,7 @@ export const PLATFORM_SECTION_IDS = [
   "rule-governance",
   "knowledge-lifecycle",
   "disambiguation",
+  "graph-incremental",
 ] as const;
 
 export type PlatformSectionId = (typeof PLATFORM_SECTION_IDS)[number];

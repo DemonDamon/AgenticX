@@ -40,4 +40,4 @@ assert "doc-a" in r2.unchanged
 assert r2.extracted_source_ids == ["doc-b"]
 ```
 
-Admin UI is deferred; this package is the library spine.
+Admin UI: `/admin/graph-incremental` in `enterprise/apps/admin-console` (store/API under `graph-incremental-*`, e2e `enterprise/scripts/e2e-graph-incremental.ts`). This package remains the library spine.
