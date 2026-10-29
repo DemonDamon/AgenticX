@@ -37,5 +37,5 @@
 
 ## Status
 
-- **Plans:** writing
-- **Impl:** pending (R1-1… then serial)
+- **Plans:** done
+- **Impl:** R1-1 landed; R1-2… remaining

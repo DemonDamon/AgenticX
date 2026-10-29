@@ -63,10 +63,10 @@ class RuleFileStore:
 
 ### Task 1
 
-- [ ] Failing tests: invalid transition raises; missing rule KeyError; empty store lists [].
-- [ ] Implement model + store; green tests (tmp_path persist/reload).
-- [ ] Commit: `feat(rules): rule entity model and file store`
+- [x] Failing tests: invalid transition raises; missing rule KeyError; empty store lists [].
+- [x] Implement model + store; green tests (tmp_path persist/reload).
+- [x] Commit: `feat(rules): rule entity model and file store`
 
 ## Status
 
-Pending
+Done on `feat/agx-rules-knowledge-p0`.
