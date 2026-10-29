@@ -20,6 +20,8 @@ from agenticx.knowledge.graphers.incremental.publish import (
     knowledge_object_to_relationship,
     merge_published_into_graph,
     publish_objects,
+    publish_to_store,
+    retire_from_store,
     submit_for_review,
 )
 from agenticx.knowledge.graphers.incremental.sync import (
@@ -47,6 +49,8 @@ __all__ = [
     "knowledge_object_to_relationship",
     "merge_published_into_graph",
     "publish_objects",
+    "publish_to_store",
     "resolve_incremental_store_dir",
+    "retire_from_store",
     "submit_for_review",
 ]
