@@ -18,11 +18,11 @@
 
 ### Tasks
 
-- [ ] Types + store + seed Brand-A entities/rels
-- [ ] API routes; backend label in every response
-- [ ] vitest green
-- [ ] Commit: `feat(admin): GraphStore-backed graph-explorer read APIs`
+- [x] Types + store + seed Brand-A entities/rels
+- [x] API routes; backend label in every response
+- [x] vitest green
+- [x] Commit: `feat(admin): GraphStore-backed graph-explorer read APIs`
 
 ## Status
 
-Pending
+Done
