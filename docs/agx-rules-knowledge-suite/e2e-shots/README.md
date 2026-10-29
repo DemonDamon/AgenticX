@@ -76,3 +76,16 @@ pnpm -C enterprise exec tsx scripts/e2e-disambiguation.ts
 | `09-disambiguation-conflict-resolve.png` | Conflict resolve mode |
 
 Synthetic **Brand-A** ids only — no real customer names.
+
+### Portal R2 disambiguation (optional e2e)
+
+Script: `enterprise/scripts/e2e-portal-disambiguation.ts` against web-portal `:3000`.
+
+| File | Mode |
+|------|------|
+| `13-portal-disambiguation-candidate-select.png` | Candidate select |
+| `14-portal-disambiguation-info-supplement.png` | Info supplement |
+| `15-portal-disambiguation-conflict-resolve.png` | Conflict resolve |
+
+Mount: `/workspace/disambiguation` (runtime store, not admin).
+
