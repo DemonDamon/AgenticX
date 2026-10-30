@@ -10,6 +10,7 @@ from agenticx.data_suite.channels.fake import FakeChannel
 from agenticx.data_suite.channels.clickhouse import ClickHouseChannel
 from agenticx.data_suite.channels.jdbc import JdbcChannel
 from agenticx.data_suite.channels.kafka import KafkaChannel
+from agenticx.data_suite.channels.hive import HiveChannel
 
 
 def test_load_channel_config_missing(monkeypatch):
@@ -148,6 +149,70 @@ def test_build_file_empty_returns_file_memory():
 
     ch = build_channel("f_empty", cfg={"kind": "file"})
     assert isinstance(ch, FileChannel)
+    probe = ch.probe()
+    assert probe.ok is True
+    assert probe.tables == []
+
+
+def test_build_hive_with_host_returns_hive_channel():
+    ch = build_channel(
+        "h1",
+        cfg={
+            "kind": "hive",
+            "host": "localhost",
+            "port": 10000,
+            "database": "default",
+        },
+    )
+    assert isinstance(ch, HiveChannel)
+    assert ch.name == "h1"
+    probe = ch.probe()
+    assert probe.ok is False
+    assert probe.error
+
+
+def test_build_hive_with_thrift_uri_returns_hive_channel():
+    ch = build_channel(
+        "h_uri",
+        cfg={"kind": "hive", "thrift_uri": "hive://localhost:10000/default"},
+    )
+    assert isinstance(ch, HiveChannel)
+
+
+def test_build_spark_alias_returns_hive_channel():
+    ch = build_channel(
+        "spark1",
+        cfg={"kind": "spark", "host": "localhost", "port": 10000},
+    )
+    assert isinstance(ch, HiveChannel)
+    assert ch.name == "spark1"
+
+
+def test_build_sparksql_alias_returns_hive_channel():
+    ch = build_channel(
+        "ssql1",
+        cfg={"kind": "sparksql", "url": "hive://localhost:10000/default"},
+    )
+    assert isinstance(ch, HiveChannel)
+
+
+def test_build_hive_tables_only_returns_fake():
+    ch = build_channel(
+        "h_offline",
+        cfg={
+            "kind": "hive",
+            "tables": {"events": [{"id": 1}]},
+        },
+    )
+    assert isinstance(ch, FakeChannel)
+    assert ch.kind == "hive"
+    assert ch.probe().ok is True
+    assert ch.query("SELECT * FROM events").rows == [[1]]
+
+
+def test_build_hive_empty_returns_hive_memory():
+    ch = build_channel("h_empty", cfg={"kind": "hive"})
+    assert isinstance(ch, HiveChannel)
     probe = ch.probe()
     assert probe.ok is True
     assert probe.tables == []
