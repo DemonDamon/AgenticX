@@ -1,0 +1,13 @@
+id: sample_query_acl
+default_effect: deny
+grants:
+  - role: admin
+    datasets: ["*"]
+    boards: ["*"]
+  - role: analyst
+    datasets: ["members"]
+    boards: ["sample_member_board", "golden_member_board"]
+  - role: guest
+    datasets: ["members"]
+    boards: ["sample_member_board", "golden_member_board"]
+    fields: ["phone", "email", "region", "member_id", "tier", "status", "orders", "brand", "line", "config"]
