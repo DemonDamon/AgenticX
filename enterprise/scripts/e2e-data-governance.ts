@@ -5,14 +5,51 @@
  *
  * Prerequisite: admin-console on :3001 with seeded admin user.
  *
- * Run:
+ * Run (from repo root):
+ *   set -a && source enterprise/.env.local && set +a
  *   pnpm -C enterprise exec tsx scripts/e2e-data-governance.ts
+ *
+ * Also loads enterprise/.env.local automatically when login env vars are unset
+ * (same keys as e2e-rule-governance / e2e-knowledge-lifecycle / e2e-data-boards).
  */
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 
+/** Load KEY=VAL from enterprise/.env.local into process.env when unset. */
+function loadEnterpriseEnvLocal(): void {
+  const candidates = [
+    path.resolve(__dirname, "../.env.local"),
+    path.resolve(process.cwd(), ".env.local"),
+    path.resolve(process.cwd(), "enterprise/.env.local"),
+  ];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    const raw = fs.readFileSync(file, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let val = trimmed.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+    break;
+  }
+}
+
+loadEnterpriseEnvLocal();
+
 const ADMIN_BASE = process.env.ADMIN_BASE_URL ?? "http://127.0.0.1:3001";
+const ADMIN_EMAIL =
+  process.env.ADMIN_CONSOLE_LOGIN_EMAIL?.trim() || "admin@agenticx.local";
 const ADMIN_PASSWORD =
   process.env.ADMIN_CONSOLE_LOGIN_PASSWORD?.trim() ||
   process.env.AUTH_DEV_OWNER_PASSWORD?.trim() ||
@@ -34,15 +71,29 @@ async function adminLogin(page: import("playwright").Page): Promise<void> {
   await email.waitFor({ state: "visible", timeout: 20_000 });
   await email.click();
   await email.fill("");
-  await email.fill("admin@agenticx.local");
+  await email.fill(ADMIN_EMAIL);
   await password.click();
   await password.fill("");
   await password.fill(ADMIN_PASSWORD);
   await page.waitForTimeout(300);
-  await Promise.all([
-    page.waitForURL(/\/dashboard/, { timeout: 45_000 }),
-    page.getByRole("button", { name: /登录并进入控制台|Sign in to console/i }).click(),
-  ]);
+  try {
+    await Promise.all([
+      page.waitForURL(/\/dashboard/, { timeout: 45_000 }),
+      page.getByRole("button", { name: /登录并进入控制台|Sign in to console/i }).click(),
+    ]);
+  } catch (err) {
+    const url = page.url();
+    const errText = await page
+      .getByText(/登录失败|Login failed|检查邮箱和密码|Invalid/i)
+      .first()
+      .innerText()
+      .catch(() => "");
+    throw new Error(
+      `admin login did not reach /dashboard (url=${url} hint=${errText || "none"}). ` +
+        `Ensure ADMIN_CONSOLE_LOGIN_PASSWORD / AUTH_DEV_OWNER_PASSWORD match enterprise/.env.local. ` +
+        `Original: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 async function main() {
