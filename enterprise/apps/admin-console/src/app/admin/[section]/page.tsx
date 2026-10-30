@@ -21,6 +21,7 @@ import DataGovernanceSection from "../_sections/data-governance";
 import DataBoardsSection from "../_sections/data-boards";
 import DataSecuritySection from "../_sections/data-security";
 import DataJobsSection from "../_sections/data-jobs";
+import DataIdmappingSection from "../_sections/data-idmapping";
 import RuleGovernanceSection from "../_sections/rule-governance";
 import KnowledgeLifecycleSection from "../_sections/knowledge-lifecycle";
 import DisambiguationSection from "../_sections/disambiguation";
@@ -52,6 +53,7 @@ const PLATFORM_SECTION_PAGES = {
   "data-boards": DataBoardsSection,
   "data-security": DataSecuritySection,
   "data-jobs": DataJobsSection,
+  "data-idmapping": DataIdmappingSection,
   "rule-governance": RuleGovernanceSection,
   "knowledge-lifecycle": KnowledgeLifecycleSection,
   "disambiguation": DisambiguationSection,

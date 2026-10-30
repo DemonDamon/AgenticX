@@ -37,7 +37,13 @@ const PLATFORM_HREFS = [
   "/admin/data-boards",
   "/admin/data-security",
   "/admin/data-jobs",
+  "/admin/data-idmapping",
   "/admin/rule-governance",
+  "/admin/knowledge-lifecycle",
+  "/admin/disambiguation",
+  "/admin/citation-evidence",
+  "/admin/graph-incremental",
+  "/admin/graph-explorer",
 ];
 
 function stringRecord(value: object): Record<string, string> {
