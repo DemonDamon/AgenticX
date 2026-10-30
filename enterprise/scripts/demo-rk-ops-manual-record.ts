@@ -765,8 +765,18 @@ function buildCues(): Cue[] {
         await pause(page, 700);
         const syncBtn = page.getByTestId("graph-incremental-sync");
         if (await syncBtn.isVisible().catch(() => false)) {
-          await syncBtn.click();
-          await pause(page, 1600);
+          for (let i = 0; i < 40; i++) {
+            if (await syncBtn.isEnabled().catch(() => false)) break;
+            await page.waitForTimeout(250);
+          }
+          if (await syncBtn.isEnabled().catch(() => false)) {
+            await syncBtn.click();
+            await pause(page, 1600);
+          } else {
+            // Still show detail/report area even if sync is gated
+            await syncBtn.click({ force: true }).catch(() => undefined);
+            await pause(page, 800);
+          }
         }
         const report = page.getByTestId("graph-incremental-sync-report");
         if (await report.isVisible().catch(() => false)) {
@@ -786,7 +796,7 @@ function buildCues(): Cue[] {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await page.goto(`${ADMIN_BASE}/admin/graph-explorer`, {
           waitUntil: "domcontentloaded",
-          timeout: 30_000,
+          timeout: 90_000,
         });
         await dismissNextOverlay(page);
         await page
@@ -872,9 +882,22 @@ function buildCues(): Cue[] {
           }
         }
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
+        let row = page.getByTestId(
           "portal-disambiguation-row-das-cooling-candidate",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-candidate",
+          );
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          // Fallback: first table row (SAMPLE may still be loading)
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
         if (!(await row.isVisible().catch(() => false))) {
           throw new Error("missing portal row das-cooling-candidate");
         }
@@ -901,9 +924,21 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
+        let row = page.getByTestId(
           "portal-disambiguation-row-das-cooling-supplement",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-supplement",
+          );
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
         if (!(await row.isVisible().catch(() => false))) {
           throw new Error("missing portal row das-cooling-supplement");
         }
@@ -928,9 +963,21 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
+        let row = page.getByTestId(
           "portal-disambiguation-row-das-cooling-conflict",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-conflict",
+          );
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
         if (!(await row.isVisible().catch(() => false))) {
           throw new Error("missing portal row das-cooling-conflict");
         }
