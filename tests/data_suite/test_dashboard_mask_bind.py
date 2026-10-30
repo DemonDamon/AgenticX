@@ -59,3 +59,67 @@ def test_role_required_with_masking():
     )
     with pytest.raises(ValueError, match="role"):
         bind_widget(widget, ROWS, masking=_engine())
+
+
+# --- H5: secure_bind forces ACL + masking ---
+
+from agenticx.data_suite.acl import QueryAccessDenied, load_query_acl_policy, secure_bind_widget
+
+ACL_PATH = Path(__file__).parent / "fixtures" / "sample_query_acl.yaml"
+
+
+def test_secure_bind_analyst_ok_and_masked_filter_semantics():
+    widget = WidgetSpec(
+        id="hit",
+        title="Hit",
+        chart="stat",
+        dataset="members",
+        metric="count",
+    )
+    series = secure_bind_widget(
+        widget,
+        ROWS,
+        role="analyst",
+        acl=load_query_acl_policy(ACL_PATH),
+        masking=_engine(),
+        board_id="sample_member_board",
+        filters={"phone": "13812345678"},
+    )
+    # analyst partial-masks phone before filter → raw phone filter misses
+    assert series.points[0].value == 0.0
+
+
+def test_secure_bind_outsider_denied():
+    widget = WidgetSpec(
+        id="hit",
+        title="Hit",
+        chart="stat",
+        dataset="members",
+        metric="count",
+    )
+    with pytest.raises(QueryAccessDenied):
+        secure_bind_widget(
+            widget,
+            ROWS,
+            role="outsider",
+            acl=load_query_acl_policy(ACL_PATH),
+            masking=_engine(),
+        )
+
+
+def test_secure_bind_cannot_skip_masking_for_payroll_dataset():
+    widget = WidgetSpec(
+        id="pay",
+        title="Pay",
+        chart="stat",
+        dataset="payroll",
+        metric="count",
+    )
+    with pytest.raises(QueryAccessDenied, match="dataset_denied"):
+        secure_bind_widget(
+            widget,
+            ROWS,
+            role="analyst",
+            acl=load_query_acl_policy(ACL_PATH),
+            masking=_engine(),
+        )

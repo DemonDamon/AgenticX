@@ -1692,12 +1692,21 @@
       },
       "dataSecurity": {
         "title": "数据安全",
-        "description": "字段脱敏预览与页面水印（P2 A7）",
+        "description": "字段脱敏预览、自助取数 ACL 与页面水印",
         "policyTitle": "脱敏策略样例",
         "policyId": "策略 ID",
         "rawPhone": "原始手机号",
         "maskedPhone": "脱敏后",
-        "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。"
+        "stubNote": "当前为前端样例镜像 Python MaskingEngine；生产走查询/绑定链路。",
+        "queryTitle": "自助取数试探",
+        "queryHint": "选择数据角色后发起取数：越权返回 403，授权角色返回脱敏结果。",
+        "queryRole": "数据角色",
+        "queryDataset": "数据集",
+        "queryRun": "发起取数",
+        "queryDenied": "数据权限不足（403）",
+        "queryAllowed": "已脱敏返回",
+        "queryFailed": "取数失败",
+        "queryResult": "取数结果"
       },
       "disambiguation": {
         "title": "消歧确认",
