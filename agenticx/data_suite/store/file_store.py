@@ -1,4 +1,4 @@
-"""JSON file persistence for dictionary fields and board specs.
+"""JSON file persistence for dictionary, boards, and governance ops.
 
 Path resolution: explicit ``root`` argument, else ``AGX_DATA_SUITE_STORE_DIR``,
 else a process-local default under the cwd (``.runtime/data-suite``).
@@ -129,3 +129,266 @@ class BoardFileStore:
         self._boards[bid] = stored
         self._persist()
         return dict(stored)
+
+
+class CleaningRuleStore:
+    """Upsert / list cleaning rules in ``cleaning_rules.json``."""
+
+    def __init__(self, root: Optional[Union[str, Path]] = None) -> None:
+        self.root = resolve_store_dir(root)
+        self._path = self.root / "cleaning_rules.json"
+        self._rules: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        self._rules.clear()
+        if not self._path.is_file():
+            return
+        raw = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        for row in raw.get("rules") or []:
+            rid = str(row.get("id") or "").strip()
+            if not rid:
+                continue
+            self._rules[rid] = {
+                "id": rid,
+                "template": str(row.get("template") or ""),
+                "field": str(row.get("field") or ""),
+                "params": dict(row.get("params") or {}),
+                "enabled": bool(row.get("enabled", True)),
+            }
+
+    def _persist(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        payload = {"rules": [self._rules[k] for k in sorted(self._rules)]}
+        self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def list_rules(self) -> List[Dict[str, Any]]:
+        return [dict(self._rules[k]) for k in sorted(self._rules)]
+
+    def get_rule(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        row = self._rules.get(rule_id)
+        return dict(row) if row is not None else None
+
+    def upsert_rule(self, rule: Dict[str, Any]) -> Dict[str, Any]:
+        rid = str(rule.get("id") or "").strip()
+        if not rid:
+            raise ValueError("rule.id required")
+        stored = {
+            "id": rid,
+            "template": str(rule.get("template") or ""),
+            "field": str(rule.get("field") or ""),
+            "params": dict(rule.get("params") or {}),
+            "enabled": bool(rule.get("enabled", True)),
+        }
+        self._rules[rid] = stored
+        self._persist()
+        return dict(stored)
+
+
+class ClassificationStore:
+    """Upsert / list trust grades in ``classification.json`` (seed S/A/B/C)."""
+
+    DEFAULT_GRADES: List[Dict[str, Any]] = [
+        {"id": "S", "label": "S", "rank": 4},
+        {"id": "A", "label": "A", "rank": 3},
+        {"id": "B", "label": "B", "rank": 2},
+        {"id": "C", "label": "C", "rank": 1},
+    ]
+
+    def __init__(self, root: Optional[Union[str, Path]] = None) -> None:
+        self.root = resolve_store_dir(root)
+        self._path = self.root / "classification.json"
+        self._grades: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        self._grades.clear()
+        if not self._path.is_file():
+            for g in self.DEFAULT_GRADES:
+                self._grades[g["id"]] = dict(g)
+            self._persist()
+            return
+        raw = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        rows = raw.get("grades") or []
+        if not rows:
+            for g in self.DEFAULT_GRADES:
+                self._grades[g["id"]] = dict(g)
+            self._persist()
+            return
+        for row in rows:
+            gid = str(row.get("id") or "").strip()
+            if not gid:
+                continue
+            self._grades[gid] = {
+                "id": gid,
+                "label": str(row.get("label") or gid),
+                "rank": int(row.get("rank") or 0),
+            }
+
+    def _persist(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        # Sort by rank desc then id
+        ordered = sorted(self._grades.values(), key=lambda g: (-int(g.get("rank") or 0), g["id"]))
+        payload = {"grades": [dict(g) for g in ordered]}
+        self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def list_grades(self) -> List[Dict[str, Any]]:
+        return sorted(
+            [dict(g) for g in self._grades.values()],
+            key=lambda g: (-int(g.get("rank") or 0), g["id"]),
+        )
+
+    def get_grade(self, grade_id: str) -> Optional[Dict[str, Any]]:
+        row = self._grades.get(grade_id)
+        return dict(row) if row is not None else None
+
+    def upsert_grade(self, grade: Dict[str, Any]) -> Dict[str, Any]:
+        gid = str(grade.get("id") or "").strip()
+        if not gid:
+            raise ValueError("grade.id required")
+        stored = {
+            "id": gid,
+            "label": str(grade.get("label") or gid),
+            "rank": int(grade.get("rank") or 0),
+        }
+        self._grades[gid] = stored
+        self._persist()
+        return dict(stored)
+
+
+class QualityMetricStore:
+    """Metric defs + last_run snapshot in ``quality_metrics.json``."""
+
+    def __init__(self, root: Optional[Union[str, Path]] = None) -> None:
+        self.root = resolve_store_dir(root)
+        self._path = self.root / "quality_metrics.json"
+        self._metrics: Dict[str, Dict[str, Any]] = {}
+        self._last_run: Optional[Dict[str, Any]] = None
+        self._load()
+
+    def _load(self) -> None:
+        self._metrics.clear()
+        self._last_run = None
+        if not self._path.is_file():
+            return
+        raw = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        for row in raw.get("metrics") or []:
+            mid = str(row.get("id") or "").strip()
+            if not mid:
+                continue
+            self._metrics[mid] = {
+                "id": mid,
+                "type": str(row.get("type") or ""),
+                "field": str(row.get("field") or ""),
+            }
+        lr = raw.get("last_run")
+        self._last_run = dict(lr) if isinstance(lr, dict) else None
+
+    def _persist(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "metrics": [self._metrics[k] for k in sorted(self._metrics)],
+            "last_run": self._last_run,
+        }
+        self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def list_metrics(self) -> List[Dict[str, Any]]:
+        return [dict(self._metrics[k]) for k in sorted(self._metrics)]
+
+    def get_last_run(self) -> Optional[Dict[str, Any]]:
+        return dict(self._last_run) if self._last_run is not None else None
+
+    def upsert_metric(self, metric: Dict[str, Any]) -> Dict[str, Any]:
+        mid = str(metric.get("id") or "").strip()
+        if not mid:
+            raise ValueError("metric.id required")
+        stored = {
+            "id": mid,
+            "type": str(metric.get("type") or ""),
+            "field": str(metric.get("field") or ""),
+        }
+        self._metrics[mid] = stored
+        self._persist()
+        return dict(stored)
+
+    def set_last_run(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        self._last_run = {
+            "day": str(snapshot.get("day") or ""),
+            "metrics": dict(snapshot.get("metrics") or {}),
+            "meta": dict(snapshot.get("meta") or {}),
+        }
+        self._persist()
+        return dict(self._last_run)
+
+    def run_day(
+        self,
+        day: str,
+        rows: Optional[List[Dict[str, Any]]] = None,
+        *,
+        quarantine: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Compute QualityRollup for ``day`` from stored metric defs and persist last_run."""
+        from agenticx.data_suite.governance.quality import QualityRollup
+
+        rollup = QualityRollup()
+        rollup.load_metric_defs(self.list_metrics())
+        snap = rollup.compute_day(day, rows or [], quarantine=quarantine)
+        return self.set_last_run(
+            {"day": snap.day, "metrics": snap.metrics, "meta": snap.meta}
+        )
+
+
+class ReviewActionStore:
+    """Append-only review/audit actions in ``review_actions.json``."""
+
+    def __init__(self, root: Optional[Union[str, Path]] = None) -> None:
+        self.root = resolve_store_dir(root)
+        self._path = self.root / "review_actions.json"
+        self._actions: List[Dict[str, Any]] = []
+        self._load()
+
+    def _load(self) -> None:
+        self._actions = []
+        if not self._path.is_file():
+            return
+        raw = json.loads(self._path.read_text(encoding="utf-8")) or {}
+        for row in raw.get("actions") or []:
+            aid = str(row.get("id") or "").strip()
+            if not aid:
+                continue
+            self._actions.append(
+                {
+                    "id": aid,
+                    "target_rule_id": str(row.get("target_rule_id") or ""),
+                    "decision": str(row.get("decision") or ""),
+                    "note": str(row.get("note") or ""),
+                    "at": str(row.get("at") or ""),
+                }
+            )
+
+    def _persist(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        payload = {"actions": [dict(a) for a in self._actions]}
+        self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def list_actions(self) -> List[Dict[str, Any]]:
+        return [dict(a) for a in self._actions]
+
+    def append_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        aid = str(action.get("id") or "").strip()
+        if not aid:
+            raise ValueError("action.id required")
+        decision = str(action.get("decision") or "").strip()
+        if decision not in {"approve", "reject", "keep"}:
+            raise ValueError("decision must be approve|reject|keep")
+        stored = {
+            "id": aid,
+            "target_rule_id": str(action.get("target_rule_id") or ""),
+            "decision": decision,
+            "note": str(action.get("note") or ""),
+            "at": str(action.get("at") or ""),
+        }
+        self._actions.append(stored)
+        self._persist()
+        return dict(stored)
+
