@@ -22,6 +22,10 @@ class QualityRollup:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         self._metrics = list(data.get("metrics") or [])
 
+    def load_metric_defs(self, metrics: List[Dict[str, Any]]) -> None:
+        """Load metric definitions from in-memory dicts (e.g. QualityMetricStore)."""
+        self._metrics = [dict(m) for m in metrics]
+
     def compute_day(
         self,
         day: str,

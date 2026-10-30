@@ -25,6 +25,16 @@ class CleaningEngine:
         self._ruleset_id = str(data.get("ruleset_id") or "")
         self._rules = list(data.get("rules") or [])
 
+    def load_rules(
+        self,
+        rules: List[Dict[str, Any]],
+        *,
+        ruleset_id: str = "",
+    ) -> None:
+        """Load rules from in-memory dicts (e.g. CleaningRuleStore)."""
+        self._ruleset_id = ruleset_id
+        self._rules = [dict(r) for r in rules]
+
     def apply(
         self,
         rows: List[Dict[str, Any]],
