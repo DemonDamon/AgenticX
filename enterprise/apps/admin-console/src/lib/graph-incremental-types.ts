@@ -35,6 +35,8 @@ export type GraphStatsSnapshot = {
   entity_count: number;
   relation_count: number;
   updated_at: string;
+  /** GraphStore backend when K3 publish SoT is wired (e.g. neo4j, memory). */
+  store_backend?: string;
   [key: string]: unknown;
 };
 
@@ -45,39 +47,40 @@ export type SourceWithStatus = SourceDocumentRow & {
   last_run_id?: string;
 };
 
-/** Synthetic Brand-A seed only — no real customer identifiers. */
+/** 示例化工厂·冷却回路 synthetic seed — desensitized demo. */
 export const SAMPLE_SOURCES: SourceDocumentRow[] = [
   {
-    id: "brand-a-src-ledger-1",
-    content: "Brand-A plant ledger entry for Pump 01 at site plant-a.",
+    id: "src-ledger-pump-01",
+    content: "示例化工厂设备台账：1号循环泵位于一车间冷却区，归属冷却回路。",
     content_hash: "",
-    meta: { tags: ["ops", "sample", "brand-a"], kind: "ledger" },
+    meta: { tags: ["ops", "sample", "cooling-loop"], kind: "ledger" },
     last_seen_at: "2026-10-29T02:00:00Z",
   },
   {
-    id: "brand-a-src-site-1",
-    content: "Brand-A Plant A site registry record.",
+    id: "src-site-cooling-1",
+    content: "区域登记：一车间冷却区，负责冷却回路运维。",
     content_hash: "",
-    meta: { tags: ["ops", "sample", "brand-a"], kind: "site" },
+    meta: { tags: ["ops", "sample", "cooling-loop"], kind: "site" },
     last_seen_at: "2026-10-29T02:00:00Z",
   },
   {
-    id: "brand-a-src-ops-note",
-    content: "Brand-A ops note: valve check scheduled for plant-a.",
+    id: "src-ops-note-valve",
+    content: "运维说明：回路切断阀巡检计划已排入一车间冷却区值班表。",
     content_hash: "",
-    meta: { tags: ["ops", "sample", "brand-a"], kind: "note" },
+    meta: { tags: ["ops", "sample", "cooling-loop"], kind: "note" },
     last_seen_at: "2026-10-29T03:00:00Z",
   },
 ];
 
 export const SAMPLE_SOURCE_INDEX: SourceIndexLinks = {
-  "brand-a-src-ledger-1": ["brand-a-entity-pump-01"],
-  "brand-a-src-site-1": ["brand-a-site-plant-a"],
-  "brand-a-src-ops-note": ["brand-a-entity-valve-01"],
+  "src-ledger-pump-01": ["device-pump-01"],
+  "src-site-cooling-1": ["site-cooling-zone-1"],
+  "src-ops-note-valve": ["device-valve-01"],
 };
 
 export const SAMPLE_GRAPH_STATS: GraphStatsSnapshot = {
   entity_count: 3,
-  relation_count: 1,
+  relation_count: 2,
   updated_at: "2026-10-29T03:05:00Z",
+  store_backend: "file",
 };

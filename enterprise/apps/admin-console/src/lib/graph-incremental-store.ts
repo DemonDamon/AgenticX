@@ -12,6 +12,11 @@ import {
   type SourceWithStatus,
   type SyncReportRow,
 } from "./graph-incremental-types";
+import {
+  getGraphStats as getStoreStats,
+  publishTouchedObjects,
+  seedBrandAGraph,
+} from "./graph-store";
 
 export type {
   ChangeSetRow,
@@ -119,7 +124,7 @@ function buildSeedRuns(sources: SourceDocumentRow[]): SyncReportRow[] {
   const ids = sources.map((s) => s.id);
   const objectIds = Object.values(SAMPLE_SOURCE_INDEX).flat();
   const full: SyncReportRow = {
-    run_id: "brand-a-sync-full-001",
+    run_id: "sync-full-001",
     added: [...ids],
     changed: [],
     removed: [],
@@ -135,7 +140,7 @@ function buildSeedRuns(sources: SourceDocumentRow[]): SyncReportRow[] {
     at: "2026-10-29T02:05:00Z",
   };
   const incremental: SyncReportRow = {
-    run_id: "brand-a-sync-incr-002",
+    run_id: "sync-incr-002",
     added: [],
     changed: [],
     removed: [],
@@ -167,13 +172,30 @@ export async function reseedSamples(): Promise<{
   for (const [k, v] of Object.entries(SAMPLE_SOURCE_INDEX)) {
     links[k] = [...v];
   }
-  const graph_stats: GraphStatsSnapshot = { ...SAMPLE_GRAPH_STATS };
+  // Publish SoT: sample entities/edges live in GraphStore (not JSON alone).
+  const seeded = await seedBrandAGraph();
+  const storeStats = seeded.stats;
+  const graph_stats: GraphStatsSnapshot = {
+    entity_count: Number(storeStats.entity_count) || SAMPLE_GRAPH_STATS.entity_count,
+    relation_count: Number(storeStats.relationship_count) || SAMPLE_GRAPH_STATS.relation_count,
+    updated_at: nowIso(),
+    store_backend: String(storeStats.backend || seeded.backend),
+  };
+  const runsWithBackend = runs.map((r) => ({
+    ...r,
+    graph_stats: {
+      ...r.graph_stats,
+      store_backend: graph_stats.store_backend,
+      entity_count: graph_stats.entity_count,
+      relation_count: graph_stats.relation_count,
+    },
+  }));
   await writeJsonFile(sourcesPath(), { sources });
   await writeJsonFile(fingerprintsPath(), { fingerprints });
-  await writeJsonFile(syncRunsPath(), { runs });
+  await writeJsonFile(syncRunsPath(), { runs: runsWithBackend });
   await writeJsonFile(sourceIndexPath(), { links });
   await writeJsonFile(graphStatsPath(), graph_stats);
-  return { sources, runs, links, graph_stats };
+  return { sources, runs: runsWithBackend, links, graph_stats };
 }
 
 async function ensureSeeded(): Promise<void> {
@@ -230,15 +252,26 @@ export async function getAffectedForSource(sourceId: string): Promise<{
 
 export async function getGraphStats(): Promise<GraphStatsSnapshot | null> {
   await ensureSeeded();
+  // Prefer live GraphStore SoT; JSON graph_stats.json is a cache/display aid only.
   try {
-    await readFile(graphStatsPath(), "utf-8");
-    return await readJsonFile<GraphStatsSnapshot>(graphStatsPath(), {
-      entity_count: 0,
-      relation_count: 0,
+    const st = await getStoreStats();
+    return {
+      entity_count: Number(st.entity_count) || 0,
+      relation_count: Number(st.relationship_count) || 0,
       updated_at: nowIso(),
-    });
+      store_backend: String(st.backend || st.store_backend || "file"),
+    };
   } catch {
-    return null;
+    try {
+      await readFile(graphStatsPath(), "utf-8");
+      return await readJsonFile<GraphStatsSnapshot>(graphStatsPath(), {
+        entity_count: 0,
+        relation_count: 0,
+        updated_at: nowIso(),
+      });
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -338,15 +371,51 @@ export async function runMockSync(opts?: {
     ? [...touched]
     : [];
 
+  const runId = `sync-${randomUUID().slice(0, 8)}`;
+  const syncedAt = nowIso();
+
+  // Align display with GraphStore SoT (seed/ensure store; do not treat JSON as truth).
+  let storeBackend = "file";
+  let storeEntityCount = Object.values(links).flat().length || SAMPLE_GRAPH_STATS.entity_count;
+  let storeRelCount = SAMPLE_GRAPH_STATS.relation_count;
+  try {
+    const st = await getStoreStats();
+    storeBackend = String(st.backend || st.store_backend || "file");
+    storeEntityCount = Number(st.entity_count) || storeEntityCount;
+    storeRelCount = Number(st.relationship_count) || storeRelCount;
+  } catch {
+    const seeded = await seedBrandAGraph();
+    storeBackend = String(seeded.backend);
+    storeEntityCount = Number(seeded.stats.entity_count) || storeEntityCount;
+    storeRelCount = Number(seeded.stats.relationship_count) || storeRelCount;
+  }
+
+  // Closed loop: when sources extract/publish, stamp GraphStore entities so explorer reflects sync.
+  let publishedIntoStore: string[] = [];
+  if (published.length) {
+    const pub = await publishTouchedObjects(published, {
+      synced_at: syncedAt,
+      run_id: runId,
+      actor,
+      source_ids: needsExtract,
+    });
+    publishedIntoStore = pub.updated_object_ids;
+    storeBackend = String(pub.backend || storeBackend);
+    storeEntityCount = Number(pub.stats.entity_count) || storeEntityCount;
+    storeRelCount = Number(pub.stats.relationship_count) || storeRelCount;
+  }
+
   const graph_stats: Record<string, unknown> = {
-    entity_count: Object.values(links).flat().length || SAMPLE_GRAPH_STATS.entity_count,
-    relation_count: SAMPLE_GRAPH_STATS.relation_count,
+    entity_count: storeEntityCount,
+    relation_count: storeRelCount,
+    store_backend: storeBackend,
     skipped_unchanged: change.unchanged.length,
     actor,
+    published_into_store: publishedIntoStore,
   };
 
   const report: SyncReportRow = {
-    run_id: `brand-a-sync-${randomUUID().slice(0, 8)}`,
+    run_id: runId,
     added: change.added,
     changed: change.changed,
     removed: change.removed,
@@ -356,7 +425,7 @@ export async function runMockSync(opts?: {
     published_object_ids: published.sort(),
     retired_object_ids: [],
     graph_stats,
-    at: nowIso(),
+    at: syncedAt,
   };
 
   await writeJsonFile(sourcesPath(), { sources: nextSources });
@@ -368,6 +437,7 @@ export async function runMockSync(opts?: {
     entity_count: Number(graph_stats.entity_count) || 0,
     relation_count: Number(graph_stats.relation_count) || 0,
     updated_at: report.at,
+    store_backend: String(graph_stats.store_backend || storeBackend),
   } satisfies GraphStatsSnapshot);
 
   return cloneReport(report);
@@ -376,7 +446,7 @@ export async function runMockSync(opts?: {
 export async function appendSyncReport(input: Partial<SyncReportRow> & { run_id?: string }): Promise<SyncReportRow> {
   await ensureSeeded();
   const report: SyncReportRow = {
-    run_id: input.run_id || `brand-a-sync-${randomUUID().slice(0, 8)}`,
+    run_id: input.run_id || `sync-${randomUUID().slice(0, 8)}`,
     added: [...(input.added || [])],
     changed: [...(input.changed || [])],
     removed: [...(input.removed || [])],

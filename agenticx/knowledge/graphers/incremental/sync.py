@@ -13,6 +13,8 @@ from agenticx.knowledge.graphers.incremental.index import SourceObjectIndex
 from agenticx.knowledge.graphers.incremental.publish import (
     merge_published_into_graph,
     publish_objects,
+    publish_to_store,
+    retire_from_store,
     submit_for_review,
 )
 from agenticx.knowledge.graphers.incremental.sources import (
@@ -124,8 +126,10 @@ class IncrementalGraphSync:
         object_store: Optional[KnowledgeObjectFileStore] = None,
         trail: Optional[ChangeTrailStore] = None,
         graph: Optional[KnowledgeGraph] = None,
+        graph_store: Optional[Any] = None,
         actor: str = "sync",
         auto_publish: bool = False,
+        mirror_knowledge_graph: bool = True,
     ) -> None:
         self.root = resolve_incremental_store_dir(root)
         self.extractor = extractor
@@ -141,6 +145,8 @@ class IncrementalGraphSync:
             else KnowledgeObjectFileStore(self.root, trail=self.trail, actor=self.actor)
         )
         self.graph = graph if graph is not None else KnowledgeGraph(name="incremental")
+        self.graph_store = graph_store
+        self.mirror_knowledge_graph = bool(mirror_knowledge_graph)
 
     def sync(self, docs: List[SourceDocument]) -> SyncReport:
         docs = list(docs)
@@ -185,12 +191,34 @@ class IncrementalGraphSync:
             submit_for_review(self.object_store, touched)
             published_objs = publish_objects(self.object_store, touched)
             published = [o.id for o in published_objs]
-            graph_stats = merge_published_into_graph(
-                self.object_store, self.graph, object_ids=published
-            )
+            if self.graph_store is not None:
+                graph_stats = publish_to_store(
+                    self.object_store, self.graph_store, object_ids=published
+                )
+                if self.mirror_knowledge_graph:
+                    merge_published_into_graph(
+                        self.object_store, self.graph, object_ids=published
+                    )
+            else:
+                # Backward-compatible path: in-memory KnowledgeGraph only
+                graph_stats = merge_published_into_graph(
+                    self.object_store, self.graph, object_ids=published
+                )
+                graph_stats = {
+                    **graph_stats,
+                    "store_backend": "knowledge_graph_memory",
+                    "entity_count": len(self.graph.entities),
+                    "relationship_count": len(self.graph.relationships),
+                }
         elif touched:
             # still record affected prior objects from index resolution
             pass
+
+        if retired and self.graph_store is not None:
+            retire_stats = retire_from_store(
+                self.object_store, self.graph_store, retired
+            )
+            graph_stats = {**graph_stats, "retire": retire_stats}
 
         # Include previously affected ids for audit completeness
         all_touched = sorted(set(touched) | set(affected.object_ids))

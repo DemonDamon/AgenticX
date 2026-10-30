@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -40,34 +40,59 @@ export default function AdminGraphIncrementalSection() {
   const [fromApi, setFromApi] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [liveStoreBackend, setLiveStoreBackend] = useState<string>("");
 
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      const [srcRes, runsRes] = await Promise.all([
+      const [srcRes, runsRes, statsRes] = await Promise.all([
         adminFetch("/api/admin/graph-incremental/sources"),
         adminFetch("/api/admin/graph-incremental/sync/runs"),
+        adminFetch("/api/admin/graph-explorer/stats"),
       ]);
       if (!srcRes.ok) throw new Error(`HTTP ${srcRes.status}`);
       if (!runsRes.ok) throw new Error(`HTTP ${runsRes.status}`);
-      const srcJson = (await srcRes.json()) as { data?: { sources?: SourceWithStatus[] } };
+      const srcJson = (await srcRes.json()) as {
+        data?: {
+          sources?: SourceWithStatus[];
+          graph_stats?: { store_backend?: string; backend?: string } | null;
+        };
+      };
       const runsJson = (await runsRes.json()) as { data?: { runs?: SyncReportRow[] } };
+      const statsJson = statsRes.ok
+        ? ((await statsRes.json()) as {
+            data?: { backend?: string; stats?: { backend?: string; store_backend?: string } };
+          })
+        : null;
       const nextSources = srcJson.data?.sources?.length
         ? srcJson.data.sources
         : sampleWithStatus();
       const nextRuns = runsJson.data?.runs ?? [];
+      const liveBackend =
+        (srcJson.data?.graph_stats?.store_backend as string | undefined) ||
+        (srcJson.data?.graph_stats?.backend as string | undefined) ||
+        (statsJson?.data?.stats?.store_backend as string | undefined) ||
+        (statsJson?.data?.stats?.backend as string | undefined) ||
+        (statsJson?.data?.backend as string | undefined) ||
+        "";
+      if (liveBackend) setLiveStoreBackend(liveBackend);
       setSources(nextSources);
       setRuns(nextRuns);
       setFromApi(Boolean(srcJson.data?.sources?.length));
-      const prefer =
-        nextSources.find((r) => r.id === selectedSourceId) ?? nextSources[0];
-      if (prefer) setSelectedSourceId(prefer.id);
-      const preferRun =
-        nextRuns.find((r) => r.run_id === selectedRunId) ??
-        nextRuns.find((r) => r.run_id === prefer?.last_run_id) ??
-        nextRuns[0];
-      if (preferRun) setSelectedRunId(preferRun.run_id);
-    } catch {
+      setSelectedSourceId((prevSrc) => {
+        const prefer = nextSources.find((r) => r.id === prevSrc) ?? nextSources[0];
+        const nextSrcId = prefer?.id ?? prevSrc;
+        setSelectedRunId((prevRun) => {
+          const preferRun =
+            nextRuns.find((r) => r.run_id === prevRun) ??
+            nextRuns.find((r) => r.run_id === prefer?.last_run_id) ??
+            nextRuns[0];
+          return preferRun?.run_id ?? prevRun;
+        });
+        return nextSrcId;
+      });
+    } catch (err) {
+      console.warn("[graph-incremental] loadList failed", err);
       setSources(sampleWithStatus());
       setRuns([]);
       setFromApi(false);
@@ -75,7 +100,7 @@ export default function AdminGraphIncrementalSection() {
     } finally {
       setLoading(false);
     }
-  }, [selectedSourceId, selectedRunId]);
+  }, []);
 
   const loadReport = useCallback(async (runId: string) => {
     if (!runId) {
@@ -149,6 +174,14 @@ export default function AdminGraphIncrementalSection() {
     }
   }
 
+  
+  const storeBackend =
+    liveStoreBackend ||
+    (report?.graph_stats?.store_backend as string | undefined) ||
+    (typeof report?.graph_stats?.backend === "string"
+      ? (report.graph_stats.backend as string)
+      : undefined);
+
   return (
     <div className="space-y-6" data-testid="graph-incremental-page">
       <PageHeader title={t("title")} description={t("description")} />
@@ -185,6 +218,19 @@ export default function AdminGraphIncrementalSection() {
           {t("refresh")}
         </Button>
       </div>
+
+      <p className="text-sm text-muted-foreground" data-testid="graph-incremental-store-backend">
+        GraphStore backend:{" "}
+        <code data-testid="graph-incremental-store-backend-value">{storeBackend || "—"}</code>{" "}
+        (publish SoT; JSON sync metadata is not graph truth){" "}
+        <a
+          href="/admin/graph-explorer"
+          className="underline"
+          data-testid="graph-incremental-link-explorer"
+        >
+          Open graph explorer
+        </a>
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card data-testid="graph-incremental-list">
