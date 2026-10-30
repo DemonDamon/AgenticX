@@ -81,7 +81,8 @@
         "disambiguation": "Disambiguation",
         "citationEvidence": "Citation evidence",
         "graphIncremental": "Graph incremental",
-        "graphExplorer": "Graph explorer"
+        "graphExplorer": "Graph explorer",
+        "dataIdmapping": "ID mapping"
       }
     },
     "health": {
@@ -1739,6 +1740,44 @@
           "status": "Status",
           "snapshot": "Snapshot",
           "started": "Started"
+        }
+      },
+      "dataIdmapping": {
+        "title": "ID mapping",
+        "description": "Configurable ID types, associate/merge, conflict adjudication, and snapshot compare (fake sample data)",
+        "profilesTitle": "Profiles",
+        "conflictsTitle": "Conflict review queue",
+        "snapshotsTitle": "Snapshot compare",
+        "loading": "Loading ID mapping…",
+        "apiSource": "Loaded from API",
+        "loadFailed": "Load failed",
+        "actionFailed": "Action failed",
+        "mergeOk": "Merge completed",
+        "resolveOk": "Conflict resolved",
+        "compareOk": "Snapshot compare done",
+        "needTwoSnapshots": "Select two snapshots first",
+        "runMerge": "Run sample merge",
+        "conflictsEmpty": "No conflicts yet. Run a sample merge first.",
+        "keepValue": "Keep value",
+        "rejectMerge": "Reject merge",
+        "leftSnapshot": "Left snapshot",
+        "rightSnapshot": "Right snapshot",
+        "compare": "Compare",
+        "snapshotsHint": "Pick two snapshots and compare subject/link deltas.",
+        "diffOnlyLeft": "Subjects only on left",
+        "diffOnlyRight": "Subjects only on right",
+        "diffLinkChanges": "Shared-subject link changes",
+        "diffConflicts": "Conflicts (left/right)",
+        "col": {
+          "profile": "Profile",
+          "idTypes": "ID types",
+          "priority": "Merge priority",
+          "onConflict": "On conflict",
+          "conflictId": "Conflict ID",
+          "idType": "Type",
+          "values": "Values",
+          "status": "Status",
+          "actions": "Actions"
         }
       },
       "disambiguation": {

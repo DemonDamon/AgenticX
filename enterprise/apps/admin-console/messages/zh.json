@@ -81,7 +81,8 @@
         "disambiguation": "消歧确认",
         "citationEvidence": "引用证据",
         "graphIncremental": "图谱增量同步",
-        "graphExplorer": "图谱探索"
+        "graphExplorer": "图谱探索",
+        "dataIdmapping": "ID 映射"
       }
     },
     "health": {
@@ -1739,6 +1740,44 @@
           "status": "状态",
           "snapshot": "快照",
           "started": "开始时间"
+        }
+      },
+      "dataIdmapping": {
+        "title": "ID 映射",
+        "description": "可配置 ID 类型、关联合并、冲突人工裁决与快照对比（脱敏假数据样例）",
+        "profilesTitle": "映射配置",
+        "conflictsTitle": "冲突审阅队列",
+        "snapshotsTitle": "快照对比",
+        "loading": "正在加载 ID 映射…",
+        "apiSource": "已从 API 加载",
+        "loadFailed": "加载失败",
+        "actionFailed": "操作失败",
+        "mergeOk": "关联合并已完成",
+        "resolveOk": "冲突已裁决",
+        "compareOk": "快照对比完成",
+        "needTwoSnapshots": "请先选择两个快照",
+        "runMerge": "运行样例合并",
+        "conflictsEmpty": "暂无冲突，请先运行样例合并。",
+        "keepValue": "保留取值",
+        "rejectMerge": "拒绝合并",
+        "leftSnapshot": "左侧快照",
+        "rightSnapshot": "右侧快照",
+        "compare": "对比",
+        "snapshotsHint": "选择两个快照后点击对比，可查看主体与关联差。",
+        "diffOnlyLeft": "仅左侧主体数",
+        "diffOnlyRight": "仅右侧主体数",
+        "diffLinkChanges": "共享主体关联变化",
+        "diffConflicts": "冲突数（左/右）",
+        "col": {
+          "profile": "配置名",
+          "idTypes": "ID 类型",
+          "priority": "合并优先级",
+          "onConflict": "冲突策略",
+          "conflictId": "冲突 ID",
+          "idType": "类型",
+          "values": "冲突取值",
+          "status": "状态",
+          "actions": "操作"
         }
       },
       "disambiguation": {

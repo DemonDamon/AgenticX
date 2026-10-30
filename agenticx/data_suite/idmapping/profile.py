@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Union
@@ -31,8 +32,7 @@ class IdMapProfile:
             return len(self.priority) + 100
 
 
-def load_profile(path: Union[str, Path]) -> IdMapProfile:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+def load_profile_dict(data: Dict[str, Any]) -> IdMapProfile:
     if not isinstance(data, dict):
         raise IdMapProfileError("profile root must be a mapping")
     name = str(data.get("name") or "").strip() or "default"
@@ -50,3 +50,44 @@ def load_profile(path: Union[str, Path]) -> IdMapProfile:
     if on_conflict not in ("prefer_priority", "reject"):
         raise IdMapProfileError(f"unsupported on_conflict: {on_conflict}")
     return IdMapProfile(name=name, id_types=id_types, priority=priority, on_conflict=on_conflict)
+
+
+def profile_to_dict(profile: IdMapProfile) -> Dict[str, Any]:
+    return {
+        "name": profile.name,
+        "id_types": [{"name": t.name, "priority": t.priority} for t in profile.id_types],
+        "merge": {
+            "priority": list(profile.priority),
+            "on_conflict": profile.on_conflict,
+        },
+    }
+
+
+def load_profile(path: Union[str, Path]) -> IdMapProfile:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    if p.suffix.lower() == ".json":
+        data = json.loads(text)
+    else:
+        data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise IdMapProfileError("profile root must be a mapping")
+    return load_profile_dict(data)
+
+
+def dump_profile(
+    profile: IdMapProfile,
+    path: Union[str, Path],
+    *,
+    fmt: str | None = None,
+) -> Path:
+    """Write profile as YAML or JSON. fmt defaults from path suffix."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = profile_to_dict(profile)
+    use = (fmt or p.suffix.lstrip(".") or "yaml").lower()
+    if use == "json":
+        p.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    else:
+        p.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return p

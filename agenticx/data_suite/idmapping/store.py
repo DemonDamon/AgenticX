@@ -4,7 +4,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -33,3 +33,10 @@ class SnapshotStore:
             if path.exists():
                 return json.loads(path.read_text(encoding="utf-8"))
         raise KeyError(f"unknown snapshot: {snapshot_id}")
+
+    def list_ids(self) -> List[str]:
+        ids = set(self._memory.keys())
+        if self.root is not None and self.root.is_dir():
+            for path in self.root.glob("*.json"):
+                ids.add(path.stem)
+        return sorted(ids)
