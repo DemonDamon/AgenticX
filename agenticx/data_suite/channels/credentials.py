@@ -9,6 +9,7 @@ from agenticx.data_suite.channels.fake import FakeChannel
 from agenticx.data_suite.channels.grants import WriteGrantStore
 from agenticx.data_suite.channels.jdbc import JdbcChannel
 from agenticx.data_suite.channels.kafka import KafkaChannel
+from agenticx.data_suite.channels.file import FileChannel
 
 _SECRET_KEYS = ("password", "token", "secret", "api_key", "apikey", "access_key")
 
@@ -67,7 +68,18 @@ def build_channel(
         # bootstrap → KafkaChannel; tables-only offline fixture → Fake; else empty memory
         if has_bootstrap or not tables:
             return KafkaChannel.from_dict(name, entry, grants=store)
-    # hive/file (and tables-only jdbc/kafka) share FakeChannel with kind tag
+    if kind == "file":
+        has_endpoint = bool(
+            entry.get("root")
+            or entry.get("base_path")
+            or entry.get("sftp_host")
+            or entry.get("endpoint")
+            or entry.get("bucket")
+        )
+        # endpoint/root/… → FileChannel; tables-only offline fixture → Fake; else empty memory
+        if has_endpoint or not tables:
+            return FileChannel.from_dict(name, entry, grants=store)
+    # hive (and tables-only jdbc/kafka/file) share FakeChannel with kind tag
     return FakeChannel(
         name=name,
         tables={str(t): list(rows) if isinstance(rows, list) else [] for t, rows in tables.items()},
