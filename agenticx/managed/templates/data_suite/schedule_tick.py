@@ -73,8 +73,14 @@ def run_patrol_tick(
     cfg: PatrolScheduleConfig,
     quarantine: Optional[List[Dict[str, Any]]] = None,
     sink: Optional[Sink] = None,
+    metering: Any = None,
+    metering_context: Any = None,
 ) -> Dict[str, Any]:
-    """Run quality + dict-drift once under ``cfg.tick_id``; Fake sink when no webhook_url."""
+    """Run quality + dict-drift once under ``cfg.tick_id``; Fake sink when no webhook_url.
+
+    When ``metering`` (MeteringRecorder) is provided, records one ``route=patrol``
+    usage event after the tick (platform metering abstraction; in-memory OK).
+    """
     if sink is None:
         if cfg.webhook_url:
             sink = HttpWebhookSink(cfg.webhook_url)
@@ -94,7 +100,7 @@ def run_patrol_tick(
     out = run_scheduled(tick, tick_id=cfg.tick_id)
     events = getattr(sink, "events", []) or []
     kinds = [getattr(e, "kind", None) for e in events]
-    return {
+    result = {
         "tick_id": out.get("tick_id") if isinstance(out, dict) else cfg.tick_id,
         "cron": cfg.cron,
         "webhook_url": cfg.webhook_url,
@@ -104,4 +110,31 @@ def run_patrol_tick(
         "todos": out.get("todos") if isinstance(out, dict) else 0,
         "events": events,
         "sink": sink,
+        "metering_record": None,
     }
+    if metering is not None:
+        from agenticx.managed.metering import PatrolMeteringContext, record_patrol_usage
+
+        ctx = metering_context
+        if ctx is None:
+            ctx = PatrolMeteringContext(tenant_id="default")
+        tenant_id = getattr(ctx, "tenant_id", None) or (ctx.get("tenant_id") if isinstance(ctx, dict) else "default")
+        agent_id = getattr(ctx, "agent_id", None) or (ctx.get("agent_id") if isinstance(ctx, dict) else "data_suite_patrol")
+        provider = getattr(ctx, "provider", None) or (ctx.get("provider") if isinstance(ctx, dict) else "agenticx")
+        model = getattr(ctx, "model", None) or (ctx.get("model") if isinstance(ctx, dict) else "patrol-tick")
+        user_id = getattr(ctx, "user_id", None) if not isinstance(ctx, dict) else ctx.get("user_id")
+        dept_id = getattr(ctx, "dept_id", None) if not isinstance(ctx, dict) else ctx.get("dept_id")
+        usage = record_patrol_usage(
+            metering,
+            tenant_id=str(tenant_id),
+            tick_id=str(result["tick_id"]),
+            agent_id=str(agent_id),
+            provider=str(provider),
+            model=str(model),
+            user_id=user_id,
+            dept_id=dept_id,
+            webhook_count=int(result["webhook_count"]),
+            todos=int(result["todos"] or 0),
+        )
+        result["metering_record"] = usage
+    return result
