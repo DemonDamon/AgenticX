@@ -212,6 +212,20 @@ async function zoomOut(
 }
 
 async function adminLogin(page: Page): Promise<void> {
+  // Prefer API cookie login — more reliable after next-dev restarts
+  const api = await page.request.post(`${ADMIN_BASE}/api/auth/login`, {
+    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+  });
+  if (api.ok()) {
+    await page.goto(`${ADMIN_BASE}/dashboard`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    if (!page.url().includes("/login")) {
+      await dismissNextOverlay(page);
+      return;
+    }
+  }
   await page.goto(`${ADMIN_BASE}/login`, {
     waitUntil: "networkidle",
     timeout: 60_000,
@@ -233,10 +247,23 @@ async function adminLogin(page: Page): Promise<void> {
       .getByRole("button", { name: /登录并进入控制台|Sign in to console/i })
       .click({ force: true }),
   ]);
-  await pause(page, 1500);
+  await dismissNextOverlay(page);
 }
 
 async function portalLogin(page: Page): Promise<void> {
+  const api = await page.request.post(`${PORTAL_BASE}/api/auth/login`, {
+    data: { email: PORTAL_EMAIL, password: PORTAL_PASSWORD },
+  });
+  if (api.ok()) {
+    await page.goto(`${PORTAL_BASE}/workspace`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    if (!page.url().includes("/auth")) {
+      await dismissNextOverlay(page);
+      return;
+    }
+  }
   await page.goto(`${PORTAL_BASE}/auth`, {
     waitUntil: "networkidle",
     timeout: 60_000,
@@ -251,7 +278,7 @@ async function portalLogin(page: Page): Promise<void> {
     page.waitForURL(/\/workspace/, { timeout: 45_000 }),
     page.locator('button[type="submit"]').first().click({ force: true }),
   ]);
-  await pause(page, 1500);
+  await dismissNextOverlay(page);
 }
 
 /** Split VO into short spoken clauses so TTS breathes. */
@@ -801,7 +828,8 @@ function buildCues(): Cue[] {
         await dismissNextOverlay(page);
         await page
           .getByTestId("graph-explorer-page")
-          .waitFor({ state: "visible", timeout: 30_000 });
+          .waitFor({ state: "visible", timeout: 60_000 })
+          .catch(() => undefined);
         const loading = page.getByText(
           /Loading graph from GraphStore|正在从 GraphStore/i,
         );
@@ -812,8 +840,15 @@ function buildCues(): Cue[] {
         }
         const seedBtn = page.getByTestId("graph-explorer-seed");
         if (await seedBtn.isVisible().catch(() => false)) {
-          await seedBtn.click();
-          await pause(page, 1200);
+          try {
+            await Promise.race([
+              seedBtn.click(),
+              page.waitForTimeout(5000),
+            ]);
+            await pause(page, 800);
+          } catch {
+            /* seed may fail without Python GraphStore; file store already Chinese */
+          }
         }
         await page
           .getByTestId("graph-explorer-canvas")
