@@ -15,6 +15,7 @@ vi.mock("@agenticx/auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/admin-sso-runtime", () => ({
+  assertAdminSsoStrategyProtocol: () => ({ id: "saml", protocol: "saml" }),
   getAdminSamlProviderConfigServer: (...args: unknown[]) =>
     getAdminSamlProviderConfigServerMock(...args),
 }));

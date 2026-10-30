@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("../../../../../../lib/sso-runtime", () => ({
+  assertPortalSsoStrategyProtocol: () => ({ id: "saml", protocol: "saml" }),
   getPortalSamlProviderConfigServer: vi.fn(),
   resolveReturnToOrDefault: (raw: string | null) => raw ?? "/workspace",
 }));

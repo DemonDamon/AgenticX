@@ -20,6 +20,7 @@ vi.mock("@agenticx/auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/sso-runtime", () => ({
+  assertPortalSsoStrategyProtocol: () => ({ id: "oidc", protocol: "oidc" }),
   getPortalSsoProviderConfigServer: (...args: unknown[]) => getPortalSsoProviderConfigServerMock(...args),
   getPortalSsoProviderOptions: (...args: unknown[]) => getPortalSsoProviderOptionsMock(...args),
   getOidcClientService: () => ({

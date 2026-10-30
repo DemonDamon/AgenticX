@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("../../../../../../lib/admin-sso-runtime", () => ({
+  assertAdminSsoStrategyProtocol: () => ({ id: "saml", protocol: "saml" }),
   getAdminSamlProviderConfigServer: vi.fn(async () => {
     throw new Error("must not be called");
   }),

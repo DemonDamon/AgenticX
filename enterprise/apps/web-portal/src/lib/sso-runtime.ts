@@ -86,11 +86,16 @@ export function assertPortalSsoStrategyProtocol(
   expected: "oidc" | "saml",
   protocolHint?: string | null,
 ): AuthStrategy {
-  const strategy = getPortalAuthStrategy(providerId, protocolHint ?? expected);
+  const notConfigured =
+    expected === "oidc" ? "oidc.provider_not_configured" : "saml.provider_not_configured";
+  let strategy: AuthStrategy;
+  try {
+    strategy = getPortalAuthStrategy(providerId, protocolHint ?? expected);
+  } catch {
+    throw new Error(notConfigured);
+  }
   if (strategy.protocol !== expected) {
-    throw new Error(
-      expected === "oidc" ? "oidc.provider_not_configured" : "saml.provider_not_configured",
-    );
+    throw new Error(notConfigured);
   }
   return strategy;
 }

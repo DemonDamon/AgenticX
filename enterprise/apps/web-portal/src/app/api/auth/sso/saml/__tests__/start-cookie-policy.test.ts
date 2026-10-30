@@ -15,6 +15,7 @@ vi.mock("@agenticx/auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/sso-runtime", () => ({
+  assertPortalSsoStrategyProtocol: () => ({ id: "saml", protocol: "saml" }),
   getPortalSamlProviderConfigServer: (...args: unknown[]) =>
     getPortalSamlProviderConfigServerMock(...args),
   resolveReturnToOrDefault: (raw: string | null) => raw ?? "/workspace",
