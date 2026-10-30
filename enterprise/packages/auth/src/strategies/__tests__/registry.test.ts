@@ -34,4 +34,16 @@ describe("AuthStrategyRegistry", () => {
     });
     expect(registry.get("customer-x-iam").protocol).toBe("custom");
   });
+
+  it("fake-customer-iam pluggability: register → resolve → protocol", () => {
+    const registry = createDefaultAuthStrategyRegistry();
+    const fake = registry.get("fake-customer-iam");
+    expect(fake.id).toBe("fake-customer-iam");
+    expect(fake.protocol).toBe("custom");
+    const endpoints = fake.resolveEndpoints?.({
+      authorizationUrl: "https://fake-iam.example.invalid/authorize",
+    });
+    expect(endpoints?.authorizationUrl).toBe("https://fake-iam.example.invalid/authorize");
+  });
+
 });

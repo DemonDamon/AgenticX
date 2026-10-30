@@ -20,6 +20,10 @@ describe("resolveAuthStrategyId", () => {
   it("defaults to oidc", () => {
     expect(resolveAuthStrategyId({ providerId: "entra" })).toBe("oidc");
   });
+
+  it("maps custom protocol to fake-customer-iam", () => {
+    expect(resolveAuthStrategyId({ protocol: "custom" })).toBe("fake-customer-iam");
+  });
 });
 
 describe("applyStrategyEndpoints", () => {

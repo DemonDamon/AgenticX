@@ -92,4 +92,16 @@ describe("AuthStrategyRegistry wiring", () => {
     const { assertAdminSsoStrategyProtocol } = await import("../admin-sso-runtime");
     expect(() => assertAdminSsoStrategyProtocol("x", "oidc")).toThrow("oidc.provider_not_configured");
   });
+
+  it("normalizes unknown strategy to provider_not_configured", async () => {
+    process.env.SSO_OIDC_X_STRATEGY = "nope";
+    const { assertAdminSsoStrategyProtocol } = await import("../admin-sso-runtime");
+    expect(() => assertAdminSsoStrategyProtocol("x", "oidc")).toThrow("oidc.provider_not_configured");
+  });
+
+  it("fake-customer-iam is rejected for oidc expectation (pluggable custom)", async () => {
+    process.env.SSO_OIDC_X_STRATEGY = "fake-customer-iam";
+    const { assertAdminSsoStrategyProtocol } = await import("../admin-sso-runtime");
+    expect(() => assertAdminSsoStrategyProtocol("x", "oidc")).toThrow("oidc.provider_not_configured");
+  });
 });
