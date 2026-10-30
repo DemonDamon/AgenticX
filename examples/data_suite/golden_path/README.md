@@ -48,3 +48,13 @@ Golden-path still uses **FakeChannel** seeds (`kind: fake`) so offline CI stays 
 `FileChannel` (SFTP / object storage) is available via `build_channel(kind="file")` with an
 injectable path/partition policy — no customer `date=YYYYMMDD` layout is hardcoded in the
 channel kernel. Example partition templates belong in deployment config or unit tests only.
+
+## Hive / Spark Thrift channel (H2)
+
+Golden-path still uses **FakeChannel** seeds so offline CI stays hermetic.
+`HiveChannel` (HiveServer2 / Spark Thrift SQL) is available via
+`build_channel(kind="hive")` — or aliases `spark` / `sparksql` — with an
+injectable in-memory transport for unit tests. Live pyhive/thrift wiring is
+deferred (probe returns ok=False with a clear error when an endpoint is set
+but the client lib is missing). No customer topology or schema names belong
+in the channel kernel.

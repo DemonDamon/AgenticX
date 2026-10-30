@@ -8,6 +8,7 @@ from agenticx.data_suite.channels.clickhouse import ClickHouseChannel
 from agenticx.data_suite.channels.jdbc import JdbcChannel
 from agenticx.data_suite.channels.kafka import KafkaChannel
 from agenticx.data_suite.channels.file import FileChannel
+from agenticx.data_suite.channels.hive import HiveChannel
 from agenticx.data_suite.channels.credentials import (
     ChannelConfigError,
     build_channel,
@@ -26,6 +27,7 @@ __all__ = [
     "JdbcChannel",
     "KafkaChannel",
     "FileChannel",
+    "HiveChannel",
     "DataChannel",
     "FakeChannel",
     "WriteDeniedError",
