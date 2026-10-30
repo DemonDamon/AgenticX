@@ -305,7 +305,7 @@
       "defaultTemperatureDescription": "Lower is more deterministic, higher is more varied"
     },
     "disambiguationEntry": "Disambiguation (runtime)",
-    "disambiguationEntryHint": "Open the Near runtime choice panel for Brand-A demos"
+    "disambiguationEntryHint": "Open the Near runtime choice panel for the cooling-loop demo"
   },
   "rooms": {
     "title": "Collaboration rooms",
@@ -389,14 +389,14 @@
   },
   "disambiguation": {
     "title": "Disambiguation",
-    "description": "Near runtime choice panel for candidate select / info supplement / conflict resolve — Brand-A samples; uses runtime sessions (not admin store).",
+    "description": "Near runtime choice panel for candidate select / info supplement / conflict resolve — sample plant cooling-loop demo; uses runtime sessions (not admin store).",
     "backToWorkspace": "Back to workspace",
     "listTitle": "Sessions",
     "panelTitle": "Choice panel",
     "loading": "Loading disambiguation sessions…",
     "apiSource": "Loaded from runtime store API",
-    "stubNote": "Could not reach the runtime disambiguation API; showing local Brand-A seed.",
-    "reseed": "Reseed Brand-A samples",
+    "stubNote": "Could not reach the runtime disambiguation API; showing local cooling-loop seed.",
+    "reseed": "Reseed cooling-loop samples",
     "reseedSuccess": "Samples reseeded",
     "reseedFailed": "Reseed failed",
     "submit": "Submit answer",

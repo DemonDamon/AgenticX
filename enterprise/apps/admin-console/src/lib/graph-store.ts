@@ -394,7 +394,7 @@ export async function publishTouchedObjects(
     };
   }
 
-  // Ensure Brand-A baseline exists before stamping (local demo backends).
+  // Ensure sample baseline exists before stamping (local demo backends).
   const store = await getLocalStore();
   if (store.stats().entity_count === 0) {
     await seedBrandAGraph();
@@ -410,7 +410,7 @@ export async function publishTouchedObjects(
           name: oid,
           entity_type: "unknown",
           description: null,
-          attributes: { brand: "brand-a" },
+          attributes: { scenario: "cooling-loop" },
         } satisfies GraphNode);
     base.attributes = {
       ...(base.attributes || {}),

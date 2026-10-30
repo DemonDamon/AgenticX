@@ -232,7 +232,7 @@ export default function AdminDisambiguationSection() {
                   >
                     <div data-testid="disambiguation-mode">
                       <span className="text-muted-foreground">{t("col.mode")}: </span>
-                      {modeLabel} <span className="font-mono text-xs">({pending.mode})</span>
+                      {modeLabel}
                     </div>
                     <p data-testid="disambiguation-prompt">{pending.prompt}</p>
 

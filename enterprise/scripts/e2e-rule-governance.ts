@@ -84,8 +84,8 @@ async function main() {
     await page.waitForTimeout(200);
     await list.screenshot({ path: path.join(SHOT_DIR, "01-rule-governance-list.png") });
 
-    // Prefer Brand-A temp threshold row; fall back to first row.
-    const prefer = page.getByTestId("rule-governance-row-brand-a-temp-threshold");
+    // Prefer cooling overtemp rule row; fall back to first row.
+    const prefer = page.getByTestId("rule-governance-row-rule-cooling-overtemp");
     if (await prefer.isVisible().catch(() => false)) {
       await prefer.click();
     } else {
@@ -113,7 +113,7 @@ async function main() {
       throw new Error(
         fromApi
           ? "claiming seeded/API rules but executions empty (shot 03 requires non-empty executions)"
-          : "rule-governance-executions not visible (seed Brand-A executions.json required)",
+          : "rule-governance-executions not visible (seed cooling-loop executions.json required)",
       );
     }
     const execItems = await executions.locator("li").count();

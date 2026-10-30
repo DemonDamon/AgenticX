@@ -29,11 +29,11 @@ export type ExecutionRow = {
   finished_at?: string;
 };
 
-/** Synthetic seed for empty stores (Brand-A style only). */
+/** 示例化工厂·冷却回路 synthetic seed (desensitized demo). */
 export const SAMPLE_RULES: RuleRow[] = [
   {
-    id: "brand-a-temp-threshold",
-    name: "Brand-A device temperature threshold",
+    id: "rule-cooling-overtemp",
+    name: "冷却回路超温告警",
     status: "active",
     version: 1,
     enabled: true,
@@ -41,9 +41,14 @@ export const SAMPLE_RULES: RuleRow[] = [
       object: "device",
       trigger: { type: "event", event: "metric.breach" },
       condition: { field: "temperature", op: "gt", value: 80 },
-      actions: [{ type: "notify", target: "ops-channel", params: { level: "warn" } }],
-      feedback: { channel: "ops-channel" },
+      actions: [{ type: "notify", target: "duty-channel", params: { level: "warn" } }],
+      feedback: { channel: "duty-channel" },
     },
-    meta: { scope: "workspace-brand-a", priority: 50, trigger: "event", tags: ["ops", "sample", "brand-a"] },
+    meta: {
+      scope: "workspace-sample-plant",
+      priority: 50,
+      trigger: "event",
+      tags: ["ops", "sample", "cooling-loop"],
+    },
   },
 ];

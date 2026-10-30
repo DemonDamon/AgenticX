@@ -46,46 +46,52 @@ export type GraphStoreStats = {
   [key: string]: unknown;
 };
 
-/** Synthetic Brand-A seed only — no real customer identifiers. */
-export const BRAND_A_GRAPH_NODES: GraphNode[] = [
+/** 示例化工厂·冷却回路 synthetic seed — desensitized demo. */
+export const SAMPLE_GRAPH_NODES: GraphNode[] = [
   {
-    id: "brand-a-entity-pump-01",
-    name: "Pump 01",
+    id: "device-pump-01",
+    name: "1号循环泵",
     entity_type: "unknown",
-    description: "Brand-A sample pump",
-    attributes: { site: "plant-a", kind: "pump", brand: "brand-a" },
+    description: "示例化工厂冷却回路 · 1号循环泵",
+    attributes: { site: "一车间冷却区", kind: "pump", scenario: "cooling-loop" },
   },
   {
-    id: "brand-a-site-plant-a",
-    name: "Plant A",
+    id: "site-cooling-zone-1",
+    name: "一车间冷却区",
     entity_type: "unknown",
-    description: "Brand-A sample plant site",
-    attributes: { kind: "site", brand: "brand-a" },
+    description: "示例化工厂 · 一车间冷却区",
+    attributes: { kind: "site", scenario: "cooling-loop" },
   },
   {
-    id: "brand-a-entity-valve-01",
-    name: "Valve 01",
+    id: "device-valve-01",
+    name: "回路切断阀",
     entity_type: "unknown",
-    description: "Brand-A sample valve",
-    attributes: { site: "plant-a", kind: "valve", brand: "brand-a" },
+    description: "示例化工厂冷却回路 · 切断阀",
+    attributes: { site: "一车间冷却区", kind: "valve", scenario: "cooling-loop" },
   },
 ];
 
-export const BRAND_A_GRAPH_EDGES: GraphEdge[] = [
+/** @deprecated use SAMPLE_GRAPH_NODES */
+export const BRAND_A_GRAPH_NODES = SAMPLE_GRAPH_NODES;
+
+export const SAMPLE_GRAPH_EDGES: GraphEdge[] = [
   {
-    id: "brand-a-rel-pump-at-plant",
-    source_entity_id: "brand-a-entity-pump-01",
-    target_entity_id: "brand-a-site-plant-a",
+    id: "rel-pump01-in-zone1",
+    source_entity_id: "device-pump-01",
+    target_entity_id: "site-cooling-zone-1",
     relation_type: "related_to",
-    description: "Pump located at Plant A",
-    attributes: { brand: "brand-a" },
+    description: "1号循环泵位于一车间冷却区",
+    attributes: { scenario: "cooling-loop" },
   },
   {
-    id: "brand-a-rel-valve-at-plant",
-    source_entity_id: "brand-a-entity-valve-01",
-    target_entity_id: "brand-a-site-plant-a",
+    id: "rel-valve01-in-zone1",
+    source_entity_id: "device-valve-01",
+    target_entity_id: "site-cooling-zone-1",
     relation_type: "related_to",
-    description: "Valve located at Plant A",
-    attributes: { brand: "brand-a" },
+    description: "回路切断阀位于一车间冷却区",
+    attributes: { scenario: "cooling-loop" },
   },
 ];
+
+/** @deprecated use SAMPLE_GRAPH_EDGES */
+export const BRAND_A_GRAPH_EDGES = SAMPLE_GRAPH_EDGES;

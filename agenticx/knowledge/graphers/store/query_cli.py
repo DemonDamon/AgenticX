@@ -19,40 +19,41 @@ from agenticx.knowledge.graphers.store import create_graph_store
 
 
 def seed_brand_a(store: Any) -> Dict[str, Any]:
+    """Seed 示例化工厂·冷却回路 demo graph (op name kept for bridge compat)."""
     entities = [
         Entity(
-            id="brand-a-entity-pump-01",
-            name="Pump 01",
+            id="device-pump-01",
+            name="1号循环泵",
             entity_type=EntityType.UNKNOWN,
-            attributes={"site": "plant-a", "kind": "pump", "brand": "brand-a"},
+            attributes={"site": "一车间冷却区", "kind": "pump", "scenario": "cooling-loop"},
         ),
         Entity(
-            id="brand-a-site-plant-a",
-            name="Plant A",
+            id="site-cooling-zone-1",
+            name="一车间冷却区",
             entity_type=EntityType.UNKNOWN,
-            attributes={"kind": "site", "brand": "brand-a"},
+            attributes={"kind": "site", "scenario": "cooling-loop"},
         ),
         Entity(
-            id="brand-a-entity-valve-01",
-            name="Valve 01",
+            id="device-valve-01",
+            name="回路切断阀",
             entity_type=EntityType.UNKNOWN,
-            attributes={"site": "plant-a", "kind": "valve", "brand": "brand-a"},
+            attributes={"site": "一车间冷却区", "kind": "valve", "scenario": "cooling-loop"},
         ),
     ]
     rels = [
         Relationship(
-            id="brand-a-rel-pump-at-plant",
-            source_entity_id="brand-a-entity-pump-01",
-            target_entity_id="brand-a-site-plant-a",
+            id="rel-pump01-in-zone1",
+            source_entity_id="device-pump-01",
+            target_entity_id="site-cooling-zone-1",
             relation_type=RelationType.RELATED_TO,
-            description="Pump located at Plant A",
+            description="1号循环泵位于一车间冷却区",
         ),
         Relationship(
-            id="brand-a-rel-valve-at-plant",
-            source_entity_id="brand-a-entity-valve-01",
-            target_entity_id="brand-a-site-plant-a",
+            id="rel-valve01-in-zone1",
+            source_entity_id="device-valve-01",
+            target_entity_id="site-cooling-zone-1",
             relation_type=RelationType.RELATED_TO,
-            description="Valve located at Plant A",
+            description="回路切断阀位于一车间冷却区",
         ),
     ]
     for e in entities:
@@ -97,7 +98,7 @@ def main() -> int:
         stats = seed_brand_a(store)
         out = {"ok": True, "data": {"stats": stats, "backend": store.backend_name}}
     elif op == "publish_touch":
-        # Incremental publish: stamp last_synced_* on touched entities (Brand-A / demo).
+        # Incremental publish: stamp last_synced_* on touched entities (cooling-loop demo).
         object_ids = [str(x) for x in (req.get("object_ids") or []) if x]
         meta = req.get("meta") or {}
         synced_at = str(meta.get("synced_at") or "")

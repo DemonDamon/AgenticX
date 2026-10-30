@@ -93,7 +93,7 @@ async function main() {
     await waitPastLoading(page);
     await dismissNextOverlay(page);
 
-    // Ensure seed for stable Brand-A rows
+    // Ensure seed for stable cooling-loop rows
     const seedBtn = page.getByTestId("graph-incremental-seed");
     if (await seedBtn.isVisible().catch(() => false)) {
       await seedBtn.click();
@@ -114,7 +114,7 @@ async function main() {
     const shot10 = path.join(SHOT_DIR, "10-graph-incremental-list.png");
     await list.screenshot({ path: shot10 });
 
-    const prefer = page.getByTestId("graph-incremental-row-brand-a-src-ops-note");
+    const prefer = page.getByTestId("graph-incremental-row-src-ops-note-valve");
     if (await prefer.isVisible().catch(() => false)) {
       await prefer.click();
     } else {

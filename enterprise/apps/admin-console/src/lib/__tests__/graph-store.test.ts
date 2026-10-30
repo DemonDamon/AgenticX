@@ -41,7 +41,7 @@ describe("graph-store (admin GraphStore layer)", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("seeds Brand-A into file GraphStore and reports backend", async () => {
+  it("seeds cooling-loop into file GraphStore and reports backend", async () => {
     const seeded = await seedBrandAGraph();
     expect(seeded.backend).toBe("file");
     expect(seeded.stats.entity_count).toBe(BRAND_A_GRAPH_NODES.length);
@@ -50,7 +50,7 @@ describe("graph-store (admin GraphStore layer)", () => {
     expect(stats.backend).toBe("file");
     expect(stats.store_backend).toBe("file");
     const blob = JSON.stringify(await getSubgraph());
-    expect(blob.toLowerCase()).toContain("brand-a");
+    expect(blob.toLowerCase()).toContain("cooling-loop");
     expect(blob.toLowerCase()).not.toContain("proposal");
   });
 
@@ -64,11 +64,11 @@ describe("graph-store (admin GraphStore layer)", () => {
 
   it("neighborhood depth-1 around pump excludes valve", async () => {
     await seedBrandAGraph();
-    const nb = await getNeighborhood("brand-a-entity-pump-01", { depth: 1 });
+    const nb = await getNeighborhood("device-pump-01", { depth: 1 });
     const ids = nb.nodes.map((n) => n.id);
-    expect(ids).toContain("brand-a-entity-pump-01");
-    expect(ids).toContain("brand-a-site-plant-a");
-    expect(ids).not.toContain("brand-a-entity-valve-01");
+    expect(ids).toContain("device-pump-01");
+    expect(ids).toContain("site-cooling-zone-1");
+    expect(ids).not.toContain("device-valve-01");
   });
 
   it("memory backend works for in-process tests", async () => {
@@ -82,17 +82,17 @@ describe("graph-store (admin GraphStore layer)", () => {
 
   it("publishTouchedObjects stamps last_synced attrs on file store", async () => {
     await seedBrandAGraph();
-    const pub = await publishTouchedObjects(["brand-a-entity-pump-01"], {
+    const pub = await publishTouchedObjects(["device-pump-01"], {
       synced_at: "2026-10-29T15:00:00Z",
-      run_id: "brand-a-sync-test-001",
+      run_id: "sync-test-001",
       actor: "tester",
-      source_ids: ["brand-a-src-ledger-1"],
+      source_ids: ["src-ledger-pump-01"],
     });
     expect(pub.backend).toBe("file");
-    expect(pub.updated_object_ids).toEqual(["brand-a-entity-pump-01"]);
-    const nb = await getNeighborhood("brand-a-entity-pump-01", { depth: 0 });
-    const node = nb.nodes.find((n) => n.id === "brand-a-entity-pump-01");
-    expect(node?.attributes?.last_sync_run_id).toBe("brand-a-sync-test-001");
+    expect(pub.updated_object_ids).toEqual(["device-pump-01"]);
+    const nb = await getNeighborhood("device-pump-01", { depth: 0 });
+    const node = nb.nodes.find((n) => n.id === "device-pump-01");
+    expect(node?.attributes?.last_sync_run_id).toBe("sync-test-001");
     expect(node?.attributes?.last_synced_at).toBe("2026-10-29T15:00:00Z");
   });
 });

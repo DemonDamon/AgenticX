@@ -7,7 +7,7 @@ import {
   formatConfidence,
 } from "../../../../packages/ui/src/components/data/citation-view";
 
-describe("citation view Brand-A fixture (K1 UI)", () => {
+describe("citation view cooling-loop fixture (K1 UI)", () => {
   it("matches citation-ui-contract top-level keys", () => {
     const view = buildBrandACitationFixture();
     for (const key of CITATION_VIEW_KEYS) {
@@ -17,12 +17,12 @@ describe("citation view Brand-A fixture (K1 UI)", () => {
       }
       expect(view).toHaveProperty(key);
     }
-    expect(view.entity_id).toBe("brand-a-pump-01");
-    expect(view.entity_id.toLowerCase()).toContain("brand-a");
+    expect(view.entity_id).toBe("device-pump-01");
+    expect(view.entity_id.toLowerCase()).toContain("device-pump");
     expect(assertCitationViewShape(view)).toEqual([]);
   });
 
-  it("citations expose contract item keys and Brand-A provenance", () => {
+  it("citations expose contract item keys and cooling-loop provenance", () => {
     const view = buildBrandACitationFixture();
     expect(view.citations.length).toBeGreaterThanOrEqual(2);
     for (const c of view.citations) {

@@ -241,8 +241,7 @@ export function DisambiguationChoicePanel() {
                   >
                     <div data-testid="portal-disambiguation-mode">
                       <span className="text-muted-foreground">{t("col.mode")}: </span>
-                      {modeLabel}{" "}
-                      <span className="font-mono text-xs">({pending.mode})</span>
+                      {modeLabel}
                     </div>
                     <p data-testid="portal-disambiguation-prompt">{pending.prompt}</p>
 

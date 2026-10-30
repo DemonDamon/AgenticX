@@ -33,45 +33,45 @@ describe("knowledge-lifecycle-store", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("seeds Brand-A samples only", async () => {
+  it("seeds cooling-loop samples only", async () => {
     const objects = await listObjects();
     expect(objects.map((o) => o.id)).toEqual(
       [...SAMPLE_KNOWLEDGE_OBJECTS.map((o) => o.id)].sort(),
     );
     const blob = JSON.stringify(objects).toLowerCase();
-    expect(blob).toContain("brand-a");
+    expect(blob).toContain("cooling-loop");
     expect(blob).not.toContain("proposal");
   });
 
   it("transitions draft → pending_review and records trail", async () => {
-    const updated = await transitionObject("brand-a-entity-pump-01", "pending_review", {
+    const updated = await transitionObject("device-pump-01", "pending_review", {
       actor: "tester",
     });
     expect(updated.status).toBe("pending_review");
-    const trail = await listTrail("brand-a-entity-pump-01");
+    const trail = await listTrail("device-pump-01");
     expect(trail.some((e) => e.action === "transition" && e.to_status === "pending_review")).toBe(
       true,
     );
   });
 
   it("rejects illegal object transitions", async () => {
-    await expect(transitionObject("brand-a-entity-pump-01", "published")).rejects.toThrow(
+    await expect(transitionObject("device-pump-01", "published")).rejects.toThrow(
       /cannot transition/,
     );
   });
 
   it("upserts object and bumps version when requested", async () => {
     const created = await upsertObject(
-      { id: "brand-a-entity-valve-01", kind: "entity", attrs: { name: "Brand-A Valve 01" } },
+      { id: "device-valve-01", kind: "entity", attrs: { name: "回路切断阀" } },
       { actor: "tester" },
     );
     expect(created.version).toBe(1);
     const bumped = await upsertObject(
-      { id: "brand-a-entity-valve-01", kind: "entity", attrs: { name: "Brand-A Valve 01b" } },
+      { id: "device-valve-01", kind: "entity", attrs: { name: "回路切断阀-修订" } },
       { actor: "tester", bumpVersion: true },
     );
     expect(bumped.version).toBe(2);
-    expect((await getObject("brand-a-entity-valve-01"))?.attrs.name).toBe("Brand-A Valve 01b");
+    expect((await getObject("device-valve-01"))?.attrs.name).toBe("回路切断阀-修订");
   });
 
   it("runs quality checks and opens issues; issue transitions work", async () => {
