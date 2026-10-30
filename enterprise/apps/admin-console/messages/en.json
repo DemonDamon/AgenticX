@@ -1692,12 +1692,21 @@
       },
       "dataSecurity": {
         "title": "Data security",
-        "description": "Field masking preview and page watermark (P2 A7)",
+        "description": "Field masking preview, self-serve query ACL, and page watermark",
         "policyTitle": "Sample masking policy",
         "policyId": "Policy ID",
         "rawPhone": "Raw phone",
         "maskedPhone": "Masked",
-        "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking."
+        "stubNote": "Client fixture mirroring Python MaskingEngine; production uses bind-path masking.",
+        "queryTitle": "Self-serve query probe",
+        "queryHint": "Pick a data role and query: unauthorized returns 403; allowed roles return masked rows.",
+        "queryRole": "Data role",
+        "queryDataset": "Dataset",
+        "queryRun": "Run query",
+        "queryDenied": "Data access denied (403)",
+        "queryAllowed": "Masked response",
+        "queryFailed": "Query failed",
+        "queryResult": "Query result"
       },
       "disambiguation": {
         "title": "Disambiguation",

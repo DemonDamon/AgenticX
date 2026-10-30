@@ -74,20 +74,20 @@ def secure_bind_widget(widget, rows, *, role, acl, masking, board_id=None, filte
 ## Tasks
 
 ### Task 1 — Plan + Python ACL + secure path + pytest
-- [ ] 本 plan 落盘
-- [ ] `acl/{policy,gate,secure}` + fixture YAML
-- [ ] `test_query_acl.py`；扩展 `test_dashboard_mask_bind.py`
-- [ ] Commit: `feat(data-suite): query ACL gate + forced masking secure path`
+- [x] 本 plan 落盘
+- [x] `acl/{policy,gate,secure}` + fixture YAML
+- [x] `test_query_acl.py`；扩展 `test_dashboard_mask_bind.py`
+- [x] Commit: `feat(data-suite): query ACL gate + forced masking secure path`
 
 ### Task 2 — Admin/Portal query API + vitest
-- [ ] `data-query-acl.ts` + admin POST route + tests
-- [ ] portal 最小 `/api/data-suite/query`
-- [ ] Commit: `feat(admin,portal): self-serve query ACL API with forced mask`
+- [x] `data-query-acl.ts` + admin POST route + tests
+- [x] portal 最小 `/api/data-suite/query`
+- [x] Commit: `feat(admin,portal): self-serve query ACL API with forced mask`
 
 ### Task 3 — UI copy + e2e + PR
-- [ ] data-security「自助取数试探」中文文案 + testids
-- [ ] `e2e-data-query-acl.ts`（source `enterprise/.env.local`）；断言 outsider 403 + analyst 脱敏
-- [ ] Gates 绿；Mark plan Done；push；`gh pr create`；**不 merge；不启动 H6**
+- [x] data-security「自助取数试探」中文文案 + testids
+- [x] `e2e-data-query-acl.ts`（source `enterprise/.env.local`）；断言 outsider 403 + analyst 脱敏
+- [x] Gates 绿；Mark plan Done；push；`gh pr create`；**不 merge；不启动 H6**
 
 ## Done when
 1. 越权 role 取数 → `QueryAccessDenied` / HTTP 403
