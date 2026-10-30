@@ -21,6 +21,7 @@ export const PLATFORM_SECTION_IDS = [
   "data-governance",
   "data-boards",
   "data-security",
+  "data-jobs",
   "rule-governance",
   "knowledge-lifecycle",
   "disambiguation",
