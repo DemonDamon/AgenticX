@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { loginWithOidcClaims } from "../../../../../../lib/auth-runtime";
 import { ACCESS_COOKIE, REFRESH_COOKIE, isAuthCookieSecure } from "../../../../../../lib/session";
 import {
+  assertPortalSsoStrategyProtocol,
   getOidcClientService,
   getPortalSsoProviderConfigServer,
   resolveReturnToOrDefault,
@@ -75,6 +76,7 @@ export async function GET(request: Request) {
     const secret = resolveStateSecret();
     const decoded = validateStateFromCookie(stateCookie, state, secret);
     providerId = decoded.providerId;
+    assertPortalSsoStrategyProtocol(decoded.providerId, "oidc");
     const provider = await getPortalSsoProviderConfigServer(decoded.providerId);
     issuerForAudit = provider.issuer;
     const oidcClient = getOidcClientService();

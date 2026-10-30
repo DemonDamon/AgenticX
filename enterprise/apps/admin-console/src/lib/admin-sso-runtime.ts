@@ -81,11 +81,16 @@ export function assertAdminSsoStrategyProtocol(
   expected: "oidc" | "saml",
   protocolHint?: string | null,
 ): AuthStrategy {
-  const strategy = getAdminAuthStrategy(providerId, protocolHint ?? expected);
+  const notConfigured =
+    expected === "oidc" ? "oidc.provider_not_configured" : "saml.provider_not_configured";
+  let strategy: AuthStrategy;
+  try {
+    strategy = getAdminAuthStrategy(providerId, protocolHint ?? expected);
+  } catch {
+    throw new Error(notConfigured);
+  }
   if (strategy.protocol !== expected) {
-    throw new Error(
-      expected === "oidc" ? "oidc.provider_not_configured" : "saml.provider_not_configured",
-    );
+    throw new Error(notConfigured);
   }
   return strategy;
 }

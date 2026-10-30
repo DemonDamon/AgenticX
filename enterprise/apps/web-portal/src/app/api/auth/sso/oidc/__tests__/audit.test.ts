@@ -30,6 +30,7 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("../../../../../../lib/sso-runtime", () => ({
+  assertPortalSsoStrategyProtocol: () => ({ id: "oidc", protocol: "oidc" }),
   getOidcClientService: () => ({
     exchangeCallback: vi.fn(),
   }),

@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { loginWithOidcClaims } from "../../../../../../lib/auth-runtime";
 import { ACCESS_COOKIE, REFRESH_COOKIE, isAuthCookieSecure } from "../../../../../../lib/session";
 import {
+  assertPortalSsoStrategyProtocol,
   getPortalSamlProviderConfigServer,
   resolveReturnToOrDefault,
 } from "../../../../../../lib/sso-runtime";
@@ -147,6 +148,7 @@ export async function POST(request: Request) {
       throw new SamlCallbackError("saml.relay_state_invalid", "Missing or invalid SAML state cookie");
     }
     providerId = preliminaryProviderId;
+    assertPortalSsoStrategyProtocol(preliminaryProviderId, "saml");
     const provider = await getPortalSamlProviderConfigServer(preliminaryProviderId);
     issuerForAudit = provider.idpEntityId;
 

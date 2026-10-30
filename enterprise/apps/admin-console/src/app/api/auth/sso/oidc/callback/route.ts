@@ -9,6 +9,7 @@ import {
   isAdminCookieSecure,
 } from "../../../../../../lib/admin-session";
 import {
+  assertAdminSsoStrategyProtocol,
   getAdminSsoProviderConfigServer,
   getOidcClientService,
 } from "../../../../../../lib/admin-sso-runtime";
@@ -89,6 +90,7 @@ export async function GET(request: Request) {
     const secret = resolveStateSecret();
     const decoded = validateStateFromCookie(stateCookie, state, secret);
     providerId = decoded.providerId;
+    assertAdminSsoStrategyProtocol(decoded.providerId, "oidc");
     const provider = await getAdminSsoProviderConfigServer(decoded.providerId);
     providerIssuer = provider.issuer;
     const oidcClient = getOidcClientService();

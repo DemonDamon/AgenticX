@@ -20,6 +20,7 @@ vi.mock("@agenticx/auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/admin-sso-runtime", () => ({
+  assertAdminSsoStrategyProtocol: () => ({ id: "oidc", protocol: "oidc" }),
   getAdminSsoProviderConfigServer: (...args: unknown[]) => getAdminSsoProviderConfigServerMock(...args),
   getAdminSsoProviderOptions: (...args: unknown[]) => getAdminSsoProviderOptionsMock(...args),
   getOidcClientService: () => ({

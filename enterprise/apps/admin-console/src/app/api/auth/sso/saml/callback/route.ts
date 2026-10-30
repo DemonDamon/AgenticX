@@ -15,7 +15,7 @@ import {
   createAdminSessionToken,
   isAdminCookieSecure,
 } from "../../../../../../lib/admin-session";
-import { getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
+import { assertAdminSsoStrategyProtocol, getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
 
 const ADMIN_SAML_STATE_COOKIE = DEFAULT_SAML_ADMIN_STATE_COOKIE;
 
@@ -160,6 +160,7 @@ export async function POST(request: Request) {
       throw new SamlCallbackError("saml.relay_state_invalid", "Missing or invalid SAML state cookie");
     }
     providerId = preliminaryProviderId;
+    assertAdminSsoStrategyProtocol(preliminaryProviderId, "saml");
     const provider = await getAdminSamlProviderConfigServer(preliminaryProviderId);
     issuerForAudit = provider.idpEntityId;
 
