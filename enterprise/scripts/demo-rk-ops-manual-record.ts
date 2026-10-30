@@ -899,7 +899,7 @@ function buildCues(): Cue[] {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await page.goto(`${PORTAL_BASE}/workspace/disambiguation`, {
           waitUntil: "domcontentloaded",
-          timeout: 30_000,
+          timeout: 90_000,
         });
         await dismissNextOverlay(page);
         await page
