@@ -88,8 +88,8 @@ def dst_rows(registry, table: str = "members_out") -> list[dict]:
 
 ### Task 2 — PR（不 merge）
 
-- [ ] Mark plan Done；push；`gh pr create` 含 gates 表 + e2e/commands checkbox
-- [ ] **不 merge；不启动 H9**
+- [x] Mark plan Done；push；`gh pr create` 含 gates 表 + e2e/commands checkbox（#176）
+- [x] **不 merge；不启动 H9**（执行侧遵守；merge 留给用户）
 
 ## Done when
 
