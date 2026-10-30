@@ -41,7 +41,7 @@ describe("disambiguation-runtime-store", () => {
     expect(dir.replace(/\\/g, "/")).not.toContain(".runtime/admin/disambiguation");
   });
 
-  it("seeds Brand-A sessions for all three modes", async () => {
+  it("seeds cooling-loop sessions for all three modes", async () => {
     const sessions = await listSessions();
     expect(sessions.length).toBe(SAMPLE_DISAMBIGUATION_SESSIONS.length);
     const modes = new Set(sessions.flatMap((s) => s.pending.map((p) => p.mode)));
@@ -49,43 +49,43 @@ describe("disambiguation-runtime-store", () => {
     expect(modes.has("info_supplement")).toBe(true);
     expect(modes.has("conflict_resolve")).toBe(true);
     const blob = JSON.stringify(sessions).toLowerCase();
-    expect(blob).toContain("brand-a");
+    expect(blob).toContain("cooling-loop");
     expect(blob).not.toContain("proposal");
   });
 
   it("applies candidate_select and completes session", async () => {
-    const updated = await applyResponse("das-brand-a-candidate", {
-      request_id: "daq-brand-a-cand-1",
-      selected_ids: ["brand-a-pump-01"],
+    const updated = await applyResponse("das-cooling-candidate", {
+      request_id: "daq-cooling-cand-1",
+      selected_ids: ["device-pump-01"],
     });
     expect(updated.status).toBe("completed");
-    expect(updated.slots.object).toBe("Brand-A Pump 01");
+    expect(updated.slots.object).toBe("1号循环泵");
     expect(updated.pending).toHaveLength(0);
-    expect((await getSession("das-brand-a-candidate"))?.resolved.length).toBe(1);
+    expect((await getSession("das-cooling-candidate"))?.resolved.length).toBe(1);
   });
 
   it("applies info_supplement free_text", async () => {
-    const updated = await applyResponse("das-brand-a-supplement", {
-      request_id: "daq-brand-a-info-1",
-      free_text: "ops-channel-brand-a",
+    const updated = await applyResponse("das-cooling-supplement", {
+      request_id: "daq-cooling-info-1",
+      free_text: "值班群",
     });
     expect(updated.status).toBe("completed");
-    expect(updated.slots.notify_channel).toBe("ops-channel-brand-a");
+    expect(updated.slots.notify_channel).toBe("值班群");
   });
 
   it("applies conflict_resolve pick", async () => {
-    const updated = await applyResponse("das-brand-a-conflict", {
-      request_id: "daq-brand-a-conf-1",
-      selected_ids: ["val-plant-a"],
+    const updated = await applyResponse("das-cooling-conflict", {
+      request_id: "daq-cooling-conf-1",
+      selected_ids: ["zone-cooling-1"],
     });
     expect(updated.status).toBe("completed");
-    expect(updated.slots.site_name).toBe("Brand-A Plant A");
+    expect(updated.slots.site_name).toBe("一车间冷却区");
   });
 
   it("rejects invalid candidate pick", async () => {
     await expect(
-      applyResponse("das-brand-a-candidate", {
-        request_id: "daq-brand-a-cand-1",
+      applyResponse("das-cooling-candidate", {
+        request_id: "daq-cooling-cand-1",
         selected_ids: ["not-a-real-id"],
       }),
     ).rejects.toThrow(/unknown selected_ids/);

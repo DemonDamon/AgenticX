@@ -120,13 +120,13 @@ async function main() {
     await canvasCard.screenshot({ path: shot17 });
 
     // Click pump node (SVG <g> — use force click on circle)
-    const pump = page.getByTestId("graph-explorer-node-brand-a-entity-pump-01");
+    const pump = page.getByTestId("graph-explorer-node-device-pump-01");
     await pump.waitFor({ state: "visible", timeout: 15_000 });
     await pump.locator("circle").click({ force: true });
     await page.waitForTimeout(800);
     await page.getByTestId("graph-explorer-detail-id").waitFor({ state: "visible", timeout: 15_000 });
     const detailText = await page.getByTestId("graph-explorer-detail").innerText();
-    if (!/brand-a-entity-pump-01/i.test(detailText)) {
+    if (!/device-pump-01/i.test(detailText)) {
       throw new Error(`node detail missing pump id: ${detailText.slice(0, 200)}`);
     }
 
@@ -179,7 +179,7 @@ async function main() {
 
     const syncResp = await page.request.post(`${ADMIN_BASE}/api/admin/graph-incremental/sync`, {
       data: {
-        force_changed_ids: ["brand-a-src-ops-note"],
+        force_changed_ids: ["src-ops-note-valve"],
         actor: "e2e-graph-explorer",
       },
     });
@@ -212,7 +212,7 @@ async function main() {
     });
     await waitPastLoading(page);
     await dismissNextOverlay(page);
-    const valve = page.getByTestId("graph-explorer-node-brand-a-entity-valve-01");
+    const valve = page.getByTestId("graph-explorer-node-device-valve-01");
     await valve.waitFor({ state: "visible", timeout: 15_000 });
     await valve.locator("circle").click({ force: true });
     await page.waitForTimeout(800);

@@ -212,6 +212,20 @@ async function zoomOut(
 }
 
 async function adminLogin(page: Page): Promise<void> {
+  // Prefer API cookie login — more reliable after next-dev restarts
+  const api = await page.request.post(`${ADMIN_BASE}/api/auth/login`, {
+    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+  });
+  if (api.ok()) {
+    await page.goto(`${ADMIN_BASE}/dashboard`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    if (!page.url().includes("/login")) {
+      await dismissNextOverlay(page);
+      return;
+    }
+  }
   await page.goto(`${ADMIN_BASE}/login`, {
     waitUntil: "networkidle",
     timeout: 60_000,
@@ -233,10 +247,23 @@ async function adminLogin(page: Page): Promise<void> {
       .getByRole("button", { name: /登录并进入控制台|Sign in to console/i })
       .click({ force: true }),
   ]);
-  await pause(page, 1500);
+  await dismissNextOverlay(page);
 }
 
 async function portalLogin(page: Page): Promise<void> {
+  const api = await page.request.post(`${PORTAL_BASE}/api/auth/login`, {
+    data: { email: PORTAL_EMAIL, password: PORTAL_PASSWORD },
+  });
+  if (api.ok()) {
+    await page.goto(`${PORTAL_BASE}/workspace`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    if (!page.url().includes("/auth")) {
+      await dismissNextOverlay(page);
+      return;
+    }
+  }
   await page.goto(`${PORTAL_BASE}/auth`, {
     waitUntil: "networkidle",
     timeout: 60_000,
@@ -251,7 +278,7 @@ async function portalLogin(page: Page): Promise<void> {
     page.waitForURL(/\/workspace/, { timeout: 45_000 }),
     page.locator('button[type="submit"]').first().click({ force: true }),
   ]);
-  await pause(page, 1500);
+  await dismissNextOverlay(page);
 }
 
 /** Split VO into short spoken clauses so TTS breathes. */
@@ -403,8 +430,8 @@ function buildCues(): Cue[] {
   return [
     {
       id: "open-title",
-      vo: "大家好。今天想跟各位聊一聊，AgenticX 的规则与知识套件。咱们不讲底层实现，就讲产品本身，能帮企业解决什么问题。",
-      caption: "AgenticX 规则与知识套件 · 产品演示",
+      vo: "大家好。今天用「示例化工厂 · 冷却回路」这个脱敏样例，给各位看 AgenticX 的规则与知识套件。不讲底层实现，就讲产品怎么帮运维把规则和知识管明白。",
+      caption: "示例化工厂 · 冷却回路 · 规则与知识演示",
       holdAfterMs: 250,
       run: async (page) => {
         await page.setContent(
@@ -426,8 +453,8 @@ function buildCues(): Cue[] {
     },
     {
       id: "open-why",
-      vo: "这里其实是在回答一个问题：规则谁说了算，知识靠不靠谱，同名对象撞车了怎么办，设备关系图怎么跟着文档一起更新。界面里都是脱敏示例，方便大家看清楚能力本身。",
-      caption: "要解决：规则治理 · 知识可信 · 人工消歧 · 图谱同步",
+      vo: "一句话业务：值班同事说「冷却超温要告警」，AI 起草规则时不确定该绑哪台设备，需要人点一下确认；知识条目要可质检；设备关系要进图谱可看。样例已脱敏，不是真实客户。",
+      caption: "冷却超温告警 → 人工消歧绑设备 · 知识可质检 · 图谱可看",
       holdAfterMs: 200,
       run: async (page) => {
         await page.setContent(
@@ -467,8 +494,8 @@ function buildCues(): Cue[] {
     },
     {
       id: "rules-list",
-      vo: "先看规则治理。你看这块列表——其实就是在说：企业里到底有哪些业务规则在管。先把家底摸清，再谈 AI 能不能用。",
-      caption: "规则治理：先看有哪些业务规则在管",
+      vo: "先看规则治理。列表里是「冷却回路超温告警」这类业务规则。先把家底摸清，再谈 AI 起草和绑定。",
+      caption: "规则治理：冷却回路超温告警",
       holdAfterMs: 350,
       focus: '[data-testid="rule-governance-list"]',
       focusScale: 1.75,
@@ -503,7 +530,7 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 450 }).catch(() => undefined);
         const prefer = page.getByTestId(
-          "rule-governance-row-brand-a-temp-threshold",
+          "rule-governance-row-rule-cooling-overtemp",
         );
         if (await prefer.isVisible().catch(() => false)) {
           await prefer.click();
@@ -554,15 +581,15 @@ function buildCues(): Cue[] {
     },
     {
       id: "knowledge-detail",
-      vo: "咱们点开示例对象，比如二号泵。你看这块：当前状态在这儿，点一下质量检查，有问题会列出来，方便人审核。",
-      caption: "示例：2号泵 — 看状态、跑质检、看问题",
+      vo: "咱们点开示例对象，比如 2号循环泵。你看这块：当前状态在这儿，点一下质量检查，有问题会列出来，方便人审核。",
+      caption: "示例：2号循环泵 — 看状态、跑质检",
       holdAfterMs: 400,
       focus: '[data-testid="knowledge-lifecycle-detail"]',
       focusScale: 1.9,
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         const prefer = page.getByTestId(
-          "knowledge-lifecycle-row-brand-a-entity-pump-02",
+          "knowledge-lifecycle-row-device-pump-02",
         );
         if (await prefer.isVisible().catch(() => false)) {
           await prefer.click();
@@ -590,7 +617,7 @@ function buildCues(): Cue[] {
     },
     {
       id: "das-intro",
-      vo: "企业用 AI，最怕同名对象搞混。消歧确认，就是把拍板权留给人。下面三种模式：候选选择、信息补充、冲突裁决。数据是脱敏的示例工厂设备。",
+      vo: "冷却回路里泵和阀容易同名混淆。消歧确认，就是把拍板权留给人。下面三种模式：候选选择、信息补充、冲突裁决。",
       caption: "消歧：同名冲突时由人拍板（三种模式）",
       holdAfterMs: 280,
       focus: '[data-testid="disambiguation-table"]',
@@ -630,23 +657,23 @@ function buildCues(): Cue[] {
     },
     {
       id: "das-candidate",
-      vo: "第一种，候选选择。这里在选：规则该绑哪台设备。咱们勾置信度更高的一号泵。意思很清楚——人确认，这台才是正确对象。",
-      caption: "候选选择：勾选「1号泵」",
+      vo: "第一种，候选选择。提问是：这条「冷却回路超温告警」规则，应该绑定哪台设备？咱们勾置信度更高的 1号循环泵。",
+      caption: "候选选择：勾选「1号循环泵」",
       holdAfterMs: 400,
       focus: '[data-testid="disambiguation-choice-panel"]',
       focusScale: 2.0,
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId("disambiguation-row-das-brand-a-candidate");
+        const row = page.getByTestId("disambiguation-row-das-cooling-candidate");
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing row das-brand-a-candidate");
+          throw new Error("missing row das-cooling-candidate");
         }
         await row.click({ force: true });
         await page
           .getByTestId("disambiguation-choice-panel")
           .waitFor({ state: "visible", timeout: 15_000 });
-        const c = page.getByTestId("disambiguation-candidate-brand-a-pump-01");
+        const c = page.getByTestId("disambiguation-candidate-device-pump-01");
         if (await c.isVisible().catch(() => false)) {
           await c.check({ force: true });
         }
@@ -655,8 +682,8 @@ function buildCues(): Cue[] {
     },
     {
       id: "das-supplement",
-      vo: "第二种，信息补充。系统缺一段现场说明，人在这儿补上。比如写：一号车间东侧，运维通道已确认。补完，流程才能往下走。",
-      caption: "信息补充：补上缺失的现场说明",
+      vo: "第二种，信息补充。规则草稿还缺告警通知渠道，人在这儿补上。比如写：值班群。补完，流程才能往下走。",
+      caption: "信息补充：补告警通知渠道",
       holdAfterMs: 400,
       focus: '[data-testid="disambiguation-choice-panel"]',
       focusScale: 2.0,
@@ -664,10 +691,10 @@ function buildCues(): Cue[] {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
         const row = page.getByTestId(
-          "disambiguation-row-das-brand-a-supplement",
+          "disambiguation-row-das-cooling-supplement",
         );
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing row das-brand-a-supplement");
+          throw new Error("missing row das-cooling-supplement");
         }
         await row.click({ force: true });
         await page
@@ -682,23 +709,23 @@ function buildCues(): Cue[] {
     },
     {
       id: "das-conflict",
-      vo: "第三种，冲突裁决。两边说法不一致时，不能让 AI 悄悄合并。你看这块，由人选定采纳哪一方。这里选示例阀门这一侧。",
-      caption: "冲突裁决：人选采纳哪一方",
+      vo: "第三种，冲突裁决。同一设备在两份台账里所属区域不一致，不能让 AI 悄悄合并。这里确认以「一车间冷却区」为准。",
+      caption: "冲突裁决：确认一车间冷却区",
       holdAfterMs: 400,
       focus: '[data-testid="disambiguation-choice-panel"]',
       focusScale: 2.0,
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId("disambiguation-row-das-brand-a-conflict");
+        const row = page.getByTestId("disambiguation-row-das-cooling-conflict");
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing row das-brand-a-conflict");
+          throw new Error("missing row das-cooling-conflict");
         }
         await row.click({ force: true });
         await page
           .getByTestId("disambiguation-choice-panel")
           .waitFor({ state: "visible", timeout: 15_000 });
-        const c = page.getByTestId("disambiguation-candidate-val-plant-a");
+        const c = page.getByTestId("disambiguation-candidate-zone-cooling-1");
         if (await c.isVisible().catch(() => false)) {
           await c.check({ force: true });
         }
@@ -749,7 +776,7 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         const prefer = page.getByTestId(
-          "graph-incremental-row-brand-a-src-ops-note",
+          "graph-incremental-row-src-ops-note-valve",
         );
         if (await prefer.isVisible().catch(() => false)) {
           await prefer.click();
@@ -765,8 +792,18 @@ function buildCues(): Cue[] {
         await pause(page, 700);
         const syncBtn = page.getByTestId("graph-incremental-sync");
         if (await syncBtn.isVisible().catch(() => false)) {
-          await syncBtn.click();
-          await pause(page, 1600);
+          for (let i = 0; i < 40; i++) {
+            if (await syncBtn.isEnabled().catch(() => false)) break;
+            await page.waitForTimeout(250);
+          }
+          if (await syncBtn.isEnabled().catch(() => false)) {
+            await syncBtn.click();
+            await pause(page, 1600);
+          } else {
+            // Still show detail/report area even if sync is gated
+            await syncBtn.click({ force: true }).catch(() => undefined);
+            await pause(page, 800);
+          }
         }
         const report = page.getByTestId("graph-incremental-sync-report");
         if (await report.isVisible().catch(() => false)) {
@@ -777,8 +814,8 @@ function buildCues(): Cue[] {
     },
     {
       id: "graph-explorer",
-      vo: "图谱探索是活的图视图。画布上是设备与关系。咱们点开一号泵，能直接看属性。旁边徽章会告诉你，图存在哪里，比如 Neo4j。",
-      caption: "图谱探索：点「1号泵」看属性",
+      vo: "图谱探索是活的图视图。画布上是冷却回路设备与关系。咱们点开 1号循环泵，能直接看属性。旁边徽章会告诉你，图存在哪里，比如 Neo4j。",
+      caption: "图谱探索：点「1号循环泵」看属性",
       holdAfterMs: 450,
       focus: '[data-testid="graph-explorer-detail"], [data-testid="graph-explorer-canvas"]',
       focusScale: 1.7,
@@ -786,12 +823,13 @@ function buildCues(): Cue[] {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await page.goto(`${ADMIN_BASE}/admin/graph-explorer`, {
           waitUntil: "domcontentloaded",
-          timeout: 30_000,
+          timeout: 90_000,
         });
         await dismissNextOverlay(page);
         await page
           .getByTestId("graph-explorer-page")
-          .waitFor({ state: "visible", timeout: 30_000 });
+          .waitFor({ state: "visible", timeout: 60_000 })
+          .catch(() => undefined);
         const loading = page.getByText(
           /Loading graph from GraphStore|正在从 GraphStore/i,
         );
@@ -802,15 +840,22 @@ function buildCues(): Cue[] {
         }
         const seedBtn = page.getByTestId("graph-explorer-seed");
         if (await seedBtn.isVisible().catch(() => false)) {
-          await seedBtn.click();
-          await pause(page, 1200);
+          try {
+            await Promise.race([
+              seedBtn.click(),
+              page.waitForTimeout(5000),
+            ]);
+            await pause(page, 800);
+          } catch {
+            /* seed may fail without Python GraphStore; file store already Chinese */
+          }
         }
         await page
           .getByTestId("graph-explorer-canvas")
           .waitFor({ state: "visible", timeout: 30_000 });
         await pause(page, 1200);
         const pump = page.getByTestId(
-          "graph-explorer-node-brand-a-entity-pump-01",
+          "graph-explorer-node-device-pump-01",
         );
         if (await pump.isVisible().catch(() => false)) {
           await pump
@@ -845,8 +890,8 @@ function buildCues(): Cue[] {
     },
     {
       id: "portal-das-candidate",
-      vo: "门户消歧面板，同样三种模式。先看候选选择：业务同事勾选一号泵，不用进管理台，也能完成确认。",
-      caption: "门户消歧：勾选「1号泵」",
+      vo: "门户消歧面板，同样三种模式。先看候选选择：业务同事勾选 1号循环泵，不用进管理台，也能完成确认。",
+      caption: "门户消歧：勾选「1号循环泵」",
       holdAfterMs: 350,
       focus: '[data-testid="portal-disambiguation-choice-panel"]',
       focusScale: 1.95,
@@ -854,7 +899,7 @@ function buildCues(): Cue[] {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await page.goto(`${PORTAL_BASE}/workspace/disambiguation`, {
           waitUntil: "domcontentloaded",
-          timeout: 30_000,
+          timeout: 90_000,
         });
         await dismissNextOverlay(page);
         await page
@@ -872,18 +917,31 @@ function buildCues(): Cue[] {
           }
         }
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
-          "portal-disambiguation-row-das-brand-a-candidate",
+        let row = page.getByTestId(
+          "portal-disambiguation-row-das-cooling-candidate",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-candidate",
+          );
+        }
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing portal row das-brand-a-candidate");
+          // Fallback: first table row (SAMPLE may still be loading)
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          throw new Error("missing portal row das-cooling-candidate");
         }
         await row.click({ force: true });
         await page
           .getByTestId("portal-disambiguation-choice-panel")
           .waitFor({ state: "visible", timeout: 15_000 });
         const c = page.getByTestId(
-          "portal-disambiguation-candidate-brand-a-pump-01",
+          "portal-disambiguation-candidate-device-pump-01",
         );
         if (await c.isVisible().catch(() => false)) {
           await c.check({ force: true });
@@ -893,7 +951,7 @@ function buildCues(): Cue[] {
     },
     {
       id: "portal-das-supplement",
-      vo: "信息补充这边也一样。缺现场说明，就在门户里补上。比如：一号车间东侧，运维通道已确认。",
+      vo: "信息补充这边也一样。缺告警通知渠道，就在门户里补上。比如：值班群。",
       caption: "门户：信息补充",
       holdAfterMs: 320,
       focus: '[data-testid="portal-disambiguation-choice-panel"]',
@@ -901,11 +959,23 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
-          "portal-disambiguation-row-das-brand-a-supplement",
+        let row = page.getByTestId(
+          "portal-disambiguation-row-das-cooling-supplement",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-supplement",
+          );
+        }
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing portal row das-brand-a-supplement");
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          throw new Error("missing portal row das-cooling-supplement");
         }
         await row.click({ force: true });
         await page
@@ -920,7 +990,7 @@ function buildCues(): Cue[] {
     },
     {
       id: "portal-das-conflict",
-      vo: "冲突裁决也在门户完成。人选采纳哪一方，AI 不会偷偷合并。一线同学自己就能拍板。",
+      vo: "冲突裁决也在门户完成。人选「一车间冷却区」，AI 不会偷偷合并。一线同学自己就能拍板。",
       caption: "门户：冲突裁决",
       holdAfterMs: 320,
       focus: '[data-testid="portal-disambiguation-choice-panel"]',
@@ -928,18 +998,30 @@ function buildCues(): Cue[] {
       run: async (page) => {
         await zoomOut(page, { durationMs: 400 }).catch(() => undefined);
         await dismissNextOverlay(page);
-        const row = page.getByTestId(
-          "portal-disambiguation-row-das-brand-a-conflict",
+        let row = page.getByTestId(
+          "portal-disambiguation-row-das-cooling-conflict",
         );
+        for (let i = 0; i < 30; i++) {
+          if (await row.isVisible().catch(() => false)) break;
+          await page.waitForTimeout(300);
+          row = page.getByTestId(
+            "portal-disambiguation-row-das-cooling-conflict",
+          );
+        }
         if (!(await row.isVisible().catch(() => false))) {
-          throw new Error("missing portal row das-brand-a-conflict");
+          row = page.locator(
+            '[data-testid="portal-disambiguation-table"] tbody tr',
+          ).first();
+        }
+        if (!(await row.isVisible().catch(() => false))) {
+          throw new Error("missing portal row das-cooling-conflict");
         }
         await row.click({ force: true });
         await page
           .getByTestId("portal-disambiguation-choice-panel")
           .waitFor({ state: "visible", timeout: 15_000 });
         const c = page.getByTestId(
-          "portal-disambiguation-candidate-val-plant-a",
+          "portal-disambiguation-candidate-zone-cooling-1",
         );
         if (await c.isVisible().catch(() => false)) {
           await c.check({ force: true });

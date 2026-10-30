@@ -124,7 +124,7 @@ function buildSeedRuns(sources: SourceDocumentRow[]): SyncReportRow[] {
   const ids = sources.map((s) => s.id);
   const objectIds = Object.values(SAMPLE_SOURCE_INDEX).flat();
   const full: SyncReportRow = {
-    run_id: "brand-a-sync-full-001",
+    run_id: "sync-full-001",
     added: [...ids],
     changed: [],
     removed: [],
@@ -140,7 +140,7 @@ function buildSeedRuns(sources: SourceDocumentRow[]): SyncReportRow[] {
     at: "2026-10-29T02:05:00Z",
   };
   const incremental: SyncReportRow = {
-    run_id: "brand-a-sync-incr-002",
+    run_id: "sync-incr-002",
     added: [],
     changed: [],
     removed: [],
@@ -172,7 +172,7 @@ export async function reseedSamples(): Promise<{
   for (const [k, v] of Object.entries(SAMPLE_SOURCE_INDEX)) {
     links[k] = [...v];
   }
-  // Publish SoT: Brand-A entities/edges live in GraphStore (not JSON alone).
+  // Publish SoT: sample entities/edges live in GraphStore (not JSON alone).
   const seeded = await seedBrandAGraph();
   const storeStats = seeded.stats;
   const graph_stats: GraphStatsSnapshot = {
@@ -371,7 +371,7 @@ export async function runMockSync(opts?: {
     ? [...touched]
     : [];
 
-  const runId = `brand-a-sync-${randomUUID().slice(0, 8)}`;
+  const runId = `sync-${randomUUID().slice(0, 8)}`;
   const syncedAt = nowIso();
 
   // Align display with GraphStore SoT (seed/ensure store; do not treat JSON as truth).
@@ -446,7 +446,7 @@ export async function runMockSync(opts?: {
 export async function appendSyncReport(input: Partial<SyncReportRow> & { run_id?: string }): Promise<SyncReportRow> {
   await ensureSeeded();
   const report: SyncReportRow = {
-    run_id: input.run_id || `brand-a-sync-${randomUUID().slice(0, 8)}`,
+    run_id: input.run_id || `sync-${randomUUID().slice(0, 8)}`,
     added: [...(input.added || [])],
     changed: [...(input.changed || [])],
     removed: [...(input.removed || [])],

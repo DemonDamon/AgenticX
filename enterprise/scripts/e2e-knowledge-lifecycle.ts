@@ -84,7 +84,7 @@ async function main() {
     await page.waitForTimeout(200);
     await list.screenshot({ path: path.join(SHOT_DIR, "04-knowledge-lifecycle-list.png") });
 
-    const prefer = page.getByTestId("knowledge-lifecycle-row-brand-a-entity-pump-02");
+    const prefer = page.getByTestId("knowledge-lifecycle-row-device-pump-02");
     if (await prefer.isVisible().catch(() => false)) {
       await prefer.click();
     } else {

@@ -25,12 +25,12 @@ describe("knowledge-lifecycle object transition RBAC", () => {
     });
     const { POST } = await import("../route");
     const response = await POST(
-      new Request("http://localhost/api/admin/knowledge-lifecycle/objects/brand-a-1/transition", {
+      new Request("http://localhost/api/admin/knowledge-lifecycle/objects/device-sample-1/transition", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "reviewed" }),
       }),
-      { params: Promise.resolve({ id: "brand-a-1" }) },
+      { params: Promise.resolve({ id: "device-sample-1" }) },
     );
     expect(response.status).toBe(403);
     expect(requireAdminScopeMock).toHaveBeenCalledWith(["kb:update"]);
@@ -44,20 +44,20 @@ describe("knowledge-lifecycle object transition RBAC", () => {
       scopes: ["kb:update"],
     });
     transitionObjectMock.mockResolvedValue({
-      id: "brand-a-1",
+      id: "device-sample-1",
       status: "reviewed",
     });
     const { POST } = await import("../route");
     const response = await POST(
-      new Request("http://localhost/api/admin/knowledge-lifecycle/objects/brand-a-1/transition", {
+      new Request("http://localhost/api/admin/knowledge-lifecycle/objects/device-sample-1/transition", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "reviewed" }),
       }),
-      { params: Promise.resolve({ id: "brand-a-1" }) },
+      { params: Promise.resolve({ id: "device-sample-1" }) },
     );
     expect(response.status).toBe(200);
-    expect(transitionObjectMock).toHaveBeenCalledWith("brand-a-1", "reviewed", {
+    expect(transitionObjectMock).toHaveBeenCalledWith("device-sample-1", "reviewed", {
       actor: "reviewer@agenticx.local",
     });
     const body = (await response.json()) as { code: string };

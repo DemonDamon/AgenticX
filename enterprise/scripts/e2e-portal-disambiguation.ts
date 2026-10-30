@@ -98,9 +98,9 @@ async function main() {
     }
 
     // Shot 13: candidate_select — check a candidate so pixels differ from empty
-    await openMode(page, "das-brand-a-candidate", "candidate_select");
+    await openMode(page, "das-cooling-candidate", "candidate_select");
     await page
-      .getByTestId("portal-disambiguation-candidate-brand-a-pump-01")
+      .getByTestId("portal-disambiguation-candidate-device-pump-01")
       .check({ force: true });
     await page.waitForTimeout(250);
     const shot13 = "13-portal-disambiguation-candidate-select.png";
@@ -108,19 +108,19 @@ async function main() {
     console.log("shot", shot13, "mode", "candidate_select");
 
     // Shot 14: info_supplement
-    await openMode(page, "das-brand-a-supplement", "info_supplement");
+    await openMode(page, "das-cooling-supplement", "info_supplement");
     await page
       .getByTestId("portal-disambiguation-free-text")
-      .fill("ops-channel-brand-a");
+      .fill("值班群");
     await page.waitForTimeout(250);
     const shot14 = "14-portal-disambiguation-info-supplement.png";
     await page.screenshot({ path: path.join(SHOT_DIR, shot14), fullPage: true });
     console.log("shot", shot14, "mode", "info_supplement");
 
     // Shot 15: conflict_resolve
-    await openMode(page, "das-brand-a-conflict", "conflict_resolve");
+    await openMode(page, "das-cooling-conflict", "conflict_resolve");
     await page
-      .getByTestId("portal-disambiguation-candidate-val-plant-a")
+      .getByTestId("portal-disambiguation-candidate-zone-cooling-1")
       .check({ force: true });
     await page.waitForTimeout(250);
     const shot15 = "15-portal-disambiguation-conflict-resolve.png";

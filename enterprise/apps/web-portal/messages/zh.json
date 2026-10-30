@@ -305,7 +305,7 @@
       "defaultTemperatureDescription": "数值越低越确定，越高越多样"
     },
     "disambiguationEntry": "消歧选择面板（runtime）",
-    "disambiguationEntryHint": "打开 Near 运行时消歧选择面板（Brand-A 演示）"
+    "disambiguationEntryHint": "打开 Near 运行时消歧选择面板（示例化工厂·冷却回路演示）"
   },
   "rooms": {
     "title": "协作房间",
@@ -389,14 +389,14 @@
   },
   "disambiguation": {
     "title": "消歧选择面板",
-    "description": "Near 运行时消歧：候选选择 / 信息补充 / 冲突裁决 — 仅 Brand-A 样例；消费 runtime 会话（非 admin 存储）。",
+    "description": "Near 运行时消歧：候选选择 / 信息补充 / 冲突裁决 — 仅示例化工厂·冷却回路样例；消费 runtime 会话（非 admin 存储）。",
     "backToWorkspace": "返回工作区",
     "listTitle": "会话列表",
     "panelTitle": "选择面板",
     "loading": "正在加载消歧会话…",
     "apiSource": "已从 runtime 存储 API 加载",
-    "stubNote": "无法连接 runtime 消歧 API；显示本地 Brand-A 样例。",
-    "reseed": "重新灌入 Brand-A 样例",
+    "stubNote": "无法连接 runtime 消歧 API；显示本地冷却回路样例。",
+    "reseed": "重新灌入冷却回路样例",
     "reseedSuccess": "样例已重置",
     "reseedFailed": "重置失败",
     "submit": "提交回答",

@@ -4,7 +4,7 @@ import { CitationEvidencePanel, buildBrandACitationFixture } from "@agenticx/ui"
 import { getWorkspaceSessionFromCookies } from "../../../lib/session";
 
 /**
- * K1 citation UI demo — Brand-A fixture only (no live assemble_evidence).
+ * K1 citation UI demo — 示例化工厂·冷却回路 fixture only (no live assemble_evidence).
  * Mount: /workspace/citations
  */
 export default async function WorkspaceCitationsPage() {
@@ -24,7 +24,7 @@ export default async function WorkspaceCitationsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Citation evidence</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            K1 view-model demo (Brand-A synthetic fixture). Contract: citation-ui-contract.md.
+            K1 view-model demo（示例化工厂·冷却回路脱敏样例）。Contract: citation-ui-contract.md.
           </p>
         </div>
         <Link
@@ -35,7 +35,7 @@ export default async function WorkspaceCitationsPage() {
           Back to workspace
         </Link>
       </div>
-      <CitationEvidencePanel view={view} title="Brand-A pump evidence" />
+      <CitationEvidencePanel view={view} title="1号循环泵 · 出处证据" />
     </main>
   );
 }

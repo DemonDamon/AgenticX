@@ -89,7 +89,7 @@ async function main() {
     await waitPage(page);
     await dismissNextOverlay(page);
 
-    // Ensure Brand-A samples exist (wait for busy to clear)
+    // Ensure cooling-loop samples exist (wait for busy to clear)
     const reseed = page.getByTestId("disambiguation-reseed");
     if (await reseed.isVisible().catch(() => false)) {
       await reseed.waitFor({ state: "visible", timeout: 10_000 });
@@ -109,8 +109,8 @@ async function main() {
     console.log(`[e2e-disambiguation] sessions=${rowCount}`);
 
     // Shot 07: candidate_select — do not submit; keep panel open for shot
-    await openRow(page, "das-brand-a-candidate");
-    await page.getByTestId("disambiguation-candidate-brand-a-pump-01").check({ force: true });
+    await openRow(page, "das-cooling-candidate");
+    await page.getByTestId("disambiguation-candidate-device-pump-01").check({ force: true });
     await page.waitForTimeout(250);
     await page.screenshot({
       path: path.join(SHOT_DIR, "07-disambiguation-candidate-select.png"),
@@ -119,8 +119,8 @@ async function main() {
     console.log("[e2e-disambiguation] shot 07 ok");
 
     // Shot 08: info_supplement
-    await openRow(page, "das-brand-a-supplement");
-    await page.getByTestId("disambiguation-free-text").fill("ops-channel-brand-a");
+    await openRow(page, "das-cooling-supplement");
+    await page.getByTestId("disambiguation-free-text").fill("值班群");
     await page.waitForTimeout(250);
     await page.screenshot({
       path: path.join(SHOT_DIR, "08-disambiguation-info-supplement.png"),
@@ -129,8 +129,8 @@ async function main() {
     console.log("[e2e-disambiguation] shot 08 ok");
 
     // Shot 09: conflict_resolve
-    await openRow(page, "das-brand-a-conflict");
-    await page.getByTestId("disambiguation-candidate-val-plant-a").check({ force: true });
+    await openRow(page, "das-cooling-conflict");
+    await page.getByTestId("disambiguation-candidate-zone-cooling-1").check({ force: true });
     await page.waitForTimeout(250);
     await page.screenshot({
       path: path.join(SHOT_DIR, "09-disambiguation-conflict-resolve.png"),
