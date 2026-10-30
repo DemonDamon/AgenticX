@@ -100,3 +100,54 @@ def test_build_kafka_empty_returns_kafka_memory():
     assert probe.ok is True
     assert probe.tables == []
 
+
+
+def test_build_file_with_endpoint_returns_file_channel():
+    from agenticx.data_suite.channels.file import FileChannel
+
+    ch = build_channel(
+        "f1",
+        cfg={
+            "kind": "file",
+            "endpoint": "s3://bucket/prefix",
+        },
+    )
+    assert isinstance(ch, FileChannel)
+    assert ch.name == "f1"
+    probe = ch.probe()
+    assert probe.ok is False
+    assert probe.error
+
+
+def test_build_file_with_root_returns_file_channel():
+    from agenticx.data_suite.channels.file import FileChannel
+
+    ch = build_channel(
+        "f_root",
+        cfg={"kind": "file", "root": "/data/landing"},
+    )
+    assert isinstance(ch, FileChannel)
+
+
+def test_build_file_tables_only_returns_fake():
+    ch = build_channel(
+        "f_offline",
+        cfg={
+            "kind": "file",
+            "tables": {"members": [{"id": 1}]},
+        },
+    )
+    assert isinstance(ch, FakeChannel)
+    assert ch.kind == "file"
+    assert ch.probe().ok is True
+    assert ch.query("SELECT * FROM members").rows == [[1]]
+
+
+def test_build_file_empty_returns_file_memory():
+    from agenticx.data_suite.channels.file import FileChannel
+
+    ch = build_channel("f_empty", cfg={"kind": "file"})
+    assert isinstance(ch, FileChannel)
+    probe = ch.probe()
+    assert probe.ok is True
+    assert probe.tables == []

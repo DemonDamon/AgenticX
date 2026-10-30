@@ -41,3 +41,10 @@ Point the admin data-boards section at this board seed when doing UI shots (`see
 | `seed/` | YAML/JSON configs (channels, job, idmap, dict, quality, tags, audience, board, masking, patrol) |
 | `probe.py` … `patrol_stage.py` | Stage helpers |
 | `run_golden_path.py` | Orchestrator |
+
+## File channel (H1)
+
+Golden-path still uses **FakeChannel** seeds (`kind: fake`) so offline CI stays hermetic.
+`FileChannel` (SFTP / object storage) is available via `build_channel(kind="file")` with an
+injectable path/partition policy — no customer `date=YYYYMMDD` layout is hardcoded in the
+channel kernel. Example partition templates belong in deployment config or unit tests only.
