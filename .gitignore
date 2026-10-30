@@ -3,6 +3,8 @@
 .vscode/
 !.cursor/plans/
 !.cursor/plans/**
+!.cursor/skills/
+!.cursor/skills/**
 .cursor/commands/
 .qoder/
 .trae/
