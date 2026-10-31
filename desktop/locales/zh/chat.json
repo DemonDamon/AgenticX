@@ -801,7 +801,10 @@
   },
   "budget": {
     "title": "本轮运行 token 预算已耗尽",
-    "body": "本次运行累计 {{current}} / 上限 {{max}}（约 {{pct}}%，source={{source}}）。预算随新消息重置——直接发新消息即可带着当前进度续接。",
+    "titleSession": "本会话累计 token 已达上限",
+    "usageLine": "{{current}} / {{max}}",
+    "body": "约 {{pct}}%（source={{source}}）。单轮预算随新消息重置——在本会话内直接发新消息可带着当前进度续接。",
+    "bodySession": "已超过会话累计上限（约 {{pct}}%）。需提高「会话累计上限」或新建会话续接；本会话内累计用量不会因新消息清零。",
     "resumeDraft": "续接未完成的工作",
     "newSession": "新建会话续接",
     "adjust": "调整预算上限",

@@ -189,6 +189,7 @@ import {
 } from "../utils/backend-scope";
 import type { RunMode } from "../constants/confirm-strategy-options";
 import type { SettingsFocus } from "../settings-tab";
+import { SESSION_CAP_FOCUS } from "../settings-tab";
 import {
   SecurityCenterTab,
   type SecurityCenterTabHandle,
@@ -1862,7 +1863,15 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
   },
 );
 
-const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function ToolsTab(_props, ref) {
+type ToolsTabProps = {
+  sessionCapFocus?: boolean;
+  sessionCapFocusSeq?: number;
+};
+
+const ToolsTab = forwardRef<ToolsTabHandle, ToolsTabProps>(function ToolsTab(
+  { sessionCapFocus = false, sessionCapFocusSeq = 0 },
+  ref,
+) {
   const { t } = useTranslation("settings");
   const ccBridgePanelRef = useRef<CcBridgePanelHandle>(null);
   const wbBridgePanelRef = useRef<WbBridgePanelHandle>(null);
@@ -2336,7 +2345,13 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onContextBudgetRatioPercentChange={handleToolSearchRatioPercentChange}
         disabled={loading}
       />
-      <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />
+      <TokenBudgetConfigSection
+        value={tokenBudget}
+        onChange={setTokenBudget}
+        disabled={loading}
+        scrollToSessionCap={sessionCapFocus}
+        sessionCapHighlightKey={sessionCapFocusSeq}
+      />
       <StallNudgeConfigSection value={stallNudge} onChange={setStallNudge} disabled={loading} />
       <UnattendedConfigSection value={unattended} onChange={setUnattended} disabled={loading} />
       {toolSearchPersistError ? (
@@ -5090,6 +5105,8 @@ export function SettingsPanel({
   }, [enterpriseAccountReady, enterpriseLoggedIn, tab]);
   const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
   const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
+  const [sessionCapFocus, setSessionCapFocus] = useState(false);
+  const [sessionCapFocusSeq, setSessionCapFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
   const [metaEditorKind, setMetaEditorKind] = useState<"costume" | "identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
@@ -5099,6 +5116,7 @@ export function SettingsPanel({
   useEffect(() => {
     if (!open) {
       setSecurityFocus(undefined);
+      setSessionCapFocus(false);
       return;
     }
     if (!settingsOpenToTab && !settingsOpenToFocus) return;
@@ -5107,7 +5125,11 @@ export function SettingsPanel({
       const TAB_ALIASES: Partial<Record<SettingsTab, SettingsTab>> = { hooks: "security" };
       setTab(TAB_ALIASES[settingsOpenToTab] ?? settingsOpenToTab);
     }
-    if (settingsOpenToFocus) {
+    if (settingsOpenToFocus === SESSION_CAP_FOCUS) {
+      setTab("tools");
+      setSessionCapFocus(true);
+      setSessionCapFocusSeq(settingsFocusSeq);
+    } else if (settingsOpenToFocus) {
       setSecurityFocus(settingsOpenToFocus);
       setSecurityFocusSeq(settingsFocusSeq);
     }
@@ -9040,7 +9062,11 @@ export function SettingsPanel({
               <ConnectorsSettingsPage sessionId={sessionId} onRefreshMcp={onRefreshMcp} />
             )}
             <div className={tab === "tools" ? "space-y-4" : "hidden"}>
-              <ToolsTab ref={toolsTabRef} />
+              <ToolsTab
+                ref={toolsTabRef}
+                sessionCapFocus={sessionCapFocus}
+                sessionCapFocusSeq={sessionCapFocusSeq}
+              />
             </div>
 
             {/* === SKILLS TAB === */}

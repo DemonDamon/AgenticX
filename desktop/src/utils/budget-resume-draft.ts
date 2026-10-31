@@ -111,3 +111,23 @@ export function buildBudgetResumeDraft(messages: Message[]): string {
   );
   return sections.join("\n\n");
 }
+
+/** After createNewTopic, persist + paint the budget resume draft without auto-send. */
+export function applyBudgetResumeDraftToComposer(args: {
+  paneId: string;
+  draft: string;
+  prepareFreshComposerPaneDraft: (paneId: string, prefill?: string) => void;
+  setComposerText: (text: string) => void;
+  /** Defaults to microtask defer (matches ChatPane new-topic handler). */
+  deferComposerPaint?: (paint: () => void) => void;
+}): void {
+  const trimmed = String(args.draft ?? "").trim();
+  if (!trimmed) return;
+  args.prepareFreshComposerPaneDraft(args.paneId, trimmed);
+  const paint = () => args.setComposerText(trimmed);
+  if (args.deferComposerPaint) {
+    args.deferComposerPaint(paint);
+  } else {
+    window.setTimeout(paint, 0);
+  }
+}

@@ -1,5 +1,7 @@
 import type { ChangeEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SESSION_CAP_ANCHOR_ID } from "../../settings-tab";
 
 export const TOKEN_BUDGET_MIN_SESSION = 100_000;
 export const TOKEN_BUDGET_MAX_SESSION = 5_000_000;
@@ -17,6 +19,9 @@ type TokenBudgetConfigSectionProps = {
   value: TokenBudgetConfig;
   onChange: (value: TokenBudgetConfig) => void;
   disabled?: boolean;
+  /** Deep-link from budget exceeded card: scroll to session cap field. */
+  scrollToSessionCap?: boolean;
+  sessionCapHighlightKey?: number;
 };
 
 function clampSession(raw: number): number {
@@ -29,14 +34,33 @@ function clampTurn(raw: number): number {
   return Math.max(TOKEN_BUDGET_MIN_TURN, Math.min(TOKEN_BUDGET_MAX_TURN, Math.round(raw)));
 }
 
-export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBudgetConfigSectionProps) {
+export function TokenBudgetConfigSection({
+  value,
+  onChange,
+  disabled,
+  scrollToSessionCap = false,
+  sessionCapHighlightKey = 0,
+}: TokenBudgetConfigSectionProps) {
   const { t } = useTranslation("workspace");
+  const sessionCapAnchorRef = useRef<HTMLLabelElement>(null);
+  const sessionCapInputRef = useRef<HTMLInputElement>(null);
+  const [sessionCapHighlighted, setSessionCapHighlighted] = useState(false);
+
   const handleSessionChange = (e: ChangeEvent<HTMLInputElement>) => {
     onChange({ ...value, max_tokens_per_session: clampSession(Number(e.target.value)) });
   };
   const handleTurnChange = (e: ChangeEvent<HTMLInputElement>) => {
     onChange({ ...value, max_tokens_per_turn: clampTurn(Number(e.target.value)) });
   };
+
+  useEffect(() => {
+    if (!scrollToSessionCap || disabled) return;
+    sessionCapAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setSessionCapHighlighted(true);
+    window.setTimeout(() => sessionCapInputRef.current?.focus(), 400);
+    const timer = window.setTimeout(() => setSessionCapHighlighted(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, [scrollToSessionCap, sessionCapHighlightKey, disabled]);
 
   return (
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
@@ -46,9 +70,17 @@ export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBud
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs text-text-muted">
+        <label
+          ref={sessionCapAnchorRef}
+          id={SESSION_CAP_ANCHOR_ID}
+          data-testid="token-budget-session-cap"
+          className={`block scroll-mt-3 text-xs text-text-muted transition-[box-shadow] duration-500 ${
+            sessionCapHighlighted ? "rounded-md shadow-[0_0_0_2px_var(--ui-btn-primary-bg)]" : ""
+          }`}
+        >
           {t("automation.sessionCap")}
           <input
+            ref={sessionCapInputRef}
             type="number"
             min={TOKEN_BUDGET_MIN_SESSION}
             max={TOKEN_BUDGET_MAX_SESSION}
