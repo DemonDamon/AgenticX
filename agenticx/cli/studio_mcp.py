@@ -112,8 +112,10 @@ _DEFAULT_MCP_SKIP_KEY_LEGACY = "__agenticx_skip_default_mcp__"
 
 
 def agenticx_home_mcp_path() -> Path:
-    """Canonical MCP config path under ~/.agenticx."""
-    return Path.home() / ".agenticx" / "mcp.json"
+    """Canonical MCP config path under the active AgenticX data root."""
+    from agenticx.utils.agx_home import agx_home
+
+    return agx_home() / "mcp.json"
 
 
 def _normalize_extra_search_path_strings(paths: Any) -> List[str]:

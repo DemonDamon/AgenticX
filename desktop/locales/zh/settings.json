@@ -112,7 +112,14 @@
     "accentGreen": "绿色",
     "accentPink": "粉红色",
     "accentYellow": "橙色",
-    "accentMono": "单色"
+    "accentMono": "单色",
+    "dataDir": "数据目录",
+    "dataDirHint": "会话、配置与缓存的存放位置。修改后请完全退出并重启 Near 后生效；不会自动迁移已有数据。",
+    "dataDirWindowsExample": "Windows 用户可将目录选在非系统盘（例如 D:\\\\NearData），以减轻系统盘占用。",
+    "dataDirBrowse": "选择文件夹…",
+    "dataDirReset": "恢复默认",
+    "dataDirEnvOverride": "当前由环境变量 AGX_HOME / AGENTICX_HOME 覆盖，设置面板无法修改。",
+    "dataDirRestartRequired": "数据目录已更新，请完全退出并重启 Near 后生效。"
   },
   "commonSettings": {
     "saved": "已保存",

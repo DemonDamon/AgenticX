@@ -87,6 +87,20 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
   version: "0.6.0",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
+  getAgxHomeDir: async (): Promise<{
+    ok: boolean;
+    resolved?: string;
+    defaultDir?: string;
+    envOverride?: boolean;
+    restartRequired?: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke("get-agx-home-dir"),
+  pickAgxHomeDir: async (): Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }> =>
+    ipcRenderer.invoke("pick-agx-home-dir"),
+  setAgxHomeDir: async (
+    dataDir: string,
+  ): Promise<{ ok: boolean; resolved?: string; restartRequired?: boolean; error?: string }> =>
+    ipcRenderer.invoke("set-agx-home-dir", dataDir),
   waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
   enterpriseSyncCapabilities: async (): Promise<{ ok: boolean; skipped?: boolean }> =>
@@ -1309,3 +1323,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       error?: string;
     }>,
 });
+
+let syncAgxHome = "";
+try {
+  syncAgxHome = String(ipcRenderer.sendSync("get-agx-home-dir-sync") ?? "");
+} catch {
+  syncAgxHome = "";
+}
+contextBridge.exposeInMainWorld("__AGX_HOME__", syncAgxHome);

@@ -5,11 +5,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { getAgxHomeDir } from "./agx-home";
 
-const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
-const PORT_FILE = path.join(CONFIG_DIR, "browser_bridge.port");
-const TOKEN_FILE = path.join(CONFIG_DIR, "browser_bridge.token");
-const DESKTOP_USE_DIR = path.join(CONFIG_DIR, "desktop-use");
+function agxConfigDir(): string {
+  return getAgxHomeDir();
+}
+
+const PORT_FILE = () => path.join(agxConfigDir(), "browser_bridge.port");
+const TOKEN_FILE = () => path.join(agxConfigDir(), "browser_bridge.token");
+const DESKTOP_USE_DIR = () => path.join(agxConfigDir(), "desktop-use");
 
 const ACTIONS = new Set([
   "open",
@@ -68,7 +72,7 @@ function writeSecretFile(filePath: string, contents: string): void {
 }
 
 function removeBridgeFiles(): void {
-  for (const filePath of [PORT_FILE, TOKEN_FILE]) {
+  for (const filePath of [PORT_FILE(), TOKEN_FILE()]) {
     try {
       fs.unlinkSync(filePath);
     } catch {
@@ -204,8 +208,8 @@ export function startNearBrowserBridge(getHost: () => WebContents | null): void 
     const matched = dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
     if (!matched?.[1]) return { ok: false, error: "invalid_png" };
     try {
-      fs.mkdirSync(DESKTOP_USE_DIR, { recursive: true });
-      const filePath = path.join(DESKTOP_USE_DIR, `browser_${Date.now()}.png`);
+      fs.mkdirSync(DESKTOP_USE_DIR(), { recursive: true });
+      const filePath = path.join(DESKTOP_USE_DIR(), `browser_${Date.now()}.png`);
       fs.writeFileSync(filePath, Buffer.from(matched[1], "base64"));
       return { ok: true, path: filePath };
     } catch (err) {
@@ -301,8 +305,8 @@ export function startNearBrowserBridge(getHost: () => WebContents | null): void 
         void requestListener(req, res);
       });
       created.listen(port, "127.0.0.1", () => {
-        writeSecretFile(PORT_FILE, String(port));
-        writeSecretFile(TOKEN_FILE, token);
+        writeSecretFile(PORT_FILE(), String(port));
+        writeSecretFile(TOKEN_FILE(), token);
         server = created;
       });
       created.on("error", (err) => {
