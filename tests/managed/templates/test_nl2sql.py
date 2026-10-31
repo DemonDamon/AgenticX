@@ -5,11 +5,13 @@ from __future__ import annotations
 import pytest
 
 from agenticx.managed.templates.data_suite import (
+    CODE_INVALID_QUERY_MODE,
     CODE_WRITE_GUARD_DENIED,
     FakeQueryChannel,
     ReadOnlySqlExecutor,
     WriteGateDecision,
     build_nl2sql_manifest_stub,
+    decide_query_mode,
     decide_sql_write_gate,
     is_read_only_sql,
 )
@@ -56,3 +58,27 @@ def test_sql_write_gate_decision_shape():
 def test_manifest_stub_passes_write_guards():
     m = build_nl2sql_manifest_stub()
     assert m["tools"][0]["name"] == "data_suite_sql_query"
+
+
+def test_query_mode_decision_valid_and_invalid():
+    allowed_exec = decide_query_mode("execute")
+    assert allowed_exec.allowed is True
+    assert allowed_exec.code == ""
+
+    allowed_explain = decide_query_mode("explain")
+    assert allowed_explain.allowed is True
+
+    allowed_default = decide_query_mode(None)
+    assert allowed_default.allowed is True
+
+    denied = decide_query_mode("mutate")
+    assert denied.allowed is False
+    assert denied.code == CODE_INVALID_QUERY_MODE
+    assert CODE_INVALID_QUERY_MODE in denied.reason
+
+
+def test_manifest_stub_documents_mode_enum():
+    m = build_nl2sql_manifest_stub()
+    props = m["tools"][0]["input_schema"]["properties"]
+    assert "mode" in props
+    assert set(props["mode"]["enum"]) == {"explain", "execute"}
