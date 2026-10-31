@@ -124,7 +124,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: near-${{ steps.desktop_version.outputs.version }}-${{ matrix.arch }}
           path: desktop/release/*-${{ matrix.arch }}.dmg
@@ -186,7 +186,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: near-${{ steps.desktop_version.outputs.version }}-windows-x64
           path: desktop/release/Near-*-win-x64.exe
@@ -289,7 +289,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: near-${{ steps.desktop_version.outputs.version }}-${{ env.ARCH }}
           path: desktop/release/*-${{ env.ARCH }}.dmg
@@ -351,7 +351,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: near-${{ steps.desktop_version.outputs.version }}-windows-x64
           path: desktop/release/Near-*-win-x64.exe
