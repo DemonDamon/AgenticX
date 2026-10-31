@@ -71,7 +71,7 @@
     "@testing-library/user-event": "^14.6.8",
     "@types/js-yaml": "^4.0.9",
     "@types/mdast": "^4.0.4",
-    "@types/node": "^22.13.14",
+    "@types/node": "^26.6.5",
     "@types/prismjs": "^1.26.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.18",
