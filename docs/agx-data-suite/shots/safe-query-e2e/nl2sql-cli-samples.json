@@ -1,0 +1,76 @@
+[
+  {
+    "request": {
+      "question": "上月华东大区 GMV 和退货率分别是多少？",
+      "mode": "explain",
+      "sql": "SELECT region, gmv FROM retail_monthly WHERE region='华东'"
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "sql": "SELECT region, gmv FROM retail_monthly WHERE region='华东'",
+        "rows": [],
+        "refused": false,
+        "reason": null,
+        "mode": "explain",
+        "executed": false,
+        "code": null,
+        "channel_calls": [],
+        "backend": "python"
+      }
+    },
+    "returncode": 0
+  },
+  {
+    "request": {
+      "question": "上月华东大区 GMV 和退货率分别是多少？",
+      "mode": "execute",
+      "sql": "SELECT region, gmv FROM retail_monthly WHERE region='华东'"
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "sql": "SELECT region, gmv FROM retail_monthly WHERE region='华东'",
+        "rows": [
+          {
+            "region": "华东",
+            "gmv": 12800000,
+            "return_rate": 0.032
+          }
+        ],
+        "refused": false,
+        "reason": null,
+        "mode": "execute",
+        "executed": true,
+        "code": null,
+        "channel_calls": [
+          "SELECT region, gmv FROM retail_monthly WHERE region='华东'"
+        ],
+        "backend": "python"
+      }
+    },
+    "returncode": 0
+  },
+  {
+    "request": {
+      "question": "删掉",
+      "mode": "execute",
+      "sql": "DELETE FROM retail_monthly WHERE region='华东'"
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "sql": "DELETE FROM retail_monthly WHERE region='华东'",
+        "rows": [],
+        "refused": true,
+        "reason": "write_guard_denied: non-readonly sql",
+        "mode": "execute",
+        "executed": false,
+        "code": "write_guard_denied",
+        "channel_calls": [],
+        "backend": "python"
+      }
+    },
+    "returncode": 0
+  }
+]

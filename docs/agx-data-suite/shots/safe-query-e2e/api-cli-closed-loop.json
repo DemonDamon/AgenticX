@@ -1,0 +1,53 @@
+{
+  "case_question": "上月华东大区 GMV 和退货率分别是多少？",
+  "steps": {
+    "A2_explain": {
+      "mode": "explain",
+      "executed": false,
+      "sql": "SELECT region AS 大区, gmv AS GMV, return_rate AS 退货率 FROM monthly_ops WHERE region = '华东大区' AND period = '上月'",
+      "rows": [],
+      "channel_calls": [],
+      "ok": true
+    },
+    "A3_execute": {
+      "mode": "execute",
+      "executed": true,
+      "rows": [
+        {
+          "大区": "华东大区",
+          "GMV": 128500000.0,
+          "退货率": 0.032
+        }
+      ],
+      "ok": true
+    },
+    "A1_write_gate": {
+      "refused": true,
+      "code": "write_guard_denied",
+      "reason": "write_guard_denied: non-readonly sql",
+      "channel_calls": [],
+      "ok": true
+    },
+    "A4_publish_neighborhood": {
+      "stats_ok": true,
+      "entities": 3,
+      "relations": 2,
+      "node_ids": [
+        "metric-east-gmv",
+        "table-order-fact"
+      ],
+      "edge_ids": [
+        "rel-gmv-depends-orders"
+      ],
+      "ok": true
+    },
+    "A5_secondary_warning": {
+      "ok_flag": true,
+      "warnings": [
+        "secondary_hook_failed:RuntimeError: 可选索引重建失败（演示次要副作用）"
+      ],
+      "primary_failures": [],
+      "ok": true
+    }
+  }
+}

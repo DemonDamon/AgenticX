@@ -1,0 +1,14 @@
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Run Errors 1 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ ERROR  configuration error CONFIG_LOAD_FAILED (config)
+failed to load config /Users/damon/myWork/AgenticX-w4/enterprise/e2e/e2e.config.ts: E2E_MODEL_BASE_URL is required to load e2e.config.ts
+
+
+ Test Files  no test files
+      Tests  no tests executed
+     Errors  1 error
+   Start at  13:09:33
+   Duration  4ms
+     Report  (not written)
+

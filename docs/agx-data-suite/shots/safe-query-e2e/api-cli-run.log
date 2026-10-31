@@ -1,0 +1,3 @@
+/Users/damon/myWork/AgenticX-w4/agenticx/core/agent_builder.py:31: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+  class AgentBuilderConfig(BaseModel):
+/Users/damon/myWork/AgenticX-w4/docs/agx-data-suite/shots/safe-query-e2e/api-cli-closed-loop.json

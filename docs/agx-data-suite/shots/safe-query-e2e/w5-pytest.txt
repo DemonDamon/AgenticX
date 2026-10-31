@@ -1,0 +1,1118 @@
+/opt/miniconda3/lib/python3.13/site-packages/pytest_asyncio/plugin.py:211: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-8.3.3, pluggy-1.5.0
+rootdir: /Users/damon/myWork/AgenticX-w5
+configfile: pyproject.toml
+plugins: asyncio-1.1.0, anyio-4.10.0, langsmith-0.4.39, hydra-core-1.3.2, cov-7.0.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1 item
+
+tests/safe_query/test_w5_east_china_retail_complex_case.py ./opt/miniconda3/lib/python3.13/site-packages/coverage/sqlitedb.py:122: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x321365a80>
+  return self.con.execute(sql, parameters)  # type: ignore[arg-type]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/miniconda3/lib/python3.13/site-packages/coverage/sqlitedb.py:122: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x321365b70>
+  return self.con.execute(sql, parameters)  # type: ignore[arg-type]
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+             [100%]
+
+=============================== warnings summary ===============================
+agenticx/core/agent_builder.py:31
+  /Users/damon/myWork/AgenticX-w5/agenticx/core/agent_builder.py:31: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class AgentBuilderConfig(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.13.1-final-0 _______________
+
+Name                                                                Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------------------------
+agenticx/__init__.py                                                   27      0   100%
+agenticx/_optional.py                                                  14     14     0%   8-58
+agenticx/_version.py                                                    1      0   100%
+agenticx/agents/__init__.py                                             7      7     0%   7-29
+agenticx/agents/agent_events.py                                        45     45     0%   10-94
+agenticx/agents/decision_router.py                                     65     65     0%   12-120
+agenticx/agents/mining_graph.py                                       126    126     0%   13-409
+agenticx/agents/mining_planner_agent.py                               288    288     0%   17-999
+agenticx/agents/react_agent.py                                         55     55     0%   36-237
+agenticx/agents/react_agent_async.py                                  393    393     0%   20-873
+agenticx/agents/spawn_worker.py                                       234    234     0%   17-820
+agenticx/avatar/__init__.py                                             3      3     0%   7-10
+agenticx/avatar/group_chat.py                                         114    114     0%   7-176
+agenticx/avatar/group_members.py                                       29     29     0%   7-48
+agenticx/avatar/portrait.py                                           272    272     0%   10-631
+agenticx/avatar/registry.py                                           284    284     0%   10-494
+agenticx/brain/__init__.py                                              6      6     0%   3-9
+agenticx/brain/manager.py                                              47     47     0%   3-62
+agenticx/brain/mount.py                                                72     72     0%   3-115
+agenticx/brain/registry.py                                            342    342     0%   3-491
+agenticx/brain/routes.py                                              454    454     0%   3-633
+agenticx/brain/runtime_code.py                                         49     49     0%   3-86
+agenticx/brain/runtime_docs.py                                         40     40     0%   3-64
+agenticx/brain/search.py                                              162    162     0%   3-304
+agenticx/brain/synthesis.py                                            80     80     0%   7-181
+agenticx/brain/types.py                                                91     91     0%   3-166
+agenticx/brain/wiki/__init__.py                                         3      3     0%   11-20
+agenticx/brain/wiki/merge.py                                           36     36     0%   19-74
+agenticx/brain/wiki/page.py                                           118    118     0%   12-201
+agenticx/brain/wiki_compile_queue.py                                  124    124     0%   6-208
+agenticx/brain/wiki_compiler.py                                       214    214     0%   15-425
+agenticx/brain/wiki_graph.py                                          215    215     0%   7-324
+agenticx/brain/wiki_ops.py                                            211    211     0%   7-373
+agenticx/branding.py                                                    3      3     0%   7-9
+agenticx/cases/__init__.py                                              4      4     0%   6-23
+agenticx/cases/init_inject.py                                          62     62     0%   11-136
+agenticx/cases/model.py                                                58     58     0%   11-133
+agenticx/cases/precipitate.py                                          95     95     0%   12-186
+agenticx/cases/remote.py                                               82     82     0%   19-228
+agenticx/cases/search.py                                               47     47     0%   10-93
+agenticx/cases/store.py                                                61     61     0%   11-105
+agenticx/cc_bridge/__init__.py                                          2      2     0%   7-14
+agenticx/cc_bridge/http_app.py                                        160    160     0%   7-265
+agenticx/cc_bridge/ndjson.py                                           48     48     0%   7-101
+agenticx/cc_bridge/session_manager.py                                 436    436     0%   7-638
+agenticx/cc_bridge/settings.py                                         67     67     0%   7-108
+agenticx/cc_bridge/tui_parser.py                                       66     66     0%   7-109
+agenticx/cli/__init__.py                                               10      6    40%   22-29
+agenticx/cli/agent_loop.py                                             59     59     0%   7-81
+agenticx/cli/agent_tools.py                                          6350   6350     0%   7-13563
+agenticx/cli/browser_bridge_settings.py                                27     27     0%   7-43
+agenticx/cli/cc_bridge_commands.py                                     23     23     0%   7-51
+agenticx/cli/client.py                                                235    235     0%   9-481
+agenticx/cli/codegen_engine.py                                        179    179     0%   7-280
+agenticx/cli/config_commands.py                                       109    109     0%   7-169
+agenticx/cli/config_manager.py                                        337    199    41%   109-113, 220-228, 259-261, 285-304, 309-313, 317-336, 340-350, 354-372, 377-380, 385-388, 393-470, 475-478, 482-487, 491-500, 505-509, 520-531, 542-551, 556-565, 574-577, 582-602, 606-608, 613
+agenticx/cli/debug.py                                                  59     59     0%   9-101
+agenticx/cli/deploy.py                                                199    199     0%   9-700
+agenticx/cli/docs.py                                                  194    194     0%   9-368
+agenticx/cli/generate_commands.py                                     114    114     0%   7-239
+agenticx/cli/harness_app.py                                            33     33     0%   7-66
+agenticx/cli/hooks_commands.py                                         73     73     0%   6-128
+agenticx/cli/intent_classifier.py                                      80     80     0%   7-193
+agenticx/cli/log_config.py                                             17     17     0%   5-41
+agenticx/cli/ma_client_commands.py                                    292    292     0%   7-573
+agenticx/cli/ma_commands.py                                           107    107     0%   7-212
+agenticx/cli/main.py                                                 1130   1130     0%   9-2088
+agenticx/cli/mcp_discovery.py                                         153    153     0%   4-322
+agenticx/cli/memory_graph_commands.py                                 103    103     0%   7-194
+agenticx/cli/scaffold.py                                              191    191     0%   9-1091
+agenticx/cli/skills_commands.py                                        75     75     0%   7-207
+agenticx/cli/studio.py                                                547    547     0%   7-764
+agenticx/cli/studio_mcp.py                                            745    745     0%   7-1173
+agenticx/cli/studio_skill.py                                           90     90     0%   7-162
+agenticx/cli/tools.py                                                 300    300     0%   7-592
+agenticx/cli/volcengine_commands.py                                   173    173     0%   10-449
+agenticx/cli/wb_bridge_commands.py                                     27     27     0%   7-60
+agenticx/code_index/__init__.py                                         4      4     0%   3-14
+agenticx/code_index/backends/__init__.py                                4      4     0%   3-7
+agenticx/code_index/backends/base.py                                   13     13     0%   3-18
+agenticx/code_index/backends/native_backend.py                         14     14     0%   3-38
+agenticx/code_index/backends/semble_backend.py                        113    113     0%   3-198
+agenticx/code_index/config.py                                          42     42     0%   3-64
+agenticx/code_index/format.py                                          15     15     0%   3-42
+agenticx/code_index/manager.py                                        211    211     0%   3-301
+agenticx/code_index/state.py                                           32     32     0%   3-44
+agenticx/code_index/tools.py                                          144    144     0%   3-196
+agenticx/collaboration/__init__.py                                     12      0   100%
+agenticx/collaboration/base.py                                        180     31    83%   217-224, 228-229, 256, 268-276, 288-294, 298-301, 305-310, 314-317, 321
+agenticx/collaboration/config.py                                      108      4    96%   14, 176-190
+agenticx/collaboration/conversation.py                                 87     65    25%   54-58, 74-96, 113-150, 155-167, 184-192, 201-204, 213-220
+agenticx/collaboration/delegation.py                                  191    132    31%   52, 157-169, 194-238, 299-306, 311, 316, 321, 343-403, 429-454, 510-517, 522, 527, 532, 554-614, 637-661, 691
+agenticx/collaboration/enums.py                                        65      4    94%   86, 91, 96, 101
+agenticx/collaboration/intelligence/__init__.py                         5      5     0%   6-18
+agenticx/collaboration/intelligence/collaboration_intelligence.py     319    319     0%   6-790
+agenticx/collaboration/intelligence/message_router.py                 302    302     0%   6-714
+agenticx/collaboration/intelligence/models.py                         144    144     0%   6-191
+agenticx/collaboration/intelligence/role_assigner.py                  264    264     0%   6-695
+agenticx/collaboration/manager.py                                     154    129    16%   36-39, 58-76, 86-145, 157-163, 182-187, 199-215, 227-259, 271-277, 281-303, 312-331, 345-355, 359-364, 373-383
+agenticx/collaboration/memory.py                                      132    114    14%   26-29, 41-59, 71-81, 90-107, 111-133, 153-178, 190-212, 243-274, 286-299, 311-325, 334-353
+agenticx/collaboration/metrics.py                                     128     73    43%   77-81, 95-107, 121-138, 149-163, 176-201, 209-228, 240-267, 286-301, 313-339
+agenticx/collaboration/patterns.py                                    778    694    11%   34-43, 59-70, 83-119, 129-188, 192-261, 265-287, 291-316, 332-343, 356-400, 410-446, 456-542, 546-595, 606-614, 618-635, 661-668, 681-711, 728-751, 763-814, 826-835, 847-891, 912-941, 945, 983-992, 1005-1039, 1054, 1067-1107, 1123-1131, 1145, 1156, 1168-1199, 1211, 1249-1253, 1266-1298, 1315-1338, 1350-1363, 1375-1407, 1420-1446, 1465-1489, 1493-1496, 1534-1552, 1566-1598, 1615-1622, 1635-1673, 1686-1704, 1716-1726, 1738-1765, 1769-1772, 1810-1816, 1829-1872, 1889-1933, 1945-1969, 1981-1997, 2009-2041, 2057-2077, 2081, 2121-2128, 2141-2178, 2192-2201, 2210-2238, 2247-2272, 2287-2302, 2314-2344, 2356-2380, 2384
+agenticx/collaboration/prompts/__init__.py                              2      0   100%
+agenticx/collaboration/prompts/role_playing_prompts.py                 20     10    50%   31-60, 73-103, 118-134, 148-155
+agenticx/collaboration/role_playing.py                                125    105    16%   55-92, 108-286, 305-308, 324-332, 344-356, 368-383
+agenticx/collaboration/task_lock.py                                   156     93    40%   103-132, 140-152, 163-177, 187-204, 218-221, 229-230, 238-239, 244-261, 272-274, 282-285, 297-301, 323-333, 342-357
+agenticx/collaboration/workforce/__init__.py                           14     14     0%   17-41
+agenticx/collaboration/workforce/context_manager.py                    70     70     0%   9-186
+agenticx/collaboration/workforce/coordinator.py                        52     52     0%   9-138
+agenticx/collaboration/workforce/events.py                            132    132     0%   10-282
+agenticx/collaboration/workforce/failure_analyzer.py                   92     92     0%   9-295
+agenticx/collaboration/workforce/hooks.py                              53     53     0%   9-173
+agenticx/collaboration/workforce/prompts.py                            10     10     0%   11-286
+agenticx/collaboration/workforce/recovery_strategies.py                59     59     0%   9-205
+agenticx/collaboration/workforce/task_assigner.py                      40     40     0%   9-129
+agenticx/collaboration/workforce/task_decomposer.py                    88     88     0%   9-255
+agenticx/collaboration/workforce/task_planner.py                       59     59     0%   9-185
+agenticx/collaboration/workforce/utils.py                              48     48     0%   9-133
+agenticx/collaboration/workforce/worker.py                             70     70     0%   9-233
+agenticx/collaboration/workforce/worker_factory.py                     51     51     0%   9-178
+agenticx/collaboration/workforce/workforce_pattern.py                 274    274     0%   8-928
+agenticx/connectors/__init__.py                                         0      0   100%
+agenticx/connectors/database.py                                       240    189    21%   63-73, 87-103, 107-109, 112-124, 128-129, 133-151, 155-161, 166-179, 186-189, 194-197, 201-240, 243-246, 249-280, 284-296, 299-321, 324-327, 330-335, 338-339, 343-349
+agenticx/connectors/db_mcp.py                                          44     44     0%   10-74
+agenticx/connectors/gateway_client.py                                 206    206     0%   20-300
+agenticx/connectors/manage.py                                         237    237     0%   9-401
+agenticx/connectors/oauth.py                                          191    191     0%   17-309
+agenticx/connectors/rest_spec.py                                      292    292     0%   11-379
+agenticx/core/__init__.py                                              40      0   100%
+agenticx/core/adapters.py                                             233    137    41%   63-65, 89-98, 102-131, 165, 170-190, 194-211, 215-223, 227-257, 261-268, 305, 310-328, 332-340, 344-368, 372, 409-413, 419, 424, 434-448, 452-459, 463, 467, 479-493, 507-523, 534, 540, 546
+agenticx/core/agent.py                                                 84     25    70%   8-11, 168-199, 228-233, 247-268, 281, 329-331
+agenticx/core/agent_builder.py                                        146    105    28%   27-28, 75-76, 81-84, 95, 107-119, 135-158, 172-211, 225-251, 265-276, 292-302, 315-325, 338-343
+agenticx/core/agent_executor.py                                       515    432    16%   75, 96, 99, 113, 117, 121, 125, 144-168, 202-242, 267-305, 316-414, 431-442, 470-593, 603-663, 678-788, 792-818, 830-839, 843-997, 1001-1012, 1021-1060, 1073-1078, 1094-1119, 1123, 1127-1128, 1132, 1170-1297, 1319, 1339-1351, 1355-1357, 1361, 1365-1367
+agenticx/core/background.py                                           247    247     0%   24-560
+agenticx/core/code_action_executor.py                                  80     60    25%   58-61, 64-67, 70-76, 79-101, 107-129, 135-138
+agenticx/core/communication.py                                         95     67    29%   24-28, 38, 53-67, 76-80, 90, 99-108, 120-127, 136, 140, 149-151, 160-161, 170-174, 183-185, 200-217, 226-227, 237, 254, 263-272, 284-291
+agenticx/core/component.py                                             22     11    50%   27-29, 33-35, 39, 43, 47, 51, 56
+agenticx/core/config_watcher.py                                       117     92    21%   28-29, 32-36, 48-57, 60-61, 64-75, 78-89, 92-93, 96-98, 101-108, 111-129, 132-144, 147-158
+agenticx/core/context_compiler.py                                     524    457    13%   216-220, 229-259, 263-268, 272-300, 304-325, 329, 346-397, 439-442, 462-517, 536-545, 561-586, 598, 610-611, 624-630, 680-707, 713-730, 739-754, 758-766, 770-779, 792-872, 884-885, 894-916, 931-973, 979-991, 995-1020, 1024-1031, 1042-1070, 1081-1135, 1146-1175, 1184-1207, 1211-1216, 1224-1234, 1256-1286, 1297-1317, 1321-1323, 1333-1342, 1360-1384, 1413-1422, 1444-1451
+agenticx/core/discovery.py                                            169     95    44%   122-123, 127-128, 132-134, 143-157, 216-228, 253-262, 274-277, 287-318, 329-330, 339-347, 366-374, 378, 382, 433-436, 440, 464-483, 509-529, 553-572, 596-614, 640-663, 667-668, 672, 685-687, 693
+agenticx/core/error_handler.py                                        143    116    19%   22, 41-51, 63-86, 94, 103-107, 124-136, 140-141, 145-149, 153-155, 171-175, 189-222, 235-274, 283, 295-301, 317-336, 340-342, 351-359
+agenticx/core/event.py                                                176     71    60%   29-32, 145-148, 152-154, 228, 232, 236, 240, 247-269, 278-282, 286, 290, 298-301, 305-316, 320, 327-330, 340-350, 362-366
+agenticx/core/event_bus.py                                             74     74     0%   6-116
+agenticx/core/execution_lane.py                                        60     37    38%   32-34, 37, 40, 44, 69-74, 83-91, 95-113, 119-120, 125, 129, 133, 137-139
+agenticx/core/executor.py                                             337    254    25%   26-27, 71, 96, 109-116, 120-133, 137-155, 159-179, 183-192, 199-201, 205-216, 220-228, 232-257, 261-285, 289-329, 338-349, 353, 370-415, 435-480, 489-524, 533-565, 574-609, 618-621, 627-640, 649-667, 671-679, 683-684, 688-689, 693-694, 698-700, 712-717, 723-724, 730-731
+agenticx/core/graph.py                                                146    146     0%   16-446
+agenticx/core/guiderails.py                                            92     44    52%   37, 41, 45, 81-83, 112-113, 121-168, 182-194
+agenticx/core/handoff.py                                               87     49    44%   70-71, 75, 79-82, 137-140, 147-149, 156-158, 167, 185-198, 221-230, 268-289
+agenticx/core/hooks/__init__.py                                         4      0   100%
+agenticx/core/hooks/llm_hooks.py                                       61     46    25%   38-40, 57-59, 64-66, 71-73, 93-112, 131-147, 153-155, 160
+agenticx/core/hooks/tool_hooks.py                                     112     90    20%   44-46, 63-65, 70-72, 77-79, 99-118, 137-153, 159-161, 166, 174-220, 230-245
+agenticx/core/hooks/types.py                                           33      2    94%   13-14
+agenticx/core/interruption.py                                         155     92    41%   89, 141-144, 149-151, 195-204, 227-241, 253, 265, 277-281, 304-324, 336-339, 352-361, 373-378, 392-394, 398-403, 407, 456-462, 470-485, 499-506, 523-538, 551-553, 559
+agenticx/core/marketplace.py                                          328    223    32%   75, 98, 134, 190-210, 231-275, 294-326, 339-350, 370-420, 435-457, 469-477, 496-527, 540-550, 554-586, 590-604, 613-619, 623-631, 635-649, 654-682, 695-702
+agenticx/core/memory_extraction.py                                    320    239    25%   54, 70-71, 238-240, 249-315, 326-353, 357-364, 368-373, 377-397, 407-434, 438-447, 468-516, 551-559, 563, 580-602, 609-635, 639-649, 653, 665-687, 698-701, 705-708, 733-739, 743, 747-773, 782-820, 824-834, 838, 842-863, 886-889, 913-918
+agenticx/core/message.py                                               13      0   100%
+agenticx/core/offload/__init__.py                                       3      3     0%   13-22
+agenticx/core/offload/file_offloader.py                                56     56     0%   11-163
+agenticx/core/offload/protocol.py                                      70     70     0%   17-202
+agenticx/core/overflow_recovery.py                                     60     38    37%   47-50, 54-84, 88-89, 100-117
+agenticx/core/performance.py                                          256    256     0%   25-624
+agenticx/core/plan_notebook.py                                        224    185    17%   49-51, 141-190, 242-249, 279-301, 305-306, 328-398, 420-471, 491-536, 551-574, 594-608, 620-637, 652-679, 692, 713, 815-825, 844, 853-856, 860-864, 872, 878-882
+agenticx/core/plan_storage.py                                         125     77    38%   59-61, 65-71, 75-99, 142-154, 158-160, 164-169, 225, 235-237, 241, 245, 249, 253, 259, 283-284, 288-304, 308-332, 336-342, 346-357, 361-375
+agenticx/core/platform.py                                              25      0   100%
+agenticx/core/prompt.py                                               226    186    18%   46-81, 85-99, 132-140, 151-176, 185-235, 239-244, 248-250, 259-260, 264-271, 275-285, 289-298, 302-331, 335-347, 356-357, 361, 377-379, 385-418, 422, 426, 433, 457-473, 482-498, 510, 520
+agenticx/core/reflector.py                                            113     85    25%   40, 121-123, 141-172, 184-223, 235-243, 255-288, 310-313, 330-340, 349, 358-361
+agenticx/core/registry.py                                             228    163    29%   49, 83-91, 96, 109-158, 163-173, 185-202, 214-232, 236-237, 254-269, 285-311, 315-316, 320-321, 325-330, 341-346, 350-360, 364-369, 395-413, 417-425, 429-437, 451-470, 480, 485, 490, 495, 500
+agenticx/core/security.py                                             298    185    38%   24-27, 86-88, 92, 110, 156-170, 174, 180-210, 214-216, 220-221, 225-226, 241-261, 280-302, 309-314, 318-328, 332-340, 347-367, 375-393, 397-404, 408-410, 414, 421-422, 438-458, 462-470, 477-478, 482, 498-509, 516-525, 530-537, 554-572, 585-605, 618-631, 643-644, 652-653, 664-667, 672-673, 678-679, 684-685
+agenticx/core/self_repair.py                                           87     48    45%   86-91, 94-96, 99-113, 116-118, 121-135, 139-151
+agenticx/core/slave_parallel_executor.py                               51     34    33%   29-30, 37-68, 71-82
+agenticx/core/stream_accumulator.py                                    79     65    18%   36-42, 51, 60-63, 72, 81, 90-92, 101, 113-115, 124-128, 137-143, 146-172, 176-181
+agenticx/core/task.py                                                  12      0   100%
+agenticx/core/task_validator.py                                       298    235    21%   86-87, 107-132, 140-167, 171-202, 206-253, 258-279, 297-298, 320-354, 367-395, 402-414, 418-431, 435-445, 449-453, 457-460, 464-468, 472-477, 498-499, 520-539, 546-574, 587-649, 658, 663-668, 673, 677-680, 684-703
+agenticx/core/token_counter.py                                        147    109    26%   23-25, 85-91, 95-115, 119-128, 140-150, 160-171, 176-177, 199-219, 236-241, 268-290, 301-305, 324-342, 346-351, 364-367, 376, 385, 394
+agenticx/core/tool.py                                                  39     20    49%   43, 47, 58, 62-69, 79-86, 104-129
+agenticx/core/tool_system.py                                          128     88    31%   40-60, 64, 68, 72, 76, 81-85, 90-104, 109-112, 117-120, 125-128, 132-167, 172-207, 211-213, 217-245, 249-256, 266-267, 273-275, 281-283
+agenticx/core/tool_v2.py                                              256    131    49%   67-111, 143-145, 149-151, 155-157, 178, 182, 186, 231, 251, 272-285, 320-338, 354-360, 365, 370, 375, 380, 384, 393-419, 425, 440-446, 450, 473, 507-578
+agenticx/core/workflow.py                                              21      0   100%
+agenticx/core/workflow_engine.py                                      420    310    26%   110-116, 135-148, 167-181, 194-202, 206-208, 217-241, 246-251, 256-288, 292-316, 327-328, 332-333, 337-339, 343-345, 350, 357-358, 362, 390-393, 397-398, 402-403, 407-420, 424-441, 457-459, 463-465, 469-470, 474-475, 498-509, 527-599, 603-608, 612-619, 623-628, 632, 638-652, 660-670, 677-743, 750-767, 773-798, 806-825, 833-858, 866-883, 892, 902-921
+agenticx/data_sources/__init__.py                                       4      4     0%   7-18
+agenticx/data_sources/base.py                                          19     19     0%   7-35
+agenticx/data_sources/catalog.py                                        4      4     0%   7-51
+agenticx/data_sources/credential_store.py                              28     28     0%   7-54
+agenticx/data_sources/errors.py                                         7      7     0%   7-30
+agenticx/data_sources/plugins/__init__.py                               0      0   100%
+agenticx/data_sources/plugins/akshare_plugin.py                       100    100     0%   7-199
+agenticx/data_sources/plugins/ifind_plugin.py                          16     16     0%   7-43
+agenticx/data_sources/plugins/imf_plugin.py                            33     33     0%   7-82
+agenticx/data_sources/plugins/tushare_plugin.py                        52     52     0%   7-99
+agenticx/data_sources/plugins/world_bank_plugin.py                     40     40     0%   7-97
+agenticx/data_sources/registry.py                                      84     84     0%   7-143
+agenticx/data_suite/__init__.py                                         1      0   100%
+agenticx/data_suite/acl/__init__.py                                     4      4     0%   1-5
+agenticx/data_suite/acl/gate.py                                        42     42     0%   1-85
+agenticx/data_suite/acl/policy.py                                      35     35     0%   1-56
+agenticx/data_suite/acl/secure.py                                      21     21     0%   1-55
+agenticx/data_suite/audience/__init__.py                                3      3     0%   1-8
+agenticx/data_suite/audience/dsl.py                                    27     27     0%   1-42
+agenticx/data_suite/audience/pushdown.py                              110    110     0%   8-175
+agenticx/data_suite/channels/__init__.py                               11      0   100%
+agenticx/data_suite/channels/base.py                                   18      1    94%   20
+agenticx/data_suite/channels/clickhouse.py                             76     53    30%   35, 44-63, 66-82, 85-101, 106-118, 125-142
+agenticx/data_suite/channels/credentials.py                            66     49    26%   24-33, 37-40, 50-92, 103-112
+agenticx/data_suite/channels/fake.py                                   39     22    44%   31, 39-54, 57-70
+agenticx/data_suite/channels/file.py                                  168    122    27%   34, 37, 46, 62, 65-71, 74-76, 79-88, 91-102, 106-122, 126, 137, 145-153, 177-186, 189-193, 196-206, 209-224, 229-250, 253-272
+agenticx/data_suite/channels/grants.py                                 15      5    67%   14-17, 27
+agenticx/data_suite/channels/hive.py                                  125     93    26%   33, 39-51, 54-56, 60, 63, 67-72, 76, 81-92, 118-128, 131-141, 144-159, 164-188, 195-215
+agenticx/data_suite/channels/jdbc.py                                  114     89    22%   31-34, 55-56, 59-83, 86-102, 105-123, 128-142, 149-173
+agenticx/data_suite/channels/kafka.py                                 110     80    27%   29, 32-35, 38-40, 44-53, 57, 64-76, 102-111, 114-124, 127-142, 147-165, 168-183
+agenticx/data_suite/channels/registry.py                               17      8    53%   12, 15, 18-21, 24, 27
+agenticx/data_suite/dashboard/__init__.py                               4      4     0%   1-15
+agenticx/data_suite/dashboard/binder.py                                63     63     0%   1-90
+agenticx/data_suite/dashboard/explore.py                               27     27     0%   1-45
+agenticx/data_suite/dashboard/spec.py                                  36     36     0%   1-64
+agenticx/data_suite/governance/__init__.py                              6      0   100%
+agenticx/data_suite/governance/cleaning.py                             66     49    26%   20-21, 24-26, 35-36, 44-73, 82-107
+agenticx/data_suite/governance/dictionary.py                           29     11    62%   25, 28-38, 41-44, 47
+agenticx/data_suite/governance/lineage_graph.py                        32     21    34%   17, 21-33, 37-43
+agenticx/data_suite/governance/quality.py                              43     26    40%   19, 22-23, 27, 36-54, 57-58, 61-62
+agenticx/data_suite/governance/trust.py                                41     25    39%   21-24, 27-31, 34-55
+agenticx/data_suite/idmapping/__init__.py                               5      0   100%
+agenticx/data_suite/idmapping/admin.py                                168    111    34%   80, 84-89, 93-104, 113-129, 144-149, 152-173, 176-178, 184-187, 195-209, 212-216, 219-223, 226, 235-252, 255-258, 268-291, 294, 297, 300-302
+agenticx/data_suite/idmapping/engine.py                                89     69    22%   24-25, 29, 33, 37-127, 135-136
+agenticx/data_suite/idmapping/profile.py                               61     38    38%   29-32, 36-52, 56, 67-75, 85-93
+agenticx/data_suite/idmapping/store.py                                 34     21    38%   18-26, 29-35, 38-42
+agenticx/data_suite/jobs/__init__.py                                    6      0   100%
+agenticx/data_suite/jobs/dsl.py                                        59     29    51%   31-47, 70, 74-87
+agenticx/data_suite/jobs/lineage.py                                     9      1    89%   22
+agenticx/data_suite/jobs/nodes.py                                      48     34    29%   20-25, 29, 33-39, 43-55, 65-74, 84-94, 104-114
+agenticx/data_suite/jobs/ops.py                                       148     89    40%   34, 38, 77-80, 91-105, 108, 111, 120-126, 129-135, 142-143, 164-187, 190-193, 196-199, 210-235, 245-247, 264-266, 288-293, 306-313
+agenticx/data_suite/jobs/runner.py                                     42     24    43%   39-77
+agenticx/data_suite/jobs/scheduler.py                                  57     46    19%   11-22, 27-56, 64-69
+agenticx/data_suite/masking/__init__.py                                 3      3     0%   1-4
+agenticx/data_suite/masking/engine.py                                  38     38     0%   1-49
+agenticx/data_suite/masking/policy.py                                  29     29     0%   1-46
+agenticx/data_suite/pack/__init__.py                                    4      4     0%   1-5
+agenticx/data_suite/pack/loader.py                                     46     46     0%   1-73
+agenticx/data_suite/pack/manifest.py                                   28     28     0%   1-48
+agenticx/data_suite/pack/register.py                                  192    192     0%   1-280
+agenticx/data_suite/store/__init__.py                                   2      2     0%   3-12
+agenticx/data_suite/store/file_store.py                               235    235     0%   7-393
+agenticx/data_suite/tags/__init__.py                                    3      3     0%   1-9
+agenticx/data_suite/tags/catalog.py                                    46     46     0%   1-71
+agenticx/data_suite/tags/compute.py                                    36     36     0%   1-54
+agenticx/delivery/__init__.py                                           3      3     0%   7-10
+agenticx/delivery/bootstrap.py                                         80     80     0%   7-114
+agenticx/delivery/config.py                                            82     82     0%   7-130
+agenticx/delivery/orchestrator.py                                     162    162     0%   7-257
+agenticx/delivery/plan_mdc.py                                         128    128     0%   7-288
+agenticx/delivery/stage_agents.py                                     138    138     0%   14-302
+agenticx/delivery/stages.py                                           102    102     0%   7-268
+agenticx/delivery/store.py                                             87     87     0%   7-126
+agenticx/delivery/worktree.py                                          43     43     0%   7-84
+agenticx/deploy/__init__.py                                             7      7     0%   20-106
+agenticx/deploy/base.py                                                56     56     0%   7-281
+agenticx/deploy/components/__init__.py                                 24     24     0%   7-46
+agenticx/deploy/components/docker.py                                  157    157     0%   10-435
+agenticx/deploy/components/local.py                                    73     73     0%   7-249
+agenticx/deploy/components/volcengine/__init__.py                      15     15     0%   10-38
+agenticx/deploy/components/volcengine/component.py                    151    151     0%   14-457
+agenticx/deploy/components/volcengine/config_generator.py              35     35     0%   11-161
+agenticx/deploy/components/volcengine/dockerfile_generator.py          44     44     0%   12-171
+agenticx/deploy/components/volcengine/wrapper.py                       89     89     0%   10-304
+agenticx/deploy/config.py                                             153    153     0%   7-377
+agenticx/deploy/credentials.py                                         99     99     0%   7-264
+agenticx/deploy/environment.py                                         93     93     0%   7-245
+agenticx/deploy/types.py                                              132    132     0%   7-257
+agenticx/embeddings/__init__.py                                         8      0   100%
+agenticx/embeddings/bailian.py                                        217    187    14%   12-15, 20-22, 48-113, 117, 121-142, 148, 152-162, 166-176, 187-199, 204-224, 228-254, 258-270, 274-286, 292-398, 402-414, 418-419, 423-428
+agenticx/embeddings/base.py                                             8      1    88%   11
+agenticx/embeddings/config.py                                           4      1    75%   6
+agenticx/embeddings/litellm.py                                         19     14    26%   6-14, 17-22
+agenticx/embeddings/openai.py                                          24     19    21%   6-15, 18-29
+agenticx/embeddings/router.py                                          51     36    29%   7, 11-22, 25-32, 35-42, 46-47, 51, 55, 59, 63-64, 68-69, 73, 77
+agenticx/embeddings/siliconflow.py                                     34     25    26%   8-12, 16, 19-42, 47-51
+agenticx/evaluation/__init__.py                                         7      7     0%   10-35
+agenticx/evaluation/evalset.py                                        119    119     0%   7-333
+agenticx/evaluation/fault_injection.py                                118    118     0%   7-258
+agenticx/evaluation/llm_judge.py                                      168    168     0%   14-524
+agenticx/evaluation/reliability_runner.py                             191    191     0%   7-393
+agenticx/evaluation/runner.py                                         140    140     0%   7-379
+agenticx/evaluation/span_evaluator.py                                 115    115     0%   10-445
+agenticx/evaluation/trace_converter.py                                 89     89     0%   12-326
+agenticx/evaluation/trajectory_matcher.py                              92     92     0%   7-307
+agenticx/extensions/__init__.py                                         3      3     0%   7-18
+agenticx/extensions/bundle.py                                         195    195     0%   53-407
+agenticx/extensions/installer.py                                      240    240     0%   20-477
+agenticx/extensions/registry_hub.py                                   501    501     0%   30-881
+agenticx/extensions/skill_watcher.py                                   81     81     0%   7-121
+agenticx/extensions/skillhub_adapter.py                               385    385     0%   12-719
+agenticx/extensions/skillhub_install_guard.py                          67     67     0%   12-180
+agenticx/flow/__init__.py                                               7      0   100%
+agenticx/flow/base.py                                                 217    153    29%   92, 94, 96, 98, 106-131, 153-160, 210-218, 223-232, 237, 242, 247, 252, 269, 280-322, 338-372, 380-398, 412-424, 435-459, 473-477, 491-502, 520-557, 561-562, 570
+agenticx/flow/decorators.py                                           159    122    23%   61, 66, 71, 85-97, 125-151, 155-157, 161, 165-180, 267-295, 327-354, 388-415, 447-457, 484-494
+agenticx/flow/execution_plan.py                                       240    137    43%   130, 134-136, 140-142, 146-149, 198-204, 208-209, 213-215, 219, 227-229, 233-236, 240, 297-309, 314-316, 321, 326, 331, 336, 347-350, 357-360, 371-379, 383-388, 396-397, 417-424, 435-440, 444-448, 456-469, 477-481, 504-562, 572-600, 604, 609, 617
+agenticx/flow/execution_plan_manager.py                               224    170    24%   88, 91, 94, 97-100, 103, 113-115, 118-119, 122-124, 127-133, 136-141, 144-149, 205-208, 220-226, 240-250, 268-274, 282-288, 299-315, 324-326, 338-342, 346-347, 358-364, 390-402, 418-426, 448-471, 486-493, 504-511, 523-531, 544-546, 555-556, 569-570, 574-575, 579-580, 595-607, 614, 617-618
+agenticx/flow/state.py                                                 52     29    44%   96-101, 106, 111-113, 122-124, 135, 146, 159, 172, 176-180, 188, 206-211
+agenticx/flow/types.py                                                 25      0   100%
+agenticx/gateway/__init__.py                                            3      3     0%   7-10
+agenticx/gateway/adapters/__init__.py                                   5      5     0%   7-12
+agenticx/gateway/adapters/base.py                                       4      4     0%   7-13
+agenticx/gateway/adapters/dingtalk.py                                  65     65     0%   7-94
+agenticx/gateway/adapters/feishu.py                                   126    126     0%   7-187
+agenticx/gateway/adapters/qqbot.py                                     61     61     0%   10-97
+agenticx/gateway/adapters/slack.py                                     74     74     0%   7-109
+agenticx/gateway/adapters/telegram.py                                  53     53     0%   7-78
+agenticx/gateway/adapters/wechat_ilink.py                             836    836     0%   10-1517
+agenticx/gateway/adapters/wecom.py                                    128    128     0%   7-176
+agenticx/gateway/app.py                                               588    588     0%   7-821
+agenticx/gateway/client.py                                            742    742     0%   7-1250
+agenticx/gateway/config.py                                             94     94     0%   7-139
+agenticx/gateway/connect_page.py                                       14     14     0%   7-34
+agenticx/gateway/connect_session.py                                    90     90     0%   7-145
+agenticx/gateway/crypto_utils.py                                       52     52     0%   7-70
+agenticx/gateway/device_manager.py                                    101    101     0%   7-131
+agenticx/gateway/feishu_longconn.py                                   678    678     0%   15-1318
+agenticx/gateway/im_confirm.py                                         75     75     0%   7-115
+agenticx/gateway/im_group_speaker.py                                  156    156     0%   7-283
+agenticx/gateway/im_wechat_files.py                                   263    263     0%   7-400
+agenticx/gateway/im_wechat_inbound.py                                 240    240     0%   7-351
+agenticx/gateway/mobile_stream.py                                      36     36     0%   6-57
+agenticx/gateway/mobile_tokens.py                                      73     73     0%   7-103
+agenticx/gateway/models.py                                             33     33     0%   7-57
+agenticx/gateway/router.py                                             83     83     0%   7-213
+agenticx/gateway/user_device_map.py                                   118    118     0%   7-164
+agenticx/hooks/__init__.py                                             22      8    64%   74, 79, 84, 89, 94, 99-102
+agenticx/hooks/config.py                                               54     42    22%   23-33, 39-43, 47-56, 62-78
+agenticx/hooks/declarative.py                                         266    190    29%   82, 110, 114-115, 133-135, 139, 142, 149-169, 179-226, 243-265, 282-313, 333-338, 348, 352, 359, 362, 370-378, 386-390, 393, 396, 405-413, 417, 421-430, 440-552, 557-582, 591-608, 612-622, 626-635
+agenticx/hooks/fire_and_forget.py                                      11     11     0%   6-26
+agenticx/hooks/frontmatter.py                                          35     15    57%   36-58
+agenticx/hooks/list_api.py                                             47     47     0%   7-120
+agenticx/hooks/llm_hooks.py                                           117     80    32%   78-81, 118-122, 145-149, 158, 167, 187-194, 214-221, 236-242, 257-263, 278-280, 292-303, 315-330, 334-343, 347-358
+agenticx/hooks/loader.py                                              191    146    24%   78-105, 110, 116-145, 149-158, 168-189, 209-271, 276-289, 306-312, 317-322, 334-364
+agenticx/hooks/registry.py                                             66     42    36%   34-35, 38-47, 50, 53, 56, 69-83, 88-108, 115, 134-142
+agenticx/hooks/status.py                                               20      3    85%   28-29, 47
+agenticx/hooks/tool_hooks.py                                          117     79    32%   41, 82-85, 122-126, 153-157, 166, 175, 195-202, 222-229, 244-250, 265-271, 286-288, 300-308, 320-336, 340-349, 353-366
+agenticx/hooks/types.py                                                23      2    91%   13-14
+agenticx/integrations/mem0/__init__.py                                  4      0   100%
+agenticx/integrations/mem0/llms/__init__.py                             0      0   100%
+agenticx/integrations/mem0/llms/agenticx_llm.py                        27     17    37%   27-44, 65-70, 85, 98, 104
+agenticx/integrations/mem0/memory/__init__.py                           0      0   100%
+agenticx/integrations/mem0/memory/main.py                             809    735     9%   81-110, 119-158, 162-168, 172-183, 227-282, 285-451, 454-462, 474-505, 535-573, 576-612, 641-688, 691-726, 739-744, 753-755, 766-790, 802-803, 806-832, 843-870, 873-924, 927-941, 950-966, 974-999, 1003-1009, 1013-1024, 1056-1108, 1117-1290, 1293-1301, 1313-1344, 1374-1415, 1418-1454, 1484-1533, 1536-1573, 1586-1592, 1601-1603, 1614-1642, 1654-1655, 1658-1689, 1701-1738, 1741-1795, 1798-1815, 1824-1841
+agenticx/knowledge/__init__.py                                         14      0   100%
+agenticx/knowledge/base.py                                             33      7    79%   41, 73-74, 111, 124-126
+agenticx/knowledge/chunkers/__init__.py                                45     16    64%   65-71, 94-104, 113, 122, 131, 152
+agenticx/knowledge/chunkers/agentic_chunker.py                        129    111    14%   24-27, 33-64, 68-98, 102-144, 148-172, 176-213, 217-236, 247-275
+agenticx/knowledge/chunkers/csv_row_chunker.py                         56     44    21%   21-24, 28-48, 57-94, 98-122
+agenticx/knowledge/chunkers/document_chunker.py                       111     96    14%   22-25, 29-49, 58-68, 72-126, 130-244, 248-274
+agenticx/knowledge/chunkers/fixed_size_chunker.py                      68     55    19%   21-23, 36-61, 65-85, 94-127, 131-163
+agenticx/knowledge/chunkers/framework.py                              271    187    31%   55-71, 75-82, 99, 104, 109, 116-121, 137-143, 147-149, 153-165, 186, 199-203, 211, 224-228, 248-278, 295-312, 323-330, 344, 354-355, 367-404, 415-522, 533-561, 573, 577
+agenticx/knowledge/chunkers/recursive_chunker.py                       86     71    17%   21-23, 36-61, 65-84, 93-113, 117-160, 164-181, 185-207
+agenticx/knowledge/chunkers/semantic_chunker.py                       242    222     8%   22-26, 39-64, 68-111, 121-123, 127-183, 187-235, 239-325, 329-360, 364-419, 423-433, 437-477
+agenticx/knowledge/config.py                                          269    162    40%   48, 52-61, 65, 71-73, 89, 93-106, 110, 115-117, 134, 139-141, 145-146, 150-151, 168, 172-179, 183, 188-190, 208, 212-217, 221, 233, 249-267, 280-312, 324-357, 368-382, 386, 397-408, 417, 420, 432-439, 443-450, 461-469, 478-481, 489-499, 507, 519-526, 534
+agenticx/knowledge/document.py                                        106     51    52%   46-66, 72-92, 111-120, 133-148, 153, 158, 163, 167-177, 182, 200-219, 226-232, 236-238, 242-244, 248, 252, 255
+agenticx/knowledge/extractor.py                                       300    207    31%   72, 85-86, 110-116, 120-125, 129, 133, 137, 144, 199, 203, 207-268, 272-300, 304-341, 348, 352-367, 371-478, 482-517, 521-536, 543-550, 554-555, 559-560, 564-565, 569-570, 575-581, 585-614, 624-636, 640, 643
+agenticx/knowledge/graphers/__init__.py                                18     10    44%   78-88
+agenticx/knowledge/graphers/builder.py                                237    211    11%   9-10, 26-93, 104-235, 243-246, 255-307, 311-317, 321-341, 346-355, 359-380, 385-394, 398-434, 438, 442
+agenticx/knowledge/graphers/community.py                              101     80    21%   9-10, 14-15, 24-26, 30-37, 42-48, 53-59, 64-75, 79-98, 108-128, 136-162, 166-185, 189-205, 210-229, 238-240
+agenticx/knowledge/graphers/config.py                                 155     41    74%   21, 25-27, 37, 41-43, 56, 60, 73, 77, 89, 93, 106, 110, 123, 127, 145, 149-151, 173, 177-184, 210, 215-225
+agenticx/knowledge/graphers/incremental/__init__.py                     6      0   100%
+agenticx/knowledge/graphers/incremental/extract.py                     81     50    38%   23-31, 44-53, 68-69, 80-81, 108-135
+agenticx/knowledge/graphers/incremental/index.py                      101     78    23%   20, 31-35, 38-46, 50-56, 62-69, 72-82, 85-101, 104, 107, 111-118, 121-136
+agenticx/knowledge/graphers/incremental/publish.py                    163     85    48%   27-30, 42-43, 46-49, 58-59, 65-66, 122-172, 203, 209-210, 228-230, 242-244, 253-254, 260-262, 300-319
+agenticx/knowledge/graphers/incremental/sources.py                    102     64    37%   16-21, 26-27, 38-46, 49, 58-60, 77, 80, 89-103, 110-113, 116-121, 124-126, 132, 135-142, 145, 148-152
+agenticx/knowledge/graphers/incremental/sync.py                       123     83    33%   46-49, 52, 68, 87-90, 93-98, 101-103, 109-112, 115, 134-149, 152-239
+agenticx/knowledge/graphers/models.py                                 281    156    44%   16-17, 80, 83, 87, 91, 110-127, 148, 151, 155-159, 163, 188-206, 239-265, 280-289, 293, 297, 301-315, 322-328, 332-349, 354-379, 383, 387, 391-395, 402, 409, 416-422, 426-471, 475, 486-487, 492-517, 522-524, 528, 553-560, 568-626
+agenticx/knowledge/graphers/neo4j_exporter.py                         144    144     0%   6-371
+agenticx/knowledge/graphers/optimizer.py                              220    204     7%   7-8, 17-21, 25-78, 82-121, 128-158, 162-176, 180-202, 207-228, 232-265, 270-305, 309-354, 358-398
+agenticx/knowledge/graphers/schema_generator.py                       182    167     8%   16-32, 43-72, 76-118, 129-178, 189-240, 244-259, 269-284, 288-305, 309-336, 348-357
+agenticx/knowledge/graphers/spo_extractor.py                          556    527     5%   19-47, 59-92, 106-155, 159-225, 229-299, 304-335, 339-348, 352-401, 406-440, 444-470, 474-515, 519-531, 535-546, 550-563, 567-627, 631-664, 668-734, 739-847, 851-870, 874-916, 920-939, 943-973, 977-1128
+agenticx/knowledge/graphers/store/__init__.py                           6      0   100%
+agenticx/knowledge/graphers/store/factory.py                           21     16    24%   26-46
+agenticx/knowledge/graphers/store/file.py                              67     44    34%   21-23, 27, 30-37, 40-46, 52-53, 56-57, 60-63, 66-69, 72, 75, 78-81, 84, 87, 96, 104-107
+agenticx/knowledge/graphers/store/memory.py                            47     18    62%   30-41, 44-47, 54-55, 65-66, 69-70, 95
+agenticx/knowledge/graphers/store/neo4j_store.py                      181    142    22%   29-32, 36-38, 42-46, 50-60, 82-91, 95, 98-103, 106-108, 111-113, 116-122, 127-158, 166-198, 208-217, 220-229, 232-242, 245-255, 262-279, 290-303, 306-325, 335-339, 353-365, 369-390, 407-428, 441, 445
+agenticx/knowledge/graphers/store/protocol.py                           3      0   100%
+agenticx/knowledge/graphers/store/query.py                             45     13    71%   36, 44, 48, 58, 80-93
+agenticx/knowledge/graphers/store/query_cli.py                         75     75     0%   11-159
+agenticx/knowledge/graphers/validators.py                             112     97    13%   5-6, 16-19, 23-36, 40-109, 113-127, 131-142, 146-147, 151-165, 169-173, 177-209, 213-215
+agenticx/knowledge/knowledge.py                                       190    160    16%   39-48, 58-75, 86-117, 129-142, 154-181, 193-210, 216-226, 232-248, 259-289, 294-303, 308-318, 323-331, 336-343, 354-363, 372-379, 389-395, 399, 404
+agenticx/knowledge/lifecycle/__init__.py                                7      0   100%
+agenticx/knowledge/lifecycle/idmap_hook.py                             62     47    24%   23-46, 56-91, 102-109
+agenticx/knowledge/lifecycle/issues.py                                127     81    36%   38-39, 57-73, 77, 92, 108, 122-125, 128-134, 137-139, 146-182, 185-188, 197-211, 219-226
+agenticx/knowledge/lifecycle/model.py                                  60      5    92%   55, 57, 62, 75, 116
+agenticx/knowledge/lifecycle/quality.py                               123    100    19%   21-27, 30, 54-67, 71-95, 99-114, 122-148, 152-158, 162-192, 197-216, 224-242
+agenticx/knowledge/lifecycle/store.py                                  77     29    62%   30-33, 57-60, 75-80, 85-86, 95, 107-112, 116-117, 135-137, 156-158
+agenticx/knowledge/lifecycle/trail.py                                  77     45    42%   30-42, 46-48, 60, 76-79, 82-87, 90-92, 98-103, 106-107, 110, 123-128
+agenticx/knowledge/processing.py                                      260    153    41%   101-112, 128, 135-136, 184, 192-220, 229, 233-238, 245, 253-286, 295, 299-304, 311, 319-343, 352, 356-361, 377-385, 389-397, 413-450, 464, 481-496, 510-539, 554-555, 563, 574-590, 604-625
+agenticx/knowledge/readers/__init__.py                                 35     17    51%   62-63, 85-107, 116
+agenticx/knowledge/readers/csv_reader.py                              180    157    13%   41-48, 64-84, 88, 92-97, 103-147, 157-208, 220-261, 270-293, 302-357, 361-365, 369-378, 382, 385
+agenticx/knowledge/readers/json_reader.py                             138    117    15%   34-38, 54-74, 78, 82-87, 91-153, 165-208, 212-240, 244-257, 261-276, 280-289, 293, 296
+agenticx/knowledge/readers/pdf_reader.py                              222    202     9%   41-52, 58-82, 86-96, 113-177, 189-191, 196-244, 249-333, 338-388, 393-443, 455-459, 468, 471
+agenticx/knowledge/readers/powerpoint_reader.py                        70     55    21%   33-39, 43-49, 66-103, 115-117, 122-174, 183, 186
+agenticx/knowledge/readers/text_reader.py                              81     64    21%   34-37, 53-97, 109-111, 123-149, 162-168, 180-197, 206, 213
+agenticx/knowledge/readers/web_reader.py                              188    168    11%   40-56, 62-86, 92-110, 126-177, 182-206, 211-233, 238-269, 274-368, 380-383, 392, 395
+agenticx/knowledge/readers/word_reader.py                             135    115    15%   31-36, 40-58, 62-66, 70-75, 92-149, 161-163, 168-184, 189-234, 239-261, 265-292, 301, 304
+agenticx/knowledge/search_orchestration.py                             65     43    34%   50-53, 60-97, 105-116, 120-133
+agenticx/learning/__init__.py                                           5      5     0%   7-12
+agenticx/learning/analyzer.py                                          99     99     0%   13-176
+agenticx/learning/config.py                                            66     66     0%   25-136
+agenticx/learning/drift_detector.py                                   102    102     0%   7-159
+agenticx/learning/evidence.py                                          85     85     0%   18-173
+agenticx/learning/gepa_proposer.py                                     89     89     0%   7-190
+agenticx/learning/instinct.py                                          40     40     0%   7-79
+agenticx/learning/instinct_store.py                                    32     32     0%   7-56
+agenticx/learning/loop_review.py                                      166    166     0%   21-297
+agenticx/learning/observer.py                                          85     85     0%   11-152
+agenticx/learning/session_review_hook.py                              207    207     0%   14-433
+agenticx/learning/skill_condition_filter.py                            74     74     0%   23-149
+agenticx/learning/skill_deprecation.py                                 22     22     0%   12-67
+agenticx/learning/skill_quality_gate.py                               103    103     0%   19-225
+agenticx/learning/skill_usage_tracker.py                               84     84     0%   13-157
+agenticx/learning/trajectory/__init__.py                                2      2     0%   1-3
+agenticx/learning/trajectory/__main__.py                               81     81     0%   9-116
+agenticx/learning/trajectory/decision_mining.py                        67     67     0%   19-157
+agenticx/learning/trajectory/decision_policy.py                        29     29     0%   13-74
+agenticx/learning/trajectory/evolution.py                             119    119     0%   7-212
+agenticx/learning/trajectory/forest.py                                133    133     0%   7-195
+agenticx/learning/trajectory/harbor_collector.py                       63     63     0%   6-95
+agenticx/learning/trajectory/memory.py                                137    137     0%   9-216
+agenticx/learning/trajectory/policy.py                                 36     36     0%   7-93
+agenticx/learning/trajectory/regularization.py                        170    170     0%   27-316
+agenticx/learning/trajectory/replay.py                                 90     90     0%   7-127
+agenticx/learning/trajectory/scheduler.py                             115    115     0%   29-231
+agenticx/learning/trajectory/schema.py                                 53     53     0%   11-72
+agenticx/learning/trajectory/session_collector.py                      29     29     0%   6-59
+agenticx/learning/trajectory/store.py                                  45     45     0%   2-55
+agenticx/learning/trajectory/task_pool.py                              87     87     0%   20-178
+agenticx/learning/trajectory/task_split.py                             30     30     0%   11-55
+agenticx/llms/__init__.py                                              43      4    91%   89-93
+agenticx/llms/ark_provider.py                                         210    171    19%   115-158, 172, 192-212, 228-233, 246-295, 330-363, 384-406, 425-450, 459-528, 549-576, 592-593, 605-606, 619, 644-658
+agenticx/llms/auth_profile.py                                         117     77    34%   35-36, 52-55, 59, 62-67, 70-77, 80-90, 93-100, 103-110, 113-118, 124-132, 135-138, 141-152, 155-167
+agenticx/llms/bailian_provider.py                                     455    410    10%   19-30, 35-42, 47-55, 60-64, 68-71, 79-93, 109-110, 119-120, 124-217, 221-244, 249-285, 289-291, 299-301, 310-381, 387-425, 429-456, 465-551, 562-652, 656-687, 691-745, 771-772, 784-787, 792, 813-826
+agenticx/llms/base.py                                                  21      2    90%   95, 104
+agenticx/llms/deepseek_provider.py                                     28     16    43%   26-35, 43-46, 50-51
+agenticx/llms/failover.py                                              85     62    27%   54-61, 69, 73-76, 85-86, 94-104, 108-118, 124-134, 140-152, 158-168
+agenticx/llms/kimi_provider.py                                        282    234    17%   31-34, 43-48, 52, 56-57, 65, 73, 80-93, 97-107, 114-120, 124-126, 131-144, 151-192, 197-213, 218-222, 228-256, 262-289, 293-320, 324-350, 359-449, 454-455, 459-460, 464-465, 469-473, 478-504, 528-529, 534
+agenticx/llms/litellm_provider.py                                     370    333    10%   16-20, 35-49, 54-59, 73-80, 91-106, 116-128, 133-145, 170-172, 181-188, 192-194, 200-235, 241-276, 281-321, 330-431, 436-490, 497, 501-613, 639-640, 644-650
+agenticx/llms/llm_factory.py                                           37     37     0%   5-116
+agenticx/llms/mimo_provider.py                                         28     16    43%   25-34, 42-45, 49-50
+agenticx/llms/minimax_provider.py                                      22     11    50%   28-39, 43
+agenticx/llms/provider_display.py                                      94     94     0%   7-170
+agenticx/llms/provider_fault.py                                        64     64     0%   10-136
+agenticx/llms/provider_resolver.py                                    161    126    22%   33-34, 38-46, 62-92, 102-133, 145-151, 188-191, 199-201, 211-224, 228-253, 262-300
+agenticx/llms/qianfan_provider.py                                       9      1    89%   26
+agenticx/llms/response.py                                              23      0   100%
+agenticx/llms/response_cache.py                                        40     26    35%   27-31, 34, 38-50, 54-58, 62, 66
+agenticx/llms/sampling_params.py                                       36     29    19%   13-16, 28-35, 55-60, 71-82, 91-93
+agenticx/llms/transcript_sanitizer.py                                  76     55    28%   50-61, 64-68, 71-72, 75-83, 86-94, 97-104, 107-124
+agenticx/llms/typesafe_client.py                                       46     46     0%   3-85
+agenticx/llms/typesafe_config.py                                       83     83     0%   9-131
+agenticx/llms/vision.py                                                91     91     0%   7-155
+agenticx/llms/vision_fallback.py                                       81     81     0%   7-134
+agenticx/llms/zhipu_provider.py                                        36     23    36%   22-33, 41-43, 54-56, 64, 72, 77, 85, 92
+agenticx/longrun/__init__.py                                            5      5     0%   7-17
+agenticx/longrun/bootstrap.py                                          39     39     0%   7-60
+agenticx/longrun/orchestrator.py                                      226    226     0%   7-335
+agenticx/longrun/retry_policy.py                                       22     22     0%   7-35
+agenticx/longrun/sources/__init__.py                                   20     20     0%   7-44
+agenticx/longrun/sources/cron_source.py                                79     79     0%   7-103
+agenticx/longrun/sources/linear_source.py                              48     48     0%   7-87
+agenticx/longrun/sources/manual_source.py                              14     14     0%   7-28
+agenticx/longrun/sources/project_feature_source.py                     63     63     0%   11-111
+agenticx/longrun/stall_detector.py                                     28     28     0%   7-42
+agenticx/longrun/studio_routes.py                                     106    106     0%   7-156
+agenticx/longrun/task_hooks.py                                         17     17     0%   7-55
+agenticx/longrun/task_workspace.py                                     58     58     0%   7-123
+agenticx/longrun/token_accountant.py                                   27     27     0%   7-42
+agenticx/managed/__init__.py                                            4      0   100%
+agenticx/managed/actions.py                                            67     67     0%   7-145
+agenticx/managed/api_client.py                                        222    222     0%   7-366
+agenticx/managed/budget.py                                             84     84     0%   7-147
+agenticx/managed/builder.py                                            83     83     0%   7-165
+agenticx/managed/credential_extension.py                              131    131     0%   7-242
+agenticx/managed/credentials.py                                       236    236     0%   10-428
+agenticx/managed/egress_policy.py                                      90     90     0%   7-134
+agenticx/managed/errors.py                                             34      6    82%   28-32, 35
+agenticx/managed/eval_iterate.py                                       67     67     0%   7-134
+agenticx/managed/evaluation.py                                        254    254     0%   7-412
+agenticx/managed/events/__init__.py                                     6      6     0%   7-37
+agenticx/managed/events/adapter.py                                    310    310     0%   7-554
+agenticx/managed/events/broadcast.py                                  118    118     0%   7-179
+agenticx/managed/events/sqlite_store.py                               258    258     0%   7-536
+agenticx/managed/events/state_machine.py                              210    210     0%   7-434
+agenticx/managed/events/store.py                                       45     45     0%   7-88
+agenticx/managed/extensions.py                                         82     82     0%   11-167
+agenticx/managed/gateway_llm.py                                        51     51     0%   7-126
+agenticx/managed/host/__init__.py                                       8      8     0%   7-38
+agenticx/managed/host/actor.py                                        508    508     0%   7-835
+agenticx/managed/host/app.py                                          108    108     0%   7-187
+agenticx/managed/host/auth.py                                          37     37     0%   7-73
+agenticx/managed/host/config.py                                       285    285     0%   7-479
+agenticx/managed/host/continuation.py                                  90     90     0%   7-151
+agenticx/managed/host/ingest.py                                       110    110     0%   7-248
+agenticx/managed/host/models.py                                        19     19     0%   7-38
+agenticx/managed/host/platform_tools.py                                44     44     0%   7-75
+agenticx/managed/host/registry.py                                      29     29     0%   7-84
+agenticx/managed/host/remote_executor.py                               28     28     0%   7-66
+agenticx/managed/host/routes.py                                       198    198     0%   7-378
+agenticx/managed/host/service.py                                      310    310     0%   7-600
+agenticx/managed/host/tasks.py                                        568    568     0%   7-947
+agenticx/managed/host/threads.py                                      615    615     0%   10-1191
+agenticx/managed/host/work_queue.py                                   153    153     0%   7-448
+agenticx/managed/host/worker_routes.py                                171    171     0%   7-318
+agenticx/managed/ids.py                                                27     27     0%   7-52
+agenticx/managed/llm.py                                                18      2    89%   36-37
+agenticx/managed/manifest.py                                          435    321    26%   156, 160-161, 165, 169, 173, 177, 187-197, 207-224, 228-236, 240-243, 255-259, 269-282, 286-302, 306-347, 351-386, 390-409, 413-429, 436-517, 521-538, 542-568, 572, 580-583, 588-642, 656-666
+agenticx/managed/mcp_session.py                                       190    190     0%   10-303
+agenticx/managed/memory.py                                            383    383     0%   11-791
+agenticx/managed/memory_dream.py                                      209    209     0%   10-321
+agenticx/managed/memory_mount.py                                      673    673     0%   10-1087
+agenticx/managed/metering.py                                           51     51     0%   8-130
+agenticx/managed/permissions.py                                       148    148     0%   7-335
+agenticx/managed/protocol.py                                          329     44    87%   130-132, 188-190, 212-217, 488-490, 532-567, 571, 576-579, 583
+agenticx/managed/redaction.py                                         126    126     0%   9-184
+agenticx/managed/spec.py                                              165    165     0%   7-304
+agenticx/managed/sse.py                                                83     83     0%   7-130
+agenticx/managed/templates/__init__.py                                  2      0   100%
+agenticx/managed/templates/data_suite/__init__.py                       8      0   100%
+agenticx/managed/templates/data_suite/dict_drift.py                    51     29    43%   24-31, 45, 48-90
+agenticx/managed/templates/data_suite/nl2sql.py                       135     36    73%   35, 37, 60-90, 107, 109-126, 133, 136, 145, 152, 155, 158, 162, 212, 234-235, 270-271
+agenticx/managed/templates/data_suite/quality_patrol.py                36     15    58%   23-30, 44, 52-63
+agenticx/managed/templates/data_suite/schedule_tick.py                 72     51    29%   25-30, 44-60, 84-140
+agenticx/managed/templates/data_suite/types.py                         16      0   100%
+agenticx/managed/templates/data_suite/webhook.py                       31     15    52%   17, 20, 27-29, 32-45, 50, 53-57
+agenticx/managed/templates/data_suite/write_guards.py                  97     50    48%   64-67, 95, 105, 114-117, 125-127, 136-139, 149-167, 175-188, 196
+agenticx/managed/testing.py                                            89     37    58%   26, 57-58, 62, 69-70, 88-90, 93-99, 104-110, 120-122, 125-134, 137
+agenticx/managed/worker/__init__.py                                     4      4     0%   7-17
+agenticx/managed/worker/broker.py                                     143    143     0%   7-221
+agenticx/managed/worker/client.py                                     136    136     0%   7-301
+agenticx/managed/worker/runner.py                                     226    226     0%   7-420
+agenticx/memory/__init__.py                                            26      7    73%   44-50
+agenticx/memory/base.py                                                55     25    55%   27-36, 48, 56-63, 82-83, 226, 238-244
+agenticx/memory/camel_memories.py                                     407    407     0%   12-931
+agenticx/memory/compaction_flush.py                                    32     15    53%   109-110, 118-129, 135-140, 147
+agenticx/memory/component.py                                          238    199    16%   36-38, 74-88, 92, 118-176, 199-264, 273-330, 347-352, 360-376, 380-393, 397-430, 434-465, 469-477, 482-499, 504-526, 531-540, 545-566, 586-604, 608, 612-616
+agenticx/memory/context_creators/__init__.py                            2      2     0%   8-10
+agenticx/memory/context_creators/score_based.py                       127    127     0%   10-367
+agenticx/memory/core_memory.py                                        264    231    12%   39-43, 50-86, 109-134, 147-151, 170-214, 218-225, 229-239, 256-267, 278-306, 319-340, 344-349, 353-360, 364-383, 393-434, 438-444, 448-464, 468-497, 508-523, 527-542, 551-568, 572-583, 587, 596-612, 616-619
+agenticx/memory/episodic_memory.py                                    291    238    18%   39, 64-68, 72-74, 78, 99-109, 136-185, 206-233, 237, 245-251, 255-256, 265-278, 287-305, 310-336, 340-362, 366-373, 385-401, 411-463, 473-504, 508-522, 526-530, 541-556, 560-563, 572-588, 592-614, 618-619, 628-644, 648-654
+agenticx/memory/graph/__init__.py                                       4      0   100%
+agenticx/memory/graph/clients.py                                       86     73    15%   16-18, 27, 32-33, 37-39, 48-57, 61-68, 72-76, 81-91, 102-175
+agenticx/memory/graph/config.py                                       131     90    31%   66-74, 78-82, 87-196, 201
+agenticx/memory/graph/deps.py                                          64     64     0%   7-102
+agenticx/memory/graph/dto.py                                           43     32    26%   14-20, 24-29, 33-39, 43-47, 52, 64-65, 84-86, 101
+agenticx/memory/graph/embedder.py                                      26     26     0%   7-51
+agenticx/memory/graph/episode_delete.py                               107    107     0%   11-190
+agenticx/memory/graph/episode_delete_worker.py                         17     17     0%   7-32
+agenticx/memory/graph/executor.py                                      37     37     0%   11-65
+agenticx/memory/graph/forget.py                                        94     94     0%   7-132
+agenticx/memory/graph/graph_rebuild.py                                123    123     0%   17-197
+agenticx/memory/graph/graph_recovery.py                               117    117     0%   13-202
+agenticx/memory/graph/group_id.py                                      58     44    24%   24-29, 34-37, 42, 47, 62-79, 88-93, 104-105, 115-126
+agenticx/memory/graph/json_compat.py                                  322    291    10%   37, 42-52, 57-82, 86-91, 95-105, 109-112, 116-121, 125-132, 136-153, 157-158, 162-170, 174-187, 197-259, 264-274, 278, 287-291, 296-306, 315-328, 333-355, 360-386, 396-411, 416-439
+agenticx/memory/graph/llm_client.py                                    60     60     0%   7-140
+agenticx/memory/graph/pins.py                                          58     45    22%   20, 24-41, 45-47, 52-56, 61-78, 83
+agenticx/memory/graph/retention.py                                     52     47    10%   15-30, 46-87
+agenticx/memory/graph/routes.py                                       241    241     0%   7-375
+agenticx/memory/graph/status.py                                        96     73    24%   22, 26, 44-45, 48-58, 61-63, 66-67, 70-73, 76-85, 89-97, 100-105, 108-123, 126-137, 140, 144-158
+agenticx/memory/graph/store.py                                        440    375    15%   33, 40, 48-53, 62-87, 98-117, 132-136, 141-143, 147-148, 152-157, 161-163, 166-173, 180-182, 185-191, 197-223, 232-247, 250-252, 256-273, 277-279, 282-361, 373-375, 395-427, 436-438, 449-471, 474-476, 481-485, 496-498, 517-540, 543-545, 548-560, 563-565, 568-571, 574-576, 587-643, 658-660, 677-696, 699-701, 710-713, 722-728, 733-755, 759-776, 781-800, 805-824
+agenticx/memory/graph/writer.py                                       142    142     0%   7-263
+agenticx/memory/hierarchical.py                                       140     70    50%   31, 74-75, 93-95, 118-120, 147-180, 201-211, 215-227, 231-241, 245-249, 253, 285-287, 297, 301, 310-314, 324-339, 343-358
+agenticx/memory/hybrid_search.py                                      370    306    17%   18-19, 85-97, 111-157, 161-190, 194-210, 214-237, 241-268, 272-294, 298-314, 318-335, 339-355, 359-375, 379, 399-406, 416-442, 446-456, 460-463, 467-488, 492-499, 503-518, 522-538, 542, 561-568, 578-614, 619-635, 639-644, 648, 652-658, 673-675, 685-721, 725-726, 730-731, 735-738
+agenticx/memory/intelligence/__init__.py                                8      8     0%   10-44
+agenticx/memory/intelligence/cache_manager.py                         345    345     0%   6-714
+agenticx/memory/intelligence/memory_intelligence.py                   260    260     0%   6-661
+agenticx/memory/intelligence/models.py                                205    205     0%   6-302
+agenticx/memory/intelligence/pattern_analyzer.py                      416    416     0%   6-950
+agenticx/memory/intelligence/retrieval_optimizer.py                   279    279     0%   6-647
+agenticx/memory/item_status.py                                         70     70     0%   7-120
+agenticx/memory/knowledge_base.py                                     163    139    15%   44-52, 80-100, 128-139, 156-161, 183-197, 216-224, 244-249, 265-277, 287-325, 337-353, 373-408, 429, 463-467, 471-479, 489-491, 505-527, 531-547
+agenticx/memory/mcp_memory.py                                         201    178    11%   44-49, 53-91, 95-110, 119-157, 167-212, 221-250, 254-277, 281-302, 311-337, 341-356, 360-394, 398-400, 404-405, 409
+agenticx/memory/mem0_memory.py                                         61     42    31%   24-31, 37-61, 72-100, 112-152, 160, 168, 176, 184, 191-192
+agenticx/memory/mem0_wrapper.py                                        30     16    47%   25-26, 30-35, 39, 43-45, 54-55, 59, 63, 67-68
+agenticx/memory/memory_decay.py                                       219    168    23%   48, 72, 95-108, 125-156, 173-200, 224-252, 270-280, 297-315, 333-347, 361, 365-379, 383-388, 392-397, 401-411, 416-425, 434-452, 456-475, 483-517, 524-586
+agenticx/memory/message_timestamp_backfill.py                         216    216     0%   7-356
+agenticx/memory/recall.py                                             171    171     0%   7-311
+agenticx/memory/semantic_memory.py                                    375    314    16%   44, 70, 90-104, 134-169, 194-236, 249-281, 303-335, 340-348, 352-353, 372-399, 418-443, 448-475, 480-501, 512-523, 533-541, 545-551, 556-568, 572-584, 588-605, 610-627, 631-641, 651-694, 699-728, 732-746, 750-754, 765-780, 784-799, 808-824, 828-845, 849, 858-874, 878-886
+agenticx/memory/session_store.py                                      560    560     0%   7-1095
+agenticx/memory/short_term.py                                         177    155    12%   39-51, 60-92, 102-122, 131-163, 167-188, 192-202, 211-228, 232-240, 248-281, 285-288, 292-295, 299-304, 308-312, 316-323, 327-349, 353-354
+agenticx/memory/sop_registry.py                                       133    104    22%   70-77, 93-120, 123, 127-128, 133, 150-184, 187-194, 203-229, 237-246, 250-266
+agenticx/memory/timestamp_pollution_repair.py                         122    122     0%   24-234
+agenticx/memory/turn_archive_config.py                                100    100     0%   7-142
+agenticx/memory/workspace_memory.py                                   449    449     0%   7-811
+agenticx/observability/__init__.py                                     12      0   100%
+agenticx/observability/ai_attributes.py                                84      3    96%   116, 126, 135
+agenticx/observability/analysis.py                                    334    221    34%   56, 80, 84, 88, 92, 96, 100, 130, 158, 180, 184-198, 202, 218-233, 243-248, 261, 271-283, 299-324, 328-335, 339-346, 350-358, 362-371, 375-384, 388, 417-418, 422-452, 456, 481-487, 492-499, 504-509, 513-528, 532-556, 560-580, 591-592, 596-613, 617-623, 627-636, 640-650, 655-666, 689, 709-714, 744, 748-779, 784-791, 796-803, 807-832
+agenticx/observability/callbacks.py                                   261    179    31%   65-72, 76, 80, 94, 98, 102, 106, 110, 114, 118, 122, 126, 130, 134, 138, 148-186, 191-210, 215-242, 246, 250, 254-260, 264, 269-299, 303, 307, 312, 316, 321-324, 335-337, 347-358, 362-375, 379-392, 396, 400, 404-406, 410, 427-431, 440, 444, 448, 452, 460-487, 491-524, 528-529, 533-534, 538, 546, 555, 559
+agenticx/observability/correlation.py                                  55     41    25%   28-34, 38-45, 49-55, 59-71, 75-100
+agenticx/observability/evaluation.py                                  288    204    29%   51, 75, 79-82, 85, 102, 106, 110, 114, 125, 129-137, 141-153, 157, 161-170, 174-177, 181-200, 209-229, 240, 244-247, 251-273, 282-300, 304, 321-331, 335-348, 362-367, 376-447, 451-472, 476-502, 508, 516-528, 532-544, 552-566, 570, 574-596, 606-624, 628-637, 641-642
+agenticx/observability/gaia_adapter.py                                 33     33     0%   7-79
+agenticx/observability/gaia_executor.py                                38     38     0%   7-79
+agenticx/observability/gaia_exporter.py                                24     24     0%   7-50
+agenticx/observability/gaia_loader.py                                 105    105     0%   7-164
+agenticx/observability/gaia_model_registry.py                          75     75     0%   7-149
+agenticx/observability/gaia_runner.py                                  62     62     0%   7-142
+agenticx/observability/gaia_validator.py                               45     45     0%   7-75
+agenticx/observability/logging.py                                     196    123    37%   66, 91-110, 143-154, 159-174, 178-185, 191-211, 215, 219, 223, 227, 231, 238-256, 263-286, 293-323, 341-355, 370, 382-385, 399-401, 415-420, 435-437, 448-452, 465-467, 480-482, 496-498, 511-513, 523-525, 535-537, 548-550, 561-562, 566-574
+agenticx/observability/mineru/__init__.py                               5      5     0%   6-45
+agenticx/observability/mineru/error_classifier.py                     117    117     0%   5-458
+agenticx/observability/mineru/health_check.py                         418    418     0%   5-800
+agenticx/observability/mineru/rate_limiter.py                         306    306     0%   5-610
+agenticx/observability/mineru/retry_policy.py                         215    215     0%   5-475
+agenticx/observability/monitoring.py                                  350    254    27%   46, 85, 129, 149-168, 172-178, 182-184, 188-190, 194, 198-199, 203, 207, 211-214, 218-259, 263, 267, 278-286, 313-314, 324-327, 331-397, 401-452, 456-457, 472-484, 488-506, 510-512, 516-520, 527-568, 572-576, 584-621, 625-635, 644-689, 698-717, 721, 732-733, 737, 741-747, 751
+agenticx/observability/otel/__init__.py                                 6      6     0%   37-78
+agenticx/observability/otel/config.py                                  81     81     0%   28-291
+agenticx/observability/otel/handler.py                                253    253     0%   17-575
+agenticx/observability/otel/hooks.py                                  154    154     0%   26-347
+agenticx/observability/otel/span_exporter.py                           84     84     0%   28-267
+agenticx/observability/span_tree.py                                   180    120    33%   55, 59, 63-67, 71, 75, 92-104, 139-179, 205-210, 214-216, 229-257, 269-270, 287-309, 313, 317, 323, 327, 331, 335, 339, 343, 347-355, 359-371, 383, 391-392, 401-417
+agenticx/observability/trajectory.py                                  334    225    33%   79, 97, 144, 175-188, 192-201, 205-219, 223-230, 234, 238, 242, 246, 250, 254, 258, 262-270, 274-288, 292-301, 305-320, 324, 352, 360, 365-391, 396-397, 412-425, 429, 433-442, 446-466, 470-523, 527-548, 555-600, 604-625, 629-670, 674-695, 699-715, 719-750, 754-770, 774-775, 779, 783, 787, 791-803, 807-809, 813-822
+agenticx/observability/utils.py                                       373    303    19%   35, 50-52, 56-61, 65-70, 74-83, 87-99, 103, 107-109, 113-120, 132-139, 151-187, 191-192, 196, 214, 218-228, 242-259, 263-276, 280-308, 312-340, 357, 361-364, 368-372, 376-380, 384, 391-412, 416-438, 457, 461-467, 471-485, 489-495, 499, 503-522, 526-535, 539-546, 550-557, 561-562, 566-577, 588, 592, 596, 603-611, 615, 619-620, 624-633, 639-660, 665-705
+agenticx/observability/websocket.py                                   265    179    32%   51, 70, 79, 90-111, 115-129, 133-136, 140-143, 147-150, 154-167, 175-197, 201-209, 213-216, 220, 224-225, 229, 238-240, 244-255, 259-264, 278-284, 294-310, 314-329, 333-344, 348-360, 364-377, 381-395, 399-412, 416-427, 431-443, 447-452, 456-461, 465, 469-475, 479-480, 493-501, 509-514, 518-529, 533-548, 552-573, 577, 581, 585, 589, 593
+agenticx/ops/__init__.py                                                2      2     0%   6-17
+agenticx/ops/change_log.py                                             84     84     0%   6-123
+agenticx/ops/changeplane/__init__.py                                    6      6     0%   6-20
+agenticx/ops/changeplane/openship.py                                  156    156     0%   6-211
+agenticx/ops/changeplane/provider.py                                   27     27     0%   6-54
+agenticx/ops/changeplane/sync.py                                       28     28     0%   6-63
+agenticx/ops/changeplane/types.py                                      20     20     0%   6-44
+agenticx/ops/changeplane/webhook.py                                    66     66     0%   6-104
+agenticx/ops/factory.py                                                49     49     0%   13-87
+agenticx/ops/first_party.py                                           287    287     0%   6-499
+agenticx/ops/otel_bootstrap.py                                         12     12     0%   6-27
+agenticx/ops/parity.py                                                272    272     0%   6-380
+agenticx/ops/query.py                                                  69     69     0%   6-101
+agenticx/ops/signoz.py                                                124    124     0%   6-170
+agenticx/ops/slo.py                                                   304    304     0%   6-476
+agenticx/ops/tools.py                                                 166    166     0%   6-440
+agenticx/ops/umodel/__init__.py                                         4      4     0%   6-16
+agenticx/ops/umodel/ingest.py                                          69     69     0%   6-147
+agenticx/ops/umodel/schema.py                                          62     62     0%   6-102
+agenticx/ops/umodel/store.py                                          115    115     0%   6-185
+agenticx/planner/__init__.py                                            2      2     0%   10-18
+agenticx/planner/adaptive_planner.py                                  161    161     0%   32-569
+agenticx/presets.py                                                    56     56     0%   7-104
+agenticx/project_state/__init__.py                                      4      4     0%   11-30
+agenticx/project_state/feature_list.py                                 76     76     0%   7-154
+agenticx/project_state/init_script.py                                  21     21     0%   7-76
+agenticx/project_state/progress.py                                     22     22     0%   7-41
+agenticx/project_state/prompts.py                                      75     75     0%   12-183
+agenticx/project_state/schema.py                                      108    108     0%   7-185
+agenticx/project_state/store.py                                       209    209     0%   7-301
+agenticx/project_state/tools.py                                       238    238     0%   11-606
+agenticx/project_state/verify.py                                      124    124     0%   7-243
+agenticx/protocols/__init__.py                                          8      0   100%
+agenticx/protocols/agui.py                                            151    151     0%   9-261
+agenticx/protocols/client.py                                          109     83    24%   60-66, 73, 77, 81, 107-127, 150-208, 223-265, 287-303, 315-323, 332
+agenticx/protocols/interfaces.py                                       11      0   100%
+agenticx/protocols/mining_protocol.py                                 228    125    45%   57-63, 67-74, 149-153, 157-159, 163, 167-170, 183-186, 195, 205-213, 227-230, 359-386, 390-392, 396-398, 402, 406, 410, 414-426, 435-437, 441-442, 446-448, 452-455, 459-462, 466-488, 513-556, 571-589, 610-639, 659-688
+agenticx/protocols/models.py                                           53      8    85%   79-80, 84-85, 89-90, 106, 131
+agenticx/protocols/server.py                                           92     72    22%   57-72, 77-138, 147-168, 177-219, 228, 238-250
+agenticx/protocols/storage.py                                          45     30    33%   27-28, 40-41, 53-58, 70-75, 94-109, 121-125, 133-134, 143-144, 156
+agenticx/protocols/tools.py                                            97     70    28%   50-68, 83-104, 108, 121-132, 136, 156-194, 206-213, 222-236, 245, 249, 294-308, 331
+agenticx/reliability/__init__.py                                        9      9     0%   9-47
+agenticx/reliability/call_identity.py                                  55     55     0%   7-104
+agenticx/reliability/call_ledger.py                                   222    222     0%   7-387
+agenticx/reliability/errors.py                                         11     11     0%   7-42
+agenticx/reliability/replay_policy.py                                  51     51     0%   7-121
+agenticx/reliability/run_state.py                                      75     75     0%   10-146
+agenticx/retrieval/__init__.py                                         13      0   100%
+agenticx/retrieval/agents.py                                          130     93    28%   40-41, 58-95, 106, 129-132, 154-179, 189-205, 217-249, 259-271, 276-280, 290-291, 309-310, 330-363, 375-376, 397-405, 411-426, 435-442, 454-460
+agenticx/retrieval/auto_retriever.py                                  139    114    18%   38-46, 50-55, 70-91, 100-113, 122-131, 136-159, 169-184, 190-213, 218-236, 253-271, 280-295, 305-320, 325-334
+agenticx/retrieval/base.py                                             60     13    78%   60, 64-69, 87-89, 166-168
+agenticx/retrieval/bm25_retriever.py                                  126    101    20%   33-41, 47, 56-105, 114-138, 147-166, 171-183, 192-193, 199-209, 220-226, 231-255, 259-262, 266-272, 276-280
+agenticx/retrieval/citation_view.py                                    52     41    21%   23-34, 38-43, 47-48, 61, 98-125
+agenticx/retrieval/disambiguation.py                                   79     79     0%   8-208
+agenticx/retrieval/evidence.py                                        141    108    23%   32-43, 46, 54-58, 79-85, 88, 99-105, 114-122, 126-132, 136-175, 179-194, 203-214, 229-241
+agenticx/retrieval/graph_retriever.py                                 540    480    11%   52-53, 81-102, 106, 123-174, 183-238, 247-259, 264-273, 282-311, 316-351, 361-381, 387-396, 402-418, 424-440, 445-475, 481-483, 487-522, 526-537, 541-552, 556-567, 571-582, 587-643, 655-658, 662-665, 670-709, 718-752, 757-852, 862-882, 892-898, 908-974, 978-1014, 1018-1067, 1071-1142
+agenticx/retrieval/hybrid_retriever.py                                164    137    16%   43-54, 58-62, 71-109, 118-136, 145-160, 165-193, 208-291, 299, 305-316, 322-340, 348-370, 376-385
+agenticx/retrieval/provenance.py                                       53     31    42%   30-42, 45, 55-61, 72-77, 89-92
+agenticx/retrieval/reranker.py                                         98     77    21%   36-37, 47-99, 108-126, 134-155, 160, 180-199, 205-214, 226-228, 240-247, 259-266
+agenticx/retrieval/tools.py                                           147     79    46%   28-34, 39, 43-57, 61, 74-79, 84, 88-114, 118, 131-136, 141, 145-166, 170, 183-188, 193, 197-216, 220, 234-242, 255-260, 265, 269-283, 287, 291, 312-317, 322, 326-340, 344, 348
+agenticx/retrieval/vector_retriever.py                                 91     74    19%   11-12, 35-39, 44, 53-97, 106-139, 148-160, 165-177, 186-201, 206-212
+agenticx/rl/__init__.py                                                 0      0   100%
+agenticx/rl/acceptance.py                                              46     46     0%   15-92
+agenticx/rl/arvo.py                                                   144    144     0%   21-247
+agenticx/rl/core_algos.py                                              32     32     0%   10-70
+agenticx/rl/decision.py                                               178    178     0%   19-338
+agenticx/rl/decision_eval.py                                          103    103     0%   11-165
+agenticx/rl/decision_head.py                                          176    176     0%   17-281
+agenticx/rl/decision_scorers.py                                       121    121     0%   16-242
+agenticx/rl/device.py                                                  57     57     0%   11-94
+agenticx/rl/distributed.py                                             51     51     0%   10-82
+agenticx/rl/harbor_reward.py                                           40     40     0%   8-110
+agenticx/rl/harbor_rollout.py                                          53     53     0%   9-96
+agenticx/rl/hf_rollout.py                                              31     31     0%   10-61
+agenticx/rl/lora.py                                                    54     54     0%   9-89
+agenticx/rl/mimo_harbor_bridge.py                                      74     74     0%   19-248
+agenticx/rl/mint_backend.py                                            72     72     0%   10-155
+agenticx/rl/model_server.py                                           101    101     0%   9-177
+agenticx/rl/parallel.py                                                32     32     0%   8-65
+agenticx/rl/recipes.py                                                 43     43     0%   10-79
+agenticx/rl/replay_bridge.py                                           14     14     0%   8-30
+agenticx/rl/replay_shaping.py                                          21     21     0%   10-36
+agenticx/rl/rollout.py                                                148    148     0%   12-283
+agenticx/rl/trainer.py                                                128    128     0%   8-216
+agenticx/rl/vllm_rollout.py                                            42     42     0%   11-79
+agenticx/rules/__init__.py                                              8      8     0%   3-38
+agenticx/rules/compile.py                                              70     70     0%   7-176
+agenticx/rules/disambiguation.py                                      108    108     0%   7-256
+agenticx/rules/dsl.py                                                 153    153     0%   3-204
+agenticx/rules/execution.py                                            75     75     0%   3-137
+agenticx/rules/intents.py                                               7      7     0%   3-12
+agenticx/rules/model.py                                                91     91     0%   3-155
+agenticx/rules/nl.py                                                  171    171     0%   8-398
+agenticx/rules/store.py                                                73     73     0%   7-108
+agenticx/runtime/__init__.py                                           39     31    21%   32-72
+agenticx/runtime/_automation_tasks_io.py                               22     22     0%   18-63
+agenticx/runtime/action_audit.py                                       70     70     0%   10-142
+agenticx/runtime/action_proposals/__init__.py                           5      5     0%   7-31
+agenticx/runtime/action_proposals/errors.py                            11     11     0%   7-40
+agenticx/runtime/action_proposals/service.py                          150    150     0%   10-385
+agenticx/runtime/action_proposals/store.py                            115    115     0%   7-267
+agenticx/runtime/agent_runtime.py                                    3896   3896     0%   7-8233
+agenticx/runtime/assistant_output.py                                  339    339     0%   7-525
+agenticx/runtime/auto_solve.py                                         22     22     0%   4-39
+agenticx/runtime/automation_run_health.py                              73     73     0%   15-152
+agenticx/runtime/checkpoint.py                                         80     80     0%   22-148
+agenticx/runtime/choice_panels/__init__.py                              2      2     0%   7-19
+agenticx/runtime/choice_panels/store.py                               202    202     0%   12-331
+agenticx/runtime/clarify.py                                            57     39    32%   31-39, 74-77, 89-119, 123-127, 131, 143-144, 153-154
+agenticx/runtime/code_outline.py                                      116    116     0%   7-205
+agenticx/runtime/code_read_cache.py                                    92     92     0%   7-126
+agenticx/runtime/command_safety.py                                    310    310     0%   34-772
+agenticx/runtime/command_sandbox.py                                   587    587     0%   37-1505
+agenticx/runtime/compaction_journal.py                                 84     84     0%   26-185
+agenticx/runtime/compactor.py                                         544    544     0%   10-918
+agenticx/runtime/confirm.py                                           218    164    25%   34-37, 43, 66-70, 91-101, 111-126, 131-139, 152, 157, 162, 166, 170, 177-178, 193-204, 216-259, 263-267, 271-280, 291-313, 316, 319, 337-340, 343-361, 364, 372, 375-377, 398-405, 412-464, 467, 470, 473, 476, 479, 490-491, 494-495
+agenticx/runtime/connectors_store.py                                  434    434     0%   24-716
+agenticx/runtime/context_budget.py                                     73     73     0%   3-145
+agenticx/runtime/context_file_budget.py                                23     23     0%   7-46
+agenticx/runtime/coordination/__init__.py                               5      5     0%   7-17
+agenticx/runtime/coordination/bus.py                                    2      2     0%   18-20
+agenticx/runtime/coordination/factory.py                               86     86     0%   18-135
+agenticx/runtime/coordination/in_process.py                            62     62     0%   15-113
+agenticx/runtime/coordination/leader.py                                63     63     0%   13-103
+agenticx/runtime/coordination/redis_bus.py                            254    254     0%   30-382
+agenticx/runtime/credential_store.py                                  166    129    22%   39-40, 59, 70, 73-74, 84-90, 105-130, 137-144, 149-155, 158-178, 181-221, 227, 233-244, 253-265, 276-292, 298-304
+agenticx/runtime/data_source_flow_guard.py                             11     11     0%   6-30
+agenticx/runtime/disambiguation.py                                    265    162    39%   47, 58, 67, 83, 92, 113, 127-133, 155, 165, 175-187, 193-220, 224, 228, 232, 236, 240, 261, 275-281, 298-303, 310-313, 316-322, 325-327, 340-360, 363-365, 368-371, 379-386, 392-405, 412-435, 455-457, 460-467, 474-477, 480, 483-494
+agenticx/runtime/durable_jobs/__init__.py                               5      5     0%   7-16
+agenticx/runtime/durable_jobs/access.py                                12     12     0%   7-32
+agenticx/runtime/durable_jobs/models.py                                30     30     0%   7-47
+agenticx/runtime/durable_jobs/store.py                                220    220     0%   9-537
+agenticx/runtime/durable_jobs/worker.py                               107    107     0%   7-182
+agenticx/runtime/effect_guard.py                                      139    139     0%   7-252
+agenticx/runtime/enterprise_agent_builder.py                          319    319     0%   10-502
+agenticx/runtime/enterprise_agent_policy.py                            85     85     0%   15-147
+agenticx/runtime/enterprise_agent_publish.py                          170    170     0%   7-268
+agenticx/runtime/enterprise_agent_sync.py                              81     81     0%   7-135
+agenticx/runtime/enterprise_trace.py                                  577    577     0%   16-902
+agenticx/runtime/enterprise_worker.py                                 634    634     0%   7-950
+agenticx/runtime/events.py                                            240    188    22%   21-26, 69-85, 95-97, 102-106, 110, 115-137, 142-173, 177-180, 184-187, 199-209, 228-277, 290-313, 329-365, 377-412
+agenticx/runtime/file_state.py                                         69     69     0%   7-108
+agenticx/runtime/followup_stream.py                                    43     43     0%   7-89
+agenticx/runtime/fresh_round_loop.py                                  145    145     0%   7-265
+agenticx/runtime/global_mcp_manager.py                                142    142     0%   17-262
+agenticx/runtime/global_mcp_state.py                                   84     84     0%   18-150
+agenticx/runtime/graph/__init__.py                                      8      8     0%   7-34
+agenticx/runtime/graph/compiler.py                                     39     39     0%   7-97
+agenticx/runtime/graph/events.py                                       14     14     0%   7-45
+agenticx/runtime/graph/intervene.py                                   246    246     0%   7-458
+agenticx/runtime/graph/models.py                                      135    135     0%   7-290
+agenticx/runtime/graph/scheduler.py                                   103    103     0%   7-159
+agenticx/runtime/graph/social.py                                      124    124     0%   7-287
+agenticx/runtime/graph/store.py                                        94     94     0%   7-125
+agenticx/runtime/group_context.py                                     116    116     0%   7-211
+agenticx/runtime/group_facts.py                                       171    171     0%   11-276
+agenticx/runtime/group_router.py                                     1683   1683     0%   7-3837
+agenticx/runtime/harden_flags.py                                      125    125     0%   11-220
+agenticx/runtime/health_probe.py                                       96     96     0%   10-155
+agenticx/runtime/hooks/__init__.py                                     62     62     0%   4-125
+agenticx/runtime/hooks/legacy_event_bridge_hook.py                     28     28     0%   4-75
+agenticx/runtime/hooks/memory_hook.py                                 101    101     0%   9-135
+agenticx/runtime/hooks/session_freeze_hook.py                          11     11     0%   7-24
+agenticx/runtime/hooks/session_summary_hook.py                         40     40     0%   7-66
+agenticx/runtime/hooks/turn_archive_hook.py                            88     88     0%   7-142
+agenticx/runtime/interrupted_closers.py                                59     59     0%   10-106
+agenticx/runtime/isolate_run.py                                       325    325     0%   9-495
+agenticx/runtime/jev_intent.py                                        182    182     0%   3-327
+agenticx/runtime/llm_retry.py                                          94     94     0%   10-198
+agenticx/runtime/loop_controller.py                                    32     32     0%   4-78
+agenticx/runtime/loop_detector.py                                     399    399     0%   7-754
+agenticx/runtime/mcp_crash_guard.py                                    37     37     0%   7-59
+agenticx/runtime/mcp_tool_catalog.py                                   30     30     0%   3-66
+agenticx/runtime/meta_tools.py                                       1905   1905     0%   7-4280
+agenticx/runtime/model_context_window.py                               28     28     0%   7-86
+agenticx/runtime/model_pricing.py                                      75     75     0%   7-132
+agenticx/runtime/parked_approvals.py                                  107    107     0%   7-179
+agenticx/runtime/path_policy.py                                        32     32     0%   27-103
+agenticx/runtime/plan_artifacts.py                                    225    225     0%   7-337
+agenticx/runtime/plan_mode.py                                          46     46     0%   7-117
+agenticx/runtime/plugin_usage.py                                      349    349     0%   10-674
+agenticx/runtime/prompt_cache_policy.py                               126    126     0%   7-219
+agenticx/runtime/provider_failover.py                                  63     63     0%   10-135
+agenticx/runtime/provider_fallback.py                                 120    120     0%   7-181
+agenticx/runtime/replay_ledger/__init__.py                              7      7     0%   7-27
+agenticx/runtime/replay_ledger/branch_service.py                      120    120     0%   7-251
+agenticx/runtime/replay_ledger/context_checkpoint.py                  111    111     0%   7-244
+agenticx/runtime/replay_ledger/contracts.py                           130    130     0%   7-273
+agenticx/runtime/replay_ledger/effects.py                              48     48     0%   7-109
+agenticx/runtime/replay_ledger/export.py                              121    121     0%   7-273
+agenticx/runtime/replay_ledger/recorder.py                            269    269     0%   7-616
+agenticx/runtime/replay_ledger/store.py                               450    450     0%   7-617
+agenticx/runtime/replay_ledger/workspace_snapshot.py                  141    141     0%   7-276
+agenticx/runtime/resource_monitor.py                                   40     40     0%   4-70
+agenticx/runtime/scratchpad.py                                         42     30    29%   19, 23, 27-31, 35-44, 48-53, 57, 61-66
+agenticx/runtime/scratchpad_utils.py                                   19     19     0%   7-38
+agenticx/runtime/session_boundary.py                                   72     51    29%   17, 21-24, 28-33, 44-56, 65-78, 82-92, 112, 116, 120
+agenticx/runtime/session_freeze.py                                     10     10     0%   10-32
+agenticx/runtime/session_mode.py                                       31     31     0%   7-56
+agenticx/runtime/session_perf.py                                      199    199     0%   7-296
+agenticx/runtime/session_summary_store.py                              77     77     0%   7-108
+agenticx/runtime/stall_policy.py                                      155    155     0%   7-240
+agenticx/runtime/subagent_runs/__init__.py                              4      4     0%   7-23
+agenticx/runtime/subagent_runs/cluster.py                              11     11     0%   7-26
+agenticx/runtime/subagent_runs/contracts.py                            85     85     0%   7-138
+agenticx/runtime/subagent_runs/resolver.py                            117    117     0%   7-268
+agenticx/runtime/subagent_runs/store.py                               381    381     0%   7-629
+agenticx/runtime/task_decomposer.py                                    86     86     0%   10-191
+agenticx/runtime/task_scheduler.py                                     63     63     0%   10-111
+agenticx/runtime/team_manager.py                                     1295   1295     0%   7-2187
+agenticx/runtime/todo_disk_reconcile.py                                81     81     0%   7-112
+agenticx/runtime/todo_manager.py                                       69     49    29%   26, 37, 42, 46, 50-51, 55-57, 61-73, 76-108
+agenticx/runtime/token_budget.py                                      145    145     0%   10-259
+agenticx/runtime/tool_orchestrator.py                                  74     74     0%   7-104
+agenticx/runtime/tool_result_budget.py                                572    572     0%   7-880
+agenticx/runtime/tool_search.py                                       397    397     0%   6-782
+agenticx/runtime/tool_search_runtime.py                                98     98     0%   3-202
+agenticx/runtime/truncated_final.py                                    57     57     0%   3-145
+agenticx/runtime/turn_abort.py                                         50     50     0%   12-144
+agenticx/runtime/usage_metadata.py                                    240    224     7%   24-41, 45-49, 53-57, 62-85, 94-109, 120, 130-192, 212, 220-228, 233-235, 247-263, 280-350
+agenticx/runtime/usage_store.py                                       426    426     0%   7-1214
+agenticx/runtime/vision_history_budget.py                              88     88     0%   7-150
+agenticx/runtime/widget_flow_guard.py                                 119    119     0%   6-196
+agenticx/runtime/work_items.py                                        315    315     0%   6-473
+agenticx/safety/__init__.py                                             9      9     0%   10-52
+agenticx/safety/advanced_detector.py                                   72     72     0%   10-132
+agenticx/safety/audit.py                                               48     48     0%   10-74
+agenticx/safety/input_validator.py                                     81     81     0%   12-187
+agenticx/safety/layer.py                                               74     74     0%   15-176
+agenticx/safety/leak_detector.py                                      156    156     0%   13-264
+agenticx/safety/policy.py                                              57     57     0%   12-116
+agenticx/safety/sandbox_policy.py                                      62     62     0%   10-109
+agenticx/safety/sanitizer.py                                           85     85     0%   13-182
+agenticx/sandbox/__init__.py                                            9      9     0%   17-130
+agenticx/sandbox/audit.py                                              63     63     0%   10-118
+agenticx/sandbox/backends/__init__.py                                  35     35     0%   13-88
+agenticx/sandbox/backends/docker.py                                   247    247     0%   19-614
+agenticx/sandbox/backends/microsandbox.py                             227    227     0%   21-785
+agenticx/sandbox/backends/remote.py                                   148    148     0%   13-322
+agenticx/sandbox/backends/subprocess.py                               171    171     0%   18-440
+agenticx/sandbox/base.py                                              199    199     0%   13-583
+agenticx/sandbox/code_interpreter.py                                  134    134     0%   18-376
+agenticx/sandbox/execd.py                                             334    334     0%   19-902
+agenticx/sandbox/jupyter_kernel.py                                    272    272     0%   18-646
+agenticx/sandbox/mcp_gateway/__init__.py                                3      3     0%   21-29
+agenticx/sandbox/mcp_gateway/client.py                                 65     65     0%   13-159
+agenticx/sandbox/mcp_gateway/gateway_app.py                           100    100     0%   24-222
+agenticx/sandbox/template.py                                           98     98     0%   9-257
+agenticx/sandbox/tools/__init__.py                                      1      1     0%   9
+agenticx/sandbox/types.py                                             130    130     0%   9-272
+agenticx/server/__init__.py                                            15     15     0%   26-166
+agenticx/server/api_models.py                                          47     47     0%   12-97
+agenticx/server/api_routes.py                                         368    368     0%   12-1220
+agenticx/server/auth.py                                               104    104     0%   7-160
+agenticx/server/event_hooks.py                                         67     67     0%   11-191
+agenticx/server/health.py                                             160    160     0%   7-293
+agenticx/server/jwt_secret.py                                          27     27     0%   14-87
+agenticx/server/middleware.py                                         161    161     0%   7-294
+agenticx/server/openai_protocol.py                                     68     68     0%   7-254
+agenticx/server/protocol.py                                            13     13     0%   7-92
+agenticx/server/redis_backend.py                                      240    240     0%   10-395
+agenticx/server/resilience.py                                         184    184     0%   7-277
+agenticx/server/server.py                                             142    142     0%   9-462
+agenticx/server/sse_adapter.py                                        136    136     0%   12-361
+agenticx/server/sse_formatter.py                                       93     93     0%   11-454
+agenticx/server/task_queue.py                                         161    161     0%   10-286
+agenticx/server/tenant.py                                              35     35     0%   7-74
+agenticx/server/types.py                                              154    154     0%   7-308
+agenticx/server/user_manager.py                                       206    206     0%   9-566
+agenticx/server/webhook.py                                             46     46     0%   6-87
+agenticx/sessions/__init__.py                                           5      5     0%   10-22
+agenticx/sessions/base.py                                              93     93     0%   7-380
+agenticx/sessions/database.py                                         146    146     0%   7-383
+agenticx/sessions/in_memory.py                                         84     84     0%   7-218
+agenticx/sessions/write_lock.py                                        38     38     0%   7-65
+agenticx/skills/__init__.py                                             7      7     0%   10-19
+agenticx/skills/frontmatter.py                                        140    140     0%   7-215
+agenticx/skills/fuzzy_patch.py                                        133    133     0%   20-264
+agenticx/skills/guard.py                                              119    119     0%   24-262
+agenticx/skills/guard_classify.py                                     115    115     0%   9-166
+agenticx/skills/guard_config.py                                        67     67     0%   7-102
+agenticx/skills/guard_engine.py                                       296    296     0%   7-533
+agenticx/skills/guard_report.py                                        17     17     0%   7-67
+agenticx/skills/guard_score.py                                         37     37     0%   7-64
+agenticx/skills/guard_types.py                                         47     47     0%   7-90
+agenticx/skills/guard_v1.py                                            85     85     0%   7-242
+agenticx/skills/import_repo.py                                        294    294     0%   7-427
+agenticx/skills/meta_skill.py                                          25     25     0%   7-70
+agenticx/skills/pending_queue.py                                      128    128     0%   7-179
+agenticx/skills/registry.py                                           290    290     0%   12-444
+agenticx/skills/skill_versions.py                                      61     61     0%   7-126
+agenticx/skills/snapshot.py                                           161    161     0%   10-294
+agenticx/skills/versioning.py                                          35     35     0%   14-78
+agenticx/storage/__init__.py                                           25      0   100%
+agenticx/storage/base.py                                               20      7    65%   20-22, 27, 32, 151-152
+agenticx/storage/errors.py                                             83     61    27%   12-15, 18-23, 30-31, 34-41, 48-49, 52-59, 66-67, 70-75, 82-84, 87-92, 99-100, 103-108, 115-116, 119-124
+agenticx/storage/graph_storages/__init__.py                             4      0   100%
+agenticx/storage/graph_storages/base.py                                 7      2    71%   189, 193
+agenticx/storage/graph_storages/nebula.py                              58     32    45%   26-34, 39, 44, 49, 54, 65, 76, 87, 100, 113-114, 126-127, 141-142, 156-157, 167, 179, 184, 189, 198, 202-205
+agenticx/storage/graph_storages/neo4j.py                              302    265    12%   16-18, 41-67, 72, 77, 82, 86-104, 114-130, 141, 151-167, 179-199, 212-213, 225-226, 240-241, 254-268, 278, 290, 298-322, 331-493, 497-503, 510-536, 540-568, 580-594, 598-605
+agenticx/storage/key_value_storages/__init__.py                         7      0   100%
+agenticx/storage/key_value_storages/base.py                             7      2    71%   130, 134
+agenticx/storage/key_value_storages/in_memory.py                       35     19    46%   19, 27-32, 40, 44, 55, 64, 75-78, 89, 97, 105, 113, 121, 125
+agenticx/storage/key_value_storages/mongodb.py                         41     25    39%   23-26, 35, 44-45, 50, 62-63, 73, 85-86, 98-99, 108-109, 118-119, 128-129, 138-139, 143-146
+agenticx/storage/key_value_storages/postgres.py                        53     33    38%   11-12, 30-37, 46, 55-56, 61, 73-74, 84, 96-97, 109-110, 119-120, 129-130, 139-140, 149-150, 154-157
+agenticx/storage/key_value_storages/redis.py                          147    126    14%   10-11, 31-59, 67-82, 90-101, 106-112, 123-132, 141-147, 158-169, 180-189, 197-206, 214-224, 232-242, 250-259, 263-266
+agenticx/storage/key_value_storages/sqlite.py                          57     39    32%   25-31, 39-41, 49-50, 54-56, 67-71, 80-85, 96-99, 110-111, 119-120, 128-129, 137-138, 146-147, 151-153
+agenticx/storage/manager.py                                           210    162    23%   64-76, 80, 99-101, 126-127, 132, 137-146, 150-157, 164-167, 171-200, 204-210, 214-226, 230-238, 242-250, 254-390, 394-400, 405, 409-423
+agenticx/storage/migration.py                                          89     76    15%   17-19, 28-75, 89-140, 154-223, 232-260, 264, 268
+agenticx/storage/mineru/__init__.py                                     6      6     0%   5-11
+agenticx/storage/mineru/models.py                                     151    151     0%   5-300
+agenticx/storage/mineru/registry.py                                   179    179     0%   5-375
+agenticx/storage/mineru/renderer.py                                   266    266     0%   5-436
+agenticx/storage/mineru/validator.py                                  210    210     0%   5-378
+agenticx/storage/mineru/visualizer.py                                 275    275     0%   5-637
+agenticx/storage/models.py                                            101      0   100%
+agenticx/storage/object_storages/__init__.py                            5      0   100%
+agenticx/storage/object_storages/azure.py                              67     40    40%   25-29, 42-44, 49, 54-55, 60-61, 66, 71, 76-77, 82-83, 88-89, 94-95, 100-101, 113, 126-127, 137, 150-151, 165-166, 179-180, 193-194, 199, 203-206
+agenticx/storage/object_storages/base.py                               45     26    42%   19-20, 38-39, 61-62, 73-74, 85-91, 102-103, 114, 125-126, 138-139, 150-151, 162-163, 223, 227, 231
+agenticx/storage/object_storages/gcs.py                                67     40    40%   25-29, 42-44, 49, 54-55, 60-61, 66, 71, 76-77, 82-83, 88-89, 94-95, 100-101, 113, 126-127, 137, 150-151, 165-166, 179-180, 193-194, 199, 203-206
+agenticx/storage/object_storages/s3.py                                 69     42    39%   27-33, 46-48, 53, 58-59, 64-65, 70, 75, 80-81, 86-87, 92-93, 98-99, 104-105, 117, 130-131, 141, 154-155, 169-170, 183-184, 197-198, 203, 207-210
+agenticx/storage/unified_manager.py                                   107    107     0%   13-317
+agenticx/storage/vectordb_storages/__init__.py                          9      0   100%
+agenticx/storage/vectordb_storages/base.py                             43     14    67%   52, 77, 183-185, 201-203, 219-221, 225, 229, 233
+agenticx/storage/vectordb_storages/chroma.py                           29     16    45%   24-28, 38, 48, 57-58, 71-72, 77, 82, 87, 91-94
+agenticx/storage/vectordb_storages/faiss.py                            65     45    31%   36-39, 43-49, 53-57, 66-70, 79-80, 88, 103-122, 126-127, 131, 136, 148-155, 159
+agenticx/storage/vectordb_storages/milvus.py                          195    176    10%   16-17, 37-80, 84-128, 139-220, 229-240, 248-259, 271-315, 319-330, 334-343, 348, 352-358
+agenticx/storage/vectordb_storages/pgvector.py                         29     16    45%   24-28, 38, 48, 57-58, 71-72, 77, 82, 87, 91-94
+agenticx/storage/vectordb_storages/pinecone.py                         31     18    42%   26-32, 42, 52, 61-62, 75-76, 81, 86, 91, 95-98
+agenticx/storage/vectordb_storages/qdrant.py                           30     17    43%   25-30, 40, 50, 59-60, 73-74, 79, 84, 89, 93-96
+agenticx/storage/vectordb_storages/weaviate.py                         29     16    45%   24-28, 38, 48, 57-58, 71-72, 77, 82, 87, 91-94
+agenticx/studio/__init__.py                                             0      0   100%
+agenticx/studio/attachment_routing.py                                 134    134     0%   16-318
+agenticx/studio/automation_scheduler.py                               265    265     0%   24-392
+agenticx/studio/avatar_url_compact.py                                  11     11     0%   11-25
+agenticx/studio/blocking_io.py                                         16     16     0%   11-35
+agenticx/studio/changeplane_routes.py                                  43     43     0%   6-70
+agenticx/studio/chat_attachments.py                                   394    394     0%   10-580
+agenticx/studio/code_index/__init__.py                                  2      2     0%   3-5
+agenticx/studio/code_index/routes.py                                   79     79     0%   3-112
+agenticx/studio/command_resolve.py                                     39     39     0%   7-78
+agenticx/studio/command_routes.py                                     113    113     0%   7-210
+agenticx/studio/command_store.py                                      149    149     0%   7-230
+agenticx/studio/compaction_notice.py                                   39     39     0%   9-85
+agenticx/studio/context_file_hydration.py                             131    131     0%   7-262
+agenticx/studio/context_file_keys.py                                   60     60     0%   6-87
+agenticx/studio/context_usage.py                                      252    252     0%   7-509
+agenticx/studio/continuation.py                                       268    268     0%   7-479
+agenticx/studio/conversation_continue.py                              163    163     0%   7-243
+agenticx/studio/credentials_routes.py                                  98     98     0%   9-162
+agenticx/studio/data_sources_routes.py                                100    100     0%   7-154
+agenticx/studio/delivery_api.py                                        58     58     0%   7-114
+agenticx/studio/document_pages.py                                     129    129     0%   19-267
+agenticx/studio/doubao_sauc_asr.py                                    106    106     0%   9-176
+agenticx/studio/enterprise_worker_routes.py                            99     99     0%   7-193
+agenticx/studio/html_element_context.py                                60     60     0%   6-98
+agenticx/studio/kb/__init__.py                                          5      5     0%   16-38
+agenticx/studio/kb/chunk_strategy.py                                  165    165     0%   7-244
+agenticx/studio/kb/contracts.py                                       200    200     0%   10-400
+agenticx/studio/kb/fts_index.py                                        72     72     0%   7-158
+agenticx/studio/kb/ingest_cache.py                                     68     68     0%   7-124
+agenticx/studio/kb/jobs.py                                            128    128     0%   11-263
+agenticx/studio/kb/manager.py                                          74     74     0%   8-108
+agenticx/studio/kb/routes.py                                          201    201     0%   10-371
+agenticx/studio/kb/rrf.py                                              30     30     0%   7-63
+agenticx/studio/kb/runtime.py                                         761    761     0%   21-1595
+agenticx/studio/message_forward.py                                    149    149     0%   7-228
+agenticx/studio/protocols.py                                           72     72     0%   7-123
+agenticx/studio/references.py                                         141    141     0%   7-199
+agenticx/studio/run_replay_routes.py                                  140    140     0%   7-287
+agenticx/studio/server.py                                            5464   5464     0%   7-9316
+agenticx/studio/session_event_hub.py                                  136    136     0%   7-200
+agenticx/studio/session_manager.py                                   2538   2538     0%   7-3953
+agenticx/studio/skills_list_api.py                                     22     22     0%   7-69
+agenticx/studio/storage/__init__.py                                     5      5     0%   7-17
+agenticx/studio/storage/backend.py                                    101    101     0%   19-214
+agenticx/studio/storage/factory.py                                     64     64     0%   17-113
+agenticx/studio/storage/local_file.py                                 145    145     0%   19-230
+agenticx/studio/storage/redis_backend.py                              150    150     0%   25-264
+agenticx/studio/subagent_review.py                                    121    121     0%   7-252
+agenticx/studio/supervisor.py                                         263    263     0%   7-432
+agenticx/studio/tools_status_api.py                                    14     14     0%   7-37
+agenticx/studio/turn_interruption.py                                  117    117     0%   3-215
+agenticx/studio/typesafe_routes.py                                     53     53     0%   4-110
+agenticx/studio/usage_alive.py                                         21     21     0%   7-40
+agenticx/studio/vision_autodescribe.py                                 47     47     0%   21-110
+agenticx/studio/voice_endpoints.py                                    660    660     0%   7-991
+agenticx/studio/web_search/__init__.py                                  3      3     0%   7-10
+agenticx/studio/web_search/contracts.py                                45     45     0%   7-81
+agenticx/studio/web_search/providers.py                               213    213     0%   7-307
+agenticx/studio/web_search/routes.py                                  112    112     0%   7-148
+agenticx/studio/web_search/service.py                                  53     53     0%   7-84
+agenticx/tools/__init__.py                                             29      3    90%   18-20
+agenticx/tools/adapters/__init__.py                                     7      0   100%
+agenticx/tools/adapters/base.py                                        52     20    62%   61-62, 123-125, 137-150, 162-167
+agenticx/tools/adapters/liteparse.py                                  137    108    21%   33-47, 74-76, 85-93, 97-112, 121-183, 198-223, 247-261, 270-283, 287, 291
+agenticx/tools/adapters/mineru.py                                     147    107    27%   61-69, 73-87, 91-96, 100-108, 112-121, 142-213, 222-256, 260, 265, 279, 288-299, 306, 314-344, 355, 363-384
+agenticx/tools/adapters/pipeline.py                                   156    136    13%   35-45, 49-189, 216-283, 311-324, 328, 332-357, 364-369, 382-406
+agenticx/tools/adapters/utils.py                                       89     73    18%   29-67, 81-93, 106-138, 157-168, 183-192
+agenticx/tools/adapters/video_frames.py                               181    181     0%   7-320
+agenticx/tools/adapters/vlm_client.py                                 163    140    14%   36-51, 81-143, 170-190, 203-219, 246-276, 289-326, 345-358, 371-396, 419, 423, 427-452
+agenticx/tools/base.py                                                194    156    20%   24-26, 66-83, 103-111, 116, 121, 125, 129-130, 134-141, 145-151, 166-174, 185-202, 236-237, 254-388, 403-470, 479-487, 508-518, 544-556, 567, 571, 575, 583
+agenticx/tools/builtin.py                                             188    138    27%   72-78, 82-91, 104-115, 136-150, 154-165, 172, 181-211, 216-257, 261-281, 288-294, 298-314, 321, 329-359, 366, 374-403, 421
+agenticx/tools/config.py                                              184    184     0%   7-411
+agenticx/tools/credentials.py                                         149    119    20%   16-17, 49-68, 73-95, 99-102, 106-112, 116-129, 133-146, 162-168, 185-186, 203-217, 232-242, 268, 280-288, 304-317, 333-357, 367-369, 374-375, 380-381
+agenticx/tools/document_routers.py                                    101     82    19%   26-27, 41-42, 51, 64-89, 93-97, 102-113, 120-125, 130-135, 140-159, 164-172, 177-185
+agenticx/tools/document_text.py                                       113    113     0%   7-228
+agenticx/tools/executor.py                                            256    208    19%   22-24, 59-65, 87, 102-113, 130-162, 194-200, 204-205, 260-285, 290-302, 315-322, 343-434, 455-471, 492-503, 522-619, 640-645, 662-675, 679, 696-714, 742-750, 775-800, 808-812, 816, 820-821
+agenticx/tools/fallback_chain.py                                       44     44     0%   12-124
+agenticx/tools/function_tool.py                                        59     43    27%   30-81, 115-125, 136, 148-153, 165-169, 211-221, 246
+agenticx/tools/guardrails/__init__.py                                   5      5     0%   10-21
+agenticx/tools/guardrails/builtin.py                                   15     15     0%   7-57
+agenticx/tools/guardrails/hook.py                                      43     43     0%   7-98
+agenticx/tools/guardrails/provider.py                                  20     20     0%   7-39
+agenticx/tools/hashline.py                                             36     36     0%   7-61
+agenticx/tools/html_extractor.py                                       97     97     0%   7-114
+agenticx/tools/image_generation.py                                     61     61     0%   7-127
+agenticx/tools/intelligence/__init__.py                                 5      5     0%   6-18
+agenticx/tools/intelligence/assembler.py                              174    174     0%   6-486
+agenticx/tools/intelligence/engine.py                                 187    187     0%   6-417
+agenticx/tools/intelligence/history.py                                163    163     0%   6-372
+agenticx/tools/intelligence/models.py                                  79     79     0%   6-119
+agenticx/tools/lsp_manager.py                                         347    347     0%   14-565
+agenticx/tools/mcp_hub.py                                             186    178     4%   21-343
+agenticx/tools/mineru.py                                              712    593    17%   61-101, 138-140, 170-172, 176-178, 197-204, 211-214, 233-294, 308-379, 391-400, 406-447, 453-506, 519-556, 560, 580-619, 632-662, 669-671, 675-686, 690-691, 698-700, 716-728, 738-855, 867-886, 890-952, 956-968, 972-1231, 1242-1250, 1255-1295, 1299-1371, 1375, 1381-1382, 1387-1395, 1402-1403, 1415-1425, 1433-1449, 1458-1472, 1476-1497, 1517, 1543, 1567
+agenticx/tools/near_browser/__init__.py                                 4      4     0%   7-17
+agenticx/tools/near_browser/profile.py                                 59     59     0%   10-103
+agenticx/tools/near_browser/url_guard.py                              168    168     0%   10-262
+agenticx/tools/openapi_toolset.py                                     206    175    15%   24-25, 30-31, 69-81, 85-134, 138-187, 225-245, 263-276, 296-311, 330-346, 350-364, 384-450, 471-510, 522-533, 537-540, 544-551
+agenticx/tools/policy.py                                              127     72    43%   46-48, 81-85, 90, 127-129, 136-157, 168-187, 191, 198, 202-205, 225-232, 257-261, 280-285, 312-315, 319-320, 324-326, 330
+agenticx/tools/remote.py                                              768    633    18%   36-56, 88-94, 105, 110-112, 131-137, 146-303, 306, 309-313, 316-322, 345-348, 368-410, 418-421, 429-440, 452-481, 490-504, 513-519, 526-529, 533-774, 778-795, 799-815, 819-838, 849-868, 873-899, 904-910, 934, 944-947, 976-978, 982-989, 993-994, 1003-1034, 1038-1049, 1053-1065, 1080-1086, 1090-1091, 1095-1112, 1116-1127, 1131-1132, 1146-1152, 1156-1157, 1161, 1172-1174, 1183-1241, 1259-1261, 1270-1273, 1284, 1292, 1306-1315, 1324, 1334-1357, 1366-1381, 1391-1433, 1437-1438, 1442-1448, 1455-1463, 1467-1503, 1512-1513, 1517-1530, 1534, 1538, 1548, 1557, 1562
+agenticx/tools/remote_v2.py                                           364    293    20%   35-39, 43-44, 48-49, 58, 69-87, 138-163, 169-174, 182-186, 219-232, 236-241, 248-260, 264-271, 275-277, 281, 290-428, 432-454, 471-500, 508-526, 530-546, 554-576, 589-607, 626-701, 708-715, 745-754, 758-759, 764-796, 800-816
+agenticx/tools/resolvers/__init__.py                                    3      3     0%   7-10
+agenticx/tools/resolvers/api_connector_resolver.py                     21     21     0%   7-43
+agenticx/tools/resolvers/computer_use_resolver.py                      40     40     0%   10-116
+agenticx/tools/sandbox_tools.py                                       170    116    32%   126-132, 137, 142, 146-147, 169-261, 298-304, 309, 314, 318-319, 341-369, 425-438, 443, 448, 453, 461-479, 485-489, 497-499, 503-504, 526-585, 597-598, 602, 623, 649-661
+agenticx/tools/security.py                                             30     22    27%   18-22, 43-73
+agenticx/tools/shell_bundle.py                                         96     68    29%   35-37, 44-63, 66-103, 125-129, 132-140, 143-162, 166, 170-191
+agenticx/tools/show_images.py                                          73     73     0%   7-123
+agenticx/tools/skill_bundle.py                                        664    569    14%   35-37, 80-91, 130-131, 233-236, 246-307, 330-333, 343-371, 375-378, 383-391, 407-428, 432-441, 446-460, 467-486, 491-495, 505-514, 519-576, 590-612, 617-618, 673-687, 696-887, 917-948, 975-995, 1000-1003, 1008-1014, 1019-1024, 1029-1046, 1054, 1063-1087, 1091-1100, 1104-1117, 1124-1146, 1162-1164, 1186-1202, 1211-1213, 1222-1225, 1229-1231, 1282-1295, 1308-1315, 1319-1365, 1369-1389, 1409-1439
+agenticx/tools/skill_execution_backend.py                              77     77     0%   12-275
+agenticx/tools/skill_sync.py                                           85     63    26%   37-59, 68-84, 94-105, 109-118, 122-135
+agenticx/tools/tool_context.py                                         85     37    56%   14-15, 62-64, 69, 74, 78, 82, 86, 101-108, 120-121, 125, 153, 163, 207, 211, 215, 219-222, 226-249
+agenticx/tools/unified_document.py                                    115     89    23%   65-83, 88-106, 112-119, 125-132, 136-177, 181-200, 204-213, 225-226, 238-251
+agenticx/tools/windowed.py                                             93     65    30%   38-42, 61-71, 74-83, 87-92, 95-99, 102-106, 109-130, 133-141, 144-168
+agenticx/trainer/__init__.py                                            3      3     0%   1-3
+agenticx/trainer/__main__.py                                           74     74     0%   8-91
+agenticx/trainer/builders.py                                           54     54     0%   7-79
+agenticx/trainer/exporters.py                                          20     20     0%   3-37
+agenticx/trainer/gateway.py                                            12     12     0%   8-22
+agenticx/trainer/heldout.py                                            20     20     0%   7-32
+agenticx/trainer/quality.py                                            23     23     0%   3-29
+agenticx/trainer/registry.py                                           73     73     0%   8-105
+agenticx/trainer/scrub.py                                              26     26     0%   3-39
+agenticx/utils/__init__.py                                              0      0   100%
+agenticx/utils/agx_home.py                                             10     10     0%   32-52
+agenticx/utils/async_bridge.py                                         13      6    54%   35-43
+agenticx/utils/atomic_writer.py                                        22     22     0%   7-35
+agenticx/utils/proxy_policy.py                                        225    183    19%   45-50, 55-66, 70-73, 77-82, 87-91, 97-120, 125-147, 151-157, 161-162, 167-189, 193-197, 202-203, 208-210, 213-217, 220-231, 234-236, 241-243, 246-259, 262-264, 269-274, 279-282, 286-289, 298-306, 312-316
+agenticx/utils/safe_pickle.py                                          44     25    43%   69-70, 75-79, 99, 108, 120-122, 133-134, 145-155, 166, 177
+agenticx/utils/workspace_dir.py                                        11      6    45%   24-29
+agenticx/wb_bridge/__init__.py                                          0      0   100%
+agenticx/wb_bridge/events.py                                          118    118     0%   11-176
+agenticx/wb_bridge/http_app.py                                        124    124     0%   7-252
+agenticx/wb_bridge/process.py                                         115    115     0%   10-194
+agenticx/wb_bridge/session_manager.py                                 302    302     0%   7-456
+agenticx/wb_bridge/settings.py                                        116    116     0%   7-206
+agenticx/workspace/__init__.py                                          2      2     0%   7-9
+agenticx/workspace/loader.py                                          514    514     0%   7-818
+-------------------------------------------------------------------------------------------------
+TOTAL                                                              152719 140892     8%
+Coverage HTML written to dir htmlcov
+Coverage XML written to file coverage.xml
+======================== 1 passed, 1 warning in 35.21s =========================
