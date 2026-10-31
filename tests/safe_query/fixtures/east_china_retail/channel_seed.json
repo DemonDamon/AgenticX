@@ -1,0 +1,12 @@
+{
+  "case": "华东零售 · 月度经营问数 + 知识图核验",
+  "question": "上月华东大区 GMV 和退货率分别是多少？",
+  "scripted_sql": "SELECT region AS 大区, gmv AS GMV, return_rate AS 退货率 FROM monthly_ops WHERE region = '华东大区' AND period = '上月'",
+  "rows": [
+    {
+      "大区": "华东大区",
+      "GMV": 128500000.0,
+      "退货率": 0.032
+    }
+  ]
+}

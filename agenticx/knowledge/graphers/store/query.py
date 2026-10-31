@@ -1,4 +1,10 @@
-"""Shared GraphStore query helpers (neighborhood / subgraph)."""
+"""Shared GraphStore query helpers (neighborhood / subgraph).
+
+These pure builders back the **sole recommended GraphStore read facade**.
+Product code should call ``GraphStore.neighborhood`` / ``GraphStore.subgraph``
+(which delegate here) rather than reimplementing traversal or talking to a
+backend driver directly. See ``store/README.md``.
+"""
 
 from __future__ import annotations
 

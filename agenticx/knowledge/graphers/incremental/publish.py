@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from agenticx.knowledge.graphers.models import (
     Entity,
@@ -182,11 +182,22 @@ def publish_to_store(
     graph_store: Any,
     *,
     object_ids: Optional[Iterable[str]] = None,
+    secondary_hooks: Optional[Sequence[Callable[[Dict[str, Any]], None]]] = None,
 ) -> Dict[str, Any]:
     """Upsert published KnowledgeObjects into a GraphStore (entities then relations).
 
-    ``graph_store`` is the publish source of truth when provided. Returns stats
-    including ``store_backend`` and upsert counts.
+    ``graph_store`` is the publish source of truth when provided.
+
+    Return shape invariants:
+
+    - **Primary** path is entity/relation ``upsert_*``. Failures are recorded in
+      ``primary_failures`` and set ``ok`` to ``False``.
+    - **Secondary** side effects (``stats()``, optional ``secondary_hooks``) never
+      flip ``ok``. Their failures append human-readable strings to ``warnings``
+      so a successful primary write is never reported as a whole-publish failure
+      (and a failed primary is never masked as success).
+
+    Also returns ``store_backend``, upsert counts, and SyncReport-compatible aliases.
     """
     if object_ids is None:
         candidates = store.list_objects(status=KnowledgeStatus.PUBLISHED)
@@ -207,30 +218,53 @@ def publish_to_store(
     entities_upserted = 0
     relations_upserted = 0
     skipped = 0
+    primary_failures: List[Dict[str, Any]] = []
+    warnings: List[str] = []
 
     for obj in entities:
         try:
             graph_store.upsert_entity(knowledge_object_to_entity(obj))
             entities_upserted += 1
-        except Exception:
+        except Exception as exc:
             skipped += 1
+            primary_failures.append(
+                {
+                    "object_id": obj.id,
+                    "kind": "entity",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
 
     for obj in relations:
         try:
             graph_store.upsert_relationship(knowledge_object_to_relationship(obj))
             relations_upserted += 1
-        except Exception:
+        except Exception as exc:
             skipped += 1
+            primary_failures.append(
+                {
+                    "object_id": obj.id,
+                    "kind": "relation",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
 
-    skipped += len(others)
+    for obj in others:
+        skipped += 1
+        warnings.append(f"unsupported_kind:{obj.kind}:{obj.id}")
+
     backend = getattr(graph_store, "backend_name", type(graph_store).__name__)
     store_stats: Dict[str, Any] = {}
     try:
         store_stats = dict(graph_store.stats() or {})
-    except Exception:
+    except Exception as exc:
         store_stats = {}
+        warnings.append(f"store_stats_failed:{type(exc).__name__}: {exc}")
 
-    return {
+    result: Dict[str, Any] = {
+        "ok": len(primary_failures) == 0,
+        "warnings": warnings,
+        "primary_failures": primary_failures,
         "entities_upserted": entities_upserted,
         "relations_upserted": relations_upserted,
         "skipped": skipped,
@@ -243,6 +277,18 @@ def publish_to_store(
         "entity_count": store_stats.get("entity_count"),
         "relationship_count": store_stats.get("relationship_count"),
     }
+
+    for hook in secondary_hooks or ():
+        try:
+            hook(result)
+        except Exception as exc:
+            warnings.append(f"secondary_hook_failed:{type(exc).__name__}: {exc}")
+
+    # Re-bind warnings list in case hooks mutated nothing but we appended after copy
+    result["warnings"] = warnings
+    # ok stays tied to primary only — never flipped by secondary hooks
+    result["ok"] = len(primary_failures) == 0
+    return result
 
 
 def retire_from_store(
