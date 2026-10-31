@@ -7,8 +7,9 @@
  */
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+
+import { getAgxHomeDir } from "./agx-home";
 
 /** 与 Python `_safe_name` 一致：字母数字与 -_ 保留，其余替换为 _，截断 80，空则 server。 */
 export function mcpOauthSafeName(name: string): string {
@@ -19,12 +20,12 @@ export function mcpOauthSafeName(name: string): string {
   return out || "server";
 }
 
-export function mcpOauthStoreDir(home: string = os.homedir()): string {
-  return path.join(home, ".agenticx", "connectors", "oauth");
+export function mcpOauthStoreDir(dataRoot?: string): string {
+  return path.join(dataRoot ?? getAgxHomeDir(), "connectors", "oauth");
 }
 
-export function mcpOauthTokenPath(name: string, home?: string): string {
-  return path.join(mcpOauthStoreDir(home), `${mcpOauthSafeName(name)}.json`);
+export function mcpOauthTokenPath(name: string, dataRoot?: string): string {
+  return path.join(mcpOauthStoreDir(dataRoot), `${mcpOauthSafeName(name)}.json`);
 }
 
 function readStore(file: string): Record<string, unknown> | null {

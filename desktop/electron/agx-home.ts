@@ -95,6 +95,22 @@ export function agxHomePath(...segments: string[]): string {
   return path.join(getAgxHomeDir(), ...segments);
 }
 
+/** Expand ``~/.agenticx/...`` to the configured data root; other ``~/`` paths use the user profile. */
+export function expandAgxVirtualPath(input: string): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const decoded = raw.startsWith("file://")
+    ? decodeURIComponent(raw.replace(/^file:\/\//, ""))
+    : raw;
+  if (decoded === "~") return os.homedir();
+  if (decoded === "~/.agenticx") return getAgxHomeDir();
+  if (decoded.startsWith("~/.agenticx/")) {
+    return path.join(getAgxHomeDir(), decoded.slice("~/.agenticx/".length));
+  }
+  if (decoded.startsWith("~/")) return path.join(os.homedir(), decoded.slice(2));
+  return path.normalize(decoded);
+}
+
 export function bootstrapAgenticxDir(): string {
   return BOOTSTRAP_DIR;
 }

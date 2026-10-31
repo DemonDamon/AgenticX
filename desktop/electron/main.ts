@@ -28,6 +28,7 @@ import {
   agxHomeEnvForChildProcess,
   applyConfiguredDataDir,
   defaultAgenticxHomeDir,
+  expandAgxVirtualPath,
   getAgxHomeDir,
 } from "./agx-home";
 
@@ -524,12 +525,7 @@ function normalizeDesktopRunMode(raw: unknown): "ask" | "allowlist" | "auto" {
 }
 
 function expandDesktopLocalPath(input: string): string {
-  const raw = String(input || "").trim();
-  if (!raw) return "";
-  const decoded = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
-  if (decoded === "~") return os.homedir();
-  if (decoded.startsWith("~/")) return path.join(os.homedir(), decoded.slice(2));
-  return path.normalize(decoded);
+  return expandAgxVirtualPath(input);
 }
 
 function resolveConfigWorkspaceDirRaw(cfg?: AgxConfig): string {
@@ -2287,7 +2283,7 @@ function actionAuditUploaderDeps() {
   return {
     loadConfig: loadAgxConfig,
     fetchImpl: proxyAwareFetch,
-    homeDir: os.homedir(),
+    agxHome: getAgxHomeDir(),
     now: () => Date.now(),
   };
 }
@@ -3447,25 +3443,22 @@ const TMEET_PACKAGE_URL =
 const TMEET_PACKAGE_SHA512 =
   "N/TdgdxP+D09y9SschrrdCfMe+sGncIZlHUH9czTjAunC/b/Ck3CFO2BplYcm+lnlPPvguOjD0s8qp3GmJO41Q==";
 const TMEET_PACKAGE_MAX_BYTES = 20 * 1024 * 1024;
-const NATIVE_CONNECTOR_STATUS_PATH = path.join(
-  os.homedir(),
-  ".agenticx",
-  "connectors",
-  "native-status.json",
-);
+function nativeConnectorStatusPath(): string {
+  return configPath("connectors", "native-status.json");
+}
 
 function persistTmeetConnectorStatus(connected: boolean): void {
-  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  const parentDir = path.dirname(nativeConnectorStatusPath());
   fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   if (
-    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
-    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+    fs.existsSync(nativeConnectorStatusPath()) &&
+    fs.lstatSync(nativeConnectorStatusPath()).isSymbolicLink()
   ) {
     throw new Error("原生连接器状态文件不能是符号链接");
   }
   let current: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(nativeConnectorStatusPath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       current = parsed as Record<string, unknown>;
     }
@@ -3491,12 +3484,12 @@ function persistTmeetConnectorStatus(connected: boolean): void {
       },
     },
   };
-  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${nativeConnectorStatusPath()}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
-  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+  fs.renameSync(tempPath, nativeConnectorStatusPath());
 }
 
 function tryPersistTmeetConnectorStatus(connected: boolean): void {
@@ -3533,13 +3526,7 @@ function tmeetBinarySha256(): string {
 }
 
 function tmeetInstallDir(): string {
-  return path.join(
-    os.homedir(),
-    ".agenticx",
-    "connectors",
-    "tencent-meeting",
-    TMEET_PACKAGE_VERSION,
-  );
+  return configPath("connectors", "tencent-meeting", TMEET_PACKAGE_VERSION);
 }
 
 async function resolveTmeetBinaryPath(): Promise<string | null> {
@@ -3660,13 +3647,7 @@ async function runTmeetCommand(args: string[], timeoutMs = 15000): Promise<strin
 }
 
 function tmeetSkillDir(): string {
-  return path.join(
-    os.homedir(),
-    ".agenticx",
-    "skills",
-    "near-connectors",
-    "tencent-meeting",
-  );
+  return configPath("skills", "near-connectors", "tencent-meeting");
 }
 
 function ensureTmeetSkill(binaryPath: string): void {
@@ -3914,17 +3895,17 @@ const GH_RELEASE_BASE = `https://github.com/cli/cli/releases/download/v${GH_CLI_
 const GH_ARCHIVE_MAX_BYTES = 40 * 1024 * 1024;
 
 function persistGithubConnectorStatus(connected: boolean): void {
-  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  const parentDir = path.dirname(nativeConnectorStatusPath());
   fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   if (
-    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
-    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+    fs.existsSync(nativeConnectorStatusPath()) &&
+    fs.lstatSync(nativeConnectorStatusPath()).isSymbolicLink()
   ) {
     throw new Error("原生连接器状态文件不能是符号链接");
   }
   let current: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(nativeConnectorStatusPath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       current = parsed as Record<string, unknown>;
     }
@@ -3950,12 +3931,12 @@ function persistGithubConnectorStatus(connected: boolean): void {
       },
     },
   };
-  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${nativeConnectorStatusPath()}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
-  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+  fs.renameSync(tempPath, nativeConnectorStatusPath());
 }
 
 function tryPersistGithubConnectorStatus(connected: boolean): void {
@@ -4819,17 +4800,17 @@ const LARK_CLI_RELEASE_BASE = `https://github.com/larksuite/cli/releases/downloa
 const LARK_CLI_ARCHIVE_MAX_BYTES = 60 * 1024 * 1024;
 
 function persistFeishuConnectorStatus(connected: boolean): void {
-  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  const parentDir = path.dirname(nativeConnectorStatusPath());
   fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   if (
-    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
-    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+    fs.existsSync(nativeConnectorStatusPath()) &&
+    fs.lstatSync(nativeConnectorStatusPath()).isSymbolicLink()
   ) {
     throw new Error("原生连接器状态文件不能是符号链接");
   }
   let current: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(nativeConnectorStatusPath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       current = parsed as Record<string, unknown>;
     }
@@ -4855,12 +4836,12 @@ function persistFeishuConnectorStatus(connected: boolean): void {
       },
     },
   };
-  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${nativeConnectorStatusPath()}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
-  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+  fs.renameSync(tempPath, nativeConnectorStatusPath());
 }
 
 function tryPersistFeishuConnectorStatus(connected: boolean): void {
@@ -5563,17 +5544,17 @@ function wecomSkillDir(): string {
 }
 
 function persistWecomConnectorStatus(connected: boolean): void {
-  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  const parentDir = path.dirname(nativeConnectorStatusPath());
   fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   if (
-    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
-    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+    fs.existsSync(nativeConnectorStatusPath()) &&
+    fs.lstatSync(nativeConnectorStatusPath()).isSymbolicLink()
   ) {
     throw new Error("原生连接器状态文件不能是符号链接");
   }
   let current: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(nativeConnectorStatusPath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       current = parsed as Record<string, unknown>;
     }
@@ -5599,12 +5580,12 @@ function persistWecomConnectorStatus(connected: boolean): void {
       },
     },
   };
-  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${nativeConnectorStatusPath()}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
-  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+  fs.renameSync(tempPath, nativeConnectorStatusPath());
 }
 
 function tryPersistWecomConnectorStatus(connected: boolean): void {
@@ -6358,17 +6339,17 @@ function qqmailSkillDir(): string {
 }
 
 function persistQqmailConnectorStatus(connected: boolean, account?: string): void {
-  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  const parentDir = path.dirname(nativeConnectorStatusPath());
   fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
   if (
-    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
-    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+    fs.existsSync(nativeConnectorStatusPath()) &&
+    fs.lstatSync(nativeConnectorStatusPath()).isSymbolicLink()
   ) {
     throw new Error("原生连接器状态文件不能是符号链接");
   }
   let current: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(nativeConnectorStatusPath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       current = parsed as Record<string, unknown>;
     }
@@ -6395,12 +6376,12 @@ function persistQqmailConnectorStatus(connected: boolean, account?: string): voi
       },
     },
   };
-  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${nativeConnectorStatusPath()}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
-  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+  fs.renameSync(tempPath, nativeConnectorStatusPath());
 }
 
 function tryPersistQqmailConnectorStatus(connected: boolean, account?: string): void {

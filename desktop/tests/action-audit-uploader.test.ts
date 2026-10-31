@@ -31,15 +31,15 @@ function harness(now = 1_700_000_000_000): {
   deps: ActionAuditUploaderDeps;
   fetchImpl: ReturnType<typeof vi.fn>;
 } {
-  const home = mkdtempSync(path.join(tmpdir(), "action-audit-"));
-  const dir = path.join(home, ".agenticx", "action_audit");
+  const agxHome = mkdtempSync(path.join(tmpdir(), "action-audit-"));
+  const dir = path.join(agxHome, "action_audit");
   const fetchImpl = vi.fn();
   const deps: ActionAuditUploaderDeps = {
     loadConfig: () => ({
       enterprise: { enabled: true, token: "agx-pat-test", base_url: "https://portal.example" },
     }),
     fetchImpl,
-    homeDir: home,
+    agxHome,
     now: () => now,
   };
   return { dir, deps, fetchImpl };

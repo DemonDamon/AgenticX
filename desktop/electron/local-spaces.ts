@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+
+import { agxHomePath } from "./agx-home";
 
 export type LocalSpace = {
   id: string;
@@ -26,7 +27,7 @@ export function setLocalSpacesFileForTests(filePath: string | null): void {
 
 function spacesFilePath(): string {
   if (spacesFileOverride && spacesFileOverride.trim()) return spacesFileOverride;
-  return path.join(os.homedir(), ".agenticx", "spaces.json");
+  return agxHomePath("spaces.json");
 }
 
 function canonicalDir(dirPath: string): string {

@@ -7,8 +7,9 @@
 
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+
+import { getAgxHomeDir } from "./agx-home";
 
 import {
   normalizeEnterpriseCapabilities,
@@ -38,8 +39,8 @@ export function hasEnterprisePat(cfg: EnterpriseSyncConfig): boolean {
   return Boolean(cfg.enterprise?.enabled && String(cfg.enterprise.token ?? "").trim());
 }
 
-export function enterpriseSkillsRoot(home = os.homedir()): string {
-  return path.join(home, ".agenticx", "skills", ENTERPRISE_SKILL_GROUP);
+export function enterpriseSkillsRoot(dataRoot = getAgxHomeDir()): string {
+  return path.join(dataRoot, "skills", ENTERPRISE_SKILL_GROUP);
 }
 
 export async function applyEnterpriseCapabilitiesToDisk(opts: {
@@ -84,8 +85,8 @@ export async function applyEnterpriseCapabilitiesToDisk(opts: {
   return { managedMcp, managedSkills: installed.sort(), skipped: false };
 }
 
-export function writeManagedSkill(dirName: string, content: string, home = os.homedir()): void {
-  const skillDir = path.join(enterpriseSkillsRoot(home), dirName);
+export function writeManagedSkill(dirName: string, content: string, dataRoot = getAgxHomeDir()): void {
+  const skillDir = path.join(enterpriseSkillsRoot(dataRoot), dirName);
   const markerPath = path.join(skillDir, ENTERPRISE_SKILL_MARKER);
   if (fs.existsSync(skillDir) && !fs.existsSync(markerPath)) {
     throw new Error(`skill directory ${dirName} is not enterprise-managed`);
@@ -98,8 +99,8 @@ export function writeManagedSkill(dirName: string, content: string, home = os.ho
   });
 }
 
-export function removeManagedSkill(dirName: string, home = os.homedir()): void {
-  const skillDir = path.join(enterpriseSkillsRoot(home), dirName);
+export function removeManagedSkill(dirName: string, dataRoot = getAgxHomeDir()): void {
+  const skillDir = path.join(enterpriseSkillsRoot(dataRoot), dirName);
   if (!fs.existsSync(path.join(skillDir, ENTERPRISE_SKILL_MARKER))) return;
   fs.rmSync(skillDir, { recursive: true, force: true });
 }
