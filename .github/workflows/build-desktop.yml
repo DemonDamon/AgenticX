@@ -46,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -138,7 +138,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -201,7 +201,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -303,7 +303,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
