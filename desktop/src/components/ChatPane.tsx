@@ -309,7 +309,8 @@ import {
   findBudgetExceededInMessages,
   type BudgetExceededInfo,
 } from "../utils/budget-exceeded";
-import { buildBudgetResumeDraft } from "../utils/budget-resume-draft";
+import { applyBudgetResumeDraftToComposer, buildBudgetResumeDraft } from "../utils/budget-resume-draft";
+import { SESSION_CAP_FOCUS } from "../settings-tab";
 import {
   getCachedGlobalKbRetrievalMode,
   getKbRetrievalModeForPane,
@@ -9159,7 +9160,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               sessionId={(pane.sessionId || "").trim() || undefined}
               onResumeInNewSession={() => resumeInNewSessionRef.current()}
               onResumeDraft={() => resumeDraftRef.current()}
-              onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
+              onOpenBudgetSettings={() =>
+                useAppStore.getState().openSettings("tools", SESSION_CAP_FOCUS)
+              }
               onResumeTask={() => void resumeCurrentTask()}
               resumeInFlight={resumeInFlight}
               isFutileResume={isFutileResumeFlag}
@@ -13531,6 +13534,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const draft = buildBudgetResumeDraft(pane.messages ?? []);
     createNewTopic(false, pane.sessionMode ?? "daily_office");
     setBudgetExceededInfo(null);
+    applyBudgetResumeDraftToComposer({
+      paneId: pane.id,
+      draft,
+      prepareFreshComposerPaneDraft,
+      setComposerText,
+    });
     setComposerHasText(isComposerNonEmpty(draft));
   };
 

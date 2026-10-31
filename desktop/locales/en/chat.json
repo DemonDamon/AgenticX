@@ -801,7 +801,10 @@
   },
   "budget": {
     "title": "This run exhausted its token budget",
-    "body": "Used {{current}} / cap {{max}} (about {{pct}}%, source={{source}}). The budget resets with each new message — just send a follow-up to continue with current progress.",
+    "titleSession": "Session cumulative token cap reached",
+    "usageLine": "{{current}} / {{max}}",
+    "body": "About {{pct}}% (source={{source}}). Per-turn budget resets with each new message — send a follow-up in this chat to continue with current progress.",
+    "bodySession": "Over the session cumulative cap (about {{pct}}%). Raise the session cap in settings or continue in a new chat; session totals do not reset with new messages.",
     "resumeDraft": "Continue unfinished work",
     "newSession": "Continue in a new chat",
     "adjust": "Adjust budget cap",

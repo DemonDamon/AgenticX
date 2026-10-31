@@ -1,5 +1,5 @@
 /** 设置页内锚点；从「自定义」等入口打开时滚到对应区块，而不是只切 Tab。 */
-export const SETTINGS_FOCUS_IDS = ["security-rules"] as const;
+export const SETTINGS_FOCUS_IDS = ["security-rules", "sessionCap"] as const;
 
 export type SettingsFocus = (typeof SETTINGS_FOCUS_IDS)[number];
 
@@ -11,6 +11,11 @@ export function isSettingsFocus(x: unknown): x is SettingsFocus {
 export const SECURITY_RULES_FOCUS = "security-rules" satisfies SettingsFocus;
 
 export const SECURITY_RULES_ANCHOR_ID = "agx-security-rules";
+
+/** 预算超限卡片「调整预算上限」的落点：内置工具 Tab 内的会话累计上限。 */
+export const SESSION_CAP_FOCUS = "sessionCap" satisfies SettingsFocus;
+
+export const SESSION_CAP_ANCHOR_ID = "agx-session-cap-budget";
 
 /** 与 SettingsPanel 左侧导航 id 一致；用于从外部（如「查看账号」）打开指定设置分区。 */
 export const SETTINGS_TAB_IDS = [

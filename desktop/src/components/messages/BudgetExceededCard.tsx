@@ -44,8 +44,12 @@ export function BudgetExceededCard({
         rounds: rounds?.round ?? rounds?.maxRounds ?? "?",
         max: rounds?.maxRounds ?? rounds?.round ?? "?",
       })
-    : t("budget.title");
+    : info?.source === "session"
+      ? t("budget.titleSession")
+      : t("budget.title");
   const body = isRounds ? t("budget.roundsBody") : null;
+  const tokenBodyKey =
+    info?.source === "session" ? "budget.bodySession" : "budget.body";
 
   return (
     <div className="flex min-w-0 items-start gap-2">
@@ -69,14 +73,22 @@ export function BudgetExceededCard({
                   {isRounds ? (
                     body ? <p className="mt-1 text-xs text-text-muted">{body}</p> : null
                   ) : info ? (
-                    <p className="mt-1 text-xs text-text-muted">
-                      {t("budget.body", {
-                        current: info.current.toLocaleString(),
-                        max: info.maxAllowed.toLocaleString(),
-                        pct,
-                        source: info.source,
-                      })}
-                    </p>
+                    <>
+                      <p className="mt-1 text-sm font-medium tabular-nums text-text-strong">
+                        {t("budget.usageLine", {
+                          current: info.current.toLocaleString(),
+                          max: info.maxAllowed.toLocaleString(),
+                        })}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {t(tokenBodyKey, {
+                          current: info.current.toLocaleString(),
+                          max: info.maxAllowed.toLocaleString(),
+                          pct,
+                          source: info.source,
+                        })}
+                      </p>
+                    </>
                   ) : null}
 
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">

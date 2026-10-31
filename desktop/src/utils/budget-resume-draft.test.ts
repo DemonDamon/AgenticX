@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Message } from "../store";
 import {
   budgetExceededInfoFromPayload,
   findBudgetExceededInMessages,
   parseBudgetExceededFromText,
 } from "./budget-exceeded";
-import { buildBudgetResumeDraft } from "./budget-resume-draft";
+import { applyBudgetResumeDraftToComposer, buildBudgetResumeDraft } from "./budget-resume-draft";
 import {
   looksLikeUnfinishedAssistantBody,
   shouldShowBudgetIncompleteHint,
@@ -122,6 +122,41 @@ describe("buildBudgetResumeDraft", () => {
     expect(draft).toContain("- docs/file-29.md");
     expect(draft).not.toContain("- docs/file-30.md");
     expect(draft).toContain("…等共 35 个文件");
+  });
+});
+
+describe("applyBudgetResumeDraftToComposer", () => {
+  it("persists pane draft and paints composer without auto-send", () => {
+    const prepare = vi.fn();
+    const setText = vi.fn();
+    const deferred: Array<() => void> = [];
+    applyBudgetResumeDraftToComposer({
+      paneId: "pane-1",
+      draft: "【原始目标】\ngoal",
+      prepareFreshComposerPaneDraft: prepare,
+      setComposerText: setText,
+      deferComposerPaint: (paint) => {
+        deferred.push(paint);
+      },
+    });
+    expect(prepare).toHaveBeenCalledWith("pane-1", "【原始目标】\ngoal");
+    expect(setText).not.toHaveBeenCalled();
+    expect(deferred).toHaveLength(1);
+    deferred[0]!();
+    expect(setText).toHaveBeenCalledWith("【原始目标】\ngoal");
+  });
+
+  it("skips empty drafts", () => {
+    const prepare = vi.fn();
+    const setText = vi.fn();
+    applyBudgetResumeDraftToComposer({
+      paneId: "pane-1",
+      draft: "   ",
+      prepareFreshComposerPaneDraft: prepare,
+      setComposerText: setText,
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(setText).not.toHaveBeenCalled();
   });
 });
 

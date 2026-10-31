@@ -4,12 +4,14 @@ import {
   isSettingsFocus,
   isSettingsTab,
   SECURITY_RULES_FOCUS,
+  SESSION_CAP_FOCUS,
   SETTINGS_TAB_IDS,
 } from "./settings-tab";
 
 describe("settings deep-link", () => {
   it("accepts the security rules focus used by 自定义", () => {
     expect(isSettingsFocus(SECURITY_RULES_FOCUS)).toBe(true);
+    expect(isSettingsFocus(SESSION_CAP_FOCUS)).toBe(true);
     expect(isSettingsTab("security")).toBe(true);
     expect(isSettingsFocus("security")).toBe(false);
     expect(isSettingsFocus("")).toBe(false);
