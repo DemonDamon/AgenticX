@@ -126,7 +126,7 @@ memory = [
     "mem0ai>=0.1.0,<1",
     "chromadb>=0.5.0,<1",
     "qdrant-client>=1.10.0,<2",
-    "redis>=5.0.0,<6",
+    "redis>=5.0.0,<9",
     "pymilvus>=2.4.0,<3",
     "numpy>=1.24.0,<2",
 ]
@@ -207,7 +207,7 @@ text = [
 # ── Server 生产级（认证 + Redis 共享状态）──
 server = [
     "PyJWT>=2.8.0",
-    "redis>=5.0.0,<6",
+    "redis>=5.0.0,<9",
 ]
 # ── 火山引擎 AgentKit ──
 volcengine = [
