@@ -44,6 +44,8 @@ Admin UI: `/admin/graph-incremental` in `enterprise/apps/admin-console` (store/A
 
 ## GraphStore (publish source of truth)
 
+**Read facade:** the sole recommended read APIs are `GraphStore.neighborhood` and `GraphStore.subgraph` (see `../store/README.md`). Do not bypass the Protocol with a raw backend driver.
+
 K3 incremental publish writes lifecycle-published entities/relations into a
 `GraphStore` backend:
 

@@ -13,6 +13,10 @@ class GraphStore(Protocol):
 
     Production default is Neo4j. In-memory / file backends are for tests
     and offline fixtures — file/JSON must not be treated as production SoT.
+
+    **Sole recommended read surface:** ``neighborhood`` and ``subgraph``.
+    Callers (agents, admin bridges, templates) should use these Protocol
+    helpers — never bypass via a raw backend driver. See ``store/README.md``.
     """
 
     @property
