@@ -211,7 +211,7 @@ server = [
 ]
 # ── 火山引擎 AgentKit ──
 volcengine = [
-    "agentkit-sdk-python>=0.2.0,<0.9",
+    "agentkit-sdk-python>=0.2.0,<0.10",
 ]
 # ── 文档构建 ──
 docs = [
