@@ -16,7 +16,7 @@
     "@agenticx/iam-core": "workspace:^",
     "drizzle-orm": "^0.45.2",
     "mysql2": "^3.14.1",
-    "ulid": "^2.3.0"
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",

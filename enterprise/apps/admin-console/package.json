@@ -43,7 +43,7 @@
     "recharts": "^3.2.1",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
-    "ulid": "^2.3.0"
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

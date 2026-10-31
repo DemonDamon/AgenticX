@@ -39,7 +39,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1",
-    "ulid": "^2.3.0",
+    "ulid": "^3.0.2",
     "unpdf": "^1.8.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
