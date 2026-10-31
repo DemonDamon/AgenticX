@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/agenticx/connector-runtime v0.0.0
 	github.com/agenticx/enterprise/policy-engine v0.0.0
-	github.com/alicebob/miniredis/v2 v2.35.0
+	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-sql-driver/mysql v1.10.1
