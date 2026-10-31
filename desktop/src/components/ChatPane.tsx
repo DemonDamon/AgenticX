@@ -2967,6 +2967,7 @@ type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const { t } = useTranslation("chat");
+  const { t: tSidebar } = useTranslation("sidebar");
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
@@ -3476,6 +3477,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [avatarCreateHandoffToastOpen, setAvatarCreateHandoffToastOpen] = useState(false);
   const [isolateBusy, setIsolateBusy] = useState(false);
   const [attachToastMessage, setAttachToastMessage] = useState(() =>
     i18n.t("attachment.visionUnsupported", { ns: "chat" }),
@@ -13550,7 +13552,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   useEffect(() => {
     const onNewTopic = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { paneId?: string; draftText?: string; autoSend?: boolean; spaceId?: string }
+        | {
+            paneId?: string;
+            draftText?: string;
+            autoSend?: boolean;
+            spaceId?: string;
+            draftHandoffNotice?: boolean;
+          }
         | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
       // 专家指令直达 autoSend：派发方在 ack-retry 等 acknowledged，先确认再执行。
@@ -13568,6 +13576,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         // renders from direct DOM writes, so we must go through
         // setComposerText to actually show the draft text in the box.
         window.setTimeout(() => setComposerText(draftText), 0);
+        if (detail?.draftHandoffNotice && pane.avatarId === null) {
+          setAvatarCreateHandoffToastOpen(true);
+        }
         if (detail?.autoSend) {
           // 直达执行：新话题草稿落位后自动发送，专家在主聊天界面直接开始运行。
           window.setTimeout(() => void sendChatRef.current(draftText), 0);
@@ -14686,6 +14697,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             message={attachToastMessage}
             onClose={() => setAttachToastOpen(false)}
             timeoutMs={3200}
+          />
+          <Toast
+            placement="inline-bottom-center"
+            open={avatarCreateHandoffToastOpen}
+            message={tSidebar("gallery.createDraftHandoffToast")}
+            onClose={() => setAvatarCreateHandoffToastOpen(false)}
+            timeoutMs={4200}
           />
           </div>
 

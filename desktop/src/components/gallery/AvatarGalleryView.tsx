@@ -181,7 +181,7 @@ export function AvatarGalleryView() {
   };
 
   const handleCreateViaChat = (description: string) => {
-    newMetaTask(t("gallery.createDraft", { description }));
+    newMetaTask(t("gallery.createDraft", { description }), { draftHandoffNotice: true });
   };
 
   const handlePinToggle = async (avatarId: string) => {

@@ -254,32 +254,48 @@ export function usePaneNavigation() {
    * Optional `draftText` pre-fills the composer (editable, not auto-sent) —
    * used by the avatar gallery's "AI 创建" flow to hand off a template prompt.
    */
-  const newMetaTask = useCallback((draftText?: string, opts?: { spaceId?: string }) => {
-    setMainView("chat");
-    const metaPane = panes.find((item) => item.avatarId === null);
-    let paneId = metaPane?.id;
-    if (metaPane) {
-      setActivePaneId(metaPane.id);
-    } else {
-      paneId = addPane(null, META_AGENT_DISPLAY_NAME, "");
-      setActivePaneId(paneId);
-    }
-    setActiveAvatarId(null);
-    const targetPaneId = paneId;
-    const spaceId = opts?.spaceId?.trim() ?? "";
-    // Defer so the pane is mounted/focused before it handles the new-topic event.
-    window.setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent("agenticx:pane:new-topic", {
-          detail: {
-            paneId: targetPaneId,
-            draftText,
-            ...(spaceId ? { spaceId } : {}),
-          },
-        })
-      );
-    }, 0);
-  }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);
+  const newMetaTask = useCallback(
+    (
+      draftText?: string,
+      opts?: { spaceId?: string; draftHandoffNotice?: boolean },
+    ) => {
+      setMainView("chat");
+      const metaPane = panes.find((item) => item.avatarId === null);
+      let paneId = metaPane?.id;
+      if (metaPane) {
+        setActivePaneId(metaPane.id);
+      } else {
+        paneId = addPane(null, META_AGENT_DISPLAY_NAME, "");
+        setActivePaneId(paneId);
+      }
+      setActiveAvatarId(null);
+      const targetPaneId = paneId;
+      if (!targetPaneId) return;
+      const spaceId = opts?.spaceId?.trim() ?? "";
+      const trimmedDraft = String(draftText ?? "").trim();
+      if (trimmedDraft) {
+        // Persist before new-topic clears/reapplies so gallery handoff survives mount races.
+        prepareFreshComposerPaneDraft(targetPaneId, trimmedDraft);
+      }
+      const dispatch = () =>
+        window.dispatchEvent(
+          new CustomEvent("agenticx:pane:new-topic", {
+            detail: {
+              paneId: targetPaneId,
+              draftText: trimmedDraft || undefined,
+              ...(spaceId ? { spaceId } : {}),
+              ...(opts?.draftHandoffNotice ? { draftHandoffNotice: true } : {}),
+            },
+          }),
+        );
+      // Defer so the pane is mounted/focused before it handles the new-topic event.
+      window.setTimeout(dispatch, 0);
+      if (trimmedDraft) {
+        window.setTimeout(dispatch, 120);
+      }
+    },
+    [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView],
+  );
 
   const openManagedAgentPane = useCallback((agent: EnterpriseAgentCard) => {
     setMainView("chat");
