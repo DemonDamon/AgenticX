@@ -115,7 +115,8 @@ function resolveBackend(): "fixture" | "python" {
 async function pythonBridge(req: Nl2SqlAdminRequest): Promise<Nl2SqlAdminResult> {
   const python = process.env.AGX_PYTHON || process.env.PYTHON || "python3";
   const repoHint = process.env.AGX_REPO_ROOT?.trim();
-  const cwd = repoHint || path.resolve(process.cwd(), "../..");
+  // Next.js cwd is apps/admin-console → repo root is three levels up.
+  const cwd = repoHint || path.resolve(process.cwd(), "../../..");
   const payload = {
     question: req.question,
     mode: req.mode ?? null,

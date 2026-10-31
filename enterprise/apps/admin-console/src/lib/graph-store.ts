@@ -201,14 +201,24 @@ class FileGraphStore extends MemoryGraphStore {
 /** Process-local memory singleton (tests / AGX_GRAPH_STORE_BACKEND=memory). */
 const globalMemory = new MemoryGraphStore();
 
+function resolvePythonRepoRoot(): string {
+  const repoHint = process.env.AGX_REPO_ROOT?.trim();
+  if (repoHint) return repoHint;
+  // Next.js cwd is apps/admin-console → repo root is three levels up.
+  return path.resolve(process.cwd(), "../../..");
+}
+
 async function pythonBridge(req: Record<string, unknown>): Promise<Record<string, unknown>> {
   const python = process.env.AGX_PYTHON || process.env.PYTHON || "python3";
-  const repoHint = process.env.AGX_REPO_ROOT?.trim();
-  const cwd = repoHint || path.resolve(process.cwd(), "../..");
+  const cwd = resolvePythonRepoRoot();
+  const env = {
+    ...process.env,
+    PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+  };
   return await new Promise((resolve, reject) => {
     const child = spawn(python, ["-m", "agenticx.knowledge.graphers.store.query_cli"], {
       cwd,
-      env: process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";

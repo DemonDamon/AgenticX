@@ -26,3 +26,14 @@
 | `S2-产品操作手册-草稿.md` | 与飞书正本同步的 Markdown 草稿 |
 | `S2-feishu-ops-manual.url` | 飞书正本快捷链接 |
 | `shots/` | E2E / 手册用截图（不含演示视频） |
+| `shots/safe-query-e2e/` | 安全问数 A1–A6 证据与清单 |
+| `safe-query-w4-manual.md` | 安全问数讲解/执行 UI 手工说明 |
+
+
+## 安全问数（Agent safe-query）
+
+平台能力：写闸统一契约、NL2SQL 讲解/执行、知识图邻域读门面。管理台入口：`/admin/data-nl2sql`（自然语言取数）。
+
+- E2E 验收清单与截图：[`shots/safe-query-e2e/A1-A6-checklist.md`](shots/safe-query-e2e/A1-A6-checklist.md)
+- W4 手工说明：[`safe-query-w4-manual.md`](safe-query-w4-manual.md)
+- Master plan：[`../plans/2026-10-31-agx-agent-safe-query-capability-master.md`](../plans/2026-10-31-agx-agent-safe-query-capability-master.md)

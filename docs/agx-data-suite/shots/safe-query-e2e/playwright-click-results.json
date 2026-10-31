@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-10-31T05:09:00.696Z",
+  "admin_base": "http://127.0.0.1:3001",
+  "results": [
+    {
+      "id": "A2-explain",
+      "ok": true,
+      "detail": "sqlHasSelect=true explainNote=true rowsCount=0"
+    },
+    {
+      "id": "A3-execute",
+      "ok": true,
+      "detail": "rowsSnippet=结果行 region gmv return_rate 华东 12800000 0.032"
+    },
+    {
+      "id": "A1-write-gate",
+      "ok": true,
+      "detail": "denial=写闸已拒绝：SQL 非只读，未执行"
+    },
+    {
+      "id": "A4-neighborhood-ui",
+      "ok": true,
+      "detail": "no published object with view-neighborhood in seed; page+list visible — API A4 covered by W5 pytest"
+    }
+  ],
+  "all_click_steps_ok": true
+}

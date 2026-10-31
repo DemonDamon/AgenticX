@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-10-31T05:15:20.631Z",
+  "admin_base": "http://127.0.0.1:3001",
+  "steps": {
+    "graph_seed_clicked": true,
+    "source_note": "知识生命周期 API 不可用，显示本地种子数据。",
+    "pump01_initial_status": "状态: draft (v1)",
+    "pump01_status": "状态: published (v1)",
+    "pump01_published": true,
+    "site_status": "状态: published (v2)",
+    "landed_url": "http://127.0.0.1:3001/admin/graph-explorer?focus=site-cooling-zone-1",
+    "neighborhood_text_snippet": "邻域 device-pump-01 · 1号循环泵 device-valve-01 · 回路切断阀 site-cooling-zone-1 · 一车间冷却区",
+    "neighborhood_has_chinese_entity": true,
+    "pump_neighborhood_snippet": "邻域 device-pump-01 · 1号循环泵 site-cooling-zone-1 · 一车间冷却区",
+    "pump_neighborhood_ok": true
+  },
+  "a4_ui_pass": true
+}
