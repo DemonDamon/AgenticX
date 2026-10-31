@@ -37,6 +37,7 @@ const PLATFORM_HREFS = [
   "/admin/data-boards",
   "/admin/data-security",
   "/admin/data-jobs",
+  "/admin/data-nl2sql",
   "/admin/data-idmapping",
   "/admin/rule-governance",
   "/admin/knowledge-lifecycle",

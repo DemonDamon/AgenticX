@@ -82,7 +82,8 @@
         "citationEvidence": "Citation evidence",
         "graphIncremental": "Graph incremental",
         "graphExplorer": "Graph explorer",
-        "dataIdmapping": "ID mapping"
+        "dataIdmapping": "ID mapping",
+        "dataNl2sql": "Safe query"
       }
     },
     "health": {
@@ -1846,7 +1847,9 @@
           "version": "Version",
           "name": "Name"
         },
-        "writeForbidden": "Missing knowledge write scope (kb:update required)"
+        "writeForbidden": "Missing knowledge write scope (kb:update required)",
+        "viewNeighborhood": "View neighborhood",
+        "viewNeighborhoodHint": "Object is published; open graph explorer for neighborhood."
       },
       "ruleGovernance": {
         "title": "Rule governance",
@@ -1922,7 +1925,37 @@
           "name": "Name",
           "type": "Type",
           "description": "Description"
-        }
+        },
+        "neighborhoodTitle": "Neighborhood",
+        "focusEmpty": "Focus entity not found; loaded full subgraph.",
+        "neighborhoodEmpty": "No neighborhood nodes"
+      },
+      "dataNl2sql": {
+        "title": "Safe query",
+        "description": "NL2SQL explain then execute; show write-gate denial reasons (East China retail demo question)",
+        "formTitle": "Ask",
+        "question": "Business question",
+        "modeLabel": "Query mode",
+        "modeExplain": "Explain",
+        "modeExecute": "Execute",
+        "modeHint": "Explain drafts SQL only; execute runs read-only behind the write gate.",
+        "forcedSql": "Forced SQL (optional, denial demo)",
+        "forcedSqlHint": "Leave empty to draft from the question; use DELETE/INSERT to demo denial.",
+        "run": "Run",
+        "running": "Running…",
+        "runFailed": "Query failed",
+        "demoDeny": "Fill denial demo",
+        "resultTitle": "Result",
+        "resultMode": "Mode",
+        "executedYes": "Executed",
+        "executedNo": "Not executed",
+        "sqlDraft": "SQL draft",
+        "deniedTitle": "Write gate denied",
+        "deniedFallback": "Request denied",
+        "errorCode": "Error code",
+        "explainNote": "Explain mode: SQL draft only; channel not touched. Switch to Execute and run again.",
+        "rowsTitle": "Rows",
+        "rowsEmpty": "No rows"
       }
     },
     "dashboard": {

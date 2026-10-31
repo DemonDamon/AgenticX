@@ -82,7 +82,8 @@
         "citationEvidence": "引用证据",
         "graphIncremental": "图谱增量同步",
         "graphExplorer": "图谱探索",
-        "dataIdmapping": "ID 映射"
+        "dataIdmapping": "ID 映射",
+        "dataNl2sql": "安全问数"
       }
     },
     "health": {
@@ -1846,7 +1847,9 @@
           "version": "版本",
           "name": "名称"
         },
-        "writeForbidden": "无知识库写权限（需要 kb:update）"
+        "writeForbidden": "无知识库写权限（需要 kb:update）",
+        "viewNeighborhood": "查看邻域",
+        "viewNeighborhoodHint": "对象已发布，可在图谱探索中查看实体邻域。"
       },
       "ruleGovernance": {
         "title": "规则治理",
@@ -1922,7 +1925,37 @@
           "name": "名称",
           "type": "类型",
           "description": "描述"
-        }
+        },
+        "neighborhoodTitle": "邻域",
+        "focusEmpty": "未找到焦点实体，已加载全量子图。",
+        "neighborhoodEmpty": "暂无邻域节点"
+      },
+      "dataNl2sql": {
+        "title": "安全问数",
+        "description": "自然语言转 SQL：先讲解再执行；写闸拒绝原因可读（华东零售演示问句）",
+        "formTitle": "问数",
+        "question": "业务问句",
+        "modeLabel": "查询模式",
+        "modeExplain": "讲解",
+        "modeExecute": "执行",
+        "modeHint": "讲解只生成 SQL 草案，不访问通道；执行走只读写闸。",
+        "forcedSql": "强制 SQL（可选，用于写闸演示）",
+        "forcedSqlHint": "留空则按问句生成草案；填写 DELETE/INSERT 等可演示拒绝。",
+        "run": "运行",
+        "running": "运行中…",
+        "runFailed": "问数失败",
+        "demoDeny": "填入写闸演示",
+        "resultTitle": "结果",
+        "resultMode": "模式",
+        "executedYes": "已执行",
+        "executedNo": "未执行",
+        "sqlDraft": "SQL 草案",
+        "deniedTitle": "写闸拒绝",
+        "deniedFallback": "请求被拒绝",
+        "errorCode": "错误码",
+        "explainNote": "讲解模式：仅展示 SQL 草案，通道未执行。可切换到「执行」后再次运行。",
+        "rowsTitle": "结果行",
+        "rowsEmpty": "无结果行"
       }
     },
     "dashboard": {

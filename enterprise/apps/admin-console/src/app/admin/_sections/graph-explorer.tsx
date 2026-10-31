@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Button,
   Card,
@@ -22,7 +23,11 @@ export default function AdminGraphExplorerSection() {
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [backend, setBackend] = useState<string>("");
   const [selected, setSelected] = useState<GraphNode | null>(null);
+  const [neighborhoodNodes, setNeighborhoodNodes] = useState<GraphNode[]>([]);
+  const [focusNote, setFocusNote] = useState("");
   const [loading, setLoading] = useState(true);
+  const searchParams = useSearchParams();
+  const focusId = (searchParams.get("focus") || "").trim();
   const [busy, setBusy] = useState(false);
 
   const loadSubgraph = useCallback(async () => {
@@ -60,6 +65,26 @@ export default function AdminGraphExplorerSection() {
     void loadSubgraph();
   }, [loadSubgraph]);
 
+  useEffect(() => {
+    if (loading || !focusId || nodes.length === 0) return;
+    const hit = nodes.find((n) => n.id === focusId);
+    if (hit) {
+      setFocusNote("");
+      void onSelectNode(hit);
+    } else {
+      setFocusNote(t("focusEmpty"));
+      // still try neighborhood API for entities not in current subgraph viewport
+      void onSelectNode({
+        id: focusId,
+        name: focusId,
+        entity_type: "unknown",
+        description: null,
+        attributes: {},
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focus once per load/focusId
+  }, [loading, focusId, nodes]);
+
   async function doSeed() {
     setBusy(true);
     try {
@@ -78,7 +103,10 @@ export default function AdminGraphExplorerSection() {
 
   async function onSelectNode(node: GraphNode | null) {
     setSelected(node);
-    if (!node) return;
+    if (!node) {
+      setNeighborhoodNodes([]);
+      return;
+    }
     try {
       const res = await adminFetch(
         `/api/admin/graph-explorer/neighborhood?id=${encodeURIComponent(node.id)}&depth=1`,
@@ -87,7 +115,9 @@ export default function AdminGraphExplorerSection() {
       const json = (await res.json()) as {
         data?: { nodes?: GraphNode[]; backend?: string };
       };
-      const center = json.data?.nodes?.find((n) => n.id === node.id);
+      const neighbors = json.data?.nodes ?? [];
+      setNeighborhoodNodes(neighbors);
+      const center = neighbors.find((n) => n.id === node.id);
       if (center) setSelected(center);
       if (json.data?.backend) setBackend(json.data.backend);
     } catch {
@@ -133,6 +163,11 @@ export default function AdminGraphExplorerSection() {
         {" · "}
         {t("sotNote")}
       </p>
+      {focusNote ? (
+        <p className="text-sm text-amber-700" data-testid="graph-explorer-focus-note">
+          {focusNote}
+        </p>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card data-testid="graph-explorer-canvas-card">
@@ -188,6 +223,22 @@ export default function AdminGraphExplorerSection() {
                 >
                   {JSON.stringify(selected.attributes ?? {}, null, 2)}
                 </pre>
+
+                <div className="pt-2" data-testid="graph-explorer-neighborhood">
+                  <div className="mb-1 font-medium">{t("neighborhoodTitle")}</div>
+                  {neighborhoodNodes.length === 0 ? (
+                    <p className="text-muted-foreground">{t("neighborhoodEmpty")}</p>
+                  ) : (
+                    <ul className="space-y-1 font-mono text-xs">
+                      {neighborhoodNodes.map((n) => (
+                        <li key={n.id} data-testid={`graph-explorer-neighbor-${n.id}`}>
+                          {n.id}
+                          {n.name ? ` · ${n.name}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </>
             ) : (
               <p className="text-muted-foreground">{t("noSelection")}</p>
