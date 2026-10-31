@@ -39,7 +39,7 @@
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",
     "turbo": "^2.9.6",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "^5.0.5",
     "xml-crypto": "^6.0.0"
   },
@@ -50,7 +50,7 @@
   },
   "pnpm": {
     "overrides": {
-      "typescript": "5.9.3"
+      "typescript": "7.0.2"
     }
   }
 }
