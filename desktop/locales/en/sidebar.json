@@ -280,6 +280,7 @@
     "deleteIrreversible": "This cannot be undone.",
     "deleteConfirm": "Delete expert “{{name}}”? This cannot be undone.",
     "createDraft": "Help me create a digital expert.\n\nMy requirements:\n{{description}}\n\nDesign this expert from the requirements. If information is missing, only ask the key questions that would clearly change the result; if there is already enough, do not ask again.\n\nBefore creating, organize and show this plan:\n- Name\n- Role\n- Bio\n- Specialty tags\n- Working style and tone\n- Necessary boundaries\n\nThen use a confirmation card. Create only after I confirm; if I ask for changes, update the plan and confirm again.",
+    "createDraftHandoffToast": "Creation draft opened in chat — send it, then confirm to create the expert",
     "portraitStyle": "Portrait style",
     "portraitStyleHint": "Applies to built-in agents and every expert on this page. Photos you uploaded stay.",
     "portraitApplying": "Updating portraits…",
