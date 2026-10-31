@@ -163,6 +163,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/data-boards", labelKey: "dataBoards", icon: LayoutDashboard },
       { href: "/admin/data-security", labelKey: "dataSecurity", icon: Shield },
       { href: "/admin/data-jobs", labelKey: "dataJobs", icon: RefreshCw },
+      { href: "/admin/data-nl2sql", labelKey: "dataNl2sql", icon: MessageSquareText },
       { href: "/admin/data-idmapping", labelKey: "dataIdmapping", icon: Fingerprint },
       { href: "/admin/rule-governance", labelKey: "ruleGovernance", icon: BookMarked },
       { href: "/admin/knowledge-lifecycle", labelKey: "knowledgeLifecycle", icon: BookMarked },

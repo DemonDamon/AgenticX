@@ -3,7 +3,7 @@ import { isPlatformSection, PLATFORM_SECTION_IDS } from "../admin-platform-secti
 
 describe("isPlatformSection", () => {
   it("accepts the platform slugs that share /admin/[section]", () => {
-    expect(PLATFORM_SECTION_IDS).toEqual([
+        expect(PLATFORM_SECTION_IDS).toEqual([
       "agents",
       "agent-environments",
       "agent-vaults",
@@ -25,6 +25,9 @@ describe("isPlatformSection", () => {
       "data-governance",
       "data-boards",
       "data-security",
+      "data-jobs",
+      "data-nl2sql",
+      "data-idmapping",
       "rule-governance",
       "knowledge-lifecycle",
       "disambiguation",

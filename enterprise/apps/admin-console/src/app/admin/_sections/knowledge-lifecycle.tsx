@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -271,6 +272,22 @@ export default function AdminKnowledgeLifecycleSection() {
                     </Button>
                   ))}
                 </div>
+
+                {detail.status === "published" ? (
+                  <div
+                    className="rounded border bg-muted/30 p-3"
+                    data-testid="knowledge-lifecycle-neighborhood"
+                  >
+                    <p className="mb-2 text-muted-foreground">{t("viewNeighborhoodHint")}</p>
+                    <Link
+                      href={`/admin/graph-explorer?focus=${encodeURIComponent(detail.id)}`}
+                      data-testid="knowledge-lifecycle-view-neighborhood"
+                      className="inline-flex h-8 items-center rounded-md border bg-secondary px-3 text-sm text-secondary-foreground hover:bg-secondary/80"
+                    >
+                      {t("viewNeighborhood")}
+                    </Link>
+                  </div>
+                ) : null}
 
                 <div>
                   <h3 className="mb-2 font-medium">{t("issuesTitle")}</h3>
