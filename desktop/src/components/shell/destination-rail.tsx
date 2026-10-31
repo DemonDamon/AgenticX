@@ -14,6 +14,7 @@ import { ScratchChatIcon } from "../work-panel/ScratchChatIcon";
 import { HoverTip } from "../ds/HoverTip";
 import { workspaceToolLocked } from "../../utils/fresh-task-workspace";
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "../../store";
 
 /** Right-edge tools. Same set as the work-panel plus menu. */
 export type DestinationKind =
@@ -53,7 +54,9 @@ type RailProps = {
 };
 
 export function DestinationRail({ activeKind, freshTask = false, onSelect }: RailProps) {
+  const settingsOpen = useAppStore((s) => s.settings.open);
   const { t } = useTranslation("workspace");
+  if (settingsOpen) return null;
   return (
     <aside
       className="relative z-[60] flex w-10 shrink-0 flex-col items-center gap-1 self-stretch bg-transparent px-1 py-2"

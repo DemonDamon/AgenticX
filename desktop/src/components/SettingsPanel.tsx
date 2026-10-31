@@ -7173,7 +7173,8 @@ export function SettingsPanel({
 
   return (
     <>
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
+    {/* Above ChatPane DestinationRail / workExpanded composer (z-[60]) — see issues #71/#72 */}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
       {/* 默认更宽；右下角可拖拽调整尺寸并持久化，切换 tab 时尺寸不变 */}
       <div
         className="agx-settings-panel relative flex shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
@@ -9760,7 +9761,7 @@ export function SettingsPanel({
     </div>
     {mcpErrorInspect ? (
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-error-inspect-title"
