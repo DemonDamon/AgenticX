@@ -24,6 +24,12 @@ import {
   readGatewayAdapterForm,
   type GatewayAdapterForm,
 } from "./gateway-adapter-config";
+import {
+  agxHomeEnvForChildProcess,
+  applyConfiguredDataDir,
+  defaultAgenticxHomeDir,
+  getAgxHomeDir,
+} from "./agx-home";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -459,6 +465,10 @@ type AgxConfig = {
     supabase_url?: string;
     updated_at?: string;
   };
+  /** Desktop-local bootstrap: custom AgenticX data root (mirrors ~/.agenticx/data_root.json). */
+  near?: {
+    data_dir?: string;
+  };
 };
 
 type EmailConfig = {
@@ -501,10 +511,9 @@ type SkillInstallPolicyConfig = {
   non_high_risk_auto_install: boolean;
 };
 
-const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
-const SESSIONS_DIR = path.join(CONFIG_DIR, "sessions");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
-const DEFAULT_META_WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
+function configPath(...segments: string[]): string {
+  return path.join(getAgxHomeDir(), ...segments);
+}
 
 function normalizeDesktopRunMode(raw: unknown): "ask" | "allowlist" | "auto" {
   const text = String(raw ?? "").trim().toLowerCase();
@@ -531,7 +540,7 @@ function resolveConfigWorkspaceDirRaw(cfg?: AgxConfig): string {
 
 function resolveMetaWorkspaceDir(cfg?: AgxConfig): string {
   const expanded = expandDesktopLocalPath(resolveConfigWorkspaceDirRaw(cfg ?? loadAgxConfig()));
-  if (!expanded) return DEFAULT_META_WORKSPACE_DIR;
+  if (!expanded) return configPath("workspace");
   return path.resolve(expanded);
 }
 
@@ -539,19 +548,15 @@ function metaWorkspaceMarkdownPath(filename: string, cfg?: AgxConfig): string {
   return path.join(resolveMetaWorkspaceDir(cfg), filename);
 }
 
-const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
-const AUTOMATION_LOGS_DIR = path.join(CONFIG_DIR, "logs", "automation");
-const WORKSPACE_PERF_LOG_PATH = path.join(CONFIG_DIR, "logs", "workspace-perf.log");
-
 function automationLogPath(taskId: string): string {
   const id = String(taskId ?? "").trim() || "unknown";
-  return path.join(AUTOMATION_LOGS_DIR, `${id}.log`);
+  return path.join(configPath("logs", "automation"), `${id}.log`);
 }
 
 /** Append a line to the task's persistent log file. Rotates when >2 MB. */
 function appendAutomationLog(taskId: string, line: string): void {
   try {
-    fs.mkdirSync(AUTOMATION_LOGS_DIR, { recursive: true });
+    fs.mkdirSync(configPath("logs", "automation"), { recursive: true });
     const file = automationLogPath(taskId);
     try {
       const st = fs.statSync(file);
@@ -568,16 +573,16 @@ function appendAutomationLog(taskId: string, line: string): void {
 function appendWorkspacePerfLog(payload: unknown): void {
   try {
     const line = typeof payload === "string" ? payload : JSON.stringify(payload);
-    fs.mkdirSync(path.dirname(WORKSPACE_PERF_LOG_PATH), { recursive: true });
+    fs.mkdirSync(path.dirname(configPath("logs", "workspace-perf.log")), { recursive: true });
     try {
-      if (fs.statSync(WORKSPACE_PERF_LOG_PATH).size > 2 * 1024 * 1024) {
-        fs.renameSync(WORKSPACE_PERF_LOG_PATH, `${WORKSPACE_PERF_LOG_PATH}.1`);
+      if (fs.statSync(configPath("logs", "workspace-perf.log")).size > 2 * 1024 * 1024) {
+        fs.renameSync(configPath("logs", "workspace-perf.log"), `${configPath("logs", "workspace-perf.log")}.1`);
       }
     } catch {
       /* first write */
     }
     fs.appendFileSync(
-      WORKSPACE_PERF_LOG_PATH,
+      configPath("logs", "workspace-perf.log"),
       `[${new Date().toISOString()}] ${line}\n`,
       "utf-8",
     );
@@ -586,14 +591,10 @@ function appendWorkspacePerfLog(payload: unknown): void {
   }
 }
 /** 默认定时任务根目录：~/.agenticx/crontask/<taskId>/，与用户指定 workspace 二选一；venv/脚本均应落在任务根下 */
-const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
 
 function defaultAutomationCrontaskPath(taskId: string): string {
-  return path.join(AUTOMATION_CRONTASK_DIR, String(taskId ?? "").trim());
+  return path.join(configPath("crontask"), String(taskId ?? "").trim());
 }
-const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
-const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
-const LAYOUT_PATH = path.join(CONFIG_DIR, "layout.json");
 
 type LayoutBounds = {
   x?: number;
@@ -633,7 +634,7 @@ type LayoutFile = {
  *  so first-launch / corrupted-file paths fall back to defaults. */
 function loadLayoutData(): LayoutFile {
   try {
-    const raw = fs.readFileSync(LAYOUT_PATH, "utf-8");
+    const raw = fs.readFileSync(configPath("layout.json"), "utf-8");
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return {};
     return parsed as LayoutFile;
@@ -647,14 +648,13 @@ function saveLayoutData(patch: Partial<LayoutFile>): void {
   try {
     const prev = loadLayoutData();
     const merged: LayoutFile = { ...prev, ...patch };
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(LAYOUT_PATH, JSON.stringify(merged, null, 2), "utf-8");
+    fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+    fs.writeFileSync(configPath("layout.json"), JSON.stringify(merged, null, 2), "utf-8");
   } catch {
     // best effort; layout persistence is not critical enough to crash the app
   }
 }
 const FEISHU_DESKTOP_BINDING_KEY = "_desktop";
-const WECHAT_BINDING_PATH = path.join(CONFIG_DIR, "wechat_binding.json");
 const WECHAT_DESKTOP_BINDING_KEY = "_desktop";
 
 function clearWechatDesktopBindingIfDeleted(sessionIds: string[]): void {
@@ -662,7 +662,7 @@ function clearWechatDesktopBindingIfDeleted(sessionIds: string[]): void {
   if (deletedIds.size === 0) return;
   let data: Record<string, unknown> = {};
   try {
-    const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+    const raw = fs.readFileSync(configPath("wechat_binding.json"), "utf-8");
     data = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return;
@@ -674,8 +674,8 @@ function clearWechatDesktopBindingIfDeleted(sessionIds: string[]): void {
   const boundSid = String((desktopBinding as { session_id?: unknown }).session_id ?? "").trim();
   if (!boundSid || !deletedIds.has(boundSid)) return;
   delete data[WECHAT_DESKTOP_BINDING_KEY];
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(WECHAT_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
+  fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+  fs.writeFileSync(configPath("wechat_binding.json"), JSON.stringify(data, null, 2), "utf-8");
 }
 const EMAIL_CONFIG_KEYS = new Set([
   "enabled",
@@ -886,8 +886,8 @@ type AutomationTaskProgressPayload = {
 
 function loadAutomationTasks(): AutomationTaskData[] {
   try {
-    if (!fs.existsSync(AUTOMATION_TASKS_PATH)) return [];
-    const raw = fs.readFileSync(AUTOMATION_TASKS_PATH, "utf-8");
+    if (!fs.existsSync(configPath("automation_tasks.json"))) return [];
+    const raw = fs.readFileSync(configPath("automation_tasks.json"), "utf-8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -896,8 +896,8 @@ function loadAutomationTasks(): AutomationTaskData[] {
 }
 
 function saveAutomationTasks(tasks: AutomationTaskData[]): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(AUTOMATION_TASKS_PATH, JSON.stringify(tasks, null, 2), "utf-8");
+  fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+  fs.writeFileSync(configPath("automation_tasks.json"), JSON.stringify(tasks, null, 2), "utf-8");
 }
 
 /** Max wait for one automation /api/chat SSE (ms). Prevents sidebar spinner stuck if stream never closes. */
@@ -1185,8 +1185,8 @@ async function runAutomationTaskHttp(
     onSessionReady?: (sessionId: string) => void;
   },
 ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
-  const portFile = path.join(CONFIG_DIR, "serve.port");
-  const tokenFile = path.join(CONFIG_DIR, "serve.token");
+  const portFile = configPath("serve.port");
+  const tokenFile = configPath("serve.token");
   if (!fs.existsSync(portFile)) {
     return { ok: false, error: "agx serve 未运行（缺少 serve.port）" };
   }
@@ -1709,11 +1709,11 @@ function dropMimoNonChatModels(provider: string, models: string[]): string[] {
 }
 
 function loadAgxConfig(): AgxConfig {
-  if (!fs.existsSync(CONFIG_PATH)) {
+  if (!fs.existsSync(configPath("config.yaml"))) {
     return { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
   }
   try {
-    const raw = yaml.load(fs.readFileSync(CONFIG_PATH, "utf-8")) as AgxConfig;
+    const raw = yaml.load(fs.readFileSync(configPath("config.yaml"), "utf-8")) as AgxConfig;
     return raw ?? { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
   } catch {
     return { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
@@ -1721,8 +1721,32 @@ function loadAgxConfig(): AgxConfig {
 }
 
 function saveAgxConfig(cfg: AgxConfig): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+  fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+  fs.writeFileSync(configPath("config.yaml"), yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+}
+
+function mirrorNearDataDirInConfig(resolved: string): void {
+  fs.mkdirSync(resolved, { recursive: true });
+  const cfgPath = path.join(resolved, "config.yaml");
+  let cfg: AgxConfig = { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const loaded = yaml.load(fs.readFileSync(cfgPath, "utf-8")) as AgxConfig;
+      if (loaded && typeof loaded === "object") cfg = loaded;
+    } catch {
+      /* keep default skeleton */
+    }
+  }
+  const isDefault = path.resolve(resolved) === path.resolve(defaultAgenticxHomeDir());
+  if (isDefault) {
+    if (cfg.near) {
+      delete cfg.near.data_dir;
+      if (Object.keys(cfg.near).length === 0) delete cfg.near;
+    }
+  } else {
+    cfg.near = { ...(cfg.near ?? {}), data_dir: resolved };
+  }
+  fs.writeFileSync(cfgPath, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
 }
 
 function readOpsToolsEnabled(cfg: AgxConfig): boolean {
@@ -1800,8 +1824,8 @@ function resolveAvatarSoulPath(avatarId: string): string {
   if (!id || !/^[a-zA-Z0-9._-]+$/.test(id)) {
     throw new Error("invalid avatar id");
   }
-  const root = path.resolve(AVATARS_DIR);
-  const target = path.resolve(path.join(AVATARS_DIR, id, "SOUL.md"));
+  const root = path.resolve(configPath("avatars"));
+  const target = path.resolve(path.join(configPath("avatars"), id, "SOUL.md"));
   if (!target.startsWith(root + path.sep)) {
     throw new Error("avatar soul path outside root");
   }
@@ -2305,7 +2329,7 @@ function getStudioUrl(): string {
   let port = apiPort;
   if (!Number.isFinite(port) || port <= 0) {
     try {
-      const portFile = path.join(CONFIG_DIR, "serve.port");
+      const portFile = configPath("serve.port");
       const text = fs.existsSync(portFile) ? fs.readFileSync(portFile, "utf-8").trim() : "";
       const parsed = Number.parseInt(text, 10);
       if (Number.isFinite(parsed) && parsed > 0) {
@@ -2696,7 +2720,7 @@ function emitAutomationTaskProgress(payload: AutomationTaskProgressPayload): voi
 
 function buildSkillWatchRoots(): string[] {
   const roots = [
-    path.join(CONFIG_DIR, "skills"),
+    path.join(getAgxHomeDir(), "skills"),
     path.join(os.homedir(), ".agents", "skills"),
     path.join(os.homedir(), ".agent", "skills"),
     path.join(os.homedir(), ".claude", "skills"),
@@ -2720,7 +2744,7 @@ function buildSkillWatchRoots(): string[] {
 
 function startSkillsDirWatcher(): void {
   if (skillsDirWatchers.length > 0) return;
-  const managedSkillsRoot = path.resolve(path.join(CONFIG_DIR, "skills"));
+  const managedSkillsRoot = path.resolve(path.join(getAgxHomeDir(), "skills"));
   for (const watchRoot of buildSkillWatchRoots()) {
     // Only create AgenticX-managed root. External roots should be watched iff present.
     if (watchRoot === managedSkillsRoot) {
@@ -2878,7 +2902,7 @@ function repoAdjacentVenvBinDirs(): string[] {
  */
 function userManagedVenvBinDir(): string {
   const sub = process.platform === "win32" ? "Scripts" : "bin";
-  return path.join(os.homedir(), ".agenticx", ".venv", sub);
+  return path.join(getAgxHomeDir(), ".venv", sub);
 }
 
 /** Same as above but only returned when it actually exists on disk. */
@@ -2916,7 +2940,7 @@ function backendRepairVenvDir(): string {
     const sourceRoot = findAgenticxSourceRoot();
     if (sourceRoot) return path.join(sourceRoot, ".venv");
   }
-  return path.join(os.homedir(), ".agenticx", ".venv");
+  return path.join(getAgxHomeDir(), ".venv");
 }
 
 /** Find an executable by candidate names across the augmented PATH dirs. */
@@ -3178,8 +3202,8 @@ async function startStudioServe(): Promise<void> {
   // Persist actual port & token so in-process adapters (WeChat, Feishu) and
   // sibling processes discover the live agx serve instance, not a stale one.
   try {
-    const portFile = path.join(os.homedir(), ".agenticx", "serve.port");
-    const tokenFile = path.join(os.homedir(), ".agenticx", "serve.token");
+    const portFile = configPath("serve.port");
+    const tokenFile = configPath("serve.token");
     fs.mkdirSync(path.dirname(portFile), { recursive: true });
     fs.writeFileSync(portFile, String(apiPort));
     fs.writeFileSync(tokenFile, apiToken);
@@ -3194,6 +3218,7 @@ async function startStudioServe(): Promise<void> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...LOCAL_BACKEND_STARTUP_ENV,
+    ...agxHomeEnvForChildProcess(),
     PATH: augmentedPath,
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
@@ -4028,7 +4053,7 @@ function ghArchiveSha256(): string {
 }
 
 function ghInstallDir(): string {
-  return path.join(os.homedir(), ".agenticx", "connectors", "github", GH_CLI_VERSION);
+  return configPath("connectors", "github", GH_CLI_VERSION);
 }
 
 async function resolveInstalledGhBinaryPath(): Promise<string | null> {
@@ -4214,7 +4239,7 @@ async function runGhCommand(args: string[], timeoutMs = 15000): Promise<string> 
 }
 
 function githubSkillDir(): string {
-  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "github");
+  return configPath("skills", "near-connectors", "github");
 }
 
 function ensureGithubSkill(binaryPath: string): void {
@@ -4278,7 +4303,7 @@ function removeGithubSkill(): void {
 /** mcp.json on disk (agent GitHub tools); never log token values. */
 function readAgenticxMcpGithubTokenMeta(): { configured: boolean; token: string } {
   try {
-    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    const mcpPath = configPath("mcp.json");
     if (!fs.existsSync(mcpPath)) return { configured: false, token: "" };
     const raw = JSON.parse(fs.readFileSync(mcpPath, "utf8")) as {
       mcpServers?: Record<string, { env?: Record<string, string> }>;
@@ -4366,7 +4391,7 @@ async function syncGithubMcpPatFromGhCli(): Promise<{ synced: boolean; reason?: 
     if (!token || token.length < 20) {
       return { synced: false, reason: "no_token" };
     }
-    const mcpPath = path.join(os.homedir(), ".agenticx", "mcp.json");
+    const mcpPath = configPath("mcp.json");
     if (!fs.existsSync(mcpPath)) {
       return { synced: false, reason: "no_mcp_json" };
     }
@@ -4949,7 +4974,7 @@ function larkCliArchiveSha256(): string {
 }
 
 function larkCliInstallDir(): string {
-  return path.join(os.homedir(), ".agenticx", "connectors", "feishu", LARK_CLI_VERSION);
+  return configPath("connectors", "feishu", LARK_CLI_VERSION);
 }
 
 async function resolveInstalledLarkCliBinaryPath(): Promise<string | null> {
@@ -5145,7 +5170,7 @@ async function runLarkCliCommand(
 }
 
 function feishuSkillDir(): string {
-  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "feishu");
+  return configPath("skills", "near-connectors", "feishu");
 }
 
 function ensureFeishuSkill(binaryPath: string): void {
@@ -5526,7 +5551,7 @@ function wecomBotEncPath(): string {
 }
 
 function wecomInstallDir(version = WECOM_CLI_VERSION): string {
-  return path.join(os.homedir(), ".agenticx", "connectors", "wecom", version);
+  return configPath("connectors", "wecom", version);
 }
 
 function wecomBinaryName(): string {
@@ -5534,7 +5559,7 @@ function wecomBinaryName(): string {
 }
 
 function wecomSkillDir(): string {
-  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "wecom");
+  return configPath("skills", "near-connectors", "wecom");
 }
 
 function persistWecomConnectorStatus(connected: boolean): void {
@@ -6321,7 +6346,7 @@ const AGENTLY_CLI_ARCHIVE_MAX_BYTES = 40 * 1024 * 1024;
 const AGENTLY_NPM_REGISTRY = "https://registry.npmjs.org";
 
 function qqmailInstallDir(version = AGENTLY_CLI_VERSION): string {
-  return path.join(os.homedir(), ".agenticx", "connectors", "qqmail", version);
+  return configPath("connectors", "qqmail", version);
 }
 
 function qqmailBinaryName(): string {
@@ -6329,7 +6354,7 @@ function qqmailBinaryName(): string {
 }
 
 function qqmailSkillDir(): string {
-  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "qqmail");
+  return configPath("skills", "near-connectors", "qqmail");
 }
 
 function persistQqmailConnectorStatus(connected: boolean, account?: string): void {
@@ -7031,7 +7056,7 @@ async function startWechatSidecar(): Promise<void> {
   }
   try {
     const port = await findFreePort();
-    const dataDir = path.join(os.homedir(), ".agenticx");
+    const dataDir = getAgxHomeDir();
     const args = ["--port", String(port), "--data-dir", dataDir];
     // Minimal spawn context for diagnosing unknown runtime flags.
     console.info("[wechat-sidecar] spawn command", {
@@ -7125,7 +7150,7 @@ let connectorRuntimeStarting: Promise<ConnectorRuntimeEnsureResult> | null = nul
 let connectorRuntimeAdopted = false;
 
 function connectorRuntimeDataDir(): string {
-  return path.join(CONFIG_DIR, "connector-runtime");
+  return path.join(getAgxHomeDir(), "connector-runtime");
 }
 
 /** 读取 data-dir 下 0600 token 文件（与 master.key 同信任级；由网关在启动时落盘）。 */
@@ -8002,6 +8027,52 @@ function registerEarlyIpc(): void {
     } catch (error) {
       return { ok: false, error: String(error) };
     }
+  });
+
+  ipcMain.on("get-agx-home-dir-sync", (event) => {
+    event.returnValue = getAgxHomeDir();
+  });
+
+  ipcMain.handle("get-agx-home-dir", async () => {
+    const resolved = getAgxHomeDir();
+    const envOverride = Boolean(
+      String(process.env.AGX_HOME ?? "").trim() || String(process.env.AGENTICX_HOME ?? "").trim(),
+    );
+    return {
+      ok: true,
+      resolved,
+      defaultDir: defaultAgenticxHomeDir(),
+      envOverride,
+      restartRequired: false,
+    };
+  });
+
+  ipcMain.handle("pick-agx-home-dir", async () => {
+    const focused = BrowserWindow.getFocusedWindow();
+    const result = focused
+      ? await dialog.showOpenDialog(focused, { properties: ["openDirectory", "createDirectory"] })
+      : await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths?.[0]) {
+      return { ok: false, cancelled: true };
+    }
+    return { ok: true, path: result.filePaths[0] };
+  });
+
+  ipcMain.handle("set-agx-home-dir", async (_event, rawPath: unknown) => {
+    const text = String(rawPath ?? "").trim();
+    if (!text) {
+      return { ok: false, error: "empty_path" };
+    }
+    const applied = applyConfiguredDataDir(text);
+    if (!applied.ok) {
+      return { ok: false, error: applied.error };
+    }
+    try {
+      mirrorNearDataDirInConfig(applied.resolved);
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+    return { ok: true, resolved: applied.resolved, restartRequired: true };
   });
 
   ipcMain.handle("get-api-base", async () => {
@@ -9288,7 +9359,7 @@ function registerIpc(): void {
 
   ipcMain.handle("load-feishu-binding", async () => {
     try {
-      const raw = fs.readFileSync(FEISHU_BINDING_PATH, "utf-8");
+      const raw = fs.readFileSync(configPath("feishu_binding.json"), "utf-8");
       const data = JSON.parse(raw) as Record<string, unknown>;
       return { ok: true, bindings: data };
     } catch {
@@ -9305,7 +9376,7 @@ function registerIpc(): void {
   }) => {
     let data: Record<string, unknown> = {};
     try {
-      const raw = fs.readFileSync(FEISHU_BINDING_PATH, "utf-8");
+      const raw = fs.readFileSync(configPath("feishu_binding.json"), "utf-8");
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       /* empty */
@@ -9327,8 +9398,8 @@ function registerIpc(): void {
         bound_at: new Date().toISOString(),
       };
     }
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(FEISHU_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
+    fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+    fs.writeFileSync(configPath("feishu_binding.json"), JSON.stringify(data, null, 2), "utf-8");
     return { ok: true };
   });
 
@@ -9692,7 +9763,7 @@ function registerIpc(): void {
 
   ipcMain.handle("wechat-clear-credentials", async () => {
     try {
-      const credsPath = path.join(CONFIG_DIR, "wechat_credentials.json");
+      const credsPath = path.join(getAgxHomeDir(), "wechat_credentials.json");
       if (fs.existsSync(credsPath)) fs.unlinkSync(credsPath);
       return { ok: true };
     } catch {
@@ -9734,7 +9805,7 @@ function registerIpc(): void {
 
   ipcMain.handle("load-wechat-binding", async () => {
     try {
-      const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+      const raw = fs.readFileSync(configPath("wechat_binding.json"), "utf-8");
       const data = JSON.parse(raw) as Record<string, unknown>;
       return { ok: true, bindings: data };
     } catch {
@@ -9751,7 +9822,7 @@ function registerIpc(): void {
   }) => {
     let data: Record<string, unknown> = {};
     try {
-      const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+      const raw = fs.readFileSync(configPath("wechat_binding.json"), "utf-8");
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       /* empty */
@@ -9773,8 +9844,8 @@ function registerIpc(): void {
         bound_at: new Date().toISOString(),
       };
     }
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(WECHAT_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
+    fs.mkdirSync(getAgxHomeDir(), { recursive: true });
+    fs.writeFileSync(configPath("wechat_binding.json"), JSON.stringify(data, null, 2), "utf-8");
     return { ok: true };
   });
 
@@ -10657,7 +10728,7 @@ function registerIpc(): void {
   ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
-    const diskFull = readSessionMessagesFromDisk(SESSIONS_DIR, sid);
+    const diskFull = readSessionMessagesFromDisk(configPath("sessions"), sid);
     if (diskFull) return diskFull;
     await waitForStudio(PRELOAD_READY_BUDGET_MS);
     return withFetchTimeout(
@@ -10695,7 +10766,7 @@ function registerIpc(): void {
       const wantTail =
         typeof options.tailRounds === "number" && Number.isFinite(options.tailRounds);
       if (wantTail) {
-        const diskTail = readSessionMessagesTailFromDisk(SESSIONS_DIR, sid);
+        const diskTail = readSessionMessagesTailFromDisk(configPath("sessions"), sid);
         if (diskTail) return diskTail;
       }
       await waitForStudio(PRELOAD_READY_BUDGET_MS);
@@ -11396,7 +11467,7 @@ function registerIpc(): void {
 
   ipcMain.handle("workspace-perf-log", async (_event, payload: unknown) => {
     appendWorkspacePerfLog(payload);
-    return { ok: true, path: WORKSPACE_PERF_LOG_PATH };
+    return { ok: true, path: configPath("logs", "workspace-perf.log") };
   });
 
   ipcMain.handle("confirm-dialog", async (_event, payload: unknown) => {
@@ -11528,7 +11599,7 @@ function registerIpc(): void {
       const dir = defaultAutomationCrontaskPath(id);
       task.workspace = dir;
       try {
-        fs.mkdirSync(AUTOMATION_CRONTASK_DIR, { recursive: true });
+        fs.mkdirSync(configPath("crontask"), { recursive: true });
         fs.mkdirSync(dir, { recursive: true });
       } catch (err) {
         return { ok: false, error: String(err) };
@@ -11570,7 +11641,7 @@ function registerIpc(): void {
     try {
       if (removeCrontaskDir) {
         const crontaskPath = path.resolve(defaultAutomationCrontaskPath(taskId));
-        const root = path.resolve(AUTOMATION_CRONTASK_DIR);
+        const root = path.resolve(configPath("crontask"));
         if (fs.existsSync(crontaskPath) && crontaskPath !== root && crontaskPath.startsWith(root + path.sep)) {
           fs.rmSync(crontaskPath, { recursive: true, force: true });
         }
@@ -12809,7 +12880,7 @@ function registerIpc(): void {
     if (payload.activeProvider) cfg.active_provider = payload.activeProvider;
     if (payload.activeModel) cfg.active_model = payload.activeModel;
     saveAgxConfig(cfg);
-    return { ok: true, path: CONFIG_PATH };
+    return { ok: true, path: configPath("config.yaml") };
   });
 
   ipcMain.handle("native-say", async (_event, text: string) => {
@@ -13468,7 +13539,7 @@ function registerIpc(): void {
       let rootDir = selected;
       if (stat.isFile()) {
         const zip = await fs.promises.readFile(selected);
-        rootDir = path.join(os.homedir(), ".agenticx", "canvas-imports", String(Date.now()));
+        rootDir = configPath("canvas-imports", String(Date.now()));
         extractStoreZip(zip, rootDir);
       }
       const manifestPath = path.join(rootDir, "manifest.json");
@@ -13499,7 +13570,7 @@ function registerIpc(): void {
     const token = String(cfg.enterprise?.token ?? "").trim();
     const portalUrl = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
     if (!token || !portalUrl) return { ok: false, error: "enterprise-login-required" };
-    const rootDir = path.join(os.homedir(), ".agenticx", "canvas-imports", id);
+    const rootDir = configPath("canvas-imports", id);
     try {
       const downloaded = await downloadEnterpriseCase({ portalUrl, token, id, destDir: rootDir });
       if (!downloaded.ok) return downloaded;
@@ -13618,7 +13689,7 @@ function registerIpc(): void {
 
   /** Default Meta session workspace: ~/.agenticx/taskspaces/<sid>/default */
   const resolveSessionDefaultWorkspaceDir = async (sid: string): Promise<string> => {
-    const fallback = path.join(os.homedir(), ".agenticx", "taskspaces", sid, "default");
+    const fallback = configPath("taskspaces", sid, "default");
     try {
       const resp = await fetch(
         `${getStudioUrl()}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,

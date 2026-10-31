@@ -550,6 +550,18 @@ declare global {
     agenticxDesktop: {
       version: string;
       getApiBase: () => Promise<string>;
+      getAgxHomeDir: () => Promise<{
+        ok: boolean;
+        resolved?: string;
+        defaultDir?: string;
+        envOverride?: boolean;
+        restartRequired?: boolean;
+        error?: string;
+      }>;
+      pickAgxHomeDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>;
+      setAgxHomeDir: (
+        dataDir: string,
+      ) => Promise<{ ok: boolean; resolved?: string; restartRequired?: boolean; error?: string }>;
       waitForStudio: (timeoutMs?: number) => Promise<{ ok: boolean }>;
       enterpriseSyncCapabilities: () => Promise<{ ok: boolean; skipped?: boolean }>;
       collabRoomList: () => Promise<{ ok: boolean; data?: { rooms: unknown[] }; error?: string }>;

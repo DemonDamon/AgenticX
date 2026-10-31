@@ -1,52 +1,159 @@
-"""``~/.agenticx`` 下各类路径的**惰性**解析。
+"""Resolve the AgenticX on-disk data root (``~/.agenticx`` by default).
 
-为什么需要这个模块：仓库里有二十多处写成模块级常量
+Resolution order (first match wins):
 
-    AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
+1. Environment: ``AGX_HOME`` or ``AGENTICX_HOME`` (non-empty, expanded).
+2. Desktop / settings bootstrap: ``~/.agenticx/data_root.json`` ``data_dir`` field,
+   or ``near.data_dir`` / ``agenticx_home_dir`` in ``~/.agenticx/config.yaml`` when
+   no env override is set (bootstrap reads only the default stub tree under
+   ``Path.home() / ".agenticx"``).
+3. Default: ``Path.home() / ".agenticx"``.
 
-``Path.home()`` 在 import 那一刻就被求值定死。tests/conftest.py 把 ``$HOME`` 指到沙箱是
-**用例开始时**才生效的，而这些模块在收集阶段早就 import 完了——于是测试数据直接写进开发
-者真实的 ``~/.agenticx``。实测一轮全量测试会在真实目录里新增 171 个条目：133 个 avatar、
-65 个 group，其中一个目录名就叫
-``<MagicMock name='mock.bound_avatar_id' id='5080543248'>``。这些还会出现在桌面端的
-数字专家 / 项目群列表里。
-
-用法（每个模块三行）：
-
-    from agenticx.utils.agx_home import agx_home, lazy_home_path
-
-    def _avatars_root() -> Path:
-        return lazy_home_path(__name__, "AVATARS_ROOT", "avatars")
-
-    def __getattr__(name):                      # PEP 562，给外部读取用
-        if name == "AVATARS_ROOT":
-            return agx_home() / "avatars"
-        raise AttributeError(name)
-
-模块内部一律改调 ``_avatars_root()``：PEP 562 的 ``__getattr__`` 只拦「对模块对象取属性」，
-拦不住模块自己函数里的全局名查找。
+Changing the data directory in Near Desktop writes the bootstrap pointer and takes
+effect after an application restart; there is no silent migration of existing data.
 
 Author: Damon Li
 """
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
+_BOOTSTRAP_DIR_NAME = ".agenticx"
+_DATA_ROOT_POINTER_NAME = "data_root.json"
+_LEGACY_CONFIG_NAME = "config.yaml"
+
+
+def default_agenticx_home() -> Path:
+    """Canonical default when no env or bootstrap override applies."""
+    return Path.home() / _BOOTSTRAP_DIR_NAME
+
+
+def bootstrap_agenticx_dir() -> Path:
+    """Fixed stub directory under the user profile (holds bootstrap pointer only)."""
+    return default_agenticx_home()
+
+
+def data_root_pointer_path() -> Path:
+    return bootstrap_agenticx_dir() / _DATA_ROOT_POINTER_NAME
+
+
+def _normalize_home_path(raw: str) -> Path | None:
+    text = str(raw or "").strip()
+    if not text or text.lower() in {"none", "null", "~", "~/.agenticx"}:
+        return None
+    try:
+        return Path(text).expanduser().resolve(strict=False)
+    except (OSError, ValueError):
+        return None
+
+
+def _env_agx_home() -> Path | None:
+    for key in ("AGX_HOME", "AGENTICX_HOME"):
+        val = os.environ.get(key, "").strip()
+        if not val:
+            continue
+        resolved = _normalize_home_path(val)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _read_pointer_data_dir() -> Path | None:
+    pointer = data_root_pointer_path()
+    if not pointer.is_file():
+        return None
+    try:
+        payload = json.loads(pointer.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("data_dir") or payload.get("agenticx_home_dir")
+    if raw is None:
+        return None
+    return _normalize_home_path(str(raw))
+
+
+def _read_bootstrap_yaml_data_dir() -> Path | None:
+    cfg_path = bootstrap_agenticx_dir() / _LEGACY_CONFIG_NAME
+    if not cfg_path.is_file():
+        return None
+    try:
+        import yaml
+
+        loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    near = loaded.get("near")
+    if isinstance(near, dict):
+        raw = near.get("data_dir") or near.get("agenticx_home_dir")
+        if raw is not None:
+            resolved = _normalize_home_path(str(raw))
+            if resolved is not None:
+                return resolved
+    for key in ("agenticx_home_dir", "data_dir"):
+        raw = loaded.get(key)
+        if raw is not None:
+            resolved = _normalize_home_path(str(raw))
+            if resolved is not None:
+                return resolved
+    return None
+
+
+def resolve_agx_home() -> Path:
+    """Resolve the active data root using env → bootstrap settings → default."""
+    env_home = _env_agx_home()
+    if env_home is not None:
+        return env_home
+    pointer = _read_pointer_data_dir()
+    if pointer is not None:
+        return pointer
+    yaml_home = _read_bootstrap_yaml_data_dir()
+    if yaml_home is not None:
+        return yaml_home
+    return default_agenticx_home()
+
 
 def agx_home() -> Path:
-    """``~/.agenticx``，按调用时的 HOME 解析。"""
-    return Path.home() / ".agenticx"
+    """Active AgenticX data root (lazy, call-time resolution)."""
+    return resolve_agx_home()
 
 
 def lazy_home_path(module_name: str, attr: str, *parts: str) -> Path:
-    """解析 ``~/.agenticx/<parts>``，但允许模块属性覆盖。
-
-    覆盖那一档是给既有测试留的：``monkeypatch.setattr("...registry.AVATARS_ROOT", tmp)``
-    会往模块 ``__dict__`` 里塞值，这里优先读它；撤销后自动回到按 HOME 解析。
-    """
+    """Resolve ``<agx_home()>/<parts>`` with optional module attribute override."""
     override = sys.modules[module_name].__dict__.get(attr)
     if override is not None:
         return Path(override)
     return agx_home().joinpath(*parts)
+
+
+def write_data_root_pointer(data_dir: Path | str) -> Path:
+    """Persist bootstrap pointer under ``~/.agenticx/data_root.json`` (0600 best-effort)."""
+    target = _normalize_home_path(str(data_dir))
+    if target is None:
+        raise ValueError("data_dir must be a non-empty absolute or ~ path")
+    stub = bootstrap_agenticx_dir()
+    stub.mkdir(parents=True, exist_ok=True)
+    pointer = data_root_pointer_path()
+    payload = {"data_dir": str(target)}
+    text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    pointer.write_text(text, encoding="utf-8")
+    try:
+        pointer.chmod(0o600)
+    except OSError:
+        pass
+    return pointer
+
+
+def clear_data_root_pointer() -> None:
+    """Remove bootstrap pointer so resolution falls back to default ``~/.agenticx``."""
+    try:
+        data_root_pointer_path().unlink(missing_ok=True)
+    except OSError:
+        pass

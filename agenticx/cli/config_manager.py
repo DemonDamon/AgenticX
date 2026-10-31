@@ -257,7 +257,9 @@ class _ConfigManagerMeta(type):
 
     def __getattr__(cls, name: str):
         if name == "GLOBAL_CONFIG_PATH":
-            return Path.home() / ".agenticx" / "config.yaml"
+            from agenticx.utils.agx_home import agx_home
+
+            return agx_home() / "config.yaml"
         raise AttributeError(
             f"type object {cls.__name__!r} has no attribute {name!r}"
         )

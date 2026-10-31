@@ -5099,6 +5099,19 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const securityTabRef = useRef<SecurityCenterTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [agxDataDir, setAgxDataDir] = useState("");
+  const [agxDataDirEnvOverride, setAgxDataDirEnvOverride] = useState(false);
+  const [agxDataDirNote, setAgxDataDirNote] = useState("");
+  useEffect(() => {
+    if (!open || tab !== "general") return;
+    const load = window.agenticxDesktop.getAgxHomeDir;
+    if (typeof load !== "function") return;
+    void load().then((result) => {
+      if (!result?.ok) return;
+      setAgxDataDir(String(result.resolved ?? ""));
+      setAgxDataDirEnvOverride(Boolean(result.envOverride));
+    });
+  }, [open, tab]);
   useEffect(() => {
     if (!enterpriseAccountReady) return;
     if (tab === "enterprise_worker" && !enterpriseLoggedIn) setTab("account");
@@ -7357,6 +7370,72 @@ export function SettingsPanel({
                           />
                         );
                       })()}
+                    </div>
+
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
+
+                    <div className="flex flex-col gap-2 py-2">
+                      <div>
+                        <div className={SETTINGS_LABEL_CLASS}>{t("display.dataDir")}</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t("display.dataDirHint")}</div>
+                        {typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent) ? (
+                          <div className={`mt-1 ${SETTINGS_HINT_CLASS}`}>{t("display.dataDirWindowsExample")}</div>
+                        ) : null}
+                        {agxDataDirEnvOverride ? (
+                          <div className="mt-1 text-xs text-amber-500/90">{t("display.dataDirEnvOverride")}</div>
+                        ) : null}
+                        {agxDataDirNote ? (
+                          <div className="mt-1 text-xs text-text-muted">{agxDataDirNote}</div>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={agxDataDir}
+                          className="min-w-0 flex-1 rounded-md border border-[var(--border-muted)] bg-surface-card px-3 py-2 text-sm text-text-strong"
+                        />
+                        <button
+                          type="button"
+                          disabled={agxDataDirEnvOverride}
+                          className="shrink-0 rounded-md border border-[var(--border-muted)] px-3 py-2 text-sm text-text-strong hover:bg-surface-card-strong disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            void window.agenticxDesktop.pickAgxHomeDir?.().then(async (picked) => {
+                              if (!picked?.ok || picked.cancelled || !picked.path) return;
+                              const saved = await window.agenticxDesktop.setAgxHomeDir?.(picked.path);
+                              if (!saved?.ok) {
+                                setAgxDataDirNote(
+                                  t("commonSettings.saveFailedColon", { reason: saved?.error ?? "unknown" }),
+                                );
+                                return;
+                              }
+                              setAgxDataDir(String(saved.resolved ?? picked.path));
+                              setAgxDataDirNote(t("display.dataDirRestartRequired"));
+                            });
+                          }}
+                        >
+                          {t("display.dataDirBrowse")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={agxDataDirEnvOverride}
+                          className="shrink-0 rounded-md border border-[var(--border-muted)] px-3 py-2 text-sm text-text-muted hover:bg-surface-card-strong disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            void window.agenticxDesktop.setAgxHomeDir?.("~/.agenticx").then((saved) => {
+                              if (!saved?.ok) {
+                                setAgxDataDirNote(
+                                  t("commonSettings.saveFailedColon", { reason: saved?.error ?? "unknown" }),
+                                );
+                                return;
+                              }
+                              setAgxDataDir(String(saved.resolved ?? ""));
+                              setAgxDataDirNote(t("display.dataDirRestartRequired"));
+                            });
+                          }}
+                        >
+                          {t("display.dataDirReset")}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />

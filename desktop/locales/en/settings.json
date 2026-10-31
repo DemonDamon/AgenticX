@@ -112,7 +112,14 @@
     "accentGreen": "Green",
     "accentPink": "Pink",
     "accentYellow": "Orange",
-    "accentMono": "Mono"
+    "accentMono": "Mono",
+    "dataDir": "Data directory",
+    "dataDirHint": "Where sessions, settings, and caches are stored. Fully quit and restart Near for changes to apply; existing data is not migrated automatically.",
+    "dataDirWindowsExample": "On Windows, you can choose a folder on a non-system drive (for example D:\\\\NearData) to reduce pressure on the system volume.",
+    "dataDirBrowse": "Choose folder…",
+    "dataDirReset": "Use default",
+    "dataDirEnvOverride": "AGX_HOME or AGENTICX_HOME is set in the environment; the settings panel cannot change the data directory.",
+    "dataDirRestartRequired": "Data directory updated. Fully quit and restart Near for it to take effect."
   },
   "commonSettings": {
     "saved": "Saved",
