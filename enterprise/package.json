@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@agenticx/iam-core": "workspace:*",
-    "@types/node": "^20.19.0",
+    "@types/node": "^26.6.5",
     "mysql2": "^3.14.1",
     "pg": "^8.20.0",
     "playwright": "^1.59.1",
