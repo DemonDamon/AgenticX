@@ -594,12 +594,13 @@ def load_available_servers() -> Dict[str, "MCPServerConfig"]:
 def import_mcp_config(source_path: str, target_path: Optional[str] = None) -> Dict[str, Any]:
     """Import MCP servers from source config into AgenticX workspace config."""
     from agenticx.tools.remote import load_mcp_config
+    from agenticx.utils.agx_home import agx_home
 
     source = Path(source_path).expanduser().resolve(strict=False)
     target = (
         Path(target_path).expanduser().resolve(strict=False)
         if target_path
-        else (Path.home() / ".agenticx" / "mcp.json")
+        else agx_home() / "mcp.json"
     )
     if not source.exists() or not source.is_file():
         return {

@@ -194,9 +194,9 @@ describe("electron mcp-oauth-store (token file view)", () => {
   });
 
   it("reports only booleans and resets tokens while keeping the DCR client", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agx-oauth-"));
+    const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agx-oauth-"));
     try {
-      const file = mcpOauthTokenPath("tencent-docs", home);
+      const file = mcpOauthTokenPath("tencent-docs", dataRoot);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(
         file,
@@ -207,21 +207,21 @@ describe("electron mcp-oauth-store (token file view)", () => {
         }),
         { mode: 0o600 },
       );
-      const state = readMcpOauthAuthorized(["tencent-docs", "linear"], home);
+      const state = readMcpOauthAuthorized(["tencent-docs", "linear"], dataRoot);
       expect(state).toEqual({ "tencent-docs": true, linear: false });
       expect(JSON.stringify(state)).not.toContain("secret");
 
-      expect(resetMcpOauthTokens("tencent-docs", home)).toBe(true);
+      expect(resetMcpOauthTokens("tencent-docs", dataRoot)).toBe(true);
       const after = JSON.parse(fs.readFileSync(file, "utf-8"));
       expect(after.tokens).toBeUndefined();
       expect(after.client_info).toEqual({ client_id: "cid" });
       expect(after.redirect_port).toBe(43210);
       expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-      expect(readMcpOauthAuthorized(["tencent-docs"], home)["tencent-docs"]).toBe(false);
-      expect(resetMcpOauthTokens("tencent-docs", home)).toBe(false);
-      expect(resetMcpOauthTokens("missing", home)).toBe(false);
+      expect(readMcpOauthAuthorized(["tencent-docs"], dataRoot)["tencent-docs"]).toBe(false);
+      expect(resetMcpOauthTokens("tencent-docs", dataRoot)).toBe(false);
+      expect(resetMcpOauthTokens("missing", dataRoot)).toBe(false);
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(dataRoot, { recursive: true, force: true });
     }
   });
 });

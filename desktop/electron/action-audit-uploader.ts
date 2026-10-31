@@ -23,7 +23,8 @@ export type ActionAuditConfig = {
 export type ActionAuditUploaderDeps = {
   loadConfig: () => ActionAuditConfig;
   fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
-  homeDir: string;
+  /** Resolved AgenticX data root (same as ``getAgxHomeDir()``). */
+  agxHome: string;
   now: () => number;
 };
 
@@ -39,8 +40,8 @@ type ParsedLine = {
   value: unknown;
 };
 
-function auditDir(homeDir: string): string {
-  return path.join(homeDir, ".agenticx", "action_audit");
+function auditDir(agxHome: string): string {
+  return path.join(agxHome, "action_audit");
 }
 
 function nonEmptyLines(text: string): string[] {
@@ -122,7 +123,7 @@ export async function flushActionAuditOnce(deps: ActionAuditUploaderDeps): Promi
     return { skipped: true, sent: 0, dropped: 0, pending: 0 };
   }
 
-  const dir = auditDir(deps.homeDir);
+  const dir = auditDir(deps.agxHome);
   if (!fs.existsSync(dir)) {
     return { sent: 0, dropped: 0, pending: 0 };
   }

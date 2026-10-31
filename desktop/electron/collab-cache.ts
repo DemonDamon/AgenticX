@@ -1,6 +1,7 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+
+import { agxHomePath } from "./agx-home";
 
 const ID_RE = /^[0-9A-Za-z]{26}$/;
 const ROOM_KEEP = 2000;
@@ -30,7 +31,7 @@ export function setCollabCacheRootForTests(root: string | null): void {
 
 function cacheRoot(): string {
   if (cacheRootOverride && cacheRootOverride.trim()) return cacheRootOverride;
-  return path.join(os.homedir(), ".agenticx", "collab-cache");
+  return agxHomePath("collab-cache");
 }
 
 function assertId(id: string, label: string): string {

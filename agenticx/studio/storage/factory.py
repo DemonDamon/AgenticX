@@ -24,6 +24,8 @@ from pathlib import Path
 from agenticx.studio.storage.backend import SessionStorageBackend, SyncStorageFacade
 from agenticx.studio.storage.local_file import LocalFileBackend
 
+from agenticx.utils.agx_home import agx_home
+
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -33,11 +35,11 @@ _VALID_KINDS = ("local", "redis")
 
 
 def _default_sessions_root() -> Path:
-    return Path.home() / ".agenticx" / "sessions"
+    return agx_home() / "sessions"
 
 
 def _default_config_dir() -> Path:
-    return Path.home() / ".agenticx"
+    return agx_home()
 
 
 def _config_value(key: str) -> object:

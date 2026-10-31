@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clearDataRootPointer,
   defaultAgenticxHomeDir,
+  expandAgxVirtualPath,
   refreshAgxHomeCache,
   resolveAgxHomeDir,
   writeDataRootPointer,
@@ -74,5 +75,16 @@ describe("agx-home resolution", () => {
     clearDataRootPointer();
     refreshAgxHomeCache();
     expect(resolveAgxHomeDir()).toBe(defaultAgenticxHomeDir());
+  });
+
+  it("expandAgxVirtualPath maps ~/.agenticx to the resolved data root", () => {
+    const custom = path.join(tmpHome, "custom-data");
+    fs.mkdirSync(custom);
+    writeDataRootPointer(custom);
+    refreshAgxHomeCache();
+    expect(expandAgxVirtualPath("~/.agenticx/sessions/s1/messages.json")).toBe(
+      path.join(custom, "sessions", "s1", "messages.json"),
+    );
+    expect(expandAgxVirtualPath("~/Documents/x.txt")).toBe(path.join(tmpHome, "Documents", "x.txt"));
   });
 });
