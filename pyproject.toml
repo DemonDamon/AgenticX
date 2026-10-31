@@ -46,7 +46,7 @@ dependencies = [
     "httpx>=0.25.0,<1",
     "requests>=2.31.0,<3",
     "aiohttp>=3.9.0,<4",
-    "aiofiles>=23.0.0,<25",
+    "aiofiles>=23.0.0,<26",
     "websockets>=12.0",
     # Web 框架
     "fastapi>=0.100.0",
