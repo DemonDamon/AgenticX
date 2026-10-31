@@ -1,0 +1,109 @@
+{
+  "case": "华东零售 · 月度经营问数 + 知识图核验",
+  "question": "上月华东大区 GMV 和退货率分别是多少？",
+  "tenant_label": "华东零售演示租户",
+  "objects": [
+    {
+      "id": "metric-east-gmv",
+      "kind": "entity",
+      "attrs": {
+        "name": "GMV",
+        "entity_type": "unknown",
+        "指标名称": "成交总额",
+        "业务口径": "华东大区月度成交金额（含税）",
+        "大区": "华东大区",
+        "单位": "元"
+      },
+      "source_ids": [
+        "case-east-china-retail"
+      ],
+      "meta": {
+        "案例": "华东零售",
+        "对象角色": "指标"
+      }
+    },
+    {
+      "id": "metric-east-return-rate",
+      "kind": "entity",
+      "attrs": {
+        "name": "退货率",
+        "entity_type": "unknown",
+        "指标名称": "退货率",
+        "业务口径": "退货金额 / GMV",
+        "大区": "华东大区",
+        "单位": "比例"
+      },
+      "source_ids": [
+        "case-east-china-retail"
+      ],
+      "meta": {
+        "案例": "华东零售",
+        "对象角色": "指标"
+      }
+    },
+    {
+      "id": "table-order-fact",
+      "kind": "entity",
+      "attrs": {
+        "name": "订单事实",
+        "entity_type": "unknown",
+        "表名": "订单事实",
+        "说明": "零售订单明细事实表（演示）",
+        "大区维度": "华东大区"
+      },
+      "source_ids": [
+        "case-east-china-retail"
+      ],
+      "meta": {
+        "案例": "华东零售",
+        "对象角色": "表"
+      }
+    },
+    {
+      "id": "rel-gmv-depends-orders",
+      "kind": "relation",
+      "attrs": {
+        "relation_type": "related_to",
+        "关系名称": "指标依赖表",
+        "说明": "GMV 指标依赖订单事实表"
+      },
+      "relations": [
+        {
+          "rel": "related_to",
+          "source_entity_id": "metric-east-gmv",
+          "target_entity_id": "table-order-fact"
+        }
+      ],
+      "source_ids": [
+        "case-east-china-retail"
+      ],
+      "meta": {
+        "案例": "华东零售",
+        "对象角色": "关系"
+      }
+    },
+    {
+      "id": "rel-return-rate-depends-orders",
+      "kind": "relation",
+      "attrs": {
+        "relation_type": "related_to",
+        "关系名称": "指标依赖表",
+        "说明": "退货率指标依赖订单事实表"
+      },
+      "relations": [
+        {
+          "rel": "related_to",
+          "source_entity_id": "metric-east-return-rate",
+          "target_entity_id": "table-order-fact"
+        }
+      ],
+      "source_ids": [
+        "case-east-china-retail"
+      ],
+      "meta": {
+        "案例": "华东零售",
+        "对象角色": "关系"
+      }
+    }
+  ]
+}
