@@ -8,9 +8,15 @@ from typing import Any, Mapping
 
 from agenticx.managed.templates.data_suite.types import WriteGuardPolicy
 
-# Stable error codes (master plan W0/W1 contract).
+# Stable error codes (master plan W0/W1/W2 contract).
 CODE_WRITE_GUARD_DENIED = "write_guard_denied"
 CODE_WRITE_TOOLS_DISABLED = "write_tools_disabled"
+CODE_EXPLAIN_ONLY_NO_EXECUTE = "explain_only_no_execute"
+CODE_INVALID_QUERY_MODE = "invalid_query_mode"
+
+QUERY_MODE_EXECUTE = "execute"
+QUERY_MODE_EXPLAIN = "explain"
+_VALID_QUERY_MODES = frozenset({QUERY_MODE_EXECUTE, QUERY_MODE_EXPLAIN})
 
 _WRITE_TOOL_TOKEN_RE = re.compile(r"[^a-z0-9]+")
 _WRITE_TOOL_TOKENS = frozenset(
@@ -81,6 +87,25 @@ def decide_sql_write_gate(*, is_readonly: bool) -> WriteGateDecision:
     if is_readonly:
         return allow_write()
     return decide_non_readonly_sql()
+
+
+def normalize_query_mode(mode: str | None) -> str:
+    """Default empty/None to execute; otherwise lowercase strip."""
+    if mode is None:
+        return QUERY_MODE_EXECUTE
+    text = str(mode).strip().lower()
+    return text or QUERY_MODE_EXECUTE
+
+
+def decide_query_mode(mode: str | None) -> WriteGateDecision:
+    """Allow explain|execute (default execute); deny anything else."""
+    normalized = normalize_query_mode(mode)
+    if normalized in _VALID_QUERY_MODES:
+        return allow_write()
+    return deny_write(
+        code=CODE_INVALID_QUERY_MODE,
+        reason=f"{CODE_INVALID_QUERY_MODE}: {normalized!r}",
+    )
 
 
 def decide_manifest_tools_gate(
@@ -172,16 +197,22 @@ def assert_read_only_tools(
 
 
 __all__ = [
+    "CODE_EXPLAIN_ONLY_NO_EXECUTE",
+    "CODE_INVALID_QUERY_MODE",
     "CODE_WRITE_GUARD_DENIED",
     "CODE_WRITE_TOOLS_DISABLED",
+    "QUERY_MODE_EXECUTE",
+    "QUERY_MODE_EXPLAIN",
     "WriteGateDecision",
     "allow_write",
     "assert_read_only_tools",
     "decide_manifest_tools_gate",
     "decide_mcp_write_gate",
     "decide_non_readonly_sql",
+    "decide_query_mode",
     "decide_sql_write_gate",
     "deny_write",
     "evaluate_read_only_tools",
+    "normalize_query_mode",
     "tool_requires_write_enable",
 ]

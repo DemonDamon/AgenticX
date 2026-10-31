@@ -6,6 +6,8 @@ import pytest
 
 from agenticx.managed.llm import LLMCallContext
 from agenticx.managed.templates.data_suite import (
+    CODE_INVALID_QUERY_MODE,
+    CODE_WRITE_GUARD_DENIED,
     FakeQueryChannel,
     extract_sql_from_llm,
     run_nl2sql,
@@ -105,3 +107,97 @@ def test_run_nl2sql_no_sql_refused():
     result = run_nl2sql("??", llm_factory=factory, channel=ch, context=_ctx())
     assert result.refused is True
     assert "nl2sql_no_sql" in (result.reason or "")
+
+
+
+def test_run_nl2sql_explain_never_hits_channel():
+    llm = ScriptedLLM(
+        [ScriptStep(content="```sql\nSELECT id FROM members\n```")],
+    )
+    factory = StaticLLMFactory(llm)
+    ch = FakeQueryChannel([{"id": 42}])
+    result = run_nl2sql(
+        "列出成员 id",
+        llm_factory=factory,
+        channel=ch,
+        context=_ctx(),
+        mode="explain",
+    )
+    assert result.refused is False
+    assert result.mode == "explain"
+    assert result.executed is False
+    assert result.sql.upper().startswith("SELECT")
+    assert result.rows == []
+    assert ch.calls == []
+
+
+def test_run_nl2sql_default_mode_is_execute():
+    llm = ScriptedLLM(
+        [ScriptStep(content="```sql\nSELECT id FROM members\n```")],
+    )
+    factory = StaticLLMFactory(llm)
+    ch = FakeQueryChannel([{"id": 7}])
+    result = run_nl2sql("列出", llm_factory=factory, channel=ch, context=_ctx())
+    assert result.mode == "execute"
+    assert result.executed is True
+    assert result.refused is False
+    assert result.rows == [{"id": 7}]
+    assert ch.calls == [result.sql]
+
+
+def test_run_nl2sql_execute_still_refuses_write():
+    llm = ScriptedLLM([ScriptStep(content="DELETE FROM t")])
+    factory = StaticLLMFactory(llm)
+    ch = FakeQueryChannel([{"id": 1}])
+    result = run_nl2sql(
+        "删数据",
+        llm_factory=factory,
+        channel=ch,
+        context=_ctx(),
+        mode="execute",
+    )
+    assert result.refused is True
+    assert result.executed is False
+    assert result.mode == "execute"
+    assert CODE_WRITE_GUARD_DENIED in (result.reason or "")
+    assert (result.code or "") == CODE_WRITE_GUARD_DENIED or CODE_WRITE_GUARD_DENIED in (
+        result.reason or ""
+    )
+    assert ch.calls == []
+
+
+def test_run_nl2sql_explain_allows_draft_write_sql_without_channel():
+    """Explain returns SQL draft even when non-readonly; never executes."""
+    llm = ScriptedLLM([ScriptStep(content="INSERT INTO t VALUES (1)")])
+    factory = StaticLLMFactory(llm)
+    ch = FakeQueryChannel([{"id": 1}])
+    result = run_nl2sql(
+        "插入一行",
+        llm_factory=factory,
+        channel=ch,
+        context=_ctx(),
+        mode="explain",
+    )
+    assert result.refused is False
+    assert result.executed is False
+    assert "INSERT" in result.sql.upper()
+    assert result.rows == []
+    assert ch.calls == []
+
+
+def test_run_nl2sql_invalid_mode():
+    llm = ScriptedLLM([ScriptStep(content="```sql\nSELECT 1\n```")])
+    factory = StaticLLMFactory(llm)
+    ch = FakeQueryChannel([{"n": 1}])
+    result = run_nl2sql(
+        "q",
+        llm_factory=factory,
+        channel=ch,
+        context=_ctx(),
+        mode="mutate",
+    )
+    assert result.refused is True
+    assert result.executed is False
+    assert result.code == CODE_INVALID_QUERY_MODE
+    assert CODE_INVALID_QUERY_MODE in (result.reason or "")
+    assert ch.calls == []
