@@ -9,7 +9,10 @@ from typing import Any, List, Optional, Protocol
 
 from agenticx.managed.llm import LLMCallContext, LLMFactory
 from agenticx.managed.templates.data_suite.types import WriteGuardPolicy
-from agenticx.managed.templates.data_suite.write_guards import assert_read_only_tools
+from agenticx.managed.templates.data_suite.write_guards import (
+    assert_read_only_tools,
+    decide_sql_write_gate,
+)
 
 _WRITE_HEAD = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|MERGE|GRANT|REVOKE)\b",
@@ -41,8 +44,9 @@ class ReadOnlySqlExecutor:
         self._write_guard = write_guard or WriteGuardPolicy()
 
     def execute(self, sql: str, *, limit: int = 100) -> List[dict]:
-        if not is_read_only_sql(sql):
-            raise PermissionError("write_guard_denied: non-readonly sql")
+        decide_sql_write_gate(is_readonly=is_read_only_sql(sql)).raise_if_denied(
+            as_permission_error=True
+        )
         return list(self._channel.query(sql, limit=limit))
 
 
@@ -190,12 +194,13 @@ class Nl2SqlSession:
             sql = extract_sql_from_llm(response)
         except ValueError as exc:
             return Nl2SqlResult(sql="", rows=[], refused=True, reason=str(exc))
-        if not is_read_only_sql(sql):
+        sql_decision = decide_sql_write_gate(is_readonly=is_read_only_sql(sql))
+        if not sql_decision.allowed:
             return Nl2SqlResult(
                 sql=sql,
                 rows=[],
                 refused=True,
-                reason="write_guard_denied: non-readonly sql",
+                reason=sql_decision.reason,
             )
         try:
             rows = self._executor.execute(sql, limit=limit)

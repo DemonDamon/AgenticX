@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, create_model  # type: ignore
 
+from agenticx.managed.templates.data_suite.write_guards import (
+    decide_mcp_write_gate,
+    tool_requires_write_enable,
+)
 from agenticx.tools.base import BaseTool, ToolError
 from agenticx.tools.remote_v2 import MCPClientV2, MCPServerConfig, MCPToolInfo
 
@@ -25,6 +29,7 @@ class MCPHubConfig(BaseModel):
 
     servers: List[MCPServerConfig] = Field(default_factory=list)
     auto_mode: bool = False
+    write_tools_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -37,6 +42,7 @@ class MCPToolSnapshot:
     description: str
     input_schema: dict
     enabled: bool
+    requires_write_enable: bool = False
 
 
 @dataclass
@@ -128,10 +134,12 @@ class MCPHub:
         *,
         auto_mode: bool = False,
         organization_id: Optional[str] = None,
+        write_tools_enabled: bool = False,
     ) -> None:
         self.clients = clients
         self.auto_mode = auto_mode
         self.organization_id = organization_id
+        self.write_tools_enabled = bool(write_tools_enabled)
         self._tool_routing: Dict[str, _ToolRoute] = {}
         self._merged_tools: List[MCPToolInfo] = []
 
@@ -143,7 +151,12 @@ class MCPHub:
         organization_id: Optional[str] = None,
     ) -> "MCPHub":
         clients = [MCPClientV2(server) for server in config.servers]
-        return cls(clients, auto_mode=config.auto_mode, organization_id=organization_id)
+        return cls(
+            clients,
+            auto_mode=config.auto_mode,
+            organization_id=organization_id,
+            write_tools_enabled=bool(getattr(config, "write_tools_enabled", False)),
+        )
 
     async def discover_all_tools(self) -> List[MCPToolInfo]:
         """Discover and merge tools from all MCP clients."""
@@ -185,6 +198,23 @@ class MCPHub:
                 tool_name=name,
             )
 
+        description = str(getattr(route.tool_info, "description", "") or "")
+        requires_write = tool_requires_write_enable(
+            route.original_name,
+            description=description,
+        ) or tool_requires_write_enable(name, description=description)
+        decision = decide_mcp_write_gate(
+            requires_write_enable=requires_write,
+            write_tools_enabled=self.write_tools_enabled,
+            tool_name=name,
+        )
+        if not decision.allowed:
+            raise ToolError(
+                decision.reason,
+                tool_name=name,
+                details={"code": decision.code, "reason": decision.reason},
+            )
+
         return await route.client.call_tool(route.original_name, arguments or {})
 
     def list_tool_snapshots(self) -> List[MCPToolSnapshot]:
@@ -214,14 +244,20 @@ class MCPHub:
             schema = copy.deepcopy(route.tool_info.inputSchema or {})
             if not isinstance(schema, dict):
                 schema = {}
+            description = str(route.tool_info.description or "")
+            requires_write = tool_requires_write_enable(
+                original,
+                description=description,
+            ) or tool_requires_write_enable(str(routed_name), description=description)
             out.append(
                 MCPToolSnapshot(
                     server_name=server_name,
                     original_name=original,
                     routed_name=str(routed_name),
-                    description=str(route.tool_info.description or ""),
+                    description=description,
                     input_schema=schema,
                     enabled=enabled,
+                    requires_write_enable=requires_write,
                 )
             )
         return out
