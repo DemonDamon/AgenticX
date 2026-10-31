@@ -172,7 +172,7 @@ data = [
     "scipy>=1.11.0,<2",
     "matplotlib>=3.7.0,<4",
     "seaborn>=0.12.0,<1",
-    "plotly>=5.15.0,<6",
+    "plotly>=5.15.0,<8",
 ]
 # ── 可观测性 / 监控 ──
 monitoring = [
