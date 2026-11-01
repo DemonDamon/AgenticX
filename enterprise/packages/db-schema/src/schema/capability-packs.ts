@@ -50,6 +50,8 @@ export const enterpriseSkills = pgTable(
     /** `tenant` 自建；`platform` 为平台 grant 下发，元数据只读。 */
     origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
     platformCatalogItemId: ulid("platform_catalog_item_id"),
+    /** 安装副本：指向平台下发 skill 的 capabilityId（如 skill:ulid）。 */
+    installCopyOf: varchar("install_copy_of", { length: 64 }),
     /** 货架生命周期：draft / published / deprecated（与 status 开关并存）。 */
     shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("published"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
@@ -77,12 +79,19 @@ export const enterpriseCapabilityPacks = pgTable(
     displayName: varchar("display_name", { length: 128 }),
     description: text("description"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
+    /** `tenant` 自建；`platform` 为平台 grant 的专家包/组合包。 */
+    origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
+    platformCatalogItemId: ulid("platform_catalog_item_id"),
     metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },
   (table) => ({
     tenantSlugUq: uniqueIndex("enterprise_capability_packs_tenant_slug_uq").on(table.tenantId, table.slug),
     tenantStatusIdx: index("enterprise_capability_packs_tenant_status_idx").on(table.tenantId, table.status),
+    platformCatalogIdx: index("enterprise_capability_packs_platform_catalog_idx").on(
+      table.tenantId,
+      table.platformCatalogItemId,
+    ),
   })
 );
 

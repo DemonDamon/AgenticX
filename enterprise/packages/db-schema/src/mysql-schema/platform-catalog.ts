@@ -45,6 +45,7 @@ export const platformCatalogItemVersions = mysqlTable(
     scannedBy: varchar("scanned_by", { length: 128 }),
     scanFindings: json("scan_findings").notNull().default([]).$type<unknown[]>(),
     shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("draft"),
+    packManifest: json("pack_manifest").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },
   (table) => ({

@@ -9,3 +9,4 @@ export * from "./schemas";
 export * from "./model-reasoning";
 export * from "./ecp-shelf-lifecycle";
 export * from "./ecp-approval-workflow";
+export * from "./ecp-expert-package";

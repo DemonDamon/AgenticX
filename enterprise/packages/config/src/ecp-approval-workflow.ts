@@ -5,7 +5,11 @@
 import { assertScanAllowsPublish, type ScanVerdict, ShelfPublishError } from "./ecp-shelf-lifecycle";
 
 export type ApprovalAction = "shelf_publish" | "platform_introduce";
-export type ApprovalResourceType = "enterprise_skill" | "platform_catalog_version" | "platform_catalog_item";
+export type ApprovalResourceType =
+  | "enterprise_skill"
+  | "platform_catalog_version"
+  | "platform_catalog_item"
+  | "expert_package";
 export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
 export type ApprovalStepKind = "auto_scan" | "manual";
 export type ApprovalActorScope = "enterprise_admin" | "platform_operator";

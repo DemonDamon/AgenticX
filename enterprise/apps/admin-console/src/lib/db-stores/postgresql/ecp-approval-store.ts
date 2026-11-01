@@ -277,7 +277,7 @@ async function resolveScanVerdict(input: {
       .limit(1);
     return (rows[0]?.scanVerdict as ScanVerdict) ?? null;
   }
-  if (input.resourceType === "platform_catalog_item") {
+  if (input.resourceType === "platform_catalog_item" || input.resourceType === "expert_package") {
     const versionId = input.contextJson.versionId;
     if (typeof versionId === "string") {
       const rows = await db

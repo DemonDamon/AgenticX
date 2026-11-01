@@ -49,6 +49,8 @@ export const platformCatalogItemVersions = pgTable(
     scannedBy: varchar("scanned_by", { length: 128 }),
     scanFindings: jsonb("scan_findings").notNull().default([]).$type<unknown[]>(),
     shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("draft"),
+    /** expert_package 成员清单（skill/mcp capabilityId 引用） */
+    packManifest: jsonb("pack_manifest").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },
   (table) => ({

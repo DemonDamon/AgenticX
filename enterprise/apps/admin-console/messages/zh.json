@@ -1066,6 +1066,7 @@
         "tabs": {
           "packs": "能力包",
           "skills": "Skill",
+          "ecp": "平台目录",
           "approvals": "上架审核",
           "mcp": "MCP",
           "agentPolicy": "智能体动作"
@@ -1102,6 +1103,30 @@
           "deprecated": "已下架",
           "publish": "发布",
           "submitApproval": "提交上架审核"
+        },
+        "ecp": {
+          "platformCatalog": {
+            "title": "平台能力目录",
+            "description": "平台侧 skill / 专家包条目；租户库中的平台下发物在 Skill 与能力包列表中以「平台下发」标识。",
+            "slug": "标识",
+            "displayName": "显示名",
+            "slugRequired": "请填写标识"
+          },
+          "resourceType": {
+            "skill": "技能包",
+            "expert_package": "专家包"
+          },
+          "distribution": {
+            "title": "分发策略",
+            "description": "默认关闭安装副本，仅授权引用下发；开启后 grant 会物化租户自有副本。",
+            "installCopyLabel": "启用安装副本",
+            "installCopyHint": "关闭时与阶段 1–3 一致，为纯 grant 下发；开启后 revoke（立即剥离）会禁用副本成员。",
+            "saved": "分发策略已保存"
+          }
+        },
+        "library": {
+          "platform": "平台下发",
+          "org": "组织自建"
         },
         "approval": {
           "settingsTitle": "审核预设",

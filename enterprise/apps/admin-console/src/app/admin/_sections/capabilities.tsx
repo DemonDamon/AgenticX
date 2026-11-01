@@ -6,12 +6,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback } from "react";
 
 import { CapabilityPacksPanel } from "../../../components/capabilities/CapabilityPacksPanel";
+import {
+  EcpDistributionSettingsPanel,
+  PlatformCatalogPanel,
+} from "../../../components/capabilities/EcpExpertPackagePanel";
 import { DesktopAgentPolicyPanel } from "../../../components/capabilities/DesktopAgentPolicyPanel";
 import { McpServersPanel } from "../../../components/capabilities/McpServersPanel";
 import { SkillsPanel } from "../../../components/capabilities/SkillsPanel";
 import { ApprovalWorkflowPanel } from "../../../components/capabilities/ApprovalWorkflowPanel";
 
-const TABS = ["packs", "skills", "approvals", "mcp", "agentPolicy"] as const;
+const TABS = ["packs", "skills", "ecp", "approvals", "mcp", "agentPolicy"] as const;
 type TabId = (typeof TABS)[number];
 
 function isTabId(value: string | null): value is TabId {
@@ -46,6 +50,10 @@ function CapabilitiesTabs() {
       </TabsContent>
       <TabsContent value="skills" className="pt-4">
         <SkillsPanel />
+      </TabsContent>
+      <TabsContent value="ecp" className="space-y-4 pt-4">
+        <PlatformCatalogPanel />
+        <EcpDistributionSettingsPanel />
       </TabsContent>
       <TabsContent value="approvals" className="pt-4">
         <ApprovalWorkflowPanel />

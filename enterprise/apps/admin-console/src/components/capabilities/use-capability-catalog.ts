@@ -42,6 +42,7 @@ export type SkillRecord = {
   requiredCapabilities: string[];
   shelfStatus?: "draft" | "published" | "deprecated";
   metadataReadOnly?: boolean;
+  origin?: "tenant" | "platform";
   status: CapabilityStatus;
   /** null = 从未扫过（手工登记的技能）。和「扫过且安全」是两回事。 */
   scanVerdict?: string | null;
@@ -55,6 +56,8 @@ export type PackRecord = {
   displayName: string;
   description: string;
   status: CapabilityStatus;
+  origin?: "tenant" | "platform";
+  metadataReadOnly?: boolean;
   capabilityIds: string[];
   assignmentKeys: string[];
 };

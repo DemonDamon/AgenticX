@@ -1066,6 +1066,7 @@
         "tabs": {
           "packs": "Packs",
           "skills": "Skills",
+          "ecp": "Platform catalog",
           "approvals": "Approvals",
           "mcp": "MCP",
           "agentPolicy": "Agent actions"
@@ -1102,6 +1103,30 @@
           "deprecated": "Deprecated",
           "publish": "Publish",
           "submitApproval": "Submit for approval"
+        },
+        "ecp": {
+          "platformCatalog": {
+            "title": "Platform catalog",
+            "description": "Platform skill and expert package entries. Tenant copies show as platform-distributed in org library lists.",
+            "slug": "Slug",
+            "displayName": "Display name",
+            "slugRequired": "Slug is required"
+          },
+          "resourceType": {
+            "skill": "Skill bundle",
+            "expert_package": "Expert package"
+          },
+          "distribution": {
+            "title": "Distribution policy",
+            "description": "Install copy is off by default (grant-only). When enabled, grant materializes tenant-owned copies.",
+            "installCopyLabel": "Enable install copy",
+            "installCopyHint": "Off matches phases 1–3 grant-only delivery. Strip revoke disables copied members when on.",
+            "saved": "Distribution policy saved"
+          }
+        },
+        "library": {
+          "platform": "Platform",
+          "org": "Organization"
         },
         "approval": {
           "settingsTitle": "Approval presets",

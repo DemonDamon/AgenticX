@@ -4,7 +4,9 @@
 
 import {
   assertScanAllowsPublish,
+  isExpertPackageResourceType,
   isShelfPublished,
+  normalizeExpertPackageManifest,
   type ScanVerdict,
   type ShelfStatus,
   ShelfPublishError,
@@ -24,6 +26,7 @@ import {
   ApprovalRequiredError,
   consumeApprovalRequest,
 } from "./ecp-approval-store";
+import { applyExpertPackageRevoke, syncExpertPackageToTenant } from "./expert-package-sync";
 
 export type CatalogItemStatus = "active" | "disabled";
 export type GrantStatus = "granted" | "revoked";
@@ -68,6 +71,7 @@ export interface PlatformCatalogVersionRecord {
   scannedAt: string | null;
   scannedBy: string | null;
   scanFindings: unknown[];
+  packManifest: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +97,7 @@ export interface CreatePlatformCatalogItemInput {
   bundleUri?: string;
   bundleDigest?: string;
   status?: CatalogItemStatus;
+  packManifest?: Record<string, unknown>;
 }
 
 export interface UpdatePlatformCatalogItemInput {
@@ -108,6 +113,7 @@ export interface CreateCatalogVersionInput {
   version: string;
   bundleUri?: string;
   bundleDigest?: string;
+  packManifest?: Record<string, unknown>;
 }
 
 export type CatalogVersionScanResult = {
@@ -154,6 +160,7 @@ function rowToVersion(
     scannedAt: row.scannedAt ?? null,
     scannedBy: row.scannedBy ?? null,
     scanFindings: Array.isArray(row.scanFindings) ? row.scanFindings : [],
+    packManifest: (row.packManifest as Record<string, unknown>) ?? {},
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -260,7 +267,11 @@ async function syncCatalogItemToActiveGrants(catalogItemId: string): Promise<voi
       ),
     );
   for (const grant of grants) {
-    await upsertTenantSkillFromCatalog(grant.tenantId, catalog);
+    if (isExpertPackageResourceType(catalog.resourceType)) {
+      await syncExpertPackageToTenant(grant.tenantId, catalog);
+    } else {
+      await upsertTenantSkillFromCatalog(grant.tenantId, catalog);
+    }
   }
 }
 
@@ -330,6 +341,19 @@ export async function createCatalogItem(
   const versionId = ulid();
   const version = input.version?.trim() || "0.0.0";
   const now = new Date();
+  if (input.resourceType?.trim() === "expert_package") {
+    if (!input.packManifest) {
+      throw new Error("expert_package requires packManifest");
+    }
+    normalizeExpertPackageManifest(input.packManifest);
+  }
+  const manifest =
+    input.resourceType?.trim() === "expert_package" && input.packManifest
+      ? input.packManifest
+      : {};
+  if (input.resourceType?.trim() === "expert_package" && input.packManifest) {
+    normalizeExpertPackageManifest(input.packManifest);
+  }
   await db.insert(platformCatalogItems).values({
     id,
     slug,
@@ -352,6 +376,7 @@ export async function createCatalogItem(
     bundleUri: input.bundleUri ?? "",
     bundleDigest: input.bundleDigest ?? "",
     shelfStatus: "draft",
+    packManifest: manifest,
     createdAt: now,
     updatedAt: now,
   });
@@ -371,6 +396,10 @@ export async function createCatalogVersion(
   const db = getIamDb();
   const id = ulid();
   const now = new Date();
+  const manifest = input.packManifest ?? {};
+  if (isExpertPackageResourceType(item.resourceType) && input.packManifest) {
+    normalizeExpertPackageManifest(input.packManifest);
+  }
   await db.insert(platformCatalogItemVersions).values({
     id,
     catalogItemId,
@@ -378,6 +407,7 @@ export async function createCatalogVersion(
     bundleUri: input.bundleUri ?? "",
     bundleDigest: input.bundleDigest ?? "",
     shelfStatus: "draft",
+    packManifest: manifest,
     createdAt: now,
     updatedAt: now,
   });
@@ -537,7 +567,7 @@ export async function listGrantsForCatalogItem(
 export async function grantCatalogToTenant(
   catalogItemId: string,
   tenantId: string,
-): Promise<{ grant: TenantDistributionGrantRecord; skillId: string }> {
+): Promise<{ grant: TenantDistributionGrantRecord; skillId?: string; packId?: string }> {
   const catalog = await getCatalogItem(catalogItemId);
   if (!catalog) throw new Error("catalog item not found");
   if (!isShelfPublished(catalog.shelfStatus)) {
@@ -581,14 +611,23 @@ export async function grantCatalogToTenant(
       updatedAt: now,
     });
   }
-  const skillId = await upsertTenantSkillFromCatalog(tenantId, catalog);
+  const skillId = isExpertPackageResourceType(catalog.resourceType)
+    ? undefined
+    : await upsertTenantSkillFromCatalog(tenantId, catalog);
+  const packSync = isExpertPackageResourceType(catalog.resourceType)
+    ? await syncExpertPackageToTenant(tenantId, catalog)
+    : undefined;
   const grantRows = await db
     .select()
     .from(tenantDistributionGrants)
     .where(eq(tenantDistributionGrants.id, grantId))
     .limit(1);
   if (!grantRows[0]) throw new Error("grant failed");
-  return { grant: rowToGrant(grantRows[0]), skillId };
+  return {
+    grant: rowToGrant(grantRows[0]),
+    skillId,
+    packId: packSync?.packId,
+  };
 }
 
 export async function revokeCatalogFromTenant(
@@ -623,12 +662,17 @@ export async function revokeCatalogFromTenant(
     .where(eq(tenantDistributionGrants.id, rows[0].id));
 
   if (policy === "strip_bootstrap") {
-    const skill = await findTenantSkillByCatalogId(tenantId, catalogItemId);
-    if (skill) {
-      await db
-        .update(enterpriseSkills)
-        .set({ status: "disabled", updatedAt: now })
-        .where(eq(enterpriseSkills.id, skill.id));
+    const catalog = await getCatalogItem(catalogItemId);
+    if (catalog && isExpertPackageResourceType(catalog.resourceType)) {
+      await applyExpertPackageRevoke(tenantId, catalogItemId, policy);
+    } else {
+      const skill = await findTenantSkillByCatalogId(tenantId, catalogItemId);
+      if (skill) {
+        await db
+          .update(enterpriseSkills)
+          .set({ status: "disabled", updatedAt: now })
+          .where(eq(enterpriseSkills.id, skill.id));
+      }
     }
   }
 
