@@ -24,7 +24,7 @@ export const recordSkillScan: typeof postgresql.recordSkillScan = (...args) =>
   implementation().recordSkillScan(...args);
 export const publishSkill: typeof postgresql.publishSkill = (...args) =>
   implementation().publishSkill(...args);
-export { ShelfPublishError } from "./db-stores/postgresql/capability-packs-store";
+export { ShelfPublishError, ApprovalRequiredError } from "./db-stores/postgresql/capability-packs-store";
 
 export const listCapabilityPacks: typeof postgresql.listCapabilityPacks = (...args) =>
   implementation().listCapabilityPacks(...args);

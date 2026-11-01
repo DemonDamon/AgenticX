@@ -1,7 +1,7 @@
 # E3 Executable Subplan — 可配置审核
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: pending  
+> Status: implemented (E3)  
 > Depends: E2
 
 ## Goal

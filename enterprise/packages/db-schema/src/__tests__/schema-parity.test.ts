@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 103 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(103);
+  it("mirrors all 108 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(108);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -74,6 +74,16 @@ describe("postgresql/mysql schema parity", () => {
       ]) {
         expect(skills?.columns.has(column), column).toBe(true);
       }
+    }
+  });
+
+  it("creates ECP approval workflow tables", () => {
+    for (const dialect of [pgTables, mysqlTables]) {
+      expect(dialect.has("approval_requests")).toBe(true);
+      expect(dialect.has("approval_steps")).toBe(true);
+      expect(dialect.has("approval_workflow_presets")).toBe(true);
+      expect(dialect.has("ecp_approval_settings")).toBe(true);
+      expect(dialect.has("ecp_platform_approval_settings")).toBe(true);
     }
   });
 
@@ -175,6 +185,7 @@ describe("mysql baseline migration inventory", () => {
       "0044_ma_webhook_catalog.sql",
       "0045_ecp_platform_catalog.sql",
       "0046_ecp_e2_shelf_lifecycle.sql",
+      "0047_ecp_e3_approval_workflow.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -239,6 +250,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 44, tag: "0044_ma_webhook_catalog" }),
       expect.objectContaining({ idx: 45, tag: "0045_ecp_platform_catalog" }),
       expect.objectContaining({ idx: 46, tag: "0046_ecp_e2_shelf_lifecycle" }),
+      expect.objectContaining({ idx: 47, tag: "0047_ecp_e3_approval_workflow" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

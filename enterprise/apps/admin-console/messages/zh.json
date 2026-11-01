@@ -1066,6 +1066,7 @@
         "tabs": {
           "packs": "能力包",
           "skills": "Skill",
+          "approvals": "上架审核",
           "mcp": "MCP",
           "agentPolicy": "智能体动作"
         },
@@ -1099,7 +1100,53 @@
           "draft": "草稿",
           "published": "已发布",
           "deprecated": "已下架",
-          "publish": "发布"
+          "publish": "发布",
+          "submitApproval": "提交上架审核"
+        },
+        "approval": {
+          "settingsTitle": "审核预设",
+          "settingsDescription": "为 Skill 上架、平台物引入与目录版本发布选择通用审核链路；关闭表示仅保留安全扫描门禁。",
+          "skillPublishPreset": "Skill 上架",
+          "platformIntroducePreset": "引入平台物",
+          "catalogPublishPreset": "目录版本发布",
+          "presetDisabled": "不启用",
+          "loadFailed": "加载审核配置失败",
+          "saveFailed": "保存失败",
+          "saved": "审核配置已保存",
+          "queueTitle": "待办审核",
+          "queueDescription": "通过或驳回会写入步骤备注，便于审计追溯。",
+          "queueEmpty": "暂无待办",
+          "approve": "通过",
+          "reject": "驳回",
+          "approved": "已通过",
+          "rejected": "已驳回",
+          "actionFailed": "操作失败",
+          "reasonRequired": "请填写驳回原因",
+          "rejectPlaceholder": "驳回原因（必填）",
+          "rejectReason": "驳回原因",
+          "stepScan": "安全扫描",
+          "action": {
+            "shelf_publish": "上架",
+            "platform_introduce": "引入平台物"
+          },
+          "status": {
+            "pending": "待审核",
+            "approved": "已通过",
+            "rejected": "已驳回",
+            "cancelled": "已取消"
+          },
+          "stepStatus": {
+            "pending": "待处理",
+            "passed": "已通过",
+            "failed": "未通过",
+            "skipped": "已跳过"
+          },
+          "actor": {
+            "enterprise_admin": "企业管理员",
+            "platform_operator": "平台运营",
+            "unknown": "未知"
+          },
+          "publishBlocked": "尚未完成审核，请先提交并通过上架审核"
         },
         "actions": {
           "enable": "启用",

@@ -33,6 +33,7 @@ export * from "./quota-plans";
 export * from "./desktop-device-auth";
 export * from "./capability-packs";
 export * from "./platform-catalog";
+export * from "./ecp-approval";
 export * from "./user-opt-outs";
 export * from "./user-groups";
 export * from "./collab-rooms";
