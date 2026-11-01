@@ -695,6 +695,7 @@ export async function listTenantSkillsForTest(tenantId: string) {
       slug: enterpriseSkills.slug,
       origin: enterpriseSkills.origin,
       platformCatalogItemId: enterpriseSkills.platformCatalogItemId,
+      installCopyOf: enterpriseSkills.installCopyOf,
       version: enterpriseSkills.version,
       bundleDigest: enterpriseSkills.bundleDigest,
       shelfStatus: enterpriseSkills.shelfStatus,
