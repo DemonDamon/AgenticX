@@ -146,3 +146,8 @@ research/codedeepresearch/*/upstream/
 
 # Local device-gateway config for real-device pairing (contains device token)
 gateway_config.dev.yaml
+
+# Demo / copper-pipe screenshots (regenerate via enterprise/scripts; keep scripts + srt/mp4 optional)
+docs/agx-data-suite/shots/**/*.png
+docs/agx-rules-knowledge-suite/e2e-shots/**/*.png
+docs/managed-agent/shots/**/*.png
