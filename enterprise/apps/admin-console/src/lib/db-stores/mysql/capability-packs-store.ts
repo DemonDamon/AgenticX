@@ -10,14 +10,14 @@ import {
   enterpriseCapabilityPackMembers,
   enterpriseCapabilityPacks,
   enterpriseSkills,
-} from "@agenticx/db-schema/mysql";
+} from "@agenticx/db-schema";
 import {
   assertScanAllowsPublish,
   isCapabilityId,
   type ShelfStatus,
   ShelfPublishError,
 } from "@agenticx/config";
-import { getAdminMysqlDb } from "./database";
+import { getIamDb } from "@agenticx/iam-core";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 
@@ -33,7 +33,6 @@ import {
 
 export { ShelfPublishError };
 export { ApprovalRequiredError };
-export { PlatformSkillMetadataReadonlyError } from "./platform-catalog-store";
 
 export type CapabilityStatus = "active" | "disabled";
 
@@ -72,6 +71,9 @@ export interface CapabilityPackRecord {
   displayName: string;
   description: string;
   status: CapabilityStatus;
+  origin: "tenant" | "platform";
+  platformCatalogItemId: string | null;
+  metadataReadOnly: boolean;
   metadata: Record<string, unknown>;
   /** `mcp:<ulid>` / `skill:<ulid>` */
   capabilityIds: string[];
@@ -81,7 +83,16 @@ export interface CapabilityPackRecord {
   updatedAt: string;
 }
 
-export interface CreateSkillInput {
+export function isPlatformOriginPack(origin: string | null | undefined): boolean {
+  return origin === "platform";
+}
+
+export class PlatformPackMetadataReadonlyError extends Error {
+  constructor(message = "platform-origin pack metadata is read-only") {
+    super(message);
+    this.name = "PlatformPackMetadataReadonlyError";
+  }
+}
   slug: string;
   displayName?: string;
   description?: string;
@@ -183,7 +194,7 @@ function rowToSkill(row: typeof enterpriseSkills.$inferSelect): SkillRecord {
 }
 
 export async function listSkills(): Promise<SkillRecord[]> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const rows = await db
     .select()
@@ -194,7 +205,7 @@ export async function listSkills(): Promise<SkillRecord[]> {
 }
 
 export async function getSkill(id: string): Promise<SkillRecord | null> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const rows = await db
     .select()
@@ -205,7 +216,7 @@ export async function getSkill(id: string): Promise<SkillRecord | null> {
 }
 
 export async function createSkill(input: CreateSkillInput): Promise<SkillRecord> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const slug = input.slug.trim();
   if (!slug) throw new Error("slug is required");
@@ -247,7 +258,7 @@ export type SkillScanResult = {
  * 而这一页上点一下就发给全公司了。
  */
 export async function recordSkillScan(id: string, result: SkillScanResult): Promise<SkillRecord> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   await db
     .update(enterpriseSkills)
@@ -278,7 +289,7 @@ export async function publishSkill(id: string): Promise<SkillRecord> {
     resourceType: "enterprise_skill",
     resourceId: id,
   });
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   await db
     .update(enterpriseSkills)
     .set({ shelfStatus: "published", updatedAt: new Date() })
@@ -292,7 +303,7 @@ export async function publishSkill(id: string): Promise<SkillRecord> {
 }
 
 export async function updateSkill(id: string, input: UpdateSkillInput): Promise<SkillRecord> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const existingRows = await db
     .select({ origin: enterpriseSkills.origin })
@@ -323,7 +334,7 @@ export async function updateSkill(id: string, input: UpdateSkillInput): Promise<
 }
 
 export async function deleteSkill(id: string): Promise<boolean> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const existingRows = await db
     .select({ origin: enterpriseSkills.origin })
@@ -336,8 +347,9 @@ export async function deleteSkill(id: string): Promise<boolean> {
   }
   const deleted = await db
     .delete(enterpriseSkills)
-    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));
-  return deleted[0].affectedRows > 0;
+    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)))
+    .returning({ id: enterpriseSkills.id });
+  return deleted.length > 0;
 }
 
 async function loadPackRelations(packIds: readonly string[]): Promise<{
@@ -347,7 +359,7 @@ async function loadPackRelations(packIds: readonly string[]): Promise<{
   const members = new Map<string, string[]>();
   const assignments = new Map<string, string[]>();
   if (packIds.length === 0) return { members, assignments };
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
 
   const memberRows = await db
@@ -389,6 +401,9 @@ function rowToPack(
     displayName: row.displayName ?? "",
     description: row.description ?? "",
     status: (row.status as CapabilityStatus) || "active",
+    origin: (row.origin as "tenant" | "platform") || "tenant",
+    platformCatalogItemId: row.platformCatalogItemId ?? null,
+    metadataReadOnly: isPlatformOriginPack(row.origin),
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     capabilityIds,
     assignmentKeys,
@@ -398,7 +413,7 @@ function rowToPack(
 }
 
 export async function listCapabilityPacks(): Promise<CapabilityPackRecord[]> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const rows = await db
     .select()
@@ -412,7 +427,7 @@ export async function listCapabilityPacks(): Promise<CapabilityPackRecord[]> {
 }
 
 export async function getCapabilityPack(id: string): Promise<CapabilityPackRecord | null> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const rows = await db
     .select()
@@ -426,7 +441,7 @@ export async function getCapabilityPack(id: string): Promise<CapabilityPackRecor
 }
 
 async function replaceMembers(packId: string, capabilityIds: string[]): Promise<void> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const now = new Date();
   await db
     .delete(enterpriseCapabilityPackMembers)
@@ -438,7 +453,7 @@ async function replaceMembers(packId: string, capabilityIds: string[]): Promise<
 }
 
 async function replaceAssignments(packId: string, assignmentKeys: string[]): Promise<void> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const now = new Date();
   await db
@@ -464,7 +479,7 @@ async function replaceAssignments(packId: string, assignmentKeys: string[]): Pro
 export async function createCapabilityPack(
   input: CreateCapabilityPackInput
 ): Promise<CapabilityPackRecord> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const slug = input.slug.trim();
   if (!slug) throw new Error("slug is required");
@@ -494,7 +509,7 @@ export async function updateCapabilityPack(
   id: string,
   input: UpdateCapabilityPackInput
 ): Promise<CapabilityPackRecord> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const existing = await getCapabilityPack(id);
   if (!existing) throw new Error("pack not found");
@@ -521,10 +536,13 @@ export async function updateCapabilityPack(
 }
 
 export async function deleteCapabilityPack(id: string): Promise<boolean> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const tenantId = requiredTenantId();
   const deleted = await db
     .delete(enterpriseCapabilityPacks)
-    .where(and(eq(enterpriseCapabilityPacks.tenantId, tenantId), eq(enterpriseCapabilityPacks.id, id)));
-  return deleted[0].affectedRows > 0;
+    .where(and(eq(enterpriseCapabilityPacks.tenantId, tenantId), eq(enterpriseCapabilityPacks.id, id)))
+    .returning({ id: enterpriseCapabilityPacks.id });
+  return deleted.length > 0;
 }
+
+export { PlatformSkillMetadataReadonlyError } from "./platform-catalog-store";

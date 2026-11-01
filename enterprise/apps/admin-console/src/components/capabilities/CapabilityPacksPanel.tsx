@@ -149,6 +149,11 @@ export function CapabilityPacksPanel() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {pack.metadataReadOnly || pack.origin === "platform" ? (
+                  <Badge variant="secondary">{t("library.platform")}</Badge>
+                ) : (
+                  <Badge variant="outline">{t("library.org")}</Badge>
+                )}
                 <Badge variant={pack.status === "active" ? "default" : "secondary"}>
                   {pack.status === "active" ? t("status.active") : t("status.disabled")}
                 </Badge>

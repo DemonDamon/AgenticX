@@ -29,8 +29,8 @@ import {
   ecpPlatformApprovalSettings,
   enterpriseSkills,
   platformCatalogItemVersions,
-} from "@agenticx/db-schema/mysql";
-import { getAdminMysqlDb } from "./database";
+} from "@agenticx/db-schema";
+import { getIamDb } from "@agenticx/iam-core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 
@@ -122,7 +122,7 @@ function rowToStep(row: typeof approvalSteps.$inferSelect): ApprovalStepRecord {
 }
 
 async function loadSteps(requestId: string): Promise<ApprovalStepRecord[]> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db
     .select()
     .from(approvalSteps)
@@ -132,7 +132,7 @@ async function loadSteps(requestId: string): Promise<ApprovalStepRecord[]> {
 }
 
 async function loadRequestRecord(id: string): Promise<ApprovalRequestRecord | null> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db.select().from(approvalRequests).where(eq(approvalRequests.id, id)).limit(1);
   if (!rows[0]) return null;
   const steps = await loadSteps(id);
@@ -148,7 +148,7 @@ export async function listBuiltinPresets() {
 }
 
 export async function getTenantApprovalSettings(tenantId: string): Promise<TenantApprovalSettings> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db
     .select()
     .from(ecpApprovalSettings)
@@ -173,7 +173,7 @@ export async function upsertTenantApprovalSettings(
       throw new ApprovalWorkflowError("unknown approval preset");
     }
   }
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const now = new Date();
   const existing = await getTenantApprovalSettings(tenantId);
   await db
@@ -191,7 +191,8 @@ export async function upsertTenantApprovalSettings(
       createdAt: now,
       updatedAt: now,
     })
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: ecpApprovalSettings.tenantId,
       set: {
         skillPublishPresetSlug:
           input.skillPublishPresetSlug !== undefined
@@ -208,7 +209,7 @@ export async function upsertTenantApprovalSettings(
 }
 
 export async function getPlatformApprovalSettings(): Promise<PlatformApprovalSettings> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db
     .select()
     .from(ecpPlatformApprovalSettings)
@@ -223,7 +224,7 @@ export async function upsertPlatformApprovalSettings(input: {
   if (input.catalogPublishPresetSlug && !getBuiltinPreset(input.catalogPublishPresetSlug)) {
     throw new ApprovalWorkflowError("unknown approval preset");
   }
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const now = new Date();
   const existing = await getPlatformApprovalSettings();
   await db
@@ -237,7 +238,8 @@ export async function upsertPlatformApprovalSettings(input: {
       createdAt: now,
       updatedAt: now,
     })
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: ecpPlatformApprovalSettings.id,
       set: {
         catalogPublishPresetSlug:
           input.catalogPublishPresetSlug !== undefined
@@ -254,7 +256,7 @@ async function resolveScanVerdict(input: {
   resourceId: string;
   contextJson: Record<string, unknown>;
 }): Promise<ScanVerdict> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   if (input.resourceType === "enterprise_skill") {
     const rows = await db
       .select({ scanVerdict: enterpriseSkills.scanVerdict })
@@ -275,7 +277,7 @@ async function resolveScanVerdict(input: {
       .limit(1);
     return (rows[0]?.scanVerdict as ScanVerdict) ?? null;
   }
-  if (input.resourceType === "platform_catalog_item") {
+  if (input.resourceType === "platform_catalog_item" || input.resourceType === "expert_package") {
     const versionId = input.contextJson.versionId;
     if (typeof versionId === "string") {
       const rows = await db
@@ -290,7 +292,7 @@ async function resolveScanVerdict(input: {
 }
 
 async function syncRequestStatus(requestId: string): Promise<ApprovalRequestRecord | null> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const steps = await loadSteps(requestId);
   const status = deriveRequestStatusFromSteps(steps as ApprovalStepSnapshot[]);
   const nowIso = new Date().toISOString();
@@ -319,7 +321,7 @@ async function executePlatformIntroduceSideEffect(record: ApprovalRequestRecord)
   const tenantId = record.tenantId;
   const { grantCatalogToTenant } = await import("./platform-catalog-store");
   await grantCatalogToTenant(catalogItemId, tenantId);
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   await db
     .update(approvalRequests)
     .set({
@@ -330,7 +332,7 @@ async function executePlatformIntroduceSideEffect(record: ApprovalRequestRecord)
 }
 
 async function runAutoScanForRequest(requestId: string, contextJson: Record<string, unknown>) {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const reqRows = await db
     .select()
     .from(approvalRequests)
@@ -375,7 +377,7 @@ export async function createApprovalRequest(input: {
 }): Promise<ApprovalRequestRecord> {
   const preset = getBuiltinPreset(input.presetSlug);
   if (!preset) throw new ApprovalWorkflowError("unknown approval preset");
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const requestId = ulid();
   const now = new Date();
   const contextJson = input.contextJson ?? {};
@@ -417,7 +419,7 @@ export async function listApprovalRequests(input: {
   status?: ApprovalRequestStatus;
   limit?: number;
 }): Promise<ApprovalRequestRecord[]> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const conditions = [];
   if (input.tenantId) conditions.push(eq(approvalRequests.tenantId, input.tenantId));
   if (input.status) conditions.push(eq(approvalRequests.status, input.status));
@@ -462,7 +464,7 @@ export async function approveApprovalRequest(input: {
     platformOperatorTenantId: platformOperatorTenantId(),
   });
   if (!allowed) throw new ApprovalWorkflowError("forbidden to approve this step");
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const nowIso = new Date().toISOString();
   await db
     .update(approvalSteps)
@@ -505,7 +507,7 @@ export async function rejectApprovalRequest(input: {
     platformOperatorTenantId: platformOperatorTenantId(),
   });
   if (!allowed) throw new ApprovalWorkflowError("forbidden to reject this step");
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const nowIso = new Date().toISOString();
   await db
     .update(approvalSteps)
@@ -538,7 +540,7 @@ async function findLatestApprovedRequest(input: {
   resourceId: string;
   action: ApprovalAction;
 }): Promise<ApprovalRequestRecord | null> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db
     .select()
     .from(approvalRequests)
@@ -560,7 +562,7 @@ async function findLatestApprovedRequest(input: {
 }
 
 export async function consumeApprovalRequest(requestId: string): Promise<void> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   await db
     .update(approvalRequests)
     .set({ consumedAt: new Date().toISOString(), updatedAt: new Date() })
@@ -667,7 +669,7 @@ export async function submitPlatformIntroduceRequest(input: {
 
 /** 供迁移/测试：确认预设表可读。 */
 export async function countWorkflowPresets(): Promise<number> {
-  const db = getAdminMysqlDb();
+  const db = getIamDb();
   const rows = await db.select({ id: approvalWorkflowPresets.id }).from(approvalWorkflowPresets);
   return rows.length;
 }

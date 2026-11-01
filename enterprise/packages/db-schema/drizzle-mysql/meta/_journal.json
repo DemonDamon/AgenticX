@@ -337,6 +337,13 @@
       "when": 1789100000001,
       "tag": "0047_ecp_e3_approval_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1789200000001,
+      "tag": "0048_ecp_e4_expert_package",
+      "breakpoints": true
     }
   ]
 }

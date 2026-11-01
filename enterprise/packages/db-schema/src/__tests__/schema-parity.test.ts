@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 108 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(108);
+  it("mirrors all 109 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(109);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -84,6 +84,26 @@ describe("postgresql/mysql schema parity", () => {
       expect(dialect.has("approval_workflow_presets")).toBe(true);
       expect(dialect.has("ecp_approval_settings")).toBe(true);
       expect(dialect.has("ecp_platform_approval_settings")).toBe(true);
+    }
+  });
+
+  it("creates ECP tenant distribution settings", () => {
+    for (const dialect of [pgTables, mysqlTables]) {
+      expect(dialect.has("ecp_tenant_settings")).toBe(true);
+      const settings = dialect.get("ecp_tenant_settings");
+      expect(settings?.columns.has("install_copy_enabled")).toBe(true);
+      const packs = dialect.get("enterprise_capability_packs");
+      expect(packs?.columns.has("origin"), "enterprise_capability_packs.origin").toBe(true);
+      expect(
+        packs?.columns.has("platform_catalog_item_id"),
+        "enterprise_capability_packs.platform_catalog_item_id",
+      ).toBe(true);
+      const versions = dialect.get("platform_catalog_item_versions");
+      expect(versions?.columns.has("pack_manifest"), "platform_catalog_item_versions.pack_manifest").toBe(
+        true,
+      );
+      const skills = dialect.get("enterprise_skills");
+      expect(skills?.columns.has("install_copy_of"), "enterprise_skills.install_copy_of").toBe(true);
     }
   });
 
@@ -186,6 +206,7 @@ describe("mysql baseline migration inventory", () => {
       "0045_ecp_platform_catalog.sql",
       "0046_ecp_e2_shelf_lifecycle.sql",
       "0047_ecp_e3_approval_workflow.sql",
+      "0048_ecp_e4_expert_package.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -251,6 +272,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 45, tag: "0045_ecp_platform_catalog" }),
       expect.objectContaining({ idx: 46, tag: "0046_ecp_e2_shelf_lifecycle" }),
       expect.objectContaining({ idx: 47, tag: "0047_ecp_e3_approval_workflow" }),
+      expect.objectContaining({ idx: 48, tag: "0048_ecp_e4_expert_package" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

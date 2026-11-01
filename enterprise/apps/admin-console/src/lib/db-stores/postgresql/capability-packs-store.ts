@@ -71,6 +71,9 @@ export interface CapabilityPackRecord {
   displayName: string;
   description: string;
   status: CapabilityStatus;
+  origin: "tenant" | "platform";
+  platformCatalogItemId: string | null;
+  metadataReadOnly: boolean;
   metadata: Record<string, unknown>;
   /** `mcp:<ulid>` / `skill:<ulid>` */
   capabilityIds: string[];
@@ -80,7 +83,16 @@ export interface CapabilityPackRecord {
   updatedAt: string;
 }
 
-export interface CreateSkillInput {
+export function isPlatformOriginPack(origin: string | null | undefined): boolean {
+  return origin === "platform";
+}
+
+export class PlatformPackMetadataReadonlyError extends Error {
+  constructor(message = "platform-origin pack metadata is read-only") {
+    super(message);
+    this.name = "PlatformPackMetadataReadonlyError";
+  }
+}
   slug: string;
   displayName?: string;
   description?: string;
@@ -389,6 +401,9 @@ function rowToPack(
     displayName: row.displayName ?? "",
     description: row.description ?? "",
     status: (row.status as CapabilityStatus) || "active",
+    origin: (row.origin as "tenant" | "platform") || "tenant",
+    platformCatalogItemId: row.platformCatalogItemId ?? null,
+    metadataReadOnly: isPlatformOriginPack(row.origin),
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     capabilityIds,
     assignmentKeys,
@@ -479,6 +494,7 @@ export async function createCapabilityPack(
     displayName: input.displayName?.trim() || slug,
     description: input.description ?? "",
     status: input.status ?? "active",
+    origin: "tenant",
     metadata: input.metadata ?? {},
     createdAt: now,
     updatedAt: now,
@@ -498,6 +514,15 @@ export async function updateCapabilityPack(
   const tenantId = requiredTenantId();
   const existing = await getCapabilityPack(id);
   if (!existing) throw new Error("pack not found");
+  if (existing.metadataReadOnly) {
+    if (
+      input.displayName !== undefined ||
+      input.description !== undefined ||
+      input.capabilityIds !== undefined
+    ) {
+      throw new PlatformPackMetadataReadonlyError();
+    }
+  }
 
   const patch: Partial<typeof enterpriseCapabilityPacks.$inferInsert> = { updatedAt: new Date() };
   if (input.displayName !== undefined) patch.displayName = input.displayName;

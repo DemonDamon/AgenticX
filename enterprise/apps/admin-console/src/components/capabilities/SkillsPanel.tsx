@@ -131,6 +131,11 @@ export function SkillsPanel() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {skill.metadataReadOnly ? (
+                  <Badge variant="secondary">{t("library.platform")}</Badge>
+                ) : (
+                  <Badge variant="outline">{t("library.org")}</Badge>
+                )}
                 <Badge
                   variant={
                     skill.scanVerdict === "dangerous"

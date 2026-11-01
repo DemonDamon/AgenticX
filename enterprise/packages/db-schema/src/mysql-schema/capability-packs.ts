@@ -49,6 +49,7 @@ export const enterpriseSkills = mysqlTable(
     scanFindings: json("scan_findings").$type<unknown[]>().notNull().default([]),
     origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
     platformCatalogItemId: ulid("platform_catalog_item_id"),
+    installCopyOf: varchar("install_copy_of", { length: 64 }),
     shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("published"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     ...auditColumns,
@@ -75,12 +76,18 @@ export const enterpriseCapabilityPacks = mysqlTable(
     displayName: varchar("display_name", { length: 128 }),
     description: text("description"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
+    origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
+    platformCatalogItemId: ulid("platform_catalog_item_id"),
     metadata: json("metadata").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },
   (table) => ({
     tenantSlugUq: uniqueIndex("enterprise_capability_packs_tenant_slug_uq").on(table.tenantId, table.slug),
     tenantStatusIdx: index("enterprise_capability_packs_tenant_status_idx").on(table.tenantId, table.status),
+    platformCatalogIdx: index("enterprise_capability_packs_platform_catalog_idx").on(
+      table.tenantId,
+      table.platformCatalogItemId,
+    ),
   })
 );
 

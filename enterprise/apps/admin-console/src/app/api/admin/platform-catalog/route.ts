@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       bundleUri?: string;
       bundleDigest?: string;
       status?: "active" | "disabled";
+      packManifest?: Record<string, unknown>;
     };
     if (!body.slug?.trim()) {
       return NextResponse.json({ code: "40000", message: "slug required" }, { status: 400 });
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
       bundleUri: body.bundleUri,
       bundleDigest: body.bundleDigest,
       status: body.status,
+      packManifest: body.packManifest,
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { item } });
   } catch (error) {
