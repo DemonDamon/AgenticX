@@ -1,7 +1,7 @@
 # E1 Executable Subplan — 跨租户分发（grant / revoke）
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: ready  
+> Status: Done (merged #228)  
 > Branch: `feat/ecp-e1-distribution`
 
 ## Goal
