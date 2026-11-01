@@ -151,7 +151,8 @@ export async function seedEcpE5PgFixture(): Promise<EcpE5FixtureIds> {
     version: "1.0.0",
     bundleDigest: "digest-catalog-s-v1",
   });
-  const skillVersion = (await createCatalogVersion(skillCatalog.id, { version: "1.0.0" })).id;
+  const skillVersion = skillCatalog.effectiveVersionId;
+  if (!skillVersion) throw new Error("skill catalog missing initial version");
   await recordCatalogVersionScan(skillVersion, {
     verdict: "safe",
     source: "ecp-e5-fixture",
@@ -164,11 +165,11 @@ export async function seedEcpE5PgFixture(): Promise<EcpE5FixtureIds> {
     slug: `ecp-pack-e-${RUN}`,
     displayName: "ECP Expert E",
     resourceType: CATALOG_RESOURCE_EXPERT_PACKAGE,
+    version: "1.0.0",
     packManifest: manifest,
   });
-  const expertVersion = (
-    await createCatalogVersion(expertCatalog.id, { version: "1.0.0", packManifest: manifest })
-  ).id;
+  const expertVersion = expertCatalog.effectiveVersionId;
+  if (!expertVersion) throw new Error("expert catalog missing initial version");
   await recordCatalogVersionScan(expertVersion, {
     verdict: "safe",
     source: "ecp-e5-fixture",
