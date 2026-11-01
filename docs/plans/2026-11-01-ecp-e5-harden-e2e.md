@@ -1,7 +1,7 @@
 # E5 Executable Subplan — 硬化与完整 E2E
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: implementing  
+> Status: Done  
 > Depends: E1–E4  
 > Branch: `feat/ecp-e5-harden-e2e`  
 > Planned-with: composer-2.5  
@@ -63,3 +63,4 @@ pnpm -C enterprise/apps/admin-console test -- ecp-e5-closed-loop.pg
 ```
 
 Made-with: Damon Li · Impl-Model: composer-2.5 · Plan-File: docs/plans/2026-11-01-ecp-e5-harden-e2e.md
+
