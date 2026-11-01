@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminScope } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../../lib/admin-auth";
 import {
   getEcpTenantDistributionPolicy,
   updateEcpTenantDistributionPolicy,
-} from "../../../../lib/ecp-tenant-settings-store";
+} from "../../../../../lib/ecp-tenant-settings-store";
 
 export async function GET() {
   const auth = await requireAdminScope(["provider:read"]);
