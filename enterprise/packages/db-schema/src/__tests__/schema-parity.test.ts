@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 100 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(100);
+  it("mirrors all 102 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(102);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -69,9 +69,18 @@ describe("postgresql/mysql schema parity", () => {
         "scanned_at",
         "scanned_by",
         "scan_findings",
+        "origin",
+        "platform_catalog_item_id",
       ]) {
         expect(skills?.columns.has(column), column).toBe(true);
       }
+    }
+  });
+
+  it("creates platform catalog distribution tables", () => {
+    for (const dialect of [pgTables, mysqlTables]) {
+      expect(dialect.has("platform_catalog_items")).toBe(true);
+      expect(dialect.has("tenant_distribution_grants")).toBe(true);
     }
   });
 
@@ -161,6 +170,7 @@ describe("mysql baseline migration inventory", () => {
       "0042_ma_evals.sql",
       "0043_ma_memory_dreams.sql",
       "0044_ma_webhook_catalog.sql",
+      "0045_ecp_platform_catalog.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -223,6 +233,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 42, tag: "0042_ma_evals" }),
       expect.objectContaining({ idx: 43, tag: "0043_ma_memory_dreams" }),
       expect.objectContaining({ idx: 44, tag: "0044_ma_webhook_catalog" }),
+      expect.objectContaining({ idx: 45, tag: "0045_ecp_platform_catalog" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
-import { deleteSkill, getSkill, updateSkill } from "../../../../../lib/capability-packs-store";
+import {
+  PlatformSkillMetadataReadonlyError,
+  deleteSkill,
+  getSkill,
+  updateSkill,
+} from "../../../../../lib/capability-packs-store";
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["provider:read"]);
@@ -30,6 +35,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { skill } });
   } catch (error) {
+    if (error instanceof PlatformSkillMetadataReadonlyError) {
+      return NextResponse.json({ code: "40300", message: error.message }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : "update failed";
     const status = message === "skill not found" ? 404 : 400;
     return NextResponse.json({ code: status === 404 ? "40400" : "40000", message }, { status });
@@ -40,7 +48,14 @@ export async function DELETE(_req: Request, context: { params: Promise<{ id: str
   const auth = await requireAdminScope(["provider:update"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  const removed = await deleteSkill(id);
-  if (!removed) return NextResponse.json({ code: "40400", message: "skill not found" }, { status: 404 });
-  return NextResponse.json({ code: "00000", message: "ok", data: { id } });
+  try {
+    const removed = await deleteSkill(id);
+    if (!removed) return NextResponse.json({ code: "40400", message: "skill not found" }, { status: 404 });
+    return NextResponse.json({ code: "00000", message: "ok", data: { id } });
+  } catch (error) {
+    if (error instanceof PlatformSkillMetadataReadonlyError) {
+      return NextResponse.json({ code: "40300", message: error.message }, { status: 403 });
+    }
+    throw error;
+  }
 }

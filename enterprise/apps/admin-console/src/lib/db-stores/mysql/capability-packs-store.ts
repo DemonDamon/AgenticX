@@ -16,6 +16,11 @@ import { getAdminMysqlDb } from "./database";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 
+import {
+  isPlatformOriginSkill,
+  PlatformSkillMetadataReadonlyError,
+} from "./platform-catalog-store";
+
 export type CapabilityStatus = "active" | "disabled";
 
 export interface SkillRecord {
@@ -28,6 +33,9 @@ export interface SkillRecord {
   bundleUri: string;
   bundleDigest: string;
   requiredCapabilities: string[];
+  origin: "tenant" | "platform";
+  platformCatalogItemId: string | null;
+  metadataReadOnly: boolean;
   status: CapabilityStatus;
   /**
    * 安全扫描结论。null 表示从未扫过——手工登记的技能就是这个状态。
@@ -144,6 +152,9 @@ function rowToSkill(row: typeof enterpriseSkills.$inferSelect): SkillRecord {
     requiredCapabilities: Array.isArray(row.requiredCapabilities)
       ? row.requiredCapabilities.map(String)
       : [],
+    origin: isPlatformOriginSkill(row.origin) ? "platform" : "tenant",
+    platformCatalogItemId: row.platformCatalogItemId ?? null,
+    metadataReadOnly: isPlatformOriginSkill(row.origin),
     status: (row.status as CapabilityStatus) || "active",
     scanVerdict: row.scanVerdict ?? null,
     scanSource: row.scanSource ?? null,
@@ -194,6 +205,7 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillRecord>
     bundleUri: input.bundleUri ?? "",
     bundleDigest: input.bundleDigest ?? "",
     requiredCapabilities: assertCapabilityIds(input.requiredCapabilities ?? []),
+    origin: "tenant",
     status: input.status ?? "active",
     createdAt: now,
     updatedAt: now,
@@ -239,6 +251,15 @@ export async function recordSkillScan(id: string, result: SkillScanResult): Prom
 export async function updateSkill(id: string, input: UpdateSkillInput): Promise<SkillRecord> {
   const db = getAdminMysqlDb();
   const tenantId = requiredTenantId();
+  const existingRows = await db
+    .select({ origin: enterpriseSkills.origin })
+    .from(enterpriseSkills)
+    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)))
+    .limit(1);
+  if (!existingRows[0]) throw new Error("skill not found");
+  if (isPlatformOriginSkill(existingRows[0].origin)) {
+    throw new PlatformSkillMetadataReadonlyError();
+  }
   const patch: Partial<typeof enterpriseSkills.$inferInsert> = { updatedAt: new Date() };
   if (input.displayName !== undefined) patch.displayName = input.displayName;
   if (input.description !== undefined) patch.description = input.description;
@@ -261,6 +282,15 @@ export async function updateSkill(id: string, input: UpdateSkillInput): Promise<
 export async function deleteSkill(id: string): Promise<boolean> {
   const db = getAdminMysqlDb();
   const tenantId = requiredTenantId();
+  const existingRows = await db
+    .select({ origin: enterpriseSkills.origin })
+    .from(enterpriseSkills)
+    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)))
+    .limit(1);
+  if (!existingRows[0]) return false;
+  if (isPlatformOriginSkill(existingRows[0].origin)) {
+    throw new PlatformSkillMetadataReadonlyError();
+  }
   const deleted = await db
     .delete(enterpriseSkills)
     .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));

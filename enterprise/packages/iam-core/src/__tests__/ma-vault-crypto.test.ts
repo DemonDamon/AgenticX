@@ -11,6 +11,17 @@ const KEY_A = "vault-master-key-A-0123456789abcdef";
 const KEY_B = "vault-master-key-B-0123456789abcdef";
 const PLAIN = { token: "tok-abcdefgh-123" }; // gitleaks:allow
 
+/** Flip base64 symbols only in the last sextet — often a no-op on decoded bytes. */
+function tamperSealedCiphertext(ciphertext: string): string {
+  const raw = Buffer.from(ciphertext, "base64url");
+  expect(raw.length).toBeGreaterThan(32);
+  // iv[0..11] tag[12..27] ciphertext[28..] — corrupt tag + payload so GCM must fail.
+  for (const idx of [14, 15, 16, 30, 31, 32, raw.length - 1]) {
+    raw[idx] = raw[idx]! ^ 0xff;
+  }
+  return raw.toString("base64url");
+}
+
 describe("ma vault crypto", () => {
   it("seal/open roundtrip", () => {
     const sealed = sealSecretPayload(PLAIN, { MA_VAULT_MASTER_KEY: KEY_A });
@@ -50,7 +61,8 @@ describe("ma vault crypto", () => {
 
   it("tampered ciphertext -> VaultDecryptError", () => {
     const sealed = sealSecretPayload(PLAIN, { MA_VAULT_MASTER_KEY: KEY_A });
-    const tampered = `${sealed.ciphertext.slice(0, -1)}${sealed.ciphertext.endsWith("a") ? "b" : "a"}`;
+    const tampered = tamperSealedCiphertext(sealed.ciphertext);
+    expect(tampered).not.toBe(sealed.ciphertext);
     expect(() => openSecretPayload({ ...sealed, ciphertext: tampered }, { MA_VAULT_MASTER_KEY: KEY_A })).toThrow(
       VaultDecryptError,
     );

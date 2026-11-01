@@ -8,6 +8,8 @@ export {
   normalizeAssignmentKeys,
 } from "./db-stores/postgresql/capability-packs-store";
 
+export { PlatformSkillMetadataReadonlyError } from "./db-stores/postgresql/platform-catalog-store";
+
 function implementation(): typeof postgresql {
   const config = resolveDatabaseConfig();
   return config.dialect === "mysql" ? mysql : postgresql;
