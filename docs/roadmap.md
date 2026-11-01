@@ -27,6 +27,7 @@
 |--------|-------------|
 | **M12** | Agent Evolution — Architecture search, knowledge distillation, adaptive planning |
 | **M18** | Multi-tenancy & RBAC — Per-tenant data isolation, fine-grained permission control |
+| **M19** | Enterprise Capability Platform — Platform catalog, cross-tenant grant/revoke, shelf lifecycle, approval workflow, expert_package distribution (see [enterprise/docs/features/ecp/README.md](../enterprise/docs/features/ecp/README.md)) |
 
 ## Community Requests
 

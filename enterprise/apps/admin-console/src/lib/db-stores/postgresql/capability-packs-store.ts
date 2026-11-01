@@ -93,6 +93,8 @@ export class PlatformPackMetadataReadonlyError extends Error {
     this.name = "PlatformPackMetadataReadonlyError";
   }
 }
+
+export interface CreateSkillInput {
   slug: string;
   displayName?: string;
   description?: string;

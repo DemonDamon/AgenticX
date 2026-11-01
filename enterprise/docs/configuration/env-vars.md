@@ -19,6 +19,7 @@
 | `AUTH_JWT_PRIVATE_KEY_FILE` | ⚪ | `.env.local` 习惯写 `*_FILE`，`start-dev.sh` 展开为内容 |
 | `AUTH_JWT_PUBLIC_KEY_FILE` | ⚪ | 同上 |
 | `DEFAULT_TENANT_ID` | 🟡 | 默认租户 ULID（seed 之后） |
+| `ECP_PLATFORM_TENANT_ID` | 🟡 | ECP 专家包模板 skill/MCP 所在平台租户 ULID；缺省回退 `DEFAULT_TENANT_ID`（见 [features/ecp/platform-tenant-env.md](../features/ecp/platform-tenant-env.md)） |
 | `DEFAULT_DEPT_ID` | ⚪ | 默认部门 ULID |
 | `AGX_AUTO_DB_MIGRATE` | ⚪ | `start-dev.sh` 仅在 localhost DB 下自动 migrate；`=0` 关闭 |
 
