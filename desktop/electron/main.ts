@@ -2391,6 +2391,9 @@ async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skippe
     cfg.enterprise.agent_action_policy = normalizeAgentActionPolicy(agentPolicy);
     saveAgxConfig(cfg);
   }
+  if (!result.skipped && (result.managedSkills.length > 0 || result.managedMcp.length > 0)) {
+    emitSkillsChanged();
+  }
   return { ok: true, skipped: result.skipped };
 }
 
