@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminScope } from "../../../../../../../lib/admin-auth";
-import { getCatalogItem, recordCatalogVersionScan } from "../../../../../../../lib/platform-catalog-store";
-import { scanSkillViaRegistry } from "../../../../../../../lib/skill-registry-scan";
+import { requireAdminScope } from "../../../../../../../../lib/admin-auth";
+import { getCatalogItem, recordCatalogVersionScan } from "../../../../../../../../lib/platform-catalog-store";
+import { scanSkillViaRegistry } from "../../../../../../../../lib/skill-registry-scan";
 
 const VERDICTS = new Set(["safe", "caution", "dangerous"]);
 
