@@ -84,7 +84,7 @@ INSERT INTO `approval_workflow_presets` (
   `updated_at`
 )
 SELECT
-  '01ECPPRESETENTERPRISEONLYAA',
+  '01ECPPRESETENTERPRISEONLYA',
   'enterprise_admin_only',
   '企管单级',
   JSON_ARRAY(
