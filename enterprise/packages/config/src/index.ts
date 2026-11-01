@@ -7,3 +7,4 @@ export * from "./member-spending-limit";
 export * from "./feature-usage-limits";
 export * from "./schemas";
 export * from "./model-reasoning";
+export * from "./ecp-shelf-lifecycle";

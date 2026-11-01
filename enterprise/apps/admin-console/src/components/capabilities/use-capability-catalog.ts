@@ -40,6 +40,8 @@ export type SkillRecord = {
   bundleUri: string;
   bundleDigest: string;
   requiredCapabilities: string[];
+  shelfStatus?: "draft" | "published" | "deprecated";
+  metadataReadOnly?: boolean;
   status: CapabilityStatus;
   /** null = 从未扫过（手工登记的技能）。和「扫过且安全」是两回事。 */
   scanVerdict?: string | null;

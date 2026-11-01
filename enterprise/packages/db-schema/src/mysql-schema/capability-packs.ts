@@ -49,6 +49,7 @@ export const enterpriseSkills = mysqlTable(
     scanFindings: json("scan_findings").$type<unknown[]>().notNull().default([]),
     origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
     platformCatalogItemId: ulid("platform_catalog_item_id"),
+    shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("published"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     ...auditColumns,
   },

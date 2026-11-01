@@ -1095,6 +1095,12 @@
           "active": "已启用",
           "disabled": "已停用"
         },
+        "shelf": {
+          "draft": "草稿",
+          "published": "已发布",
+          "deprecated": "已下架",
+          "publish": "发布"
+        },
         "actions": {
           "enable": "启用",
           "disable": "停用",

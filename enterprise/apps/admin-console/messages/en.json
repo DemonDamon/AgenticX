@@ -1095,6 +1095,12 @@
           "active": "Active",
           "disabled": "Disabled"
         },
+        "shelf": {
+          "draft": "Draft",
+          "published": "Published",
+          "deprecated": "Deprecated",
+          "publish": "Publish"
+        },
         "actions": {
           "enable": "Enable",
           "disable": "Disable",

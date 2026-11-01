@@ -1,10 +1,18 @@
 /**
  * ECP E1 revoke / sync 判定（纯函数，便于两租户场景单测）。
  */
+import {
+  shouldPushCatalogUpdateToTenant as shouldPushCatalogUpdate,
+  type ShelfStatus,
+} from "@agenticx/config";
+
 import type { GrantStatus, RevokePolicy } from "../db-stores/postgresql/platform-catalog-store";
 
-export function shouldPushCatalogUpdateToTenant(grantStatus: GrantStatus | undefined): boolean {
-  return grantStatus === "granted";
+export function shouldPushCatalogUpdateToTenant(
+  grantStatus: GrantStatus | undefined,
+  shelfStatus: ShelfStatus | string | undefined = "published",
+): boolean {
+  return shouldPushCatalogUpdate(grantStatus, shelfStatus);
 }
 
 export function tenantSkillStatusAfterRevoke(
