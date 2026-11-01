@@ -215,6 +215,7 @@ _SKILL_SOURCE_FRAGMENTS: List[tuple[str, str]] = [
     (".agenticx/skills/registry", "registry"),
     (".agenticx/skills/bundles", "bundle"),
     (".agenticx/skills/agent-created", "agent_created"),
+    (".agenticx/skills/enterprise", "enterprise"),
     (".agenticx/skills", "agenticx"),
     ("/.cursor/skills", "cursor"),
     ("/.cursor/plugins", "cursor"),
@@ -320,6 +321,7 @@ _VALID_EXPLICIT_SKILL_SOURCES = frozenset(
         "project_agent",
         "agenticx",
         "agent_created",
+        "enterprise",
         "skillhub",
         "custom",
     }

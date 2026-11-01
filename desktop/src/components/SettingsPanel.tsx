@@ -471,6 +471,7 @@ function inferSourceFromBaseDir(baseDir?: string): string | null {
   if (p.includes("/agenticx/skills/")) return "builtin";
   if (p.includes("/.agenticx/skills/registry/")) return "registry";
   if (p.includes("/.agenticx/skills/bundles/")) return "bundle";
+  if (p.includes("/.agenticx/skills/enterprise/")) return "enterprise";
   if (p.includes("/.cursor/skills/")) return "cursor";
   if (p.includes("/.claude/skills/")) return "claude";
   if (p.includes("/.agents/skills/")) return "agents";
@@ -488,7 +489,7 @@ function effectiveSkillSource(skill: SkillItem): string {
 
 function effectiveSkillLocation(skill: SkillItem): "project" | "global" {
   const src = effectiveSkillSource(skill);
-  if (["cursor", "claude", "agents", "agent_global", "skillhub", "registry", "bundle"].includes(src)) {
+  if (["cursor", "claude", "agents", "agent_global", "skillhub", "registry", "bundle", "enterprise"].includes(src)) {
     return "global";
   }
   return skill.location === "project" ? "project" : "global";
@@ -537,6 +538,11 @@ function skillSourceBadge(source: string | undefined, t: TFunction): { label: st
       return { label: t("skills.sourceSelf"), className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
     case "agent_created":
       return { label: t("skills.sourceSelf"), className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
+    case "enterprise":
+      return {
+        label: t("skills.tierEnterprise"),
+        className: `${base} border-violet-500/30 bg-violet-500/10 text-violet-300`,
+      };
     case "custom":
       return { label: t("skills.sourceCustom"), className: `${base} border-border bg-surface-panel text-text-faint` };
     default:
