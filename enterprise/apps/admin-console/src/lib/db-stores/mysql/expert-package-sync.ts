@@ -9,6 +9,7 @@ import {
   type ExpertPackageManifest,
 } from "@agenticx/config";
 import {
+  enterpriseCapabilityAssignments,
   enterpriseCapabilityPackMembers,
   enterpriseCapabilityPacks,
   enterpriseSkills,
@@ -16,7 +17,7 @@ import {
   platformCatalogItemVersions,
 } from "@agenticx/db-schema";
 import { getIamDb } from "@agenticx/iam-core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 
 import { getEcpTenantDistributionPolicy } from "./ecp-tenant-settings-store";
@@ -224,6 +225,56 @@ async function replacePackMembers(packId: string, capabilityIds: string[]): Prom
   );
 }
 
+/**
+ * 平台 catalog skill grant 后写入租户已分配的自建能力包成员，供 Portal/bootstrap 按 pack 下发。
+ * 平台专家包（platformCatalogItemId 非空）成员由 syncExpertPackageToTenant 独占维护，此处跳过。
+ */
+export async function syncCatalogSkillGrantToTenant(
+  tenantId: string,
+  tenantSkillId: string,
+): Promise<{ packIds: string[] }> {
+  const capabilityId = `skill:${tenantSkillId}`;
+  const db = getIamDb();
+  const now = new Date();
+
+  const assignedPackRows = await db
+    .select({ packId: enterpriseCapabilityPacks.id })
+    .from(enterpriseCapabilityPacks)
+    .innerJoin(
+      enterpriseCapabilityAssignments,
+      eq(enterpriseCapabilityAssignments.packId, enterpriseCapabilityPacks.id),
+    )
+    .where(
+      and(
+        eq(enterpriseCapabilityPacks.tenantId, tenantId),
+        eq(enterpriseCapabilityPacks.status, "active"),
+        isNull(enterpriseCapabilityPacks.platformCatalogItemId),
+      ),
+    );
+
+  const packIds = [...new Set(assignedPackRows.map((row) => row.packId))];
+  for (const packId of packIds) {
+    const existing = await db
+      .select({ capabilityId: enterpriseCapabilityPackMembers.capabilityId })
+      .from(enterpriseCapabilityPackMembers)
+      .where(
+        and(
+          eq(enterpriseCapabilityPackMembers.packId, packId),
+          eq(enterpriseCapabilityPackMembers.capabilityId, capabilityId),
+        ),
+      )
+      .limit(1);
+    if (existing[0]) continue;
+    await db.insert(enterpriseCapabilityPackMembers).values({
+      packId,
+      capabilityId,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return { packIds };
+}
+
 export async function syncExpertPackageToTenant(
   tenantId: string,
   catalog: PlatformCatalogItemRecord,
@@ -335,4 +386,13 @@ export async function listTenantPacksForTest(tenantId: string) {
     })
     .from(enterpriseCapabilityPacks)
     .where(eq(enterpriseCapabilityPacks.tenantId, tenantId));
+}
+
+export async function listPackMembersForTest(packId: string): Promise<string[]> {
+  const db = getIamDb();
+  const rows = await db
+    .select({ capabilityId: enterpriseCapabilityPackMembers.capabilityId })
+    .from(enterpriseCapabilityPackMembers)
+    .where(eq(enterpriseCapabilityPackMembers.packId, packId));
+  return rows.map((row) => row.capabilityId).sort();
 }

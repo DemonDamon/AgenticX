@@ -26,7 +26,7 @@ import {
   ApprovalRequiredError,
   consumeApprovalRequest,
 } from "./ecp-approval-store";
-import { applyExpertPackageRevoke, syncExpertPackageToTenant } from "./expert-package-sync";
+import { applyExpertPackageRevoke, syncCatalogSkillGrantToTenant, syncExpertPackageToTenant } from "./expert-package-sync";
 
 export type CatalogItemStatus = "active" | "disabled";
 export type GrantStatus = "granted" | "revoked";
@@ -270,7 +270,8 @@ async function syncCatalogItemToActiveGrants(catalogItemId: string): Promise<voi
     if (isExpertPackageResourceType(catalog.resourceType)) {
       await syncExpertPackageToTenant(grant.tenantId, catalog);
     } else {
-      await upsertTenantSkillFromCatalog(grant.tenantId, catalog);
+      const skillId = await upsertTenantSkillFromCatalog(grant.tenantId, catalog);
+      await syncCatalogSkillGrantToTenant(grant.tenantId, skillId);
     }
   }
 }
@@ -614,6 +615,9 @@ export async function grantCatalogToTenant(
   const skillId = isExpertPackageResourceType(catalog.resourceType)
     ? undefined
     : await upsertTenantSkillFromCatalog(tenantId, catalog);
+  if (skillId) {
+    await syncCatalogSkillGrantToTenant(tenantId, skillId);
+  }
   const packSync = isExpertPackageResourceType(catalog.resourceType)
     ? await syncExpertPackageToTenant(tenantId, catalog)
     : undefined;
