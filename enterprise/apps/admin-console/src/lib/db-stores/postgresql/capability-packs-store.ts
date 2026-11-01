@@ -25,8 +25,14 @@ import {
   isPlatformOriginSkill,
   PlatformSkillMetadataReadonlyError,
 } from "./platform-catalog-store";
+import {
+  assertShelfPublishApproval,
+  ApprovalRequiredError,
+  consumeApprovalRequest,
+} from "./ecp-approval-store";
 
 export { ShelfPublishError };
+export { ApprovalRequiredError };
 
 export type CapabilityStatus = "active" | "disabled";
 
@@ -265,12 +271,20 @@ export async function publishSkill(id: string): Promise<SkillRecord> {
     throw new PlatformSkillMetadataReadonlyError();
   }
   assertScanAllowsPublish(existing.scanVerdict as "safe" | "caution" | "dangerous" | null);
-  const db = getIamDb();
   const tenantId = requiredTenantId();
+  const approval = await assertShelfPublishApproval({
+    tenantId,
+    resourceType: "enterprise_skill",
+    resourceId: id,
+  });
+  const db = getIamDb();
   await db
     .update(enterpriseSkills)
     .set({ shelfStatus: "published", updatedAt: new Date() })
     .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));
+  if (approval) {
+    await consumeApprovalRequest(approval.id);
+  }
   const updated = await getSkill(id);
   if (!updated) throw new Error("skill not found");
   return updated;

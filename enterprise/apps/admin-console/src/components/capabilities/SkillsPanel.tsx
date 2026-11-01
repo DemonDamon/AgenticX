@@ -162,7 +162,27 @@ export function SkillsPanel() {
                   size="sm"
                   variant="outline"
                   disabled={skill.shelfStatus === "published" || skill.metadataReadOnly}
-                  onClick={() => void catalog.send(`/api/admin/skills/${skill.id}/publish`, "POST")}
+                  onClick={() => void catalog.send(`/api/admin/skills/${skill.id}/publish-request`, "POST")}
+                >
+                  {t("shelf.submitApproval")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={skill.shelfStatus === "published" || skill.metadataReadOnly}
+                  onClick={async () => {
+                    const res = await fetch(`/api/admin/skills/${skill.id}/publish`, { method: "POST" });
+                    if (res.status === 409) {
+                      toast.error(t("approval.publishBlocked"));
+                      return;
+                    }
+                    if (!res.ok) {
+                      toast.error(t("toast.loadFailed"));
+                      return;
+                    }
+                    toast.success(t("shelf.publish"));
+                    void catalog.load();
+                  }}
                 >
                   {t("shelf.publish")}
                 </Button>

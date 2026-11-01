@@ -19,12 +19,19 @@ import { getIamDb } from "@agenticx/iam-core";
 import { and, desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 
+import {
+  assertShelfPublishApproval,
+  ApprovalRequiredError,
+  consumeApprovalRequest,
+} from "./ecp-approval-store";
+
 export type CatalogItemStatus = "active" | "disabled";
 export type GrantStatus = "granted" | "revoked";
 export type RevokePolicy = "retain_stop_updates" | "strip_bootstrap";
 export type SkillOrigin = "tenant" | "platform";
 
 export { ShelfPublishError };
+export { ApprovalRequiredError };
 
 export class PlatformSkillMetadataReadonlyError extends Error {
   constructor(message = "platform-origin skill metadata is read-only") {
@@ -403,12 +410,21 @@ export async function recordCatalogVersionScan(
 export async function publishCatalogVersion(
   catalogItemId: string,
   versionId: string,
+  operatorTenantId?: string,
 ): Promise<{ item: PlatformCatalogItemRecord; version: PlatformCatalogVersionRecord }> {
   const version = await getCatalogVersion(versionId);
   if (!version || version.catalogItemId !== catalogItemId) {
     throw new Error("catalog version not found");
   }
   assertScanAllowsPublish(version.scanVerdict);
+  const tenantId =
+    operatorTenantId?.trim() || process.env.DEFAULT_TENANT_ID?.trim() || "default";
+  const approval = await assertShelfPublishApproval({
+    tenantId,
+    resourceType: "platform_catalog_version",
+    resourceId: versionId,
+    action: "shelf_publish",
+  });
   const db = getIamDb();
   const now = new Date();
   await db
@@ -430,6 +446,9 @@ export async function publishCatalogVersion(
   const item = await getCatalogItem(catalogItemId);
   const publishedVersion = await getCatalogVersion(versionId);
   if (!item || !publishedVersion) throw new Error("publish failed");
+  if (approval) {
+    await consumeApprovalRequest(approval.id);
+  }
   return { item, version: publishedVersion };
 }
 

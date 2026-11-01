@@ -8,3 +8,4 @@ export * from "./feature-usage-limits";
 export * from "./schemas";
 export * from "./model-reasoning";
 export * from "./ecp-shelf-lifecycle";
+export * from "./ecp-approval-workflow";

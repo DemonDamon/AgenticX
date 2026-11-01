@@ -1066,6 +1066,7 @@
         "tabs": {
           "packs": "Packs",
           "skills": "Skills",
+          "approvals": "Approvals",
           "mcp": "MCP",
           "agentPolicy": "Agent actions"
         },
@@ -1099,7 +1100,53 @@
           "draft": "Draft",
           "published": "Published",
           "deprecated": "Deprecated",
-          "publish": "Publish"
+          "publish": "Publish",
+          "submitApproval": "Submit for approval"
+        },
+        "approval": {
+          "settingsTitle": "Approval presets",
+          "settingsDescription": "Choose a reusable workflow for skill publish, platform introduce, and catalog version publish. Disabled means scan-only gating.",
+          "skillPublishPreset": "Skill publish",
+          "platformIntroducePreset": "Platform introduce",
+          "catalogPublishPreset": "Catalog version publish",
+          "presetDisabled": "Disabled",
+          "loadFailed": "Failed to load approval settings",
+          "saveFailed": "Save failed",
+          "saved": "Approval settings saved",
+          "queueTitle": "Pending approvals",
+          "queueDescription": "Approve or reject with a note for audit.",
+          "queueEmpty": "No pending items",
+          "approve": "Approve",
+          "reject": "Reject",
+          "approved": "Approved",
+          "rejected": "Rejected",
+          "actionFailed": "Action failed",
+          "reasonRequired": "Rejection reason is required",
+          "rejectPlaceholder": "Rejection reason (required)",
+          "rejectReason": "Reason",
+          "stepScan": "Security scan",
+          "action": {
+            "shelf_publish": "Publish",
+            "platform_introduce": "Introduce platform item"
+          },
+          "status": {
+            "pending": "Pending",
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "cancelled": "Cancelled"
+          },
+          "stepStatus": {
+            "pending": "Pending",
+            "passed": "Passed",
+            "failed": "Failed",
+            "skipped": "Skipped"
+          },
+          "actor": {
+            "enterprise_admin": "Enterprise admin",
+            "platform_operator": "Platform operator",
+            "unknown": "Unknown"
+          },
+          "publishBlocked": "Publish is blocked until approval completes"
         },
         "actions": {
           "enable": "Enable",

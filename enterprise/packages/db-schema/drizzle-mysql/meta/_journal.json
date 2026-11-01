@@ -330,6 +330,13 @@
       "when": 1789000000001,
       "tag": "0046_ecp_e2_shelf_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "5",
+      "when": 1789100000001,
+      "tag": "0047_ecp_e3_approval_workflow",
+      "breakpoints": true
     }
   ]
 }

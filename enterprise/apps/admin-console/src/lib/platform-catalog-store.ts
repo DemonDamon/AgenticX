@@ -47,4 +47,4 @@ export const setEffectiveCatalogVersion: typeof postgresql.setEffectiveCatalogVe
   implementation().setEffectiveCatalogVersion(...args);
 export const deprecateCatalogItem: typeof postgresql.deprecateCatalogItem = (...args) =>
   implementation().deprecateCatalogItem(...args);
-export { ShelfPublishError } from "./db-stores/postgresql/platform-catalog-store";
+export { ShelfPublishError, ApprovalRequiredError } from "./db-stores/postgresql/platform-catalog-store";
