@@ -1,7 +1,7 @@
 # E4 Executable Subplan — expert_package
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: implementing  
+> Status: Done (merged #231)  
 > Depends: E1, E2, E3  
 > Branch: `feat/ecp-e4-expert-package`
 

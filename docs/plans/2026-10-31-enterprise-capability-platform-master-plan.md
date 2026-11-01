@@ -1,6 +1,6 @@
 # AGX 企业能力平台 Master Plan
 
-> **状态**：Accepted · 执行中（见 `2026-11-01-enterprise-capability-platform-subplans.md`）  
+> **状态**：Done（E1–E5 已合入 `main`；合成 + PG 闭环 E2E PASS；Admin 平台目录 UI #234、grant→pack 成员 #235 已合入）。Admin→Portal→磁盘下发路径已在 E5 验收；Desktop Skills 徽章 GUI 点击铜管为可选本地产品余项，不阻塞主线 Done。子计划索引见 `2026-11-01-enterprise-capability-platform-subplans.md`。  
 > **日期**：2026-11-01（Asia/Shanghai）  
 > **分支目标**：合入 `main` 的平台能力（非客户交付包）  
 > **原则**：只建底层通用、可复制、高价值的能力与组件；项目侧定制不进 AGX 主线；闭环用完整 case E2E 验收，不靠口头对照
@@ -205,9 +205,9 @@
 
 ## 10. 待关门项（纪要勾掉即可）
 
-1. [ ] 确认 §2 准入闸门写入研发规范/评审纪要。  
-2. [ ] 评审后链到 `docs/roadmap.md`（建议 M19）。  
-3. [ ] 指定阶段 1 负责人与首个合成 E2E 落点仓库路径。
+1. [ ] 确认 §2 准入闸门写入研发规范/评审纪要（平台 E1–E5 已落地，纪要仍为可选治理项）。  
+2. [x] 评审后链到 `docs/roadmap.md`（M19 Enterprise Capability Platform，见 `docs/roadmap.md` 与 `enterprise/docs/features/ecp/README.md`）。  
+3. [x] 合成 E2E 落点：`enterprise/apps/admin-console/src/lib/__tests__/ecp-e5-closed-loop.synthetic.test.ts`（可选 PG：`ecp-e5-closed-loop.pg.integration.test.ts`）；阶段负责人仍以纪要为准（未单独归档则 N/A）。
 
 （专家包路线、revoke 默认、阶段 1～2 不做安装副本、超管 API-first：已在阶段 0 预填，除非评审推翻。）
 
@@ -231,3 +231,4 @@
 | 2026-10-31 | 初稿（探针对照叙事） |
 | 2026-11-01 | 改为直接表述 AGX 建设内容；写入 main 准入闸门；拍板 revoke 默认与「安装副本」延后至阶段 4；强调合成 E2E 闭环 |
 | 2026-11-01 | Accepted；拆 E1–E5 子计划并串行开工 |
+| 2026-11-01 | E1–E5 及 Admin UI / pack-gap 跟进合入 `main`；主线 Status 置 Done |

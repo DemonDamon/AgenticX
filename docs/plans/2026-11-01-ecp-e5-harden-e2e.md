@@ -1,7 +1,7 @@
 # E5 Executable Subplan — 硬化与完整 E2E
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: Done  
+> Status: Done (merged #232; PG closed-loop fix #233)  
 > Depends: E1–E4  
 > Branch: `feat/ecp-e5-harden-e2e`  
 > Planned-with: composer-2.5  

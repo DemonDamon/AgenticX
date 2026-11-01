@@ -1,7 +1,8 @@
 # Enterprise Capability Platform — Subplan Index
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: executing (serial)  
+> Status: Done (serial E1–E5 merged to `main`; #228–#235)  
+> Residual (optional): Desktop Skills badge GUI click copper-pipe — local product verification only; not blocking E1–E5 Done.  
 > Date: 2026-11-01  
 > Execution: **串行** E1→E2→E3→E4→E5；每期合入前跑该期 E2E；E5 跑完整闭环 case。不并行多 agent 改同一底座，避免 schema/API 打架。
 

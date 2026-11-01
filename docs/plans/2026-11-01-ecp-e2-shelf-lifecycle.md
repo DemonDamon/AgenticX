@@ -1,7 +1,7 @@
 # E2 Executable Subplan — 货架 draft/publish
 
 > Parent: `docs/plans/2026-10-31-enterprise-capability-platform-master-plan.md`  
-> Status: pending (E1 merged #228)
+> Status: Done (merged #229)
 
 ## Goal
 平台目录条目 draft/publish 生命周期、版本线与 scan 门禁。
