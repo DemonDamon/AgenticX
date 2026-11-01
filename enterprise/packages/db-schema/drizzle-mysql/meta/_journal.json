@@ -323,6 +323,13 @@
       "when": 1788900000001,
       "tag": "0045_ecp_platform_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "5",
+      "when": 1789000000001,
+      "tag": "0046_ecp_e2_shelf_lifecycle",
+      "breakpoints": true
     }
   ]
 }

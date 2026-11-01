@@ -13,6 +13,7 @@ function skill(overrides: Partial<SkillPromptSource> = {}): SkillPromptSource {
     description: "对照条款",
     scanVerdict: "safe",
     status: "active",
+    shelfStatus: "published",
     optedOut: false,
     body: null,
     ...overrides,
@@ -26,6 +27,7 @@ describe("buildEnterpriseSkillBlock", () => {
         skill(),
         skill({ id: "skill:02", displayName: "费用", scanVerdict: "caution" }),
         skill({ id: "skill:03", displayName: "停用", status: "disabled" }),
+        skill({ id: "skill:06", displayName: "草稿", shelfStatus: "draft" }),
         skill({ id: "skill:04", displayName: "关闭", optedOut: true }),
         skill({ id: "skill:05", displayName: "未扫", scanVerdict: null }),
       ],
@@ -34,6 +36,7 @@ describe("buildEnterpriseSkillBlock", () => {
     expect(block).toContain("合同核验");
     expect(block).not.toContain("费用");
     expect(block).not.toContain("停用");
+    expect(block).not.toContain("草稿");
     expect(block).not.toContain("关闭");
     expect(block).not.toContain("未扫");
     expect(block).not.toContain("```");

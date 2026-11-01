@@ -25,7 +25,9 @@ describe("ECP E1 two-tenant distribution (synthetic)", () => {
     expect(tenantSkillStatusAfterRevoke("strip_bootstrap")).toBe("disabled");
   });
 
-  it("granted tenant receives catalog updates", () => {
+  it("granted tenant receives catalog updates only when published", () => {
+    expect(shouldPushCatalogUpdateToTenant("granted", "published")).toBe(true);
+    expect(shouldPushCatalogUpdateToTenant("granted", "draft")).toBe(false);
     expect(shouldPushCatalogUpdateToTenant("granted")).toBe(true);
   });
 });

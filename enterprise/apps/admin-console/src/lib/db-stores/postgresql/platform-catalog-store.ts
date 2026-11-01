@@ -3,7 +3,15 @@
  */
 
 import {
+  assertScanAllowsPublish,
+  isShelfPublished,
+  type ScanVerdict,
+  type ShelfStatus,
+  ShelfPublishError,
+} from "@agenticx/config";
+import {
   enterpriseSkills,
+  platformCatalogItemVersions,
   platformCatalogItems,
   tenantDistributionGrants,
 } from "@agenticx/db-schema";
@@ -15,6 +23,8 @@ export type CatalogItemStatus = "active" | "disabled";
 export type GrantStatus = "granted" | "revoked";
 export type RevokePolicy = "retain_stop_updates" | "strip_bootstrap";
 export type SkillOrigin = "tenant" | "platform";
+
+export { ShelfPublishError };
 
 export class PlatformSkillMetadataReadonlyError extends Error {
   constructor(message = "platform-origin skill metadata is read-only") {
@@ -33,6 +43,24 @@ export interface PlatformCatalogItemRecord {
   bundleUri: string;
   bundleDigest: string;
   status: CatalogItemStatus;
+  shelfStatus: ShelfStatus;
+  effectiveVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformCatalogVersionRecord {
+  id: string;
+  catalogItemId: string;
+  version: string;
+  bundleUri: string;
+  bundleDigest: string;
+  shelfStatus: ShelfStatus;
+  scanVerdict: ScanVerdict;
+  scanSource: string | null;
+  scannedAt: string | null;
+  scannedBy: string | null;
+  scanFindings: unknown[];
   createdAt: string;
   updatedAt: string;
 }
@@ -69,6 +97,19 @@ export interface UpdatePlatformCatalogItemInput {
   status?: CatalogItemStatus;
 }
 
+export interface CreateCatalogVersionInput {
+  version: string;
+  bundleUri?: string;
+  bundleDigest?: string;
+}
+
+export type CatalogVersionScanResult = {
+  verdict: string;
+  source: string;
+  findings: unknown[];
+  scannedBy: string;
+};
+
 function iso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }
@@ -84,6 +125,28 @@ function rowToCatalog(row: typeof platformCatalogItems.$inferSelect): PlatformCa
     bundleUri: row.bundleUri ?? "",
     bundleDigest: row.bundleDigest ?? "",
     status: (row.status as CatalogItemStatus) || "active",
+    shelfStatus: (row.shelfStatus as ShelfStatus) || "draft",
+    effectiveVersionId: row.effectiveVersionId ?? null,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
+function rowToVersion(
+  row: typeof platformCatalogItemVersions.$inferSelect,
+): PlatformCatalogVersionRecord {
+  return {
+    id: row.id,
+    catalogItemId: row.catalogItemId,
+    version: row.version,
+    bundleUri: row.bundleUri ?? "",
+    bundleDigest: row.bundleDigest ?? "",
+    shelfStatus: (row.shelfStatus as ShelfStatus) || "draft",
+    scanVerdict: (row.scanVerdict as ScanVerdict) ?? null,
+    scanSource: row.scanSource ?? null,
+    scannedAt: row.scannedAt ?? null,
+    scannedBy: row.scannedBy ?? null,
+    scanFindings: Array.isArray(row.scanFindings) ? row.scanFindings : [],
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -107,6 +170,11 @@ export function isPlatformOriginSkill(origin: string | null | undefined): boolea
   return origin === "platform";
 }
 
+function tenantSkillStatusFromCatalog(catalog: PlatformCatalogItemRecord): "active" | "disabled" {
+  if (!isShelfPublished(catalog.shelfStatus)) return "disabled";
+  return catalog.status === "disabled" ? "disabled" : "active";
+}
+
 async function findTenantSkillByCatalogId(tenantId: string, catalogItemId: string) {
   const db = getIamDb();
   const rows = await db
@@ -128,6 +196,8 @@ async function upsertTenantSkillFromCatalog(
 ): Promise<string> {
   const db = getIamDb();
   const now = new Date();
+  const tenantStatus = tenantSkillStatusFromCatalog(catalog);
+  const tenantShelf: ShelfStatus = isShelfPublished(catalog.shelfStatus) ? "published" : "draft";
   const existing = await findTenantSkillByCatalogId(tenantId, catalog.id);
   if (existing) {
     await db
@@ -141,7 +211,8 @@ async function upsertTenantSkillFromCatalog(
         bundleDigest: catalog.bundleDigest,
         origin: "platform",
         platformCatalogItemId: catalog.id,
-        status: catalog.status === "disabled" ? "disabled" : "active",
+        shelfStatus: tenantShelf,
+        status: tenantStatus,
         updatedAt: now,
       })
       .where(eq(enterpriseSkills.id, existing.id));
@@ -160,7 +231,8 @@ async function upsertTenantSkillFromCatalog(
     requiredCapabilities: [],
     origin: "platform",
     platformCatalogItemId: catalog.id,
-    status: catalog.status === "disabled" ? "disabled" : "active",
+    shelfStatus: tenantShelf,
+    status: tenantStatus,
     createdAt: now,
     updatedAt: now,
   });
@@ -169,7 +241,7 @@ async function upsertTenantSkillFromCatalog(
 
 async function syncCatalogItemToActiveGrants(catalogItemId: string): Promise<void> {
   const catalog = await getCatalogItem(catalogItemId);
-  if (!catalog) return;
+  if (!catalog || catalog.shelfStatus === "draft") return;
   const db = getIamDb();
   const grants = await db
     .select()
@@ -183,6 +255,23 @@ async function syncCatalogItemToActiveGrants(catalogItemId: string): Promise<voi
   for (const grant of grants) {
     await upsertTenantSkillFromCatalog(grant.tenantId, catalog);
   }
+}
+
+async function applyEffectiveVersionToCatalogItem(
+  catalogItemId: string,
+  version: PlatformCatalogVersionRecord,
+): Promise<void> {
+  const db = getIamDb();
+  await db
+    .update(platformCatalogItems)
+    .set({
+      version: version.version,
+      bundleUri: version.bundleUri,
+      bundleDigest: version.bundleDigest,
+      effectiveVersionId: version.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(platformCatalogItems.id, catalogItemId));
 }
 
 export async function listCatalogItems(): Promise<PlatformCatalogItemRecord[]> {
@@ -204,6 +293,26 @@ export async function getCatalogItem(id: string): Promise<PlatformCatalogItemRec
   return rows[0] ? rowToCatalog(rows[0]) : null;
 }
 
+export async function listCatalogVersions(catalogItemId: string): Promise<PlatformCatalogVersionRecord[]> {
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(platformCatalogItemVersions)
+    .where(eq(platformCatalogItemVersions.catalogItemId, catalogItemId))
+    .orderBy(desc(platformCatalogItemVersions.updatedAt));
+  return rows.map(rowToVersion);
+}
+
+export async function getCatalogVersion(versionId: string): Promise<PlatformCatalogVersionRecord | null> {
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(platformCatalogItemVersions)
+    .where(eq(platformCatalogItemVersions.id, versionId))
+    .limit(1);
+  return rows[0] ? rowToVersion(rows[0]) : null;
+}
+
 export async function createCatalogItem(
   input: CreatePlatformCatalogItemInput,
 ): Promise<PlatformCatalogItemRecord> {
@@ -211,6 +320,8 @@ export async function createCatalogItem(
   const slug = input.slug.trim();
   if (!slug) throw new Error("slug is required");
   const id = ulid();
+  const versionId = ulid();
+  const version = input.version?.trim() || "0.0.0";
   const now = new Date();
   await db.insert(platformCatalogItems).values({
     id,
@@ -218,16 +329,139 @@ export async function createCatalogItem(
     displayName: input.displayName?.trim() || slug,
     description: input.description ?? "",
     resourceType: input.resourceType?.trim() || "skill",
-    version: input.version?.trim() || "0.0.0",
+    version,
     bundleUri: input.bundleUri ?? "",
     bundleDigest: input.bundleDigest ?? "",
     status: input.status ?? "active",
+    shelfStatus: "draft",
+    effectiveVersionId: versionId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.insert(platformCatalogItemVersions).values({
+    id: versionId,
+    catalogItemId: id,
+    version,
+    bundleUri: input.bundleUri ?? "",
+    bundleDigest: input.bundleDigest ?? "",
+    shelfStatus: "draft",
     createdAt: now,
     updatedAt: now,
   });
   const created = await getCatalogItem(id);
   if (!created) throw new Error("create failed");
   return created;
+}
+
+export async function createCatalogVersion(
+  catalogItemId: string,
+  input: CreateCatalogVersionInput,
+): Promise<PlatformCatalogVersionRecord> {
+  const item = await getCatalogItem(catalogItemId);
+  if (!item) throw new Error("catalog item not found");
+  const version = input.version.trim();
+  if (!version) throw new Error("version is required");
+  const db = getIamDb();
+  const id = ulid();
+  const now = new Date();
+  await db.insert(platformCatalogItemVersions).values({
+    id,
+    catalogItemId,
+    version,
+    bundleUri: input.bundleUri ?? "",
+    bundleDigest: input.bundleDigest ?? "",
+    shelfStatus: "draft",
+    createdAt: now,
+    updatedAt: now,
+  });
+  const created = await getCatalogVersion(id);
+  if (!created) throw new Error("create version failed");
+  return created;
+}
+
+export async function recordCatalogVersionScan(
+  versionId: string,
+  result: CatalogVersionScanResult,
+): Promise<PlatformCatalogVersionRecord> {
+  const db = getIamDb();
+  await db
+    .update(platformCatalogItemVersions)
+    .set({
+      scanVerdict: result.verdict,
+      scanSource: result.source,
+      scanFindings: result.findings,
+      scannedBy: result.scannedBy,
+      scannedAt: new Date().toISOString(),
+      updatedAt: new Date(),
+    })
+    .where(eq(platformCatalogItemVersions.id, versionId));
+  const updated = await getCatalogVersion(versionId);
+  if (!updated) throw new Error("catalog version not found");
+  return updated;
+}
+
+export async function publishCatalogVersion(
+  catalogItemId: string,
+  versionId: string,
+): Promise<{ item: PlatformCatalogItemRecord; version: PlatformCatalogVersionRecord }> {
+  const version = await getCatalogVersion(versionId);
+  if (!version || version.catalogItemId !== catalogItemId) {
+    throw new Error("catalog version not found");
+  }
+  assertScanAllowsPublish(version.scanVerdict);
+  const db = getIamDb();
+  const now = new Date();
+  await db
+    .update(platformCatalogItemVersions)
+    .set({ shelfStatus: "published", updatedAt: now })
+    .where(eq(platformCatalogItemVersions.id, versionId));
+  await db
+    .update(platformCatalogItems)
+    .set({
+      shelfStatus: "published",
+      effectiveVersionId: versionId,
+      version: version.version,
+      bundleUri: version.bundleUri,
+      bundleDigest: version.bundleDigest,
+      updatedAt: now,
+    })
+    .where(eq(platformCatalogItems.id, catalogItemId));
+  await syncCatalogItemToActiveGrants(catalogItemId);
+  const item = await getCatalogItem(catalogItemId);
+  const publishedVersion = await getCatalogVersion(versionId);
+  if (!item || !publishedVersion) throw new Error("publish failed");
+  return { item, version: publishedVersion };
+}
+
+export async function setEffectiveCatalogVersion(
+  catalogItemId: string,
+  versionId: string,
+): Promise<PlatformCatalogItemRecord> {
+  const version = await getCatalogVersion(versionId);
+  if (!version || version.catalogItemId !== catalogItemId) {
+    throw new Error("catalog version not found");
+  }
+  if (!isShelfPublished(version.shelfStatus)) {
+    throw new ShelfPublishError("only published versions can be set as effective");
+  }
+  await applyEffectiveVersionToCatalogItem(catalogItemId, version);
+  await syncCatalogItemToActiveGrants(catalogItemId);
+  const item = await getCatalogItem(catalogItemId);
+  if (!item) throw new Error("catalog item not found");
+  return item;
+}
+
+export async function deprecateCatalogItem(id: string): Promise<PlatformCatalogItemRecord> {
+  const db = getIamDb();
+  const now = new Date();
+  await db
+    .update(platformCatalogItems)
+    .set({ shelfStatus: "deprecated", status: "disabled", updatedAt: now })
+    .where(eq(platformCatalogItems.id, id));
+  await syncCatalogItemToActiveGrants(id);
+  const item = await getCatalogItem(id);
+  if (!item) throw new Error("catalog item not found");
+  return item;
 }
 
 export async function updateCatalogItem(
@@ -240,12 +474,30 @@ export async function updateCatalogItem(
   const patch: Partial<typeof platformCatalogItems.$inferInsert> = { updatedAt: new Date() };
   if (input.displayName !== undefined) patch.displayName = input.displayName;
   if (input.description !== undefined) patch.description = input.description;
-  if (input.version !== undefined) patch.version = input.version;
-  if (input.bundleUri !== undefined) patch.bundleUri = input.bundleUri;
-  if (input.bundleDigest !== undefined) patch.bundleDigest = input.bundleDigest;
   if (input.status !== undefined) patch.status = input.status;
+  if (!isShelfPublished(existing.shelfStatus)) {
+    if (input.version !== undefined) patch.version = input.version;
+    if (input.bundleUri !== undefined) patch.bundleUri = input.bundleUri;
+    if (input.bundleDigest !== undefined) patch.bundleDigest = input.bundleDigest;
+  }
   await db.update(platformCatalogItems).set(patch).where(eq(platformCatalogItems.id, id));
-  await syncCatalogItemToActiveGrants(id);
+
+  if (!isShelfPublished(existing.shelfStatus) && existing.effectiveVersionId) {
+    const versionPatch: Partial<typeof platformCatalogItemVersions.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    if (input.version !== undefined) versionPatch.version = input.version;
+    if (input.bundleUri !== undefined) versionPatch.bundleUri = input.bundleUri;
+    if (input.bundleDigest !== undefined) versionPatch.bundleDigest = input.bundleDigest;
+    await db
+      .update(platformCatalogItemVersions)
+      .set(versionPatch)
+      .where(eq(platformCatalogItemVersions.id, existing.effectiveVersionId));
+  }
+
+  if (isShelfPublished(existing.shelfStatus)) {
+    await syncCatalogItemToActiveGrants(id);
+  }
   const updated = await getCatalogItem(id);
   if (!updated) throw new Error("catalog item not found");
   return updated;
@@ -269,6 +521,9 @@ export async function grantCatalogToTenant(
 ): Promise<{ grant: TenantDistributionGrantRecord; skillId: string }> {
   const catalog = await getCatalogItem(catalogItemId);
   if (!catalog) throw new Error("catalog item not found");
+  if (!isShelfPublished(catalog.shelfStatus)) {
+    throw new ShelfPublishError("catalog item must be published before grant");
+  }
   const db = getIamDb();
   const nowIso = new Date().toISOString();
   const now = new Date();
@@ -379,6 +634,7 @@ export async function listTenantSkillsForTest(tenantId: string) {
       platformCatalogItemId: enterpriseSkills.platformCatalogItemId,
       version: enterpriseSkills.version,
       bundleDigest: enterpriseSkills.bundleDigest,
+      shelfStatus: enterpriseSkills.shelfStatus,
       status: enterpriseSkills.status,
     })
     .from(enterpriseSkills)
@@ -398,6 +654,12 @@ export async function isCatalogUpdateVisibleToTenant(
   catalogItemId: string,
   nextDigest: string,
 ): Promise<boolean> {
+  const catalog = await getCatalogItem(catalogItemId);
+  if (!catalog || !isShelfPublished(catalog.shelfStatus)) {
+    const skill = await findTenantSkillByCatalogId(tenantId, catalogItemId);
+    if (!skill) return false;
+    return skill.bundleDigest === nextDigest;
+  }
   const db = getIamDb();
   const grant = await db
     .select()

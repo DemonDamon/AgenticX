@@ -151,6 +151,21 @@ export function SkillsPanel() {
                 <Badge variant={skill.status === "active" ? "default" : "secondary"}>
                   {skill.status === "active" ? t("status.active") : t("status.disabled")}
                 </Badge>
+                <Badge variant={skill.shelfStatus === "published" ? "success" : "secondary"}>
+                  {skill.shelfStatus === "published"
+                    ? t("shelf.published")
+                    : skill.shelfStatus === "deprecated"
+                      ? t("shelf.deprecated")
+                      : t("shelf.draft")}
+                </Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={skill.shelfStatus === "published" || skill.metadataReadOnly}
+                  onClick={() => void catalog.send(`/api/admin/skills/${skill.id}/publish`, "POST")}
+                >
+                  {t("shelf.publish")}
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"

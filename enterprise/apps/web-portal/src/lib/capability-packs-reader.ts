@@ -10,7 +10,6 @@
  */
 
 import {
-  type CapabilitySurface,
   featureCapabilityId,
   groupCapabilityIdsByKind,
   isPlatformFeature,
@@ -97,6 +96,7 @@ type SkillRow = {
   requiredCapabilities: unknown;
   scanVerdict: "safe" | "caution" | "dangerous" | null;
   origin: string | null;
+  shelfStatus: string | null;
   status: string;
 };
 type McpRow = { id: string; name: string; displayName: string | null };
@@ -192,6 +192,7 @@ export async function loadUserCapabilityView(
           and(
             eq(t.skills.tenantId, tenantId),
             eq(t.skills.status, "active"),
+            eq(t.skills.shelfStatus, "published"),
             inArray(t.skills.id, grouped.skill),
           ),
         )) as SkillRow[])

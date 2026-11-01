@@ -1,5 +1,6 @@
-export const ENTERPRISE_SKILLS_MARKER = "<!-- enterprise-skills -->";
+import { skillShelfAllowsBootstrap } from "@agenticx/config";
 
+export const ENTERPRISE_SKILLS_MARKER = "<!-- enterprise-skills -->";
 const MAX_BLOCK = 12_000;
 const MAX_CATALOG = 8;
 const MAX_DESCRIPTION = 160;
@@ -10,6 +11,7 @@ export type SkillPromptSource = {
   description: string;
   scanVerdict: "safe" | "caution" | "dangerous" | null;
   status: string;
+  shelfStatus: string;
   optedOut: boolean;
   body: string | null;
 };
@@ -27,7 +29,10 @@ function clip(text: string): string {
 
 export function selectableSkills(catalog: SkillPromptSource[]): SkillPromptSource[] {
   return catalog.filter(
-    (item) => item.status === "active" && !item.optedOut && item.scanVerdict === "safe",
+    (item) =>
+      skillShelfAllowsBootstrap(item.shelfStatus, item.status) &&
+      !item.optedOut &&
+      item.scanVerdict === "safe",
   );
 }
 

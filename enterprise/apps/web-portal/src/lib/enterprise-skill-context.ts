@@ -33,6 +33,7 @@ export async function applyAssignedSkillPrompt<T extends Message>(input: {
     description: item.description ?? "",
     scanVerdict: item.scanVerdict ?? null,
     status: "active",
+    shelfStatus: "published",
     optedOut: item.state !== "on",
     body: null,
   }));

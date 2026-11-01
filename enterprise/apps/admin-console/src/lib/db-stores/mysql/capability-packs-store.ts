@@ -11,7 +11,12 @@ import {
   enterpriseCapabilityPacks,
   enterpriseSkills,
 } from "@agenticx/db-schema/mysql";
-import { isCapabilityId } from "@agenticx/config";
+import {
+  assertScanAllowsPublish,
+  isCapabilityId,
+  type ShelfStatus,
+  ShelfPublishError,
+} from "@agenticx/config";
 import { getAdminMysqlDb } from "./database";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -20,6 +25,8 @@ import {
   isPlatformOriginSkill,
   PlatformSkillMetadataReadonlyError,
 } from "./platform-catalog-store";
+
+export { ShelfPublishError };
 
 export type CapabilityStatus = "active" | "disabled";
 
@@ -36,6 +43,7 @@ export interface SkillRecord {
   origin: "tenant" | "platform";
   platformCatalogItemId: string | null;
   metadataReadOnly: boolean;
+  shelfStatus: ShelfStatus;
   status: CapabilityStatus;
   /**
    * 安全扫描结论。null 表示从未扫过——手工登记的技能就是这个状态。
@@ -155,6 +163,7 @@ function rowToSkill(row: typeof enterpriseSkills.$inferSelect): SkillRecord {
     origin: isPlatformOriginSkill(row.origin) ? "platform" : "tenant",
     platformCatalogItemId: row.platformCatalogItemId ?? null,
     metadataReadOnly: isPlatformOriginSkill(row.origin),
+    shelfStatus: (row.shelfStatus as ShelfStatus) || "published",
     status: (row.status as CapabilityStatus) || "active",
     scanVerdict: row.scanVerdict ?? null,
     scanSource: row.scanSource ?? null,
@@ -206,6 +215,7 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillRecord>
     bundleDigest: input.bundleDigest ?? "",
     requiredCapabilities: assertCapabilityIds(input.requiredCapabilities ?? []),
     origin: "tenant",
+    shelfStatus: "draft",
     status: input.status ?? "active",
     createdAt: now,
     updatedAt: now,
@@ -242,6 +252,24 @@ export async function recordSkillScan(id: string, result: SkillScanResult): Prom
       scannedAt: new Date().toISOString(),
       updatedAt: new Date(),
     })
+    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));
+  const updated = await getSkill(id);
+  if (!updated) throw new Error("skill not found");
+  return updated;
+}
+
+export async function publishSkill(id: string): Promise<SkillRecord> {
+  const existing = await getSkill(id);
+  if (!existing) throw new Error("skill not found");
+  if (isPlatformOriginSkill(existing.origin)) {
+    throw new PlatformSkillMetadataReadonlyError();
+  }
+  assertScanAllowsPublish(existing.scanVerdict as "safe" | "caution" | "dangerous" | null);
+  const db = getIamDb();
+  const tenantId = requiredTenantId();
+  await db
+    .update(enterpriseSkills)
+    .set({ shelfStatus: "published", updatedAt: new Date() })
     .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));
   const updated = await getSkill(id);
   if (!updated) throw new Error("skill not found");

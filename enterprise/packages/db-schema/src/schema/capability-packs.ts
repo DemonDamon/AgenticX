@@ -50,6 +50,8 @@ export const enterpriseSkills = pgTable(
     /** `tenant` 自建；`platform` 为平台 grant 下发，元数据只读。 */
     origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
     platformCatalogItemId: ulid("platform_catalog_item_id"),
+    /** 货架生命周期：draft / published / deprecated（与 status 开关并存）。 */
+    shelfStatus: varchar("shelf_status", { length: 16 }).notNull().default("published"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     ...auditColumns,
   },

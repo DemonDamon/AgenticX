@@ -498,6 +498,13 @@
       "when": 1788900000000,
       "tag": "0071_ecp_platform_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0072_ecp_e2_shelf_lifecycle",
+      "breakpoints": true
     }
   ]
 }

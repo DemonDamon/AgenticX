@@ -33,3 +33,18 @@ export const tenantHasGrantedCatalogSkill: typeof postgresql.tenantHasGrantedCat
   implementation().tenantHasGrantedCatalogSkill(...args);
 export const isCatalogUpdateVisibleToTenant: typeof postgresql.isCatalogUpdateVisibleToTenant = (...args) =>
   implementation().isCatalogUpdateVisibleToTenant(...args);
+export const listCatalogVersions: typeof postgresql.listCatalogVersions = (...args) =>
+  implementation().listCatalogVersions(...args);
+export const getCatalogVersion: typeof postgresql.getCatalogVersion = (...args) =>
+  implementation().getCatalogVersion(...args);
+export const createCatalogVersion: typeof postgresql.createCatalogVersion = (...args) =>
+  implementation().createCatalogVersion(...args);
+export const recordCatalogVersionScan: typeof postgresql.recordCatalogVersionScan = (...args) =>
+  implementation().recordCatalogVersionScan(...args);
+export const publishCatalogVersion: typeof postgresql.publishCatalogVersion = (...args) =>
+  implementation().publishCatalogVersion(...args);
+export const setEffectiveCatalogVersion: typeof postgresql.setEffectiveCatalogVersion = (...args) =>
+  implementation().setEffectiveCatalogVersion(...args);
+export const deprecateCatalogItem: typeof postgresql.deprecateCatalogItem = (...args) =>
+  implementation().deprecateCatalogItem(...args);
+export { ShelfPublishError } from "./db-stores/postgresql/platform-catalog-store";
