@@ -50,6 +50,9 @@ export type PortalCapability = {
   bundleDigest?: string;
   description?: string;
   scanVerdict?: "safe" | "caution" | "dangerous" | null;
+  /** 平台 grant 下发为 platform；租户自建为 tenant。 */
+  origin?: "tenant" | "platform";
+  metadataReadOnly?: boolean;
   /** MCP 专有：网关反代入口，由 desktop-capability-endpoints 在下发前补上。 */
   endpointUrl?: string;
   /** 这条能力在哪些客户端生效。 */
@@ -93,6 +96,7 @@ type SkillRow = {
   bundleDigest: string | null;
   requiredCapabilities: unknown;
   scanVerdict: "safe" | "caution" | "dangerous" | null;
+  origin: string | null;
   status: string;
 };
 type McpRow = { id: string; name: string; displayName: string | null };
@@ -106,6 +110,7 @@ type McpRow = { id: string; name: string; displayName: string | null };
 export const resolveAssignmentKeysForUser = resolveKeysForUser;
 
 function toSkillCapability(row: SkillRow): PortalCapability {
+  const platform = row.origin === "platform";
   return {
     surfaces: DEFAULT_CAPABILITY_SURFACES,
     id: `skill:${row.id}`,
@@ -120,6 +125,8 @@ function toSkillCapability(row: SkillRow): PortalCapability {
     bundleDigest: row.bundleDigest ?? "",
     description: row.description ?? "",
     scanVerdict: row.scanVerdict ?? null,
+    origin: platform ? "platform" : "tenant",
+    metadataReadOnly: platform,
   };
 }
 

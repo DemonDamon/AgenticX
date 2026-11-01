@@ -316,6 +316,13 @@
       "when": 1788800000001,
       "tag": "0044_ma_webhook_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "5",
+      "when": 1788900000001,
+      "tag": "0045_ecp_platform_catalog",
+      "breakpoints": true
     }
   ]
 }

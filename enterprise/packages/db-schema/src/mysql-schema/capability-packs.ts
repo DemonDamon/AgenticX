@@ -47,12 +47,18 @@ export const enterpriseSkills = mysqlTable(
     scannedBy: varchar("scanned_by", { length: 128 }),
     /** 命中的规则条目，原样存扫描器的 payload，不在这里二次解释。 */
     scanFindings: json("scan_findings").$type<unknown[]>().notNull().default([]),
+    origin: varchar("origin", { length: 16 }).notNull().default("tenant"),
+    platformCatalogItemId: ulid("platform_catalog_item_id"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     ...auditColumns,
   },
   (table) => ({
     tenantSlugUq: uniqueIndex("enterprise_skills_tenant_slug_uq").on(table.tenantId, table.slug),
     tenantStatusIdx: index("enterprise_skills_tenant_status_idx").on(table.tenantId, table.status),
+    platformCatalogIdx: index("enterprise_skills_platform_catalog_idx").on(
+      table.tenantId,
+      table.platformCatalogItemId,
+    ),
   })
 );
 
