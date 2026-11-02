@@ -1,0 +1,122 @@
+{
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+8%",
+  "tts_cache_dir": ".runtime/agx-ma-demo-tts",
+  "out_mp4": "docs/managed-agent/shots/ma-ops-manual-demo.mp4",
+  "cues": [
+    {
+      "id": "open-title",
+      "vo": "大家好。今天用脱敏样例，给各位看 AgenticX 的托管智能体。不讲底层实现，就讲企业怎么登记智能体、配好环境和凭证，再在门户房间里验跑，用量和会话都能回头看。",
+      "caption": "托管智能体 · 配置到验跑闭环",
+      "holdAfterMs": 250
+    },
+    {
+      "id": "open-why",
+      "vo": "一句话业务：同一个智能体定义，在管理台一次构建、按版本发布；可以跑在云端运行时，也可以挂到员工桌面。会话、凭证、记忆、计量，都回到同一套控制面。",
+      "caption": "一次构建 · 云端或桌面执行 · 同一控制面",
+      "holdAfterMs": 220
+    },
+    {
+      "id": "admin-login",
+      "vo": "先登录管理台。进来以后看左侧：智能体运行管定义和观测；资源配置管执行环境、凭证库、记忆库，还有 Webhook 和 IM 渠道。",
+      "caption": "管理台登录 → Dashboard 侧栏两组",
+      "holdAfterMs": 280,
+      "focus": "nav, aside, [data-testid='admin-dashboard'], main, body",
+      "focusScale": 1.35
+    },
+    {
+      "id": "models",
+      "vo": "落地第一步，先到平台模型页，至少启用一个可用模型。没模型的话，新建智能体会被拦住，门户也会提示没有可用模型。",
+      "caption": "平台 → 模型：先启用至少一个",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.55
+    },
+    {
+      "id": "environments",
+      "vo": "再到执行环境。点新建，选云端或员工桌面，配沙箱后端和镜像。这里决定会话在哪儿跑、出站白名单怎么收。",
+      "caption": "资源配置 → 执行环境（新建对话框）",
+      "holdAfterMs": 380,
+      "focus": "[role='dialog'], main",
+      "focusScale": 1.8
+    },
+    {
+      "id": "vaults",
+      "vo": "接着建凭证库。先起个名字就行，密钥进详情后再加。运行时在边界注入，智能体看不到明文。旁白不念任何真实密钥。",
+      "caption": "凭证库：登记密钥入口（不含明文）",
+      "holdAfterMs": 360,
+      "focus": "[role='dialog'], main",
+      "focusScale": 1.75
+    },
+    {
+      "id": "memory",
+      "vo": "记忆库是可选的。需要跨会话记住偏好或经验时再建，挂载后以文件形式读写，变更可追溯。共享知识建议先只读挂载。",
+      "caption": "可选：记忆库",
+      "holdAfterMs": 300,
+      "focus": "main",
+      "focusScale": 1.55
+    },
+    {
+      "id": "agents-create",
+      "vo": "资源齐了，打开智能体页新建。填名称和标识，选模型，写系统提示词，按需绑能力，再发布。发布后，命中可见范围的成员就能用。",
+      "caption": "智能体：新建 → 发布",
+      "holdAfterMs": 400,
+      "focus": "[role='dialog'], main",
+      "focusScale": 1.8
+    },
+    {
+      "id": "sessions",
+      "vo": "会话页看托管运行痕迹。可以按智能体、邮箱、状态、来源筛。空库时显示暂无托管会话，属正常。",
+      "caption": "智能体运行 → 会话观测",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.55
+    },
+    {
+      "id": "schedules",
+      "vo": "定时任务按 cron 打开独立会话。填智能体、时区和输入内容，工作日九点这类计划一眼能配。运行时要开调度开关才会到点触发。",
+      "caption": "定时任务（需调度开关）",
+      "holdAfterMs": 360,
+      "focus": "main",
+      "focusScale": 1.6
+    },
+    {
+      "id": "webhooks-channels",
+      "vo": "Webhook 和 IM 渠道扫一眼就行。Webhook 订阅事件推签名通知；IM 渠道把飞书自建应用绑到智能体，密钥放单独凭证库。两边都要对应运行时开关。",
+      "caption": "Webhook / IM 渠道一览",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.45
+    },
+    {
+      "id": "usage",
+      "vo": "用量页按托管会话汇总。可按智能体、用户、部门、模型、天分组查询；配额页看用户乘智能体的额度。真正拦截要开配额开关。",
+      "caption": "智能体用量 / 配额",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.55
+    },
+    {
+      "id": "evals",
+      "vo": "评测页要开前端开关才会出现。评测集、评分标准、任务、候选版本四步走；候选不自动生效，得回智能体页手动切版本。",
+      "caption": "可选：评测（需 UI 开关）",
+      "holdAfterMs": 300,
+      "focus": "main",
+      "focusScale": 1.5
+    },
+    {
+      "id": "portal-rooms",
+      "vo": "最后到门户。工作区进协作房间，用已发布的云端智能体验跑一轮。管理台配、门户用，这条主路径就通了。",
+      "caption": "门户工作区 → 协作房间验跑",
+      "holdAfterMs": 380,
+      "focus": "main, body",
+      "focusScale": 1.4
+    },
+    {
+      "id": "closing",
+      "vo": "演示到这儿。模型、执行环境、凭证库，再建智能体并发布；门户房间验跑，会话和用量回头看。谢谢各位。",
+      "caption": "谢谢 · 托管智能体产品演示",
+      "holdAfterMs": 400
+    }
+  ]
+}
