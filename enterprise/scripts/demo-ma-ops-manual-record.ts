@@ -152,9 +152,12 @@ async function zoomTo(
   selector: string,
   opts?: { scale?: number; durationMs?: number; padding?: number },
 ): Promise<void> {
-  const scale = opts?.scale ?? 1.85;
+  // Prefer a soft requested scale, but NEVER zoom so hard that the target
+  // (and the blue ring) overflows the recorded viewport — that is what made
+  // dialogs / main look "half cropped" in the MA demo.
+  const requestedScale = opts?.scale ?? 1.45;
   const durationMs = opts?.durationMs ?? 850;
-  const padding = opts?.padding ?? 56;
+  const padding = opts?.padding ?? 48;
   const loc = page.locator(selector).first();
   const visible = await loc.isVisible().catch(() => false);
   if (!visible) {
@@ -168,10 +171,10 @@ async function zoomTo(
         const el = document.querySelector(sel);
         if (!el) return;
         const r = el.getBoundingClientRect();
-        const targetY = window.innerHeight * 0.32;
-        const delta = r.top - targetY;
+        const targetY = window.innerHeight * 0.42;
+        const delta = r.top + r.height / 2 - targetY;
         if (Math.abs(delta) > 24) {
-          window.scrollBy({ top: delta - padding * 0.2, behavior: "auto" });
+          window.scrollBy({ top: delta - padding * 0.15, behavior: "auto" });
         }
       },
       { sel: selector, padding },
@@ -179,40 +182,58 @@ async function zoomTo(
     .catch(() => undefined);
   await page.waitForTimeout(180);
   await page.evaluate(
-    ({ sel, scale, durationMs }) => {
+    ({ sel, requestedScale, durationMs, padding }) => {
       const el = document.querySelector(sel);
       if (!el) return;
       const r = el.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const fitW = (vw - padding * 2) / r.width;
+      const fitH = (vh - padding * 2) / r.height;
+      // Cap so the whole focus stays inside the frame with margin.
+      const scale = Math.max(
+        1,
+        Math.min(requestedScale, fitW, fitH, 1.65),
+      );
       const ox = r.left + r.width / 2;
-      const oy = r.top + Math.min(r.height * 0.35, 80);
+      const oy = r.top + r.height / 2;
+      const tx = vw / 2 - ox;
+      const ty = vh / 2 - oy;
       const html = document.documentElement as HTMLElement;
       html.style.transition = `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
       html.style.transformOrigin = `${ox}px ${oy}px`;
-      html.style.transform = `scale(${scale})`;
+      // translate after scale-about-origin keeps the focus centered in frame
+      html.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
       let ring = document.getElementById("demo-zoom-ring");
       if (!ring) {
         ring = document.createElement("div");
         ring.id = "demo-zoom-ring";
         document.body.appendChild(ring);
       }
-      const rr = el.getBoundingClientRect();
+      // Paint ring from pre-transform box, then mirror the same camera matrix
+      // so the blue frame tracks the focus without escaping the viewport.
       Object.assign(ring.style, {
         position: "fixed",
-        left: `${rr.left - 8}px`,
-        top: `${rr.top - 8}px`,
-        width: `${rr.width + 16}px`,
-        height: `${rr.height + 16}px`,
+        left: `${r.left - 8}px`,
+        top: `${r.top - 8}px`,
+        width: `${r.width + 16}px`,
+        height: `${r.height + 16}px`,
         border: "2px solid rgba(96,165,250,0.95)",
         borderRadius: "10px",
         boxShadow:
           "0 0 0 9999px rgba(15,23,42,0.28), 0 0 24px rgba(59,130,246,0.45)",
         pointerEvents: "none",
         zIndex: "2147483646",
-        transition: `opacity ${Math.min(400, durationMs)}ms ease`,
+        transition: `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${Math.min(400, durationMs)}ms ease`,
+        transformOrigin: `${ox - (r.left - 8)}px ${oy - (r.top - 8)}px`,
+        transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
         opacity: "1",
       } as CSSStyleDeclaration);
+      (html as HTMLElement & { dataset: DOMStringMap }).dataset.demoZoomScale =
+        String(scale);
     },
-    { sel: selector, scale, durationMs },
+    { sel: selector, requestedScale, durationMs, padding },
   );
   await page.waitForTimeout(durationMs + 60);
 }
@@ -531,7 +552,7 @@ function buildCues(): Cue[] {
       caption: "管理台登录 → Dashboard 侧栏两组",
       holdAfterMs: 280,
       focus: "nav, aside, [data-testid='admin-dashboard'], main, body",
-      focusScale: 1.35,
+      focusScale: 1.22,
       run: async (page) => {
         await adminLogin(page);
         await page.waitForURL(/\/dashboard/, { timeout: 10_000 }).catch(() => undefined);
@@ -544,7 +565,7 @@ function buildCues(): Cue[] {
       caption: "平台 → 模型：先启用至少一个",
       holdAfterMs: 320,
       focus: "main",
-      focusScale: 1.55,
+      focusScale: 1.28,
       run: async (page) => {
         await gotoAdmin(page, "/admin/models");
         await page.getByText(/模型|Models/i).first().waitFor({ state: "visible", timeout: 12_000 }).catch(() => undefined);
@@ -557,7 +578,7 @@ function buildCues(): Cue[] {
       caption: "资源配置 → 执行环境（新建对话框）",
       holdAfterMs: 380,
       focus: "[role='dialog'], main",
-      focusScale: 1.8,
+      focusScale: 1.22,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-environments");
         await openCreateDialog(page, /新建环境|New environment/i);
@@ -570,7 +591,7 @@ function buildCues(): Cue[] {
       caption: "凭证库：登记密钥入口（不含明文）",
       holdAfterMs: 360,
       focus: "[role='dialog'], main",
-      focusScale: 1.75,
+      focusScale: 1.22,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-vaults");
         await openCreateDialog(page, /新建凭证库|New vault/i);
@@ -583,7 +604,7 @@ function buildCues(): Cue[] {
       caption: "可选：记忆库",
       holdAfterMs: 300,
       focus: "main",
-      focusScale: 1.55,
+      focusScale: 1.28,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-memory");
         await page.waitForTimeout(600);
@@ -596,7 +617,7 @@ function buildCues(): Cue[] {
       caption: "智能体：新建 → 发布",
       holdAfterMs: 400,
       focus: "[role='dialog'], main",
-      focusScale: 1.8,
+      focusScale: 1.22,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agents");
         await openCreateDialog(page, /新建智能体|New agent/i);
@@ -609,7 +630,7 @@ function buildCues(): Cue[] {
       caption: "智能体运行 → 会话观测",
       holdAfterMs: 320,
       focus: "main",
-      focusScale: 1.55,
+      focusScale: 1.28,
       run: async (page) => {
         await gotoAdmin(page, "/ops/logs/managed");
         const refresh = page.getByRole("button", { name: /刷新|Refresh/i }).first();
@@ -626,7 +647,7 @@ function buildCues(): Cue[] {
       caption: "定时任务（需调度开关）",
       holdAfterMs: 360,
       focus: "main",
-      focusScale: 1.6,
+      focusScale: 1.3,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-schedules");
         await openCreateDialog(page, /新建定时任务|New schedule/i);
@@ -644,7 +665,7 @@ function buildCues(): Cue[] {
       caption: "Webhook / IM 渠道一览",
       holdAfterMs: 320,
       focus: "main",
-      focusScale: 1.45,
+      focusScale: 1.25,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-webhooks");
         await pause(page, 700);
@@ -658,7 +679,7 @@ function buildCues(): Cue[] {
       caption: "智能体用量 / 配额",
       holdAfterMs: 320,
       focus: "main",
-      focusScale: 1.55,
+      focusScale: 1.28,
       run: async (page) => {
         await gotoAdmin(page, "/metering/agents");
         await pause(page, 900);
@@ -670,7 +691,7 @@ function buildCues(): Cue[] {
       caption: "可选：评测（需 UI 开关）",
       holdAfterMs: 300,
       focus: "main",
-      focusScale: 1.5,
+      focusScale: 1.28,
       run: async (page) => {
         await gotoAdmin(page, "/admin/agent-evals");
         // If flag off, page may 404 / redirect — still hold for VO beat
@@ -684,7 +705,7 @@ function buildCues(): Cue[] {
       caption: "门户工作区 → 协作房间验跑",
       holdAfterMs: 380,
       focus: "main, body",
-      focusScale: 1.4,
+      focusScale: 1.22,
       run: async (page) => {
         await zoomOut(page, { durationMs: 350 }).catch(() => undefined);
         await portalLogin(page);
@@ -800,7 +821,7 @@ async function main() {
           const sel = await resolveFocusSelector(page, cue.focus);
           if (sel) {
             await zoomTo(page, sel, {
-              scale: cue.focusScale ?? 1.85,
+              scale: cue.focusScale ?? 1.35,
               durationMs: 850,
             });
           }

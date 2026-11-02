@@ -30,7 +30,7 @@
       "caption": "平台 → 模型：先启用至少一个",
       "holdAfterMs": 320,
       "focus": "main",
-      "focusScale": 1.55
+      "focusScale": 1.35
     },
     {
       "id": "environments",
@@ -38,7 +38,7 @@
       "caption": "资源配置 → 执行环境（新建对话框）",
       "holdAfterMs": 380,
       "focus": "[role='dialog'], main",
-      "focusScale": 1.8
+      "focusScale": 1.35
     },
     {
       "id": "vaults",
@@ -46,7 +46,7 @@
       "caption": "凭证库：登记密钥入口（不含明文）",
       "holdAfterMs": 360,
       "focus": "[role='dialog'], main",
-      "focusScale": 1.75
+      "focusScale": 1.35
     },
     {
       "id": "memory",
@@ -54,7 +54,7 @@
       "caption": "可选：记忆库",
       "holdAfterMs": 300,
       "focus": "main",
-      "focusScale": 1.55
+      "focusScale": 1.35
     },
     {
       "id": "agents-create",
@@ -62,7 +62,7 @@
       "caption": "智能体：新建 → 发布",
       "holdAfterMs": 400,
       "focus": "[role='dialog'], main",
-      "focusScale": 1.8
+      "focusScale": 1.35
     },
     {
       "id": "sessions",
@@ -70,7 +70,7 @@
       "caption": "智能体运行 → 会话观测",
       "holdAfterMs": 320,
       "focus": "main",
-      "focusScale": 1.55
+      "focusScale": 1.35
     },
     {
       "id": "schedules",
@@ -78,7 +78,7 @@
       "caption": "定时任务（需调度开关）",
       "holdAfterMs": 360,
       "focus": "main",
-      "focusScale": 1.6
+      "focusScale": 1.35
     },
     {
       "id": "webhooks-channels",
@@ -86,7 +86,7 @@
       "caption": "Webhook / IM 渠道一览",
       "holdAfterMs": 320,
       "focus": "main",
-      "focusScale": 1.45
+      "focusScale": 1.35
     },
     {
       "id": "usage",
@@ -94,7 +94,7 @@
       "caption": "智能体用量 / 配额",
       "holdAfterMs": 320,
       "focus": "main",
-      "focusScale": 1.55
+      "focusScale": 1.35
     },
     {
       "id": "evals",
@@ -102,7 +102,7 @@
       "caption": "可选：评测（需 UI 开关）",
       "holdAfterMs": 300,
       "focus": "main",
-      "focusScale": 1.5
+      "focusScale": 1.35
     },
     {
       "id": "portal-rooms",
@@ -110,7 +110,7 @@
       "caption": "门户工作区 → 协作房间验跑",
       "holdAfterMs": 380,
       "focus": "main, body",
-      "focusScale": 1.4
+      "focusScale": 1.35
     },
     {
       "id": "closing",
