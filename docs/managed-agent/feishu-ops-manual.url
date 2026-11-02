@@ -4,5 +4,5 @@ wiki: https://wv18cbjmgi0.feishu.cn/wiki/D5oYwjetaiMuxQkZefrcuG0Mnjc
 docx: https://wv18cbjmgi0.feishu.cn/docx/RLIbdjwFJo85IBxfvofcxhB5nPe
 parent_wiki: https://wv18cbjmgi0.feishu.cn/wiki/S49bw4rkJiSJ32kJFr5ctwsgnDb
 voice: zh-CN-XiaoxiaoNeural @ +8%
-duration_s: 362
-note: 2026-11-02 库洛洛经 lark-cli 首发；同日缩放裁切修复后重录并替换预览视频；PNG/MP4/SRT 勿 commit。
+duration_s: 254
+note: 2026-11-02 库洛洛经 lark-cli 首发；同日去掉 CSS 页面缩放、仅蓝色焦点框后重录并替换预览视频；PNG/MP4/SRT 勿 commit。
