@@ -1,7 +1,7 @@
 /**
  * Record Managed Agent (托管智能体) admin+portal product demo as MP4
  * with Chinese VO + burned captions. Investor/human-readable narrative (口语旁白)
- * + documentary camera (zoom local → global).
+ * + focus ring on focal control (no CSS page zoom).
  * Forked from demo-ecp-ops-manual-record.ts; multi-page tour density like demo-rk-ops-manual-record.ts.
  * VO / caption / hold / focus load from docs/managed-agent/shots/ma-demo-cues.json.
  *
@@ -152,12 +152,12 @@ async function zoomTo(
   selector: string,
   opts?: { scale?: number; durationMs?: number; padding?: number },
 ): Promise<void> {
-  // Prefer a soft requested scale, but NEVER zoom so hard that the target
-  // (and the blue ring) overflows the recorded viewport — that is what made
-  // dialogs / main look "half cropped" in the MA demo.
-  const requestedScale = opts?.scale ?? 1.45;
-  const durationMs = opts?.durationMs ?? 850;
-  const padding = opts?.padding ?? 48;
+  // No CSS zoom: html transform scale/translate crops the frame and misaligns
+  // the blue ring. Keep only a viewport-accurate focus ring around the target.
+  // `scale` / focusScale are ignored (kept in signature for cue JSON compat).
+  void opts?.scale;
+  const durationMs = opts?.durationMs ?? 400;
+  const ringPad = opts?.padding ?? 8;
   const loc = page.locator(selector).first();
   const visible = await loc.isVisible().catch(() => false);
   if (!visible) {
@@ -167,87 +167,91 @@ async function zoomTo(
   await loc.scrollIntoViewIfNeeded().catch(() => undefined);
   await page
     .evaluate(
-      ({ sel, padding }) => {
+      ({ sel, ringPad }) => {
         const el = document.querySelector(sel);
         if (!el) return;
         const r = el.getBoundingClientRect();
         const targetY = window.innerHeight * 0.42;
         const delta = r.top + r.height / 2 - targetY;
         if (Math.abs(delta) > 24) {
-          window.scrollBy({ top: delta - padding * 0.15, behavior: "auto" });
+          window.scrollBy({ top: delta - ringPad * 2, behavior: "auto" });
         }
       },
-      { sel: selector, padding },
+      { sel: selector, ringPad },
     )
     .catch(() => undefined);
-  await page.waitForTimeout(180);
+  await page.waitForTimeout(120);
   await page.evaluate(
-    ({ sel, requestedScale, durationMs, padding }) => {
+    ({ sel, durationMs, ringPad }) => {
       const el = document.querySelector(sel);
       if (!el) return;
       const r = el.getBoundingClientRect();
-      if (r.width < 8 || r.height < 8) return;
+      if (r.width < 4 || r.height < 4) return;
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      const fitW = (vw - padding * 2) / r.width;
-      const fitH = (vh - padding * 2) / r.height;
-      // Cap so the whole focus stays inside the frame with margin.
-      const scale = Math.max(
-        1,
-        Math.min(requestedScale, fitW, fitH, 1.65),
-      );
-      const ox = r.left + r.width / 2;
-      const oy = r.top + r.height / 2;
-      const tx = vw / 2 - ox;
-      const ty = vh / 2 - oy;
+      const inset = 8;
+      // Clear any leftover camera transform from older recorder builds.
       const html = document.documentElement as HTMLElement;
-      html.style.transition = `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-      html.style.transformOrigin = `${ox}px ${oy}px`;
-      // translate after scale-about-origin keeps the focus centered in frame
-      html.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      html.style.transition = "";
+      html.style.transform = "";
+      html.style.transformOrigin = "";
+      delete (html as HTMLElement & { dataset: DOMStringMap }).dataset
+        .demoZoomScale;
+
+      let left = r.left - ringPad;
+      let top = r.top - ringPad;
+      let width = r.width + ringPad * 2;
+      let height = r.height + ringPad * 2;
+      // Clamp ring to viewport so huge targets (sidebar / dialog) never escape.
+      left = Math.max(inset, Math.min(left, vw - inset - 16));
+      top = Math.max(inset, Math.min(top, vh - inset - 16));
+      width = Math.min(width, vw - inset - left);
+      height = Math.min(height, vh - inset - top);
+      width = Math.max(16, width);
+      height = Math.max(16, height);
+
       let ring = document.getElementById("demo-zoom-ring");
       if (!ring) {
         ring = document.createElement("div");
         ring.id = "demo-zoom-ring";
         document.body.appendChild(ring);
       }
-      // Paint ring from pre-transform box, then mirror the same camera matrix
-      // so the blue frame tracks the focus without escaping the viewport.
       Object.assign(ring.style, {
         position: "fixed",
-        left: `${r.left - 8}px`,
-        top: `${r.top - 8}px`,
-        width: `${r.width + 16}px`,
-        height: `${r.height + 16}px`,
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${width}px`,
+        height: `${height}px`,
         border: "2px solid rgba(96,165,250,0.95)",
         borderRadius: "10px",
         boxShadow:
           "0 0 0 9999px rgba(15,23,42,0.28), 0 0 24px rgba(59,130,246,0.45)",
         pointerEvents: "none",
         zIndex: "2147483646",
-        transition: `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${Math.min(400, durationMs)}ms ease`,
-        transformOrigin: `${ox - (r.left - 8)}px ${oy - (r.top - 8)}px`,
-        transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+        transition: `opacity ${Math.min(280, durationMs)}ms ease`,
+        transform: "none",
+        transformOrigin: "unset",
         opacity: "1",
       } as CSSStyleDeclaration);
-      (html as HTMLElement & { dataset: DOMStringMap }).dataset.demoZoomScale =
-        String(scale);
     },
-    { sel: selector, requestedScale, durationMs, padding },
+    { sel: selector, durationMs, ringPad },
   );
-  await page.waitForTimeout(durationMs + 60);
+  await page.waitForTimeout(Math.min(durationMs, 280) + 40);
 }
 
 async function zoomOut(
   page: Page,
   opts?: { durationMs?: number },
 ): Promise<void> {
-  const durationMs = opts?.durationMs ?? 700;
+  const durationMs = opts?.durationMs ?? 280;
   await page
     .evaluate((durationMs) => {
       const html = document.documentElement as HTMLElement;
-      html.style.transition = `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-      html.style.transform = "scale(1)";
+      html.style.transition = "";
+      html.style.transform = "";
+      html.style.transformOrigin = "";
+      delete (html as HTMLElement & { dataset: DOMStringMap }).dataset
+        .demoZoomScale;
       const ring = document.getElementById("demo-zoom-ring");
       if (ring) {
         ring.style.opacity = "0";
@@ -774,7 +778,7 @@ async function main() {
     `[demo] TTS neural cache: dir=${TTS_CACHE_DIR} voice=${TTS_VOICE} rate=${TTS_RATE} clauseGapMs=${CLAUSE_GAP_MS} allowSay=${ALLOW_SAY}`,
   );
   console.log(
-    `[demo] viewport=${VW}x${VH} deviceScaleFactor=${DEVICE_SCALE} camera=css-transform zoomTo/zoomOut`,
+    `[demo] viewport=${VW}x${VH} deviceScaleFactor=${DEVICE_SCALE} camera=focus-ring-only (no css zoom)`,
   );
 
   const cues = buildCues();
@@ -821,8 +825,7 @@ async function main() {
           const sel = await resolveFocusSelector(page, cue.focus);
           if (sel) {
             await zoomTo(page, sel, {
-              scale: cue.focusScale ?? 1.35,
-              durationMs: 850,
+              durationMs: 320,
             });
           }
         }
@@ -839,7 +842,7 @@ async function main() {
           wav: meta.wav,
         });
         if (cue.focus) {
-          await zoomOut(page, { durationMs: 700 });
+          await zoomOut(page, { durationMs: 280 });
         }
         console.log(
           `[demo] cue ${cue.id}: action@${actionStart.toFixed(1)}s vo@${voStart.toFixed(1)}-${voEnd.toFixed(1)}s focus=${cue.focus ?? "-"}`,
@@ -1034,7 +1037,7 @@ async function main() {
   console.log(`tts_voice=${TTS_VOICE}`);
   console.log(`tts_rate=${TTS_RATE}`);
   console.log(`viewport=${VW}x${VH}`);
-  console.log(`camera=css-transform zoomTo/zoomOut`);
+  console.log(`camera=focus-ring-only (no css zoom)`);
   console.log(`cues=${timeline.length}`);
   console.log("visited:");
   for (const v of visited) console.log(`  ${v}`);
