@@ -1,0 +1,90 @@
+{
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+8%",
+  "tts_cache_dir": ".runtime/agx-ma-bp-demo-tts",
+  "out_mp4": "docs/managed-agent/shots/ma-best-practice-demo.mp4",
+  "camera": "focus-ring-only",
+  "cues": [
+    {
+      "id": "open-title",
+      "vo": "大家好。今天演示托管智能体的最佳实践主路径：管理台真实新建并发布，门户房间里 at 一下，再回管理台看事件回放。",
+      "caption": "托管智能体 · 最佳实践主路径",
+      "holdAfterMs": 250
+    },
+    {
+      "id": "open-why",
+      "vo": "业务就三步：定义云端智能体，发布给可见范围，员工在协作房间点名调用；会话事件全进控制面，方便审计和排障。",
+      "caption": "新建 → 发布 → 房间验跑 → 事件回放",
+      "holdAfterMs": 220
+    },
+    {
+      "id": "admin-login",
+      "vo": "先登录管理台。左侧「智能体运行」管定义和会话，「资源配置」管环境和凭证。",
+      "caption": "管理台登录 · Dashboard",
+      "holdAfterMs": 280,
+      "focus": "nav, aside, [data-testid='admin-dashboard'], main, body"
+    },
+    {
+      "id": "models-ready",
+      "vo": "落地前确认平台模型页至少有一个已启用模型。没模型的话，新建智能体会被拦住。",
+      "caption": "平台 → 模型：已启用可用模型",
+      "holdAfterMs": 320,
+      "focus": "main table, main, body"
+    },
+    {
+      "id": "agent-create",
+      "vo": "打开智能体页，新建 bp-demo-bot。选云端执行，绑刚才启用的模型，写一句系统提示，不挂 MCP 也不挂知识库，先保存成草稿。",
+      "caption": "新建 bp-demo-bot · 云端 · 无 MCP/知识库",
+      "holdAfterMs": 360,
+      "focus": "[role='dialog'], main"
+    },
+    {
+      "id": "agent-publish",
+      "vo": "草稿就绪后点发布。发布后，命中可见范围的成员就能在门户房间里调用。",
+      "caption": "发布 bp-demo-bot",
+      "holdAfterMs": 320,
+      "focus": "table, main"
+    },
+    {
+      "id": "portal-room",
+      "vo": "切到门户，进协作房间。管理台配、门户用，这条主路径从这儿接上。",
+      "caption": "门户 → 协作房间",
+      "holdAfterMs": 300,
+      "focus": "main, body"
+    },
+    {
+      "id": "room-add-agent",
+      "vo": "在成员面板把 bp-demo-bot 加进房间。加进来之后，才能用 at 点名调用。",
+      "caption": "房间成员 → 添加智能体",
+      "holdAfterMs": 300,
+      "focus": "aside, [data-testid='room-members'], main, body"
+    },
+    {
+      "id": "room-live-run",
+      "vo": "输入 at bp-demo-bot，请用一句话自我介绍，发送后等智能体气泡回来。这一步会真正打到云端运行时。",
+      "caption": "@bp-demo-bot 一句话自我介绍",
+      "holdAfterMs": 400,
+      "focus": "form, textarea, input, main"
+    },
+    {
+      "id": "sessions-list",
+      "vo": "回到管理台会话页。这里能按智能体、邮箱、状态筛到刚才那次门户运行。",
+      "caption": "智能体运行 → 托管会话",
+      "holdAfterMs": 320,
+      "focus": "main table, main"
+    },
+    {
+      "id": "session-trace",
+      "vo": "点进会话详情，看事件回放。用户消息、模型调用、智能体回复，时间线一目了然，排障不用翻日志。",
+      "caption": "会话详情 · 事件回放",
+      "holdAfterMs": 380,
+      "focus": "[data-testid='session-replay'], main section, main"
+    },
+    {
+      "id": "closing",
+      "vo": "演示到这儿。最佳实践就是：云端新建并发布，房间 at 验跑，会话事件回放可审计。谢谢各位。",
+      "caption": "谢谢 · 托管智能体最佳实践",
+      "holdAfterMs": 400
+    }
+  ]
+}

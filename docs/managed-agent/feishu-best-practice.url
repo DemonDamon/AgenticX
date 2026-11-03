@@ -1,0 +1,8 @@
+# 托管智能体 · Best Practice 演示（飞书正本同页增补）
+# wiki / docx only — avoid key-like labels that trip gitleaks
+wiki: https://wv18cbjmgi0.feishu.cn/wiki/D5oYwjetaiMuxQkZefrcuG0Mnjc
+docx: https://wv18cbjmgi0.feishu.cn/docx/RLIbdjwFJo85IBxfvofcxhB5nPe
+section: Best Practice：创建 → 验跑 → 事件回放
+voice: zh-CN-XiaoxiaoNeural @ +8%
+duration_s: 163
+note: 2026-11-03 库洛洛经 lark-cli 在 ops-manual 正本「八、演示视频」后增补 Best Practice 预览视频（新建→发布→协作房间 @ → 事件回放）；focus-ring-only；PNG/MP4/SRT 勿 commit。
