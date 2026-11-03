@@ -979,6 +979,16 @@ declare global {
       deleteSessionsBatch: (sessionIds: string[]) => Promise<{ ok: boolean; deleted?: string[]; failed?: string[]; error?: string }>;
       pinSession: (payload: { sessionId: string; pinned: boolean }) => Promise<{ ok: boolean; pinned?: boolean; error?: string }>;
       setSessionModel: (payload: { sessionId: string; provider: string; model: string }) => Promise<{ ok: boolean; provider?: string; model?: string; error?: string }>;
+      setSessionHarness: (payload: {
+        sessionId: string;
+        harnessId: string | null;
+        options?: Record<string, unknown>;
+      }) => Promise<{
+        ok: boolean;
+        harness_id?: string | null;
+        harness_thread_id?: string | null;
+        error?: string;
+      }>;
       loadLayout: () => Promise<{
         ok: boolean;
         panes: Array<{

@@ -10499,6 +10499,28 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("set-session-harness", async (_event, payload: { sessionId: string; harnessId: string | null; options?: Record<string, unknown> }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/harness`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          harness_id: payload?.harnessId ?? null,
+          options: payload?.options ?? undefined,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("fork-session", async (_event, payload: { sessionId: string }) => {
     const sid = String(payload?.sessionId || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };

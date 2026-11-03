@@ -1079,5 +1079,13 @@
       "rounds": "Maximum tool rounds reached",
       "budget": "Managed usage limit exceeded"
     }
+  },
+  "harness": {
+    "builtin": "Built-in Runtime",
+    "tooltip": "Choose the coding-agent harness for this session",
+    "unavailable": "Local CLI not installed",
+    "loading": "Loading harnesses…",
+    "loadFailed": "Failed to load harnesses",
+    "empty": "No harnesses available"
   }
 }

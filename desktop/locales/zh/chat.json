@@ -1079,5 +1079,13 @@
       "rounds": "已达到最大工具调用轮数",
       "budget": "本轮已超出托管用量上限"
     }
+  },
+  "harness": {
+    "builtin": "内置 Runtime",
+    "tooltip": "选择本会话使用的编码 Agent Harness",
+    "unavailable": "本机 CLI 未安装，不可用",
+    "loading": "正在加载 harness 列表…",
+    "loadFailed": "harness 列表加载失败",
+    "empty": "无可用 harness"
   }
 }
