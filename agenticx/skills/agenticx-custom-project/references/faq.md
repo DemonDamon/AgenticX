@@ -66,7 +66,7 @@ python3 scripts/custom_project.py classify --kind style --where business
 
 ## 想给 Demo UI 换皮，是把这个技能改一改，还是把设计技能并进来？
 
-都不行。UI 美化、设计系统指引用**独立**的设计类技能，与本技能按兄弟技能并列组合（SkillHub 发现、确认后安装）。**不要**把第三方设计技能的正文合并进 `agenticx-custom-project`。换皮本身判业务 style：
+换皮在**业务仓**做，不要改本技能来「换一家客户的皮」。默认按本技能自带的 [frontend-ui.md](frontend-ui.md)：shadcn 管常规 UI，Bits 管动效。其它设计类技能可以并列安装（SkillHub，经确认），但**不要**把第三方技能全文粘进 `agenticx-custom-project`。换皮判断：
 
 ```bash
 python3 scripts/custom_project.py classify --kind style --where business
