@@ -70,7 +70,11 @@ def require_safe_session_id(session_id: object) -> str:
     sid = str(session_id or "").strip()
     if not sid or not _SAFE_SESSION_ID_RE.fullmatch(sid):
         raise ValueError("session_id contains invalid characters")
-    return sid
+    # ``os.path.basename`` is a semantic no-op here — the regex above already
+    # rejects path separators — but static analysis (CodeQL py/path-injection)
+    # models it as a sanitizer, so the returned id provably cannot smuggle a
+    # path prefix into the ``.../sessions/<sid>/...`` filesystem sinks.
+    return os.path.basename(sid)
 
 
 DEFAULT_MAX_TASKSPACES = 20

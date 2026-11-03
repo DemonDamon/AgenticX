@@ -456,7 +456,7 @@ def test_engine_redacts_before_persist(tmp_path):
     class LeakySummarizer(TemplateSummarizer):
         def summarize(self, snapshot, plan, manual_context=None):
             result = super().summarize(snapshot, plan, manual_context)
-            result.summary.goal += " token sk-abcdefghijklmnop1234"
+            result.summary.goal += " token sk-abcdefghijklmnop1234"  # gitleaks:allow
             return result
 
     engine = HandoffEngine(
@@ -464,10 +464,10 @@ def test_engine_redacts_before_persist(tmp_path):
         summarizer=LeakySummarizer(),
     )
     result = engine.execute_handoff(_snapshot(), "codex")
-    assert "sk-abcdefghijklmnop1234" not in result.injected_payload
+    assert "sk-abcdefghijklmnop1234" not in result.injected_payload  # gitleaks:allow
     stored = HandoffStore(str(tmp_path)).active_handoff("thread-1")
-    assert "sk-abcdefghijklmnop1234" not in stored.injected_payload
-    assert "sk-abcdefghijklmnop1234" not in stored.summary.goal
+    assert "sk-abcdefghijklmnop1234" not in stored.injected_payload  # gitleaks:allow
+    assert "sk-abcdefghijklmnop1234" not in stored.summary.goal  # gitleaks:allow
 
 
 def test_engine_unavailable_target_fails_closed(tmp_path):
