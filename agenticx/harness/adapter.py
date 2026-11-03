@@ -132,6 +132,20 @@ class HarnessAdapter(ABC):
         """Normalized views for every live session of this adapter."""
 
     # ------------------------------------------------------------------
+    # native thread adoption (SP4 handoff extension, resume tier)
+    # ------------------------------------------------------------------
+    def adopt_thread(self, session_id: str, native_thread_id: str) -> None:
+        """Adopt a pre-existing native harness thread for a live session.
+
+        Only resume-capable adapters implement this: the handoff resume
+        tier re-attaches the native thread the target harness previously
+        owned instead of starting a fresh one.
+        """
+        raise NotImplementedError(
+            f"harness {self.harness_id} cannot adopt native threads"
+        )
+
+    # ------------------------------------------------------------------
     # helpers for implementations
     # ------------------------------------------------------------------
     def _require_session(self, session_id: str) -> None:

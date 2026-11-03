@@ -297,6 +297,20 @@ class ExecCliHarnessAdapter(HarnessAdapter):
         )
 
     # ------------------------------------------------------------------
+    # native thread adoption (SP4 resume tier)
+    # ------------------------------------------------------------------
+    def adopt_thread(self, session_id: str, native_thread_id: str) -> None:
+        if not (native_thread_id or "").strip():
+            raise ValueError("native_thread_id must be non-empty")
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFoundError(session_id)
+            if session.state == "running":
+                raise TurnInProgressError(session_id)
+            session.native_thread_id = native_thread_id.strip()
+
+    # ------------------------------------------------------------------
     # introspection
     # ------------------------------------------------------------------
     def describe(self, session_id: str) -> Optional[Dict[str, Any]]:
