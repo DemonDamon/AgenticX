@@ -52,6 +52,27 @@ from agenticx.workspace.loader import (
 
 _log = logging.getLogger(__name__)
 
+# Session ids double as filesystem path segments (…/sessions/<sid>/…), so
+# every harness-control-surface entry point validates the id against this
+# conservative charset before any persistence call: a malformed id must
+# never reach os.path.join / Path() / open() as a traversal vector
+# (CodeQL py/path-injection guard).
+_SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def require_safe_session_id(session_id: object) -> str:
+    """Return the stripped session id, or raise ValueError if malformed.
+
+    Only the harness-control-surface endpoints (binding / switch / handoff
+    audit / external-harness turns) enforce this; the builtin runtime keeps
+    its historical behavior for pre-existing sessions.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or not _SAFE_SESSION_ID_RE.fullmatch(sid):
+        raise ValueError("session_id contains invalid characters")
+    return sid
+
+
 DEFAULT_MAX_TASKSPACES = 20
 MIN_MAX_TASKSPACES = 5
 MAX_MAX_TASKSPACES = 100
@@ -1599,7 +1620,7 @@ class SessionManager:
         re-applies it). ``harness_id`` in {"", "python-agent", None} unbinds
         to the builtin runtime; any other id must be a registered adapter.
         """
-        sid = str(session_id or "").strip()
+        sid = require_safe_session_id(session_id)
         if not sid:
             return False
         managed = self.get(sid)
@@ -1635,7 +1656,8 @@ class SessionManager:
     def get_session_harness(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Current binding view: {harness_id, harness_thread_id, harness_options,
         harness_session_id}."""
-        managed = self.get(str(session_id or "").strip(), touch=False)
+        sid = require_safe_session_id(session_id)
+        managed = self.get(sid, touch=False)
         if managed is None:
             return None
         session = managed.studio_session

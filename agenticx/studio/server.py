@@ -122,6 +122,7 @@ from agenticx.studio.session_manager import (
     _messages_last_turn_promised_action_without_followthrough,
     _visible_assistant_body,
     managed_session_binding_matches_avatar_query,
+    require_safe_session_id,
 )
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
@@ -335,7 +336,8 @@ async def _external_harness_chat_stream(
     """
     from agenticx.studio import harness_wiring
 
-    run_lock = await manager.acquire_session_run_lock(payload.session_id)
+    sid = require_safe_session_id(payload.session_id)
+    run_lock = await manager.acquire_session_run_lock(sid)
     if run_lock is None:
         err = SseEvent(
             type="error",
@@ -351,7 +353,7 @@ async def _external_harness_chat_stream(
     manager.run_started()
     turn_task = asyncio.create_task(
         harness_wiring.run_external_harness_turn_async(
-            manager, payload.session_id, payload.user_input
+            manager, sid, payload.user_input
         )
     )
     owns_release = True
@@ -425,13 +427,13 @@ async def _external_harness_chat_stream(
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
     except Exception as exc:
         logger.exception(
-            "[harness-chat] external turn failed session=%s", payload.session_id
+            "[harness-chat] external turn failed session=%s", sid
         )
         # Keep the transcript consistent: the wiring layer may have already
         # appended the user message; record the failure as a harness-attributed
         # assistant note and persist.
         try:
-            _managed = manager.get(payload.session_id, touch=False)
+            _managed = manager.get(sid, touch=False)
             if _managed is not None:
                 _managed.studio_session.chat_history.append(
                     {
@@ -445,7 +447,7 @@ async def _external_harness_chat_stream(
                     }
                 )
                 manager._persist_session_state(
-                    payload.session_id, _managed.studio_session
+                    sid, _managed.studio_session
                 )
         except Exception:
             logger.debug("[harness-chat] failure-note persist skipped", exc_info=True)
@@ -3139,8 +3141,9 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.studio.harness_wiring import is_external_harness
 
+            _ext_sid = require_safe_session_id(payload.session_id)
             _ext_harness_id = str(
-                (manager.get_session_harness(payload.session_id) or {}).get(
+                (manager.get_session_harness(_ext_sid) or {}).get(
                     "harness_id"
                 )
                 or ""
@@ -6683,9 +6686,10 @@ def create_studio_app() -> FastAPI:
         context, so only the boundary marker + rebind happen.
         """
         _check_token(x_agx_desktop_token)
-        sid = str(session_id or "").strip()
-        if not sid:
-            raise HTTPException(status_code=400, detail="session_id is required")
+        try:
+            sid = require_safe_session_id(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         managed = manager.get(sid, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -6733,9 +6737,10 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         """Audit view of every context handoff recorded for a session (SP5b)."""
         _check_token(x_agx_desktop_token)
-        sid = str(session_id or "").strip()
-        if not sid:
-            raise HTTPException(status_code=400, detail="session_id is required")
+        try:
+            sid = require_safe_session_id(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         managed = manager.get(sid, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")

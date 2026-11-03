@@ -224,9 +224,9 @@ def test_policy_unknown_strategy_rejected():
 # security
 # ----------------------------------------------------------------------
 def test_redact_text_scrubs_secrets():
-    text = "key sk-abcdefghijklmnop1234 at 10.1.2.3 and Bearer abcdef1234567890abcdef"
+    text = "key sk-abcdefghijklmnop1234 at 10.1.2.3 and Bearer abcdef1234567890abcdef"  # gitleaks:allow
     out = redact_text(text)
-    assert "sk-abcdefghijklmnop1234" not in out
+    assert "sk-abcdefghijklmnop1234" not in out  # gitleaks:allow
     assert "10.1.2.3" not in out
     assert "abcdef1234567890abcdef" not in out
     assert "[REDACTED:api-key]" in out
@@ -235,13 +235,13 @@ def test_redact_text_scrubs_secrets():
 
 def test_redact_summary_copies_all_fields():
     summary = HandoffSummary(
-        goal="use token sk-abcdefghijklmnop1234",
+        goal="use token sk-abcdefghijklmnop1234",  # gitleaks:allow
         memory_snapshot="secret Bearer abcdef1234567890abcdef",
     )
     redacted = redact_summary(summary)
-    assert "sk-abcdefghijklmnop1234" not in redacted.goal
+    assert "sk-abcdefghijklmnop1234" not in redacted.goal  # gitleaks:allow
     assert "Bearer abcdef" not in redacted.memory_snapshot
-    assert summary.goal == "use token sk-abcdefghijklmnop1234"  # original intact
+    assert summary.goal == "use token sk-abcdefghijklmnop1234"  # original intact  # gitleaks:allow
 
 
 def test_injection_wrapper_marks_non_executable():

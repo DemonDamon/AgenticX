@@ -43,6 +43,7 @@ from agenticx.harness.handoff import (
     ThreadBinding,
 )
 from agenticx.harness.handoff.types import HandoffSummary
+from agenticx.studio.session_manager import require_safe_session_id
 
 _TURN_WAIT_SECONDS = 240.0
 
@@ -142,11 +143,12 @@ def snapshot_from_session(
     pending_user_message: str = "",
 ) -> AppThreadSnapshot:
     """Assemble the engine's AppThreadSnapshot from a studio session."""
-    managed = manager.get(str(session_id or "").strip(), touch=False)
+    sid = require_safe_session_id(session_id)
+    managed = manager.get(sid, touch=False)
     if managed is None:
-        raise ValueError(f"session not found: {session_id}")
+        raise ValueError(f"session not found: {sid}")
     session = managed.studio_session
-    binding = manager.get_session_harness(session_id) or {}
+    binding = manager.get_session_harness(sid) or {}
 
     history: List[HistoryMessage] = []
     for row in list(session.chat_history or []):
@@ -216,7 +218,7 @@ def snapshot_from_session(
     # source_native_thread_id is the source side's thread; target ids
     # belong to the target harness and must NOT be rebound here.
     try:
-        for row in handoff_engine().audit_view(session_id):
+        for row in handoff_engine().audit_view(sid):
             handoff = row.get("handoff") or {}
             if row.get("status") != "active":
                 continue
@@ -253,7 +255,7 @@ def snapshot_from_session(
         cwd = str(Path.cwd())
 
     return AppThreadSnapshot(
-        app_thread_id=session_id,
+        app_thread_id=sid,
         current_harness=current,
         cwd=cwd,
         history=history,
@@ -316,7 +318,7 @@ def run_external_harness_turn(
     Same-process single-flight: raises :class:`HarnessTurnBusyError` when a
     turn is already running for this studio session.
     """
-    sid = str(session_id or "").strip()
+    sid = require_safe_session_id(session_id)
     if not _begin_inflight(sid):
         raise HarnessTurnBusyError(
             f"session {sid} already has an external-harness turn in flight"
@@ -330,17 +332,18 @@ def run_external_harness_turn(
 def _run_external_harness_turn_body(
     manager: Any, session_id: str, user_text: str
 ) -> TurnResult:
-    managed = manager.get(str(session_id or "").strip())
+    sid = require_safe_session_id(session_id)
+    managed = manager.get(sid)
     if managed is None:
-        raise ValueError(f"session not found: {session_id}")
+        raise ValueError(f"session not found: {sid}")
     session = managed.studio_session
-    binding = manager.get_session_harness(session_id) or {}
+    binding = manager.get_session_harness(sid) or {}
     harness_id = str(binding.get("harness_id") or "")
     if not is_external_harness(harness_id):
-        raise ValueError(f"session {session_id} is not bound to an external harness")
+        raise ValueError(f"session {sid} is not bound to an external harness")
 
     adapter = harness_registry().require(harness_id)
-    surface_sid = ensure_harness_session(manager, session_id, harness_id)
+    surface_sid = ensure_harness_session(manager, sid, harness_id)
 
     user_text = str(user_text or "").strip()
     if user_text:
@@ -378,7 +381,7 @@ def _run_external_harness_turn_body(
     # Keep the binding's native-thread handle fresh for resume/handoff.
     if native_thread:
         manager.set_session_harness(
-            session_id,
+            sid,
             harness_id=harness_id,
             thread_id=str(native_thread),
             options=binding.get("harness_options"),
@@ -386,7 +389,7 @@ def _run_external_harness_turn_body(
         )
     managed.updated_at = time.time()
     try:
-        manager._persist_session_state(session_id, session)
+        manager._persist_session_state(sid, session)
     except Exception:
         pass
     return result
@@ -413,17 +416,18 @@ def switch_harness(
     target = str(target_harness or "").strip()
     if not target:
         raise ValueError("target harness is required")
-    managed = manager.get(str(session_id or "").strip())
+    sid = require_safe_session_id(session_id)
+    managed = manager.get(sid)
     if managed is None:
-        raise ValueError(f"session not found: {session_id}")
+        raise ValueError(f"session not found: {sid}")
     session = managed.studio_session
     # Never mutate bindings / chat_history while a turn is appending to it.
-    if is_turn_inflight(session_id):
+    if is_turn_inflight(sid):
         raise HarnessTurnBusyError(
-            f"session {session_id} has a harness turn in flight; "
+            f"session {sid} has a harness turn in flight; "
             "switch after it settles"
         )
-    binding = manager.get_session_harness(session_id) or {}
+    binding = manager.get_session_harness(sid) or {}
     current = str(binding.get("harness_id") or "")
 
     # Same-harness rebind is a no-op (idempotent switch).
@@ -450,14 +454,14 @@ def switch_harness(
         _append_switch_boundary(
             manager,
             session,
-            session_id,
+            sid,
             from_harness=current,
             to_harness=None,
             strategy="builtin",
             handoff_id=None,
             notes=[],
         )
-        manager.set_session_harness(session_id, harness_id=None)
+        manager.set_session_harness(sid, harness_id=None)
         return {
             "ok": True,
             "strategy": "builtin",
@@ -472,7 +476,7 @@ def switch_harness(
     if not adapter.available():
         raise HandoffError(f"harness {target} is not available on this machine")
 
-    snapshot = snapshot_from_session(manager, session_id)
+    snapshot = snapshot_from_session(manager, sid)
     if user_strategy == STRATEGY_MANUAL and not (manual_context or "").strip():
         raise HandoffError("manual_context strategy requires manual context text")
 
@@ -485,7 +489,7 @@ def switch_harness(
     )
     if not has_conversation:
         manager.set_session_harness(
-            session_id,
+            sid,
             harness_id=target,
             thread_id=None,
             options=None,
@@ -514,7 +518,7 @@ def switch_harness(
         result.handoff.target_native_thread_id
     )
     manager.set_session_harness(
-        session_id,
+        sid,
         harness_id=target,
         thread_id=str(native_thread or "") or None,
         options=(binding.get("harness_options") if target == current else None),
@@ -523,7 +527,7 @@ def switch_harness(
     _append_switch_boundary(
         manager,
         session,
-        session_id,
+        sid,
         from_harness=current,
         to_harness=target,
         strategy=result.plan.strategy,
@@ -590,7 +594,7 @@ def _append_switch_boundary(
 
 def handoff_audit(session_id: str) -> List[Dict[str, Any]]:
     """Audit view of every handoff record for a session."""
-    return handoff_engine().audit_view(str(session_id or "").strip())
+    return handoff_engine().audit_view(require_safe_session_id(session_id))
 
 
 async def run_external_harness_turn_async(
