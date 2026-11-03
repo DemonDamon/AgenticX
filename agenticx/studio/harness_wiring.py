@@ -280,13 +280,14 @@ def ensure_harness_session(
     (resume) when one survives in the binding.
     """
     adapter = harness_registry().require(harness_id)
-    binding = manager.get_session_harness(session_id) or {}
+    sid = require_safe_session_id(session_id)
+    binding = manager.get_session_harness(sid) or {}
     surface_sid = str(binding.get("harness_session_id") or "").strip()
 
     if surface_sid and adapter.describe(surface_sid) is not None:
         return surface_sid
 
-    cwd = snapshot_from_session(manager, session_id).cwd
+    cwd = snapshot_from_session(manager, sid).cwd
     options = binding.get("harness_options") or {}
     view = adapter.spawn(cwd, options=dict(options))
     surface_sid = str(view["session_id"])
@@ -297,7 +298,7 @@ def ensure_harness_session(
         except Exception:
             pass  # stale native thread: fresh one via the next turn
     manager.set_session_harness(
-        session_id,
+        sid,
         harness_id=harness_id,
         thread_id=native_thread or None,
         options=dict(options) or None,
@@ -561,6 +562,7 @@ def _append_switch_boundary(
     notes: List[str],
 ) -> None:
     """Record the visible switch boundary as a system-notice message."""
+    sid = require_safe_session_id(session_id)
     from_name = harness_display_name(from_harness)
     to_name = harness_display_name(to_harness)
     notes_text = ""
@@ -587,7 +589,7 @@ def _append_switch_boundary(
         }
     )
     try:
-        manager._persist_session_state(session_id, session)
+        manager._persist_session_state(sid, session)
     except Exception:
         pass
 

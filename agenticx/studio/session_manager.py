@@ -59,6 +59,11 @@ _log = logging.getLogger(__name__)
 # (CodeQL py/path-injection guard).
 _SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
+# Anchor dir for the normalize-then-prefix-check in require_safe_session_id:
+# session ids are path segments under <sessions_root>/<sid>/..., so any fixed
+# absolute anchor works for proving the id is a single non-escaping segment.
+_SESSIONS_ROOT_ANCHOR = os.path.join(os.sep, "sessions")
+
 
 def require_safe_session_id(session_id: object) -> str:
     """Return the stripped session id, or raise ValueError if malformed.
@@ -66,15 +71,22 @@ def require_safe_session_id(session_id: object) -> str:
     Only the harness-control-surface endpoints (binding / switch / handoff
     audit / external-harness turns) enforce this; the builtin runtime keeps
     its historical behavior for pre-existing sessions.
+
+    Defense in depth: the regex whitelist rejects anything that is not a
+    single safe path segment, and the normalize-then-prefix-check round-trip
+    below independently proves the id cannot escape the sessions root when
+    joined onto it. The returned id is derived from the checked path - this
+    normalize+check pattern is also what static analysis (CodeQL
+    py/path-injection) models as a barrier; a bare regex guard is not.
     """
     sid = str(session_id or "").strip()
     if not sid or not _SAFE_SESSION_ID_RE.fullmatch(sid):
-        raise ValueError("session_id contains invalid characters")
-    # ``os.path.basename`` is a semantic no-op here — the regex above already
-    # rejects path separators — but static analysis (CodeQL py/path-injection)
-    # models it as a sanitizer, so the returned id provably cannot smuggle a
-    # path prefix into the ``.../sessions/<sid>/...`` filesystem sinks.
-    return os.path.basename(sid)
+        raise ValueError("session id contains invalid characters")
+    root = _SESSIONS_ROOT_ANCHOR
+    joined = os.path.normpath(os.path.join(root, sid))
+    if not joined.startswith(root + os.sep):
+        raise ValueError("session id escapes the sessions root")
+    return os.path.basename(joined)
 
 
 DEFAULT_MAX_TASKSPACES = 20
