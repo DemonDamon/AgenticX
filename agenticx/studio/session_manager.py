@@ -1365,6 +1365,10 @@ class SessionManager:
                 "session_mode": normalize_session_mode(
                     getattr(managed.studio_session, "session_mode", None)
                 ),
+                "harness_id": getattr(managed.studio_session, "harness_id", None),
+                "harness_thread_id": getattr(
+                    managed.studio_session, "harness_thread_id", None
+                ),
                 **_harness_list_fields(managed.studio_session),
             }
             parent_sid = self._conversation_parent_session_id(managed.studio_session)
@@ -1548,6 +1552,84 @@ class SessionManager:
         managed.updated_at = time.time()
         self._persist_session_state(sid, managed.studio_session)
         return True
+
+    # ------------------------------------------------------------------
+    # Harness binding (harness-control-surface SP3)
+    # ------------------------------------------------------------------
+    # The builtin python runtime is the null harness: binding to
+    # "python-agent" (or None/"") clears the binding so the session runs
+    # the default in-process runtime.
+    _BUILTIN_HARNESS_IDS = frozenset({"", "python-agent"})
+
+    @staticmethod
+    def _normalize_harness_id(harness_id: Optional[str]) -> Optional[str]:
+        raw = str(harness_id or "").strip()
+        if raw in SessionManager._BUILTIN_HARNESS_IDS:
+            return None
+        return raw
+
+    def _validate_harness_id(self, harness_id: str) -> None:
+        try:
+            from agenticx.harness.registry import default_registry
+
+            known = default_registry().list_ids()
+        except Exception:  # pragma: no cover - registry import failure
+            known = []
+        if harness_id not in known:
+            raise ValueError(
+                f"unknown harness: {harness_id}; available: {', '.join(known) or '(none)'}"
+            )
+
+    def set_session_harness(
+        self,
+        session_id: str,
+        *,
+        harness_id: Optional[str],
+        thread_id: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Bind (or unbind) the session's coding-agent harness and persist.
+
+        Mirrors set_session_model: desktop harness-picker calls this so a
+        session's bound harness survives cold restart (list_sessions()
+        re-applies it). ``harness_id`` in {"", "python-agent", None} unbinds
+        to the builtin runtime; any other id must be a registered adapter.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        managed = self.get(sid)
+        if managed is None:
+            return False
+        normalized = self._normalize_harness_id(harness_id)
+        if normalized is not None:
+            self._validate_harness_id(normalized)
+        managed.studio_session.harness_id = normalized
+        managed.studio_session.harness_thread_id = (
+            str(thread_id).strip() or None if normalized else None
+        )
+        managed.studio_session.harness_options = (
+            dict(options) if (normalized and options) else None
+        )
+        managed.updated_at = time.time()
+        self._persist_session_state(sid, managed.studio_session)
+        return True
+
+    def clear_session_harness(self, session_id: str) -> bool:
+        """Unbind: the session runs on the builtin python runtime."""
+        return self.set_session_harness(session_id, harness_id=None)
+
+    def get_session_harness(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Current binding view: {harness_id, harness_thread_id, harness_options}."""
+        managed = self.get(str(session_id or "").strip(), touch=False)
+        if managed is None:
+            return None
+        session = managed.studio_session
+        return {
+            "harness_id": getattr(session, "harness_id", None),
+            "harness_thread_id": getattr(session, "harness_thread_id", None),
+            "harness_options": getattr(session, "harness_options", None),
+        }
 
     @staticmethod
     def session_title_needs_auto_fill(name: Optional[str]) -> bool:
@@ -2417,6 +2499,25 @@ class SessionManager:
                 session.session_mode = normalize_session_mode(str(metadata.get("session_mode")))
         except Exception:
             pass
+        # Harness binding restore (SP3): re-apply the persisted harness
+        # binding so the desktop picker shows the right selection after a
+        # cold restart, mirroring provider/model restore.
+        try:
+            metadata = self._session_store._load_latest_session_metadata_sync(session_id)
+            if isinstance(metadata, dict):
+                if "harness_id" in metadata:
+                    session.harness_id = self._normalize_harness_id(
+                        metadata.get("harness_id")
+                    )
+                if "harness_thread_id" in metadata:
+                    session.harness_thread_id = (
+                        str(metadata.get("harness_thread_id") or "").strip() or None
+                    )
+                if "harness_options" in metadata:
+                    raw_opts = metadata.get("harness_options")
+                    session.harness_options = dict(raw_opts) if raw_opts else None
+        except Exception:
+            pass
         try:
             todos = self._session_store._load_todos_sync(session_id)
             if todos:
@@ -2670,6 +2771,9 @@ class SessionManager:
                         "session_mode": normalize_session_mode(
                             getattr(session, "session_mode", None)
                         ),
+                        "harness_id": getattr(session, "harness_id", None),
+                        "harness_thread_id": getattr(session, "harness_thread_id", None),
+                        "harness_options": getattr(session, "harness_options", None),
                         **_harness_list_fields(session),
                     }
                     parent_sid = self._conversation_parent_session_id(session)

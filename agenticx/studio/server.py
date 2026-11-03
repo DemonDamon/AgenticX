@@ -2232,6 +2232,8 @@ def create_studio_app() -> FastAPI:
             context_files=list(sess.context_files.keys()),
             avatar_id=getattr(managed, "avatar_id", None),
             avatar_name=getattr(managed, "avatar_name", None),
+            harness_id=getattr(sess, "harness_id", None),
+            harness_thread_id=getattr(sess, "harness_thread_id", None),
         )
 
     @app.get("/api/artifacts")
@@ -6404,6 +6406,90 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True, "session_id": session_id, "provider": provider, "model": model}
+
+    @app.get("/api/harnesses")
+    async def list_harnesses(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Harness catalog for the desktop picker (harness-control-surface).
+
+        Builtin python runtime first (always available), then every
+        registered adapter with its capabilities and local availability
+        (unavailable harnesses are grayed out in the picker, SP5a).
+        """
+        _check_token(x_agx_desktop_token)
+        from agenticx.harness.registry import default_registry
+
+        harnesses = [
+            {
+                "harness_id": "python-agent",
+                "display_name": "AgenticX 内置 Runtime",
+                "description": "自研 Python agent runtime（默认，会话内直接运行）",
+                "available": True,
+                "builtin": True,
+                "capabilities": {
+                    "permission": False,
+                    "pty": False,
+                    "streaming": True,
+                    "turn_snapshots": True,
+                    "idempotency": False,
+                    "resume": True,
+                    "handoff_injection": False,
+                },
+            }
+        ]
+        for d in default_registry().descriptors():
+            harnesses.append(
+                {
+                    "harness_id": d.harness_id,
+                    "display_name": d.display_name,
+                    "description": d.description,
+                    "available": d.available,
+                    "builtin": False,
+                    "capabilities": d.capabilities.as_dict(),
+                }
+            )
+        return {"ok": True, "harnesses": harnesses}
+
+    @app.post("/api/sessions/{session_id}/harness")
+    async def set_session_harness(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Bind (or unbind) the session's coding-agent harness (SP3).
+
+        Mirrors /model: desktop harness-picker calls this; the binding
+        survives cold restart via list_sessions(). Passing harness_id ""
+        / "python-agent" / null unbinds to the builtin python runtime.
+        """
+        _check_token(x_agx_desktop_token)
+        harness_id = payload.get("harness_id")
+        harness_id = str(harness_id).strip() if harness_id is not None else None
+        thread_id = payload.get("thread_id")
+        thread_id = str(thread_id).strip() if thread_id is not None else None
+        options = payload.get("options")
+        if options is not None and not isinstance(options, dict):
+            raise HTTPException(status_code=400, detail="options must be an object")
+        try:
+            ok = manager.set_session_harness(
+                session_id,
+                harness_id=harness_id,
+                thread_id=thread_id,
+                options=options,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="session not found")
+        binding = manager.get_session_harness(session_id)
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "harness_id": (binding or {}).get("harness_id"),
+            "harness_thread_id": (binding or {}).get("harness_thread_id"),
+            "harness_options": (binding or {}).get("harness_options"),
+        }
 
     @app.post("/api/sessions/{session_id}/isolate/adopt")
     async def adopt_session_isolate(

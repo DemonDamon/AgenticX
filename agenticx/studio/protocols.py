@@ -116,6 +116,9 @@ class SessionState(BaseModel):
     context_files: List[str] = Field(default_factory=list)
     avatar_id: Optional[str] = None
     avatar_name: Optional[str] = None
+    # Harness binding (harness-control-surface SP3): None = builtin runtime.
+    harness_id: Optional[str] = None
+    harness_thread_id: Optional[str] = None
 
 
 class SseEvent(BaseModel):
