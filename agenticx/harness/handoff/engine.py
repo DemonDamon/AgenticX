@@ -147,7 +147,9 @@ class HandoffEngine:
         payload = summary_to_payload(summary)
         payload = redact_text(payload)
 
-        # 5. persist append-only, superseding the previous active handoff
+        # 5. build the record (append-only store gets ONE complete record
+        # after the target thread is established and the payload injected --
+        # persisting earlier would lose the target ids set in steps 6-7).
         previous = self._store.active_handoff(snapshot.app_thread_id)
         source_run_ids = [
             run.run_id
@@ -156,6 +158,15 @@ class HandoffEngine:
             < run.end_position
             <= plan.delta_to_position
         ]
+        source_thread = next(
+            (
+                t.native_thread_id
+                for t in snapshot.threads
+                if t.harness == (snapshot.current_harness or "")
+                and t.native_thread_id
+            ),
+            None,
+        )
         handoff = ContextHandoff(
             handoff_id=f"ho_{uuid.uuid4().hex[:16]}",
             app_thread_id=snapshot.app_thread_id,
@@ -166,12 +177,12 @@ class HandoffEngine:
             injected_payload=payload,
             source_end_position=plan.delta_to_position,
             source_run_ids=source_run_ids,
+            source_native_thread_id=source_thread,
             created_at=_now_iso(),
             created_by_provider=result.provider_id,
             supersedes=previous.handoff_id if previous else None,
             detail={"reason": plan.reason, "notes": plan.notes},
         )
-        self._store.append_handoff(handoff)
 
         # 6. establish the target thread
         cwd = snapshot.cwd or "."
@@ -219,6 +230,9 @@ class HandoffEngine:
             if isinstance(turn.detail, dict)
             else None
         ) or handoff.resumed_native_thread_id
+
+        # 8. persist the complete record (append-only, supersedes previous)
+        self._store.append_handoff(handoff)
 
         return HandoffResult(
             handoff=handoff,

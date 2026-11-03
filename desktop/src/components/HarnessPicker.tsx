@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Terminal } from "lucide-react";
 import { useAppStore } from "../store";
+import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 
 /** Catalog entry returned by GET /api/harnesses (studio server, SP3). */
 type HarnessCatalogEntry = {
@@ -33,10 +34,13 @@ type Props = {
 export function PaneHarnessPicker({ paneId, apiBase, apiToken }: Props) {
   const { t } = useTranslation("chat");
   const setPaneHarness = useAppStore((s) => s.setPaneHarness);
+  const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const pane = useAppStore((s) => s.panes.find((p) => p.id === paneId));
   const [open, setOpen] = useState(false);
   const [catalog, setCatalog] = useState<HarnessCatalogEntry[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -80,19 +84,66 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken }: Props) {
     void loadCatalog();
   }, [loadCatalog]);
 
+  const refreshPaneMessages = useCallback(
+    async (sid: string) => {
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (!result.ok || !Array.isArray(result.messages)) return;
+        const state = useAppStore.getState();
+        const targets = state.panes.filter(
+          (p) => String(p.sessionId ?? "").trim() === sid
+        );
+        if (targets.length === 0) return;
+        const mapped = result.messages.map((item, idx) =>
+          mapLoadedSessionMessage(item as LoadedSessionMessage, sid, idx)
+        );
+        for (const target of targets) {
+          setPaneMessages(target.id, mapped);
+        }
+      } catch {
+        // keep current pane state; next natural reload will recover
+      }
+    },
+    [setPaneMessages]
+  );
+
   const handleSelect = (entry: HarnessCatalogEntry) => {
+    const previousId = (pane?.harnessId || "").trim() || null;
     const nextId = entry.harness_id === BUILTIN_ID ? null : entry.harness_id;
-    setPaneHarness(paneId, nextId);
     setOpen(false);
-    // Persist against the bound studio session so a cold restart + jump-back
-    // restores the exact pick (same contract as PaneModelPicker).
+    if (nextId === previousId) return;
+    // Optimistic local flip; the switch call below is authoritative.
+    setPaneHarness(paneId, nextId);
     const sid = String(pane?.sessionId ?? "").trim();
-    if (sid) {
-      void window.agenticxDesktop.setSessionHarness({
+    if (!sid) return;
+    setSwitching(true);
+    setSwitchError(null);
+    void window.agenticxDesktop
+      .switchSessionHarness({
         sessionId: sid,
         harnessId: entry.harness_id,
+      })
+      .then(async (resp) => {
+        if (!resp.ok) {
+          // Fail closed: the server kept the previous binding — mirror it
+          // locally and surface why (busy 409 / plan failure 400 / ...).
+          setPaneHarness(paneId, previousId);
+          const detail = String(resp.error ?? "").trim();
+          const busy = detail.includes("409") || detail.includes("in flight");
+          setSwitchError(busy ? t("harness.switchBusy") : t("harness.switchFailed"));
+          return;
+        }
+        // Success: reload so the boundary marker + carried context show up.
+        await refreshPaneMessages(sid);
+      })
+      .catch(() => {
+        setPaneHarness(paneId, previousId);
+        setSwitchError(t("harness.switchFailed"));
+      })
+      .finally(() => {
+        setSwitching(false);
+        window.setTimeout(() => setSwitchError(null), 6000);
       });
-    }
   };
 
   const currentEntry =
@@ -107,11 +158,16 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken }: Props) {
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
         type="button"
+        disabled={switching}
         className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-1.5 rounded-lg px-1.5 text-[13px] font-medium leading-5 transition-colors focus:outline-none focus-visible:bg-surface-hover ${
-          open ? "bg-surface-hover" : "hover:bg-surface-hover"
+          switching
+            ? "cursor-not-allowed opacity-50"
+            : open
+              ? "bg-surface-hover"
+              : "hover:bg-surface-hover"
         }`}
         onClick={() => setOpen((v) => !v)}
-        title={t("harness.tooltip")}
+        title={switching ? t("harness.switching") : t("harness.tooltip")}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -127,6 +183,11 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken }: Props) {
           aria-hidden
         />
       </button>
+      {switchError ? (
+        <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 max-w-[260px] truncate rounded-md bg-red-500/10 px-2 py-1 text-[11px] text-red-400">
+          {switchError}
+        </div>
+      ) : null}
       {open &&
         createPortal(
           <>
@@ -160,7 +221,7 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken }: Props) {
               ) : (
                 catalog.map((entry) => {
                   const isActive = entry.harness_id === currentHarnessId;
-                  const disabled = !entry.available;
+                  const disabled = !entry.available || switching;
                   return (
                     <button
                       key={entry.harness_id}

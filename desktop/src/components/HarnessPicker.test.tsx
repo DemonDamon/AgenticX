@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * PaneHarnessPicker component tests (harness-control-surface SP5a).
+ * PaneHarnessPicker component tests (harness-control-surface SP5a/SP5b).
  *
  * Covers: catalog fetch + trigger label, dropdown entries with builtin
- * first, unavailable graying (disabled), selection updating pane state
- * and calling setSessionHarness for a session-bound pane.
+ * first, unavailable graying (disabled), selection switching the pane's
+ * harness via switchSessionHarness for a session-bound pane, and the
+ * fail-closed revert when the switch call fails (busy 409 / plan 400).
  *
  * Author: Damon Li
  */
@@ -59,6 +60,16 @@ function makePane(overrides: Record<string, unknown> = {}) {
   };
 }
 
+type DesktopBridge = {
+  setSessionHarness: ReturnType<typeof vi.fn>;
+  switchSessionHarness: ReturnType<typeof vi.fn>;
+  loadSessionMessages: ReturnType<typeof vi.fn>;
+};
+
+function bridge(): DesktopBridge {
+  return (window as unknown as { agenticxDesktop: DesktopBridge }).agenticxDesktop;
+}
+
 describe("PaneHarnessPicker", () => {
   beforeAll(() => {
     vi.stubGlobal(
@@ -81,6 +92,10 @@ describe("PaneHarnessPicker", () => {
       "agenticxDesktop",
       {
         setSessionHarness: vi.fn().mockResolvedValue({ ok: true }),
+        switchSessionHarness: vi
+          .fn()
+          .mockResolvedValue({ ok: true, switch: { ok: true, strategy: "noop" } }),
+        loadSessionMessages: vi.fn().mockResolvedValue({ ok: true, messages: [] }),
       },
     );
     useAppStore.setState({
@@ -92,6 +107,7 @@ describe("PaneHarnessPicker", () => {
           ),
         }));
       },
+      setPaneMessages: () => {},
     } as Partial<typeof useAppStore.getState>);
   });
 
@@ -140,15 +156,12 @@ describe("PaneHarnessPicker", () => {
     expect(option.className).toContain("opacity-45");
 
     fireEvent.click(option);
-    // selection blocked: label unchanged, no IPC call
-    expect(
-      (window as unknown as { agenticxDesktop: { setSessionHarness: ReturnType<typeof vi.fn> } })
-        .agenticxDesktop.setSessionHarness,
-    ).not.toHaveBeenCalled();
+    // selection blocked: label unchanged, no switch call
+    expect(bridge().switchSessionHarness).not.toHaveBeenCalled();
     expect(useAppStore.getState().panes[0].harnessId ?? null).toBe(null);
   });
 
-  it("selects an available harness: pane state + session persistence call", async () => {
+  it("selects an available harness: pane state + switch call + message refresh", async () => {
     render(
       <PaneHarnessPicker
         paneId="pane-1"
@@ -162,18 +175,19 @@ describe("PaneHarnessPicker", () => {
     await waitFor(() => {
       expect(useAppStore.getState().panes[0].harnessId).toBe("claude-code");
     });
-    expect(
-      (window as unknown as { agenticxDesktop: { setSessionHarness: ReturnType<typeof vi.fn> } })
-        .agenticxDesktop.setSessionHarness,
-    ).toHaveBeenCalledWith({
+    expect(bridge().switchSessionHarness).toHaveBeenCalledWith({
       sessionId: "sess-1",
       harnessId: "claude-code",
+    });
+    // success path refreshes the pane so the boundary marker shows up
+    await waitFor(() => {
+      expect(bridge().loadSessionMessages).toHaveBeenCalledWith("sess-1");
     });
     // dropdown closed after selection
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("re-selecting builtin clears the binding", async () => {
+  it("re-selecting builtin switches back to the builtin runtime", async () => {
     useAppStore.setState({
       panes: [makePane({ harnessId: "claude-code" })],
     });
@@ -192,12 +206,62 @@ describe("PaneHarnessPicker", () => {
     await waitFor(() => {
       expect(useAppStore.getState().panes[0].harnessId ?? null).toBe(null);
     });
-    expect(
-      (window as unknown as { agenticxDesktop: { setSessionHarness: ReturnType<typeof vi.fn> } })
-        .agenticxDesktop.setSessionHarness,
-    ).toHaveBeenCalledWith({
+    expect(bridge().switchSessionHarness).toHaveBeenCalledWith({
       sessionId: "sess-1",
       harnessId: "python-agent",
+    });
+  });
+
+  it("fail closed: busy 409 reverts the pane to the previous harness", async () => {
+    bridge().switchSessionHarness.mockResolvedValue({
+      ok: false,
+      error: "HTTP 409: session turn in flight; wait for it to settle before switching harness",
+    });
+    useAppStore.setState({
+      panes: [makePane({ harnessId: "claude-code" })],
+    });
+    render(
+      <PaneHarnessPicker
+        paneId="pane-1"
+        apiBase="http://127.0.0.1:9740"
+        apiToken="tok"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Claude Code/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /Built-in Runtime/i }));
+
+    // optimistic flip first, then the fail-closed revert lands
+    await waitFor(() => {
+      expect(useAppStore.getState().panes[0].harnessId ?? null).toBe("claude-code");
+    });
+    // busy feedback surfaced (English copy in test locale)
+    await waitFor(() => {
+      expect(screen.getByText(/still running/i)).toBeTruthy();
+    });
+    // no message refresh on the failure path
+    expect(bridge().loadSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("fail closed: plan failure reverts the pane to the previous harness", async () => {
+    bridge().switchSessionHarness.mockResolvedValue({
+      ok: false,
+      error: "HTTP 400: manual_context strategy requires manual context text",
+    });
+    render(
+      <PaneHarnessPicker
+        paneId="pane-1"
+        apiBase="http://127.0.0.1:9740"
+        apiToken="tok"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Built-in Runtime/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude Code/i }));
+
+    await waitFor(() => {
+      expect(useAppStore.getState().panes[0].harnessId ?? null).toBe(null);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/switch failed/i)).toBeTruthy();
     });
   });
 

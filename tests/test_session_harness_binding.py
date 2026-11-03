@@ -77,6 +77,7 @@ def test_bind_unbind_and_read() -> None:
         "harness_id": "claude-code",
         "harness_thread_id": "thread-1",
         "harness_options": {"mode": "headless"},
+        "harness_session_id": None,
     }
 
     assert manager.clear_session_harness("hb-test") is True
@@ -84,6 +85,7 @@ def test_bind_unbind_and_read() -> None:
         "harness_id": None,
         "harness_thread_id": None,
         "harness_options": None,
+        "harness_session_id": None,
     }
 
 

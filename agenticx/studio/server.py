@@ -319,6 +319,155 @@ _STREAMING_SSE_HEADERS = {
 }
 
 
+async def _external_harness_chat_stream(
+    payload: ChatRequest,
+    manager: SessionManager,
+    harness_id: str,
+) -> AsyncGenerator[str, None]:
+    """SSE stream for one external-harness turn (harness-control-surface SP5b).
+
+    Desktop-compatible minimal protocol: ``harness_progress`` heartbeats
+    (any parsed SSE frame resets the client stall watchdog) → ``final``
+    (authoritative turn text) → ``done``. The blocking adapter turn runs
+    on a worker thread; on client disconnect it keeps running server-side
+    (its result lands in chat_history) and the run lock is released only
+    after it settles.
+    """
+    from agenticx.studio import harness_wiring
+
+    run_lock = await manager.acquire_session_run_lock(payload.session_id)
+    if run_lock is None:
+        err = SseEvent(
+            type="error",
+            data={
+                "error": "session_busy_elsewhere",
+                "text": "该会话正在另一副本上运行，请稍后重试。",
+            },
+        )
+        yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+        yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
+        return
+
+    manager.run_started()
+    turn_task = asyncio.create_task(
+        harness_wiring.run_external_harness_turn_async(
+            manager, payload.session_id, payload.user_input
+        )
+    )
+    owns_release = True
+
+    async def _release_after_turn() -> None:
+        try:
+            await turn_task
+        except Exception:
+            pass
+        finally:
+            manager.run_finished()
+            if run_lock is not None:
+                try:
+                    await run_lock.release()
+                except Exception:
+                    pass
+
+    started = time.time()
+
+    def _progress_sse(phase: str) -> str:
+        beat = SseEvent(
+            type="harness_progress",
+            data={
+                "harness": harness_id,
+                "phase": phase,
+                "elapsed_seconds": round(time.time() - started, 1),
+            },
+        )
+        return f"data: {json.dumps(beat.model_dump(), ensure_ascii=False)}\n\n"
+
+    try:
+        yield _progress_sse("turn_started")
+        result = None
+        while True:
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.shield(turn_task), timeout=15.0
+                )
+                break
+            except asyncio.TimeoutError:
+                # Heartbeat: keeps the desktop stall watchdog quiet while
+                # the (non-streaming) adapter turn blocks on its CLI.
+                yield _progress_sse("running")
+        final_text = str(result.result_text or "").strip()
+        terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
+        final = SseEvent(
+            type="final",
+            data={
+                "text": final_text,
+                "turn_terminal": True,
+                "terminal_reason": terminal_reason,
+                "harness": harness_id,
+                "harness_status": result.status,
+            },
+        )
+        yield f"data: {json.dumps(final.model_dump(), ensure_ascii=False)}\n\n"
+        yield f'data: {json.dumps({"type": "done", "data": {"reason": terminal_reason}}, ensure_ascii=False)}\n\n'
+    except (GeneratorExit, asyncio.CancelledError):
+        # Client went away mid-turn: the harness turn keeps running
+        # server-side; hand lock release to a watcher task.
+        if not turn_task.done():
+            owns_release = False
+            asyncio.create_task(_release_after_turn())
+        raise
+    except harness_wiring.HarnessTurnBusyError as exc:
+        err = SseEvent(
+            type="error",
+            data={"error": "session_busy_elsewhere", "text": str(exc)},
+        )
+        yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+        yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
+    except Exception as exc:
+        logger.exception(
+            "[harness-chat] external turn failed session=%s", payload.session_id
+        )
+        # Keep the transcript consistent: the wiring layer may have already
+        # appended the user message; record the failure as a harness-attributed
+        # assistant note and persist.
+        try:
+            _managed = manager.get(payload.session_id, touch=False)
+            if _managed is not None:
+                _managed.studio_session.chat_history.append(
+                    {
+                        "role": "assistant",
+                        "content": f"[harness {harness_id} turn failed] {exc}",
+                        "metadata": {
+                            "harness": harness_id,
+                            "harness_status": "error",
+                            "source": "harness-turn-failed",
+                        },
+                    }
+                )
+                manager._persist_session_state(
+                    payload.session_id, _managed.studio_session
+                )
+        except Exception:
+            logger.debug("[harness-chat] failure-note persist skipped", exc_info=True)
+        err = SseEvent(
+            type="error",
+            data={
+                "error": "harness_turn_failed",
+                "text": f"执行引擎回合失败：{exc}",
+            },
+        )
+        yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+        yield 'data: {"type":"done","data":{"reason":"harness_turn_failed"}}\n\n'
+    finally:
+        if owns_release:
+            manager.run_finished()
+            if run_lock is not None:
+                try:
+                    await run_lock.release()
+                except Exception:
+                    pass
+
+
 def _flush_taskspace_hint(
     manager: SessionManager,
     session_id: str,
@@ -2982,6 +3131,34 @@ def create_studio_app() -> FastAPI:
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        # SP5b: external-harness turn routing (unified adapter protocol).
+        # Sessions bound to an external harness execute through the bound
+        # adapter in-process; additive path — the builtin python runtime
+        # flow below stays untouched. Binding wins over avatar/skillhub
+        # interception: the raw text goes to the harness verbatim.
+        try:
+            from agenticx.studio.harness_wiring import is_external_harness
+
+            _ext_harness_id = str(
+                (manager.get_session_harness(payload.session_id) or {}).get(
+                    "harness_id"
+                )
+                or ""
+            ).strip()
+            if is_external_harness(_ext_harness_id):
+                return StreamingResponse(
+                    _external_harness_chat_stream(
+                        payload, manager, _ext_harness_id
+                    ),
+                    media_type="text/event-stream",
+                    headers=_STREAMING_SSE_HEADERS,
+                )
+        except Exception:
+            logger.exception(
+                "[harness-chat] routing check failed session=%s; "
+                "falling through to builtin runtime",
+                payload.session_id,
+            )
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_automation_session = active_avatar_id.startswith("automation:")
         # Inbound intercept: refuse old SkillHub Meta dead-path copy only
@@ -6489,6 +6666,85 @@ def create_studio_app() -> FastAPI:
             "harness_id": (binding or {}).get("harness_id"),
             "harness_thread_id": (binding or {}).get("harness_thread_id"),
             "harness_options": (binding or {}).get("harness_options"),
+        }
+
+    @app.post("/api/sessions/{session_id}/harness/switch")
+    async def switch_session_harness(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Mid-session harness switch with context handoff (SP5b).
+
+        Body: ``{harness_id, strategy?, manual_context?}``. Busy (a turn in
+        flight, builtin or external) → 409; plan/handoff failures → 400 with
+        the session keeping its current binding (fail closed). Switching to
+        ``python-agent`` returns to the builtin runtime: chat_history is its
+        context, so only the boundary marker + rebind happen.
+        """
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.harness.handoff import HandoffError, HandoffPlanError
+        from agenticx.harness.types import UnknownHarnessError
+        from agenticx.studio import harness_wiring
+
+        if harness_wiring.is_turn_inflight(sid) or (
+            str(getattr(managed, "execution_state", "idle") or "idle") == "running"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="session turn in flight; wait for it to settle before switching harness",
+            )
+        harness_id = payload.get("harness_id")
+        harness_id = str(harness_id).strip() if harness_id is not None else ""
+        if not harness_id:
+            raise HTTPException(status_code=400, detail="harness_id is required")
+        strategy = payload.get("strategy")
+        if strategy is not None and not isinstance(strategy, str):
+            raise HTTPException(status_code=400, detail="strategy must be a string")
+        manual_context = payload.get("manual_context")
+        if manual_context is not None and not isinstance(manual_context, str):
+            raise HTTPException(
+                status_code=400, detail="manual_context must be a string"
+            )
+        try:
+            result = await harness_wiring.switch_harness_async(
+                manager,
+                sid,
+                harness_id,
+                strategy=(str(strategy).strip() or None) if strategy else None,
+                manual_context=manual_context,
+            )
+        except harness_wiring.HarnessTurnBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except (HandoffError, HandoffPlanError, UnknownHarnessError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, "session_id": sid, "switch": result}
+
+    @app.get("/api/sessions/{session_id}/handoffs")
+    async def list_session_handoffs(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Audit view of every context handoff recorded for a session (SP5b)."""
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.studio import harness_wiring
+
+        return {
+            "ok": True,
+            "session_id": sid,
+            "handoffs": harness_wiring.handoff_audit(sid),
         }
 
     @app.post("/api/sessions/{session_id}/isolate/adopt")

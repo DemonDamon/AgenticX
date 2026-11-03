@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import { useContext, useMemo, type ReactNode } from "react";
-import { AlertTriangle, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
@@ -457,6 +457,7 @@ export function MessageRenderer({
   onOpenBranchSource,
   onContinueFromMessage,
 }: Props) {
+  const { t } = useTranslation("chat");
   const chatStyle = useAppStore((s) => s.chatStyle);
   const typesafeSettings = useTypesafeSettings();
   const resolvedReferences = useMemo(() => {
@@ -502,6 +503,35 @@ export function MessageRenderer({
   if (message.systemNotice) {
     const text = String(message.content ?? "").trim();
     if (!text) return null;
+    const noticeMeta =
+      message.metadata && typeof message.metadata === "object"
+        ? (message.metadata as Record<string, unknown>)
+        : undefined;
+    if (noticeMeta?.kind === "harness_switch") {
+      // Harness switch boundary (SP5b): render from metadata when present so
+      // the label localizes; fall back to the stored backend text.
+      const fromRaw = noticeMeta.from_harness;
+      const toRaw = noticeMeta.to_harness;
+      const strategyRaw = noticeMeta.strategy;
+      const from = typeof fromRaw === "string" && fromRaw ? fromRaw : t("harness.builtin");
+      const to = typeof toRaw === "string" && toRaw ? toRaw : t("harness.builtin");
+      const strategy = typeof strategyRaw === "string" && strategyRaw ? strategyRaw : "";
+      const label = fromRaw !== undefined || toRaw !== undefined
+        ? t("harness.switchBoundary", { from, to, strategy })
+        : text;
+      return (
+        <div className="flex items-center justify-center gap-1.5 py-2">
+          <span className="h-px w-8 bg-border" aria-hidden />
+          <ArrowLeftRight
+            className="h-3 w-3 shrink-0 text-text-faint"
+            strokeWidth={2}
+            aria-hidden
+          />
+          <span className="text-[12px] text-text-muted">{label}</span>
+          <span className="h-px w-8 bg-border" aria-hidden />
+        </div>
+      );
+    }
     return <div className="py-1 text-center text-[12px] text-text-muted">{text}</div>;
   }
   if (isViewImageInjectMessage(message)) {

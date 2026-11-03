@@ -80,6 +80,10 @@ class StudioSession:
     harness_id: Optional[str] = None
     harness_thread_id: Optional[str] = None
     harness_options: Optional[Dict[str, Any]] = None
+    # Unified-surface session id (SP5b): the id the bound adapter uses to
+    # address this session on the harness control surface. Re-created on
+    # cold start (spawn + adopt_thread) from harness_thread_id.
+    harness_session_id: Optional[str] = None
     # Per-server latest operation state for Desktop MCP cards.
     # Example: {"github": {"phase": "connecting", "message": "连接中…", "updated_at": 1710000000.0}}
     mcp_server_ops: Dict[str, Dict[str, object]] = field(default_factory=dict)

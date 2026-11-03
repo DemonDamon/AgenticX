@@ -436,6 +436,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     harnessId: string | null;
     options?: Record<string, unknown>;
   }) => ipcRenderer.invoke("set-session-harness", payload),
+  switchSessionHarness: async (payload: {
+    sessionId: string;
+    harnessId: string;
+    strategy?: string;
+    manualContext?: string;
+  }) => ipcRenderer.invoke("switch-session-harness", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
   saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,

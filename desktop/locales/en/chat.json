@@ -1082,6 +1082,10 @@
   },
   "harness": {
     "builtin": "Built-in Runtime",
+    "switching": "Switching engine…",
+    "switchFailed": "Engine switch failed; previous engine restored",
+    "switchBusy": "A turn is still running — try switching again after it settles",
+    "switchBoundary": "Switched engine: {{from}} → {{to}} ({{strategy}})",
     "tooltip": "Choose the coding-agent harness for this session",
     "unavailable": "Local CLI not installed",
     "loading": "Loading harnesses…",

@@ -141,6 +141,9 @@ class ContextHandoff:
     target_session_id: str = ""
     target_native_thread_id: Optional[str] = None
     resumed_native_thread_id: Optional[str] = None
+    # Source harness's own native thread at handoff time. Recorded so a
+    # later switch back (A→B→A) can resume A's thread instead of guessing.
+    source_native_thread_id: Optional[str] = None
     # Audit fields.
     created_at: str = ""
     created_by_provider: str = ""
@@ -171,6 +174,7 @@ class ContextHandoff:
             target_session_id=str(raw.get("target_session_id") or ""),
             target_native_thread_id=raw.get("target_native_thread_id"),
             resumed_native_thread_id=raw.get("resumed_native_thread_id"),
+            source_native_thread_id=raw.get("source_native_thread_id"),
             created_at=str(raw.get("created_at") or ""),
             created_by_provider=str(raw.get("created_by_provider") or ""),
             supersedes=raw.get("supersedes"),

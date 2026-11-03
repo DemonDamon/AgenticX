@@ -1369,6 +1369,9 @@ class SessionManager:
                 "harness_thread_id": getattr(
                     managed.studio_session, "harness_thread_id", None
                 ),
+                "harness_session_id": getattr(
+                    managed.studio_session, "harness_session_id", None
+                ),
                 **_harness_list_fields(managed.studio_session),
             }
             parent_sid = self._conversation_parent_session_id(managed.studio_session)
@@ -1587,6 +1590,7 @@ class SessionManager:
         harness_id: Optional[str],
         thread_id: Optional[str] = None,
         options: Optional[Dict[str, Any]] = None,
+        surface_session_id: Optional[str] = None,
     ) -> bool:
         """Bind (or unbind) the session's coding-agent harness and persist.
 
@@ -1605,11 +1609,20 @@ class SessionManager:
         if normalized is not None:
             self._validate_harness_id(normalized)
         managed.studio_session.harness_id = normalized
+        # ``str(None)`` would produce the literal string "None"; normalize
+        # explicitly (None / "" → None so adopt/resume never sees garbage).
         managed.studio_session.harness_thread_id = (
-            str(thread_id).strip() or None if normalized else None
+            (str(thread_id).strip() or None)
+            if (normalized is not None and thread_id is not None)
+            else None
         )
         managed.studio_session.harness_options = (
             dict(options) if (normalized and options) else None
+        )
+        managed.studio_session.harness_session_id = (
+            (str(surface_session_id).strip() or None)
+            if (normalized is not None and surface_session_id is not None)
+            else None
         )
         managed.updated_at = time.time()
         self._persist_session_state(sid, managed.studio_session)
@@ -1620,7 +1633,8 @@ class SessionManager:
         return self.set_session_harness(session_id, harness_id=None)
 
     def get_session_harness(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Current binding view: {harness_id, harness_thread_id, harness_options}."""
+        """Current binding view: {harness_id, harness_thread_id, harness_options,
+        harness_session_id}."""
         managed = self.get(str(session_id or "").strip(), touch=False)
         if managed is None:
             return None
@@ -1629,6 +1643,7 @@ class SessionManager:
             "harness_id": getattr(session, "harness_id", None),
             "harness_thread_id": getattr(session, "harness_thread_id", None),
             "harness_options": getattr(session, "harness_options", None),
+            "harness_session_id": getattr(session, "harness_session_id", None),
         }
 
     @staticmethod
@@ -2516,6 +2531,10 @@ class SessionManager:
                 if "harness_options" in metadata:
                     raw_opts = metadata.get("harness_options")
                     session.harness_options = dict(raw_opts) if raw_opts else None
+                if "harness_session_id" in metadata:
+                    session.harness_session_id = (
+                        str(metadata.get("harness_session_id") or "").strip() or None
+                    )
         except Exception:
             pass
         try:
@@ -2774,6 +2793,7 @@ class SessionManager:
                         "harness_id": getattr(session, "harness_id", None),
                         "harness_thread_id": getattr(session, "harness_thread_id", None),
                         "harness_options": getattr(session, "harness_options", None),
+                        "harness_session_id": getattr(session, "harness_session_id", None),
                         **_harness_list_fields(session),
                     }
                     parent_sid = self._conversation_parent_session_id(session)
@@ -3006,7 +3026,11 @@ class SessionManager:
         normalized: list[dict] = []
         for item in messages:
             role = str(item.get("role", "assistant"))
-            if role not in {"user", "assistant", "tool"}:
+            # System-notice rows (harness switch boundaries, fork markers)
+            # keep their role + flag so the desktop renders the centered
+            # marker instead of an empty assistant bubble.
+            is_system_notice = role == "system" and item.get("system_notice") is True
+            if not is_system_notice and role not in {"user", "assistant", "tool"}:
                 role = "assistant"
             raw_timestamp = item.get("timestamp")
             try:
@@ -3029,6 +3053,8 @@ class SessionManager:
                 "timestamp": parsed_timestamp,
                 "forwarded_history": item.get("forwarded_history"),
             }
+            if is_system_notice:
+                row["system_notice"] = True
             raw_sel = str(item.get("model_selection", "") or "").strip().lower()
             if raw_sel in {"manual", "auto"}:
                 row["model_selection"] = raw_sel
@@ -3581,6 +3607,12 @@ class SessionManager:
                 "provider": str(metadata.get("provider", "") or ""),
                 "model": str(metadata.get("model", "") or ""),
                 "workspace_dir": str(metadata.get("workspace_dir", "") or ""),
+                # Harness binding fields live in the persisted summary
+                # metadata; surface them so the session list reflects the
+                # binding across restarts.
+                "harness_id": metadata.get("harness_id"),
+                "harness_thread_id": metadata.get("harness_thread_id"),
+                "harness_session_id": metadata.get("harness_session_id"),
             }
             parent_sid = self._resolve_listed_parent_session_id(sid, metadata)
             if parent_sid:
