@@ -95,8 +95,12 @@ def default_registry() -> HarnessRegistry:
             registry = HarnessRegistry()
             from agenticx.harness.adapters.claude_code import ClaudeCodeAdapter
             from agenticx.harness.adapters.codebuddy import CodeBuddyAdapter
+            from agenticx.harness.adapters.codex import CodexAdapter
+            from agenticx.harness.adapters.opencode import OpenCodeAdapter
 
             registry.register(ClaudeCodeAdapter())
             registry.register(CodeBuddyAdapter())
+            registry.register(CodexAdapter())
+            registry.register(OpenCodeAdapter())
             _default_registry = registry
         return _default_registry
