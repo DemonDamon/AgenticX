@@ -46,6 +46,7 @@ class BridgeSession:
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     session_kind: str = "headless"  # headless | visible_tui
+    model: Optional[str] = None  # CLI --model when spawn requested one
     pty_master_fd: Optional[int] = None
     pty_listeners: List[queue.Queue[Optional[bytes]]] = field(default_factory=list)
     pty_listener_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -210,6 +211,7 @@ class BridgeSessionManager:
             "poll": poll,
             "log_path": s.log_path,
             "mode": s.session_kind,
+            "model": s.model,
             "state": "running" if running else "stopped",
             "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
         }
@@ -260,12 +262,22 @@ class BridgeSessionManager:
         *,
         auto_allow_permissions: Optional[bool] = None,
         mode: str = "headless",
+        model: Optional[str] = None,
     ) -> BridgeSession:
         if mode not in {"headless", "visible_tui"}:
             mode = "headless"
+        model_id = str(model or "").strip() or None
         if mode == "visible_tui":
-            return self._start_session_visible_tui(cwd, auto_allow_permissions=auto_allow_permissions)
-        return self._start_session_headless(cwd, auto_allow_permissions=auto_allow_permissions)
+            return self._start_session_visible_tui(
+                cwd,
+                auto_allow_permissions=auto_allow_permissions,
+                model=model_id,
+            )
+        return self._start_session_headless(
+            cwd,
+            auto_allow_permissions=auto_allow_permissions,
+            model=model_id,
+        )
 
     def _log_path_for_sid(self, sid: str) -> str:
         log_dir = Path(os.environ.get("CC_BRIDGE_LOG_DIR", "~/.agenticx/logs/cc-bridge")).expanduser()
@@ -280,10 +292,12 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        model: Optional[str] = None,
     ) -> BridgeSession:
         exe = os.environ.get("CC_BRIDGE_EXECUTABLE", "claude").strip() or "claude"
         if auto_allow_permissions is None:
             auto_allow_permissions = _env_truthy("CC_BRIDGE_AUTO_ALLOW_PERMISSIONS", "0")
+        model_id = str(model or "").strip() or None
 
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -299,6 +313,8 @@ class BridgeSessionManager:
             "--permission-prompt-tool",
             "stdio",
         ]
+        if model_id:
+            args.extend(["--model", model_id])
 
         env = os.environ.copy()
         env.setdefault("CLAUDE_CODE_ENVIRONMENT_KIND", "agx_cc_bridge")
@@ -323,8 +339,12 @@ class BridgeSessionManager:
             auto_allow=bool(auto_allow_permissions),
             log_path=log_path,
             session_kind="headless",
+            model=model_id,
         )
-        session.append_log(f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path}")
+        session.append_log(
+            f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path}"
+            + (f" model={model_id}" if model_id else "")
+        )
 
         assert proc.stdout is not None
         assert proc.stderr is not None
@@ -351,6 +371,7 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        model: Optional[str] = None,
     ) -> BridgeSession:
         try:
             import pty  # noqa: F401
@@ -359,6 +380,7 @@ class BridgeSessionManager:
 
         _ = auto_allow_permissions  # TUI: interactive permission in terminal; NDJSON auto_allow N/A
         exe = os.environ.get("CC_BRIDGE_EXECUTABLE", "claude").strip() or "claude"
+        model_id = str(model or "").strip() or None
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
 
@@ -374,8 +396,11 @@ class BridgeSessionManager:
         env.setdefault("CLAUDE_CODE_ENVIRONMENT_KIND", "agx_cc_bridge")
         env.setdefault("TERM", "xterm-256color")
 
+        argv = [exe]
+        if model_id:
+            argv.extend(["--model", model_id])
         proc = subprocess.Popen(
-            [exe],
+            argv,
             cwd=str(path),
             stdin=slave_fd,
             stdout=slave_fd,
@@ -399,9 +424,13 @@ class BridgeSessionManager:
             auto_allow=False,
             log_path=log_path,
             session_kind="visible_tui",
+            model=model_id,
             pty_master_fd=master_write_fd,
         )
-        session.append_log(f"[bridge] started visible_tui session_id={sid} pid={proc.pid} cwd={path}")
+        session.append_log(
+            f"[bridge] started visible_tui session_id={sid} pid={proc.pid} cwd={path}"
+            + (f" model={model_id}" if model_id else "")
+        )
 
         threading.Thread(
             target=_pty_reader_thread,
