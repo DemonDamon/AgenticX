@@ -7381,6 +7381,10 @@ export function SettingsPanel({
 
                     <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
 
+                    <PreferredHarnessPicker apiBase={apiBase} apiToken={apiToken} />
+
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
+
                     <div className="flex flex-col gap-2 py-2">
                       <div>
                         <div className={SETTINGS_LABEL_CLASS}>{t("display.dataDir")}</div>
@@ -7488,10 +7492,6 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
-                <Panel title={t("harness.title")}>
-                  <PreferredHarnessPicker apiBase={apiBase} apiToken={apiToken} />
-                </Panel>
-
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
                     <button

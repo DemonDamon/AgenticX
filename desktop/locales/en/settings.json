@@ -2151,6 +2151,7 @@
     "loading": "Loading engines…",
     "loadFailed": "Failed to load engines",
     "empty": "No engines available",
-    "builtinHint": "Near built-in runtime — ready out of the box"
+    "builtinHint": "Near built-in runtime — ready out of the box",
+    "unavailableOption": "{{name}} (local CLI not installed)"
   }
 }

@@ -2151,6 +2151,7 @@
     "loading": "正在加载执行引擎列表…",
     "loadFailed": "执行引擎列表加载失败",
     "empty": "无可用执行引擎",
-    "builtinHint": "Near 内置 Runtime，开箱即用"
+    "builtinHint": "Near 内置 Runtime，开箱即用",
+    "unavailableOption": "{{name}}（本机 CLI 未安装）"
   }
 }

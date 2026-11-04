@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 /**
- * PreferredHarnessPicker + preferred-harness util tests.
+ * PreferredHarnessPicker enum (SettingsDropdown) + preferred-harness util tests.
  *
- * Covers: catalog fetch, unavailable fail-closed (gray + disabled),
- * selection persists preferredHarnessId (Settings default for new sessions),
- * and does NOT call mid-session switchSessionHarness.
+ * Covers: catalog → dropdown options, unavailable options disabled in menu,
+ * selection persists preferredHarnessId, no mid-session switchSessionHarness.
  *
  * Author: Damon Li
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreferredHarnessPicker } from "./HarnessPicker";
 import { useAppStore } from "../store";
@@ -104,7 +103,7 @@ describe("preferred-harness util", () => {
   });
 });
 
-describe("PreferredHarnessPicker", () => {
+describe("PreferredHarnessPicker (enum)", () => {
   beforeAll(() => {
     vi.stubGlobal(
       "fetch",
@@ -134,7 +133,14 @@ describe("PreferredHarnessPicker", () => {
     } as Partial<typeof useAppStore.getState>);
   });
 
-  it("lists catalog with builtin selected by default", async () => {
+  async function openMenu() {
+    // Wait for catalog load so trigger is enabled and shows builtin label
+    const trigger = await screen.findByRole("button", { name: /Built-in Runtime/i });
+    fireEvent.click(trigger);
+    return screen.findByRole("listbox");
+  }
+
+  it("loads catalog into a SettingsDropdown enum with builtin selected", async () => {
     render(
       <PreferredHarnessPicker
         apiBase="http://127.0.0.1:9740"
@@ -149,27 +155,32 @@ describe("PreferredHarnessPicker", () => {
         }),
       ),
     );
-    expect(await screen.findByText("Claude Code")).toBeTruthy();
-    expect(screen.getByText("CodeBuddy")).toBeTruthy();
-    const builtin = screen.getByRole("option", { name: /Built-in Runtime/i });
-    expect(builtin.getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByRole("button", { name: /Built-in Runtime/i })).toBeTruthy();
+    expect(screen.getByText(/默认执行引擎|Default coding engine/i)).toBeTruthy();
+
+    const listbox = await openMenu();
+    const options = within(listbox).getAllByRole("option");
+    expect(options.length).toBe(3);
+    expect(within(listbox).getByRole("option", { name: /Claude Code/i })).toBeTruthy();
+    const unavailable = within(listbox).getByRole("option", {
+      name: /CodeBuddy.*local CLI not installed|CodeBuddy.*本机 CLI 未安装/i,
+    }) as HTMLButtonElement;
+    expect(unavailable.disabled).toBe(true);
   });
 
-  it("grays out unavailable harnesses and blocks selection", async () => {
+  it("unavailable option is disabled and does not change preference", async () => {
     render(
       <PreferredHarnessPicker
         apiBase="http://127.0.0.1:9740"
         apiToken="tok"
       />,
     );
-    const option = (await screen.findByRole("option", {
+    const listbox = await openMenu();
+    const unavailable = within(listbox).getByRole("option", {
       name: /CodeBuddy/i,
-    })) as HTMLButtonElement;
-    expect(option.disabled).toBe(true);
-    expect(option.className).toContain("cursor-not-allowed");
-    expect(option.textContent || "").toMatch(/Local CLI not installed/i);
-
-    fireEvent.click(option);
+    }) as HTMLButtonElement;
+    expect(unavailable.disabled).toBe(true);
+    fireEvent.click(unavailable);
     expect(useAppStore.getState().preferredHarnessId ?? null).toBe(null);
     expect(
       (window as unknown as { agenticxDesktop: { switchSessionHarness: ReturnType<typeof vi.fn> } })
@@ -177,14 +188,15 @@ describe("PreferredHarnessPicker", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("selecting an available harness persists preferredHarnessId only", async () => {
+  it("selecting an available option persists preferredHarnessId only", async () => {
     render(
       <PreferredHarnessPicker
         apiBase="http://127.0.0.1:9740"
         apiToken="tok"
       />,
     );
-    fireEvent.click(await screen.findByRole("option", { name: /Claude Code/i }));
+    const listbox = await openMenu();
+    fireEvent.click(within(listbox).getByRole("option", { name: /^Claude Code$/i }));
     await waitFor(() => {
       expect(useAppStore.getState().preferredHarnessId).toBe("claude-code");
     });
@@ -192,6 +204,8 @@ describe("PreferredHarnessPicker", () => {
       (window as unknown as { agenticxDesktop: { switchSessionHarness: ReturnType<typeof vi.fn> } })
         .agenticxDesktop.switchSessionHarness,
     ).not.toHaveBeenCalled();
+    // menu closed; trigger shows selected label
+    expect(await screen.findByRole("button", { name: /Claude Code/i })).toBeTruthy();
   });
 
   it("re-selecting builtin clears preferredHarnessId", async () => {
@@ -202,13 +216,16 @@ describe("PreferredHarnessPicker", () => {
         apiToken="tok"
       />,
     );
-    fireEvent.click(await screen.findByRole("option", { name: /Built-in Runtime/i }));
+    const trigger = await screen.findByRole("button", { name: /Claude Code/i });
+    fireEvent.click(trigger);
+    const listbox = await screen.findByRole("listbox");
+    fireEvent.click(within(listbox).getByRole("option", { name: /Built-in Runtime/i }));
     await waitFor(() => {
       expect(useAppStore.getState().preferredHarnessId ?? null).toBe(null);
     });
   });
 
-  it("renders load-failed copy when the catalog fetch rejects", async () => {
+  it("disables the enum trigger when catalog fetch fails", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 });
     render(
       <PreferredHarnessPicker
@@ -216,6 +233,9 @@ describe("PreferredHarnessPicker", () => {
         apiToken="tok"
       />,
     );
-    expect(await screen.findByText(/Failed to load engines/i)).toBeTruthy();
+    const trigger = await screen.findByRole("button", {
+      name: /Failed to load engines|执行引擎列表加载失败/i,
+    });
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
   });
 });
