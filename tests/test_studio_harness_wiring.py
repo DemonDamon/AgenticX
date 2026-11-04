@@ -52,12 +52,16 @@ class RecordingAdapter(HarnessAdapter):
     def spawn(self, cwd: str, *, options: Optional[Dict[str, Any]] = None):
         self.spawn_count += 1
         sid = f"{self.harness_id}-surf-{self.spawn_count}"
+        opts = dict(options or {})
+        model = str(opts.get("model") or "").strip() or None
         self._sessions[sid] = {
             "session_id": sid,
             "cwd": cwd,
             "state": "idle",
-            "options": dict(options or {}),
+            "options": opts,
             "native_thread_id": f"{self.harness_id}-native-{self.spawn_count}",
+            "model": model,
+            "raw": {"model": model},
         }
         return dict(self._sessions[sid])
 
@@ -577,3 +581,97 @@ def test_set_session_harness_persists_surface_id(tmp_path):
         assert manager.get_session_harness("sess-rt")["harness_session_id"] is None
     finally:
         manager._sessions.pop("sess-rt", None)
+
+
+# ----------------------------------------------------------------------
+# Near ChatRequest.model → harness spawn options
+# ----------------------------------------------------------------------
+def test_apply_chat_model_folds_into_options_for_cc(wiring):
+    hw, alpha, beta, _ = wiring
+    # Register a claude-code stand-in (native model knob allowlist).
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="claude-code")
+
+    hw.apply_chat_model_to_harness_options(
+        manager, "sess-1", "claude-code", "  glm-5.3-flash  "
+    )
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_options"]["model"] == "glm-5.3-flash"
+
+
+def test_apply_chat_model_ignored_for_codebuddy_like(wiring):
+    hw, alpha, beta, _ = wiring
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness(
+        "sess-1", harness_id="alpha", options={"mode": "headless"}
+    )
+    hw.apply_chat_model_to_harness_options(
+        manager, "sess-1", "alpha", "glm-5.3-flash"
+    )
+    binding = manager.get_session_harness("sess-1")
+    assert "model" not in (binding["harness_options"] or {})
+
+
+def test_run_turn_passes_chat_model_into_spawn(wiring):
+    hw, alpha, beta, _ = wiring
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="claude-code")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "hi", chat_model="glm-5.3-flash"
+    )
+    assert cc.spawn_count == 1
+    surf = next(iter(cc._sessions.values()))
+    assert surf["options"]["model"] == "glm-5.3-flash"
+    assert manager.get_session_harness("sess-1")["harness_options"]["model"] == (
+        "glm-5.3-flash"
+    )
+
+
+def test_model_change_respawns_surface_session(wiring):
+    hw, alpha, beta, _ = wiring
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="claude-code")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "one", chat_model="model-a"
+    )
+    first_sid = manager.get_session_harness("sess-1")["harness_session_id"]
+    assert cc.spawn_count == 1
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "two", chat_model="model-b"
+    )
+    second_sid = manager.get_session_harness("sess-1")["harness_session_id"]
+    assert cc.spawn_count == 2
+    assert second_sid != first_sid
+    assert first_sid not in cc._sessions
+    surf = cc._sessions[second_sid]
+    assert surf["options"]["model"] == "model-b"
+
+
+def test_same_model_reuses_surface_session(wiring):
+    hw, alpha, beta, _ = wiring
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="claude-code")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "one", chat_model="glm-5.3-flash"
+    )
+    hw.run_external_harness_turn(
+        manager, "sess-1", "two", chat_model="glm-5.3-flash"
+    )
+    assert cc.spawn_count == 1

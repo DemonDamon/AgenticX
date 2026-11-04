@@ -87,6 +87,14 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         *,
         options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Start a Claude Code CLI session.
+
+        Supported ``options``:
+        - ``mode``: ``"headless"`` (default) or ``"visible_tui"``
+        - ``auto_allow_permissions``: optional bool (headless control_request)
+        - ``model``: optional non-empty string; forwarded as ``claude --model <id>``
+          so the Near chat model picker can select the CLI model for this session
+        """
         opts = dict(options or {})
         mode = str(opts.pop("mode", "headless")).strip().lower()
         if mode not in _CC_MODES:
@@ -96,12 +104,17 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         auto_allow = opts.pop("auto_allow_permissions", None)
         if auto_allow is not None and not isinstance(auto_allow, bool):
             raise ValueError("auto_allow_permissions must be a boolean")
+        model = opts.pop("model", None)
+        if model is not None and not isinstance(model, str):
+            raise ValueError("model must be a string")
+        model_id = str(model or "").strip() or None
         if opts:
             raise ValueError(f"unknown spawn options for claude-code: {sorted(opts)}")
         session = self.start_session(
             cwd,
             auto_allow_permissions=auto_allow,
             mode=mode,
+            model=model_id,
         )
         view = self.describe(session.session_id)
         assert view is not None  # just registered by start_session

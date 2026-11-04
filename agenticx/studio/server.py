@@ -353,7 +353,10 @@ async def _external_harness_chat_stream(
     manager.run_started()
     turn_task = asyncio.create_task(
         harness_wiring.run_external_harness_turn_async(
-            manager, sid, payload.user_input
+            manager,
+            sid,
+            payload.user_input,
+            chat_model=getattr(payload, "model", None),
         )
     )
     owns_release = True

@@ -271,6 +271,73 @@ def test_spawn_claude_code_unknown_option_400(
     assert "unknown spawn options" in r.json()["detail"]
 
 
+def test_spawn_claude_code_accepts_model_option(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    captured: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured.append(list(args))
+        return _fake_popen_factory([])(args, **kwargs)
+
+    monkeypatch.setattr(
+        "agenticx.cc_bridge.session_manager.subprocess.Popen",
+        fake_popen,
+    )
+    r = client.post(
+        "/v1/harnesses/claude-code/sessions",
+        headers=_auth(),
+        json={
+            "cwd": str(tmp_path),
+            "options": {"mode": "headless", "model": "glm-5.3-flash"},
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["raw"].get("model") == "glm-5.3-flash"
+    assert captured, "expected Popen to run"
+    argv = captured[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    assert client.delete(
+        f"/v1/harnesses/claude-code/sessions/{body['session_id']}",
+        headers=_auth(),
+    ).status_code == 200
+
+
+def test_claude_code_adapter_spawn_model_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Direct adapter unit: options.model → claude --model <id>."""
+    captured: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured.append(list(args))
+        return _fake_popen_factory([])(args, **kwargs)
+
+    monkeypatch.setattr(
+        "agenticx.cc_bridge.session_manager.subprocess.Popen",
+        fake_popen,
+    )
+    cc = ClaudeCodeAdapter()
+    view = cc.spawn(
+        str(tmp_path),
+        options={"mode": "headless", "model": "glm-5.3-flash"},
+    )
+    assert view["raw"]["model"] == "glm-5.3-flash"
+    argv = captured[0]
+    assert "--model" in argv and argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    # empty / whitespace model must not inject --model
+    captured.clear()
+    cc.spawn(str(tmp_path), options={"mode": "headless", "model": "  "})
+    assert "--model" not in captured[0]
+    with pytest.raises(ValueError, match="unknown spawn options"):
+        cc.spawn(str(tmp_path), options={"mode": "headless", "wat": True})
+    with pytest.raises(ValueError, match="model must be a string"):
+        cc.spawn(str(tmp_path), options={"mode": "headless", "model": 123})
+    cc.stop(view["session_id"])
+
+
 def test_spawn_codebuddy(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:

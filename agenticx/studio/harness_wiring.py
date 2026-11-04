@@ -49,6 +49,11 @@ _TURN_WAIT_SECONDS = 240.0
 
 _BUILTIN_HARNESS_IDS = frozenset({"", "python-agent"})
 
+# Harnesses whose spawn() already accepts a native ``model`` option.
+# Do not invent a fake model knob for adapters that reject unknown options
+# (e.g. codebuddy).
+_HARNESSES_WITH_MODEL_OPTION = frozenset({"claude-code", "codex", "opencode"})
+
 _lock = threading.Lock()
 _registry: Optional[HarnessRegistry] = None
 _engine: Optional[HandoffEngine] = None
@@ -268,6 +273,55 @@ def snapshot_from_session(
 
 
 # ----------------------------------------------------------------------
+# chat model → harness spawn options
+# ----------------------------------------------------------------------
+def apply_chat_model_to_harness_options(
+    manager: Any,
+    session_id: str,
+    harness_id: str,
+    chat_model: Optional[str],
+) -> None:
+    """Fold Near ``ChatRequest.model`` into ``harness_options`` when native.
+
+    Policy: only harnesses listed in ``_HARNESSES_WITH_MODEL_OPTION`` receive
+    ``model`` (they already expose a CLI/API model knob). Empty/omitted chat
+    model leaves existing options untouched. When a live surface session was
+    spawned under a *different* model, stop it and clear
+    ``harness_session_id`` so ``ensure_harness_session`` re-spawns with the
+    picker value on the next turn (CLI ``--model`` / ``-m`` is spawn-time).
+    """
+    desired = str(chat_model or "").strip()
+    if not desired:
+        return
+    hid = str(harness_id or "").strip()
+    if hid not in _HARNESSES_WITH_MODEL_OPTION:
+        return
+    sid = require_safe_session_id(session_id)
+    binding = manager.get_session_harness(sid) or {}
+    options = dict(binding.get("harness_options") or {})
+    prev = str(options.get("model") or "").strip() or None
+    surface_sid = str(binding.get("harness_session_id") or "").strip() or None
+    options["model"] = desired
+
+    # Mid-session picker change → respawn so the new model reaches argv.
+    if surface_sid and prev != desired:
+        adapter = harness_registry().require(hid)
+        try:
+            adapter.stop(surface_sid)
+        except Exception:
+            pass
+        surface_sid = None
+
+    manager.set_session_harness(
+        sid,
+        harness_id=hid,
+        thread_id=binding.get("harness_thread_id"),
+        options=options,
+        surface_session_id=surface_sid,
+    )
+
+
+# ----------------------------------------------------------------------
 # unified-surface session lifecycle
 # ----------------------------------------------------------------------
 def ensure_harness_session(
@@ -278,17 +332,44 @@ def ensure_harness_session(
     Reuses the live adapter session when present; on cold start (adapter
     session gone) re-spawns and re-adopts the persisted native thread
     (resume) when one survives in the binding.
+
+    If the live session reports a spawn ``model`` that differs from the
+    binding's ``harness_options.model``, stop and re-spawn so the Near
+    model picker takes effect (spawn-time CLI flag).
     """
     adapter = harness_registry().require(harness_id)
     sid = require_safe_session_id(session_id)
     binding = manager.get_session_harness(sid) or {}
     surface_sid = str(binding.get("harness_session_id") or "").strip()
+    options = dict(binding.get("harness_options") or {})
+    desired_model = str(options.get("model") or "").strip() or None
 
-    if surface_sid and adapter.describe(surface_sid) is not None:
-        return surface_sid
+    if surface_sid:
+        view = adapter.describe(surface_sid)
+        if view is not None:
+            live_model = None
+            raw = view.get("raw") if isinstance(view, dict) else None
+            if isinstance(raw, dict):
+                live_model = str(raw.get("model") or "").strip() or None
+            if live_model is None and isinstance(view, dict):
+                live_model = str(view.get("model") or "").strip() or None
+            # Only enforce mismatch when we have a desired model and the
+            # adapter surfaces a spawn model (CC bridge). Exec CLIs that
+            # do not report model on describe keep the live session.
+            if (
+                desired_model is not None
+                and live_model is not None
+                and live_model != desired_model
+            ):
+                try:
+                    adapter.stop(surface_sid)
+                except Exception:
+                    pass
+                surface_sid = ""
+            else:
+                return surface_sid
 
     cwd = snapshot_from_session(manager, sid).cwd
-    options = binding.get("harness_options") or {}
     view = adapter.spawn(cwd, options=dict(options))
     surface_sid = str(view["session_id"])
     native_thread = str(binding.get("harness_thread_id") or "").strip()
@@ -311,13 +392,20 @@ def ensure_harness_session(
 # external harness turn execution (chat routing)
 # ----------------------------------------------------------------------
 def run_external_harness_turn(
-    manager: Any, session_id: str, user_text: str
+    manager: Any,
+    session_id: str,
+    user_text: str,
+    *,
+    chat_model: Optional[str] = None,
 ) -> TurnResult:
     """Execute one turn on the bound external harness and record it in
     chat_history (user + harness-attributed assistant message).
 
     Same-process single-flight: raises :class:`HarnessTurnBusyError` when a
     turn is already running for this studio session.
+
+    ``chat_model`` (Near ``ChatRequest.model``) is folded into harness
+    spawn options for adapters that already expose a native model knob.
     """
     sid = require_safe_session_id(session_id)
     if not _begin_inflight(sid):
@@ -325,13 +413,19 @@ def run_external_harness_turn(
             f"session {sid} already has an external-harness turn in flight"
         )
     try:
-        return _run_external_harness_turn_body(manager, sid, user_text)
+        return _run_external_harness_turn_body(
+            manager, sid, user_text, chat_model=chat_model
+        )
     finally:
         _end_inflight(sid)
 
 
 def _run_external_harness_turn_body(
-    manager: Any, session_id: str, user_text: str
+    manager: Any,
+    session_id: str,
+    user_text: str,
+    *,
+    chat_model: Optional[str] = None,
 ) -> TurnResult:
     sid = require_safe_session_id(session_id)
     managed = manager.get(sid)
@@ -342,6 +436,12 @@ def _run_external_harness_turn_body(
     harness_id = str(binding.get("harness_id") or "")
     if not is_external_harness(harness_id):
         raise ValueError(f"session {sid} is not bound to an external harness")
+
+    # Near model picker → harness_options before ensure/spawn.
+    apply_chat_model_to_harness_options(
+        manager, sid, harness_id, chat_model
+    )
+    binding = manager.get_session_harness(sid) or {}
 
     adapter = harness_registry().require(harness_id)
     surface_sid = ensure_harness_session(manager, sid, harness_id)
@@ -600,12 +700,20 @@ def handoff_audit(session_id: str) -> List[Dict[str, Any]]:
 
 
 async def run_external_harness_turn_async(
-    manager: Any, session_id: str, user_text: str
+    manager: Any,
+    session_id: str,
+    user_text: str,
+    *,
+    chat_model: Optional[str] = None,
 ) -> TurnResult:
     """Async wrapper: adapter turns block for the whole turn, so run them
     on a worker thread to keep the event loop responsive."""
     return await asyncio.to_thread(
-        run_external_harness_turn, manager, session_id, user_text
+        run_external_harness_turn,
+        manager,
+        session_id,
+        user_text,
+        chat_model=chat_model,
     )
 
 
@@ -636,6 +744,7 @@ __all__ = [
     "handoff_engine",
     "harness_display_name",
     "harness_registry",
+    "apply_chat_model_to_harness_options",
     "is_external_harness",
     "is_turn_inflight",
     "run_external_harness_turn",
