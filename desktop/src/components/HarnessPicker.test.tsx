@@ -166,7 +166,7 @@ describe("PreferredHarnessPicker", () => {
       name: /CodeBuddy/i,
     })) as HTMLButtonElement;
     expect(option.disabled).toBe(true);
-    expect(option.className).toContain("opacity-45");
+    expect(option.className).toContain("cursor-not-allowed");
     expect(option.textContent || "").toMatch(/Local CLI not installed/i);
 
     fireEvent.click(option);
