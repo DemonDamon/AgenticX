@@ -359,7 +359,12 @@
     "effortMax": "Max",
     "effortUltra": "Ultra",
     "effortExtreme": "Extreme",
-    "contextWindow": "Context window"
+    "contextWindow": "Context window",
+    "harnessNoModelOption": "This agent has no model option",
+    "harnessEmbeddingUnsupported": "Embedding models cannot be used with this agent",
+    "harnessOllamaUnsupported": "Local Ollama models cannot be used with this agent",
+    "harnessNoneCompatible": "No models available for this agent",
+    "harnessFilteredHint": "Some models are unavailable for the current agent"
   },
   "composer": {
     "bindFolders": "Bind folders",

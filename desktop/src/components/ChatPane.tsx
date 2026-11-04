@@ -438,6 +438,13 @@ import {
   isModelSelectable,
   isProviderCredentialed,
 } from "../utils/model-options";
+import {
+  coerceModelForHarness,
+  collectHarnessModelOptions,
+  evaluateModelForHarness,
+  resolveActiveHarnessId,
+  type HarnessModelDisableReason,
+} from "../utils/harness-model-compat";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
@@ -1381,6 +1388,16 @@ function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_P
   return nextTop;
 }
 
+
+function harnessModelDisableLabel(
+  reason: HarnessModelDisableReason | undefined,
+  t: (key: string) => string,
+): string {
+  if (reason === "embedding_unsupported") return t("model.harnessEmbeddingUnsupported");
+  if (reason === "ollama_unsupported") return t("model.harnessOllamaUnsupported");
+  return t("model.harnessNoModelOption");
+}
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
@@ -1390,6 +1407,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
   const setPaneContextWindow = useAppStore((s) => s.setPaneContextWindow);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
+  const preferredHarnessId = useAppStore((s) => s.preferredHarnessId);
+  const activeHarnessId = useMemo(
+    () => resolveActiveHarnessId(paneModel?.harnessId, preferredHarnessId),
+    [paneModel?.harnessId, preferredHarnessId],
+  );
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1445,9 +1467,60 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   };
 
   const options = useMemo(
-    () => collectSelectableModelOptions(settings.providers),
-    [settings.providers],
+    () => collectHarnessModelOptions(settings.providers, activeHarnessId),
+    [settings.providers, activeHarnessId],
   );
+  const availableOptions = useMemo(
+    () => options.filter((row) => row.available),
+    [options],
+  );
+
+  // Preferred/pane harness changed → drop selections the new harness cannot use.
+  useEffect(() => {
+    const provider = (paneModel?.modelProvider || "").trim();
+    const model = (paneModel?.modelName || "").trim();
+    if (!provider && !model) return;
+    const verdict = evaluateModelForHarness(
+      activeHarnessId,
+      provider,
+      model,
+      settings.providers,
+    );
+    if (verdict.available) return;
+    const fallback = coerceModelForHarness(
+      settings.providers,
+      activeHarnessId,
+      provider,
+      model,
+      provider,
+    );
+    if (!fallback) {
+      setPaneModel(paneId, "", "");
+      return;
+    }
+    if (fallback.provider === provider && fallback.model === model) return;
+    setPaneModel(paneId, fallback.provider, fallback.model);
+    void window.agenticxDesktop.saveConfig({
+      activeProvider: fallback.provider,
+      activeModel: fallback.model,
+    });
+    const sid = String(paneModel?.sessionId ?? "").trim();
+    if (sid) {
+      void window.agenticxDesktop.setSessionModel({
+        sessionId: sid,
+        provider: fallback.provider,
+        model: fallback.model,
+      });
+    }
+  }, [
+    activeHarnessId,
+    paneId,
+    paneModel?.modelName,
+    paneModel?.modelProvider,
+    paneModel?.sessionId,
+    setPaneModel,
+    settings.providers,
+  ]);
 
   /**
    * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
@@ -1489,7 +1562,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const currentSelectable =
     Boolean(currentModel)
     && Boolean(currentProvider)
-    && isModelSelectable(currentProvider, currentModel, settings.providers);
+    && evaluateModelForHarness(
+      activeHarnessId,
+      currentProvider,
+      currentModel,
+      settings.providers,
+    ).available;
   const currentParts = useMemo(() => {
     if (!currentSelectable) return null;
     return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
@@ -1745,6 +1823,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               const isActive =
                                 opt.provider === currentProvider && opt.model === currentModel;
                               const isHover = hoverKey === rowKey;
+                              const disabled = !opt.available;
+                              const disableReason = disabled
+                                ? harnessModelDisableLabel(opt.reason, t)
+                                : "";
                               const { modelName } = formatModelDisplayParts(
                                 opt.provider,
                                 opt.model,
@@ -1757,21 +1839,34 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   type="button"
                                   role="option"
                                   aria-selected={isActive}
+                                  aria-disabled={disabled}
+                                  disabled={disabled}
+                                  title={disabled ? disableReason : undefined}
                                   className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-5 transition-colors ${
-                                    isActive || isHover
-                                      ? "bg-surface-cardStrong"
-                                      : "hover:bg-surface-hover"
+                                    disabled
+                                      ? "cursor-not-allowed opacity-40"
+                                      : isActive || isHover
+                                        ? "bg-surface-cardStrong"
+                                        : "hover:bg-surface-hover"
                                   }`}
                                   onMouseEnter={(e) => {
+                                    if (disabled) return;
                                     cancelClearHover();
                                     setHoverKey(rowKey);
                                     setHoverSubMenu(null);
                                     setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
                                   }}
-                                  onClick={() => handleSelect(opt.provider, opt.model)}
+                                  onClick={() => {
+                                    if (disabled) return;
+                                    handleSelect(opt.provider, opt.model);
+                                  }}
                                 >
                                   <ProviderGlyph provider={opt.provider} model={opt.model} />
-                                  <span className="min-w-0 flex-1 truncate pl-px font-semibold text-text-strong">
+                                  <span
+                                    className={`min-w-0 flex-1 truncate pl-px font-semibold ${
+                                      disabled ? "text-text-faint" : "text-text-strong"
+                                    }`}
+                                  >
                                     {modelName}
                                   </span>
                                   <span className="flex w-3.5 shrink-0 justify-end">
@@ -1793,6 +1888,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                 )}
               </div>
               <div className="shrink-0 border-t border-border p-1.5">
+                {options.length > 0 && availableOptions.length < options.length ? (
+                  <div className="mb-1.5 px-1 text-center text-[11px] leading-relaxed text-text-faint">
+                    {availableOptions.length === 0
+                      ? t("model.harnessNoneCompatible")
+                      : t("model.harnessFilteredHint")}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-cardStrong px-2.5 py-2 text-[12.5px] font-medium text-text-strong transition-colors hover:bg-surface-hover"
