@@ -55,6 +55,11 @@ import {
 } from "./i18n/locales";
 import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
+import {
+  loadPreferredHarnessIdFromStorage,
+  persistPreferredHarnessId,
+  toStoredPreferredHarnessId,
+} from "./utils/preferred-harness";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
 import {
@@ -690,6 +695,8 @@ type AppState = {
   /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
+  /** Default coding-agent harness for newly created sessions (Settings → General). null = builtin. */
+  preferredHarnessId: string | null;
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
@@ -810,6 +817,7 @@ type AppState = {
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
+  setPreferredHarnessId: (harnessId: string | null) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
   setUserCubeColorwayId: (colorwayId: string) => void;
@@ -1370,6 +1378,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
+  preferredHarnessId: loadPreferredHarnessIdFromStorage(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userCubeColorwayId: loadUserCubeColorwayId(),
@@ -1690,6 +1699,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { chatStyle };
+    }),
+  setPreferredHarnessId: (harnessId) =>
+    set(() => {
+      const next = toStoredPreferredHarnessId(harnessId);
+      persistPreferredHarnessId(next);
+      return { preferredHarnessId: next };
     }),
   setUserNickname: (name) =>
     set(() => {
@@ -2102,6 +2117,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           historyJumpMessageId: null,
           scratchChats: [],
           parkedScratchChats: [],
+          harnessId: state.preferredHarnessId || null,
         },
       ],
       activePaneId: paneId,

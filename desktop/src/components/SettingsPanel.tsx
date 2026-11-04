@@ -76,6 +76,7 @@ import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
+import { PreferredHarnessPicker } from "./HarnessPicker";
 import {
   RECOMMENDED_SKILLS,
   type RecommendedSkillTier,
@@ -7487,6 +7488,10 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
+                <Panel title={t("harness.title")}>
+                  <PreferredHarnessPicker apiBase={apiBase} apiToken={apiToken} />
+                </Panel>
+
                 <Panel title={t("profile.title")}>
                   <div className="flex items-center gap-3">
                     <button

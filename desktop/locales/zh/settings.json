@@ -2142,5 +2142,14 @@
     "linkOnly": "仅链接",
     "openFile": "打开文件",
     "connectionExists": "该端点与凭证已存在连接「{{name}}」，无需重复创建"
+  },
+  "harness": {
+    "title": "默认执行引擎",
+    "hint": "新建会话时使用的编码 Agent Runtime。不会在对话进行中切换。",
+    "builtin": "内置 Runtime",
+    "unavailable": "本机 CLI 未安装，不可用",
+    "loading": "正在加载执行引擎列表…",
+    "loadFailed": "执行引擎列表加载失败",
+    "empty": "无可用执行引擎"
   }
 }
