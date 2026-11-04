@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderCatalogEntry } from "./model-options";
 import {
+  CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
   coerceModelForHarness,
   collectHarnessModelOptions,
+  enrichHarnessModelOptionsWithClaudeLive,
   evaluateModelForHarness,
   isModelAvailableForHarness,
   resolveActiveHarnessId,
@@ -113,5 +115,52 @@ describe("harness-model-compat", () => {
 
   it("returns null fallback when nothing is available (codebuddy)", () => {
     expect(resolveFallbackModelForHarness(providers, "codebuddy")).toBeNull();
+  });
+
+  it("enriches claude-code catalog with live settings aliases not in providers", () => {
+    const base = collectHarnessModelOptions(providers, "claude-code");
+    const enriched = enrichHarnessModelOptionsWithClaudeLive(
+      base,
+      "claude-code",
+      ["glm-5.3-flash", "glm-5.1", "glm-5.1", "haiku-live"],
+    );
+    const live = enriched.filter((r) => r.provider === CLAUDE_LIVE_SETTINGS_PROVIDER_ID);
+    // glm-5.1 already in zhipu catalog → not duplicated as live row
+    expect(live.map((r) => r.model).sort()).toEqual(["glm-5.3-flash", "haiku-live"].sort());
+    expect(live.every((r) => r.available)).toBe(true);
+    // builtin must not gain live rows
+    expect(
+      enrichHarnessModelOptionsWithClaudeLive(base, "python-agent", ["haiku-live"]),
+    ).toEqual(base);
+  });
+
+  it("marks live settings ids available only under claude-code", () => {
+    expect(
+      evaluateModelForHarness(
+        "claude-code",
+        CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
+        "haiku-live",
+        providers,
+      ),
+    ).toEqual({ available: true });
+    expect(
+      isModelAvailableForHarness(
+        "codex",
+        CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
+        "haiku-live",
+        providers,
+      ),
+    ).toBe(false);
+    expect(
+      coerceModelForHarness(
+        providers,
+        "claude-code",
+        CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
+        "haiku-live",
+      ),
+    ).toEqual({
+      provider: CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
+      model: "haiku-live",
+    });
   });
 });

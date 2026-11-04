@@ -433,14 +433,17 @@ import {
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
 import {
+  CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
   collectSelectableModelOptions,
   coerceSelectableModel,
+  isClaudeLiveSettingsProvider,
   isModelSelectable,
   isProviderCredentialed,
 } from "../utils/model-options";
 import {
   coerceModelForHarness,
   collectHarnessModelOptions,
+  enrichHarnessModelOptionsWithClaudeLive,
   evaluateModelForHarness,
   resolveActiveHarnessId,
   type HarnessModelDisableReason,
@@ -1401,6 +1404,8 @@ function harnessModelDisableLabel(
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
   const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
@@ -1412,6 +1417,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     () => resolveActiveHarnessId(paneModel?.harnessId, preferredHarnessId),
     [paneModel?.harnessId, preferredHarnessId],
   );
+  const [claudeLiveModelIds, setClaudeLiveModelIds] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1453,6 +1459,34 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeHarnessId !== "claude-code") {
+      setClaudeLiveModelIds([]);
+      return;
+    }
+    const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+    if (!base) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const resp = await fetch(`${base}/api/claude-code/settings/live-models`, { headers });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as { ok?: boolean; models?: unknown };
+        if (cancelled || !data?.ok || !Array.isArray(data.models)) return;
+        setClaudeLiveModelIds(
+          data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+        );
+      } catch {
+        if (!cancelled) setClaudeLiveModelIds([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHarnessId, apiBase, apiToken, open]);
+
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
     setOpen(false);
@@ -1464,12 +1498,48 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (sid) {
       void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
     }
+    // Direct-style Claude settings sync (claude-code only; never for builtin / live aliases).
+    if (
+      activeHarnessId === "claude-code"
+      && !isClaudeLiveSettingsProvider(provider)
+    ) {
+      const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+      if (base) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        void fetch(`${base}/api/claude-code/settings/apply`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ provider, model }),
+        })
+          .then(async (resp) => {
+            if (!resp.ok) return;
+            try {
+              const data = (await resp.json()) as { models?: unknown };
+              if (Array.isArray(data.models)) {
+                setClaudeLiveModelIds(
+                  data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+                );
+              }
+            } catch {
+              /* ignore */
+            }
+          })
+          .catch(() => {
+            /* non-blocking */
+          });
+      }
+    }
   };
 
-  const options = useMemo(
-    () => collectHarnessModelOptions(settings.providers, activeHarnessId),
-    [settings.providers, activeHarnessId],
-  );
+  const options = useMemo(() => {
+    const base = collectHarnessModelOptions(settings.providers, activeHarnessId);
+    return enrichHarnessModelOptionsWithClaudeLive(
+      base,
+      activeHarnessId,
+      claudeLiveModelIds,
+    );
+  }, [settings.providers, activeHarnessId, claudeLiveModelIds]);
   const availableOptions = useMemo(
     () => options.filter((row) => row.available),
     [options],
@@ -1533,6 +1603,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       if (!isProviderCredentialed(entry)) continue;
       byProvider.set(provider, []);
     }
+    if (options.some((opt) => isClaudeLiveSettingsProvider(opt.provider))) {
+      byProvider.set(CLAUDE_LIVE_SETTINGS_PROVIDER_ID, []);
+    }
     for (const opt of options) {
       const bucket = byProvider.get(opt.provider);
       if (bucket) bucket.push(opt);
@@ -1540,10 +1613,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     }
     return [...byProvider.entries()].map(([provider, items]) => ({
       provider,
-      providerLabel: getProviderDisplayName(provider, settings.providers[provider]),
+      providerLabel: isClaudeLiveSettingsProvider(provider)
+        ? t("model.claudeLiveSettings")
+        : getProviderDisplayName(provider, settings.providers[provider]),
       items,
     }));
-  }, [options, settings.providers]);
+  }, [options, settings.providers, t]);
 
   /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
   const ambiguousModelNames = useMemo(() => {
@@ -1570,12 +1645,21 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     ).available;
   const currentParts = useMemo(() => {
     if (!currentSelectable) return null;
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return {
+        modelName: currentModel,
+        providerLabel: t("model.claudeLiveSettings"),
+      };
+    }
     return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
-  }, [currentSelectable, currentModel, currentProvider, settings.providers]);
+  }, [currentSelectable, currentModel, currentProvider, settings.providers, t]);
   const currentLabel = useMemo(() => {
     if (!currentModel) return t("model.unselected");
     if (!currentProvider) return currentModel;
     if (!currentSelectable) return t("model.unselected");
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return `${t("model.claudeLiveSettings")}/${currentModel}`;
+    }
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
   }, [currentModel, currentProvider, currentSelectable, settings.providers, t]);

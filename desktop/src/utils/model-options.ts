@@ -1,5 +1,12 @@
 import { formatModelOptionLabel, normalizeBareModelId } from "./model-display";
 
+/** Synthetic provider for opaque ids read from ~/.claude/settings.json. */
+export const CLAUDE_LIVE_SETTINGS_PROVIDER_ID = "__claude_live_settings__";
+
+export function isClaudeLiveSettingsProvider(providerId: string | null | undefined): boolean {
+  return String(providerId ?? "").trim() === CLAUDE_LIVE_SETTINGS_PROVIDER_ID;
+}
+
 export type ProviderCatalogEntry = {
   apiKey: string;
   baseUrl: string;
@@ -63,10 +70,12 @@ export function isModelInProviderCatalog(
   modelId: string,
   providers: Record<string, ProviderCatalogEntry>,
 ): boolean {
-  const entry = providers[providerId];
-  if (!entry || entry.enabled === false) return false;
   const bare = normalizeBareModelId(modelId);
   if (!bare) return false;
+  // Live Claude settings aliases may be selected even when not injected into providers.
+  if (isClaudeLiveSettingsProvider(providerId)) return true;
+  const entry = providers[providerId];
+  if (!entry || entry.enabled === false) return false;
   return listProviderVisibleModelIds(entry).some(
     (candidate) => normalizeBareModelId(candidate) === bare,
   );
@@ -78,6 +87,9 @@ export function isModelSelectable(
   modelId: string,
   providers: Record<string, ProviderCatalogEntry>,
 ): boolean {
+  if (isClaudeLiveSettingsProvider(providerId)) {
+    return Boolean(normalizeBareModelId(modelId));
+  }
   if (!isModelInProviderCatalog(providerId, modelId, providers)) return false;
   const entry = providers[providerId];
   if (!entry) return false;
@@ -143,6 +155,9 @@ export function coerceSelectableModel(
 ): { provider: string; model: string } | null {
   const providerId = provider.trim();
   const bare = normalizeBareModelId(model);
+  if (isClaudeLiveSettingsProvider(providerId) && bare) {
+    return { provider: providerId, model: bare };
+  }
   if (providerId && bare && isModelSelectable(providerId, bare, providers)) {
     const canonical =
       canonicalizeCatalogModel(providerId, bare, providers) ?? bare;

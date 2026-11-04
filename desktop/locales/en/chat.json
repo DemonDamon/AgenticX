@@ -364,7 +364,9 @@
     "harnessEmbeddingUnsupported": "Embedding models cannot be used with this agent",
     "harnessOllamaUnsupported": "Local Ollama models cannot be used with this agent",
     "harnessNoneCompatible": "No models available for this agent",
-    "harnessFilteredHint": "Some models are unavailable for the current agent"
+    "harnessFilteredHint": "Some models are unavailable for the current agent",
+    "claudeLiveSettings": "Claude live settings",
+    "claudeLiveSettingsHint": "Model aliases from the live ~/.claude/settings.json"
   },
   "composer": {
     "bindFolders": "Bind folders",

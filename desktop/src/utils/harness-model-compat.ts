@@ -21,7 +21,9 @@
 
 import { isEmbeddingModelKind, inferModelKind } from "./model-capability";
 import {
+  CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
   collectSelectableModelOptions,
+  isClaudeLiveSettingsProvider,
   isModelSelectable,
   type ProviderCatalogEntry,
   type SelectableModelOption,
@@ -88,6 +90,12 @@ export function evaluateModelForHarness(
   providers: Record<string, ProviderCatalogEntry>,
 ): HarnessModelAvailability {
   const hid = normalizePreferredHarnessId(harnessId);
+  if (isClaudeLiveSettingsProvider(providerId)) {
+    if (hid === "claude-code" && String(modelId || "").trim()) {
+      return { available: true };
+    }
+    return { available: false, reason: "harness_no_model_option" };
+  }
   if (!isModelSelectable(providerId, modelId, providers)) {
     return { available: false, reason: "harness_no_model_option" };
   }
@@ -186,3 +194,49 @@ export function coerceModelForHarness(
     preferredProvider || providerId,
   );
 }
+
+/** Build synthetic picker rows for opaque ids from live Claude settings. */
+export function collectClaudeLiveSettingsModelOptions(
+  liveModelIds: readonly string[],
+  separator = "/",
+): HarnessModelOption[] {
+  const seen = new Set<string>();
+  const rows: HarnessModelOption[] = [];
+  for (const raw of liveModelIds) {
+    const model = String(raw || "").trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    rows.push({
+      provider: CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
+      model,
+      label: `${CLAUDE_LIVE_SETTINGS_PROVIDER_ID}${separator}${model}`,
+      available: true,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Under ``claude-code``, append live settings aliases that are not already
+ * present as a catalog (provider, model) pair. Other harnesses unchanged.
+ */
+export function enrichHarnessModelOptionsWithClaudeLive(
+  options: readonly HarnessModelOption[],
+  harnessId: string | null | undefined,
+  liveModelIds: readonly string[],
+  separator = "/",
+): HarnessModelOption[] {
+  const hid = normalizePreferredHarnessId(harnessId);
+  if (hid !== "claude-code") return [...options];
+  const existingModels = new Set(
+    options.map((row) => String(row.model || "").trim()).filter(Boolean),
+  );
+  const extras = collectClaudeLiveSettingsModelOptions(liveModelIds, separator).filter(
+    (row) => !existingModels.has(row.model),
+  );
+  if (extras.length === 0) return [...options];
+  return [...options, ...extras];
+}
+
+export { CLAUDE_LIVE_SETTINGS_PROVIDER_ID, isClaudeLiveSettingsProvider };
+

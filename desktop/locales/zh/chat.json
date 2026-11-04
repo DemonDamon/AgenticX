@@ -364,7 +364,9 @@
     "harnessEmbeddingUnsupported": "嵌入模型不可用于此智能体",
     "harnessOllamaUnsupported": "本地 Ollama 模型不可用于此智能体",
     "harnessNoneCompatible": "当前智能体没有可用模型",
-    "harnessFilteredHint": "部分模型因当前智能体不可用"
+    "harnessFilteredHint": "部分模型因当前智能体不可用",
+    "claudeLiveSettings": "Claude 实况设置",
+    "claudeLiveSettingsHint": "来自 ~/.claude/settings.json 的当前模型别名"
   },
   "composer": {
     "bindFolders": "绑定文件夹",
