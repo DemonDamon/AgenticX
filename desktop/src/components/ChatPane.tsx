@@ -83,6 +83,7 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
+import { PaneHarnessPicker } from "./HarnessPicker";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_OPEN_PREVIEW,
@@ -15605,6 +15606,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     />
                   ) : null}
                   <PaneModelPicker paneId={pane.id} />
+                  <PaneHarnessPicker
+                    paneId={pane.id}
+                    apiBase={apiBase}
+                    apiToken={apiToken}
+                  />
                 </div>
                 <ActionCircleButton
                   hasInput={

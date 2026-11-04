@@ -1079,5 +1079,17 @@
       "rounds": "已达到最大工具调用轮数",
       "budget": "本轮已超出托管用量上限"
     }
+  },
+  "harness": {
+    "builtin": "内置 Runtime",
+    "switching": "正在切换执行引擎…",
+    "switchFailed": "切换执行引擎失败，已恢复原引擎",
+    "switchBusy": "当前回合仍在执行，请稍后再切换",
+    "switchBoundary": "已切换执行引擎：{{from}} → {{to}}（策略 {{strategy}}）",
+    "tooltip": "选择本会话使用的编码 Agent Harness",
+    "unavailable": "本机 CLI 未安装，不可用",
+    "loading": "正在加载 harness 列表…",
+    "loadFailed": "harness 列表加载失败",
+    "empty": "无可用 harness"
   }
 }

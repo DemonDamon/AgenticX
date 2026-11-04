@@ -1,0 +1,180 @@
+{
+  "seed": 0,
+  "keys": [
+    "ALPHA-7Q4",
+    "BETA-9K2",
+    "GAMMA-5D8"
+  ],
+  "turns": 6,
+  "switches": [
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "full_summary"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume",
+      "native_thread_resumed": true
+    },
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "resume"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume"
+    }
+  ],
+  "survival": {
+    "recalled": [
+      "ALPHA-7Q4",
+      "BETA-9K2",
+      "GAMMA-5D8"
+    ],
+    "missing": []
+  },
+  "completion": true,
+  "final_answer": "ALPHA-7Q4 BETA-9K2 GAMMA-5D8\nSections 1 (数据导入) and 2 (对账规则) are finished.",
+  "summary_checks": [
+    {
+      "handoff_id": "ho_7c2753707ba8401c",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "full_summary",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_123ff4381c66498a",
+      "from": "codex",
+      "to": "opencode",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_9c84387b85b64e32",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_eee23cda7d1144fa",
+      "from": "codex",
+      "to": "opencode",
+      "status": "active",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    }
+  ],
+  "planted": true,
+  "completion_detail": {
+    "keys_ok": true,
+    "order_ok": true,
+    "sections_ok": true
+  },
+  "raw_summaries": [
+    {
+      "handoff_id": "ho_7c2753707ba8401c",
+      "strategy": "full_summary",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a payment reconciliation report. The first access key is ALPHA-7Q4. We have finished section 1: 数据导入. Reply with exactly: NOTED",
+        "decisions": "- NOTED\n- UPDATED",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "2 run(s) in scope (full thread); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_123ff4381c66498a",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a payment reconciliation report. The first access key is ALPHA-7Q4. We have finished section 1: 数据导入. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 4); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_9c84387b85b64e32",
+      "strategy": "resume",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a payment reconciliation report. The first access key is ALPHA-7Q4. We have finished section 1: 数据导入. Reply with exactly: NOTED",
+        "decisions": "- ALPHA-7Q4\nBETA-9K2\nGAMMA-5D8",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 6); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_eee23cda7d1144fa",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a payment reconciliation report. The first access key is ALPHA-7Q4. We have finished section 1: 数据导入. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 8); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    }
+  ]
+}

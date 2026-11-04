@@ -10499,6 +10499,56 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("set-session-harness", async (_event, payload: { sessionId: string; harnessId: string | null; options?: Record<string, unknown> }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/harness`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          harness_id: payload?.harnessId ?? null,
+          options: payload?.options ?? undefined,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // Mid-session harness switch with context handoff (harness-control-surface SP5b).
+  // Busy (turn in flight) fails with HTTP 409; plan failures fail with 400 and
+  // the session keeps its previous binding (fail closed).
+  ipcMain.handle("switch-session-harness", async (_event, payload: { sessionId: string; harnessId: string; strategy?: string; manualContext?: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    const harnessId = String(payload?.harnessId || "").trim();
+    if (!harnessId) return { ok: false, error: "harnessId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/harness/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          harness_id: harnessId,
+          strategy: payload?.strategy || undefined,
+          manual_context: payload?.manualContext || undefined,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("fork-session", async (_event, payload: { sessionId: string }) => {
     const sid = String(payload?.sessionId || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };

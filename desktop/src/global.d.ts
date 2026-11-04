@@ -979,6 +979,35 @@ declare global {
       deleteSessionsBatch: (sessionIds: string[]) => Promise<{ ok: boolean; deleted?: string[]; failed?: string[]; error?: string }>;
       pinSession: (payload: { sessionId: string; pinned: boolean }) => Promise<{ ok: boolean; pinned?: boolean; error?: string }>;
       setSessionModel: (payload: { sessionId: string; provider: string; model: string }) => Promise<{ ok: boolean; provider?: string; model?: string; error?: string }>;
+      setSessionHarness: (payload: {
+        sessionId: string;
+        harnessId: string | null;
+        options?: Record<string, unknown>;
+      }) => Promise<{
+        ok: boolean;
+        harness_id?: string | null;
+        harness_thread_id?: string | null;
+        error?: string;
+      }>;
+      switchSessionHarness: (payload: {
+        sessionId: string;
+        harnessId: string;
+        strategy?: string;
+        manualContext?: string;
+      }) => Promise<{
+        ok: boolean;
+        session_id?: string;
+        switch?: {
+          ok?: boolean;
+          from?: string | null;
+          to?: string;
+          strategy?: string;
+          handoff_id?: string | null;
+          native_thread_id?: string | null;
+          notes?: string | null;
+        };
+        error?: string;
+      }>;
       loadLayout: () => Promise<{
         ok: boolean;
         panes: Array<{
@@ -1041,7 +1070,7 @@ declare global {
         ok: boolean;
         messages: Array<{
           id?: string;
-          role: "user" | "assistant" | "tool";
+          role: "user" | "assistant" | "tool" | "system";
           content: string;
           agent_id?: string;
           avatar_name?: string;
@@ -1053,6 +1082,8 @@ declare global {
           timestamp?: number;
           attachments?: Array<{ name?: string; mime_type?: string; size?: number; data_url?: string }>;
           forwarded_history?: ForwardedHistoryCard;
+          system_notice?: boolean;
+          metadata?: Record<string, unknown>;
         }>;
         error?: string;
       }>;
@@ -1063,7 +1094,7 @@ declare global {
         ok: boolean;
         messages: Array<{
           id?: string;
-          role: "user" | "assistant" | "tool";
+          role: "user" | "assistant" | "tool" | "system";
           content: string;
           agent_id?: string;
           avatar_name?: string;
@@ -1075,6 +1106,8 @@ declare global {
           timestamp?: number;
           attachments?: Array<{ name?: string; mime_type?: string; size?: number; data_url?: string }>;
           forwarded_history?: ForwardedHistoryCard;
+          system_notice?: boolean;
+          metadata?: Record<string, unknown>;
         }>;
         start_index?: number;
         total_count?: number;

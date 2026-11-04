@@ -1,0 +1,180 @@
+{
+  "seed": 1,
+  "keys": [
+    "ORION-3X9",
+    "LYRA-8M1",
+    "VEGA-2T6"
+  ],
+  "turns": 6,
+  "switches": [
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "full_summary"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume",
+      "native_thread_resumed": true
+    },
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "resume"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume"
+    }
+  ],
+  "survival": {
+    "recalled": [
+      "ORION-3X9",
+      "LYRA-8M1",
+      "VEGA-2T6"
+    ],
+    "missing": []
+  },
+  "completion": true,
+  "final_answer": "(a) ORION-3X9 LYRA-8M1 VEGA-2T6\n(b) Sections 1 (特征工程) and 2 (评分卡) are finished.",
+  "summary_checks": [
+    {
+      "handoff_id": "ho_24a8b4982c49451c",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "full_summary",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_bf5ae2c848834088",
+      "from": "codex",
+      "to": "opencode",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_2e86fe51ca69470d",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_f2fa9be79a804f2f",
+      "from": "codex",
+      "to": "opencode",
+      "status": "active",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    }
+  ],
+  "planted": true,
+  "completion_detail": {
+    "keys_ok": true,
+    "order_ok": true,
+    "sections_ok": true
+  },
+  "raw_summaries": [
+    {
+      "handoff_id": "ho_24a8b4982c49451c",
+      "strategy": "full_summary",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a supplier risk scoring model. The first access key is ORION-3X9. We have finished section 1: 特征工程. Reply with exactly: NOTED",
+        "decisions": "- NOTED\n- UPDATED",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "2 run(s) in scope (full thread); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_bf5ae2c848834088",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a supplier risk scoring model. The first access key is ORION-3X9. We have finished section 1: 特征工程. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 4); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_2e86fe51ca69470d",
+      "strategy": "resume",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a supplier risk scoring model. The first access key is ORION-3X9. We have finished section 1: 特征工程. Reply with exactly: NOTED",
+        "decisions": "- ORION-3X9\nLYRA-8M1\nVEGA-2T6",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 6); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_f2fa9be79a804f2f",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a supplier risk scoring model. The first access key is ORION-3X9. We have finished section 1: 特征工程. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 8); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    }
+  ]
+}

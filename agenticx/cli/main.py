@@ -137,6 +137,16 @@ def _get_wb_bridge_app():
         raise typer.Exit(1)
 
 
+def _get_harness_surface_app():
+    """Lazy import harness-surface sub-application."""
+    try:
+        from agenticx.cli.harness_surface_commands import harness_surface_app
+        return harness_surface_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 harness_surface 模块")
+        raise typer.Exit(1)
+
+
 def _get_generate_app():
     """Lazy import generate sub-application."""
     try:
@@ -464,6 +474,13 @@ except Exception:
 try:
     wb_bridge_app = _get_wb_bridge_app()
     app.add_typer(wb_bridge_app)
+except Exception:
+    pass
+
+# 注册 harness-surface 子命令 (延迟加载)
+try:
+    harness_surface_app = _get_harness_surface_app()
+    app.add_typer(harness_surface_app)
 except Exception:
     pass
 

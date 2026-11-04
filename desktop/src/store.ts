@@ -264,6 +264,11 @@ export type ChatPane = {
   parkedScratchChats?: ScratchChat[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /**
+   * Bound coding-agent harness for this pane (harness-control-surface SP5a).
+   * null/undefined = builtin python runtime ("python-agent").
+   */
+  harnessId?: string | null;
   /** + menu turn intent: default execute / plan first / isolated copy. */
   turnIntent?: TurnIntent;
   /** True after Multitask successfully created a worktree for this pane. */
@@ -949,6 +954,7 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
+  setPaneHarness: (paneId: string, harnessId: string | null) => void;
   setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
   setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -2641,6 +2647,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
+      ),
+    })),
+  setPaneHarness: (paneId, harnessId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, harnessId: harnessId || null } : pane
       ),
     })),
   setPaneTurnIntent: (paneId, intent) =>
