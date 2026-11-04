@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check } from "lucide-react";
 
-export type SettingsDropdownOption = { value: string; label: string };
+export type SettingsDropdownOption = { value: string; label: string; disabled?: boolean };
 
 type Props = {
   value: string;
@@ -154,22 +154,33 @@ export function SettingsDropdown({
     >
       {options.map((opt) => {
         const selected = value === opt.value;
+        const optDisabled = Boolean(opt.disabled);
         return (
           <button
             key={opt.value}
             type="button"
             role="option"
             aria-selected={selected}
+            aria-disabled={optDisabled || undefined}
+            disabled={optDisabled}
+            title={optDisabled ? opt.label : undefined}
             onClick={() => {
+              if (optDisabled) return;
               onChange(opt.value);
               setOpen(false);
             }}
             className={`${itemClass} rounded-md ${
-              selected ? "bg-surface-hover text-text-primary" : "text-text-subtle"
+              optDisabled
+                ? "cursor-not-allowed text-text-faint opacity-55"
+                : selected
+                  ? "bg-surface-hover text-text-primary"
+                  : "text-text-subtle"
             }`}
           >
             <span className="flex w-3 shrink-0 justify-center">
-              {selected ? <Check className="h-2.5 w-2.5 text-[rgb(var(--theme-color-rgb,59,130,246))]" strokeWidth={2.5} /> : null}
+              {selected && !optDisabled ? (
+                <Check className="h-2.5 w-2.5 text-[rgb(var(--theme-color-rgb,59,130,246))]" strokeWidth={2.5} />
+              ) : null}
             </span>
             <span className="min-w-0 truncate text-left">{opt.label}</span>
           </button>

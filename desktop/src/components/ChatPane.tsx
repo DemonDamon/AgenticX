@@ -83,7 +83,7 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
-import { PaneHarnessPicker } from "./HarnessPicker";
+import { bindPreferredHarnessToSession } from "../utils/preferred-harness";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_OPEN_PREVIEW,
@@ -10017,6 +10017,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const pendingSpaceIdRef = useRef<string | null>(null);
 
   /** Materialize a lazy session (fresh topic / no sessionId yet) with full create params. */
+
+  const applyPreferredHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const state = useAppStore.getState();
+      await bindPreferredHarnessToSession(paneIdForBind, sessionIdForBind, {
+        getPreferredHarnessId: () => state.preferredHarnessId,
+        setPaneHarness: state.setPaneHarness,
+        setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
+      });
+    },
+    [],
+  );
+
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
     const existing = (pane.sessionId || "").trim();
     if (existing) return existing;
@@ -10048,6 +10061,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         provider: chatProvider || undefined,
         model: chatModel || undefined,
       });
+      await applyPreferredHarness(pane.id, newSessionId);
       clearPaneAwaitingFreshSession(pane.id);
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
@@ -10087,6 +10101,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setPaneSessionId,
     setPaneSessionMode,
     setPaneContextInherited,
+    applyPreferredHarness,
   ]);
 
   const composerWorkspace = useComposerWorkspaceFolders({
@@ -10465,6 +10480,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           pollSessionSidRef.current = requestSessionId;
           freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
+          void applyPreferredHarness(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
       } catch (err) {
@@ -11104,6 +11120,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           requestSessionId = created.session_id;
           freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
+          void applyPreferredHarness(pane.id, requestSessionId);
 
           try {
             const rw = await window.agenticxDesktop.loadWechatBinding();
@@ -13463,6 +13480,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           provider: chatProvider || undefined,
           model: chatModel || undefined,
         });
+        void applyPreferredHarness(pane.id, result.session_id);
         setPaneSessionMode(pane.id, result.session_mode ?? pendingMode);
         clearPanePendingSessionMode(pane.id);
         clearPaneAwaitingFreshSession(pane.id);
@@ -15606,11 +15624,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     />
                   ) : null}
                   <PaneModelPicker paneId={pane.id} />
-                  <PaneHarnessPicker
-                    paneId={pane.id}
-                    apiBase={apiBase}
-                    apiToken={apiToken}
-                  />
                 </div>
                 <ActionCircleButton
                   hasInput={
