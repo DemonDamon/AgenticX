@@ -45,6 +45,7 @@ func TestReservationRealDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	requireReceiptRequestIndex(t, handle)
 	tenant := "qtest-" + strings.TrimPrefix(newLedgerID(), "qled-")
 	if len(tenant) > 26 {
 		tenant = tenant[:26]
@@ -62,6 +63,25 @@ func TestReservationRealDatabase(t *testing.T) {
 		t.Fatalf("admission=%+v", check)
 	}
 	originalLines := append([]ReservationLine(nil), check.Reservation.Lines...)
+	for _, line := range originalLines {
+		var count int
+		row, e := handle.QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_quota_ledger WHERE tenant_id=? AND scope_type=? AND scope_id=? AND period=? AND request_id=?`, line.Key.TenantID, line.Key.ScopeType, line.Key.ScopeID, line.Key.Period, line.ReserveID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = row.Scan(&count); e != nil || count != 1 {
+			t.Fatalf("request equality lookup count=%d err=%v", count, e)
+		}
+		var reserved int64
+		row, e = handle.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta_tokens),0) FROM gateway_quota_ledger WHERE tenant_id=? AND scope_type=? AND scope_id=? AND period=? AND request_id=? AND event='reserve'`, line.Key.TenantID, line.Key.ScopeType, line.Key.ScopeID, line.Key.Period, line.ReserveID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = row.Scan(&reserved); e != nil || reserved != 100 {
+			t.Fatalf("reserve equality lookup sum=%d err=%v", reserved, e)
+		}
+	}
+
 	if err = tr.FinishReservation(check.Reservation, 25, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -97,4 +117,36 @@ func TestReservationRealDatabase(t *testing.T) {
 		t.Fatalf("ledger failure left usage=%d", got)
 	}
 	t.Logf("real %s receipt: admission, replay-idempotent settlement and atomic rollback passed", handle.Dialect)
+}
+
+// The fixture intentionally does not create this index. It must be installed by
+// the normal schema migration command before this live contract can pass.
+func requireReceiptRequestIndex(t *testing.T, handle *database.Handle) {
+	t.Helper()
+	query := `SELECT a.attname FROM pg_class tab JOIN pg_namespace ns ON ns.oid=tab.relnamespace JOIN pg_index ind ON ind.indrelid=tab.oid JOIN pg_class idx ON idx.oid=ind.indexrelid CROSS JOIN LATERAL unnest(ind.indkey) WITH ORDINALITY AS col(attnum,position) JOIN pg_attribute a ON a.attrelid=tab.oid AND a.attnum=col.attnum WHERE ns.nspname=current_schema() AND tab.relname='gateway_quota_ledger' AND idx.relname='gateway_quota_ledger_request_idx' ORDER BY col.position`
+	if handle.Dialect == database.MySQL {
+		query = `SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='gateway_quota_ledger' AND INDEX_NAME='gateway_quota_ledger_request_idx' ORDER BY SEQ_IN_INDEX`
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := handle.QueryContext(ctx, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var actual []string
+	for rows.Next() {
+		var column string
+		if err = rows.Scan(&column); err != nil {
+			t.Fatal(err)
+		}
+		actual = append(actual, column)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := "tenant_id,scope_type,scope_id,period,request_id,event"
+	if strings.Join(actual, ",") != want {
+		t.Fatalf("request lookup index=%v; run the normal schema migrator first (want %s)", actual, want)
+	}
 }

@@ -207,6 +207,7 @@ describe("mysql baseline migration inventory", () => {
       "0046_ecp_e2_shelf_lifecycle.sql",
       "0047_ecp_e3_approval_workflow.sql",
       "0048_ecp_e4_expert_package.sql",
+      "0050_gateway_quota_ledger_request_index.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -273,6 +274,8 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 46, tag: "0046_ecp_e2_shelf_lifecycle" }),
       expect.objectContaining({ idx: 47, tag: "0047_ecp_e3_approval_workflow" }),
       expect.objectContaining({ idx: 48, tag: "0048_ecp_e4_expert_package" }),
+      // idx49 / tag0049 remain reserved by the pending identity migration.
+      expect.objectContaining({ idx: 50, tag: "0050_gateway_quota_ledger_request_index" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(
