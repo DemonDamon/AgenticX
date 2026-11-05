@@ -1,4 +1,4 @@
-import { OidcCallbackError, OidcClaimError, OidcConfigError, validateStateFromCookie } from "@agenticx/auth";
+import { OidcCallbackError, OidcClaimError, OidcConfigError, resolveOidcIdentitySubject, validateStateFromCookie } from "@agenticx/auth";
 import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -101,11 +101,16 @@ export async function GET(request: Request) {
       expectedNonce: decoded.nonce,
       codeVerifier: decoded.codeVerifier,
     });
-    externalSubjectHint = exchanged.mapped.externalId ?? null;
+    externalSubjectHint = resolveOidcIdentitySubject(exchanged.claims);
 
     const result = await authenticateAdminConsoleViaOidc({
       email: exchanged.mapped.email,
       tenantId,
+      protocol: "oidc",
+      providerId: provider.providerId,
+      issuer: provider.issuer,
+      subject: resolveOidcIdentitySubject(exchanged.claims),
+      emailVerified: exchanged.mapped.emailVerified,
     });
     if (!result.ok) {
       const errCode = reasonToErrorCode(result.reason);
@@ -141,7 +146,7 @@ export async function GET(request: Request) {
             provider: providerId,
             provider_id: providerId,
             issuer: provider.issuer,
-            external_subject: exchanged.mapped.externalId ?? null,
+            external_subject: resolveOidcIdentitySubject(exchanged.claims),
             email: result.email,
           }),
         });

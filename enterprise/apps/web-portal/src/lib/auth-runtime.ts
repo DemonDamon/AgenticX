@@ -8,6 +8,11 @@ import {
 } from "@agenticx/auth";
 import {
   assignRolesIfNone,
+  bindSsoIdentityLink,
+  findSsoIdentityLink,
+  loadSsoAuthUserById,
+  insertSsoUserIfAbsent,
+  withTenantIamTransaction,
   PgAuthUserRepository,
   PgRefreshTokenStore,
   ensureSystemRoles,
@@ -273,6 +278,7 @@ type OidcLoginInput = {
   providerId: string;
   issuer: string;
   subject: string | null;
+  emailVerified?: boolean | null;
   email: string;
   displayName: string;
   deptHint?: string | null;
@@ -352,48 +358,81 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     throw new Error("DEFAULT_TENANT_ID is required for OIDC login.");
   }
 
-  let user = await runtime.repo.findByEmail(normalizedEmail);
-  let jitCreated = false;
-  let jitAssignedRoles: string[] | null = null;
-
-  if (!user) {
-    const passwordHash = await hashPassword(randomBytes(32).toString("base64url"));
-    const roleAllowlist = parseJitRoleAllowlist();
-    const jitRoles = (input.roleCodeHints ?? []).filter((code) => roleAllowlist.has(code));
-    const assignedRoles = jitRoles.length ? jitRoles : parseDefaultSsoRoleCodes();
-    jitAssignedRoles = assignedRoles;
-    const nextUser: import("@agenticx/auth").AuthUser = {
-      id: ulid(),
-      tenantId: runtime.tenantId,
-      deptId: null,
-      email: normalizedEmail,
-      displayName: input.displayName.trim() || normalizedEmail,
-      passwordHash,
-      mustChangePassword: false,
-      status: "active",
-      failedLoginCount: 0,
-      lockedUntil: null,
-      scopes: getEffectiveUserScopes([]),
-    };
-    await runtime.repo.upsertUser(nextUser);
-    const orgId = process.env.DATABASE_URL?.trim() ? await getDefaultOrgId(runtime.tenantId) : null;
-    await assignRolesIfNone({
-      tenantId: runtime.tenantId,
-      userId: nextUser.id,
-      roleCodes: assignedRoles,
-      defaultOrgId: orgId,
-      defaultDeptId: null,
-    });
-    user = await runtime.repo.findByEmail(normalizedEmail);
-    jitCreated = true;
+  const protocol = input.protocol ?? "oidc";
+  const identityKey = protocol === "oidc"
+    ? { providerId: input.providerId, issuer: input.issuer, subject: input.subject ?? "" }
+    : null;
+  // Random JIT password hashing must not hold a database lock while it computes.
+  let jitPasswordHash: string | null = null;
+  const resolveUser = async () => {
+    let user: import("@agenticx/auth").AuthUser | null = null;
+    if (identityKey) {
+      const linked = await findSsoIdentityLink(runtime.tenantId, identityKey);
+      if (linked) {
+        const candidate = await loadSsoAuthUserById(runtime.tenantId, linked.userId);
+        if (candidate?.id !== linked.userId || candidate.tenantId !== runtime.tenantId) throw new Error("oidc.user_not_found");
+        user = candidate;
+      }
+    }
+    const alreadyLinked = Boolean(user);
+    if (!alreadyLinked && protocol === "oidc" && input.emailVerified !== true) throw new Error("oidc.email_unverified");
+    user ??= await runtime.repo.findByEmail(normalizedEmail);
+    let jitCreated = false;
+    let jitAssignedRoles: string[] | null = null;
+    if (!user) {
+      if (!jitPasswordHash) return null;
+      const roleAllowlist = parseJitRoleAllowlist();
+      const jitRoles = (input.roleCodeHints ?? []).filter((code) => roleAllowlist.has(code));
+      const assignedRoles = jitRoles.length ? jitRoles : parseDefaultSsoRoleCodes();
+      jitAssignedRoles = assignedRoles;
+      const nextUser: import("@agenticx/auth").AuthUser = {
+        id: ulid(), tenantId: runtime.tenantId, deptId: null,
+        email: normalizedEmail, displayName: input.displayName.trim() || normalizedEmail,
+        passwordHash: jitPasswordHash, mustChangePassword: false, status: "active",
+        failedLoginCount: 0, lockedUntil: null, scopes: getEffectiveUserScopes([]),
+      };
+      if (identityKey) await insertSsoUserIfAbsent(nextUser);
+      else await runtime.repo.upsertUser(nextUser);
+      user = await runtime.repo.findByEmail(normalizedEmail);
+      if (user?.id === nextUser.id) {
+        const orgId = process.env.DATABASE_URL?.trim() ? await getDefaultOrgId(runtime.tenantId) : null;
+        await assignRolesIfNone({
+          tenantId: runtime.tenantId, userId: nextUser.id, roleCodes: assignedRoles,
+          defaultOrgId: orgId, defaultDeptId: null,
+        });
+        user = await runtime.repo.findByEmail(normalizedEmail);
+        jitCreated = true;
+      } else {
+        jitAssignedRoles = null;
+      }
+    }
+    if (!user || user.tenantId !== runtime.tenantId) throw new Error("oidc.user_not_found");
+    if (user.status === "disabled" || user.status === "locked" || (user.lockedUntil && user.lockedUntil > Date.now())) {
+      throw new Error("oidc.account_disabled");
+    }
+    if (identityKey && !alreadyLinked) await bindSsoIdentityLink(runtime.tenantId, identityKey, user.id);
+    return { user, jitCreated, jitAssignedRoles };
+  };
+  // Missing storage is a configuration error for persistent identity authentication.
+  const resolve = () => identityKey ? withTenantIamTransaction(runtime.tenantId, resolveUser) : resolveUser();
+  // Established identities perform only reads and never queue behind another
+  // user's first association/JIT tenant-row lock.
+  const existingLink = identityKey ? await findSsoIdentityLink(runtime.tenantId, identityKey) : null;
+  let resolved: Awaited<ReturnType<typeof resolveUser>> = null;
+  if (existingLink) {
+    const user = await loadSsoAuthUserById(runtime.tenantId, existingLink.userId);
+    if (!user || user.id !== existingLink.userId || user.tenantId !== runtime.tenantId) throw new Error("oidc.user_not_found");
+    if (user.status === "disabled" || user.status === "locked" || (user.lockedUntil && user.lockedUntil > Date.now())) throw new Error("oidc.account_disabled");
+    resolved = { user, jitCreated: false, jitAssignedRoles: null };
+  } else {
+    resolved = await resolve();
   }
-
-  if (!user) {
-    throw new Error("oidc.user_not_found");
+  if (!resolved) {
+    jitPasswordHash = await hashPassword(randomBytes(32).toString("base64url"));
+    resolved = await resolve();
   }
-  if (user.status === "disabled" || user.status === "locked" || (user.lockedUntil && user.lockedUntil > Date.now())) {
-    throw new Error("oidc.account_disabled");
-  }
+  if (!resolved) throw new Error("oidc.user_not_found");
+  const { user, jitCreated, jitAssignedRoles } = resolved;
 
   const auditProtocol = input.protocol ?? "oidc";
   if (jitCreated && jitAssignedRoles && process.env.DATABASE_URL?.trim()) {
@@ -443,10 +482,15 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     }
   }
 
-  try {
-    await syncAuthUserToPostgres(user);
-  } catch (error) {
-    console.error("[web-portal] syncAuthUserToPostgres after oidc login failed:", error);
+  // Persistent OIDC identity authentication already uses the IAM user as its
+  // authority. Replaying its old snapshot here could undo a concurrent disable
+  // or password reset after the identity transaction releases its lock.
+  if (protocol === "saml") {
+    try {
+      await syncAuthUserToPostgres(user);
+    } catch (error) {
+      console.error("[web-portal] syncAuthUserToPostgres after saml login failed:", error);
+    }
   }
 
   const tokens = await issueTokensForUser(runtime, user);

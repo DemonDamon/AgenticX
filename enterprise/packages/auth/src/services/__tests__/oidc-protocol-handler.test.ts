@@ -75,6 +75,7 @@ describe("OidcProtocolHandler", () => {
     mockAuthorizationCodeGrant.mockResolvedValue({ access_token: "tok" });
     mockGetValidatedIdTokenClaims.mockReturnValue({
       sub: "oidc-sub",
+      email_verified: true,
       email: "owner@agenticx.local",
       name: "Owner",
       groups: ["member", "policy_admin"],
@@ -99,6 +100,7 @@ describe("OidcProtocolHandler", () => {
     expect(result.protocol).toBe("oidc");
     expect(result.identity.email).toBe("owner@agenticx.local");
     expect(result.identity.externalSubject).toBe("oidc-sub");
+    expect(result.identity.emailVerified).toBe(true);
     expect(result.identity.roleCodeHints).toEqual(["member", "policy_admin"]);
     expect(result.identity.rawAttributes).toMatchObject({ sub: "oidc-sub", email: "owner@agenticx.local" });
   });

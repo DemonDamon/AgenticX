@@ -176,6 +176,7 @@ export async function POST(request: Request) {
     emailForAudit = result.identity.email ?? null;
 
     const policy = await authenticateAdminConsoleViaOidc({
+      protocol: "saml",
       email: result.identity.email,
       tenantId,
     });

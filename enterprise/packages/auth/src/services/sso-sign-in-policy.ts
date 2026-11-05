@@ -14,6 +14,7 @@ export type NormalizedSsoLoginInput = {
   issuer: string | null;
   audience: SsoAudience;
   email: string;
+  emailVerified: boolean | null;
   displayName: string;
   externalSubject: string | null;
   deptHint: string | null;
@@ -33,6 +34,7 @@ export function buildNormalizedSsoLoginInput(args: {
     issuer: args.issuer,
     audience: args.audience,
     email: args.identity.email,
+    emailVerified: args.identity.emailVerified ?? null,
     displayName: args.identity.displayName ?? args.identity.email,
     externalSubject: args.identity.externalSubject || null,
     deptHint: args.identity.deptHint ?? null,

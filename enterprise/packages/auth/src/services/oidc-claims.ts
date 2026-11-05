@@ -1,5 +1,7 @@
 export type ClaimMapping = {
   email?: string;
+  /** Verification claim for the mapped email; custom email paths require an explicit mapping. */
+  emailVerified?: string;
   name?: string;
   externalId?: string;
   dept?: string;
@@ -8,6 +10,7 @@ export type ClaimMapping = {
 
 export type OidcMappedUser = {
   email: string;
+  emailVerified: boolean | null;
   displayName: string;
   externalId: string | null;
   deptHint: string | null;
@@ -56,6 +59,27 @@ function normalizeRoleHints(value: unknown): string[] {
   return [];
 }
 
+/** Stable identity always comes from the verified ID token, never a configurable business claim. */
+export function resolveOidcIdentitySubject(claims: Record<string, unknown>): string {
+  const subject = claims.sub;
+  if (typeof subject !== "string" || !subject || subject !== subject.trim() || subject.length > 255) {
+    throw new OidcClaimError("oidc.invalid_subject");
+  }
+  return subject;
+}
+
+function verifiedEmail(claims: Record<string, unknown>, mapping: ClaimMapping): boolean | null {
+  const path = mapping.emailVerified?.trim() || ((mapping.email ?? "email") === "email" ? "email_verified" : "");
+  if (!path) return null;
+  const value = getByPath(claims, path);
+  if (typeof value === "boolean") return value;
+  // A number or generic truthy value never establishes email ownership.
+  if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) {
+    return value.trim().toLowerCase() === "true";
+  }
+  return null;
+}
+
 export function mapClaimsToAuthUser(
   claims: Record<string, unknown>,
   mapping: ClaimMapping = {},
@@ -84,6 +108,7 @@ export function mapClaimsToAuthUser(
 
   return {
     email,
+    emailVerified: typeof emailValue === "string" ? verifiedEmail(claims, mapping) : null,
     displayName,
     externalId,
     deptHint,
