@@ -144,7 +144,15 @@ func (s *Server) reportUsageDetailed(
 		cost = result.CostUSD
 		pricingVersion = result.PricingVersion
 	}
-	if budgetCheck != nil && s.quotaTracker != nil {
+	receipt := identity.quotaReservation
+	if receipt == nil && budgetCheck != nil {
+		receipt = budgetCheck.Reservation
+	}
+	if receipt != nil && s.quotaTracker != nil {
+		if err := s.quotaTracker.FinishReservation(receipt, int64(n.TotalTokens), cost); err != nil {
+			s.logger.Error("quota reservation settlement failed", "error", err)
+		}
+	} else if budgetCheck != nil && s.quotaTracker != nil {
 		s.quotaTracker.SettleCheckedBudget(
 			s.quotaContext(identity, decision.Model),
 			*budgetCheck,

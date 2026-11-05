@@ -13,27 +13,29 @@ const KNOWN_ORPHANS = [
 ] as const;
 
 describe("postgresql migration inventory", () => {
-  it("journal has exactly 74 entries and must not be renumbered", () => {
+  it("journal preserves existing indices and reserves the pending identity slot", () => {
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       dialect: string;
       entries: Array<{ tag: string; idx: number }>;
     };
     expect(journal.dialect).toBe("postgresql");
-    expect(journal.entries).toHaveLength(74);
-    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(74).keys()]);
-    expect(journal.entries.slice(-4).map((e) => e.tag)).toEqual([
+    expect(journal.entries).toHaveLength(75);
+    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(74).keys(), 75]);
+    // idx74 / tag0075 are reserved by the independent identity migration.
+    expect(journal.entries.slice(-5).map((e) => e.tag)).toEqual([
       "0071_ecp_platform_catalog",
       "0072_ecp_e2_shelf_lifecycle",
       "0073_ecp_e3_approval_workflow",
       "0074_ecp_e4_expert_package",
+      "0076_gateway_quota_ledger_request_index",
     ]);
   });
 
-  it("disk has 76 SQL files including two known orphans", () => {
+  it("disk has 77 SQL files including two known orphans", () => {
     const sqlFiles = readdirSync(drizzleDir)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    expect(sqlFiles).toHaveLength(76);
+    expect(sqlFiles).toHaveLength(77);
 
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
