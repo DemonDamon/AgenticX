@@ -220,6 +220,7 @@ describe("mysql baseline migration inventory", () => {
       "0051_enterprise_runtime_virtual_models.sql",
       "0052_security_incident_response.sql",
       "0053_sso_identity_links.sql",
+      "0054_gateway_quota_ledger_request_index.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -291,6 +292,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 51, tag: "0051_enterprise_runtime_virtual_models" }),
       expect.objectContaining({ idx: 52, tag: "0052_security_incident_response" }),
       expect.objectContaining({ idx: 53, tag: "0053_sso_identity_links" }),
+      expect.objectContaining({ idx: 54, tag: "0054_gateway_quota_ledger_request_index" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

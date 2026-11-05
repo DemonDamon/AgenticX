@@ -33,6 +33,14 @@ export const gatewayQuotaLedger = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
+    requestIdx: index("gateway_quota_ledger_request_idx").on(
+      table.tenantId,
+      table.scopeType,
+      table.scopeId,
+      table.period,
+      table.requestId,
+      table.event
+    ),
     scopeIdx: index("gateway_quota_ledger_scope_idx").on(
       table.tenantId,
       table.scopeType,

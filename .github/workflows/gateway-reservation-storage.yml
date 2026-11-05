@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "enterprise/apps/gateway/**"
+      - "enterprise/packages/db-schema/**"
       - ".github/workflows/gateway-reservation-storage.yml"
   workflow_dispatch:
 
@@ -51,6 +52,25 @@ jobs:
         with:
           go-version-file: enterprise/apps/gateway/go.mod
           cache-dependency-path: enterprise/apps/gateway/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - name: Install schema tooling and verify parity
+        working-directory: enterprise
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @agenticx/db-schema test
+      - name: Apply normal schema upgrade chain
+        working-directory: enterprise
+        env:
+          DATABASE_DIALECT: ${{ matrix.dialect }}
+          DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://postgres:postgres@127.0.0.1:5432/agx_quota_test' || 'mysql://agenticx:agenticx@127.0.0.1:3306/agx_quota_test' }}
+        run: |
+          pnpm --filter @agenticx/db-schema db:migrate
+          pnpm --filter @agenticx/db-schema db:migrate
       - name: Run receipt contracts with race detection
         working-directory: enterprise/apps/gateway
         run: go test -count=1 -race ./internal/quota ./internal/billing ./internal/server

@@ -35,6 +35,14 @@ export const gatewayQuotaLedger = mysqlTable(
     createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
+    requestIdx: index("gateway_quota_ledger_request_idx").on(
+      table.tenantId,
+      table.scopeType,
+      table.scopeId,
+      table.period,
+      table.requestId,
+      table.event
+    ),
     scopeIdx: index("gateway_quota_ledger_scope_idx").on(
       table.tenantId,
       table.scopeType,
