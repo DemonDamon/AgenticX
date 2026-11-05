@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -58,25 +59,15 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	if !ok {
 		return false
 	}
+	if s.refuseCachedRequest(ctx.w, ctx.r, ctx.identity) {
+		return true
+	}
 	if s.metrics != nil {
 		s.metrics.RecordCacheHit(string(hit.Layer))
 	}
 	usage := hit.Entry.Usage
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
-	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
-		DurationMS: durationMSSince(ctx.startedAt),
-	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
 	}
 
 	latencyTotal := time.Since(ctx.startedAt).Milliseconds()
@@ -108,17 +99,54 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	}
 	_ = s.writeAuditEvent(ev)
 
+	if s.refuseCachedRequest(ctx.w, ctx.r, ctx.identity) {
+		return true
+	}
+	writer := &leaseCacheStreamWriter{ResponseWriter: ctx.w, identity: ctx.identity, request: ctx.r}
+	if flusher, ok := ctx.w.(http.Flusher); ok {
+		writer.flusher = flusher
+	}
 	if ctx.req.Stream {
-		_ = cache.ReplayStream(ctx.w, hit.Entry, s.cacheService.Config().ReplayMode)
+		if writer.flusher == nil {
+			writeAPIError(ctx.w, openai.Internal("streaming unsupported"))
+			return true
+		}
+		var accounting streamAccounting
+		index := 0
+		writer.afterWrite = func() {
+			if index < len(hit.Entry.StreamChunks) {
+				accounting.observe(hit.Entry.StreamChunks[index])
+				accounting.reported = nil
+			}
+			index++
+		}
+		err := cache.ReplayStream(writer, hit.Entry, s.cacheService.Config().ReplayMode)
+		if err == nil {
+			err = writer.err
+		}
+		if err != nil {
+			partial := accounting.usage(ctx.estimatedInputTokens, true)
+			if partial.TotalTokens > 0 {
+				s.settleCachedUsage(ctx, partial, spanMeta{Status: "error", ErrorMessage: "cached stream interrupted"})
+			}
+			if errors.Is(err, quota.ErrConcurrencyLeaseLost) && writer.flusher != nil {
+				writeStreamPolicyError(ctx.w, writer.flusher, "50302", formatStreamError(err), nil)
+			}
+			return true
+		}
+		s.settleCachedUsage(ctx, usage, spanMeta{})
 		return true
 	}
-	if len(hit.Entry.Response.Choices) > 0 {
-		resp := hit.Entry.Response
-		resp.Usage = usage
-		cache.WriteJSONResponse(ctx.w, cache.Entry{Response: resp})
+	resp := hit.Entry.Response
+	resp.Usage = usage
+	cache.WriteJSONResponse(writer, cache.Entry{Response: resp})
+	if writer.err != nil {
+		if errors.Is(writer.err, quota.ErrConcurrencyLeaseLost) {
+			writeAPIError(ctx.w, leaseAwareAPIError(writer.err))
+		}
 		return true
 	}
-	cache.WriteJSONResponse(ctx.w, hit.Entry)
+	s.settleCachedUsage(ctx, usage, spanMeta{})
 	return true
 }
 
@@ -308,6 +336,9 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	if !ok {
 		return false
 	}
+	if s.refuseCachedRequest(ctx.w, ctx.r, ctx.identity) {
+		return true
+	}
 	if s.metrics != nil {
 		s.metrics.RecordCacheHit(string(hit.Layer))
 	}
@@ -315,19 +346,7 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
-		DurationMS: durationMSSince(ctx.startedAt),
-	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
-	}
+
 	resp := hit.Entry.Response
 	resp.Usage = usage
 	_ = s.writeAuditEvent(audit.Event{
@@ -356,6 +375,11 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 		OutputTokens:       usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
 	})
+	if s.refuseCachedRequest(w, ctx.r, ctx.identity) {
+		return true
+	}
+	guarded := &leaseCacheStreamWriter{ResponseWriter: w, identity: ctx.identity, request: ctx.r}
+	w = guarded
 	switch session.outbound {
 	case inbound.ProtocolClaude:
 		enc := outbound.NewClaudeStreamEncoder(ctx.req.Model)
@@ -373,5 +397,22 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	default:
 		cache.WriteJSONResponse(w, cache.Entry{Response: resp})
 	}
+	if guarded.err != nil {
+		if errors.Is(guarded.err, quota.ErrConcurrencyLeaseLost) {
+			writeAPIError(guarded.ResponseWriter, leaseAwareAPIError(guarded.err))
+		}
+		return true
+	}
+	s.settleCachedUsage(ctx, usage, spanMeta{})
 	return true
+}
+
+func (s *Server) settleCachedUsage(ctx cacheServeContext, usage openai.Usage, span spanMeta) {
+	span.DurationMS = durationMSSince(ctx.startedAt)
+	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, span)
+	if s.useChannelRelay() {
+		s.billingService.SettleContext(s.quotaContext(ctx.identity, ctx.req.Model), ctx.reservedTokens, int64(usage.TotalTokens))
+	} else {
+		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.TotalTokens)
+	}
 }
