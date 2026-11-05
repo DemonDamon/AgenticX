@@ -14,7 +14,6 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    branches: [main, master]
   # 每周一自检一次（防止历史 commit 被遗漏）
   schedule:
     - cron: "0 2 * * 1"
