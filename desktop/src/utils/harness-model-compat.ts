@@ -8,15 +8,17 @@
  *
  * Compatibility rule (keep in sync with PR / tests):
  * - builtin / python-agent: full selectable catalog (today).
- * - claude-code / codex / opencode: selectable chat/reasoning models stay
- *   available. Spawn `--model` / `-m` is an opaque string resolved by the
- *   CLI's own endpoint (BYOS); Near does not filter by provider API family,
- *   because Anthropic-compatible gateways commonly serve non-Anthropic ids.
- *   Embedding models are disabled. Ollama-native providers are disabled for
- *   claude-code and codex (those CLIs do not speak Ollama's native API);
+ * - claude-code / codex / opencode / codebuddy: selectable chat/reasoning
+ *   models stay available. Spawn `--model` / `-m` is an opaque string
+ *   resolved by the CLI's own endpoint (BYOS); Near does not filter by
+ *   provider API family, because Anthropic-compatible gateways commonly
+ *   serve non-Anthropic ids. Embedding models are disabled.
+ *   Ollama-native providers are disabled for claude-code, codex, and
+ *   codebuddy (those CLIs do not speak Ollama's native API — CodeBuddy
+ *   routes through its own cloud/catalog model ids via `--model`);
  *   opencode still allows them.
- * - codebuddy / unknown external: no native model spawn option → all
- *   disabled with a short reason (adapters reject unknown options).
+ * - unknown external: no native model spawn option → all disabled with a
+ *   short reason (adapters reject unknown options).
  */
 
 import { isEmbeddingModelKind, inferModelKind } from "./model-capability";
@@ -39,6 +41,7 @@ export const HARNESSES_WITH_NATIVE_MODEL_OPTION: ReadonlySet<string> = new Set([
   "claude-code",
   "codex",
   "opencode",
+  "codebuddy",
 ]);
 
 export type HarnessModelDisableReason =
@@ -111,7 +114,7 @@ export function evaluateModelForHarness(
   }
   const entry = providers[providerId];
   if (
-    (hid === "claude-code" || hid === "codex")
+    (hid === "claude-code" || hid === "codex" || hid === "codebuddy")
     && isOllamaLikeProvider(providerId, entry)
   ) {
     return { available: false, reason: "ollama_unsupported" };

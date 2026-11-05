@@ -602,7 +602,7 @@ def test_apply_chat_model_folds_into_options_for_cc(wiring):
     assert binding["harness_options"]["model"] == "glm-5.3-flash"
 
 
-def test_apply_chat_model_ignored_for_codebuddy_like(wiring):
+def test_apply_chat_model_ignored_for_harness_without_native_option(wiring):
     hw, alpha, beta, _ = wiring
     session = make_session()
     manager = FakeManager(session)
@@ -614,6 +614,21 @@ def test_apply_chat_model_ignored_for_codebuddy_like(wiring):
     )
     binding = manager.get_session_harness("sess-1")
     assert "model" not in (binding["harness_options"] or {})
+
+
+def test_apply_chat_model_folds_into_options_for_codebuddy(wiring):
+    hw, alpha, beta, _ = wiring
+    cb = RecordingAdapter("codebuddy")
+    hw.harness_registry().register(cb)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codebuddy")
+
+    hw.apply_chat_model_to_harness_options(
+        manager, "sess-1", "codebuddy", "  glm-5.3-flash  "
+    )
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_options"]["model"] == "glm-5.3-flash"
 
 
 def test_run_turn_passes_chat_model_into_spawn(wiring):

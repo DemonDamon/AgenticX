@@ -170,6 +170,18 @@ def test_ac3_and_ac4_headless_argv(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     s3 = mgr.start_session(str(tmp_path / "cwd"), permission_mode="acceptEdits")
     argv3 = captured["args"]
     assert argv3[argv3.index("--permission-mode") + 1] == "acceptEdits"
+
+    captured.clear()
+    s4 = mgr.start_session(
+        str(tmp_path / "cwd"),
+        permission_mode="default",
+        model="glm-5.3-flash",
+    )
+    argv4 = captured["args"]
+    assert "--model" in argv4 and argv4[argv4.index("--model") + 1] == "glm-5.3-flash"
+    assert s4.model == "glm-5.3-flash"
+    snap = mgr.describe_session(s4.session_id)
+    assert snap is not None and snap.get("model") == "glm-5.3-flash"
     mgr.stop_session(s3.session_id)
 
 

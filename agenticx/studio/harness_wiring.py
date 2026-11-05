@@ -50,9 +50,11 @@ _TURN_WAIT_SECONDS = 240.0
 _BUILTIN_HARNESS_IDS = frozenset({"", "python-agent"})
 
 # Harnesses whose spawn() already accepts a native ``model`` option.
-# Do not invent a fake model knob for adapters that reject unknown options
-# (e.g. codebuddy).
-_HARNESSES_WITH_MODEL_OPTION = frozenset({"claude-code", "codex", "opencode"})
+# codebuddy CLI exposes ``--model`` (verified via ``codebuddy --help``);
+# keep this set in sync with desktop HARNESSES_WITH_NATIVE_MODEL_OPTION.
+_HARNESSES_WITH_MODEL_OPTION = frozenset(
+    {"claude-code", "codex", "opencode", "codebuddy"}
+)
 
 _lock = threading.Lock()
 _registry: Optional[HarnessRegistry] = None

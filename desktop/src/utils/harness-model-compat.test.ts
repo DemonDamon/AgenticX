@@ -80,17 +80,26 @@ describe("harness-model-compat", () => {
     expect(isModelAvailableForHarness("opencode", "bailian", "text-embedding-v4", providers)).toBe(false);
   });
 
-  it("disables ollama for claude-code and codex but not opencode", () => {
+  it("disables ollama for claude-code, codex, and codebuddy but not opencode", () => {
     expect(evaluateModelForHarness("claude-code", "ollama", "llama3.2", providers)).toEqual({
       available: false,
       reason: "ollama_unsupported",
     });
     expect(isModelAvailableForHarness("codex", "ollama", "llama3.2", providers)).toBe(false);
+    expect(isModelAvailableForHarness("codebuddy", "ollama", "llama3.2", providers)).toBe(false);
     expect(isModelAvailableForHarness("opencode", "ollama", "llama3.2", providers)).toBe(true);
   });
 
+  it("allows chat models for codebuddy (native --model) and greys embeddings", () => {
+    expect(isModelAvailableForHarness("codebuddy", "zhipu", "glm-5.1", providers)).toBe(true);
+    expect(isModelAvailableForHarness("codebuddy", "bailian", "qwen-plus", providers)).toBe(true);
+    expect(
+      evaluateModelForHarness("codebuddy", "bailian", "text-embedding-v4", providers),
+    ).toEqual({ available: false, reason: "embedding_unsupported" });
+  });
+
   it("disables all models for harnesses without a native model option", () => {
-    const rows = collectHarnessModelOptions(providers, "codebuddy");
+    const rows = collectHarnessModelOptions(providers, "unknown-cli");
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => !r.available && r.reason === "harness_no_model_option")).toBe(true);
   });
@@ -113,8 +122,15 @@ describe("harness-model-compat", () => {
     });
   });
 
-  it("returns null fallback when nothing is available (codebuddy)", () => {
-    expect(resolveFallbackModelForHarness(providers, "codebuddy")).toBeNull();
+  it("returns null fallback when nothing is available (unknown harness)", () => {
+    expect(resolveFallbackModelForHarness(providers, "unknown-cli")).toBeNull();
+  });
+
+  it("resolves a chat fallback for codebuddy", () => {
+    expect(resolveFallbackModelForHarness(providers, "codebuddy")).toEqual({
+      provider: "zhipu",
+      model: "glm-5.1",
+    });
   });
 
   it("enriches claude-code catalog with live settings aliases not in providers", () => {
