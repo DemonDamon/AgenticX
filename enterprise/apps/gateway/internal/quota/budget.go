@@ -967,6 +967,7 @@ func budgetDecisionToCheckResult(b BudgetDecision) CheckResult {
 		FallbackModel:        b.FallbackModel,
 		BudgetReservedTokens: b.ReservedTokens,
 		BudgetReservedCost:   b.ReservedCost,
+		StorageError:         b.StorageError,
 		BudgetReceipt:        b.Receipt,
 	}
 }

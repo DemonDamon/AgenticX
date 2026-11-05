@@ -781,7 +781,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluateChatRequestPolicy(r, rawBody, &req, &identity)
@@ -832,6 +831,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = quotaReservation
+	identity.quotaReservation = budgetCheck.Reservation
+	qctx.Reservation = budgetCheck.Reservation
+	defer s.finishChatReservation(budgetCheck.Reservation)
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -879,6 +881,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
+	}
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
 	}
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
@@ -1491,24 +1498,25 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 
 type requestIdentity struct {
 	// PublicRetrieval is set only after a verified public-retrieval signature.
-	PublicRetrieval bool
-	TenantID        string
-	UserID          string
-	UserEmail       string
-	DepartmentID    string
-	DepartmentIDs   []string
-	SessionID       string
-	RoleCodes       []string
-	ClientType      string
-	Scopes          []string
-	DataResidency   string
-	APITokenID      int64
-	AuthViaPAT      bool
-	TraceID         string
-	TraceStep       int
-	TraceStage      string
-	DeploymentID    string
-	AgentID         string
+	PublicRetrieval  bool
+	TenantID         string
+	UserID           string
+	UserEmail        string
+	DepartmentID     string
+	DepartmentIDs    []string
+	SessionID        string
+	RoleCodes        []string
+	ClientType       string
+	Scopes           []string
+	DataResidency    string
+	APITokenID       int64
+	AuthViaPAT       bool
+	TraceID          string
+	TraceStep        int
+	TraceStage       string
+	DeploymentID     string
+	AgentID          string
+	quotaReservation *quota.ReservationReceipt
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1517,13 +1525,14 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		apiTokenID = fmt.Sprintf("%d", identity.APITokenID)
 	}
 	return quota.RequestContext{
-		TenantID:   identity.TenantID,
-		UserID:     identity.UserID,
-		DeptID:     identity.DepartmentID,
-		APITokenID: apiTokenID,
-		AgentID:    identity.AgentID,
-		Role:       roleFromScopes(identity.Scopes),
-		Model:      model,
+		Reservation: identity.quotaReservation,
+		TenantID:    identity.TenantID,
+		UserID:      identity.UserID,
+		DeptID:      identity.DepartmentID,
+		APITokenID:  apiTokenID,
+		AgentID:     identity.AgentID,
+		Role:        roleFromScopes(identity.Scopes),
+		Model:       model,
 	}
 }
 
@@ -1534,6 +1543,10 @@ func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResul
 }
 
 func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
+	if check.StorageError {
+		writeAPIError(w, openai.Internal("quota storage unavailable"))
+		return
+	}
 	msg := check.Description
 	if msg == "" {
 		msg = "policy:quota:exceeded"
@@ -1721,10 +1734,13 @@ func (s *Server) settleInterruptedStreamUsage(
 	qctx quota.RequestContext,
 	span spanMeta,
 ) {
-	usage := openai.Usage{
-		PromptTokens:     estimatedInputTokens,
-		CompletionTokens: partialOutputTokens,
-		TotalTokens:      estimatedInputTokens + partialOutputTokens,
+	if budgetCheck != nil && budgetCheck.Reservation != nil {
+		identity.quotaReservation = budgetCheck.Reservation
+		qctx.Reservation = budgetCheck.Reservation
+	}
+	usage := openai.Usage{}
+	if partialOutputTokens > 0 {
+		usage = openai.Usage{PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens, TotalTokens: estimatedInputTokens + partialOutputTokens}
 	}
 	s.reportUsageDetailed(identity, decision, usage, budgetCheck, span)
 	if s.useChannelRelay() {
@@ -1740,6 +1756,12 @@ func (s *Server) reconcileQuotaUsage(
 	estimatedInputTokens int,
 	finalTotalTokens int,
 ) {
+	if identity.quotaReservation != nil {
+		if err := s.quotaTracker.FinishReservationTokens(identity.quotaReservation, int64(finalTotalTokens)); err != nil {
+			s.logger.Error("quota reservation settlement failed", "error", err)
+		}
+		return
+	}
 	delta := finalTotalTokens - estimatedInputTokens
 	if delta == 0 {
 		return
@@ -1780,6 +1802,12 @@ func (s *Server) reconcileQuotaUsage(
 }
 
 func (s *Server) rollbackQuotaReservation(qctx quota.RequestContext, tokens int) {
+	if qctx.Reservation != nil {
+		if err := s.quotaTracker.FinishReservation(qctx.Reservation, 0, 0); err != nil {
+			s.logger.Error("quota reservation rollback failed", "error", err)
+		}
+		return
+	}
 	if tokens <= 0 {
 		return
 	}

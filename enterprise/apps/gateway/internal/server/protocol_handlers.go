@@ -141,7 +141,6 @@ func (s *Server) dispatchProtocol(
 	thinkingMode := transform.ThinkingModeFromEnv()
 
 	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
@@ -160,6 +159,10 @@ func (s *Server) dispatchProtocol(
 	if !ok {
 		return
 	}
+
+	identity.quotaReservation = budgetCheck.Reservation
+	qctx.Reservation = budgetCheck.Reservation
+	defer s.finishChatReservation(budgetCheck.Reservation)
 
 	decision := s.decider.Decide(r, req.Model)
 	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
@@ -234,8 +237,16 @@ func (s *Server) protocolComplete(
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	actualTotal := int64(providerInputTokens + providerOutputTokens)
+	actualTotal := int64(resp.Usage.TotalTokens)
+	if actualTotal <= 0 {
+		actualTotal = int64(providerInputTokens + providerOutputTokens)
+	}
 	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
+	}
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
@@ -390,8 +401,7 @@ func (s *Server) protocolStream(
 				flusher.Flush()
 			}()
 		}
-		s.billingService.RollbackContext(qctx, reservedTokens)
-		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		s.settleInterruptedStreamUsage(identity, decision, estimatedInputTokens, estimateTextTokens(responseBuilder.String()), reservedTokens, &budgetCheck, qctx, spanMeta{Status: "error", ErrorMessage: sanitizeTraceError(formatStreamError(streamErr)), PromptText: joinMessages(req.Messages), CompletionText: responseBuilder.String(), DurationMS: durationMSSince(startedAt)})
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			return

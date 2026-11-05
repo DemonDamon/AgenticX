@@ -18,18 +18,21 @@ func sharedLimiter() *RateLimiter {
 
 // RequestContext carries identity dimensions for quota evaluation.
 type RequestContext struct {
-	TenantID   string
-	UserID     string
-	DeptID     string
-	APITokenID string
-	AgentID    string
-	Role       string
-	Model      string
+	TenantID    string
+	UserID      string
+	DeptID      string
+	APITokenID  string
+	AgentID     string
+	Role        string
+	Model       string
+	Reservation *ReservationReceipt
 }
 
 // CheckResult aggregates quota decision across dimensions.
 type CheckResult struct {
 	Allowed              bool
+	StorageError         bool
+	Reservation          *ReservationReceipt
 	Warn                 bool
 	Kind                 string
 	Rule                 Rule
@@ -43,42 +46,58 @@ type CheckResult struct {
 	BudgetReceipt        *BudgetReceipt
 }
 
-func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) CheckResult {
+func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) (result CheckResult) {
 	cfg := t.loadConfig()
 	rule := selectRuleExtended(cfg, ctx)
 	lim := sharedLimiter()
-
+	receipt := &ReservationReceipt{ID: newLedgerID()}
+	defer func() {
+		result.Reservation = receipt
+		if !result.Allowed {
+			if err := t.FinishReservation(receipt, 0, 0); err != nil {
+				result.StorageError = true
+				result.Description = "quota compensation storage failed"
+			}
+			t.ReleaseReservation(receipt)
+		}
+	}()
+	var warning *CheckResult
+	remember := func(r CheckResult) {
+		if r.Warn {
+			copy := r
+			warning = &copy
+		}
+	}
 	if rule.RPM > 0 {
-		key := rateKey("rpm", ctx)
-		ok, used := lim.AllowRPM(key, rule.RPM)
+		ok, used := lim.AllowRPM(rateKey("rpm", ctx), rule.RPM)
 		if !ok {
 			if rule.Action == ActionBlock {
 				return blockedResult("rpm", rule, int64(used), int64(rule.RPM))
 			}
-			return warnResult("rpm", rule)
+			remember(warnResult("rpm", rule))
 		}
 	}
-
-	if result, ok := t.checkRequestCountLimits(ctx, rule); ok {
-		return result
+	if r, done := t.checkRequestCountLimits(ctx, rule); done {
+		if !r.Allowed {
+			return r
+		}
+		remember(r)
 	}
-
-	if result, ok := t.checkTokenWindowLimits(ctx, rule, tokens); ok {
-		return result
+	if r, done := t.reserveTokenWindowReceipt(ctx, rule, tokens, receipt); done {
+		if !r.Allowed {
+			return r
+		}
+		remember(r)
 	}
-
 	if rule.TPM > 0 {
-		key := rateKey("tpm", ctx)
-		add := max64(tokens, 1)
-		ok, used := lim.AllowTPM(key, rule.TPM, add)
+		ok, used := lim.AllowTPM(rateKey("tpm", ctx), rule.TPM, max64(tokens, 1))
 		if !ok {
 			if rule.Action == ActionBlock {
 				return blockedResult("tpm", rule, used, int64(rule.TPM))
 			}
-			return warnResult("tpm", rule)
+			remember(warnResult("tpm", rule))
 		}
 	}
-
 	if rule.MaxConcurrency > 0 {
 		key := rateKey("concurrency", ctx)
 		ok, used := lim.AcquireConcurrency(key, rule.MaxConcurrency)
@@ -86,53 +105,37 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			if rule.Action == ActionBlock {
 				return blockedResult("concurrency", rule, int64(used), int64(rule.MaxConcurrency))
 			}
-			return warnResult("concurrency", rule)
+			remember(warnResult("concurrency", rule))
+		} else {
+			receipt.release = func() { lim.ReleaseConcurrency(key) }
 		}
 	}
-
-	monthly := t.CheckAndAddContext(ctx, tokens, LedgerEventReserve)
+	monthly := t.reserveMonthlyReceipt(ctx, cfg, tokens, receipt)
 	if !monthly.Allowed {
-		t.ReleaseConcurrency(ctx)
-		return CheckResult{
-			Allowed:     false,
-			Kind:        "monthly",
-			Rule:        monthly.Rule,
-			Used:        monthly.UsedAfter,
-			Limit:       monthly.Rule.MonthlyTokens,
-			Description: "policy:quota:monthly_exceeded",
-			Headers: map[string]string{
-				"X-AgenticX-Quota-Used":  fmt.Sprintf("%d", monthly.UsedAfter),
-				"X-AgenticX-Quota-Limit": fmt.Sprintf("%d", monthly.Rule.MonthlyTokens),
-			},
-		}
+		return CheckResult{Allowed: false, StorageError: monthly.StorageError, Kind: "monthly", Rule: monthly.Rule, Used: monthly.UsedAfter, Limit: monthly.Rule.MonthlyTokens, Description: "policy:quota:monthly_exceeded"}
 	}
 	if monthly.Rule.Action == ActionWarn && monthly.ExceededBy > 0 {
-		return CheckResult{
-			Allowed:     true,
-			Warn:        true,
-			Kind:        "monthly",
-			Rule:        monthly.Rule,
-			Description: "policy:quota:monthly_warn",
-			Headers:     map[string]string{"X-AgenticX-Quota-Warn": "monthly"},
-		}
+		remember(warnResult("monthly", monthly.Rule))
 	}
-
 	budget := t.CheckBudget(ctx, tokens, costUSD)
+	receipt.Budget = budget.Receipt
 	if !budget.Allowed {
-		t.ReleaseConcurrency(ctx)
 		return budgetDecisionToCheckResult(budget)
 	}
+	result = CheckResult{Allowed: true, Rule: rule, Description: "ok", BudgetReservedTokens: budget.ReservedTokens, BudgetReservedCost: budget.ReservedCost, BudgetReceipt: budget.Receipt}
+	if warning != nil {
+		result.Warn = true
+		result.Kind = warning.Kind
+		result.Description = warning.Description
+		result.Headers = warning.Headers
+	}
 	if budget.Warn || budget.FallbackModel != "" {
-		result := CheckResult{
-			Allowed:              true,
-			Warn:                 budget.Warn,
-			Kind:                 "budget",
-			Description:          budget.Description,
-			Headers:              map[string]string{},
-			FallbackModel:        budget.FallbackModel,
-			BudgetReservedTokens: budget.ReservedTokens,
-			BudgetReservedCost:   budget.ReservedCost,
-			BudgetReceipt:        budget.Receipt,
+		result.Warn = budget.Warn || result.Warn
+		result.Kind = "budget"
+		result.Description = budget.Description
+		result.FallbackModel = budget.FallbackModel
+		if result.Headers == nil {
+			result.Headers = map[string]string{}
 		}
 		if budget.Warn {
 			result.Headers["X-AgenticX-Budget-Warn"] = budget.Description
@@ -141,17 +144,8 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			result.Headers["X-AgenticX-Budget-Used"] = fmt.Sprintf("%.6f", budget.Used)
 			result.Headers["X-AgenticX-Budget-Limit"] = fmt.Sprintf("%.6f", budget.Limit)
 		}
-		return result
 	}
-
-	return CheckResult{
-		Allowed:              true,
-		Rule:                 rule,
-		Description:          "ok",
-		BudgetReservedTokens: budget.ReservedTokens,
-		BudgetReservedCost:   budget.ReservedCost,
-		BudgetReceipt:        budget.Receipt,
-	}
+	return result
 }
 
 // CheckMCPToolCall enforces per-minute MCP tool invocation limits.
@@ -273,8 +267,8 @@ func (t *Tracker) checkRequestCountLimits(ctx RequestContext, rule Rule) (CheckR
 			continue
 		}
 		ok, used, err := t.requestCounter.Increment(ctx, c.kind, c.limit)
-		if err != nil && rule.Action == ActionBlock {
-			return blockedResult("requests", rule, used, int64(c.limit)), true
+		if err != nil {
+			return CheckResult{Allowed: false, StorageError: true, Kind: "requests", Rule: rule, Description: "request counter storage failed"}, true
 		}
 		if !ok {
 			kind := "requests"
