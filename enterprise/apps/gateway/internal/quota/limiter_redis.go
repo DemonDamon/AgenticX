@@ -48,6 +48,9 @@ type redisLimiterBackend struct {
 }
 
 func newRedisLimiterBackend(redisURL string) (*redisLimiterBackend, error) {
+	return createRedisLimiterBackend(redisURL, true)
+}
+func createRedisLimiterBackend(redisURL string, ping bool) (*redisLimiterBackend, error) {
 	opts, err := redis.ParseURL(strings.TrimSpace(redisURL))
 	if err != nil {
 		return nil, err
@@ -59,7 +62,12 @@ func newRedisLimiterBackend(redisURL string) (*redisLimiterBackend, error) {
 	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), dialTO)
 	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
+	if err := func() error {
+		if ping {
+			return client.Ping(ctx).Err()
+		}
+		return nil
+	}(); err != nil {
 		_ = client.Close()
 		return nil, err
 	}
@@ -161,18 +169,29 @@ func redisURLFromEnv() string {
 }
 
 var redisFallbackWarnOnce sync.Once
+var redisLocalModeWarnOnce sync.Once
 
-func buildSharedRateLimiter() *RateLimiter {
-	redisURL := redisURLFromEnv()
-	if redisURL == "" {
-		return NewRateLimiter()
-	}
-	backend, err := newRedisLimiterBackend(redisURL)
-	if err != nil {
-		redisFallbackWarnOnce.Do(func() {
-			log.Printf("quota: redis limiter init failed, falling back to in-process: %v", err)
+func buildSharedRateLimiter() *RateLimiter { return NewSharedRateLimiter(redisURLFromEnv()) }
+
+// NewSharedRateLimiter allows independent gateway instances to share concurrency.
+func NewSharedRateLimiter(redisURL string) *RateLimiter {
+	if strings.TrimSpace(redisURL) == "" {
+		redisLocalModeWarnOnce.Do(func() {
+			log.Printf("quota: shared storage is not configured; concurrency limits apply per gateway process")
 		})
 		return NewRateLimiter()
 	}
-	return NewRateLimiterWithBackend(backend)
+	backend, err := createRedisLimiterBackend(redisURL, false)
+	if err != nil {
+		redisFallbackWarnOnce.Do(func() {
+			log.Printf("quota: shared limiter unavailable; concurrency admission fails closed; rate windows use local fallback")
+		})
+		limiter := NewRateLimiter()
+		limiter.concurrencyErr = ErrConcurrencyUnavailable
+		return limiter
+	}
+	limiter := NewRateLimiterWithBackend(backend)
+	limiter.leaseConfig.opTimeout = backend.opTO
+	limiter.concurrencyStore = &redisConcurrencyStore{client: backend.client.WithTimeout(backend.opTO)}
+	return limiter
 }

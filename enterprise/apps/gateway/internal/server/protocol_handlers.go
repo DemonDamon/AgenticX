@@ -176,6 +176,8 @@ func (s *Server) dispatchProtocol(
 	identity.quotaReservation = budgetCheck.Reservation
 	qctx.Reservation = budgetCheck.Reservation
 	defer s.finishChatReservation(budgetCheck.Reservation)
+	r, cancelLease := s.bindChatLease(r, budgetCheck.Reservation)
+	defer cancelLease()
 
 	decision := s.decider.Decide(r, req.Model)
 	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
@@ -213,6 +215,9 @@ func (s *Server) protocolComplete(
 		return
 	}
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
+	if concurrencyLeaseLost(identity) {
+		err = quota.ErrConcurrencyLeaseLost
+	}
 	decision := routingDecisionFromRelay(result, relayModel(req.Model, result.ResolvedModel), s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
@@ -227,7 +232,7 @@ func (s *Server) protocolComplete(
 			writeAPIError(w, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound))
 			return
 		}
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	resp := result.Response
@@ -290,6 +295,10 @@ func (s *Server) protocolComplete(
 		return
 	}
 
+	if concurrencyLeaseLost(identity) {
+		writeAPIError(w, leaseAwareAPIError(quota.ErrConcurrencyLeaseLost))
+		return
+	}
 	switch session.outbound {
 	case inbound.ProtocolClaude:
 		enc := outbound.NewClaudeStreamEncoder(req.Model)
@@ -364,6 +373,9 @@ func (s *Server) protocolStream(
 	var blockedHits []policyengine.HitEvent
 
 	push := func(chunk openai.StreamChunk) error {
+		if concurrencyLeaseLost(identity) {
+			return quota.ErrConcurrencyLeaseLost
+		}
 		accounting.observe(chunk)
 		transform.ApplyStreamDelta(&chunk, thinkingMode)
 		if len(chunk.Choices) > 0 {
@@ -424,6 +436,9 @@ func (s *Server) protocolStream(
 
 	streamResult, streamErr := s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
 	decision := routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), s.decider.Decide(r, req.Model))
+	if concurrencyLeaseLost(identity) {
+		streamErr = quota.ErrConcurrencyLeaseLost
+	}
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
@@ -437,6 +452,10 @@ func (s *Server) protocolStream(
 			}()
 		}
 		s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true), identity, decision, estimatedInputTokens, estimateTextTokens(responseBuilder.String()), reservedTokens, &budgetCheck, qctx, spanMeta{Status: "error", ErrorMessage: sanitizeTraceError(formatStreamError(streamErr)), PromptText: joinMessages(req.Messages), CompletionText: responseBuilder.String(), DurationMS: durationMSSince(startedAt)})
+		if errors.Is(streamErr, quota.ErrConcurrencyLeaseLost) {
+			writeStreamAPIError(w, flusher, leaseAwareAPIError(streamErr))
+			return
+		}
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			return
@@ -483,6 +502,10 @@ func (s *Server) protocolStream(
 		CompletionText: responseText,
 	})
 
+	if concurrencyLeaseLost(identity) {
+		writeStreamPolicyError(w, flusher, "50302", formatStreamError(quota.ErrConcurrencyLeaseLost), nil)
+		return
+	}
 	usage := streamUsage
 	switch session.outbound {
 	case inbound.ProtocolClaude:
