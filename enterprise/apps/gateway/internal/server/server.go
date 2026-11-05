@@ -1192,6 +1192,7 @@ func (s *Server) handleStream(
 		}
 		payload = s.applyWasmStreamChunk(pluginCtx, payload)
 		if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+			recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 			return err
 		}
 		flusher.Flush()
@@ -1216,7 +1217,8 @@ func (s *Server) handleStream(
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+				recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 				flusher.Flush()
 			}()
 		}
@@ -1310,7 +1312,7 @@ func (s *Server) handleStream(
 				Delta: openai.StreamDelta{Content: tail},
 			}},
 		}
-		_ = push(tailChunk)
+		recordStreamDiagnostic(r.Context(), push(tailChunk), len(blockedHits) > 0)
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
@@ -1376,11 +1378,12 @@ func (s *Server) handleStream(
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
+		recordDiagnosticFailure(r.Context(), err, observability.ReasonInternalError)
 		writeStreamError(w, flusher, "audit write failed")
 		return
 	}
 
-	usagePayload, _ := json.Marshal(map[string]any{
+	usagePayload, marshalErr := json.Marshal(map[string]any{
 		"agenticx_usage": map[string]any{
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,
@@ -1389,10 +1392,13 @@ func (s *Server) handleStream(
 			"model":         decision.Model,
 		},
 	})
-	_, _ = w.Write([]byte("data: " + string(usagePayload) + "\n\n"))
+	recordDiagnosticFailure(r.Context(), marshalErr, observability.ReasonInternalError)
+	_, writeErr := w.Write([]byte("data: " + string(usagePayload) + "\n\n"))
+	recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	flusher.Flush()
 
-	_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	_, writeErr = w.Write([]byte("data: [DONE]\n\n"))
+	recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	flusher.Flush()
 }
 

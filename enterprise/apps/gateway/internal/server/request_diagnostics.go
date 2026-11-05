@@ -43,6 +43,7 @@ func diagnosticStreamReason(err error) observability.TerminalReason {
 	return observability.ReasonUpstreamError
 }
 
+// Producer success is not handler completion: auditing and final frames remain.
 func recordStreamDiagnostic(ctx context.Context, err error, policyBlocked bool) {
 	phases := observability.PhasesFromContext(ctx)
 	if phases == nil {
@@ -52,10 +53,16 @@ func recordStreamDiagnostic(ctx context.Context, err error, policyBlocked bool) 
 		phases.SetReason(diagnosticStreamReason(ctx.Err()))
 	} else if policyBlocked {
 		phases.SetReason(observability.ReasonPolicyBlocked)
-	} else if err == nil {
-		phases.SetReason(observability.ReasonCompleted)
-	} else {
+	} else if err != nil {
 		// A producer may already know this was a downstream callback error.
 		phases.SetReasonIfUnset(diagnosticStreamReason(err))
+	}
+}
+
+// recordDiagnosticFailure observes handler-tail failures without changing their
+// existing response, return or settlement behavior. The error is never retained.
+func recordDiagnosticFailure(ctx context.Context, err error, reason observability.TerminalReason) {
+	if err != nil {
+		observability.PhasesFromContext(ctx).SetReason(reason)
 	}
 }

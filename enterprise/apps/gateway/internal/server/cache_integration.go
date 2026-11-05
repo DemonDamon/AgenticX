@@ -10,6 +10,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -106,10 +107,10 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 		OutputTokens:       usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
 	}
-	_ = s.writeAuditEvent(ev)
+	recordDiagnosticFailure(ctx.r.Context(), s.writeAuditEvent(ev), observability.ReasonInternalError)
 
 	if ctx.req.Stream {
-		_ = cache.ReplayStream(ctx.w, hit.Entry, s.cacheService.Config().ReplayMode)
+		recordDiagnosticFailure(ctx.r.Context(), cache.ReplayStream(ctx.w, hit.Entry, s.cacheService.Config().ReplayMode), observability.ReasonDownstreamError)
 		return true
 	}
 	if len(hit.Entry.Response.Choices) > 0 {
