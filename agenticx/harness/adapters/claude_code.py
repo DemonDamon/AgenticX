@@ -18,6 +18,7 @@ import ujson
 
 from agenticx.cc_bridge.session_manager import BridgeSession, BridgeSessionManager
 from agenticx.harness.adapter import HarnessAdapter
+from agenticx.harness.cc_result_sanitize import sanitize_claude_code_result_text
 from agenticx.harness.types import (
     CapabilityNotSupported,
     HarnessCapabilities,
@@ -36,7 +37,11 @@ _CC_MODES = frozenset({"headless", "visible_tui"})
 
 
 def _last_result_text(session: BridgeSession) -> str:
-    """Best-effort ``result`` field from the last NDJSON result line."""
+    """Best-effort ``result`` field from the last NDJSON result line.
+
+    Sanitize before truncating so a long thinking preamble cannot push the
+    real answer past ``_RESULT_TEXT_MAX_CHARS``.
+    """
     with session.lock:
         lines = list(session.lines)
     for line in reversed(lines):
@@ -52,7 +57,8 @@ def _last_result_text(session: BridgeSession) -> str:
         result = obj.get("result")
         if result is None:
             return ""
-        return str(result)[:_RESULT_TEXT_MAX_CHARS]
+        cleaned = sanitize_claude_code_result_text(str(result))
+        return cleaned[:_RESULT_TEXT_MAX_CHARS]
     return ""
 
 
@@ -137,11 +143,14 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                 session_id, request.wait_seconds
             )
             status = TURN_STATUS_SUCCESS if ok else TURN_STATUS_TIMEOUT
+            cleaned = (
+                sanitize_claude_code_result_text(parsed) if ok else ""
+            )
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=status,
-                result_text=parsed if ok else "",
+                result_text=cleaned[:_RESULT_TEXT_MAX_CHARS] if cleaned else "",
                 tail=tail,
                 detail={
                     "mode": "visible_tui",
