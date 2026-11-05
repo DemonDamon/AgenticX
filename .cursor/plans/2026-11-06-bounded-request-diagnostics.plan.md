@@ -39,3 +39,14 @@ Document offsets versus admission duration, sampling counts and missing phases, 
 - `git diff --check`: clean.
 
 The subsequent shared-lease integration must classify its cancellation cause before the generic client-cancelled fallback. This baseline does not yet contain that sentinel; do not fabricate a string-message match or alter quota behavior to simulate it.
+
+## Handler-tail observation follow-up
+Independent review found that a nil producer result was marked completed before audit persistence, terminal usage/DONE frames, protocol final frames and cache replay had finished. The existing handlers intentionally ignore some write/audit returns; preserving that behavior must not hide diagnostic failure.
+- `internal/server/request_diagnostics.go::recordStreamDiagnostic`: do not install a completed reason for a nil producer result. Let the owning middleware finish success after the complete handler. Add a fixed diagnostic-only failure observer that accepts an error only to test nil/non-nil, never stores or stringifies it, and assigns a closed internal/downstream reason.
+- `server.go::handleStream` (~1380–1400): observe the audit failure, optional terminal payload serialization failure, and usage/DONE write results. Keep all existing settlement, return and frame ordering unchanged.
+- `protocol_handlers.go::protocolStream` (~433–453): observe each final encoder/DONE write and the existing audit write result, without changing response or settlement policy.
+- `cache_integration.go::tryServeFromCache` (~110): observe the audit and ReplayStream results while preserving served=true and all cache/accounting behavior.
+- `internal/server/request_diagnostics_terminal_test.go`: a writer that fails only at final usage/DONE/encoder markers with io.ErrClosedPipe and a live context must yield downstream_error instead of completed; audit failures must yield internal_error. Cache hit tests cover both replay and audit failure. Real HTTP/1 and HTTP/2 SSE tests must assert http.Flusher and ResponseController.Flush still work with sampling enabled and an event arrives before the handler finishes.
+These observations do not redesign product errors, retries, auditing or quota settlement. The trace phase map remains an explicitly early usage-report snapshot; it must not claim completed before handler completion.
+
+Follow-up validation: the final usage/DONE, three protocol terminal encoders, protocol/main/cache audit failures and cache replay failures were reproduced as completed before the fix. They now report fixed downstream_error/internal_error values while the response remains HTTP 200 and its context remains live. Enabled-sampling real HTTP/1 and HTTP/2 SSE Flusher/ResponseController contracts pass. Server and observability race/vet pass; producer success no longer claims a completed early trace snapshot.

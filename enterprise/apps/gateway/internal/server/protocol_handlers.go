@@ -14,6 +14,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -354,13 +355,15 @@ func (s *Server) protocolStream(
 	case inbound.ProtocolClaude:
 		claudeEnc = outbound.NewClaudeStreamEncoder(req.Model)
 		if line := claudeEnc.MessageStart(); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 			flusher.Flush()
 		}
 	case inbound.ProtocolResponses:
 		responsesEnc = outbound.NewResponsesStreamEncoder(req.Model)
 		if line := responsesEnc.Created(); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 			flusher.Flush()
 		}
 	case inbound.ProtocolGemini:
@@ -406,18 +409,21 @@ func (s *Server) protocolStream(
 		case inbound.ProtocolClaude:
 			for _, line := range claudeEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
 		case inbound.ProtocolGemini:
 			for _, line := range geminiEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
 		case inbound.ProtocolResponses:
 			for _, line := range responsesEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
@@ -427,6 +433,7 @@ func (s *Server) protocolStream(
 				return err
 			}
 			if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+				recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 				return err
 			}
 		}
@@ -449,7 +456,8 @@ func (s *Server) protocolStream(
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+				recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 				flusher.Flush()
 			}()
 		}
@@ -512,20 +520,23 @@ func (s *Server) protocolStream(
 	switch session.outbound {
 	case inbound.ProtocolClaude:
 		for _, line := range claudeEnc.Final(usage) {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 		}
 	case inbound.ProtocolGemini:
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+		recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	case inbound.ProtocolResponses:
 		if line := responsesEnc.Done(usage); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 		}
 	}
 	flusher.Flush()
 
 	outboundProto := outboundProtocolForChannel(streamResult.Channel, session.outbound)
 	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, relay.CompleteResult{Channel: streamResult.Channel, KeyRef: streamResult.KeyRef}, streamResult, estimatedInputTokens, inputTokens, outputTokens, settle.Delta, responseText, req.Messages)
-	_ = s.writeAuditEvent(ev)
+	recordDiagnosticFailure(r.Context(), s.writeAuditEvent(ev), observability.ReasonInternalError)
 }
 
 func outboundProtocolForChannel(ch channel.Channel, clientProtocol string) string {
