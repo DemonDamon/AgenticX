@@ -85,9 +85,12 @@ dependencies = [
 # `pip install "$PROJECT_ROOT[desktop-runtime]"` 安装本组。
 desktop-runtime = [
     "PyMuPDF>=1.23.0,<2",
-    "pypdf>=3.15.0,<5",
+    "pypdf>=6.21.4,<7",
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
+    # The 3.10 compatibility branch retains known image-parser risks.
+    "Pillow>=12.3.0,<13; python_version < '3.11'",
+    "Pillow>=13.0.0,<14; python_version >= '3.11'",
     "docx2txt>=0.8,<1",
     "numpy>=1.24.0,<2",
     # 知识库默认向量后端：agenticx.studio.kb.runtime._ChromaBackend 直接
@@ -140,10 +143,13 @@ graphiti = [
 #        docx2txt 处理旧版 .doc 需要 antiword (brew install antiword)
 document = [
     "PyMuPDF>=1.23.0,<2",
-    "pypdf>=3.15.0,<5",
+    "pypdf>=6.21.4,<7",
     "PyPDF2>=3.0.0,<4",
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
+    # The 3.10 compatibility branch retains known image-parser risks.
+    "Pillow>=12.3.0,<13; python_version < '3.11'",
+    "Pillow>=13.0.0,<14; python_version >= '3.11'",
     "docx2txt>=0.8,<1",
     "pytesseract>=0.3.10,<1",
     "pdf2image>=1.16.0,<2",
@@ -184,7 +190,7 @@ monitoring = [
 database = [
     "psycopg2-binary>=2.9.0,<3",
     "SQLAlchemy>=2.0.0,<3",
-    "cryptography>=41.0.0,<45",
+    "cryptography>=41.0.0,<49",
 ]
 # ── 代码语义索引（Semble）──
 code_index = [

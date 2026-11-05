@@ -38,6 +38,7 @@ _DESKTOP_RUNTIME_PACKAGES = (
                     # "The onnxruntime python package is not installed"
     "fitz",         # PyMuPDF 顶层模块名
     "pypdf",
+    "PIL",          # image decoders used by Office readers and document previews
     "docx",         # python-docx
     "pptx",         # python-pptx
     "docx2txt",
