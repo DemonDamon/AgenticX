@@ -13,6 +13,10 @@ import {
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
   resolveSessionBindingModel,
 } from "./utils/model-options";
+import {
+  coerceModelForHarness,
+  resolveActiveHarnessId,
+} from "./utils/harness-model-compat";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
@@ -1701,10 +1705,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { chatStyle };
     }),
   setPreferredHarnessId: (harnessId) =>
-    set(() => {
+    set((state) => {
       const next = toStoredPreferredHarnessId(harnessId);
       persistPreferredHarnessId(next);
-      return { preferredHarnessId: next };
+      // Preferred applies to newly created sessions. Coerce the global
+      // active model so the next pane defaults remain valid for the new
+      // preferred harness; existing panes keep their snapshotted harnessId.
+      const coercedActive = coerceModelForHarness(
+        state.settings.providers,
+        next,
+        state.activeProvider,
+        state.activeModel,
+        state.activeProvider,
+      );
+      return {
+        preferredHarnessId: next,
+        activeProvider: coercedActive?.provider ?? "",
+        activeModel: coercedActive?.model ?? "",
+      };
     }),
   setUserNickname: (name) =>
     set(() => {
@@ -2666,11 +2684,44 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
   setPaneHarness: (paneId, harnessId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, harnessId: harnessId || null } : pane
-      ),
-    })),
+    set((state) => {
+      const nextHarness = harnessId || null;
+      const providers = state.settings.providers;
+      const nextPanes = state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const activeHarness = resolveActiveHarnessId(nextHarness, state.preferredHarnessId);
+        const provider = (pane.modelProvider || "").trim();
+        const model = (pane.modelName || "").trim();
+        let modelProvider = pane.modelProvider;
+        let modelName = pane.modelName;
+        if (provider || model) {
+          const coerced = coerceModelForHarness(
+            providers,
+            activeHarness,
+            provider,
+            model,
+            provider,
+          );
+          if (!coerced) {
+            modelProvider = "";
+            modelName = "";
+          } else {
+            modelProvider = coerced.provider;
+            modelName = coerced.model;
+          }
+        }
+        return { ...pane, harnessId: nextHarness, modelProvider, modelName };
+      });
+      const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
+      if (!activePane || activePane.id !== paneId) {
+        return { panes: nextPanes };
+      }
+      return {
+        panes: nextPanes,
+        activeProvider: (activePane.modelProvider || "").trim(),
+        activeModel: (activePane.modelName || "").trim(),
+      };
+    }),
   setPaneTurnIntent: (paneId, intent) =>
     set((state) => ({
       panes: state.panes.map((pane) =>

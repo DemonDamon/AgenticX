@@ -126,6 +126,7 @@ import { parkTrailingReasoningInProcess, resolveProcessFoldRange } from "./messa
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
+  isSessionBusyElsewhereError,
 } from "../utils/noisy-chat-messages";
 import {
   ATTACHMENT_ROUTING_OFF,
@@ -433,11 +434,21 @@ import {
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
 import {
+  CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
   collectSelectableModelOptions,
   coerceSelectableModel,
+  isClaudeLiveSettingsProvider,
   isModelSelectable,
   isProviderCredentialed,
 } from "../utils/model-options";
+import {
+  coerceModelForHarness,
+  collectHarnessModelOptions,
+  enrichHarnessModelOptionsWithClaudeLive,
+  evaluateModelForHarness,
+  resolveActiveHarnessId,
+  type HarnessModelDisableReason,
+} from "../utils/harness-model-compat";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
@@ -1381,15 +1392,33 @@ function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_P
   return nextTop;
 }
 
+
+function harnessModelDisableLabel(
+  reason: HarnessModelDisableReason | undefined,
+  t: (key: string) => string,
+): string {
+  if (reason === "embedding_unsupported") return t("model.harnessEmbeddingUnsupported");
+  if (reason === "ollama_unsupported") return t("model.harnessOllamaUnsupported");
+  return t("model.harnessNoModelOption");
+}
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
   const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
   const setPaneContextWindow = useAppStore((s) => s.setPaneContextWindow);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
+  const preferredHarnessId = useAppStore((s) => s.preferredHarnessId);
+  const activeHarnessId = useMemo(
+    () => resolveActiveHarnessId(paneModel?.harnessId, preferredHarnessId),
+    [paneModel?.harnessId, preferredHarnessId],
+  );
+  const [claudeLiveModelIds, setClaudeLiveModelIds] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1431,6 +1460,34 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeHarnessId !== "claude-code") {
+      setClaudeLiveModelIds([]);
+      return;
+    }
+    const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+    if (!base) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const resp = await fetch(`${base}/api/claude-code/settings/live-models`, { headers });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as { ok?: boolean; models?: unknown };
+        if (cancelled || !data?.ok || !Array.isArray(data.models)) return;
+        setClaudeLiveModelIds(
+          data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+        );
+      } catch {
+        if (!cancelled) setClaudeLiveModelIds([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHarnessId, apiBase, apiToken, open]);
+
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
     setOpen(false);
@@ -1442,12 +1499,99 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (sid) {
       void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
     }
+    // Direct-style Claude settings sync (claude-code only; never for builtin / live aliases).
+    if (
+      activeHarnessId === "claude-code"
+      && !isClaudeLiveSettingsProvider(provider)
+    ) {
+      const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+      if (base) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        void fetch(`${base}/api/claude-code/settings/apply`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ provider, model }),
+        })
+          .then(async (resp) => {
+            if (!resp.ok) return;
+            try {
+              const data = (await resp.json()) as { models?: unknown };
+              if (Array.isArray(data.models)) {
+                setClaudeLiveModelIds(
+                  data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+                );
+              }
+            } catch {
+              /* ignore */
+            }
+          })
+          .catch(() => {
+            /* non-blocking */
+          });
+      }
+    }
   };
 
-  const options = useMemo(
-    () => collectSelectableModelOptions(settings.providers),
-    [settings.providers],
+  const options = useMemo(() => {
+    const base = collectHarnessModelOptions(settings.providers, activeHarnessId);
+    return enrichHarnessModelOptionsWithClaudeLive(
+      base,
+      activeHarnessId,
+      claudeLiveModelIds,
+    );
+  }, [settings.providers, activeHarnessId, claudeLiveModelIds]);
+  const availableOptions = useMemo(
+    () => options.filter((row) => row.available),
+    [options],
   );
+
+  // Preferred/pane harness changed → drop selections the new harness cannot use.
+  useEffect(() => {
+    const provider = (paneModel?.modelProvider || "").trim();
+    const model = (paneModel?.modelName || "").trim();
+    if (!provider && !model) return;
+    const verdict = evaluateModelForHarness(
+      activeHarnessId,
+      provider,
+      model,
+      settings.providers,
+    );
+    if (verdict.available) return;
+    const fallback = coerceModelForHarness(
+      settings.providers,
+      activeHarnessId,
+      provider,
+      model,
+      provider,
+    );
+    if (!fallback) {
+      setPaneModel(paneId, "", "");
+      return;
+    }
+    if (fallback.provider === provider && fallback.model === model) return;
+    setPaneModel(paneId, fallback.provider, fallback.model);
+    void window.agenticxDesktop.saveConfig({
+      activeProvider: fallback.provider,
+      activeModel: fallback.model,
+    });
+    const sid = String(paneModel?.sessionId ?? "").trim();
+    if (sid) {
+      void window.agenticxDesktop.setSessionModel({
+        sessionId: sid,
+        provider: fallback.provider,
+        model: fallback.model,
+      });
+    }
+  }, [
+    activeHarnessId,
+    paneId,
+    paneModel?.modelName,
+    paneModel?.modelProvider,
+    paneModel?.sessionId,
+    setPaneModel,
+    settings.providers,
+  ]);
 
   /**
    * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
@@ -1460,6 +1604,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       if (!isProviderCredentialed(entry)) continue;
       byProvider.set(provider, []);
     }
+    if (options.some((opt) => isClaudeLiveSettingsProvider(opt.provider))) {
+      byProvider.set(CLAUDE_LIVE_SETTINGS_PROVIDER_ID, []);
+    }
     for (const opt of options) {
       const bucket = byProvider.get(opt.provider);
       if (bucket) bucket.push(opt);
@@ -1467,10 +1614,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     }
     return [...byProvider.entries()].map(([provider, items]) => ({
       provider,
-      providerLabel: getProviderDisplayName(provider, settings.providers[provider]),
+      providerLabel: isClaudeLiveSettingsProvider(provider)
+        ? t("model.claudeLiveSettings")
+        : getProviderDisplayName(provider, settings.providers[provider]),
       items,
     }));
-  }, [options, settings.providers]);
+  }, [options, settings.providers, t]);
 
   /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
   const ambiguousModelNames = useMemo(() => {
@@ -1489,15 +1638,29 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const currentSelectable =
     Boolean(currentModel)
     && Boolean(currentProvider)
-    && isModelSelectable(currentProvider, currentModel, settings.providers);
+    && evaluateModelForHarness(
+      activeHarnessId,
+      currentProvider,
+      currentModel,
+      settings.providers,
+    ).available;
   const currentParts = useMemo(() => {
     if (!currentSelectable) return null;
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return {
+        modelName: currentModel,
+        providerLabel: t("model.claudeLiveSettings"),
+      };
+    }
     return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
-  }, [currentSelectable, currentModel, currentProvider, settings.providers]);
+  }, [currentSelectable, currentModel, currentProvider, settings.providers, t]);
   const currentLabel = useMemo(() => {
     if (!currentModel) return t("model.unselected");
     if (!currentProvider) return currentModel;
     if (!currentSelectable) return t("model.unselected");
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return `${t("model.claudeLiveSettings")}/${currentModel}`;
+    }
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
   }, [currentModel, currentProvider, currentSelectable, settings.providers, t]);
@@ -1745,6 +1908,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               const isActive =
                                 opt.provider === currentProvider && opt.model === currentModel;
                               const isHover = hoverKey === rowKey;
+                              const disabled = !opt.available;
+                              const disableReason = disabled
+                                ? harnessModelDisableLabel(opt.reason, t)
+                                : "";
                               const { modelName } = formatModelDisplayParts(
                                 opt.provider,
                                 opt.model,
@@ -1757,21 +1924,34 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   type="button"
                                   role="option"
                                   aria-selected={isActive}
+                                  aria-disabled={disabled}
+                                  disabled={disabled}
+                                  title={disabled ? disableReason : undefined}
                                   className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-5 transition-colors ${
-                                    isActive || isHover
-                                      ? "bg-surface-cardStrong"
-                                      : "hover:bg-surface-hover"
+                                    disabled
+                                      ? "cursor-not-allowed opacity-40"
+                                      : isActive || isHover
+                                        ? "bg-surface-cardStrong"
+                                        : "hover:bg-surface-hover"
                                   }`}
                                   onMouseEnter={(e) => {
+                                    if (disabled) return;
                                     cancelClearHover();
                                     setHoverKey(rowKey);
                                     setHoverSubMenu(null);
                                     setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
                                   }}
-                                  onClick={() => handleSelect(opt.provider, opt.model)}
+                                  onClick={() => {
+                                    if (disabled) return;
+                                    handleSelect(opt.provider, opt.model);
+                                  }}
                                 >
                                   <ProviderGlyph provider={opt.provider} model={opt.model} />
-                                  <span className="min-w-0 flex-1 truncate pl-px font-semibold text-text-strong">
+                                  <span
+                                    className={`min-w-0 flex-1 truncate pl-px font-semibold ${
+                                      disabled ? "text-text-faint" : "text-text-strong"
+                                    }`}
+                                  >
                                     {modelName}
                                   </span>
                                   <span className="flex w-3.5 shrink-0 justify-end">
@@ -1793,6 +1973,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                 )}
               </div>
               <div className="shrink-0 border-t border-border p-1.5">
+                {options.length > 0 && availableOptions.length < options.length ? (
+                  <div className="mb-1.5 px-1 text-center text-[11px] leading-relaxed text-text-faint">
+                    {availableOptions.length === 0
+                      ? t("model.harnessNoneCompatible")
+                      : t("model.harnessFilteredHint")}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-cardStrong px-2.5 py-2 text-[12.5px] font-medium text-text-strong transition-colors hover:bg-surface-hover"
@@ -12961,6 +13148,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setPaneIsolateActive(pane.id, false);
                 setAttachToastMessage(t("composer.modeMultitaskNeedGit"));
                 setAttachToastOpen(true);
+                continue;
+              }
+              // External-harness / cross-replica single-flight: soft toast only.
+              // Do not append a ❌ tool row with the raw English UUID exception.
+              if (isSessionBusyElsewhereError(payload.data?.error)) {
+                setStallHintToast(
+                  errText.trim() && !/already has an external-harness turn/i.test(errText)
+                    ? errText
+                    : t("toast.sessionBusyElsewhere"),
+                );
                 continue;
               }
               const severity = String(payload.data?.severity ?? "").trim();

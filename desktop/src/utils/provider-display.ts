@@ -1,3 +1,4 @@
+import { CLAUDE_LIVE_SETTINGS_PROVIDER_ID } from "./model-options";
 import { i18n } from "../i18n/i18n";
 
 /** Built-in vendor labels use i18n; custom vendors keep entry.displayName as-is. */
@@ -197,6 +198,9 @@ export function getProviderDisplayName(
     if (baseUrl && !isOfficialOpenAIBase(baseUrl)) {
       return String(i18n.t("provider.openaiCompat", { ns: "settings" }));
     }
+  }
+  if (pid === CLAUDE_LIVE_SETTINGS_PROVIDER_ID) {
+    return String(i18n.t("model.claudeLiveSettings", { ns: "chat", defaultValue: "Claude live settings" }));
   }
   if (BUILTIN_PROVIDER_IDS.has(pid)) return vendorLabel(pid);
   if (custom) return custom;

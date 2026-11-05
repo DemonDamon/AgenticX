@@ -61,6 +61,7 @@ import {
 } from "../../constants/meta-avatar";
 import { isNearCubePortraitUrl } from "../../utils/theme-portrait";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { hasVisibleReactNode } from "../../utils/visible-react-node";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
@@ -898,6 +899,7 @@ export function ImBubble({
   // that row sit 4px higher/lower than the committed rows above it — the uneven
   // line spacing reported in production. Neutralize them for rail rows only.
   const railRow = compactAssistant && noBubbleBorder;
+  const hasAfterBody = hasVisibleReactNode(afterBody);
   const assistantActionRhythmStack = !isUser && showAssistantFollowups;
   const tightenAssistantBodyLeading = assistantActionRhythmStack || actionRhythmBodyTail;
   const assistantBodyLeadingClass = tightenAssistantBodyLeading ? "leading-snug" : "leading-relaxed";
@@ -1094,7 +1096,7 @@ export function ImBubble({
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}
-            {hideActions ? null : (
+            {hideActions || !(hasBody || message.forwardedHistory || contentBadge) ? null : (
               <div className="agx-im-user-actions">
                 <div className="agx-im-user-actions-icons">
                   <MessageTimestamp ts={message.timestamp} align="right" />
@@ -1373,7 +1375,7 @@ export function ImBubble({
                 onRevealPath={onRevealPath}
               />
             ) : null}
-            {afterBody ? (
+            {hasAfterBody ? (
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>
                 {assistantIconButtons && !showAssistantFollowups ? (
@@ -1398,7 +1400,7 @@ export function ImBubble({
                 {assistantFollowupChipButtons}
               </div>
             ) : null}
-            {hideActions || showAssistantFollowups || !assistantIconButtons || afterBody ? null : (
+            {hideActions || showAssistantFollowups || !assistantIconButtons || hasAfterBody ? null : (
               <div className={actionOnlyClass}>
                 {assistantActionLine}
               </div>

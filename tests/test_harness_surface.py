@@ -377,6 +377,84 @@ def test_spawn_codebuddy_invalid_permission_mode_400(
     assert "permission_mode" in r.json()["detail"]
 
 
+def test_spawn_codebuddy_accepts_model_option(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    captured: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured.append(list(args))
+        return _fake_popen_factory([])(args, **kwargs)
+
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.resolve_codebuddy_executable",
+        lambda: "/tmp/fake-cb",
+    )
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.subprocess.Popen",
+        fake_popen,
+    )
+    r = client.post(
+        "/v1/harnesses/codebuddy/sessions",
+        headers=_auth(),
+        json={
+            "cwd": str(tmp_path),
+            "options": {
+                "permission_mode": "acceptEdits",
+                "model": "glm-5.3-flash",
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["raw"].get("model") == "glm-5.3-flash"
+    assert body.get("model") == "glm-5.3-flash"
+    assert captured, "expected Popen to run"
+    argv = captured[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    assert client.delete(
+        f"/v1/harnesses/codebuddy/sessions/{body['session_id']}",
+        headers=_auth(),
+    ).status_code == 200
+
+
+def test_codebuddy_adapter_spawn_model_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Direct adapter unit: options.model → codebuddy --model <id>."""
+    captured: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured.append(list(args))
+        return _fake_popen_factory([])(args, **kwargs)
+
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.resolve_codebuddy_executable",
+        lambda: "/tmp/fake-cb",
+    )
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.subprocess.Popen",
+        fake_popen,
+    )
+    wb = CodeBuddyAdapter()
+    view = wb.spawn(
+        str(tmp_path),
+        options={"permission_mode": "default", "model": "glm-5.3-flash"},
+    )
+    assert view["raw"]["model"] == "glm-5.3-flash"
+    argv = captured[0]
+    assert "--model" in argv and argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    captured.clear()
+    wb.spawn(str(tmp_path), options={"permission_mode": "default", "model": "  "})
+    assert "--model" not in captured[0]
+    with pytest.raises(ValueError, match="unknown spawn options"):
+        wb.spawn(str(tmp_path), options={"permission_mode": "default", "wat": True})
+    with pytest.raises(ValueError, match="model must be a string"):
+        wb.spawn(str(tmp_path), options={"permission_mode": "default", "model": 123})
+    wb.stop(view["session_id"])
+
+
 # ----------------------------------------------------------------------
 # HTTP: turns
 # ----------------------------------------------------------------------

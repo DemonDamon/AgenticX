@@ -9,13 +9,26 @@ export function pickHoverTipPlacement(
   anchor: { top: number; bottom: number },
   viewportHeight: number,
   tipHeight = 40,
-  gap = 6,
+  gap = 8,
   edgePad = 8,
 ): Placement {
   const need = tipHeight + gap + edgePad;
   if (preferred === "above" && anchor.top < need) return "below";
   if (preferred === "below" && viewportHeight - anchor.bottom < need) return "above";
   return preferred;
+}
+
+/** Keep a fixed tip inside the viewport horizontally (pane overflow-x-hidden otherwise clips it). */
+export function clampHoverTipLeft(
+  x: number,
+  viewportWidth: number,
+  tipWidth = 120,
+  edgePad = 12,
+): number {
+  const half = tipWidth / 2;
+  const min = edgePad + half;
+  const max = Math.max(min, viewportWidth - edgePad - half);
+  return Math.min(max, Math.max(min, x));
 }
 
 type Props = {
@@ -66,7 +79,11 @@ export function HoverTip({
     if (tooltipAlign === "end") {
       setCoords({ x: rect.right, y, placement: resolved });
     } else {
-      setCoords({ x: rect.left + rect.width / 2, y, placement: resolved });
+      setCoords({
+        x: clampHoverTipLeft(rect.left + rect.width / 2, window.innerWidth),
+        y,
+        placement: resolved,
+      });
     }
   };
 
@@ -103,11 +120,11 @@ export function HoverTip({
               transform:
                 tooltipAlign === "end"
                   ? coords.placement === "below"
-                    ? "translate(-100%, 6px)"
-                    : "translate(-100%, calc(-100% - 6px))"
+                    ? "translate(-100%, 8px)"
+                    : "translate(-100%, calc(-100% - 8px))"
                   : coords.placement === "below"
-                    ? "translate(-50%, 6px)"
-                    : "translate(-50%, calc(-100% - 6px))",
+                    ? "translate(-50%, 8px)"
+                    : "translate(-50%, calc(-100% - 8px))",
             }}
           >
             {label}
@@ -123,7 +140,7 @@ export function HoverTip({
         className={
           inline
             ? `relative inline align-baseline${className ? ` ${className}` : ""}`
-            : `relative flex shrink-0${className ? ` ${className}` : ""}`
+            : `relative flex shrink-0 overflow-visible${className ? ` ${className}` : ""}`
         }
         onPointerEnter={() => {
           clearTimer();

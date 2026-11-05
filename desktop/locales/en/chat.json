@@ -359,7 +359,14 @@
     "effortMax": "Max",
     "effortUltra": "Ultra",
     "effortExtreme": "Extreme",
-    "contextWindow": "Context window"
+    "contextWindow": "Context window",
+    "harnessNoModelOption": "This agent has no model option",
+    "harnessEmbeddingUnsupported": "Embedding models cannot be used with this agent",
+    "harnessOllamaUnsupported": "Local Ollama models cannot be used with this agent",
+    "harnessNoneCompatible": "No models available for this agent",
+    "harnessFilteredHint": "Some models are unavailable for the current agent",
+    "claudeLiveSettings": "Claude live settings",
+    "claudeLiveSettingsHint": "Model aliases from the live ~/.claude/settings.json"
   },
   "composer": {
     "bindFolders": "Bind folders",
@@ -625,6 +632,7 @@
     "favorited": "Favorited",
     "unattendedSaveFailed": "Could not save the unattended switch",
     "busyForChat": "This agent is still running. Chat opens when it finishes.",
+    "sessionBusyElsewhere": "Previous turn is still running. Please wait before sending again.",
     "bgTaskDone": "Background task finished",
     "turnInterrupted": "This turn was interrupted. Syncing status…",
     "continueCreating": "Creating a new task...",

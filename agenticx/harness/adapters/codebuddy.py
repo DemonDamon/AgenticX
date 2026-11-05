@@ -50,6 +50,26 @@ _WB_STATUS_MAP = {
     "exited": TURN_STATUS_EXITED,
 }
 
+_RESULT_TEXT_MAX_CHARS = 4000
+
+
+def _exit_stderr_excerpt(tail: str, *, limit: int = 500) -> str:
+    """Prefer ``[stderr]`` lines from a session tail for exit diagnostics."""
+    if not tail:
+        return ""
+    stderr_lines: list[str] = []
+    for raw in tail.splitlines():
+        line = raw.rstrip()
+        if line.startswith("[stderr] "):
+            stderr_lines.append(line[len("[stderr] ") :])
+        elif "Cannot find module" in line or "MODULE_NOT_FOUND" in line:
+            stderr_lines.append(line)
+    if stderr_lines:
+        return "\n".join(stderr_lines)[-limit:]
+    # Fall back to the end of the raw tail so exit is never empty noise.
+    return tail[-limit:].strip()
+
+
 
 class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
     """``codebuddy`` CLI (headless stream-json, turn snapshots) as adapter #2."""
@@ -85,6 +105,12 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         *,
         options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Start a CodeBuddy CLI session.
+
+        Supported ``options``:
+        - ``permission_mode``: CodeBuddy ``--permission-mode`` value
+        - ``model``: optional non-empty string → ``codebuddy --model <id>``
+        """
         opts = dict(options or {})
         permission_mode = str(opts.pop("permission_mode", "default")).strip()
         if permission_mode not in _PERMISSION_MODES:
@@ -92,9 +118,15 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
                 "permission_mode must be one of "
                 f"{sorted(_PERMISSION_MODES)}, got: {permission_mode!r}"
             )
+        model = opts.pop("model", None)
+        if model is not None and not isinstance(model, str):
+            raise ValueError("model must be a string")
+        model_id = str(model or "").strip() or None
         if opts:
             raise ValueError(f"unknown spawn options for codebuddy: {sorted(opts)}")
-        session = self.start_session(cwd, permission_mode=permission_mode)
+        session = self.start_session(
+            cwd, permission_mode=permission_mode, model=model_id
+        )
         view = self.describe(session.session_id)
         assert view is not None  # just registered by start_session
         return view
@@ -142,6 +174,10 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         result_text = ""
         if unified == TURN_STATUS_SUCCESS:
             result_text = str(snap.get("last_result_text", "") or "")
+        elif unified == TURN_STATUS_EXITED:
+            # Surface stderr (e.g. MODULE_NOT_FOUND from a broken app bundle)
+            # so Near's "[harness codebuddy turn exited]" banner is actionable.
+            result_text = _exit_stderr_excerpt(str(snap.get("tail", "") or ""))
         detail = {
             k: snap.get(k)
             for k in (
@@ -200,6 +236,7 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             "pid": raw.get("pid"),
             "state": raw.get("state", "running"),
             "permission_mode": raw.get("permission_mode", "default"),
+            "model": raw.get("model"),
             "turn_state": raw.get("turn_state", "idle"),
         }
         view["raw"] = raw

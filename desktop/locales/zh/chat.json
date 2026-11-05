@@ -359,7 +359,14 @@
     "effortMax": "最大",
     "effortUltra": "超高",
     "effortExtreme": "极致",
-    "contextWindow": "上下文窗口"
+    "contextWindow": "上下文窗口",
+    "harnessNoModelOption": "当前智能体不支持选择模型",
+    "harnessEmbeddingUnsupported": "嵌入模型不可用于此智能体",
+    "harnessOllamaUnsupported": "本地 Ollama 模型不可用于此智能体",
+    "harnessNoneCompatible": "当前智能体没有可用模型",
+    "harnessFilteredHint": "部分模型因当前智能体不可用",
+    "claudeLiveSettings": "Claude 实况设置",
+    "claudeLiveSettingsHint": "来自 ~/.claude/settings.json 的当前模型别名"
   },
   "composer": {
     "bindFolders": "绑定文件夹",
@@ -625,6 +632,7 @@
     "favorited": "已收藏",
     "unattendedSaveFailed": "无人值守开关保存失败",
     "busyForChat": "该智能体任务执行中，完成后才能进入对话",
+    "sessionBusyElsewhere": "上一轮还在进行中，请稍候再发送",
     "bgTaskDone": "后台任务已完成",
     "turnInterrupted": "本轮请求已中断，正在同步状态…",
     "continueCreating": "正在创建新任务...",

@@ -134,6 +134,7 @@ export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_A
  * Copy/quote stay on one 20px icon row. `flex-wrap` + `h-5` used to overflow
  * the usage/cache text onto follow-up chips in a squeezed pane.
  * `min-w-0 overflow-hidden` lets the icon row clip instead of painting over chips.
+ * HoverTip portals to document.body, so tip labels are not clipped by this box.
  *
  * The action *line* is 24px so a 20px model pill has 2px air above/below and
  * is not vertically sliced when there are no follow-up chips underneath.

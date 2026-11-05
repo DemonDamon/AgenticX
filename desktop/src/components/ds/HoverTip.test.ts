@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickHoverTipPlacement } from "./HoverTip";
+import { clampHoverTipLeft, pickHoverTipPlacement } from "./HoverTip";
 
 describe("pickHoverTipPlacement", () => {
   it("flips above → below when the target sits under the window chrome", () => {
@@ -18,5 +18,13 @@ describe("pickHoverTipPlacement", () => {
     expect(
       pickHoverTipPlacement("below", { top: 760, bottom: 788 }, 800),
     ).toBe("above");
+  });
+});
+
+describe("clampHoverTipLeft", () => {
+  it("keeps a centered tip inside the viewport", () => {
+    expect(clampHoverTipLeft(10, 800)).toBeGreaterThan(10);
+    expect(clampHoverTipLeft(790, 800)).toBeLessThan(790);
+    expect(clampHoverTipLeft(400, 800)).toBe(400);
   });
 });

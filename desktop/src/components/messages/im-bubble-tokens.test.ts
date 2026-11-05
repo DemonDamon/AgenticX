@@ -86,4 +86,23 @@ describe("IM bubble tokens", () => {
     const lists = ruleBlock(indexCss, ".agx-im-user-bubble .msg-content ul,");
     expect(lists).toContain("list-style-position: inside");
   });
+
+  it("keeps locked user-action geometry without margin-left:auto / z-index lifts", () => {
+    const actions = ruleBlock(indexCss, ".agx-im-user-actions {");
+    expect(actions).toContain("width: 0");
+    expect(actions).toContain("min-width: 100%");
+    expect(actions).not.toContain("z-index");
+    expect(actions).not.toContain("margin-left: auto");
+    const icons = ruleBlock(indexCss, ".agx-im-user-actions-icons {");
+    expect(icons).toContain("justify-content: flex-end");
+    expect(icons).not.toContain("margin-left: auto");
+    expect(icons).not.toContain("z-index");
+  });
+
+  it("clips assistant action icons so chrome cannot float outside the row", () => {
+    const block = ruleBlock(indexCss, ".agx-assistant-action-icons {");
+    expect(block).toContain("overflow: hidden");
+    expect(block).not.toContain("overflow: visible");
+  });
+
 });

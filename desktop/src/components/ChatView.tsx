@@ -52,6 +52,7 @@ import {
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
+  isSessionBusyElsewhereError,
 } from "../utils/noisy-chat-messages";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
@@ -2065,6 +2066,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
+              if (isSessionBusyElsewhereError(payload.data?.error)) {
+                // Soft notice only — never dump the raw harness UUID exception as a ❌ tool row.
+                continue;
+              }
               if (
                 eventAgentId === "meta"
                 && detector === "widget_flow_guard"

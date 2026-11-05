@@ -350,6 +350,18 @@ async def _external_harness_chat_stream(
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
         return
 
+    # Direct-style Claude settings sync before spawn/turn (claude-code only).
+    try:
+        from agenticx.harness.claude_code_settings import maybe_sync_claude_code_settings
+
+        maybe_sync_claude_code_settings(
+            harness_id,
+            getattr(payload, "provider", None),
+            getattr(payload, "model", None),
+        )
+    except Exception:
+        pass
+
     manager.run_started()
     turn_task = asyncio.create_task(
         harness_wiring.run_external_harness_turn_async(
@@ -421,10 +433,15 @@ async def _external_harness_chat_stream(
             owns_release = False
             asyncio.create_task(_release_after_turn())
         raise
-    except harness_wiring.HarnessTurnBusyError as exc:
+    except harness_wiring.HarnessTurnBusyError:
+        # Keep a stable error code for clients; never dump the raw
+        # "session {uuid} already has an external-harness turn in flight" string.
         err = SseEvent(
             type="error",
-            data={"error": "session_busy_elsewhere", "text": str(exc)},
+            data={
+                "error": "session_busy_elsewhere",
+                "text": "上一轮还在进行中，请稍候再发送",
+            },
         )
         yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
@@ -6589,6 +6606,85 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True, "session_id": session_id, "provider": provider, "model": model}
+
+    @app.get("/api/claude-code/settings/live-models")
+    async def claude_code_live_models(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Opaque model ids from the live ``~/.claude/settings.json``.
+
+        Used by the Near composer picker under the Claude Code harness to
+        surface aliases even when they are absent from AgenticX providers.
+        """
+        _check_token(x_agx_desktop_token)
+        from agenticx.harness.claude_code_settings import (
+            ClaudeSettingsError,
+            claude_settings_path,
+            extract_live_model_ids,
+            load_claude_settings,
+        )
+
+        path = claude_settings_path()
+        try:
+            doc = load_claude_settings(path)
+        except ClaudeSettingsError as exc:
+            return {
+                "ok": False,
+                "path": str(path),
+                "models": [],
+                "error": str(exc),
+            }
+        return {
+            "ok": True,
+            "path": str(path),
+            "models": extract_live_model_ids(doc),
+        }
+
+    @app.post("/api/claude-code/settings/apply")
+    async def claude_code_settings_apply(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Apply a Near provider + model into Claude Code settings (Direct sync).
+
+        Only rewrites Anthropic key fields; preserves permissions/plugins/hooks/mcp.
+        Builtin callers must not hit this; desktop only invokes when harness is
+        ``claude-code``. Selecting the synthetic live-settings provider is a no-op.
+        """
+        _check_token(x_agx_desktop_token)
+        from agenticx.harness.claude_code_settings import (
+            ClaudeSettingsError,
+            apply_named_provider_to_claude_settings,
+            claude_settings_path,
+            extract_live_model_ids,
+        )
+
+        provider = str((payload or {}).get("provider") or "").strip()
+        model = str((payload or {}).get("model") or "").strip()
+        if not provider or not model:
+            raise HTTPException(status_code=400, detail="provider and model are required")
+        if provider.startswith("__claude_live"):
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "live_settings_alias",
+                "path": str(claude_settings_path()),
+                "models": [],
+            }
+        try:
+            doc = apply_named_provider_to_claude_settings(provider, model)
+        except ClaudeSettingsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "skipped": False,
+            "path": str(claude_settings_path()),
+            "model": doc.get("model"),
+            "models": extract_live_model_ids(doc),
+            "base_url": (doc.get("env") or {}).get("ANTHROPIC_BASE_URL")
+            if isinstance(doc.get("env"), dict)
+            else None,
+        }
 
     @app.get("/api/harnesses")
     async def list_harnesses(

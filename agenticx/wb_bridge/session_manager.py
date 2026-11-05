@@ -46,6 +46,7 @@ class WbBridgeSession:
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     permission_mode: str = "default"
+    model: Optional[str] = None  # CLI --model when spawn requested one
     turn_state: str = "idle"  # "idle" | "running"
     turn_seq: int = 0  # incremented on each send
     turns_completed: int = 0
@@ -209,6 +210,7 @@ class WbBridgeSessionManager:
                 "log_path": s.log_path,
                 "state": "running" if running else "stopped",
                 "permission_mode": s.permission_mode,
+                "model": s.model,
                 "turn_state": s.turn_state,
                 "turn_seq": s.turn_seq,
                 "turn_elapsed_sec": turn_elapsed,
@@ -243,8 +245,16 @@ class WbBridgeSessionManager:
         except OSError as exc:
             _LOG.warning("stdin write failed session=%s err=%s", session.session_id, exc)
 
-    def start_session(self, cwd: str, *, permission_mode: str = "default") -> WbBridgeSession:
-        return self._start_session_headless(cwd, permission_mode=permission_mode)
+    def start_session(
+        self,
+        cwd: str,
+        *,
+        permission_mode: str = "default",
+        model: Optional[str] = None,
+    ) -> WbBridgeSession:
+        return self._start_session_headless(
+            cwd, permission_mode=permission_mode, model=model
+        )
 
     def _log_path_for_sid(self, sid: str) -> str:
         log_dir = Path(os.environ.get("WB_BRIDGE_LOG_DIR", "~/.agenticx/logs/wb-bridge")).expanduser()
@@ -259,9 +269,11 @@ class WbBridgeSessionManager:
         cwd: str,
         *,
         permission_mode: str = "default",
+        model: Optional[str] = None,
     ) -> WbBridgeSession:
         exe = resolve_codebuddy_executable()
         mode = _normalize_permission_mode(permission_mode)
+        model_id = str(model or "").strip() or None
 
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -277,6 +289,8 @@ class WbBridgeSessionManager:
             "--permission-mode",
             mode,
         ]
+        if model_id:
+            args.extend(["--model", model_id])
 
         env = os.environ.copy()
         env.setdefault("CODEBUDDY_ENVIRONMENT_KIND", "agx_wb_bridge")
@@ -300,9 +314,11 @@ class WbBridgeSessionManager:
             proc=proc,
             log_path=log_path,
             permission_mode=mode,
+            model=model_id,
         )
         session.append_log(
             f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path} argv={args}"
+            + (f" model={model_id}" if model_id else "")
         )
 
         assert proc.stdout is not None
