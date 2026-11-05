@@ -32,23 +32,24 @@ var phaseLabels = [...]string{"admission_wait", "upstream_start", "response_head
 type TerminalReason string
 
 const (
-	ReasonCompleted       TerminalReason = "completed"
-	ReasonRejected        TerminalReason = "rejected"
-	ReasonAuth            TerminalReason = "auth_error"
-	ReasonForbidden       TerminalReason = "forbidden"
-	ReasonQuotaDenied     TerminalReason = "quota_denied"
-	ReasonRateLimited     TerminalReason = "rate_limited"
-	ReasonPolicyBlocked   TerminalReason = "policy_blocked"
-	ReasonHeaderTimeout   TerminalReason = "header_timeout"
-	ReasonIdleTimeout     TerminalReason = "idle_timeout"
-	ReasonIncomplete      TerminalReason = "incomplete_stream"
-	ReasonBufferExceeded  TerminalReason = "buffer_exceeded"
-	ReasonClientCancelled TerminalReason = "client_cancelled"
-	ReasonRequestTimeout  TerminalReason = "request_timeout"
-	ReasonDownstreamError TerminalReason = "downstream_error"
-	ReasonUpstreamError   TerminalReason = "upstream_error"
-	ReasonInternalError   TerminalReason = "internal_error"
-	ReasonOther           TerminalReason = "other"
+	ReasonCompleted            TerminalReason = "completed"
+	ReasonRejected             TerminalReason = "rejected"
+	ReasonAuth                 TerminalReason = "auth_error"
+	ReasonForbidden            TerminalReason = "forbidden"
+	ReasonQuotaDenied          TerminalReason = "quota_denied"
+	ReasonRateLimited          TerminalReason = "rate_limited"
+	ReasonPolicyBlocked        TerminalReason = "policy_blocked"
+	ReasonHeaderTimeout        TerminalReason = "header_timeout"
+	ReasonIdleTimeout          TerminalReason = "idle_timeout"
+	ReasonIncomplete           TerminalReason = "incomplete_stream"
+	ReasonBufferExceeded       TerminalReason = "buffer_exceeded"
+	ReasonClientCancelled      TerminalReason = "client_cancelled"
+	ReasonRequestTimeout       TerminalReason = "request_timeout"
+	ReasonDownstreamError      TerminalReason = "downstream_error"
+	ReasonUpstreamError        TerminalReason = "upstream_error"
+	ReasonInternalError        TerminalReason = "internal_error"
+	ReasonOther                TerminalReason = "other"
+	ReasonConcurrencyLeaseLost TerminalReason = "concurrency_lease_lost"
 )
 
 func canonicalReason(reason TerminalReason) TerminalReason {
@@ -56,7 +57,7 @@ func canonicalReason(reason TerminalReason) TerminalReason {
 	case ReasonCompleted, ReasonRejected, ReasonAuth, ReasonForbidden, ReasonQuotaDenied,
 		ReasonRateLimited, ReasonPolicyBlocked, ReasonHeaderTimeout, ReasonIdleTimeout,
 		ReasonIncomplete, ReasonBufferExceeded, ReasonClientCancelled, ReasonRequestTimeout,
-		ReasonDownstreamError, ReasonUpstreamError, ReasonInternalError:
+		ReasonDownstreamError, ReasonUpstreamError, ReasonInternalError, ReasonConcurrencyLeaseLost:
 		return reason
 	default:
 		return ReasonOther
@@ -159,7 +160,9 @@ func (p *RequestPhases) SetReason(reason TerminalReason) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.finished {
+	if !p.finished && p.reason != ReasonConcurrencyLeaseLost {
+		// Internal loss is the originating failure, even if error frames or
+		// subsequent cancellation produce a less precise terminal observation.
 		p.reason = canonicalReason(reason)
 	}
 }
@@ -172,7 +175,7 @@ func (p *RequestPhases) SetReasonIfUnset(reason TerminalReason) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.finished && p.reason == "" {
+	if !p.finished && (p.reason == "" || reason == ReasonConcurrencyLeaseLost) {
 		p.reason = canonicalReason(reason)
 	}
 }

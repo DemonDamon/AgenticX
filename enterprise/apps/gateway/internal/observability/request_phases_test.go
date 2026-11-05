@@ -257,3 +257,21 @@ func TestLateCancellationOverridesEarlierSuccessEvidence(t *testing.T) {
 		t.Fatalf("stale terminal reason: %s", output.String())
 	}
 }
+
+func TestLeaseLossReasonHasPriorityOverGenericTerminalObservations(t *testing.T) {
+	var output bytes.Buffer
+	ctx, recorder := phaseTestSampler(1, &output).Start(context.Background())
+	recorder.SetReason(ReasonDownstreamError)
+	recorder.SetReasonIfUnset(ReasonConcurrencyLeaseLost)
+	for _, reason := range []TerminalReason{ReasonCompleted, ReasonClientCancelled, ReasonRequestTimeout, ReasonDownstreamError, ReasonInternalError, "sk-fake-private-reason"} {
+		recorder.SetReason(reason)
+		recorder.SetReasonIfUnset(reason)
+	}
+	if recorder.Snapshot().TraceMetadata()["reason"] != string(ReasonConcurrencyLeaseLost) {
+		t.Fatal("trace snapshot replaced originating loss")
+	}
+	recorder.Finish(ctx, ReasonCompleted)
+	if !strings.Contains(output.String(), `"reason":"concurrency_lease_lost"`) || strings.Contains(output.String(), "sk-fake") {
+		t.Fatalf("unsafe terminal priority: %s", output.String())
+	}
+}
