@@ -19,13 +19,15 @@ type Registry struct {
 	enabled bool
 	reg     *prometheus.Registry
 
-	ttftSeconds *prometheus.HistogramVec
-	tps         *prometheus.HistogramVec
-	cacheHits   *prometheus.CounterVec
-	cacheLookups *prometheus.CounterVec
-	channelHealth *prometheus.GaugeVec
-	activeStreams *prometheus.GaugeVec
-	upstreamErrors *prometheus.CounterVec
+	requestPhases     *prometheus.HistogramVec
+	requestTerminals  *prometheus.CounterVec
+	ttftSeconds       *prometheus.HistogramVec
+	tps               *prometheus.HistogramVec
+	cacheHits         *prometheus.CounterVec
+	cacheLookups      *prometheus.CounterVec
+	channelHealth     *prometheus.GaugeVec
+	activeStreams     *prometheus.GaugeVec
+	upstreamErrors    *prometheus.CounterVec
 	pluginInvocations *prometheus.CounterVec
 	pluginErrors      *prometheus.CounterVec
 	pluginLatency     *prometheus.HistogramVec
@@ -53,6 +55,15 @@ func NewRegistryFromEnv() *Registry {
 
 func (r *Registry) register() {
 	r.reg = prometheus.NewRegistry()
+	r.requestPhases = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "agx_gateway_request_phase_seconds",
+		Help:    "Sampled admission duration and request-relative transport/content phase offsets",
+		Buckets: prometheus.ExponentialBuckets(0.005, 2, 17),
+	}, []string{"phase"})
+	r.requestTerminals = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "agx_gateway_request_terminal_total",
+		Help: "Sampled terminal request outcomes with allowlisted reasons",
+	}, []string{"reason"})
 	r.ttftSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "agx_gateway_ttft_seconds",
 		Help:    "Time to first token in seconds",
@@ -107,6 +118,8 @@ func (r *Registry) register() {
 	}, []string{"method", "route"})
 
 	r.reg.MustRegister(
+		r.requestPhases,
+		r.requestTerminals,
 		r.ttftSeconds,
 		r.tps,
 		r.cacheHits,
@@ -263,4 +276,19 @@ func envOn(key string, defaultOn bool) bool {
 	default:
 		return defaultOn
 	}
+}
+
+// ObserveRequestPhases uses only fixed phase names and a closed reason set.
+// These observations share the request sampler; they are not total traffic counts.
+func (r *Registry) ObserveRequestPhases(snapshot PhaseSnapshot) {
+	if !r.Enabled() || r.requestPhases == nil || r.requestTerminals == nil {
+		return
+	}
+	for phase, ms := range snapshot.phaseMS() {
+		if snapshot.seen&(uint8(1)<<uint(phase)) != 0 {
+			r.requestPhases.WithLabelValues(phaseLabels[phase]).Observe(boundedDuration(time.Duration(ms) * time.Millisecond).Seconds())
+		}
+	}
+	r.requestPhases.WithLabelValues("total").Observe(boundedDuration(time.Duration(snapshot.TotalMS) * time.Millisecond).Seconds())
+	r.requestTerminals.WithLabelValues(string(canonicalReason(snapshot.Reason))).Inc()
 }

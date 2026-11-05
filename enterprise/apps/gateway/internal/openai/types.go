@@ -1,6 +1,9 @@
 package openai
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type ToolFunction struct {
 	Name        string `json:"name"`
@@ -119,4 +122,23 @@ type EmbeddingResponse struct {
 	Model  string           `json:"model"`
 	Data   []EmbeddingDatum `json:"data"`
 	Usage  Usage            `json:"usage"`
+}
+
+// HasContentDelta distinguishes emitted model output from role/usage metadata.
+// The raw tool-call bytes are inspected without parsing or allocating per token.
+func (c StreamChunk) HasContentDelta() bool {
+	for _, choice := range c.Choices {
+		delta := choice.Delta
+		if delta.Content != "" || delta.ReasoningContent != "" {
+			return true
+		}
+		tool := bytes.TrimSpace(delta.ToolCalls)
+		if len(tool) > 0 && tool[0] == '[' {
+			tool = bytes.TrimSpace(tool[1:])
+			if len(tool) > 0 && tool[0] != ']' {
+				return true
+			}
+		}
+	}
+	return false
 }

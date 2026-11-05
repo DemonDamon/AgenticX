@@ -12,8 +12,11 @@ func TestRegistryLabelsForbidHighCardinalityIDs(t *testing.T) {
 	forbidden := []string{
 		"session_id", "sessionId", "trace_id", "traceId",
 		"deployment_id", "deploymentId", "gateway_trace_id",
+		"user", "user_id", "query", "body", "token", "url", "nonce",
 	}
 	allowed := map[string][]string{
+		"agx_gateway_request_phase_seconds":         {"phase"},
+		"agx_gateway_request_terminal_total":        {"reason"},
 		"agx_gateway_ttft_seconds":                  {"model", "channel", "inbound_protocol"},
 		"agx_gateway_tokens_per_second":             {"model", "channel"},
 		"agx_gateway_cache_hits_total":              {"layer"},

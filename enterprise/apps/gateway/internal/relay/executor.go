@@ -11,6 +11,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
 
@@ -181,10 +182,21 @@ func (e *Executor) Stream(
 ) (StreamResult, error) {
 	var lastErr error
 	emitted := false
+	contentObserved := false
+	phases := observability.PhasesFromContext(ctx)
 	guardedPush := func(chunk openai.StreamChunk) error {
 		// A failed callback may already have written part of a frame.
 		emitted = true
-		return push(chunk)
+		err := push(chunk)
+		if phases != nil {
+			if err != nil {
+				phases.SetReason(observability.ReasonDownstreamError)
+			} else if !contentObserved && chunk.HasContentDelta() {
+				contentObserved = true
+				phases.Mark(observability.FirstContent)
+			}
+		}
+		return err
 	}
 	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)

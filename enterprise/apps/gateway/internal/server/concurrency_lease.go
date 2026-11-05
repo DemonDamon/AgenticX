@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"net/http"
@@ -13,10 +14,19 @@ func (s *Server) bindChatLease(r *http.Request, receipt *quota.ReservationReceip
 		return r, func() {}
 	}
 	ctx, cancel := receipt.Lease.Bind(r.Context())
+	if errors.Is(context.Cause(ctx), quota.ErrConcurrencyLeaseLost) {
+		observability.PhasesFromContext(ctx).SetReason(observability.ReasonConcurrencyLeaseLost)
+	}
 	return r.WithContext(ctx), cancel
 }
 func concurrencyLeaseLost(identity requestIdentity) bool {
-	return identity.quotaReservation != nil && identity.quotaReservation.Lease != nil && identity.quotaReservation.Lease.IsLost()
+	lost := identity.quotaReservation != nil && identity.quotaReservation.Lease != nil && identity.quotaReservation.Lease.IsLost()
+	if lost {
+		// This recorder is shared with the outer middleware even when the
+		// bound request is a clone with a separately cancelled context.
+		identity.diagnostics.SetReason(observability.ReasonConcurrencyLeaseLost)
+	}
+	return lost
 }
 func leaseAwareAPIError(err error) openai.APIError {
 	if errors.Is(err, quota.ErrConcurrencyLeaseLost) {
@@ -27,10 +37,14 @@ func leaseAwareAPIError(err error) openai.APIError {
 
 func cachedRequestError(r *http.Request, identity requestIdentity) error {
 	if concurrencyLeaseLost(identity) {
+		if r != nil {
+			observability.PhasesFromContext(r.Context()).SetReason(observability.ReasonConcurrencyLeaseLost)
+		}
 		return quota.ErrConcurrencyLeaseLost
 	}
 	if r != nil {
 		if errors.Is(context.Cause(r.Context()), quota.ErrConcurrencyLeaseLost) {
+			observability.PhasesFromContext(r.Context()).SetReason(observability.ReasonConcurrencyLeaseLost)
 			return quota.ErrConcurrencyLeaseLost
 		}
 		return r.Context().Err()

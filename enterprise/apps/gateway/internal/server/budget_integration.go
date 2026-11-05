@@ -7,6 +7,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
@@ -116,11 +117,17 @@ func (s *Server) runChatQuotaGate(
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
 	qctx.Context = r.Context()
+	phases := observability.PhasesFromContext(r.Context())
+	if phases != nil {
+		started := time.Now()
+		defer func() { phases.ObserveAdmission(time.Since(started)) }()
+	}
 	estimatedCost := s.estimateRequestCostUSD(req.Model, estimatedInputTokens)
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)
 		if !reservation.Allowed {
 			s.finishChatReservation(reservation.Check.Reservation)
+			phases.SetReason(observability.ReasonQuotaDenied)
 			s.writeQuotaError(w, reservation.Check)
 			return reservation.Check, reservation, false
 		}
@@ -132,6 +139,7 @@ func (s *Server) runChatQuotaGate(
 	check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens), estimatedCost)
 	if !check.Allowed {
 		s.finishChatReservation(check.Reservation)
+		phases.SetReason(observability.ReasonQuotaDenied)
 		s.writeQuotaError(w, check)
 		return check, billing.Reservation{}, false
 	}

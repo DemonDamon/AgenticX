@@ -31,7 +31,7 @@ jobs:
             connector-runtime/go.sum
       - name: Test gateway contracts with race detection
         working-directory: enterprise/apps/gateway
-        run: go test -count=1 -race ./internal/config ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay
+        run: go test -count=1 -race ./internal/config ./internal/observability ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay
       - name: Vet gateway contracts
         working-directory: enterprise/apps/gateway
-        run: go vet ./internal/config ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay
+        run: go vet ./internal/config ./internal/observability ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay

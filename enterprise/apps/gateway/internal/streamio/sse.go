@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 )
 
 var (
@@ -59,6 +61,8 @@ type Event struct{ Name, Data string }
 // The caller context owns the total deadline; heartbeats only reset body idle.
 func ReadSSE(ctx context.Context, body io.Reader, cfg Config, emit func(Event) (bool, error)) error {
 	cfg = cfg.normalized()
+	phases := observability.PhasesFromContext(ctx)
+	firstByteObserved := false
 	readCtx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
@@ -155,6 +159,10 @@ func ReadSSE(ctx context.Context, body io.Reader, cfg Config, emit func(Event) (
 				return ErrIdleTimeout
 			}
 			if len(res.data) > 0 {
+				if phases != nil && !firstByteObserved {
+					firstByteObserved = true
+					phases.MarkAt(observability.FirstBodyByte, res.completed)
+				}
 				remaining = cfg.IdleTimeout
 			} else {
 				remaining -= time.Since(waitStarted)

@@ -103,3 +103,31 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_PRICING_FILE` | 本地计价表路径（默认 `internal/metering/pricing.yaml`） |
 
 未配置上述远程 URL 时，仍使用 `GATEWAY_ADMIN_PROVIDERS_FILE`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE` 等本地路径逻辑。
+
+## 有界请求阶段诊断
+
+默认关闭。临时排查时显式设置 `GATEWAY_REQUEST_DIAGNOSTICS_SAMPLE_EVERY=100`，每个 Gateway 进程按序采样每 100 个 HTTP 请求中的 1 个（首个请求采样）；`1` 表示全部，`0`、缺失、无效值或超过 `1000000` 均关闭。各副本独立采样；这不是全局日志速率上限。关闭/未采样请求沿用原 context，不创建阶段记录器。
+
+采样请求完成时最多输出一条 `event=gateway.request_phases` 的固定字段日志：
+
+- `admission_wait_ms` 是共享 chat 准入门整体耗时，包含额度/预算存储与等待，不单独声称等于数据库耗时。
+- `upstream_start_ms`、`response_headers_ms`、`first_body_byte_ms`、`first_content_ms` 是相对 HTTP 请求进入诊断中间件的首次阶段偏移。响应头/字节取自共享流读取器，字节到达不必等整条 SSE 帧；内容是成功 push 的文本、推理或工具 delta，role/usage-only 不计。重试不覆盖已经记录的首次阶段。
+- `total_ms` 是请求整体耗时，`reason` 仅为固定终结原因；未知错误归为 `upstream_error` 或 `other`，不记录错误文本。内部并发租约失效固定记录 `concurrency_lease_lost`，并在后续写入错误或取消观察中保留这一原因。未到达/未接入的阶段为 `-1`，所有有效时长限制在 24 小时内。缓存命中、非流调用和未接入共享传输的实现可能缺少传输阶段；缺失不代表错误。
+
+日志不含正文、令牌、URL、模型名、用户、查询、nonce 或任意关联标识。已有 trace reporter 仅在采样请求上附加相同的固定字段 `request_phases` 元数据（计量报告时的快照，`total_ms` 可早于最终日志），不新增数据库或异步队列。新指标复用现有 `/metrics` registry：`agx_gateway_request_phase_seconds{phase}` 仅使用六个固定阶段值（含 total），`agx_gateway_request_terminal_total{reason}` 仅使用白名单终结原因。二者都是**采样数据**，不能当作完整请求数；既有 TTFT/TPS 的采样和语义不变。`GATEWAY_METRICS=off` 关闭指标，诊断日志仍由采样开关单独控制。
+
+日志轮转与保留由部署平台设置，本功能不修改真实环境。例如在容器部署中，可把诊断采样和容器 stdout 轮转一起显式配置：
+
+```yaml
+services:
+  gateway:
+    environment:
+      GATEWAY_REQUEST_DIAGNOSTICS_SAMPLE_EVERY: "100"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+该示例约束单容器的本地 stdout 日志文件（约 30 MB 加轮转开销），不约束副本总量、外部日志采集器、独立审计文件或 trace 数据库；它们分别需要保留策略。排查结束后恢复采样值 `0`。本示例仅为文档，不会应用到任何环境。

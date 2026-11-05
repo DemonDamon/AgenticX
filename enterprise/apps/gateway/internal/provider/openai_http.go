@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/streamio"
@@ -176,6 +177,8 @@ func (p *OpenAICompatibleProvider) Stream(
 		return fmt.Errorf("marshal upstream request: %w", err)
 	}
 
+	phases := observability.PhasesFromContext(ctx)
+	contentObserved := false
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -205,7 +208,16 @@ func (p *OpenAICompatibleProvider) Stream(
 			} else {
 				lastErr = openai.ReadSSE(ctx, resp.Body, streamio.ConfigFromEnv(), func(chunk openai.StreamChunk) error {
 					pushed = true
-					return push(chunk)
+					err := push(chunk)
+					if phases != nil {
+						if err != nil {
+							phases.SetReason(observability.ReasonDownstreamError)
+						} else if !contentObserved && chunk.HasContentDelta() {
+							contentObserved = true
+							phases.Mark(observability.FirstContent)
+						}
+					}
+					return err
 				})
 			}
 			_ = resp.Body.Close()

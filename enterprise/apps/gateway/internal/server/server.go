@@ -659,6 +659,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(trustedProxyRealIP(s.trustedProxies))
 	r.Use(middleware.Recoverer)
 	r.Use(requestTimeout(requestTimeoutFromEnv(s.logger)))
+	r.Use(observability.NewPhaseSamplerFromEnv(s.logger, s.metrics).HTTPMiddleware())
 	if s.metrics != nil && s.metrics.Enabled() {
 		r.Use(s.metrics.HTTPMiddleware())
 	}
@@ -1212,6 +1213,7 @@ func (s *Server) handleStream(
 		}
 		payload = s.applyWasmStreamChunk(pluginCtx, payload)
 		if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+			recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 			return err
 		}
 		flusher.Flush()
@@ -1234,10 +1236,13 @@ func (s *Server) handleStream(
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
 	}
 
+	recordStreamDiagnostic(r.Context(), streamErr, len(blockedHits) > 0)
+
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+				recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 				flusher.Flush()
 			}()
 		}
@@ -1331,7 +1336,7 @@ func (s *Server) handleStream(
 				Delta: openai.StreamDelta{Content: tail},
 			}},
 		}
-		_ = push(tailChunk)
+		recordStreamDiagnostic(r.Context(), push(tailChunk), len(blockedHits) > 0)
 	}
 	streamUsage := accounting.usage(estimatedInputTokens, false)
 	inputTokens := streamUsage.PromptTokens
@@ -1393,6 +1398,7 @@ func (s *Server) handleStream(
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
+		recordDiagnosticFailure(r.Context(), err, observability.ReasonInternalError)
 		writeStreamError(w, flusher, "audit write failed")
 		return
 	}
@@ -1401,7 +1407,7 @@ func (s *Server) handleStream(
 		writeStreamPolicyError(w, flusher, "50302", formatStreamError(quota.ErrConcurrencyLeaseLost), nil)
 		return
 	}
-	usagePayload, _ := json.Marshal(map[string]any{
+	usagePayload, marshalErr := json.Marshal(map[string]any{
 		"agenticx_usage": map[string]any{
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,
@@ -1410,10 +1416,13 @@ func (s *Server) handleStream(
 			"model":         decision.Model,
 		},
 	})
-	_, _ = w.Write([]byte("data: " + string(usagePayload) + "\n\n"))
+	recordDiagnosticFailure(r.Context(), marshalErr, observability.ReasonInternalError)
+	_, writeErr := w.Write([]byte("data: " + string(usagePayload) + "\n\n"))
+	recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	flusher.Flush()
 
-	_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	_, writeErr = w.Write([]byte("data: [DONE]\n\n"))
+	recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	flusher.Flush()
 }
 
@@ -1514,6 +1523,7 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 }
 
 type requestIdentity struct {
+	diagnostics *observability.RequestPhases
 	// PublicRetrieval is set only after a verified public-retrieval signature.
 	PublicRetrieval  bool
 	TenantID         string
