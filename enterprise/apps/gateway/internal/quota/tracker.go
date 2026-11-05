@@ -57,15 +57,17 @@ type usageRow struct {
 }
 
 type Decision struct {
-	Allowed     bool
-	Rule        Rule
-	UsedBefore  int64
-	UsedAfter   int64
-	ExceededBy  int64
-	Description string
+	StorageError bool
+	Allowed      bool
+	Rule         Rule
+	UsedBefore   int64
+	UsedAfter    int64
+	ExceededBy   int64
+	Description  string
 }
 
 type Tracker struct {
+	limiter                *RateLimiter
 	cfgPath                string
 	usagePath              string
 	poolUsagePath          string
@@ -88,6 +90,9 @@ type Tracker struct {
 }
 
 func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
+	return newTracker(cfgPath, usagePath, handle, sharedLimiter())
+}
+func newTracker(cfgPath, usagePath string, handle *database.Handle, limiter *RateLimiter) *Tracker {
 	budgetCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_CONFIG_FILE"))
 	if budgetCfgPath == "" {
 		budgetCfgPath = DefaultBudgetConfigPath()
@@ -105,7 +110,7 @@ func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
 	if budgetDatabaseRequired && handle != nil && handle.DB != nil {
 		budgetDatabase = handle
 	}
-	return &Tracker{
+	return &Tracker{limiter: limiter,
 		cfgPath:                cfgPath,
 		usagePath:              usagePath,
 		poolUsagePath:          poolUsagePath,
@@ -578,4 +583,18 @@ func (t *Tracker) currentUsed(userID, month string) int64 {
 		return cached
 	}
 	return 0
+}
+
+// NewTrackerWithRateLimiter supports independently constructed gateway instances.
+func NewTrackerWithRateLimiter(cfgPath, usagePath string, handle *database.Handle, limiter *RateLimiter) *Tracker {
+	if limiter == nil {
+		limiter = sharedLimiter()
+	}
+	return newTracker(cfgPath, usagePath, handle, limiter)
+}
+func (t *Tracker) rateLimiter() *RateLimiter {
+	if t != nil && t.limiter != nil {
+		return t.limiter
+	}
+	return sharedLimiter()
 }

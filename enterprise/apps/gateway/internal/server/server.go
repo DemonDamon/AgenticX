@@ -782,7 +782,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluateChatRequestPolicy(r, rawBody, &req, &identity)
@@ -833,6 +832,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = quotaReservation
+	identity.quotaReservation = budgetCheck.Reservation
+	qctx.Reservation = budgetCheck.Reservation
+	defer s.finishChatReservation(budgetCheck.Reservation)
+	r, cancelLease := s.bindChatLease(r, budgetCheck.Reservation)
+	defer cancelLease()
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -855,6 +859,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
+	if concurrencyLeaseLost(identity) {
+		err = quota.ErrConcurrencyLeaseLost
+	}
 	if err != nil {
 		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
@@ -863,7 +870,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			ErrorMessage: sanitizeTraceError(err.Error()),
 			PromptText:   joinMessages(req.Messages),
 		})
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	responseContent := ""
@@ -880,6 +887,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
+	}
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
 	}
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
@@ -980,6 +992,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	applyPluginsInvoked(&chatAudit, pluginCtx)
 	if err := s.writeAuditEvent(chatAudit); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
+		return
+	}
+	if concurrencyLeaseLost(identity) {
+		writeAPIError(w, leaseAwareAPIError(quota.ErrConcurrencyLeaseLost))
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1086,7 +1102,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.Embeddings(r.Context(), req, decision)
 	if err != nil {
 		s.rollbackQuotaReservation(s.quotaContext(identity, req.Model), estimatedInputTokens)
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	inputTokens := resp.Usage.PromptTokens
@@ -1152,6 +1168,7 @@ func (s *Server) handleStream(
 	}
 
 	var responseBuilder strings.Builder
+	var accounting streamAccounting
 	inputText := joinMessages(req.Messages)
 	var blockedHits []policyengine.HitEvent
 	var reasoningState openai.StreamReasoningState
@@ -1163,6 +1180,10 @@ func (s *Server) handleStream(
 	}
 
 	push := func(chunk openai.StreamChunk) error {
+		if concurrencyLeaseLost(identity) {
+			return quota.ErrConcurrencyLeaseLost
+		}
+		accounting.observe(chunk)
 		if firstTokenAt.IsZero() {
 			firstTokenAt = time.Now()
 			if s.metrics != nil {
@@ -1206,6 +1227,9 @@ func (s *Server) handleStream(
 		decision = routingDecisionFromStream(streamResult, req.Model, decision)
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
+	}
+	if concurrencyLeaseLost(identity) {
+		streamErr = quota.ErrConcurrencyLeaseLost
 	}
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
@@ -1253,7 +1277,7 @@ func (s *Server) handleStream(
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.settleInterruptedStreamUsage(
+			s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 				identity,
 				decision,
 				estimatedInputTokens,
@@ -1272,7 +1296,7 @@ func (s *Server) handleStream(
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.settleInterruptedStreamUsage(
+		s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 			identity,
 			decision,
 			estimatedInputTokens,
@@ -1314,13 +1338,9 @@ func (s *Server) handleStream(
 		}
 		recordStreamDiagnostic(r.Context(), push(tailChunk), len(blockedHits) > 0)
 	}
-	inputTokens := estimatedInputTokens
-	outputTokens := estimateTextTokens(responseText)
-	streamUsage := openai.Usage{
-		PromptTokens:     inputTokens,
-		CompletionTokens: outputTokens,
-		TotalTokens:      inputTokens + outputTokens,
-	}
+	streamUsage := accounting.usage(estimatedInputTokens, false)
+	inputTokens := streamUsage.PromptTokens
+	outputTokens := streamUsage.CompletionTokens
 	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     inputText,
@@ -1335,7 +1355,7 @@ func (s *Server) handleStream(
 		settle := s.billingService.SettleContext(
 			qctx,
 			reservedTokens,
-			int64(inputTokens+outputTokens),
+			int64(streamUsage.TotalTokens),
 		)
 		settleDelta = settle.Delta
 	} else {
@@ -1383,6 +1403,10 @@ func (s *Server) handleStream(
 		return
 	}
 
+	if concurrencyLeaseLost(identity) {
+		writeStreamPolicyError(w, flusher, "50302", formatStreamError(quota.ErrConcurrencyLeaseLost), nil)
+		return
+	}
 	usagePayload, marshalErr := json.Marshal(map[string]any{
 		"agenticx_usage": map[string]any{
 			"input_tokens":  inputTokens,
@@ -1501,24 +1525,25 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 type requestIdentity struct {
 	diagnostics *observability.RequestPhases
 	// PublicRetrieval is set only after a verified public-retrieval signature.
-	PublicRetrieval bool
-	TenantID        string
-	UserID          string
-	UserEmail       string
-	DepartmentID    string
-	DepartmentIDs   []string
-	SessionID       string
-	RoleCodes       []string
-	ClientType      string
-	Scopes          []string
-	DataResidency   string
-	APITokenID      int64
-	AuthViaPAT      bool
-	TraceID         string
-	TraceStep       int
-	TraceStage      string
-	DeploymentID    string
-	AgentID         string
+	PublicRetrieval  bool
+	TenantID         string
+	UserID           string
+	UserEmail        string
+	DepartmentID     string
+	DepartmentIDs    []string
+	SessionID        string
+	RoleCodes        []string
+	ClientType       string
+	Scopes           []string
+	DataResidency    string
+	APITokenID       int64
+	AuthViaPAT       bool
+	TraceID          string
+	TraceStep        int
+	TraceStage       string
+	DeploymentID     string
+	AgentID          string
+	quotaReservation *quota.ReservationReceipt
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1527,13 +1552,14 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		apiTokenID = fmt.Sprintf("%d", identity.APITokenID)
 	}
 	return quota.RequestContext{
-		TenantID:   identity.TenantID,
-		UserID:     identity.UserID,
-		DeptID:     identity.DepartmentID,
-		APITokenID: apiTokenID,
-		AgentID:    identity.AgentID,
-		Role:       roleFromScopes(identity.Scopes),
-		Model:      model,
+		Reservation: identity.quotaReservation,
+		TenantID:    identity.TenantID,
+		UserID:      identity.UserID,
+		DeptID:      identity.DepartmentID,
+		APITokenID:  apiTokenID,
+		AgentID:     identity.AgentID,
+		Role:        roleFromScopes(identity.Scopes),
+		Model:       model,
 	}
 }
 
@@ -1544,6 +1570,14 @@ func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResul
 }
 
 func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
+	if check.StorageError && check.Kind == "concurrency" {
+		writeAPIError(w, openai.APIError{Code: "50301", Message: "并发控制暂时不可用，请稍后重试。", HTTPStatus: http.StatusServiceUnavailable})
+		return
+	}
+	if check.StorageError {
+		writeAPIError(w, openai.Internal("quota storage unavailable"))
+		return
+	}
 	msg := check.Description
 	if msg == "" {
 		msg = "policy:quota:exceeded"
@@ -1730,11 +1764,18 @@ func (s *Server) settleInterruptedStreamUsage(
 	budgetCheck *quota.CheckResult,
 	qctx quota.RequestContext,
 	span spanMeta,
+	observed ...openai.Usage,
 ) {
-	usage := openai.Usage{
-		PromptTokens:     estimatedInputTokens,
-		CompletionTokens: partialOutputTokens,
-		TotalTokens:      estimatedInputTokens + partialOutputTokens,
+	if budgetCheck != nil && budgetCheck.Reservation != nil {
+		identity.quotaReservation = budgetCheck.Reservation
+		qctx.Reservation = budgetCheck.Reservation
+	}
+	usage := openai.Usage{}
+	if partialOutputTokens > 0 {
+		usage = openai.Usage{PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens, TotalTokens: estimatedInputTokens + partialOutputTokens}
+	}
+	if len(observed) > 0 {
+		usage = observed[0]
 	}
 	s.reportUsageDetailed(identity, decision, usage, budgetCheck, span)
 	if s.useChannelRelay() {
@@ -1750,6 +1791,12 @@ func (s *Server) reconcileQuotaUsage(
 	estimatedInputTokens int,
 	finalTotalTokens int,
 ) {
+	if identity.quotaReservation != nil {
+		if err := s.quotaTracker.FinishReservationTokens(identity.quotaReservation, int64(finalTotalTokens)); err != nil {
+			s.logger.Error("quota reservation settlement failed", "error", err)
+		}
+		return
+	}
 	delta := finalTotalTokens - estimatedInputTokens
 	if delta == 0 {
 		return
@@ -1790,6 +1837,12 @@ func (s *Server) reconcileQuotaUsage(
 }
 
 func (s *Server) rollbackQuotaReservation(qctx quota.RequestContext, tokens int) {
+	if qctx.Reservation != nil {
+		if err := s.quotaTracker.FinishReservation(qctx.Reservation, 0, 0); err != nil {
+			s.logger.Error("quota reservation rollback failed", "error", err)
+		}
+		return
+	}
 	if tokens <= 0 {
 		return
 	}
@@ -1968,4 +2021,8 @@ func policyMessageWithHits(message string, hits []policyengine.HitEvent) string 
 		return fmt.Sprintf("%s（命中策略: %s）", message, strings.Join(policyIDs, ", "))
 	}
 	return message
+}
+
+func (s *Server) settleInterruptedStreamObservedUsage(usage openai.Usage, identity requestIdentity, decision routing.Decision, estimatedInputTokens, partialOutputTokens int, reservedTokens int64, budgetCheck *quota.CheckResult, qctx quota.RequestContext, span spanMeta) {
+	s.settleInterruptedStreamUsage(identity, decision, estimatedInputTokens, partialOutputTokens, reservedTokens, budgetCheck, qctx, span, usage)
 }

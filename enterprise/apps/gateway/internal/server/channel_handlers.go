@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ func (s *Server) handleChatCompleteRelay(
 	qctx quota.RequestContext,
 ) {
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
+	if concurrencyLeaseLost(identity) {
+		err = quota.ErrConcurrencyLeaseLost
+	}
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
@@ -38,7 +42,7 @@ func (s *Server) handleChatCompleteRelay(
 			ErrorMessage: sanitizeTraceError(err.Error()),
 			PromptText:   joinMessages(req.Messages),
 		})
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	resp := result.Response
@@ -57,8 +61,16 @@ func (s *Server) handleChatCompleteRelay(
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	actualTotal := int64(providerInputTokens + providerOutputTokens)
+	actualTotal := int64(resp.Usage.TotalTokens)
+	if actualTotal <= 0 {
+		actualTotal = int64(providerInputTokens + providerOutputTokens)
+	}
 	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
+	}
 	s.reportUsageDetailed(identity, decision, resp.Usage, nil, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
@@ -159,6 +171,10 @@ func (s *Server) handleChatCompleteRelay(
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
+	if concurrencyLeaseLost(identity) {
+		writeAPIError(w, leaseAwareAPIError(quota.ErrConcurrencyLeaseLost))
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -257,6 +273,9 @@ func streamErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, quota.ErrConcurrencyLeaseLost) {
+		return "50302"
+	}
 	msg := err.Error()
 	// buffer overrun is treated as a hard stream safety stop (policy channel).
 	if strings.Contains(msg, "stream:buffer_exceeded") {
@@ -270,6 +289,9 @@ func streamErrorCode(err error) string {
 func formatStreamError(err error) string {
 	if err == nil {
 		return "stream failed"
+	}
+	if errors.Is(err, quota.ErrConcurrencyLeaseLost) {
+		return "请求并发许可失效，请重试。"
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "stream:request_timeout") {
