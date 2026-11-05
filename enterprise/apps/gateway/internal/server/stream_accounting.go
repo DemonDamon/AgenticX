@@ -28,7 +28,9 @@ func (a *streamAccounting) observe(chunk openai.StreamChunk) {
 	}
 }
 func (a *streamAccounting) usage(input int, interrupted bool) openai.Usage {
-	if a.reported != nil {
+	// Some upstreams attach an all-zero placeholder before final usage. It must
+	// not erase observed output when a stream stops before that final report.
+	if a.reported != nil && (a.reported.TotalTokens > 0 || a.reported.PromptTokens > 0 || a.reported.CompletionTokens > 0) {
 		usage := *a.reported
 		if usage.TotalTokens <= 0 {
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
