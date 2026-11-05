@@ -1346,7 +1346,7 @@ def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     return hint
 
 
-def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
+def _repair_streamed_tool_arguments(raw: str) -> Optional[Dict[str, Any]]:
     def _sanitize_parsed_args(parsed: Dict[str, Any]) -> Dict[str, Any]:
         # Drop leaked streamed metadata keys/values such as call_xxx / sa-xxxx
         # before tool dispatch.
@@ -1363,10 +1363,10 @@ def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
 
     text = (raw or "").strip()
     if not text:
-        return {}
+        return None
     try:
         parsed = json.loads(text)
-        return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
+        return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else None
     except Exception:
         pass
     lpos = text.find("{")
@@ -1374,10 +1374,10 @@ def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
     if lpos >= 0 and rpos > lpos:
         try:
             parsed = json.loads(text[lpos : rpos + 1])
-            return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
+            return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else None
         except Exception:
             pass
-    return {}
+    return None
 
 
 def _serialize_artifacts(session: StudioSession) -> str:
@@ -5372,7 +5372,7 @@ class AgentRuntime:
                                 )
                                 continue
                             args_obj = _repair_streamed_tool_arguments(item.get("arguments", ""))
-                            if _streamed_tool_call_truncated(accumulated_name, args_obj):
+                            if args_obj is None or _streamed_tool_call_truncated(accumulated_name, args_obj):
                                 logger.warning(
                                     "Dropping streamed tool_call '%s' (idx=%d) due to truncated/empty arguments; "
                                     "will surface retry hint to model",
