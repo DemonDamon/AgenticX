@@ -13,9 +13,8 @@ const config: NextConfig = {
   output: "standalone",
   // Dependabot/lock refresh left eslint-config-next peers incomplete; don't block production compile.
   eslint: { ignoreDuringBuilds: true },
-  // 与 web-portal 对齐：仓库里仍有存量类型错误（如 MemoryGraphStore 的
-  // override 修饰符），不阻塞生产编译。
-  typescript: { ignoreBuildErrors: true },
+  // 保留通用构建行为，由独立的 Admin 生产构建工作流开启类型校验。
+  typescript: { ignoreBuildErrors: process.env.ADMIN_PRODUCTION_BUILD_TYPECHECK !== "1" },
 
   env: {
     NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,

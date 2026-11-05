@@ -29,3 +29,13 @@ Baseline a680b0663 contains nine production type errors in the administrative ap
 - Build inputs were disposable: a synthetic tenant ID and a database URL targeting closed loopback port 1. No real deployment environment was used, and this build does not validate database access, authentication or deployed runtime behavior.
 - External preview failure logs remain unavailable; this local correction is not asserted to be the confirmed remote failure cause.
 - Full-project `tsc --noEmit` still reports exactly three pre-existing test-only diagnostics: the missing evaluation test API import, the test Error subclass override, and the test fixture optional access. These are unchanged and outside this PR; the nine production diagnostics are gone.
+
+## Automated production-build regression gate
+
+- `.github/workflows/admin-production-build.yml` runs on relevant admin app, shared enterprise package/feature, workspace configuration and workflow changes. Pull requests have no base-branch restriction; push events are limited to main/master, and manual dispatch is supported.
+- A clean hosted runner installs the existing workspace and explicitly runs these five suites (21 current cases): `ecp-tenant-settings-dialect`, `idmapping-store`, `graph-store`, `platform-catalog-distribution.integration`, `ecp-e4-expert-package.integration`.
+- The next step runs the real `pnpm --filter @agenticx/app-admin-console build` with normal production type validation. There is no continue-on-error, type-error suppression or alternate build configuration.
+- Only the build step receives disposable tenant and closed-loopback database inputs; they do not leak into unit tests or dependency installation. No repository secrets or external deployment credentials are read.
+- CI acceptance: the scoped regressions and complete optimized production build both exit zero. A missing or failing test file, compilation/type error, or failed build makes the job fail. The run validates compilation and bundling, not database connectivity, authentication, deployed behavior or an external preview provider's diagnosis.
+- Validate workflow syntax and action expressions with the official actionlint tool before publishing. The independent PR remains isolated from prior authorization and identity contribution branches.
+- Local workflow review passes official actionlint 1.7.12, YAML trigger/environment checks and shell syntax checks. The exact scoped CI command passes all 21 cases, and a disposable fixture with four present files and one missing file exits 1 before invoking the test runner. Hosted execution remains a separate result to observe after push.

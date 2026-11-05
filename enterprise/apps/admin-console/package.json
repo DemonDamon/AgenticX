@@ -47,6 +47,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
+    "@tailwindcss/postcss": "^4.2.4",
     "@types/papaparse": "^5.3.15",
     "@types/pg": "^8.15.6",
     "@types/react": "19.3.0",
@@ -54,6 +55,7 @@
     "eslint": "^10.4.0",
     "eslint-config-next": "^16.2.6",
     "eslint-plugin-i18next": "^6.1.4",
+    "tailwindcss": "^4.2.4",
     "typescript-eslint": "^8.59.4",
     "vitest": "^5.0.5"
   }
