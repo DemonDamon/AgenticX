@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -269,16 +268,22 @@ func (e *Executor) streamVirtual(
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
 	var lastErr error
+	emitted := false
+	guardedPush := func(chunk openai.StreamChunk) error {
+		// A failed callback may already have written part of a frame.
+		emitted = true
+		return push(chunk)
+	}
 	attempts := make([]channel.Attempt, 0)
 	for i, target := range order {
 		reqTry := req
 		reqTry.Model = target
-		result, err := e.streamOne(ctx, reqTry, target, id, push)
+		result, err := e.streamOne(ctx, reqTry, target, id, guardedPush)
 		attempts = append(attempts, result.Attempts...)
 		result.Attempts = attempts
 		result.ResolvedModel = target
 		result.VirtualName = virtualName
-		if err == nil || !isNoChannel(err) || i == len(order)-1 {
+		if err == nil || emitted || !isNoChannel(err) || i == len(order)-1 {
 			return result, err
 		}
 		lastErr = err
@@ -298,6 +303,12 @@ func (e *Executor) streamOne(
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
 	var lastErr error
+	emitted := false
+	guardedPush := func(chunk openai.StreamChunk) error {
+		// A failed callback may already have written part of a frame.
+		emitted = true
+		return push(chunk)
+	}
 	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)
 	maxRetries := defaultMaxRetries
@@ -314,18 +325,18 @@ func (e *Executor) streamOne(
 			maxRetries = ch.MaxRetries
 		}
 
-		result, err := e.streamOnChannel(ctx, req, ch, push)
+		result, err := e.streamOnChannel(ctx, req, ch, guardedPush)
 		attempts = append(attempts, result.attempts...)
 		if err == nil {
 			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
 			return StreamResult{Channel: ch, KeyRef: result.keyRef, Attempts: attempts, PickDecision: pick}, nil
 		}
 		lastErr = err
-		if !IsChannelRetryable(err) {
-			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
+		retryable := IsChannelRetryable(err)
+		if retryable {
+			e.picker.MarkFailure(ch, err.Error(), e.cooldown)
 		}
-		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
-		if result.committed {
+		if emitted || result.committed || !retryable {
 			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
 		}
 		excludeChannels[ch.ID] = struct{}{}
@@ -366,11 +377,10 @@ func (e *Executor) streamOnChannel(
 		chTry.APIKey = resolved.Key
 
 		wrappedPush := func(chunk openai.StreamChunk) error {
+			// A failed callback may already have written part of a frame.
+			committed = true
 			if err := push(chunk); err != nil {
 				return &clientPushError{err: err}
-			}
-			if len(chunk.Choices) > 0 && deltaHasClientPayload(chunk.Choices[0].Delta) {
-				committed = true
 			}
 			return nil
 		}
@@ -532,14 +542,6 @@ func (e *clientPushError) Unwrap() error {
 		return nil
 	}
 	return e.err
-}
-
-func deltaHasClientPayload(delta openai.StreamDelta) bool {
-	if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
-		return true
-	}
-	raw := bytes.TrimSpace(delta.ToolCalls)
-	return len(raw) > 0 && string(raw) != "null"
 }
 
 const httpStatusTooManyRequests = 429

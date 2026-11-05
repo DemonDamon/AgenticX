@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   gateway-regressions:
-    name: Gateway config and server contracts
+    name: Gateway stream and server contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,9 +29,9 @@ jobs:
             enterprise/apps/gateway/go.sum
             enterprise/packages/policy-engine/go.sum
             connector-runtime/go.sum
-      - name: Test configuration and server with race detection
+      - name: Test gateway contracts with race detection
         working-directory: enterprise/apps/gateway
-        run: go test -count=1 -race ./internal/config ./internal/server
-      - name: Vet configuration and server
+        run: go test -count=1 -race ./internal/config ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay
+      - name: Vet gateway contracts
         working-directory: enterprise/apps/gateway
-        run: go vet ./internal/config ./internal/server
+        run: go vet ./internal/config ./internal/server ./internal/streamio ./internal/openai ./internal/provider ./internal/adaptor ./internal/relay

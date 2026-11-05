@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,12 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
+	"github.com/agenticx/enterprise/gateway/internal/streamio"
 )
 
 // APIKeyResolver 根据 provider 名称解析 API Key（典型来源：进程环境变量、Secret Store）。
@@ -177,8 +176,6 @@ func (p *OpenAICompatibleProvider) Stream(
 		return fmt.Errorf("marshal upstream request: %w", err)
 	}
 
-	streamClient := *p.httpClient
-	streamClient.Timeout = 0
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -197,7 +194,7 @@ func (p *OpenAICompatibleProvider) Stream(
 		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-		resp, err := streamClient.Do(httpReq)
+		resp, err := streamio.DoStream(p.httpClient, httpReq, streamio.ConfigFromEnv())
 		if err != nil {
 			lastErr = fmt.Errorf("upstream request failed: %w", err)
 		} else {
@@ -206,7 +203,7 @@ func (p *OpenAICompatibleProvider) Stream(
 				preview, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 				lastErr = fmt.Errorf("upstream %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
 			} else {
-				lastErr = parseSSEStream(resp.Body, streamIdleTimeoutFromEnv(), func(chunk openai.StreamChunk) error {
+				lastErr = openai.ReadSSE(ctx, resp.Body, streamio.ConfigFromEnv(), func(chunk openai.StreamChunk) error {
 					pushed = true
 					return push(chunk)
 				})
@@ -221,7 +218,13 @@ func (p *OpenAICompatibleProvider) Stream(
 			}
 		}
 		if attempt == 0 && isRetryableInitialStreamError(lastErr) {
-			time.Sleep(150 * time.Millisecond)
+			timer := time.NewTimer(150 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
 			continue
 		}
 		return lastErr
@@ -248,14 +251,7 @@ func isRetryableInitialStreamError(err error) bool {
 }
 
 func streamIdleTimeoutFromEnv() time.Duration {
-	// Keep in sync with adaptor.StreamConfigFromEnv default (web-search TTFT headroom).
-	idle := 180 * time.Second
-	if v := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_IDLE_TIMEOUT")); v != "" {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			idle = time.Duration(sec) * time.Second
-		}
-	}
-	return idle
+	return streamio.ConfigFromEnv().IdleTimeout
 }
 
 func (p *OpenAICompatibleProvider) Embeddings(
@@ -300,122 +296,12 @@ func (p *OpenAICompatibleProvider) Embeddings(
 	return decoded, nil
 }
 
-// parseSSEStream 增量解析 OpenAI 兼容的 SSE 流：忽略心跳/注释行，遇到 `data: [DONE]` 即终止。
-// idle>0 时：任意两次可读字节间隔超过阈值 → stream:idle_timeout（避免浏览器侧裸 network error）。
+// parseSSEStream is retained for package callers; network requests pass their
+// context directly to the shared decoder so cancellation interrupts body reads.
 func parseSSEStream(body io.Reader, idle time.Duration, push func(openai.StreamChunk) error) error {
-	if idle <= 0 {
-		idle = 180 * time.Second
-	}
-	reader := bufio.NewReader(body)
-	var eventName string
-	var dataLines []string
-
-	type readResult struct {
-		line []byte
-		err  error
-	}
-	readCh := make(chan readResult, 1)
-	pendingRead := false
-	readOne := func() (readResult, error) {
-		if !pendingRead {
-			pendingRead = true
-			go func() {
-				line, err := reader.ReadBytes('\n')
-				readCh <- readResult{line: line, err: err}
-			}()
-		}
-		select {
-		case res := <-readCh:
-			pendingRead = false
-			return res, nil
-		case <-time.After(idle):
-			return readResult{}, fmt.Errorf("stream:idle_timeout")
-		}
-	}
-
-	flushEvent := func() (bool, error) {
-		if len(dataLines) == 0 {
-			eventName = ""
-			return false, nil
-		}
-		payload := strings.TrimSpace(strings.Join(dataLines, "\n"))
-		event := strings.TrimSpace(eventName)
-		eventName = ""
-		dataLines = nil
-		if payload == "" {
-			return false, nil
-		}
-		if payload == "[DONE]" {
-			return true, nil
-		}
-
-		var envelope struct {
-			Error *struct {
-				Message string `json:"message"`
-				Code    string `json:"code"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(payload), &envelope); err == nil && envelope.Error != nil {
-			message := strings.TrimSpace(envelope.Error.Message)
-			if message == "" {
-				message = "upstream stream error"
-			}
-			if code := strings.TrimSpace(envelope.Error.Code); code != "" {
-				return false, fmt.Errorf("upstream stream error %s: %s", code, message)
-			}
-			return false, fmt.Errorf("upstream stream error: %s", message)
-		}
-		if event == "error" {
-			return false, fmt.Errorf("upstream stream error: %s", payload)
-		}
-
-		var chunk openai.StreamChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			// 容忍上游偶发的非标准事件（如 keepalive ping），跳过即可。
-			return false, nil
-		}
-		if chunk.ID == "" && chunk.Object == "" && len(chunk.Choices) == 0 {
-			return false, nil
-		}
-		if err := push(chunk); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-
-	for {
-		res, idleErr := readOne()
-		if idleErr != nil {
-			return idleErr
-		}
-		line := res.line
-		readErr := res.err
-		if len(line) > 0 {
-			trimmed := bytes.TrimRight(line, "\r\n")
-			if len(trimmed) == 0 {
-				done, err := flushEvent()
-				if err != nil || done {
-					return err
-				}
-				if readErr == io.EOF {
-					return nil
-				}
-				continue
-			}
-			if bytes.HasPrefix(trimmed, []byte("event:")) {
-				eventName = strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("event:"))))
-			} else if bytes.HasPrefix(trimmed, []byte("data:")) {
-				dataLines = append(dataLines, strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("data:")))))
-			}
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				_, err := flushEvent()
-				return err
-			}
-			return fmt.Errorf("read upstream stream: %w", readErr)
-		}
-	}
+	cfg := streamio.ConfigFromEnv()
+	cfg.IdleTimeout = idle
+	return openai.ReadSSE(context.Background(), body, cfg, push)
 }
 
 func joinURL(base, path string) string {
