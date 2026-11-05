@@ -35,10 +35,10 @@ test("assistant action offset class is intentionally empty so style wins", () =>
   assert.equal(getAssistantActionOffsetClass({ inReActRow: true }), "");
 });
 
-test("assistant action icon row stays a single nowrap line without clipping HoverTip anchors", () => {
+test("assistant action icon row stays a single nowrap clipped line (HoverTip portals away)", () => {
   assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bflex-nowrap\b/);
-  assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\boverflow-visible\b/);
+  assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\boverflow-hidden\b/);
   assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bmin-w-0\b/);
   assert.doesNotMatch(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bflex-wrap\b/);
-  assert.doesNotMatch(ASSISTANT_ACTION_ICON_ROW_CLASS, /\boverflow-hidden\b/);
+  assert.doesNotMatch(ASSISTANT_ACTION_ICON_ROW_CLASS, /\boverflow-visible\b/);
 });

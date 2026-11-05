@@ -412,8 +412,7 @@ body {
   min-height: 1.25rem; /* h-5 */
   /* | 到模型名首字的视觉距离；1/2/3 段都用这一档 */
   --turn-rule-gutter: 10px;
-  /* Do not clip icon buttons / HoverTip anchors — meta child still overflow:hidden */
-  overflow: visible;
+  overflow: hidden;
 }
 
 /* 行上 gap-0.5=2px，按钮 20px / 图标 14px 各留 3px。补齐后图标墨水到 | 也是 10px */
@@ -1030,9 +1029,6 @@ body.agx-settings-nav-resizing {
   overflow: visible;
   line-height: 1;
   color: var(--text-muted);
-  /* Keep the icon cluster from being covered by later siblings / clipped chrome */
-  position: relative;
-  z-index: 1;
 }
 
 .agx-im-user-actions-icons {
@@ -1042,11 +1038,6 @@ body.agx-settings-nav-resizing {
   justify-content: flex-end;
   gap: 0.35rem;
   flex-shrink: 0;
-  overflow: visible;
-  /* Right edge stays on the bubble; excess icons overflow left only */
-  margin-left: auto;
-  position: relative;
-  z-index: 1;
 }
 
 /* 时间紧挨「复制」左侧，与图标同组右对齐 */
@@ -1063,8 +1054,6 @@ body.agx-settings-nav-resizing {
   align-items: center;
   justify-content: center;
   border-radius: 0.35rem;
-  overflow: visible;
-  flex-shrink: 0;
   transition: color 120ms ease-out, background-color 120ms ease-out;
 }
 

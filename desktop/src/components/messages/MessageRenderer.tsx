@@ -580,10 +580,12 @@ export function MessageRenderer({
           onRevealPath={onRevealPath}
           onOpenFileReference={onOpenFileReference}
           afterBody={
-            <>
-              {roundsFinalHint}
-              {handoff.card}
-            </>
+            roundsFinalHint || handoff.card ? (
+              <>
+                {roundsFinalHint}
+                {handoff.card}
+              </>
+            ) : undefined
           }
         />,
       );
@@ -602,10 +604,12 @@ export function MessageRenderer({
           onRevealPath={onRevealPath}
           onOpenFileReference={onOpenFileReference}
           afterBody={
-            <>
-              {roundsFinalHint}
-              {handoff.card}
-            </>
+            roundsFinalHint || handoff.card ? (
+              <>
+                {roundsFinalHint}
+                {handoff.card}
+              </>
+            ) : undefined
           }
         />,
       );
@@ -674,10 +678,12 @@ export function MessageRenderer({
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}
         afterBody={
-          <>
-            {roundsFinalHint}
-            {handoff.card}
-          </>
+          roundsFinalHint || handoff.card ? (
+            <>
+              {roundsFinalHint}
+              {handoff.card}
+            </>
+          ) : undefined
         }
         onOpenWorkspaceRefs={onOpenAllRefs}
         sessionWebRefs={sessionWebRefs}
