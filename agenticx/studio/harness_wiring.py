@@ -277,6 +277,52 @@ def snapshot_from_session(
 # ----------------------------------------------------------------------
 # chat model → harness spawn options
 # ----------------------------------------------------------------------
+def apply_run_mode_to_harness_options(
+    manager: Any,
+    session_id: str,
+    harness_id: str,
+) -> None:
+    """Fold Near confirm strategy (run_mode) into harness spawn options.
+
+    Claude Code: ``auto`` → auto_allow; ``ask``/``allowlist`` → queue prompts.
+    CodeBuddy: ``auto`` → permission_mode=acceptEdits (no interactive channel).
+    Does not stop a live surface session solely for a policy change mid-turn;
+    new options apply on the next spawn/ensure when the surface is cold.
+    """
+    from agenticx.studio.harness_permissions import harness_spawn_options_for_run_mode
+
+    sid = require_safe_session_id(session_id)
+    hid = str(harness_id or "").strip()
+    run_mode = ""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        run_mode = str(ConfigManager.get_value("run_mode") or "").strip()
+        if not run_mode:
+            run_mode = str(ConfigManager.get_value("confirm_strategy") or "").strip()
+    except Exception:
+        run_mode = ""
+    extras = harness_spawn_options_for_run_mode(hid, run_mode)
+    if not extras:
+        return
+    binding = manager.get_session_harness(sid) or {}
+    options = dict(binding.get("harness_options") or {})
+    changed = False
+    for key, value in extras.items():
+        if options.get(key) != value:
+            options[key] = value
+            changed = True
+    if not changed:
+        return
+    manager.set_session_harness(
+        sid,
+        harness_id=hid,
+        thread_id=binding.get("harness_thread_id"),
+        options=options,
+        surface_session_id=binding.get("harness_session_id"),
+    )
+
+
 def apply_chat_model_to_harness_options(
     manager: Any,
     session_id: str,
@@ -443,6 +489,8 @@ def _run_external_harness_turn_body(
     apply_chat_model_to_harness_options(
         manager, sid, harness_id, chat_model
     )
+    # Near confirm strategy → CC auto_allow / CB permission_mode.
+    apply_run_mode_to_harness_options(manager, sid, harness_id)
     binding = manager.get_session_harness(sid) or {}
 
     adapter = harness_registry().require(harness_id)

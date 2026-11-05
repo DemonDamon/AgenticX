@@ -24,6 +24,10 @@ from agenticx.cc_bridge.ndjson import (
     line_looks_like_result_success,
     parse_control_request,
 )
+from agenticx.cc_bridge.pending_permissions import (
+    PendingPermission,
+    pending_permission_from_control_request,
+)
 from agenticx.cc_bridge.tui_parser import ANCHOR_PREFIX, monotonic_now, parse_visible_tui_tail
 
 _LOG = logging.getLogger(__name__)
@@ -43,6 +47,9 @@ class BridgeSession:
     done: threading.Event = field(default_factory=threading.Event)
     exit_code: Optional[int] = None
     auto_allow: bool = False
+    # Near confirm strategy for headless can_use_tool: ask | allowlist | auto
+    permission_policy: str = "ask"
+    pending_permissions: Dict[str, PendingPermission] = field(default_factory=dict)
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     session_kind: str = "headless"  # headless | visible_tui
@@ -224,6 +231,7 @@ class BridgeSessionManager:
             "model": s.model,
             "state": "running" if running else "stopped",
             "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
+            "pending_permission_count": len(s.pending_permissions),
         }
 
     def get(self, session_id: str) -> Optional[BridgeSession]:
@@ -233,19 +241,37 @@ class BridgeSessionManager:
     def _on_control_request(self, session: BridgeSession, req: Dict[str, Any]) -> None:
         if session.session_kind == "visible_tui":
             return
-        if not session.auto_allow:
+        pending = pending_permission_from_control_request(req)
+        if pending is None:
             return
-        request_id = str(req.get("request_id") or "")
-        inner = req.get("request")
-        if not isinstance(inner, dict) or not request_id:
+        # Global auto_allow (spawn / env) still auto-answers everything.
+        if session.auto_allow:
+            line = build_control_response_allow(
+                pending.request_id,
+                pending.tool_input,
+                pending.tool_use_id or None,
+            )
+            self._write_stdin(session, line)
             return
-        tool_input = inner.get("input")
-        if not isinstance(tool_input, dict):
-            tool_input = {}
-        tool_use_id = inner.get("tool_use_id")
-        tid = str(tool_use_id) if tool_use_id is not None else None
-        line = build_control_response_allow(request_id, tool_input, tid)
-        self._write_stdin(session, line)
+        # 按需确认: auto-allow low-risk Read/Glob/Grep without Near UI.
+        policy = str(session.permission_policy or "ask").strip().lower()
+        if policy == "allowlist" and pending.risk == "low":
+            line = build_control_response_allow(
+                pending.request_id,
+                pending.tool_input,
+                pending.tool_use_id or None,
+            )
+            self._write_stdin(session, line)
+            return
+        with session.lock:
+            session.pending_permissions[pending.request_id] = pending
+        _LOG.info(
+            "queued can_use_tool request_id=%s tool=%s display=%s session=%s",
+            pending.request_id,
+            pending.tool_name,
+            pending.display_name,
+            session.session_id,
+        )
 
     def _write_stdin(self, session: BridgeSession, data: str) -> None:
         if session.pty_master_fd is not None:
@@ -271,6 +297,7 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        permission_policy: Optional[str] = None,
         mode: str = "headless",
         model: Optional[str] = None,
     ) -> BridgeSession:
@@ -286,6 +313,7 @@ class BridgeSessionManager:
         return self._start_session_headless(
             cwd,
             auto_allow_permissions=auto_allow_permissions,
+            permission_policy=permission_policy,
             model=model_id,
         )
 
@@ -302,11 +330,17 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        permission_policy: Optional[str] = None,
         model: Optional[str] = None,
     ) -> BridgeSession:
         exe = os.environ.get("CC_BRIDGE_EXECUTABLE", "claude").strip() or "claude"
         if auto_allow_permissions is None:
             auto_allow_permissions = _env_truthy("CC_BRIDGE_AUTO_ALLOW_PERMISSIONS", "0")
+        policy = str(permission_policy or "").strip().lower()
+        if policy not in {"ask", "allowlist", "auto"}:
+            policy = "auto" if auto_allow_permissions else "ask"
+        if policy == "auto":
+            auto_allow_permissions = True
         model_id = str(model or "").strip() or None
 
         path = Path(cwd).resolve()
@@ -348,6 +382,7 @@ class BridgeSessionManager:
             cwd=str(path),
             proc=proc,
             auto_allow=bool(auto_allow_permissions),
+            permission_policy=policy,
             log_path=log_path,
             session_kind="headless",
             model=model_id,
@@ -514,11 +549,20 @@ class BridgeSessionManager:
             raise KeyError("unknown session")
         if session.session_kind == "visible_tui":
             raise KeyError("permission API not supported for visible_tui; approve in TUI")
+        rid = str(request_id or "").strip()
+        queued: Optional[PendingPermission] = None
+        with session.lock:
+            queued = session.pending_permissions.pop(rid, None)
+        # Prefer stored input / tool_use_id when the caller omits them.
+        if tool_input is None and queued is not None:
+            tool_input = queued.tool_input
+        if not tool_use_id and queued is not None and queued.tool_use_id:
+            tool_use_id = queued.tool_use_id
         if allow:
             inp = tool_input if isinstance(tool_input, dict) else {}
-            line = build_control_response_allow(request_id, inp, tool_use_id)
+            line = build_control_response_allow(rid, inp, tool_use_id)
         else:
-            line = build_control_response_deny(request_id, deny_message, tool_use_id)
+            line = build_control_response_deny(rid, deny_message, tool_use_id)
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -591,6 +635,36 @@ class BridgeSessionManager:
         c = max(2, min(300, int(cols)))
         winsize = struct.pack("HHHH", r, c, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+
+    def list_pending_permissions(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return all unanswered can_use_tool prompts for a session."""
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            return [p.to_public_dict() for p in session.pending_permissions.values()]
+
+    def drain_pending_permissions(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return newly-queued permissions not yet emitted to Near SSE.
+
+        Marks each returned row as emitted so the SSE pump can re-poll without
+        re-opening the same ConfirmDialog. Rows stay in ``pending_permissions``
+        until :meth:`respond_permission` clears them.
+        """
+        session = self.get(session_id)
+        if session is None:
+            return []
+        out: List[Dict[str, Any]] = []
+        with session.lock:
+            for pending in session.pending_permissions.values():
+                if pending.emitted:
+                    continue
+                pending.emitted = True
+                row = pending.to_public_dict()
+                # Keep tool_input for allow response (not shown in bubble).
+                row["tool_input"] = dict(pending.tool_input)
+                out.append(row)
+        return out
 
     def drain_midturn_stream_items(self, session_id: str) -> List[Dict[str, Any]]:
         """Return ordered mid-turn text/tool items since the last drain (or []).

@@ -389,6 +389,7 @@ async def _external_harness_chat_stream(
                     pass
 
     started = time.time()
+    emitted_tool_ids: set[str] = set()
 
     def _progress_sse(phase: str) -> str:
         beat = SseEvent(
@@ -434,6 +435,9 @@ async def _external_harness_chat_stream(
                 tid = str(item.get("tool_call_id") or "").strip()
                 if not tid:
                     return None
+                if tid in emitted_tool_ids:
+                    return None
+                emitted_tool_ids.add(tid)
                 payload = normalize_tool_sse_payload(
                     {
                         "name": name,
@@ -498,6 +502,58 @@ async def _external_harness_chat_stream(
                     lines_out.append(line)
             return lines_out
 
+        async def _drain_permission_sse_lines() -> list[str]:
+            """Surface CC can_use_tool prompts as confirm_required SSE."""
+            if adapter is None or not surface_sid:
+                return []
+            if not hasattr(adapter, "drain_pending_permissions"):
+                return []
+            try:
+                rows = await asyncio.to_thread(
+                    adapter.drain_pending_permissions, surface_sid
+                )
+            except Exception:
+                return []
+            if not rows:
+                return []
+            from agenticx.studio.harness_permissions import (
+                pending_permission_to_confirm_sse_data,
+            )
+            from agenticx.runtime.events import normalize_tool_sse_payload
+
+            lines_out: list[str] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                # Ensure a tool_call row exists even if stream-json tool_use
+                # was missed before the permission stall.
+                tid = str(row.get("tool_use_id") or "").strip()
+                name = (
+                    str(row.get("display_name") or "").strip()
+                    or str(row.get("tool_name") or "").strip()
+                    or "tool"
+                )
+                if tid and tid not in emitted_tool_ids:
+                    emitted_tool_ids.add(tid)
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "arguments": {},
+                            "tool_call_id": tid,
+                            "agent_id": "meta",
+                        }
+                    )
+                    tool_evt = SseEvent(type="tool_call", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(tool_evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                confirm_data = pending_permission_to_confirm_sse_data(row)
+                conf_evt = SseEvent(type="confirm_required", data=confirm_data)
+                lines_out.append(
+                    f"data: {json.dumps(conf_evt.model_dump(), ensure_ascii=False)}\n\n"
+                )
+            return lines_out
+
         while True:
             try:
                 result = await asyncio.wait_for(
@@ -519,6 +575,16 @@ async def _external_harness_chat_stream(
                     for line in midturn_lines:
                         yield line
                     last_heartbeat = time.time()
+                perm_lines = await _drain_permission_sse_lines()
+                if perm_lines:
+                    for line in perm_lines:
+                        yield line
+                    last_heartbeat = time.time()
+                    # Hint so UI is not blank typing-dots only while waiting.
+                    yield _progress_sse("awaiting_permission")
+                    last_heartbeat = time.time()
+                    continue
+                if midturn_lines:
                     continue
                 # Heartbeat: keeps the desktop stall watchdog quiet while
                 # the adapter turn blocks on its CLI with no new tokens.
@@ -3106,6 +3172,54 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # External harness (Claude Code) pending can_use_tool: forward to
+        # adapter.permission so the blocked turn can continue.
+        try:
+            binding = manager.get_session_harness(payload.session_id) or {}
+        except Exception:
+            binding = {}
+        harness_id = str(binding.get("harness_id") or "").strip()
+        surface_sid = str(binding.get("harness_session_id") or "").strip()
+        if harness_id and surface_sid and harness_id != "builtin":
+            try:
+                from agenticx.studio import harness_wiring
+                from agenticx.harness.types import PermissionDecision
+
+                adapter = harness_wiring.harness_registry().require(harness_id)
+                pending_rows: list = []
+                if hasattr(adapter, "list_pending_permissions"):
+                    pending_rows = adapter.list_pending_permissions(surface_sid) or []
+                match = next(
+                    (
+                        row
+                        for row in pending_rows
+                        if isinstance(row, dict)
+                        and str(row.get("request_id") or "") == str(payload.request_id)
+                    ),
+                    None,
+                )
+                if match is not None and hasattr(adapter, "permission"):
+                    tool_input = match.get("tool_input")
+                    if not isinstance(tool_input, dict):
+                        tool_input = None
+                    # Prefer full input from pending queue (list omits it);
+                    # respond_permission falls back to queued tool_input.
+                    adapter.permission(
+                        surface_sid,
+                        PermissionDecision(
+                            request_id=str(payload.request_id),
+                            allow=bool(payload.approved),
+                            tool_input=tool_input,
+                            tool_use_id=str(match.get("tool_use_id") or "") or None,
+                            deny_message="Denied by operator",
+                        ),
+                    )
+                    return {"ok": True, "remembered": False, "harness": harness_id}
+            except Exception:
+                logger.exception(
+                    "[confirm] harness permission forward failed session=%s",
+                    payload.session_id,
+                )
         gate = managed.get_confirm_gate(payload.agent_id)
         if payload.agent_id != "meta" and managed.team_manager is not None:
             team_gate = managed.team_manager.get_confirm_gate(payload.agent_id)

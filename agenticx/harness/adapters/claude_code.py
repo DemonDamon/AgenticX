@@ -98,6 +98,7 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         Supported ``options``:
         - ``mode``: ``"headless"`` (default) or ``"visible_tui"``
         - ``auto_allow_permissions``: optional bool (headless control_request)
+        - ``permission_policy``: optional ``ask`` | ``allowlist`` | ``auto``
         - ``model``: optional non-empty string; forwarded as ``claude --model <id>``
           so the Near chat model picker can select the CLI model for this session
         """
@@ -110,6 +111,9 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         auto_allow = opts.pop("auto_allow_permissions", None)
         if auto_allow is not None and not isinstance(auto_allow, bool):
             raise ValueError("auto_allow_permissions must be a boolean")
+        permission_policy = opts.pop("permission_policy", None)
+        if permission_policy is not None and not isinstance(permission_policy, str):
+            raise ValueError("permission_policy must be a string")
         model = opts.pop("model", None)
         if model is not None and not isinstance(model, str):
             raise ValueError("model must be a string")
@@ -119,6 +123,7 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         session = self.start_session(
             cwd,
             auto_allow_permissions=auto_allow,
+            permission_policy=permission_policy,
             mode=mode,
             model=model_id,
         )
