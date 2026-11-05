@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies } from "../../../../../lib/session";
 import {
   ApprovalWorkflowError,
   submitPlatformIntroduceRequest,
-} from "../../../../lib/ecp-approval-portal";
+} from "../../../../../lib/ecp-approval-portal";
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();

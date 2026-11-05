@@ -85,6 +85,8 @@ type StreamDelta struct {
 	Role             string `json:"role,omitempty"`
 	Content          string `json:"content,omitempty"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ToolCalls 原样保留上游流式增量。网关不解析、不执行，也不送内容策略。
+	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
 }
 
 type StreamChoice struct {

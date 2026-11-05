@@ -89,3 +89,71 @@ export function injectLiveSubAgentClusterAnchors(messages: Message[]): Message[]
   });
   return out;
 }
+
+/** Insert or merge a live cluster-anchor message (SSE final / subagent_started fallback). */
+export function upsertLiveSubAgentClusterAnchor(
+  messages: Message[],
+  anchor: { clusterId: string; runIds: string[]; title?: string; createdAt?: number },
+  ownerSessionId?: string,
+): Message[] {
+  const clusterId = String(anchor.clusterId ?? "").trim();
+  const runIds = (anchor.runIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean);
+  if (!clusterId || runIds.length === 0) return messages;
+
+  const title =
+    String(anchor.title ?? "").trim() || `Agent 蜂群 · ${runIds.length} 个并行任务`;
+
+  const existingIndex = messages.findIndex(
+    (m) => m.role === "assistant" && m.subAgentCluster?.clusterId === clusterId,
+  );
+  if (existingIndex >= 0) {
+    const prev = messages[existingIndex];
+    const prevIds = prev.subAgentCluster?.runIds ?? [];
+    const merged = [...prevIds];
+    for (const rid of runIds) {
+      if (!merged.includes(rid)) merged.push(rid);
+    }
+    const nextTitle =
+      String(anchor.title ?? "").trim() ||
+      prev.subAgentCluster?.title ||
+      `Agent 蜂群 · ${merged.length} 个并行任务`;
+    if (
+      merged.length === prevIds.length &&
+      merged.every((id, i) => id === prevIds[i]) &&
+      nextTitle === (prev.subAgentCluster?.title ?? "")
+    ) {
+      return messages;
+    }
+    const out = messages.slice();
+    out[existingIndex] = {
+      ...prev,
+      subAgentCluster: {
+        clusterId,
+        runIds: merged,
+        title: nextTitle,
+        ...(anchor.createdAt != null
+          ? { createdAt: anchor.createdAt }
+          : prev.subAgentCluster?.createdAt != null
+            ? { createdAt: prev.subAgentCluster.createdAt }
+            : {}),
+      },
+    };
+    return out;
+  }
+
+  return [
+    ...messages,
+    {
+      id: `cluster-anchor-live:${clusterId}`,
+      role: "assistant",
+      content: "",
+      ownerSessionId,
+      subAgentCluster: {
+        clusterId,
+        runIds,
+        title,
+        ...(anchor.createdAt != null ? { createdAt: anchor.createdAt } : {}),
+      },
+    },
+  ];
+}

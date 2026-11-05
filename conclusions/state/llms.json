@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "llms",
-  "generation": "752285ff775b44dfb2c09169c6a89658",
+  "generation": "39fe89cad9804ea3831762051553cb64",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:a10b24353fa7b61340c2fc5f62415a9071fc1802c302225704c15e91fb7f23b2",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:851287fd93516cec71d8bb4ec9ddd4c507e84feb16b8f9d156c2376c53f75cd2",
   "summary_path": "conclusions/llms_module_conclusion.md",
-  "summary_sha256": "sha256:3ac9bf8cac612fbd6bdf116c7f694ea6e5d5c72dd4ea92ee555f32f66426d08b",
-  "updated_at": "2026-10-25T03:42:13.579370+00:00"
+  "summary_sha256": "sha256:f826d04b1a56f3be74d45d5a00c4c7fbbee5b9e1cbb76e9a1ee0bd7b4ffbaf7d",
+  "updated_at": "2026-11-14T12:24:34.208804+00:00"
 }

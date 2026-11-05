@@ -4,7 +4,7 @@ OIDC authentication resolves the verified token identity `(tenant, provider, iss
 
 ## Migration and compatibility
 
-Apply normal database migrations before deploying the application. PostgreSQL `0075_sso_identity_links` and MySQL `0049_sso_identity_links` add an empty link table. Existing users are linked lazily on their next verified sign-in. On application rollback, retain the additive table to preserve ownership history.
+Apply normal database migrations before deploying the application. PostgreSQL `0079_sso_identity_links` and MySQL `0053_sso_identity_links` add an empty link table. Existing users are linked lazily on their next verified sign-in. On application rollback, retain the additive table to preserve ownership history.
 
 First email association, including JIT creation, requires explicit verification. Standard `email` uses `email_verified`. Custom email mapping must configure its matching verification claim through `SSO_OIDC_<PROVIDER>_CLAIM_EMAIL_VERIFIED` or the provider's `emailVerified` claim mapping. Standard email verification does not verify a different mapped address or a fallback email.
 

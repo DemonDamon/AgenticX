@@ -66,6 +66,22 @@ This allows tests and deployments to swap implementations without forking the pi
 | `validate_tool_input(tool_name, args)` | Delegates to `InputValidator.validate`. |
 | `wrap_for_llm(content, source)` / `wrap_external_content(content)` | XML-style boundaries via `Sanitizer`. |
 
+### Studio mainline wiring (safety-layer-mainline)
+
+The Studio agent loop routes every tool call through `SafetyLayer` at the `dispatch_tool_async` choke point (bridge: `agenticx/runtime/studio_safety.py`):
+
+- **Input**: `validate_tool_input` runs before execution. `bash_exec` is exempt from input validation — it has its own three-layer defense (read-only verdict / whitelist / confirm gate) and the shell rules would false-positive on legitimate commands. Output sanitization still applies to `bash_exec` results.
+- **Output**: `sanitize_tool_output` runs after the credential-store redaction, before the result enters the LLM context.
+
+Flags (env > config > default; failures fall back to safe defaults):
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `AGX_STUDIO_SAFETY_LAYER` / `runtime.studio_safety_layer` | `true` | Off = zero-overhead passthrough, byte-equivalent to pre-SP1 behavior |
+| `AGX_STUDIO_SAFETY_MODE` / `runtime.studio_safety_mode` | `observe` | `observe`: pipeline runs and events are recorded, results untouched (WARN-only rollout); `enforce`: input violations block execution, output redact/sanitize/block apply |
+
+Events fan out to three sinks: the in-memory `SafetyAuditLog`, the append-only `~/.agenticx/safety/events.jsonl` (data source for `write_observation_report()`), and the enterprise audit outbox via `emit_action_audit` (kind `safety_event`) with `session_id` / `tool_call_id` correlation. Review the observation report for false positives before flipping the mode to `enforce`.
+
 ## Input validation
 
 `InputValidator` recursively flattens `dict` / `list` argument trees via `_flatten_args`, producing `(param_path, string_value)` pairs for regex scanning.
@@ -267,6 +283,31 @@ policy = SandboxPolicy(
 rec = policy.recommend("run_shell")
 # rec.backend, rec.network_enabled, rec.max_timeout
 ```
+
+## Security evaluation (`agx security-eval`)
+
+SP2 `security-eval-and-admission` adds a red-team eval harness that **proves the defenses** instead of only having them: an attack corpus is driven through a model matrix and every response is judged by both the model's own refusal and the AgenticX rule stack.
+
+- **Corpus** (`agenticx/security_eval/corpus.py`): reverse-generated from the live `guard_patterns.yaml` (every derived attack embeds a payload that provably matches its source regex) plus a versioned jailbreak seed (`jailbreak_seed.yaml`, classic public techniques aligned with OWASP LLM Top 10).
+- **Judge** (`judge.py`): verdict per (attack, model) ∈ `refused` / `blocked_by_rule` (guard patterns + LeakDetector + Policy would catch it inline) / `bypassed` / `error`, with rule-level evidence.
+- **Scorecard** (`report.py`): per-model `safety_score` (= % neutralized), grade on the skill-guard scale (S+ > S > A > B > C > D), per-OWASP-category stats. Output is versioned (`scorecard.json` machine-readable + `scorecard.md` presale-safe: no endpoints / credentials / raw payloads).
+
+```bash
+# real models (from ~/.agenticx/config.yaml providers)
+agx security-eval run --model zhipu/glm-4.6 --model minimax/MiniMax-M2.7
+# CI / offline (deterministic mock invoker, no network)
+agx security-eval run --mock --mock-behavior compliant
+agx security-eval show security-eval-reports/<run_id>
+```
+
+## Model admission (admin-console)
+
+Enabling a model in the admin-console passes the admission gate (`src/lib/model-admission-gate.ts`, data in `.runtime/admin/model-admission.json`):
+
+- Import a scorecard via `POST /api/admin/security/scorecards` (body = `scorecard.json` from the CLI); thresholds via `GET/PUT /api/admin/security/admission` (`{enabled, minScore, requireScorecard}`).
+- With the gate on, enabling a model whose latest score is below `minScore` returns **403 `model_admission_blocked`**. A body-level `override {reason (≥5 chars), ticket?}` enables anyway and is **recorded** (store + IAM `audit_events` via `insertAuditEvent`).
+- All gate decisions audit **before** the action: `model_admission.blocked_attempt` / `.override` / `.score-passed` / `.no-scorecard` / `.scorecard_imported`.
+- `threshold.enabled: false` (or no scorecard with `requireScorecard: false`) is byte-equivalent to pre-SP2 behavior.
 
 ## Dynamic rule management
 

@@ -1,6 +1,6 @@
 # @agenticx/auth 模块总结
 
-> 结论生成时间：2026-07-21（重新生成，覆盖当前代码 v0.1.0）
+> 结论生成时间：2026-11-14（target cebdabd5，覆盖当前代码 v0.1.0）
 
 > 说明：本文档描述 **企业认证抽象层包**（`@agenticx/auth`）。它是 web-portal、admin-console 共用的认证 SDK，提供密码登录 + JWT、OIDC SSO、SAML SSO、信封加密、Next.js session 中间件。包 `package.json#description` 写的是「认证抽象层（Supabase/LDAP/SSO/账密）」，但**当前代码实际实现的 provider 只有 `password` / `oidc` / `saml` 三种**（见 `providers/types.ts` 的 `AuthProviderKind`），Supabase/LDAP 仅为描述性占位，不在本包源码内。
 
@@ -15,6 +15,7 @@
 5. **AES-256-GCM + HKDF 信封加密** —— 同时用于 DB `client_secret` 列加密和签名的 state cookie
 6. **portal/admin SSO 错误码** 单一权威源（zh/en 双语映射，`saml.*` + `oidc.*` 命名空间）
 7. **Next.js Bearer-token session 中间件**
+8. **AuthStrategy 注册表** —— SSO 运行时按 `strategyId` / `protocol` / `providerId` 解析 IdP 变体（含 Keycloak realm 端点推导与 B 层 custom 插件占位）
 
 技术栈：TypeScript + `jose`（JWT）+ `openid-client` v6（OIDC）+ `@node-saml/node-saml` v5（SAML）+ `bcryptjs` + `node:crypto`（HKDF/AES-GCM）。依赖 `@agenticx/db-schema`（workspace）和 `drizzle-orm`。测试用 `vitest`，SAML fixture 构造用 dev 依赖 `xmlbuilder2`。
 
@@ -36,6 +37,16 @@ packages/auth/
     │   ├── password-provider.ts  # 包 AuthService.loginWithPassword
     │   ├── oidc-provider.ts      # 包 OidcClientService（buildAuthorizationUrl / exchangeCallback）
     │   └── saml-provider.ts      # 桩；真 SAML 在 saml-protocol-handler
+    ├── strategies/        # SSO IdP 变体注册表（与 providers/ 正交：providers=AuthProviderKind，strategies=运行时接线）
+    │   ├── types.ts            # AuthStrategy / AuthStrategyProtocol / AuthStrategyEndpoints
+    │   ├── registry.ts         # AuthStrategyRegistry + createDefaultAuthStrategyRegistry
+    │   ├── resolve.ts          # resolveAuthStrategyId / applyStrategyEndpoints
+    │   ├── oidc-strategy.ts    # 通用 OIDC（透传 issuer）
+    │   ├── saml-strategy.ts    # SAML（无 resolveEndpoints）
+    │   ├── keycloak-strategy.ts # baseUrl+realm → issuer / authorizationUrl
+    │   ├── fake-customer-iam-strategy.ts  # custom 协议演示 / B 层插件占位
+    │   ├── index.ts
+    │   └── __tests__/            # registry.test.ts、resolve.test.ts
     └── services/          # 核心能力模块
         ├── auth.ts                  # AuthService + InMemory{RefreshTokenStore,AuthUserRepository}
         ├── jwt.ts                   # JwtService（RS256 access+refresh via jose）
@@ -147,6 +158,20 @@ packages/auth/
 - **`sso-protocol-handler.ts`**：`SsoProtocolHandler<StartInput, CallbackInput>` 接口；`SsoStartResult`（redirect | form_post，含可选 cookie）；`SsoExternalIdentity { externalSubject, email, displayName, deptHint, roleCodeHints, rawAttributes, rawTokens }` —— 让路由用同样方式处理 OIDC 和 SAML
 - **`sso-sign-in-policy.ts`**：`buildNormalizedSsoLoginInput({audience: "portal"|"admin", protocol, providerId, issuer, identity}) → NormalizedSsoLoginInput`；portal 做 JIT provisioning；admin 强制预 provisioning + `admin:enter` scope（这部分逻辑在 app 中，不在本包）
 
+### AuthStrategy 注册表 (`strategies/`)
+
+**用途**：在既有 `SsoProtocolHandler`（OIDC/SAML 协议实现）之上，为 **不同 IdP 产品形态** 提供可注册的策略插件；供 portal/admin `sso-runtime` 在启动 SSO 前解析 `strategyId` 并合并缺省端点配置。
+
+**核心类型**（`strategies/types.ts`）：
+- `AuthStrategyProtocol` = `"oidc" | "saml" | "custom"`
+- `AuthStrategy`：`id` + `protocol` + 可选 `resolveEndpoints(config) → { issuer?, authorizationUrl? }`
+
+**默认注册**（`createDefaultAuthStrategyRegistry`）：`oidc`、`saml`、`keycloak`、`fake-customer-iam`。`AuthStrategyRegistry.register` 支持运行时追加 B 层 custom 策略。
+
+**解析规则**（`resolveAuthStrategyId`）：显式 `strategyId` → `protocol === "saml"` → `protocol === "custom"` → `providerId` 含 `keycloak` → 默认 `oidc`。
+
+**端点合并**（`applyStrategyEndpoints`）：调用策略的 `resolveEndpoints`，仅在 `issuer` / `authorizationUrl` 为空时写入；**不覆盖**已有非空 `issuer`（Keycloak 由 `baseUrl` + `realm` 推导 `…/realms/{realm}` 与 OIDC auth 路径）。
+
 ### Next.js 中间件
 
 `middleware/next.ts`：`createSessionMiddleware(authService)` 返回 `withSession(handler, {required, requiredScopes})`，用于 Next.js route handler。解析 `Authorization: Bearer <jwt>`，把 `{ auth: AuthContext | null }` 挂到第二个参数；失败返回 JSON：
@@ -155,13 +180,15 @@ packages/auth/
 
 ## 公共 API 表面（从 `@agenticx/auth` import）
 
-**类型**：`AuthUser, AuthContext, AuthTokens, LoginInput, RefreshSession, RefreshTokenStore, AuthUserRepository, AuthProvider, AuthProviderKind, ClaimMapping, OidcMappedUser, OidcProviderConfig, OidcExchangeResult, OidcStatePayload, SamlStatePayload, SamlSpProviderConfig, SamlAttributeMapping, SamlProfileLike, SsoProtocol, SsoStartResult, SsoStartCookie, SsoExternalIdentity, SsoCallbackResult, SsoProtocolHandler, SsoAudience, NormalizedSsoLoginInput` + 各种 `*HandlerInput / Result`
+**类型**：`AuthUser, AuthContext, AuthTokens, LoginInput, RefreshSession, RefreshTokenStore, AuthUserRepository, AuthProvider, AuthProviderKind, ClaimMapping, OidcMappedUser, OidcProviderConfig, OidcExchangeResult, OidcStatePayload, SamlStatePayload, SamlSpProviderConfig, SamlAttributeMapping, SamlProfileLike, SsoProtocol, SsoStartResult, SsoStartCookie, SsoExternalIdentity, SsoCallbackResult, SsoProtocolHandler, SsoAudience, NormalizedSsoLoginInput` + 各种 `*HandlerInput / Result`；策略层：`AuthStrategy, AuthStrategyEndpoints, AuthStrategyId, AuthStrategyProtocol, ResolveAuthStrategyIdInput`
 
-**类**：`AuthService, JwtService, OidcClientService, OidcProtocolHandler, SamlProtocolHandler, PasswordProvider, OidcProvider, SamlProvider, InMemoryRefreshTokenStore, InMemoryAuthUserRepository`
+**类**：`AuthService, JwtService, OidcClientService, OidcProtocolHandler, SamlProtocolHandler, PasswordProvider, OidcProvider, SamlProvider, InMemoryRefreshTokenStore, InMemoryAuthUserRepository, AuthStrategyRegistry`
 
 **错误**：`OidcConfigError, OidcCallbackError, OidcClaimError, OidcInvalidRedirectError, SamlConfigError, SamlCallbackError, SamlAttributeError, WeakSecretKeyError`
 
-**函数**：`hashPassword, verifyPassword, encryptSecret, decryptSecret, assertStrongSecretKey, mapClaimsToAuthUser, mapSamlProfileToIdentity, randomStateToken, randomRelayState, encodeSignedState, decodeSignedState, buildStateCookieValue, validateStateFromCookie, encodeSignedSamlState, decodeSignedSamlState, buildSamlStateCookieValue, validateSamlStateFromCookie, assertOidcRedirectUriForRuntime, createSessionMiddleware, createAuthProvider, createOidcProtocolHandler, createSamlProtocolHandler, buildNormalizedSsoLoginInput, registerOidcDiscoveryDegradedReporter`
+**函数**：`hashPassword, verifyPassword, encryptSecret, decryptSecret, assertStrongSecretKey, mapClaimsToAuthUser, mapSamlProfileToIdentity, randomStateToken, randomRelayState, encodeSignedState, decodeSignedState, buildStateCookieValue, validateStateFromCookie, encodeSignedSamlState, decodeSignedSamlState, buildSamlStateCookieValue, validateSamlStateFromCookie, assertOidcRedirectUriForRuntime, createSessionMiddleware, createAuthProvider, createOidcProtocolHandler, createSamlProtocolHandler, buildNormalizedSsoLoginInput, registerOidcDiscoveryDegradedReporter, createDefaultAuthStrategyRegistry, resolveAuthStrategyId, applyStrategyEndpoints`
+
+**策略常量**：`oidcStrategy, samlStrategy, keycloakStrategy, fakeCustomerIamStrategy`
 
 错误消息辅助：`getPortalSsoErrorMessage{Zh,En}, getAdminSsoErrorMessage{Zh,En}`
 
@@ -174,7 +201,7 @@ packages/auth/
 
 ## 测试布局
 
-全部测试在 `src/services/__tests__/`（9 个 vitest spec 文件）：
+`src/services/__tests__/`（9 个 vitest spec）+ `src/strategies/__tests__/`（2 个）：
 
 | 文件 | 覆盖 |
 |---|---|
@@ -187,8 +214,10 @@ packages/auth/
 | `saml-attribute-mapper.test.ts` | SAML attribute 映射 |
 | `saml-state.test.ts` | SAML RelayState cookie |
 | `secret-cipher.test.ts` | AES-256-GCM + HKDF |
+| `strategies/__tests__/registry.test.ts` | 默认策略列表、Keycloak 端点、custom 注册 |
+| `strategies/__tests__/resolve.test.ts` | `resolveAuthStrategyId` 优先级、`applyStrategyEndpoints` 合并规则 |
 
-运行：`pnpm --filter @agenticx/auth test`（vitest run）
+运行：`pnpm --filter @agenticx/auth test`（vitest **^5.0.5** run）
 
 **注**：`AuthService`、`JwtService`、`password.ts`、`middleware/next.ts`、provider 适配器**没有包内单元测试** —— 由消费 app 中的集成测试覆盖。`xmlbuilder2` 是 dev dependency，用于 SAML 测试构造 fixture response。
 
@@ -209,3 +238,9 @@ packages/auth/
 - `services/secret-from-env.ts`：`NAME` / `NAME_FILE` 读密钥（与 JWT、gateway internal token 一致）。
 - 测试：`auth-password-change.test.ts`、`secret-from-env.test.ts`。
 - Portal 侧改密页/API 在 `web-portal`，不在本包。
+
+## 增量（22d051f5 → cebdabd5）
+
+- 新增 `src/strategies/`：`AuthStrategyRegistry`、`resolveAuthStrategyId`、`applyStrategyEndpoints`；内置 `oidc` / `saml` / `keycloak` / `fake-customer-iam`。
+- `index.ts` barrel 增加 `export * from "./strategies"`。
+- 包内测试 +2（`registry.test.ts`、`resolve.test.ts`）；dev：`vitest` ^5.0.5。

@@ -108,7 +108,7 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 - **Runtime Boundary**: The Gateway is an enterprise compliance and model relay, not the Python Agent Runtime. Enterprise Edge Agent is a non-default MVP; Cluster Runtime has not started
 
 ### Security and Sandbox
-- **Safety Building Blocks**: Leak detection, sanitization, injection detection, policy engine, input validation, tool guardrails, approval, and audit. The Studio path combines hooks, permissions, and path protection; it does not yet route every operation through the complete `SafetyLayer`
+- **Safety Building Blocks**: Leak detection, sanitization, injection detection, policy engine, input validation, tool guardrails, approval, and audit. The Studio mainline routes every tool call through the complete `SafetyLayer` pipeline (`AGX_STUDIO_SAFETY_LAYER` on by default; `AGX_STUDIO_SAFETY_MODE` defaults to `observe` with `enforce` for active interception; safety events persist locally and bridge to enterprise audit)
 - **Sandbox**: Docker / Microsandbox / Subprocess / remote HTTP backends; Jupyter kernel manager, stateful code interpreter, sandbox templates, and JSONL execution audit
 - **Session Persistence**: Studio writes to the `~/.agenticx/sessions` file tree by default, with an optional Redis session backend. The database session service is a separate SDK module, not the default Studio path
 
@@ -485,7 +485,7 @@ See also: [docs/agx-data-suite/](docs/agx-data-suite/) (ops notes / Feishu manua
 | **M8** | ✅ | Communication Protocols — A2A (client / server / AgentCard / skill-as-tool), MCP resource access, AGUI protocol |
 | **M9** | ✅ | Observability — Callbacks, real-time monitoring, trajectory analysis, span tree, WebSocket streaming, Prometheus / OpenTelemetry integration |
 | **M10** | ✅ | Developer Experience — CLI (`agx` with 20+ commands), Studio Server (FastAPI REST + SSE), Near Desktop (Electron + React + Zustand, multi-pane) |
-| **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and multi-backend sandbox; Studio does not yet use one complete `SafetyLayer` pipeline |
+| **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and multi-backend sandbox; Studio mainline uses the complete `SafetyLayer` pipeline (observe/enforce modes, observe by default) |
 | **M13** | ✅ | Knowledge & Retrieval — Knowledge base with document processing, chunkers, graphers (GraphRAG), readers; retrieval (vector / BM25 / graph / hybrid / auto); embeddings (OpenAI / Bailian / SiliconFlow / LiteLLM) |
 | **M14** | ✅ | Avatar & Collaboration — Avatar registry, group chat (user-directed / meta-routed / round-robin), delegation, role-playing, conversation patterns, team management |
 | **M15** | ✅ | Evaluation Framework — EvalSet, LLM judge, composite judge, span evaluator, trajectory matcher, trace converter |

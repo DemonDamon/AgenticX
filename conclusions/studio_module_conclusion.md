@@ -1,6 +1,6 @@
 # AgenticX Studio 模块总结
 
-> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` → `22d051f5d18ad83a4c6083683342ab41d7850149`）
+> 结论更新时间：2026-11-14（覆盖基线 `22d051f5d18ad83a4c6083683342ab41d7850149` → `cebdabd5883de1d5a62c96ae4084de6ad036b32f`）
 
 ## 目录路径
 
@@ -40,6 +40,9 @@ agenticx/studio/
 ├── avatar_url_compact.py  # (NEW) 持久化前压缩 avatar_url（剔除 data: / 超长 URL）
 ├── credentials_routes.py  # (NEW) 本地凭据库 HTTP（不落盘 secret）
 ├── enterprise_worker_routes.py  # (NEW) 企业桌面 Worker 状态/开关 + 已发布 Agent 列表
+├── harness_permissions.py       # (NEW) 外部 harness 权限提示 → confirm_required SSE；run_mode → spawn options
+├── harness_turn_text.py         # (NEW) 外部 harness 回合 assistant 正文单条格式化（成功/失败横幅）
+├── harness_wiring.py            # (NEW) SP5b：外部 harness 回合、中途 switch/handoff、与 HandoffEngine 接线
 ├── code_index/            # (NEW) 代码索引 HTTP 路由（config/status，serve 期模型预载）
 ├── web_search/            # (NEW) 内置 Web 搜索子包（contracts/providers/service/routes）
 └── kb/                    # 本地知识库（manager/runtime/routes；job 可 cancel；chunk_strategy 标题感知/父子分块）
@@ -100,7 +103,10 @@ agenticx/studio/
 - `archive_sessions_before(session_id)`：将同一 Avatar 下早于指定会话的所有会话标记为 archived
 - `rename_session` / `pin_session` / `auto_title_session`：元数据更新 + 持久化
 - `set_session_model(session_id, provider, model)`：由 Desktop 模型选择器触发，落盘当前 session 的 `provider_name`/`model_name`，使冷启动后能够回显"上次用的模型"
-- `list_sessions(avatar_id)`：合并内存活跃会话 + 持久化历史，按 pinned-first + updated_at 排序；每行附带 `provider`、`model`、`execution_state`；avatar 过滤已下推到持久层——`_list_persisted_sessions(avatar_id)` 先按 SQLite 元数据过滤再读 `messages.json`，打开群聊/分身窗格不再全量扫盘
+- **(NEW)** `require_safe_session_id()`：harness 控制面入口（绑定 / switch / handoff 审计 / 外部 harness 回合）校验 session id，防路径注入；内置 runtime 历史会话保持旧行为
+- **(NEW)** `set_session_harness()` / `get_session_harness()` / `clear_session_harness()`：会话级 harness 绑定（`harness_id` / `harness_thread_id` / `harness_options` / `harness_session_id`），镜像 `set_session_model` 持久化；`""` / `python-agent` 视为内置 runtime
+- **(NEW)** `_normalize_messages()` 保留 `role=system` 且 `system_notice=True` 的 harness 切换边界行，供 Desktop 居中标记渲染
+- `list_sessions(avatar_id)`：合并内存活跃会话 + 持久化历史，按 pinned-first + updated_at 排序；每行附带 `provider`、`model`、`execution_state`，以及持久化的 `harness_id` / `harness_thread_id` / `harness_session_id`（与模型记忆同级回显）；avatar 过滤已下推到持久层——`_list_persisted_sessions(avatar_id)` 先按 SQLite 元数据过滤再读 `messages.json`，打开群聊/分身窗格不再全量扫盘
 - `search_sessions_by_message_text(query)`：先走 SQLite FTS，失败时回退到 LIKE 扫描，返回 `session_id + snippet`
 - `archive_sessions_before(session_id)`：将同一 Avatar 下早于指定会话的所有会话标记为 `archived`
 - `cleanup_expired()`：TTL 过期的会话先 persist 再从内存移除
@@ -263,7 +269,7 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 
 ### protocols.py
 
-定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。`speaker_user_id`：群聊房间发言人（空则视为桌面主人 `"user"`）。`command_name`：Composer 命令 chip，与 `client_turn_id` 一起写入该轮用户行的 `history_user_metadata`（空值不写），供历史重载回显。**(2026-10)** `max_tool_rounds`：单轮工具轮次上限覆盖（10–120，优先于 env/config）。`ConfirmResponse.remember`：`"session"` 时批准非受保护确认可把工具名写入 `sticky_allowed_tools`。`ClarifyResponse` 扩展 `panel_id`/`candidate_set_version`/`option_id`（版本化选项卡，过期 409）与 `secret_values`（仅交给等待中的工具，持久化只记 `secret_fields` 名）。
+定义 Studio 协议常量和请求/响应类型，供 server.py 和 Desktop IPC 共用。`SessionState` 新增 `harness_id` / `harness_thread_id`（`None` = 内置 python runtime）。`ChatRequest` 新增字段：`unattended_run`（无人值守回合：低风险操作可继续、受保护确认 fail-closed）、`reasoning_effort`（Kimi K3 `low/high/max`；DeepSeek V4 thinking `high/max`）、`thinking_enabled`（DeepSeek V4 思考开关，`None` 表示不改动 session 现状）。**(NEW，2026-09)** `plan_mode` / `isolate_run`：由 `/chat` 在跑 Runtime 前写入 session（`apply_turn_intent_to_session` / `ensure_isolate`）；自动化会话强制非 plan。`speaker_user_id`：群聊房间发言人（空则视为桌面主人 `"user"`）。`command_name`：Composer 命令 chip，与 `client_turn_id` 一起写入该轮用户行的 `history_user_metadata`（空值不写），供历史重载回显。**(2026-10)** `max_tool_rounds`：单轮工具轮次上限覆盖（10–120，优先于 env/config）。`ConfirmResponse.remember`：`"session"` 时批准非受保护确认可把工具名写入 `sticky_allowed_tools`。`ClarifyResponse` 扩展 `panel_id`/`candidate_set_version`/`option_id`（版本化选项卡，过期 409）与 `secret_values`（仅交给等待中的工具，持久化只记 `secret_fields` 名）。
 
 ---
 
@@ -405,6 +411,38 @@ data: {"type": "final", "data": {"text": "..."}, "agent_id": "meta"}
 ### supervisor.py
 
 每轮 tick 用 `sessions_with_scratchpad_flag(SESSION_META_UNATTENDED)` 一次 SQLite 查询替代逐 session scratchpad 读，避免冷启动后数百会话拖死事件循环。
+
+---
+
+## 2026-11-14 增量（22d051f5 → cebdabd5）
+
+### 外部 Harness 控制面 — harness_wiring.py + harness_permissions.py + harness_turn_text.py
+
+Studio 侧 SP5b 集成层：进程内 `HarnessRegistry` + `HandoffEngine`（`~/.agenticx/handoffs`），对接 `SessionManager` / `StudioSession`。
+
+- **harness_wiring.py**：`run_external_harness_turn` / `run_external_harness_turn_async` 经统一 adapter 执行回合，结果写入 `chat_history`（Run 元数据）；`switch_harness` / `switch_harness_async` 中途切换 + 上下文 handoff（失败 fail-closed）；`snapshot_from_session`、`handoff_audit`；`derive_sticky_harness_id` / `persist_derived_harness` 从消息 stamp 回补绑定；`sync_builtin_agent_messages_from_chat_history` 切回内置 runtime 时投影 `agent_messages`；Codex 出站附带 `attach_codex_reply_language_policy`；进程内 `_inflight_turns` 互斥（`HarnessTurnBusyError`）。
+- **harness_permissions.py**：`pending_permission_to_confirm_sse_data` 将 Claude Code `can_use_tool` 队列映射为 Desktop `confirm_required`；`harness_spawn_options_for_run_mode` 把 Near `run_mode` 折进 claude-code / codebuddy / codex spawn options。
+- **harness_turn_text.py**：`format_external_harness_assistant_content` 成功保留正文、失败单条 `[harness …]` 横幅（CodeBuddy 登录 REQUIRED 专用文案）。
+
+### Server 行为增量（本区间，仅描述）
+
+- **/chat 分流**：绑定外部 harness 时走 `_external_harness_chat_stream`（`token` / `tool_*` / `harness_progress` / `confirm_required` / CB↔CC 编排 `subagent_*` → `final` / `token_usage` / `done`）；内置 runtime 路径不变。回合前 `maybe_sync_harness_settings`；`acquire_session_run_lock` 多副本 busy → `session_busy_elsewhere`。
+- **Harness HTTP**：`GET /api/harnesses` 目录；`GET|POST /api/sessions/{sid}/harness` 绑定与 sticky 恢复；`POST …/harness/switch` handoff（回合进行中 409）；`GET …/handoffs` 审计；`GET /api/claude-code/settings/live-models`；`POST /api/harness/settings/apply`（cc-switch 同步 provider/model 进 harness 本地配置）。
+- **/api/confirm**：外部 harness 待决权限转发 `adapter.permission`（`PermissionDecision`），与 Meta 确认门并列。
+- **子智能体**：`/cancel` 与 `update_subagent_model` 增补 `cc-subagent-*` / `cb-subagent-*` CLI 子进程路径，并同步 `SubAgentRunStore` run ledger。
+
+### enterprise_worker_routes.py 扩展
+
+在既有 Worker 开关与 `GET /api/enterprise-agents` 之上：
+
+- `GET /api/enterprise-agents/{agent_id}`：ULID 校验；未登录 409；`fetch_enterprise_agent_detail`。
+- `PUT /api/enterprise-worker`：`enabled` 与 `ma_enabled` 分立；`ma_enabled` 写入 `protocol=dual` / `ma_environment_mode=auto`，关闭回落 `legacy`。
+- `POST /api/enterprise-worker/interactive-environments`：交互式环境 TTL 登记（`INTERACTIVE_ENV_TTL_S`）。
+- `POST /api/avatars/{avatar_id}/enterprise-publish`：`build_publish_manifest` + `dry_run` 默认真；真发布走 `publish_avatar_draft`。
+
+### storage/factory.py
+
+默认 sessions 根与配置目录改经 `agx_home()` 解析（测试可重定向 HOME），不再硬编码 `Path.home() / ".agenticx"`。
 
 ---
 

@@ -1,21 +1,25 @@
 # @agenticx/core-api 模块总结
 
-> 结论生成时间：2026-07-21（基于源码核验重写）
+> 结论生成时间：2026-11-14（基于 commit cebdabd5 核验重写）
 
 ## 模块概述
 
-`@agenticx/core-api` 是**纯类型 / 契约包**——只有 TypeScript 类型定义与少量纯函数，没有任何运行时副作用。被 gateway、SDK、apps 共享，涵盖 chat、audit、错误码、session-title 启发式，是跨语言（TS ↔ Go）字段对齐的契约源。
+`@agenticx/core-api` 以 **TypeScript 类型与跨端契约** 为主：Enterprise gateway、SDK、apps 共享 chat、audit、错误码、session-title 等定义，并与 Go 网关字段对齐。自 `managed-agents` 起，包内另含与主仓 Python（`agenticx/managed/manifest.py`）规则一致的 **Manifest / 客户端事件批校验** 与 canonical JSON + `sha256` 哈希，供 Managed Agents 与评测 rubric 在 TS 侧复用同一套约束。
 
 ## 目录结构
 
 ```
 packages/core-api/
 └── src/
-    ├── index.ts            # barrel：re-export chat / session-title / errors / audit
+    ├── index.ts            # barrel：chat / session-title / errors / audit / trace / managed-agents
     ├── chat.ts             # ChatMessage、ChatSession、ChatRequest、ChatResponse、ChatChunk、ChatError、ChatMessageRole、ToolCallSummary、ChatMessageAttachment、IsoDateTime、EntityId、ApiEnvelope
     ├── audit.ts            # AuditEvent、AuditEventType、AuditRoute、AuditClientType、AuditPolicySeverity/Action、AuditDigest、AuditPolicyHit、AuditQueryInput、AuditQueryResult
     ├── errors.ts           # BUSINESS_ERROR_CODES、POLICY_ERROR_CODES、isPolicyErrorCode、toComplianceMessage
-    └── session-title.ts    # sessionTitleNeedsAutoFill、buildAutoTitleFromFirstUserMessage
+    ├── session-title.ts    # sessionTitleNeedsAutoFill、buildAutoTitleFromFirstUserMessage
+    ├── trace.ts            # trace-id 契约
+    ├── managed-agents.ts   # agx-ma/2026-11 协议类型、常量、validateManifest / validateClientEventBatch 等
+    ├── managed-evals.ts    # Eval rubric 类型与 validateRubric（子路径 `@agenticx/core-api/managed-evals`）
+    └── __tests__/          # vitest：manifest / event / rubric fixture 与 Python 哈希对齐用例
 ```
 
 ## 关键导出
@@ -43,12 +47,23 @@ packages/core-api/
 - `sessionTitleNeedsAutoFill`：空名、命中占位、或以「新会话/新对话/new session/new chat」前缀开头则需自动填充
 - `buildAutoTitleFromFirstUserMessage`：空白压平（`\s+` → 单空格）后取前 **48 字**——**与主仓 Python `session_manager._build_auto_title` 显式对齐**，跨语言契约一致
 
+### managed-agents.ts（`PROTOCOL_VERSION = agx-ma/2026-11`）
+- 事件枚举：`CLIENT_EVENT_TYPES` / `SERVER_EVENT_TYPES`（含 task、thread、MCP、span 等）；`PAT_SCOPES`、`MA_WEBHOOK_EVENT_GROUPS` / `MA_WEBHOOK_EVENT_TYPES`
+- 资源与限制常量：`MAX_MANIFEST_BYTES`、`MAX_SYSTEM_BYTES`、`MULTIAGENT_MAX_MEMBERS`、`MAX_ADVISOR_INSTRUCTIONS_BYTES`、`MAX_EVENTS_PER_BATCH`、Worker lease / SSE 间隔等
+- 领域类型：`ContentBlock`、`ClientEvent` / `ServerEvent`、`AgentManifest`、`SessionRecord`、`WorkItemRecord`、`EnvironmentRecord` 等；`MA_ERROR_CODES`
+- 校验与哈希：`canonicalJson`、`manifestHash`、`validateManifest`（返回 `ManifestResult`：errors / normalized / `manifestHash`）、`validateClientEventBatch`（批量上限与 `duplicate_resolution`）
+
+### managed-evals.ts（子路径导出，不进主 barrel）
+- `RULE_TYPES`、`JUDGE_MODES`、`STOP_REASON_VALUES`；上限 `MAX_CRITERIA_BYTES`、`MAX_RULE_CHECKS` 等
+- `EvalRubric` / `EvalRuleCheck`；`validateRubric` → `RubricResult`（含 `contentHash`，复用 `canonicalJson`）
+
 ## 显著模式
 
 - **错误码命名空间**：`4xxxx` 业务错 / `9xxxx` policy 错（regex 区分），policy 错对应 gateway/policy-engine 触发
 - **中文 compliance 消息 + 网关原因优先**：`toComplianceMessage` 在 fallback 已含「命中策略」时保留具体原因，体现"网关拼原因、前端不覆盖"的协作约定
 - **session-title 跨语言契约**：与主仓 Python 实现镜像（占位集合 + 48 字截断）
 - **审计哈希链 / 跨境字段**：`AuditEvent` 内置 `prev_checksum → checksum → signature` 链与 `cross_border/residency_rule`，是 gateway Blake2b 链审计与跨境合规的 TS 侧契约
+- **Managed Agents 跨语言校验**：TS `validateManifest` / `validateClientEventBatch` / `validateRubric` 的错误文案与字节上限与 Python manifest 层对齐；fixture 测试锁定 `manifestHash` / `contentHash` 与 Python 一致
 
 ## 与 Enterprise 其他模块的关系
 
@@ -58,7 +73,7 @@ packages/core-api/
 | `packages/sdk-ts` | 部分覆盖 | SDK 的 `ChatMessage` 是更窄子集 |
 | `apps/gateway`（Go） | **结构对齐** | Go 端 `audit.Event` 字段与本包 `AuditEvent` 对齐（含哈希链、跨境、MCP 字段） |
 | `apps/gateway` → `packages/policy-engine` | 间接 | `POLICY_ERROR_CODES` 90001/90002 对应 policy-engine 的 block 命中 |
-
+| Managed Agents / 主仓 `agenticx/managed` | **校验镜像** | TS 侧 manifest、事件批、rubric 与 Python 同规则同哈希，减少双栈漂移 |
 
 ## 增量（8ebec3b5 → 30e57496）
 
@@ -73,3 +88,9 @@ packages/core-api/
 - `src/audit.ts`：`AuditEventType` 增加 `desktop_agent_action`；`AuditQueryInput` 增加可选 `event_type?: string` 过滤条件。
 - `src/chat.ts`：`ChatMessage` 增加 `control?: "continue_report"` 与 `interruption?: { reason; contentLength }`；`DeepResearchEventPayload` 增加 `report_resume_available` 变体（章节续写入口）。
 - `src/errors.ts`：`toComplianceMessage` 对 `42902` 映射「模型服务繁忙，请稍后再试。」
+
+## 增量（22d051f5 → cebdabd5）
+
+- **新增** `src/managed-agents.ts`：`agx-ma/2026-11` 线协议类型全集 + `validateManifest` / `validateClientEventBatch` 等运行时校验；barrel `index.ts` `export * from "./managed-agents"`。
+- **新增** `src/managed-evals.ts`：`validateRubric` 与 rubric 规则类型；`package.json` `exports["./managed-evals"]` 子路径，主入口不 re-export。
+- **新增** `src/__tests__/managed-agents.test.ts`、`managed-evals.test.ts`（vitest）；`package.json` 增加 `"test": "vitest run"`。

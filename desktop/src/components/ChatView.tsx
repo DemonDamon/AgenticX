@@ -1458,6 +1458,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      let pendingFinalHarness: string | undefined;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       const syncTurnRefsSnapshot = () => {
@@ -1932,6 +1933,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
               pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
               pendingFinalTerminalReason = normalizedFinal.terminalReason;
+              {
+                const harnessRaw =
+                  payload.data?.harness ?? payload.data?.harness_id ?? null;
+                const harnessId = String(harnessRaw ?? "").trim();
+                if (harnessId) pendingFinalHarness = harnessId;
+              }
               const appliedRefs = applyFinalReferencePayload(
                 pendingReferences,
                 pendingSearchedQueries,
@@ -2141,6 +2148,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
+              ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
             },
           }
         : { metadata: { turn_terminal: false } };

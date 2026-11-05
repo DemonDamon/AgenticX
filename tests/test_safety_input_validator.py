@@ -87,6 +87,15 @@ def test_blocks_ssrf_private_ip():
     assert any("ssrf_private_ip" in r.rule_id for r in result.violations)
 
 
+def test_blocks_ssrf_link_local_metadata_endpoint():
+    """SP6 红队演练发现的规则缺口：云元数据端点（169.254.169.254）必须拦截。"""
+    v = InputValidator()
+    for url in ("http://169.254.169.254/latest/meta-data/", "http://0.0.0.0:8080/x"):
+        result = v.validate("http_tool", {"url": url})
+        assert result.is_blocked is True, url
+        assert any("ssrf_private_ip" in r.rule_id for r in result.violations), url
+
+
 def test_nested_list_scanning():
     v = InputValidator()
     result = v.validate("multi_tool", {

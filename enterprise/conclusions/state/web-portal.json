@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "web-portal",
-  "generation": "224c05d7518d45698264f439be5ccdde",
+  "generation": "e4d698243c8b42029dd4ea00b18612f1",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:088fa3ab45983bb21b4537596755969b971046c6221d2806046542cb7b8fbfcc",
+  "baseline_commit": "d01aba3a86520a9a55c5ed355207e237185380ec",
+  "baseline_tree": "dce800847dfe08fc4bc1299f1de94f47a4f4af5e",
+  "source_fingerprint": "sha256:02ce0a9d8b824cffe028571f4710cb0eb1bd63ab43731ba13cb0c4f8eebdc411",
   "summary_path": "enterprise/conclusions/apps/web-portal_conclusion.md",
-  "summary_sha256": "sha256:9c28bec5940cba08e59521db4bff8af31175f0c38eec1b9222feb67f4518b90b",
-  "updated_at": "2026-10-25T03:42:33.410877+00:00"
+  "summary_sha256": "sha256:a456ef235c086f89ee1c274cd0332da926ed3df43530620a4a0078a58de16679",
+  "updated_at": "2026-11-15T15:45:47.394071+00:00"
 }

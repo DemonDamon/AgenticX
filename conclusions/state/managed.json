@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "managed",
+  "generation": "9f98d51bd0da43f08aea7cf31649b9bf",
+  "mapping_revision": 1,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:bbe0a690dc80e9b3cada957786cbd951948dddee92196b240d7d002cc0d526c5",
+  "summary_path": "conclusions/managed_module_conclusion.md",
+  "summary_sha256": "sha256:4aaa072a3d89723fa9f4aa5db3d222610f5251cd9bc57e4b6d6dfa810d6795b6",
+  "updated_at": "2026-11-14T12:27:56.386908+00:00"
+}

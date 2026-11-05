@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "project-state",
-  "generation": "f82c60c0c9d24fd498ade5908e640096",
+  "generation": "bae3e2f4e3584a88acecf10d74303bbd",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
   "source_fingerprint": "sha256:8546b09c771cbae90158b935563f27a85cc94e1cdcb558e7e8188318f3be69db",
   "summary_path": "conclusions/project_state_module_conclusion.md",
   "summary_sha256": "sha256:92e8fe4fbc5e6784f52c72ef349917e70e5f32f437acbc60b1219c2288e6e555",
-  "updated_at": "2026-10-24T13:53:16.277942+00:00"
+  "updated_at": "2026-11-14T12:15:46.945364+00:00"
 }
