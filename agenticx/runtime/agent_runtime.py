@@ -3804,7 +3804,7 @@ class AgentRuntime:
         return True, ""
 
     def _persist_final_checkpoint(self) -> None:
-        """Persist the completed turn before exposing its FINAL event."""
+        """Persist terminal turn state before exposing its final/error event."""
         if self._mid_turn_persist is None:
             return
         try:
@@ -3897,11 +3897,16 @@ class AgentRuntime:
         *,
         agent_id: str,
         is_system_trigger: bool,
+        stream_interrupted: bool = False,
     ) -> bool:
-        """Commit the prefix the user already saw into model-facing history."""
+        """Commit a safe interrupted prefix into model-facing history.
+
+        The compatibility flag applies to user cancellation only. A failed
+        stream cannot discard output already exposed to the caller.
+        """
         from agenticx.runtime.harden_flags import cancelled_prefix_finalize_enabled
 
-        if not cancelled_prefix_finalize_enabled():
+        if not stream_interrupted and not cancelled_prefix_finalize_enabled():
             return False
         parsed = parse_assistant_output(str(raw_prefix or ""))
         body = parsed.visible_body.strip()
@@ -4126,6 +4131,7 @@ class AgentRuntime:
         saw_final = False
         saw_error = False
         saw_stop = False
+        saw_stream_interruption = False
         normal_end = False
         current_round: int | None = None
         inner = self._run_turn_inner(
@@ -4154,9 +4160,12 @@ class AgentRuntime:
                     saw_final = True
                 if getattr(event, "type", None) == EventType.ERROR.value:
                     saw_error = True
-                    event_text = str((getattr(event, "data", None) or {}).get("text", "") or "")
+                    error_data = getattr(event, "data", None) or {}
+                    event_text = str(error_data.get("text", "") or "")
                     if event_text == STOP_MESSAGE:
                         saw_stop = True
+                    if error_data.get("detector") == "stream_interrupted":
+                        saw_stream_interruption = True
                 if recorder is not None:
                     try:
                         recorder.observe(event, session=session, round_idx=current_round)
@@ -4173,7 +4182,7 @@ class AgentRuntime:
                 try:
                     if saw_final:
                         recorder.finish("completed")
-                    elif normal_end and saw_stop:
+                    elif saw_stream_interruption or (normal_end and saw_stop):
                         recorder.finish("interrupted")
                     elif normal_end and saw_error:
                         recorder.finish("failed")
@@ -4184,7 +4193,7 @@ class AgentRuntime:
                         "replay recorder finish failed; preserving agent result",
                         exc_info=True,
                     )
-            if store is not None and session_id and (normal_end or saw_final):
+            if store is not None and session_id and (normal_end or saw_final or saw_stream_interruption):
                 store.clear(session_id)
             try:
                 await inner.aclose()
@@ -5144,6 +5153,7 @@ class AgentRuntime:
                 _stream_body_start_ts: Optional[float] = None
                 stream_with_tools = getattr(self.llm, "stream_with_tools", None)
                 used_stream_path = False
+                stream_had_output = False
                 if callable(stream_with_tools):
                     try:
                         loop = asyncio.get_running_loop()
@@ -5254,6 +5264,9 @@ class AgentRuntime:
                             if chunk_type == "content":
                                 tok = str(stream_chunk.get("text", ""))
                                 if tok:
+                                    # Reasoning is encoded in content too. Even
+                                    # a buffered prefix makes replay unsafe.
+                                    stream_had_output = True
                                     # Capture reasoning phase timing for
                                     # reasoning_seconds persistence. The first
                                     #  Mattis marks reasoning start; the first
@@ -5298,6 +5311,8 @@ class AgentRuntime:
                                 if tool_name.lower() == "none":
                                     tool_name = ""
                                 args_delta = str(stream_chunk.get("arguments_delta", ""))
+                                if tool_call_id or tool_name or args_delta:
+                                    stream_had_output = True
                                 if tool_call_id:
                                     acc["id"] = tool_call_id
                                 if tool_name:
@@ -5441,25 +5456,48 @@ class AgentRuntime:
                         return
                     except Exception as stream_exc:
                         logger.warning(
-                            "stream_with_tools failed, fallback to invoke path",
+                            "stream_with_tools interrupted after output"
+                            if stream_had_output
+                            else "stream_with_tools failed, fallback to invoke path",
                             exc_info=True,
                         )
+                        fault_kind = classify_provider_fault(stream_exc)
                         record_session_provider_hard_failure(
                             session,
                             provider_name,
-                            fault=classify_provider_fault(stream_exc),
+                            fault=fault_kind,
                         )
                         _log_model_fault(
                             session,
                             provider=provider_name,
                             model=model_name,
-                            kind=classify_provider_fault(stream_exc),
+                            kind=fault_kind,
                             phase="stream",
                             message=str(stream_exc)[:300],
-                            retryable=True,
+                            retryable=not stream_had_output,
                             usage_session_id=str(usage_session_id or ""),
                             usage_avatar_id=str(usage_avatar_id or ""),
                         )
+                        if stream_had_output:
+                            self._finalize_cancelled_prefix(
+                                session,
+                                str(followup_emitter.raw or response_text or ""),
+                                agent_id=agent_id,
+                                is_system_trigger=_is_system_trigger,
+                                stream_interrupted=True,
+                            )
+                            self._persist_final_checkpoint()
+                            yield RuntimeEvent(
+                                type=EventType.ERROR.value,
+                                data={
+                                    "text": "模型响应中断，已保留收到的内容。请检查后继续。",
+                                    "detector": "stream_interrupted",
+                                    "partial": True,
+                                    "retryable": False,
+                                },
+                                agent_id=agent_id,
+                            )
+                            return
                         used_stream_path = False
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:

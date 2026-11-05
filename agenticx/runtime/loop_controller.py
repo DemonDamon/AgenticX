@@ -50,17 +50,30 @@ class LoopController:
         final_text = ""
         for iteration in range(1, self.config.max_iterations + 1):
             iteration_prompt = self._build_iteration_prompt(task, iteration)
-            async for event in runtime.run_turn(
+            turn = runtime.run_turn(
                 iteration_prompt,
                 session,
                 agent_id=agent_id,
                 tools=tools,
                 system_prompt=system_prompt,
-            ):
-                if event.type == EventType.FINAL.value:
-                    final_text = str(event.data.get("text", ""))
-                    continue
-                yield event
+            )
+            try:
+                async for event in turn:
+                    if event.type == EventType.FINAL.value:
+                        final_text = str(event.data.get("text", ""))
+                        continue
+                    yield event
+                    if (
+                        event.type == EventType.ERROR.value
+                        and event.data.get("detector") == "stream_interrupted"
+                    ):
+                        # The turn already exposed output; another iteration
+                        # would silently replay an incomplete request.
+                        return
+            finally:
+                close = getattr(turn, "aclose", None)
+                if callable(close):
+                    await close()
             if self._is_completed(final_text):
                 yield RuntimeEvent(
                     type=EventType.FINAL.value,
