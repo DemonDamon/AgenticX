@@ -57,10 +57,18 @@ func (s *Server) handleChatCompleteRelay(
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	actualTotal := int64(providerInputTokens + providerOutputTokens)
+	actualTotal := int64(resp.Usage.TotalTokens)
+	if actualTotal <= 0 {
+		actualTotal = int64(providerInputTokens + providerOutputTokens)
+	}
 	actualModel := result.ResolvedModel
 	if strings.TrimSpace(actualModel) == "" {
 		actualModel = req.Model
+	}
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
 	}
 	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, actualTotal, actualModel)
 	s.reportUsageDetailed(identity, decision, resp.Usage, nil, spanMeta{

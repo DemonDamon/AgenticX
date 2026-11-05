@@ -57,12 +57,13 @@ type usageRow struct {
 }
 
 type Decision struct {
-	Allowed     bool
-	Rule        Rule
-	UsedBefore  int64
-	UsedAfter   int64
-	ExceededBy  int64
-	Description string
+	StorageError bool
+	Allowed      bool
+	Rule         Rule
+	UsedBefore   int64
+	UsedAfter    int64
+	ExceededBy   int64
+	Description  string
 }
 
 type Tracker struct {

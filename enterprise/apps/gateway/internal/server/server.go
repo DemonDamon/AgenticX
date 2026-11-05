@@ -940,6 +940,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = quotaReservation
 	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
+	identity.quotaReservation = budgetCheck.Reservation
+	qctx.Reservation = budgetCheck.Reservation
+	defer s.finishChatReservation(budgetCheck.Reservation)
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -991,6 +994,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
+	}
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
 	}
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
@@ -1273,6 +1281,7 @@ func (s *Server) handleStream(
 	}
 
 	var responseBuilder strings.Builder
+	var accounting streamAccounting
 	inputText := joinMessages(req.Messages)
 	var blockedHits []policyengine.HitEvent
 	var reasoningState openai.StreamReasoningState
@@ -1284,6 +1293,7 @@ func (s *Server) handleStream(
 	}
 
 	push := func(chunk openai.StreamChunk) error {
+		accounting.observe(chunk)
 		if firstTokenAt.IsZero() {
 			firstTokenAt = time.Now()
 			if s.metrics != nil {
@@ -1371,7 +1381,7 @@ func (s *Server) handleStream(
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.settleInterruptedStreamUsage(
+			s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 				identity,
 				decision,
 				estimatedInputTokens,
@@ -1390,7 +1400,7 @@ func (s *Server) handleStream(
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.settleInterruptedStreamUsage(
+		s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 			identity,
 			decision,
 			estimatedInputTokens,
@@ -1435,7 +1445,13 @@ func (s *Server) handleStream(
 	// SP3 compliance-moderation：流式在流尾外呼第三方内容安全 provider。
 	if modRes := s.enforceModeration(r.Context(), identity, "response", responseText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
 		partialOutputTokens := estimateTextTokens(responseText)
-		s.settleInterruptedStreamUsage(
+		// Stream-tail audit intercept keeps main's current refund/settlement:
+		// charge estimated input plus observed output, not an empty-cancellation refund.
+		s.settleInterruptedStreamObservedUsage(openai.Usage{
+			PromptTokens:     estimatedInputTokens,
+			CompletionTokens: partialOutputTokens,
+			TotalTokens:      estimatedInputTokens + partialOutputTokens,
+		},
 			identity,
 			decision,
 			estimatedInputTokens,
@@ -1458,12 +1474,19 @@ func (s *Server) handleStream(
 		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
 		return
 	}
-	inputTokens := estimatedInputTokens
-	outputTokens := estimateTextTokens(responseText)
-	streamUsage := openai.Usage{
-		PromptTokens:     inputTokens,
-		CompletionTokens: outputTokens,
-		TotalTokens:      inputTokens + outputTokens,
+	streamUsage := accounting.usage(estimatedInputTokens, false)
+	inputTokens := streamUsage.PromptTokens
+	outputTokens := streamUsage.CompletionTokens
+	var settleDelta int64
+	if s.useChannelRelay() {
+		actualModel := streamResult.ResolvedModel
+		if strings.TrimSpace(actualModel) == "" {
+			actualModel = req.Model
+		}
+		settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(streamUsage.TotalTokens), actualModel)
+		settleDelta = settle.Delta
+	} else {
+		s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, streamUsage.TotalTokens, req.Model)
 	}
 	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
@@ -1474,17 +1497,6 @@ func (s *Server) handleStream(
 		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
 	}
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
-	var settleDelta int64
-	if s.useChannelRelay() {
-		actualModel := streamResult.ResolvedModel
-		if strings.TrimSpace(actualModel) == "" {
-			actualModel = req.Model
-		}
-		settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
-		settleDelta = settle.Delta
-	} else {
-		s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, inputTokens+outputTokens, req.Model)
-	}
 
 	ev := audit.Event{
 		ID:              makeID("audit"),
@@ -1641,24 +1653,25 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 
 type requestIdentity struct {
 	// PublicRetrieval is set only after a verified public-retrieval signature.
-	PublicRetrieval bool
-	TenantID        string
-	UserID          string
-	UserEmail       string
-	DepartmentID    string
-	DepartmentIDs   []string
-	SessionID       string
-	RoleCodes       []string
-	ClientType      string
-	Scopes          []string
-	DataResidency   string
-	APITokenID      int64
-	AuthViaPAT      bool
-	TraceID         string
-	TraceStep       int
-	TraceStage      string
-	DeploymentID    string
-	AgentID         string
+	PublicRetrieval  bool
+	TenantID         string
+	UserID           string
+	UserEmail        string
+	DepartmentID     string
+	DepartmentIDs    []string
+	SessionID        string
+	RoleCodes        []string
+	ClientType       string
+	Scopes           []string
+	DataResidency    string
+	APITokenID       int64
+	AuthViaPAT       bool
+	TraceID          string
+	TraceStep        int
+	TraceStage       string
+	DeploymentID     string
+	AgentID          string
+	quotaReservation *quota.ReservationReceipt
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1667,13 +1680,14 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		apiTokenID = fmt.Sprintf("%d", identity.APITokenID)
 	}
 	return quota.RequestContext{
-		TenantID:   identity.TenantID,
-		UserID:     identity.UserID,
-		DeptID:     identity.DepartmentID,
-		APITokenID: apiTokenID,
-		AgentID:    identity.AgentID,
-		Role:       roleFromScopes(identity.Scopes),
-		Model:      model,
+		Reservation: identity.quotaReservation,
+		TenantID:    identity.TenantID,
+		UserID:      identity.UserID,
+		DeptID:      identity.DepartmentID,
+		APITokenID:  apiTokenID,
+		AgentID:     identity.AgentID,
+		Role:        roleFromScopes(identity.Scopes),
+		Model:       model,
 	}
 }
 
@@ -1684,6 +1698,10 @@ func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResul
 }
 
 func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
+	if check.StorageError {
+		writeAPIError(w, openai.Internal("quota storage unavailable"))
+		return
+	}
 	msg := check.Description
 	if msg == "" {
 		msg = "policy:quota:exceeded"
@@ -1891,7 +1909,7 @@ func (s *Server) dispatchBudgetAlert(rec quota.BudgetAlertRecord) {
 		Title:    "预算告警：" + rec.AlertType,
 		Summary: fmt.Sprintf("tenant=%s dimension=%s(%s) period=%s used=%.2f/%.2f %s",
 			rec.TenantID, rec.Dimension, rec.DimensionKey, rec.Period, rec.Used, rec.Limit, rec.Unit),
-		UserID:    rec.UserID,
+		UserID: rec.UserID,
 		DedupKey: fmt.Sprintf("budget|%s|%s|%s|%s|%s", rec.TenantID, rec.Dimension,
 			rec.DimensionKey, rec.Period, rec.AlertType),
 		EventTime: rec.CreatedAt,
@@ -1926,18 +1944,25 @@ func (s *Server) settleInterruptedStreamUsage(
 	budgetCheck *quota.CheckResult,
 	qctx quota.RequestContext,
 	span spanMeta,
+	observed ...openai.Usage,
 ) {
-	usage := openai.Usage{
-		PromptTokens:     estimatedInputTokens,
-		CompletionTokens: partialOutputTokens,
-		TotalTokens:      estimatedInputTokens + partialOutputTokens,
+	if budgetCheck != nil && budgetCheck.Reservation != nil {
+		identity.quotaReservation = budgetCheck.Reservation
+		qctx.Reservation = budgetCheck.Reservation
 	}
-	s.reportUsageDetailed(identity, decision, usage, budgetCheck, span)
+	usage := openai.Usage{}
+	if partialOutputTokens > 0 {
+		usage = openai.Usage{PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens, TotalTokens: estimatedInputTokens + partialOutputTokens}
+	}
+	if len(observed) > 0 {
+		usage = observed[0]
+	}
 	if s.useChannelRelay() {
 		s.billingService.SettleContext(qctx, reservedTokens, int64(usage.TotalTokens))
-		return
+	} else {
+		s.reconcileQuotaUsage(identity, qctx.Model, estimatedInputTokens, usage.TotalTokens)
 	}
-	s.reconcileQuotaUsage(identity, qctx.Model, estimatedInputTokens, usage.TotalTokens)
+	s.reportUsageDetailed(identity, decision, usage, budgetCheck, span)
 }
 
 func (s *Server) reconcileQuotaUsage(
@@ -1946,6 +1971,12 @@ func (s *Server) reconcileQuotaUsage(
 	estimatedInputTokens int,
 	finalTotalTokens int,
 ) {
+	if identity.quotaReservation != nil {
+		if err := s.quotaTracker.FinishReservationTokens(identity.quotaReservation, int64(finalTotalTokens)); err != nil {
+			s.logger.Error("quota reservation settlement failed", "error", err)
+		}
+		return
+	}
 	delta := finalTotalTokens - estimatedInputTokens
 	if delta == 0 {
 		return
@@ -1986,6 +2017,12 @@ func (s *Server) reconcileQuotaUsage(
 }
 
 func (s *Server) rollbackQuotaReservation(qctx quota.RequestContext, tokens int) {
+	if qctx.Reservation != nil {
+		if err := s.quotaTracker.FinishReservation(qctx.Reservation, 0, 0); err != nil {
+			s.logger.Error("quota reservation rollback failed", "error", err)
+		}
+		return
+	}
 	if tokens <= 0 {
 		return
 	}
@@ -2164,4 +2201,8 @@ func policyMessageWithHits(message string, hits []policyengine.HitEvent) string 
 		return fmt.Sprintf("%s（命中策略: %s）", message, strings.Join(policyIDs, ", "))
 	}
 	return message
+}
+
+func (s *Server) settleInterruptedStreamObservedUsage(usage openai.Usage, identity requestIdentity, decision routing.Decision, estimatedInputTokens, partialOutputTokens int, reservedTokens int64, budgetCheck *quota.CheckResult, qctx quota.RequestContext, span spanMeta) {
+	s.settleInterruptedStreamUsage(identity, decision, estimatedInputTokens, partialOutputTokens, reservedTokens, budgetCheck, qctx, span, usage)
 }
