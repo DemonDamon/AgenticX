@@ -14,3 +14,7 @@ Out of scope: Desktop login rate limiting, deployment proxy configuration, globa
 
 ## Validation
 `go test ./internal/config ./internal/server`: passed. `go test -race ./internal/config ./internal/server`: passed. Router integration confirms forwarded address normalization is active only for configured peers; existing policy/audit paths consume this RemoteAddr. `git diff --check`: clean.
+
+## CI follow-up
+
+The published PR initially ran only database contracts, secret scanning and static analysis; no automatic Go unit tests covered the trusted-proxy change. Add a path-scoped `gateway-regressions.yml` that reads the Go version from the module and runs config/server tests with race detection and vet. Pull requests targeting contribution branches are included. Remove the security workflow's PR base-branch restriction while retaining its main/master push filter. This does not change the advisory-only dependency audit or unrelated application tests.
