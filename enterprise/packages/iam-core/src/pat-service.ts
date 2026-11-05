@@ -1,3 +1,6 @@
+import { PAT_SCOPES } from "@agenticx/core-api";
+import { getAdminUser } from "./repos/users";
+import { assertAdministrativeActor, assertActorHasScope, assertActorMayGrantScopes, assertDepartmentBelongsToTenant, PrivilegeEscalationError, type AdministrativeActor } from "./repos/privilege-guard";
 /**
  * Personal Access Token (PAT) lifecycle for Enterprise Gateway.
  */
@@ -35,6 +38,7 @@ export type PatRecord = {
 };
 
 export type CreatePatInput = {
+  actor: AdministrativeActor;
   tenantId: string;
   userId: string;
   deptId?: string | null;
@@ -91,24 +95,71 @@ export function generatePatPlaintext(): string {
   return `agx-pat-${toBase62(randomBytes(24))}`;
 }
 
+export const ALLOWED_PAT_SCOPES: readonly string[] = ["workspace:chat", "desktop:managed", ...PAT_SCOPES];
+
+export function isAllowedPatScope(scope: string): boolean {
+  return ALLOWED_PAT_SCOPES.includes(scope);
+}
+
+function assertPatScopeCeiling(scopes: string[], wanted: string[]): void {
+  if (scopes.includes("*")) return;
+  if (wanted.some((scope) => {
+    if (scope === "desktop:managed") return !scopes.includes("workspace:chat");
+    if (scope.startsWith("ma:") && scopes.includes("ma:admin")) return false;
+    return !scopes.includes(scope);
+  })) throw new PrivilegeEscalationError("forbidden: token permissions exceed account privileges");
+}
+
+/** Administrative token visibility/revocation uses the same target boundary as issuance. */
+export async function assertActorMayManagePatUser(tenantId: string, userId: string, actor: AdministrativeActor): Promise<void> {
+  assertAdministrativeActor(actor, tenantId);
+  if (actor.kind === "system") return;
+  const [target, current] = await Promise.all([getAdminUser(tenantId, userId), getAdminUser(tenantId, actor.userId)]);
+  if (!target || !current || current.status !== "active") throw new PrivilegeEscalationError("forbidden: user unavailable");
+  if (actor.userId !== target.id) {
+    const live: AdministrativeActor = { ...actor, scopes: current.scopes };
+    assertActorHasScope(live, tenantId, "user:update");
+    assertActorMayGrantScopes(live, tenantId, target.scopes);
+  }
+}
+
 export async function createPat(input: CreatePatInput): Promise<CreatePatResult> {
+  assertAdministrativeActor(input.actor, input.tenantId);
+  const scopes = input.scopes?.length ? [...new Set(input.scopes.map((scope) => scope.trim()))] : ["workspace:chat"];
+  if (scopes.some((scope) => !isAllowedPatScope(scope))) throw new Error("unsupported token scope");
+  const target = await getAdminUser(input.tenantId, input.userId);
+  if (!target || target.status !== "active") throw new PrivilegeEscalationError("forbidden: target user unavailable");
+  await assertDepartmentBelongsToTenant(input.tenantId, target.deptId);
+  assertPatScopeCeiling(target.scopes, scopes);
+  let createdBy = input.createdBy;
+  if (input.actor.kind === "user") {
+    const actingUser = input.actor.userId === target.id ? target : await getAdminUser(input.tenantId, input.actor.userId);
+    if (!actingUser || actingUser.status !== "active") throw new PrivilegeEscalationError("forbidden: actor unavailable");
+    const actor: AdministrativeActor = { ...input.actor, scopes: actingUser.scopes };
+    if (actor.userId !== target.id) {
+      assertActorHasScope(actor, input.tenantId, "user:update");
+      assertActorMayGrantScopes(actor, input.tenantId, target.scopes);
+    }
+    assertPatScopeCeiling(actor.scopes, scopes);
+    createdBy = actor.userId;
+  }
+  const deptId = target.deptId;
   const plain = generatePatPlaintext();
   const tokenHash = hashToken(plain);
   const tokenPrefix = plain.slice(0, 12);
   const days = input.expireDays ?? defaultExpireDays();
   const expireAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  const scopes = input.scopes?.length ? input.scopes : ["workspace:chat"];
   if (resolveDatabaseConfig().dialect === "mysql") {
     const record = await createMysqlPatRow({
       tenantId: input.tenantId,
       userId: input.userId,
-      deptId: input.deptId ?? null,
+      deptId,
       name: input.name.trim(),
       tokenHash,
       tokenPrefix,
       scopes,
       expireAt,
-      createdBy: input.createdBy,
+      createdBy,
     });
     return { record, token: plain };
   }
@@ -119,14 +170,14 @@ export async function createPat(input: CreatePatInput): Promise<CreatePatResult>
     .values({
       tenantId: input.tenantId,
       userId: input.userId,
-      deptId: input.deptId ?? null,
+      deptId,
       name: input.name.trim(),
       tokenHash,
       tokenPrefix,
       scopes,
       status: "active",
       expireAt,
-      createdBy: input.createdBy,
+      createdBy,
     })
     .returning();
 

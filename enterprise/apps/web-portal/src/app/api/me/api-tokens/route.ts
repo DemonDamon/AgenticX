@@ -23,6 +23,7 @@ export async function POST(request: Request) {
     }
     const result = await createPat({
       tenantId: session.tenantId,
+      actor: { kind: "user", tenantId: session.tenantId, userId: session.userId, scopes: session.scopes },
       userId: session.userId,
       deptId: session.deptId ?? null,
       name: body.name.trim(),
