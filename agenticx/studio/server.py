@@ -328,9 +328,10 @@ async def _external_harness_chat_stream(
     """SSE stream for one external-harness turn (harness-control-surface SP5b).
 
     Desktop-compatible protocol: mid-turn ``token`` events (assistant
-    visible text from stream-json partials / assistant blocks) →
-    ``harness_progress`` heartbeats (any parsed SSE frame resets the
-    client stall watchdog) → ``final`` (authoritative sanitized turn
+    visible text from stream-json partials / assistant blocks), mid-turn
+    ``tool_call`` / ``tool_result`` rows (tool name + status only; no arg
+    dumps), ``harness_progress`` heartbeats (any parsed SSE frame resets
+    the client stall watchdog) → ``final`` (authoritative sanitized turn
     text) → ``done``. The blocking adapter turn runs on a worker thread;
     on client disconnect it keeps running server-side (its result lands
     in chat_history) and the run lock is released only after it settles.
@@ -414,26 +415,88 @@ async def _external_harness_chat_stream(
             adapter = None
             surface_sid = ""
 
-        async def _drain_token_sse() -> str | None:
-            """Poll adapter for mid-turn visible text; return an SSE line or None."""
-            if adapter is None or not surface_sid:
-                return None
-            if not hasattr(adapter, "drain_visible_stream_text"):
-                return None
-            try:
-                delta = await asyncio.to_thread(
-                    adapter.drain_visible_stream_text, surface_sid
+        def _midturn_item_to_sse(item: dict) -> str | None:
+            """Map one drain item to a desktop-compatible SSE data line."""
+            kind = str(item.get("kind") or "")
+            if kind == "text":
+                text_delta = str(item.get("text") or "")
+                if not text_delta:
+                    return None
+                tok = SseEvent(
+                    type="token",
+                    data={"text": text_delta, "agent_id": "meta"},
                 )
+                return f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+            if kind == "tool_start":
+                from agenticx.runtime.events import normalize_tool_sse_payload
+
+                name = str(item.get("name") or "tool").strip() or "tool"
+                tid = str(item.get("tool_call_id") or "").strip()
+                if not tid:
+                    return None
+                payload = normalize_tool_sse_payload(
+                    {
+                        "name": name,
+                        # MVP: name + status only — do not dump CLI tool args.
+                        "arguments": {},
+                        "tool_call_id": tid,
+                        "agent_id": "meta",
+                    }
+                )
+                evt = SseEvent(type="tool_call", data=payload)
+                return f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            if kind == "tool_end":
+                from agenticx.runtime.events import normalize_tool_sse_payload
+
+                name = str(item.get("name") or "tool").strip() or "tool"
+                tid = str(item.get("tool_call_id") or "").strip()
+                if not tid:
+                    return None
+                is_error = bool(item.get("is_error"))
+                payload = normalize_tool_sse_payload(
+                    {
+                        "name": name,
+                        "tool_call_id": tid,
+                        # Short status body — ChatPane updates toolStatus from
+                        # is_error; avoid pasting large tool_result content.
+                        "result": "error" if is_error else "ok",
+                        "is_error": is_error,
+                        "agent_id": "meta",
+                    }
+                )
+                evt = SseEvent(type="tool_result", data=payload)
+                return f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            return None
+
+        async def _drain_midturn_sse_lines() -> list[str]:
+            """Poll adapter for mid-turn text/tool items; return SSE lines."""
+            if adapter is None or not surface_sid:
+                return []
+            items: list = []
+            try:
+                if hasattr(adapter, "drain_midturn_stream_items"):
+                    items = await asyncio.to_thread(
+                        adapter.drain_midturn_stream_items, surface_sid
+                    )
+                elif hasattr(adapter, "drain_visible_stream_text"):
+                    delta = await asyncio.to_thread(
+                        adapter.drain_visible_stream_text, surface_sid
+                    )
+                    text_delta = str(delta or "")
+                    if text_delta:
+                        items = [{"kind": "text", "text": text_delta}]
+                else:
+                    return []
             except Exception:
-                return None
-            text_delta = str(delta or "")
-            if not text_delta:
-                return None
-            tok = SseEvent(
-                type="token",
-                data={"text": text_delta, "agent_id": "meta"},
-            )
-            return f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+                return []
+            lines_out: list[str] = []
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                line = _midturn_item_to_sse(item)
+                if line is not None:
+                    lines_out.append(line)
+            return lines_out
 
         while True:
             try:
@@ -451,9 +514,10 @@ async def _external_harness_chat_stream(
                         ).strip()
                     except Exception:
                         pass
-                token_line = await _drain_token_sse()
-                if token_line is not None:
-                    yield token_line
+                midturn_lines = await _drain_midturn_sse_lines()
+                if midturn_lines:
+                    for line in midturn_lines:
+                        yield line
                     last_heartbeat = time.time()
                     continue
                 # Heartbeat: keeps the desktop stall watchdog quiet while
@@ -463,9 +527,8 @@ async def _external_harness_chat_stream(
                     last_heartbeat = time.time()
 
         # Flush any trailing deltas that arrived with the terminal result.
-        token_line = await _drain_token_sse()
-        if token_line is not None:
-            yield token_line
+        for line in await _drain_midturn_sse_lines():
+            yield line
 
         final_text = str(result.result_text or "").strip()
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for mid-turn stream-json visible-text extraction.
+"""Unit tests for mid-turn stream-json text + tool-progress extraction.
 
 Author: Damon Li
 """
@@ -14,9 +14,12 @@ from types import SimpleNamespace
 
 from agenticx.cc_bridge.session_manager import BridgeSession, BridgeSessionManager
 from agenticx.harness.stream_json_text import (
+    ToolProgressTracker,
     VisibleTextTracker,
+    drain_midturn_items_from_lines,
     drain_visible_text_from_lines,
     iter_raw_text_fragments,
+    iter_raw_tool_progress,
 )
 from agenticx.wb_bridge.session_manager import WbBridgeSession, WbBridgeSessionManager
 
@@ -60,6 +63,50 @@ def _tool_line() -> str:
                         "id": "t1",
                         "name": "Bash",
                         "input": {"command": "ls"},
+                    }
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_start_stream_event(tool_id: str = "t1", name: str = "WebSearch") -> str:
+    return json.dumps(
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": name,
+                    "input": {},
+                },
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_result_line(
+    tool_id: str = "t1",
+    *,
+    is_error: bool = False,
+    content: str = "ok",
+) -> str:
+    return json.dumps(
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": content,
+                        "is_error": is_error,
                     }
                 ],
             },
@@ -230,3 +277,106 @@ def test_wb_drain_streams_assistant_text_after_send() -> None:
     session.append_line(_assistant_line("OK"))
     assert mgr.drain_visible_stream_text(sid) == "OK"
     assert mgr.drain_visible_stream_text(sid) == ""
+
+
+def _tool_line_named(tool_id: str, name: str) -> str:
+    return json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": name,
+                        "input": {"query": "should-not-leak"},
+                    }
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_iter_tool_progress_start_end_and_skips_args() -> None:
+    starts = list(iter_raw_tool_progress(_tool_start_stream_event("toolu_1", "WebSearch")))
+    assert len(starts) == 1
+    assert starts[0].kind == "start"
+    assert starts[0].tool_call_id == "toolu_1"
+    assert starts[0].name == "WebSearch"
+
+    assistant_starts = list(iter_raw_tool_progress(_tool_line()))
+    assert len(assistant_starts) == 1
+    assert assistant_starts[0].name == "Bash"
+    assert assistant_starts[0].tool_call_id == "t1"
+
+    ends = list(iter_raw_tool_progress(_tool_result_line("t1", is_error=False, content="HUGE " * 200)))
+    assert len(ends) == 1
+    assert ends[0].kind == "end"
+    assert ends[0].tool_call_id == "t1"
+    assert ends[0].is_error is False
+
+    err = list(iter_raw_tool_progress(_tool_result_line("t1", is_error=True)))
+    assert err[0].is_error is True
+    assert list(iter_raw_tool_progress(_delta_line("x"))) == []
+    assert list(iter_raw_tool_progress(_result_line("final"))) == []
+
+
+def test_tool_tracker_dedupes_partial_then_assistant_start() -> None:
+    tracker = ToolProgressTracker()
+    first = tracker.start("t1", "WebSearch")
+    assert first is not None and first.name == "WebSearch"
+    assert tracker.start("t1", "WebSearch") is None
+    end = tracker.end("t1")
+    assert end is not None and end.name == "WebSearch" and end.is_error is False
+    assert tracker.end("t1") is None
+
+
+def test_drain_midturn_orders_tool_then_text() -> None:
+    lines = [
+        _tool_start_stream_event("t9", "WebSearch"),
+        _tool_line_named("t9", "WebSearch"),  # deduped
+        _tool_result_line("t9"),
+        _delta_line("答"),
+        _assistant_line("答案"),
+    ]
+    text_tracker = VisibleTextTracker()
+    tool_tracker = ToolProgressTracker()
+    items, idx = drain_midturn_items_from_lines(
+        lines,
+        start_index=0,
+        text_tracker=text_tracker,
+        tool_tracker=tool_tracker,
+    )
+    assert idx == len(lines)
+    kinds = [i.kind for i in items]
+    assert kinds[:3] == ["tool_start", "tool_end", "text"]
+    assert items[0].name == "WebSearch"
+    assert items[1].tool_call_id == "t9"
+    assert "".join(i.text for i in items if i.kind == "text") == "答案"
+
+
+def test_cc_drain_emits_tool_progress_items() -> None:
+    mgr = BridgeSessionManager()
+    sid = str(uuid.uuid4())
+    session = BridgeSession(session_id=sid, cwd="/tmp", proc=_FakeProc())
+    with mgr._global_lock:
+        mgr._sessions[sid] = session
+
+    assert mgr.drain_midturn_stream_items(sid) == []
+    mgr.send_user_message(sid, "搜新闻")
+    session.append_line(_tool_start_stream_event("call_news", "WebSearch"))
+    items = mgr.drain_midturn_stream_items(sid)
+    assert items == [
+        {"kind": "tool_start", "tool_call_id": "call_news", "name": "WebSearch"}
+    ]
+    session.append_line(_tool_result_line("call_news", content="lots of news"))
+    session.append_line(_assistant_line("今日要闻如下"))
+    items2 = mgr.drain_midturn_stream_items(sid)
+    assert items2[0]["kind"] == "tool_end"
+    assert items2[0]["tool_call_id"] == "call_news"
+    assert items2[0]["is_error"] is False
+    assert items2[1] == {"kind": "text", "text": "今日要闻如下"}
+    assert all("query" not in json.dumps(i, ensure_ascii=False) for i in items2)
+

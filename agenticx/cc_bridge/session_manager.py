@@ -57,12 +57,13 @@ class BridgeSession:
     # Headless follow-up watermark: ignore result/success lines at indices
     # below this value (set in send_user_message before writing stdin).
     _result_wait_watermark: int = field(default=0, repr=False)
-    # Mid-turn visible-text streaming (Near SSE token pump). Bumped in
-    # send_user_message; drain_visible_stream_text no-ops until then.
+    # Mid-turn visible-text + tool-progress streaming (Near SSE pump).
+    # Bumped in send_user_message; drain_* no-ops until then.
     _stream_generation: int = field(default=0, repr=False)
     _visible_generation: int = field(default=0, repr=False)
     _visible_cursor: int = field(default=0, repr=False)
     _visible_tracker: Any = field(default=None, repr=False)
+    _tool_tracker: Any = field(default=None, repr=False)
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -483,7 +484,10 @@ class BridgeSessionManager:
         # Watermark before stdin write so wait_for_success_result ignores
         # prior-turn result/success lines already buffered in session.lines.
         # Also reset the visible-text tracker so Near can stream this turn only.
-        from agenticx.harness.stream_json_text import VisibleTextTracker
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+        )
 
         with session.lock:
             session._result_wait_watermark = len(session.lines)
@@ -491,6 +495,7 @@ class BridgeSessionManager:
             session._visible_generation = session._stream_generation
             session._visible_cursor = session._result_wait_watermark
             session._visible_tracker = VisibleTextTracker()
+            session._tool_tracker = ToolProgressTracker()
         line = build_user_message_line(text)
         self._write_stdin(session, line)
 
@@ -587,40 +592,83 @@ class BridgeSessionManager:
         winsize = struct.pack("HHHH", r, c, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
-    def drain_visible_stream_text(self, session_id: str) -> str:
-        """Return newly-visible assistant text since the last drain (or "").
+    def drain_midturn_stream_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return ordered mid-turn text/tool items since the last drain (or []).
 
         Safe to call from the studio SSE loop while ``wait_for_success_result``
         blocks on another thread. No-ops until ``send_user_message`` arms the
-        per-turn tracker (avoids replaying a prior turn into the bubble).
+        per-turn trackers (avoids replaying a prior turn into the bubble).
         """
         from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
             VisibleTextTracker,
-            drain_visible_text_from_lines,
+            drain_midturn_items_from_lines,
         )
 
         session = self.get(session_id)
         if session is None:
-            return ""
+            return []
         with session.lock:
             if int(session._visible_generation or 0) != int(session._stream_generation or 0):
-                return ""
+                return []
             if int(session._stream_generation or 0) <= 0:
-                return ""
-            tracker = session._visible_tracker
-            if tracker is None:
-                tracker = VisibleTextTracker()
-                session._visible_tracker = tracker
+                return []
+            text_tracker = session._visible_tracker
+            if text_tracker is None:
+                text_tracker = VisibleTextTracker()
+                session._visible_tracker = text_tracker
+            tool_tracker = session._tool_tracker
+            if tool_tracker is None:
+                tool_tracker = ToolProgressTracker()
+                session._tool_tracker = tool_tracker
             cursor = int(session._visible_cursor or 0)
             chunk_lines = list(session.lines)
-        delta, new_cursor = drain_visible_text_from_lines(
-            chunk_lines, start_index=cursor, tracker=tracker
+        items, new_cursor = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=cursor,
+            text_tracker=text_tracker,
+            tool_tracker=tool_tracker,
         )
         with session.lock:
             # Only advance if generation is still the same turn.
             if int(session._visible_generation or 0) == int(session._stream_generation or 0):
                 session._visible_cursor = new_cursor
-        return delta
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "text":
+                if item.text:
+                    out.append({"kind": "text", "text": item.text})
+            elif item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Convenience wrapper over ``drain_midturn_stream_items`` for callers that
+        only need token text (unit tests / older pumps).
+        """
+        items = self.drain_midturn_stream_items(session_id)
+        return "".join(
+            str(item.get("text") or "")
+            for item in items
+            if item.get("kind") == "text"
+        )
 
     def wait_for_success_result(
 

@@ -67,11 +67,12 @@ class WbBridgeSession:
     turn_done: threading.Event = field(default_factory=threading.Event)
     turn_line_start: int = 0  # lines index at last send; 0 if never sent
     last_idempotency_key: str = ""
-    # Mid-turn visible-text streaming (Near SSE token pump).
+    # Mid-turn visible-text + tool-progress streaming (Near SSE pump).
     _stream_generation: int = 0
     _visible_generation: int = 0
     _visible_cursor: int = 0
     _visible_tracker: Any = None
+    _tool_tracker: Any = None
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -367,7 +368,10 @@ class WbBridgeSessionManager:
         if session is None:
             raise KeyError("unknown session")
         line = build_user_message_line(text)
-        from agenticx.harness.stream_json_text import VisibleTextTracker
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+        )
 
         with session.lock:
             session.turn_done.clear()
@@ -385,6 +389,7 @@ class WbBridgeSessionManager:
             session._visible_generation = session._stream_generation
             session._visible_cursor = session.turn_line_start
             session._visible_tracker = VisibleTextTracker()
+            session._tool_tracker = ToolProgressTracker()
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -400,38 +405,80 @@ class WbBridgeSessionManager:
                 session.proc.kill()
         return True
 
-    def drain_visible_stream_text(self, session_id: str) -> str:
-        """Return newly-visible assistant text since the last drain (or "").
+    def drain_midturn_stream_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return ordered mid-turn text/tool items since the last drain (or []).
 
         Mirrors the Claude Code bridge helper so Near's external-harness SSE
-        can stream CodeBuddy tokens with the same pump.
+        can stream CodeBuddy tokens + tool rows with the same pump.
         """
         from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
             VisibleTextTracker,
-            drain_visible_text_from_lines,
+            drain_midturn_items_from_lines,
         )
 
         session = self.get(session_id)
         if session is None:
-            return ""
+            return []
         with session.lock:
             if int(session._visible_generation or 0) != int(session._stream_generation or 0):
-                return ""
+                return []
             if int(session._stream_generation or 0) <= 0:
-                return ""
-            tracker = session._visible_tracker
-            if tracker is None:
-                tracker = VisibleTextTracker()
-                session._visible_tracker = tracker
+                return []
+            text_tracker = session._visible_tracker
+            if text_tracker is None:
+                text_tracker = VisibleTextTracker()
+                session._visible_tracker = text_tracker
+            tool_tracker = session._tool_tracker
+            if tool_tracker is None:
+                tool_tracker = ToolProgressTracker()
+                session._tool_tracker = tool_tracker
             cursor = int(session._visible_cursor or 0)
             chunk_lines = list(session.lines)
-        delta, new_cursor = drain_visible_text_from_lines(
-            chunk_lines, start_index=cursor, tracker=tracker
+        items, new_cursor = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=cursor,
+            text_tracker=text_tracker,
+            tool_tracker=tool_tracker,
         )
         with session.lock:
             if int(session._visible_generation or 0) == int(session._stream_generation or 0):
                 session._visible_cursor = new_cursor
-        return delta
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "text":
+                if item.text:
+                    out.append({"kind": "text", "text": item.text})
+            elif item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Convenience wrapper over ``drain_midturn_stream_items``.
+        """
+        items = self.drain_midturn_stream_items(session_id)
+        return "".join(
+            str(item.get("text") or "")
+            for item in items
+            if item.get("kind") == "text"
+        )
 
     def wait_for_turn(
 
