@@ -327,12 +327,13 @@ async def _external_harness_chat_stream(
 ) -> AsyncGenerator[str, None]:
     """SSE stream for one external-harness turn (harness-control-surface SP5b).
 
-    Desktop-compatible minimal protocol: ``harness_progress`` heartbeats
-    (any parsed SSE frame resets the client stall watchdog) → ``final``
-    (authoritative turn text) → ``done``. The blocking adapter turn runs
-    on a worker thread; on client disconnect it keeps running server-side
-    (its result lands in chat_history) and the run lock is released only
-    after it settles.
+    Desktop-compatible protocol: mid-turn ``token`` events (assistant
+    visible text from stream-json partials / assistant blocks) →
+    ``harness_progress`` heartbeats (any parsed SSE frame resets the
+    client stall watchdog) → ``final`` (authoritative sanitized turn
+    text) → ``done``. The blocking adapter turn runs on a worker thread;
+    on client disconnect it keeps running server-side (its result lands
+    in chat_history) and the run lock is released only after it settles.
     """
     from agenticx.studio import harness_wiring
 
@@ -402,16 +403,70 @@ async def _external_harness_chat_stream(
     try:
         yield _progress_sse("turn_started")
         result = None
+        last_heartbeat = time.time()
+        surface_sid = ""
+        adapter = None
+        try:
+            binding = manager.get_session_harness(sid) or {}
+            surface_sid = str(binding.get("harness_session_id") or "").strip()
+            adapter = harness_wiring.harness_registry().require(harness_id)
+        except Exception:
+            adapter = None
+            surface_sid = ""
+
+        async def _drain_token_sse() -> str | None:
+            """Poll adapter for mid-turn visible text; return an SSE line or None."""
+            if adapter is None or not surface_sid:
+                return None
+            if not hasattr(adapter, "drain_visible_stream_text"):
+                return None
+            try:
+                delta = await asyncio.to_thread(
+                    adapter.drain_visible_stream_text, surface_sid
+                )
+            except Exception:
+                return None
+            text_delta = str(delta or "")
+            if not text_delta:
+                return None
+            tok = SseEvent(
+                type="token",
+                data={"text": text_delta, "agent_id": "meta"},
+            )
+            return f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+
         while True:
             try:
                 result = await asyncio.wait_for(
-                    asyncio.shield(turn_task), timeout=15.0
+                    asyncio.shield(turn_task), timeout=0.2
                 )
                 break
             except asyncio.TimeoutError:
+                # Prefer binding refresh once the worker has ensure/spawned.
+                if adapter is not None and not surface_sid:
+                    try:
+                        binding = manager.get_session_harness(sid) or {}
+                        surface_sid = str(
+                            binding.get("harness_session_id") or ""
+                        ).strip()
+                    except Exception:
+                        pass
+                token_line = await _drain_token_sse()
+                if token_line is not None:
+                    yield token_line
+                    last_heartbeat = time.time()
+                    continue
                 # Heartbeat: keeps the desktop stall watchdog quiet while
-                # the (non-streaming) adapter turn blocks on its CLI.
-                yield _progress_sse("running")
+                # the adapter turn blocks on its CLI with no new tokens.
+                if time.time() - last_heartbeat >= 15.0:
+                    yield _progress_sse("running")
+                    last_heartbeat = time.time()
+
+        # Flush any trailing deltas that arrived with the terminal result.
+        token_line = await _drain_token_sse()
+        if token_line is not None:
+            yield token_line
+
         final_text = str(result.result_text or "").strip()
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
         final = SseEvent(

@@ -327,6 +327,7 @@ def test_claude_code_adapter_spawn_model_argv(
     assert view["raw"]["model"] == "glm-5.3-flash"
     argv = captured[0]
     assert "--model" in argv and argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    assert "--include-partial-messages" in argv
     # empty / whitespace model must not inject --model
     captured.clear()
     cc.spawn(str(tmp_path), options={"mode": "headless", "model": "  "})
@@ -445,6 +446,7 @@ def test_codebuddy_adapter_spawn_model_argv(
     assert view["raw"]["model"] == "glm-5.3-flash"
     argv = captured[0]
     assert "--model" in argv and argv[argv.index("--model") + 1] == "glm-5.3-flash"
+    assert "--include-partial-messages" in argv
     captured.clear()
     wb.spawn(str(tmp_path), options={"permission_mode": "default", "model": "  "})
     assert "--model" not in captured[0]

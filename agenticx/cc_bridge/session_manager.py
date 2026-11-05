@@ -57,6 +57,12 @@ class BridgeSession:
     # Headless follow-up watermark: ignore result/success lines at indices
     # below this value (set in send_user_message before writing stdin).
     _result_wait_watermark: int = field(default=0, repr=False)
+    # Mid-turn visible-text streaming (Near SSE token pump). Bumped in
+    # send_user_message; drain_visible_stream_text no-ops until then.
+    _stream_generation: int = field(default=0, repr=False)
+    _visible_generation: int = field(default=0, repr=False)
+    _visible_cursor: int = field(default=0, repr=False)
+    _visible_tracker: Any = field(default=None, repr=False)
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -313,6 +319,7 @@ class BridgeSessionManager:
             "stream-json",
             "--output-format",
             "stream-json",
+            "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",
         ]
@@ -475,8 +482,15 @@ class BridgeSessionManager:
             return
         # Watermark before stdin write so wait_for_success_result ignores
         # prior-turn result/success lines already buffered in session.lines.
+        # Also reset the visible-text tracker so Near can stream this turn only.
+        from agenticx.harness.stream_json_text import VisibleTextTracker
+
         with session.lock:
             session._result_wait_watermark = len(session.lines)
+            session._stream_generation = int(session._stream_generation or 0) + 1
+            session._visible_generation = session._stream_generation
+            session._visible_cursor = session._result_wait_watermark
+            session._visible_tracker = VisibleTextTracker()
         line = build_user_message_line(text)
         self._write_stdin(session, line)
 
@@ -573,7 +587,43 @@ class BridgeSessionManager:
         winsize = struct.pack("HHHH", r, c, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Safe to call from the studio SSE loop while ``wait_for_success_result``
+        blocks on another thread. No-ops until ``send_user_message`` arms the
+        per-turn tracker (avoids replaying a prior turn into the bubble).
+        """
+        from agenticx.harness.stream_json_text import (
+            VisibleTextTracker,
+            drain_visible_text_from_lines,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return ""
+        with session.lock:
+            if int(session._visible_generation or 0) != int(session._stream_generation or 0):
+                return ""
+            if int(session._stream_generation or 0) <= 0:
+                return ""
+            tracker = session._visible_tracker
+            if tracker is None:
+                tracker = VisibleTextTracker()
+                session._visible_tracker = tracker
+            cursor = int(session._visible_cursor or 0)
+            chunk_lines = list(session.lines)
+        delta, new_cursor = drain_visible_text_from_lines(
+            chunk_lines, start_index=cursor, tracker=tracker
+        )
+        with session.lock:
+            # Only advance if generation is still the same turn.
+            if int(session._visible_generation or 0) == int(session._stream_generation or 0):
+                session._visible_cursor = new_cursor
+        return delta
+
     def wait_for_success_result(
+
         self,
         session_id: str,
         timeout_sec: float,

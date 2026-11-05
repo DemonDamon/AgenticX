@@ -67,6 +67,11 @@ class WbBridgeSession:
     turn_done: threading.Event = field(default_factory=threading.Event)
     turn_line_start: int = 0  # lines index at last send; 0 if never sent
     last_idempotency_key: str = ""
+    # Mid-turn visible-text streaming (Near SSE token pump).
+    _stream_generation: int = 0
+    _visible_generation: int = 0
+    _visible_cursor: int = 0
+    _visible_tracker: Any = None
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -286,6 +291,7 @@ class WbBridgeSessionManager:
             "stream-json",
             "--output-format",
             "stream-json",
+            "--include-partial-messages",
             "--permission-mode",
             mode,
         ]
@@ -361,6 +367,8 @@ class WbBridgeSessionManager:
         if session is None:
             raise KeyError("unknown session")
         line = build_user_message_line(text)
+        from agenticx.harness.stream_json_text import VisibleTextTracker
+
         with session.lock:
             session.turn_done.clear()
             session.turn_state = "running"
@@ -373,6 +381,10 @@ class WbBridgeSessionManager:
             session.written_paths = []
             session.turn_line_start = len(session.lines)
             session.last_idempotency_key = idempotency_key
+            session._stream_generation = int(session._stream_generation or 0) + 1
+            session._visible_generation = session._stream_generation
+            session._visible_cursor = session.turn_line_start
+            session._visible_tracker = VisibleTextTracker()
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -388,7 +400,41 @@ class WbBridgeSessionManager:
                 session.proc.kill()
         return True
 
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Mirrors the Claude Code bridge helper so Near's external-harness SSE
+        can stream CodeBuddy tokens with the same pump.
+        """
+        from agenticx.harness.stream_json_text import (
+            VisibleTextTracker,
+            drain_visible_text_from_lines,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return ""
+        with session.lock:
+            if int(session._visible_generation or 0) != int(session._stream_generation or 0):
+                return ""
+            if int(session._stream_generation or 0) <= 0:
+                return ""
+            tracker = session._visible_tracker
+            if tracker is None:
+                tracker = VisibleTextTracker()
+                session._visible_tracker = tracker
+            cursor = int(session._visible_cursor or 0)
+            chunk_lines = list(session.lines)
+        delta, new_cursor = drain_visible_text_from_lines(
+            chunk_lines, start_index=cursor, tracker=tracker
+        )
+        with session.lock:
+            if int(session._visible_generation or 0) == int(session._stream_generation or 0):
+                session._visible_cursor = new_cursor
+        return delta
+
     def wait_for_turn(
+
         self,
         session_id: str,
         timeout_sec: float,
