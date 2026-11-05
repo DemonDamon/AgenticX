@@ -231,3 +231,28 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 }
 
 const receiptToolDelta = `[{"index":0,"function":{"arguments":"{}"}}]`
+
+func TestProtocolStreamMidLeaseLossUsesSharedServiceError(t *testing.T) {
+	t.Setenv("GATEWAY_CHANNEL_REGISTRY", "on")
+	lease := &observedLostLease{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n"))
+	}))
+	defer upstream.Close()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	registry := channel.NewRegistry(logger, nil)
+	registry.SetSnapshot([]channel.Channel{{ID: "lease-protocol", TenantID: "t", Status: channel.StatusActive, ProviderType: "openai", APIKey: "synthetic-test-key", BaseURL: upstream.URL, SupportedModels: []string{"m"}, Weight: 1}})
+	picker := channel.NewPicker(registry, channel.NewStatsStore(), channel.NewAffinityStore(0))
+	s := &Server{logger: logger, channelRegistry: registry, relayExecutor: relay.NewExecutor(picker, adaptor.NewFactory(adaptor.NewOpenAIAdaptor()), keypool.NewPool()), billingService: billing.NewService(nil), policy: &policyengine.Engine{}, metering: discardUsageSink{}, audit: leaseDiscardAudit{}, decider: routing.NewDecider(config.Config{})}
+	req := openai.ChatCompletionRequest{Model: "m", Stream: true}
+	_, derived := applyDerivedModel(req)
+	receipt := &quota.ReservationReceipt{Lease: lease}
+	identity := requestIdentity{TenantID: "t", UserID: "u", quotaReservation: receipt}
+	w := &lossAfterFirstCachedWrite{ResponseRecorder: httptest.NewRecorder(), stop: func() { lease.lost.Store(true) }}
+	s.protocolStream(w, httptest.NewRequest(http.MethodPost, "/v1/responses", nil), req, identity, protocolSession{inbound: "openai-chat", outbound: "openai-chat"}, derived, "", time.Now(), 2, 10, quota.CheckResult{Reservation: receipt}, quota.RequestContext{Reservation: receipt})
+	body := w.Body.String()
+	if !strings.Contains(body, "first") || !strings.Contains(body, "50302") || strings.Contains(body, "50000") {
+		t.Fatalf("protocol mid-stream loss has inconsistent code: %s", body)
+	}
+}

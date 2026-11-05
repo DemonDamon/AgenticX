@@ -115,6 +115,7 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
+	qctx.Context = r.Context()
 	estimatedCost := s.estimateRequestCostUSD(req.Model, estimatedInputTokens)
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)

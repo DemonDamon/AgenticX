@@ -24,6 +24,7 @@ type ReservationLine struct {
 // ReservationReceipt owns one admission lifecycle. Share its pointer, not a
 // copy. A first terminal decision is immutable; retries finish only pending rows.
 type ReservationReceipt struct {
+	Lease           ConcurrencyLease
 	ID              string
 	Lines           []ReservationLine
 	Budget          *BudgetReceipt
