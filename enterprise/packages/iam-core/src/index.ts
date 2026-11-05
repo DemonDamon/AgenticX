@@ -41,3 +41,4 @@ export * from "./quota-remaining";
 
 export * from "./database/tenant-iam-transaction";
 export * from "./repos/sso-identity-links";
+export * from "./repos/privilege-guard";

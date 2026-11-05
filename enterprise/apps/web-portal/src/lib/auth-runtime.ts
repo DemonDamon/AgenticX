@@ -141,6 +141,7 @@ function createRuntime(): AuthRuntime {
       roleCodes: ["super_admin"],
       defaultOrgId: orgId,
       defaultDeptId: DEFAULT_DEPT_ID,
+      actor: { kind: "system", tenantId: tenantId, purpose: "bootstrap" },
     });
     const hydrated = await loadAuthUserByEmail(tenantId, owner.email);
     if (hydrated) {
@@ -218,6 +219,7 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
     roleCodes: roleCodesForProvisionScopes(input.scopes),
     defaultOrgId: orgId,
     defaultDeptId: input.deptId ?? null,
+      actor: { kind: "system", tenantId: input.tenantId, purpose: "bootstrap" },
   });
   const saved = await runtime.repo.findByEmail(input.email.toLowerCase());
   if (saved) {
@@ -399,6 +401,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
         await assignRolesIfNone({
           tenantId: runtime.tenantId, userId: nextUser.id, roleCodes: assignedRoles,
           defaultOrgId: orgId, defaultDeptId: null,
+          actor: { kind: "system", tenantId: runtime.tenantId, purpose: "sso" },
         });
         user = await runtime.repo.findByEmail(normalizedEmail);
         jitCreated = true;

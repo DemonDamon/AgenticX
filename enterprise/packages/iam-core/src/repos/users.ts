@@ -1,3 +1,4 @@
+import { assertActorHasScope, assertActorMayGrantRoles, assertActorMayManageUser, assertDepartmentBelongsToTenant, type AdministrativeActor } from "./privilege-guard";
 import type { AuthUser } from "@agenticx/auth";
 import { hashPassword } from "@agenticx/auth";
 import { departments, roles, userRoles, users } from "@agenticx/db-schema";
@@ -370,8 +371,13 @@ export async function createAdminUser(input: {
   roleCodes?: string[];
   initialPassword?: string | null;
   defaultOrgId: string | null;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<{ user: AdminUserDto; initialPassword: string }> {
+  assertActorHasScope(input.actor, input.tenantId, "user:create");
+  await assertDepartmentBelongsToTenant(input.tenantId, input.deptId);
+  const codes = input.roleCodes?.length ? input.roleCodes : ["member"];
+  await assertActorMayGrantRoles(input.tenantId, input.actor, codes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.createAdminUser(input);
   }
@@ -382,6 +388,10 @@ export async function createAdminUser(input: {
   const existing = await findUserRowByTenantEmail(db, input.tenantId, email);
   if (existing && isActiveUserRow(existing)) {
     throw new Error("email already exists");
+  }
+  if (existing) {
+    assertActorHasScope(input.actor, input.tenantId, "user:update");
+    await assertActorMayManageUser(input.tenantId, input.actor, existing.id);
   }
 
   const suppliedInitialPassword = Boolean(input.initialPassword?.trim());
@@ -419,10 +429,10 @@ export async function createAdminUser(input: {
     });
   }
 
-  const codes = input.roleCodes?.length ? input.roleCodes : ["member"];
   const idMap = await resolveRoleIdsFromCodes(input.tenantId, codes);
   const roleIds = codes.map((c) => idMap.get(c)).filter((x): x is string => Boolean(x));
   if (roleIds.length === 0) {
+    await assertActorMayGrantRoles(input.tenantId, input.actor, ["member"]);
     const member = await getRoleByCode(input.tenantId, "member");
     if (member) roleIds.push(member.id);
   }
@@ -436,7 +446,7 @@ export async function createAdminUser(input: {
 
   await insertAuditEvent({
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId ?? null,
+    actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
     eventType: restored ? "iam.user.restore" : "iam.user.create",
     targetKind: "user",
     targetId: id,
@@ -461,8 +471,12 @@ export async function updateAdminUser(
   tenantId: string,
   id: string,
   patch: UpdateAdminUserInput,
-  ctx: { actorUserId?: string | null; defaultOrgId: string | null }
+  ctx: { actor: AdministrativeActor; actorUserId?: string | null; defaultOrgId: string | null }
 ): Promise<AdminUserDto> {
+  assertActorHasScope(ctx.actor, tenantId, "user:update");
+  await assertDepartmentBelongsToTenant(tenantId, patch.deptId);
+  await assertActorMayManageUser(tenantId, ctx.actor, id);
+  if (patch.roleCodes) await assertActorMayGrantRoles(tenantId, ctx.actor, patch.roleCodes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.updateAdminUser(tenantId, id, patch, ctx);
   }
@@ -509,7 +523,7 @@ export async function updateAdminUser(
 
   await insertAuditEvent({
     tenantId,
-    actorUserId: ctx.actorUserId ?? null,
+    actorUserId: ctx.actor.kind === "user" ? ctx.actor.userId : null,
     eventType: "iam.user.update",
     targetKind: "user",
     targetId: id,
@@ -522,10 +536,12 @@ export async function updateAdminUser(
 export async function softDeleteUser(
   tenantId: string,
   id: string,
-  actorUserId?: string | null
+  actor: AdministrativeActor
 ): Promise<void> {
+  assertActorHasScope(actor, tenantId, "user:delete");
+  await assertActorMayManageUser(tenantId, actor, id);
   if (resolveDatabaseConfig().dialect === "mysql") {
-    return mysqlUsersRepo.softDeleteUser(tenantId, id, actorUserId);
+    return mysqlUsersRepo.softDeleteUser(tenantId, id, actor);
   }
   const db = getIamDb();
   const row = await db
@@ -545,7 +561,7 @@ export async function softDeleteUser(
 
   await insertAuditEvent({
     tenantId,
-    actorUserId: actorUserId ?? null,
+    actorUserId: actor.kind === "user" ? actor.userId : null,
     eventType: "iam.user.delete",
     targetKind: "user",
     targetId: id,
@@ -560,8 +576,11 @@ export async function softDeleteUser(
 export async function resetUserPassword(input: {
   tenantId: string;
   userId: string;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<{ initialPassword: string }> {
+  assertActorHasScope(input.actor, input.tenantId, "user:update");
+  await assertActorMayManageUser(input.tenantId, input.actor, input.userId);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.resetUserPassword(input);
   }
@@ -582,7 +601,7 @@ export async function resetUserPassword(input: {
 
   await insertAuditEvent({
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId ?? null,
+    actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
     eventType: "iam.user.reset_password",
     targetKind: "user",
     targetId: input.userId,
@@ -663,9 +682,13 @@ export async function assignRolesIfNone(input: {
   tenantId: string;
   userId: string;
   roleCodes: string[];
+  actor: AdministrativeActor;
   defaultOrgId: string | null;
   defaultDeptId: string | null;
 }): Promise<void> {
+  assertActorHasScope(input.actor, input.tenantId, "user:update");
+  await assertDepartmentBelongsToTenant(input.tenantId, input.defaultDeptId);
+  await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.assignRolesIfNone(input);
   }
@@ -703,11 +726,19 @@ export async function upsertUserByEmailInTx(
     status?: AdminUserStatus;
     roleCodes: string[];
     defaultOrgId: string | null;
+    actor: AdministrativeActor;
     actorUserId?: string | null;
   }
 ): Promise<string> {
+  assertActorHasScope(input.actor, input.tenantId, "user:create");
+  await assertDepartmentBelongsToTenant(input.tenantId, input.deptId);
+  await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
   const email = input.email.trim().toLowerCase();
   const existing = await findUserRowByTenantEmail(tx, input.tenantId, email);
+  if (existing) {
+    assertActorHasScope(input.actor, input.tenantId, "user:update");
+    await assertActorMayManageUser(input.tenantId, input.actor, existing.id);
+  }
 
   const now = new Date();
   let userId: string;
@@ -781,7 +812,7 @@ export async function upsertUserByEmailInTx(
   await insertAuditEvent(
     {
       tenantId: input.tenantId,
-      actorUserId: input.actorUserId ?? null,
+      actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
       eventType: "iam.bulk_import.user_upsert",
       targetKind: "user",
       targetId: userId,
@@ -806,6 +837,7 @@ export async function upsertUserByEmail(input: {
   status?: AdminUserStatus;
   roleCodes: string[];
   defaultOrgId: string | null;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<AdminUserDto> {
   if (resolveDatabaseConfig().dialect === "mysql") {
@@ -823,9 +855,14 @@ export async function replaceUserRoleAssignments(input: {
   tenantId: string;
   userId: string;
   roleCodes: string[];
+  actor: AdministrativeActor;
   defaultOrgId: string | null;
   defaultDeptId: string | null;
 }): Promise<void> {
+  assertActorHasScope(input.actor, input.tenantId, "user:update");
+  await assertDepartmentBelongsToTenant(input.tenantId, input.defaultDeptId);
+  await assertActorMayManageUser(input.tenantId, input.actor, input.userId);
+  await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.replaceUserRoleAssignments(input);
   }
