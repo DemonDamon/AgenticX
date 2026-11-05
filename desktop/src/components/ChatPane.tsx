@@ -126,6 +126,7 @@ import { parkTrailingReasoningInProcess, resolveProcessFoldRange } from "./messa
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
+  isSessionBusyElsewhereError,
 } from "../utils/noisy-chat-messages";
 import {
   ATTACHMENT_ROUTING_OFF,
@@ -13147,6 +13148,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setPaneIsolateActive(pane.id, false);
                 setAttachToastMessage(t("composer.modeMultitaskNeedGit"));
                 setAttachToastOpen(true);
+                continue;
+              }
+              // External-harness / cross-replica single-flight: soft toast only.
+              // Do not append a ❌ tool row with the raw English UUID exception.
+              if (isSessionBusyElsewhereError(payload.data?.error)) {
+                setStallHintToast(
+                  errText.trim() && !/already has an external-harness turn/i.test(errText)
+                    ? errText
+                    : t("toast.sessionBusyElsewhere"),
+                );
                 continue;
               }
               const severity = String(payload.data?.severity ?? "").trim();

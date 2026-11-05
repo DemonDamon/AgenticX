@@ -632,6 +632,7 @@
     "favorited": "已收藏",
     "unattendedSaveFailed": "无人值守开关保存失败",
     "busyForChat": "该智能体任务执行中，完成后才能进入对话",
+    "sessionBusyElsewhere": "上一轮还在进行中，请稍候再发送",
     "bgTaskDone": "后台任务已完成",
     "turnInterrupted": "本轮请求已中断，正在同步状态…",
     "continueCreating": "正在创建新任务...",

@@ -433,10 +433,15 @@ async def _external_harness_chat_stream(
             owns_release = False
             asyncio.create_task(_release_after_turn())
         raise
-    except harness_wiring.HarnessTurnBusyError as exc:
+    except harness_wiring.HarnessTurnBusyError:
+        # Keep a stable error code for clients; never dump the raw
+        # "session {uuid} already has an external-harness turn in flight" string.
         err = SseEvent(
             type="error",
-            data={"error": "session_busy_elsewhere", "text": str(exc)},
+            data={
+                "error": "session_busy_elsewhere",
+                "text": "上一轮还在进行中，请稍候再发送",
+            },
         )
         yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'

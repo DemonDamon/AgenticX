@@ -133,13 +133,14 @@ export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_A
 /**
  * Copy/quote stay on one 20px icon row. `flex-wrap` + `h-5` used to overflow
  * the usage/cache text onto follow-up chips in a squeezed pane.
- * `min-w-0 overflow-hidden` lets the icon row clip instead of painting over chips.
+ * Keep `overflow-visible` so HoverTip anchors (esp. 复制) are not clipped by the
+ * row box; turn-meta still clips its own text via overflow-hidden on the child.
  *
  * The action *line* is 24px so a 20px model pill has 2px air above/below and
  * is not vertically sliced when there are no follow-up chips underneath.
  */
 export const ASSISTANT_ACTION_ICON_ROW_CLASS =
-  "agx-assistant-action-icons group flex h-5 w-fit min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-hidden text-text-muted";
+  "agx-assistant-action-icons group flex h-5 w-fit min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-visible text-text-muted";
 
 /** Full-width action row; also the container query root for squeezed-pane hover. */
 export const ASSISTANT_ACTION_LINE_CLASS =

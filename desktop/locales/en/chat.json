@@ -632,6 +632,7 @@
     "favorited": "Favorited",
     "unattendedSaveFailed": "Could not save the unattended switch",
     "busyForChat": "This agent is still running. Chat opens when it finishes.",
+    "sessionBusyElsewhere": "Previous turn is still running. Please wait before sending again.",
     "bgTaskDone": "Background task finished",
     "turnInterrupted": "This turn was interrupted. Syncing status…",
     "continueCreating": "Creating a new task...",
