@@ -24,3 +24,8 @@ Real Python 3.10 library-level probes passed PDF text/AES encryption and image-i
 
 ## Dependency stack integration
 This branch merges the independently verified model SDK baseline. The merged pyproject.toml, requirements.txt and freshly regenerated requirements.lock are byte-identical to the combined verification snapshot: SDK 1.105.7, HTTP SDK 2.54.0, MCP 1.27.2, PDF 6.21.4, image parser 13.0.0 and cryptography 48.0.0. The full combined Python target suite already reported 192 passed and the same two pre-existing runtime failures; no source changes justified repeating it after this lock-only conflict resolution. The only conflict was a dependency provenance comment.
+
+## Remote regression acceptance
+This branch inherits the model dependency branch's shared Python 3.12 workflow through a normal merge. Its current lock is installed before running the explicitly listed available tests. The document/Office-image and crypto modules are hard import prerequisites; selected skipped or empty JUnit suites fail. The actual parser and encryption cases therefore cannot disappear behind optional-import skips. Contribution pull requests run regardless of their base branch, while feature pushes do not duplicate jobs.
+
+Local inherited CI runner: 40 cases passed, zero skips, with pytest 8.4.2 / pytest-asyncio 0.26.0. The parser test module, all three parser cases and all three encryption cases executed after successful hard imports. Relative to the updated model dependency base, this branch still changes only its six document-related files; the CI definition is inherited rather than duplicated in the PR diff.
