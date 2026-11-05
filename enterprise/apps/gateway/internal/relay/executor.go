@@ -37,11 +37,11 @@ func NewExecutor(picker *channel.Picker, factory *adaptor.Factory, pool *keypool
 }
 
 type CompleteResult struct {
-	Response      openai.ChatCompletionResponse
-	Channel       channel.Channel
-	KeyRef        string
-	Attempts      []channel.Attempt
-	PickDecision  channel.PickDecision
+	Response     openai.ChatCompletionResponse
+	Channel      channel.Channel
+	KeyRef       string
+	Attempts     []channel.Attempt
+	PickDecision channel.PickDecision
 }
 
 type StreamResult struct {
@@ -180,6 +180,12 @@ func (e *Executor) Stream(
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
 	var lastErr error
+	emitted := false
+	guardedPush := func(chunk openai.StreamChunk) error {
+		// A failed callback may already have written part of a frame.
+		emitted = true
+		return push(chunk)
+	}
 	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)
 	maxRetries := defaultMaxRetries
@@ -196,14 +202,14 @@ func (e *Executor) Stream(
 			maxRetries = ch.MaxRetries
 		}
 
-		result, err := e.streamOnChannel(ctx, req, ch, push)
+		result, err := e.streamOnChannel(ctx, req, ch, guardedPush)
 		attempts = append(attempts, result.attempts...)
 		if err == nil {
 			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
 			return StreamResult{Channel: ch, KeyRef: result.keyRef, Attempts: attempts, PickDecision: pick}, nil
 		}
 		lastErr = err
-		if !IsChannelRetryable(err) {
+		if emitted || !IsChannelRetryable(err) {
 			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
 		}
 		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
@@ -241,14 +247,9 @@ func (e *Executor) streamOnChannel(
 		chTry := ch
 		chTry.APIKey = resolved.Key
 
-		var tokensSent bool
+		emitted := false
 		wrappedPush := func(chunk openai.StreamChunk) error {
-			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
-				if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
-					tokensSent = true
-				}
-			}
+			emitted = true
 			return push(chunk)
 		}
 
@@ -283,7 +284,7 @@ func (e *Executor) streamOnChannel(
 			RetryReason: reason,
 			LatencyMS:   latency,
 		}
-		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !tokensSent
+		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !emitted
 		if canRetryKey {
 			e.keypool.MarkFailure(poolID, resolved.KeyRef, reason)
 			excludeKeys[resolved.KeyRef] = struct{}{}
