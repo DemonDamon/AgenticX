@@ -134,6 +134,7 @@ export async function POST(request: Request) {
           roleCodes,
           defaultOrgId: orgId,
           actorUserId: auth.session.userId,
+          actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
         });
       });
       success += 1;

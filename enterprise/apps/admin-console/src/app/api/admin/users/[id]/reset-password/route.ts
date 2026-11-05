@@ -11,6 +11,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       tenantId: auth.session.tenantId,
       userId: id,
       actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
     });
     return NextResponse.json({
       code: "00000",
@@ -19,8 +20,8 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     });
   } catch (error) {
     return NextResponse.json(
-      { code: "40000", message: error instanceof Error ? error.message : "failed" },
-      { status: 400 }
+      { code: error instanceof Error && error.name === "PrivilegeEscalationError" ? "40300" : "40000", message: error instanceof Error ? error.message : "failed" },
+      { status: error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400 }
     );
   }
 }
