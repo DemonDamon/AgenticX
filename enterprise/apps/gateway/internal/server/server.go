@@ -1158,6 +1158,7 @@ func (s *Server) handleStream(
 	}
 
 	var responseBuilder strings.Builder
+	var accounting streamAccounting
 	inputText := joinMessages(req.Messages)
 	var blockedHits []policyengine.HitEvent
 	var reasoningState openai.StreamReasoningState
@@ -1169,6 +1170,7 @@ func (s *Server) handleStream(
 	}
 
 	push := func(chunk openai.StreamChunk) error {
+		accounting.observe(chunk)
 		if firstTokenAt.IsZero() {
 			firstTokenAt = time.Now()
 			if s.metrics != nil {
@@ -1255,7 +1257,7 @@ func (s *Server) handleStream(
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.settleInterruptedStreamUsage(
+			s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 				identity,
 				decision,
 				estimatedInputTokens,
@@ -1274,7 +1276,7 @@ func (s *Server) handleStream(
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.settleInterruptedStreamUsage(
+		s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true),
 			identity,
 			decision,
 			estimatedInputTokens,
@@ -1316,13 +1318,9 @@ func (s *Server) handleStream(
 		}
 		_ = push(tailChunk)
 	}
-	inputTokens := estimatedInputTokens
-	outputTokens := estimateTextTokens(responseText)
-	streamUsage := openai.Usage{
-		PromptTokens:     inputTokens,
-		CompletionTokens: outputTokens,
-		TotalTokens:      inputTokens + outputTokens,
-	}
+	streamUsage := accounting.usage(estimatedInputTokens, false)
+	inputTokens := streamUsage.PromptTokens
+	outputTokens := streamUsage.CompletionTokens
 	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     inputText,
@@ -1337,7 +1335,7 @@ func (s *Server) handleStream(
 		settle := s.billingService.SettleContext(
 			qctx,
 			reservedTokens,
-			int64(inputTokens+outputTokens),
+			int64(streamUsage.TotalTokens),
 		)
 		settleDelta = settle.Delta
 	} else {
@@ -1733,6 +1731,7 @@ func (s *Server) settleInterruptedStreamUsage(
 	budgetCheck *quota.CheckResult,
 	qctx quota.RequestContext,
 	span spanMeta,
+	observed ...openai.Usage,
 ) {
 	if budgetCheck != nil && budgetCheck.Reservation != nil {
 		identity.quotaReservation = budgetCheck.Reservation
@@ -1741,6 +1740,9 @@ func (s *Server) settleInterruptedStreamUsage(
 	usage := openai.Usage{}
 	if partialOutputTokens > 0 {
 		usage = openai.Usage{PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens, TotalTokens: estimatedInputTokens + partialOutputTokens}
+	}
+	if len(observed) > 0 {
+		usage = observed[0]
 	}
 	s.reportUsageDetailed(identity, decision, usage, budgetCheck, span)
 	if s.useChannelRelay() {
@@ -1986,4 +1988,8 @@ func policyMessageWithHits(message string, hits []policyengine.HitEvent) string 
 		return fmt.Sprintf("%s（命中策略: %s）", message, strings.Join(policyIDs, ", "))
 	}
 	return message
+}
+
+func (s *Server) settleInterruptedStreamObservedUsage(usage openai.Usage, identity requestIdentity, decision routing.Decision, estimatedInputTokens, partialOutputTokens int, reservedTokens int64, budgetCheck *quota.CheckResult, qctx quota.RequestContext, span spanMeta) {
+	s.settleInterruptedStreamUsage(identity, decision, estimatedInputTokens, partialOutputTokens, reservedTokens, budgetCheck, qctx, span, usage)
 }

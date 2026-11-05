@@ -62,13 +62,14 @@ jobs:
           GATEWAY_QUOTA_TEST_DIALECT: ${{ matrix.dialect }}
           GATEWAY_QUOTA_TEST_DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://postgres:postgres@127.0.0.1:5432/agx_quota_test' || 'mysql://agenticx:agenticx@127.0.0.1:3306/agx_quota_test' }}
         run: |
+          set -euo pipefail
           test -n "$GATEWAY_QUOTA_TEST_DATABASE_URL"
           go test -count=1 -race -json ./internal/quota -run '^(TestReservationRealDatabase|TestBudgetDatabaseURLReceiptLifecycle)$' | tee receipt-result.jsonl
           python3 - <<'PY_GATE'
           import json
           events = [json.loads(line) for line in open("receipt-result.jsonl")]
           for name in ("TestReservationRealDatabase", "TestBudgetDatabaseURLReceiptLifecycle"):
-              selected = [e for e in events if e.get("Test") == name]
+              selected = [e for e in events if e.get("Test") == name or e.get("Test", "").startswith(name + "/")]
               assert any(e.get("Action") == "pass" for e in selected), f"{name} did not pass"
               assert not any(e.get("Action") == "skip" for e in selected), f"{name} skipped"
           PY_GATE

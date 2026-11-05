@@ -1,48 +1,25 @@
 package adaptor
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
+	"github.com/agenticx/enterprise/gateway/internal/streamio"
 )
 
-// StreamConfig 流式加固参数（FR-6）。
-type StreamConfig struct {
-	IdleTimeout       time.Duration
-	ScannerMaxBufferB int64
-}
+// StreamConfig keeps the existing adapter options on the shared read contract.
+type StreamConfig = streamio.Config
 
-func StreamConfigFromEnv() StreamConfig {
-	// Default 180s: grounded answers after web-search inject a large system block;
-	// slow third-party gateways often need >60s before the first token.
-	cfg := StreamConfig{
-		IdleTimeout:       180 * time.Second,
-		ScannerMaxBufferB: 16 * 1024 * 1024,
-	}
-	if v := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_IDLE_TIMEOUT")); v != "" {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			cfg.IdleTimeout = time.Duration(sec) * time.Second
-		}
-	}
-	if v := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_SCANNER_MAX_BUFFER_MB")); v != "" {
-		if mb, err := strconv.Atoi(v); err == nil && mb > 0 {
-			cfg.ScannerMaxBufferB = int64(mb) * 1024 * 1024
-		}
-	}
-	return cfg
-}
+func StreamConfigFromEnv() StreamConfig { return streamio.ConfigFromEnv() }
 
 // OpenAIAdaptor OpenAI 兼容上游调用。
 type OpenAIAdaptor struct {
@@ -155,9 +132,7 @@ func (a *OpenAIAdaptor) Stream(
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	streamClient := *a.httpClient
-	streamClient.Timeout = 0
-	resp, err := streamClient.Do(httpReq)
+	resp, err := streamio.DoStream(a.httpClient, httpReq, a.streamCfg)
 	if err != nil {
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
@@ -166,7 +141,7 @@ func (a *OpenAIAdaptor) Stream(
 		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return &UpstreamError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(preview))}
 	}
-	return parseSSEStream(resp.Body, a.streamCfg, push)
+	return openai.ReadSSE(ctx, resp.Body, a.streamCfg, push)
 }
 
 func (a *OpenAIAdaptor) Embeddings(
@@ -237,142 +212,7 @@ func (e *UpstreamError) Error() string {
 }
 
 func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
-	idle := cfg.IdleTimeout
-	if idle <= 0 {
-		idle = 60 * time.Second
-	}
-	maxBuf := cfg.ScannerMaxBufferB
-	if maxBuf <= 0 {
-		maxBuf = 16 * 1024 * 1024
-	}
-	reader := bufio.NewReader(body)
-	var eventName string
-	var dataLines []string
-	var totalBytes int64
-	var terminal bool
-	completeOrError := func() error {
-		if terminal {
-			return nil
-		}
-		return fmt.Errorf("stream:incomplete")
-	}
-
-	type readResult struct {
-		line []byte
-		err  error
-	}
-	readCh := make(chan readResult, 1)
-	pendingRead := false
-	readOne := func() (readResult, error) {
-		if !pendingRead {
-			pendingRead = true
-			go func() {
-				line, err := reader.ReadBytes('\n')
-				readCh <- readResult{line: line, err: err}
-			}()
-		}
-		select {
-		case res := <-readCh:
-			pendingRead = false
-			return res, nil
-		case <-time.After(idle):
-			return readResult{}, fmt.Errorf("stream:idle_timeout")
-		}
-	}
-
-	flushEvent := func() (bool, error) {
-		if len(dataLines) == 0 {
-			eventName = ""
-			return false, nil
-		}
-		payload := strings.TrimSpace(strings.Join(dataLines, "\n"))
-		event := strings.TrimSpace(eventName)
-		eventName = ""
-		dataLines = nil
-		totalBytes += int64(len(payload))
-		if totalBytes > maxBuf {
-			return false, fmt.Errorf("stream:buffer_exceeded")
-		}
-		if payload == "" {
-			return false, nil
-		}
-		if payload == "[DONE]" {
-			terminal = true
-			return true, nil
-		}
-		var envelope struct {
-			Error *struct {
-				Message string `json:"message"`
-				Code    string `json:"code"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(payload), &envelope); err == nil && envelope.Error != nil {
-			message := strings.TrimSpace(envelope.Error.Message)
-			if message == "" {
-				message = "upstream stream error"
-			}
-			if code := strings.TrimSpace(envelope.Error.Code); code != "" {
-				return false, fmt.Errorf("upstream stream error %s: %s", code, message)
-			}
-			return false, fmt.Errorf("upstream stream error: %s", message)
-		}
-		if event == "error" {
-			return false, fmt.Errorf("upstream stream error: %s", payload)
-		}
-		var chunk openai.StreamChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return false, nil
-		}
-		if chunk.ID == "" && chunk.Object == "" && len(chunk.Choices) == 0 {
-			return false, nil
-		}
-		for _, choice := range chunk.Choices {
-			if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
-				terminal = true
-				break
-			}
-		}
-		if err := push(chunk); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-
-	for {
-		res, idleErr := readOne()
-		if idleErr != nil {
-			return idleErr
-		}
-		line := res.line
-		readErr := res.err
-		if len(line) > 0 {
-			trimmed := bytes.TrimRight(line, "\r\n")
-			if len(trimmed) == 0 {
-				done, err := flushEvent()
-				if err != nil || done {
-					return err
-				}
-				if readErr == io.EOF {
-					return completeOrError()
-				}
-				continue
-			}
-			if bytes.HasPrefix(trimmed, []byte("event:")) {
-				eventName = strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("event:"))))
-			} else if bytes.HasPrefix(trimmed, []byte("data:")) {
-				dataLines = append(dataLines, strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("data:")))))
-			}
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				if _, err := flushEvent(); err != nil {
-					return err
-				}
-				return completeOrError()
-			}
-			return fmt.Errorf("read upstream stream: %w", readErr)
-		}
-	}
+	return openai.ReadSSE(context.Background(), body, cfg, push)
 }
 
 func joinURL(base, path string) string {

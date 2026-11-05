@@ -36,10 +36,11 @@ import (
 )
 
 type receiptProvider struct {
-	partial bool
-	total   bool
-	fail    bool
-	calls   int
+	streamMode string
+	partial    bool
+	total      bool
+	fail       bool
+	calls      int
 }
 
 func (p *receiptProvider) Complete(context.Context, openai.ChatCompletionRequest, routing.Decision) (openai.ChatCompletionResponse, error) {
@@ -57,6 +58,17 @@ func (*receiptProvider) Embeddings(context.Context, openai.EmbeddingRequest, rou
 	return openai.EmbeddingResponse{}, nil
 }
 func (p *receiptProvider) Stream(_ context.Context, _ openai.ChatCompletionRequest, _ routing.Decision, push func(openai.StreamChunk) error) error {
+	if strings.HasSuffix(p.streamMode, "usage") {
+		u := openai.Usage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10}
+		if err := push(openai.StreamChunk{Usage: &u}); err != nil {
+			return err
+		}
+	}
+	if strings.HasSuffix(p.streamMode, "tool") {
+		if err := push(openai.StreamChunk{Choices: []openai.StreamChoice{{Delta: openai.StreamDelta{ToolCalls: json.RawMessage(receiptToolDelta)}}}}); err != nil {
+			return err
+		}
+	}
 	if p.partial {
 		if err := push(openai.StreamChunk{Choices: []openai.StreamChoice{{Delta: openai.StreamDelta{Content: "part"}}}}); err != nil {
 			return err
@@ -85,7 +97,7 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 	}
 	pub, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	t.Setenv("AUTH_JWT_PUBLIC_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub})))
-	for _, mode := range []string{"direct", "direct-failure", "channel", "cache", "protocol", "protocol-cache", "protocol-unavailable", "direct-stream-failure", "direct-stream-partial", "protocol-stream-failure", "protocol-stream-partial", "direct-total", "channel-total"} {
+	for _, mode := range []string{"direct", "direct-failure", "channel", "cache", "protocol", "protocol-cache", "protocol-unavailable", "direct-stream-failure", "direct-stream-partial", "protocol-stream-failure", "protocol-stream-partial", "direct-total", "channel-total", "direct-stream-usage", "direct-stream-tool", "protocol-stream-usage", "protocol-stream-tool"} {
 		t.Run(mode, func(t *testing.T) {
 			d := t.TempDir()
 			for key, value := range map[string]string{"GATEWAY_QUOTA_POOL": "on", "GATEWAY_QUOTA_POOL_BACKEND": "local", "GATEWAY_TOKEN_WINDOW_QUOTA": "on", "GATEWAY_REQUEST_COUNT_QUOTA": "off", "GATEWAY_REMOTE_QUOTA_CONFIG_URL": "", "GATEWAY_REMOTE_BUDGET_CONFIG_URL": "", "GATEWAY_BUDGET_BACKEND": "", "GATEWAY_CHANNEL_REGISTRY": "off", "GATEWAY_ADMIN_CHANNELS_FILE": filepath.Join(d, "channels.json"), "GATEWAY_REMOTE_CHANNELS_URL": "", "GATEWAY_BUDGET_CONFIG_FILE": filepath.Join(d, "budgets.json"), "GATEWAY_BUDGET_USAGE_FILE": filepath.Join(d, "budgets-usage.json"), "GATEWAY_QUOTA_POOL_USAGE_FILE": filepath.Join(d, "pools.json")} {
@@ -99,7 +111,7 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(d, "budgets.json"), []byte(`{"version":2,"users":{"receipt-user":{"unit":"tokens","period":"month","limit":1000,"action":"block"}}}`), 0600); err != nil {
 				t.Fatal(err)
 			}
-			provider := &receiptProvider{fail: mode == "direct-failure", partial: strings.HasSuffix(mode, "partial"), total: strings.HasSuffix(mode, "total")}
+			provider := &receiptProvider{streamMode: mode, fail: mode == "direct-failure", partial: strings.HasSuffix(mode, "partial"), total: strings.HasSuffix(mode, "total")}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			tracker := quota.NewTracker(qp, up, nil)
 			s := &Server{provider: provider, policy: &policyengine.Engine{}, logger: logger, quotaTracker: tracker, billingService: billing.NewService(tracker), metering: discardUsageSink{}, audit: &fakeAuditWriter{}, decider: routing.NewDecider(config.Config{DefaultRoute: "third-party"})}
@@ -112,6 +124,13 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if reqBody.Stream {
 						w.Header().Set("Content-Type", "text/event-stream")
+						if strings.HasSuffix(mode, "usage") {
+							_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":4,\"total_tokens\":10}}\n\n"))
+						}
+						if strings.HasSuffix(mode, "tool") {
+							_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":" + receiptToolDelta + "}}]}\n\n"))
+						}
+
 						if strings.HasSuffix(mode, "partial") {
 							_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"part\"}}]}\n\n"))
 						}
@@ -164,6 +183,12 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 			} else if w.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
+			if strings.HasSuffix(mode, "usage") {
+				want = 10
+			}
+			if strings.HasSuffix(mode, "tool") {
+				want = int64(estimateTextTokens("hello") + estimateTextTokens(receiptToolDelta))
+			}
 			qctx := quota.RequestContext{TenantID: "receipt-tenant", UserID: "receipt-user", Role: "staff", Model: "m"}
 			if used := tracker.Remaining(qctx).Used; used != want {
 				t.Fatalf("monthly=%d want%d body=%s", used, want, w.Body.String())
@@ -204,3 +229,5 @@ func TestReservationAllChatExitsSettleOriginalRows(t *testing.T) {
 		})
 	}
 }
+
+const receiptToolDelta = `[{"index":0,"function":{"arguments":"{}"}}]`
