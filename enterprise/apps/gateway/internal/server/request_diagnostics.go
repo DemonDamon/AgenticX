@@ -7,6 +7,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/streamio"
 )
 
@@ -16,6 +17,8 @@ func diagnosticStreamReason(err error) observability.TerminalReason {
 	switch {
 	case err == nil:
 		return observability.ReasonCompleted
+	case errors.Is(err, quota.ErrConcurrencyLeaseLost):
+		return observability.ReasonConcurrencyLeaseLost
 	case errors.Is(err, context.Canceled):
 		return observability.ReasonClientCancelled
 	case errors.Is(err, context.DeadlineExceeded):
@@ -49,7 +52,9 @@ func recordStreamDiagnostic(ctx context.Context, err error, policyBlocked bool) 
 	if phases == nil {
 		return
 	}
-	if ctx.Err() != nil {
+	if errors.Is(context.Cause(ctx), quota.ErrConcurrencyLeaseLost) || errors.Is(err, quota.ErrConcurrencyLeaseLost) {
+		phases.SetReason(observability.ReasonConcurrencyLeaseLost)
+	} else if ctx.Err() != nil {
 		phases.SetReason(diagnosticStreamReason(ctx.Err()))
 	} else if policyBlocked {
 		phases.SetReason(observability.ReasonPolicyBlocked)
@@ -63,6 +68,9 @@ func recordStreamDiagnostic(ctx context.Context, err error, policyBlocked bool) 
 // existing response, return or settlement behavior. The error is never retained.
 func recordDiagnosticFailure(ctx context.Context, err error, reason observability.TerminalReason) {
 	if err != nil {
+		if errors.Is(err, quota.ErrConcurrencyLeaseLost) || errors.Is(context.Cause(ctx), quota.ErrConcurrencyLeaseLost) {
+			reason = observability.ReasonConcurrencyLeaseLost
+		}
 		observability.PhasesFromContext(ctx).SetReason(reason)
 	}
 }

@@ -112,7 +112,7 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 
 - `admission_wait_ms` 是共享 chat 准入门整体耗时，包含额度/预算存储与等待，不单独声称等于数据库耗时。
 - `upstream_start_ms`、`response_headers_ms`、`first_body_byte_ms`、`first_content_ms` 是相对 HTTP 请求进入诊断中间件的首次阶段偏移。响应头/字节取自共享流读取器，字节到达不必等整条 SSE 帧；内容是成功 push 的文本、推理或工具 delta，role/usage-only 不计。重试不覆盖已经记录的首次阶段。
-- `total_ms` 是请求整体耗时，`reason` 仅为固定终结原因；未知错误归为 `upstream_error` 或 `other`，不记录错误文本。未到达/未接入的阶段为 `-1`，所有有效时长限制在 24 小时内。缓存命中、非流调用和未接入共享传输的实现可能缺少传输阶段；缺失不代表错误。
+- `total_ms` 是请求整体耗时，`reason` 仅为固定终结原因；未知错误归为 `upstream_error` 或 `other`，不记录错误文本。内部并发租约失效固定记录 `concurrency_lease_lost`，并在后续写入错误或取消观察中保留这一原因。未到达/未接入的阶段为 `-1`，所有有效时长限制在 24 小时内。缓存命中、非流调用和未接入共享传输的实现可能缺少传输阶段；缺失不代表错误。
 
 日志不含正文、令牌、URL、模型名、用户、查询、nonce 或任意关联标识。已有 trace reporter 仅在采样请求上附加相同的固定字段 `request_phases` 元数据（计量报告时的快照，`total_ms` 可早于最终日志），不新增数据库或异步队列。新指标复用现有 `/metrics` registry：`agx_gateway_request_phase_seconds{phase}` 仅使用六个固定阶段值（含 total），`agx_gateway_request_terminal_total{reason}` 仅使用白名单终结原因。二者都是**采样数据**，不能当作完整请求数；既有 TTFT/TPS 的采样和语义不变。`GATEWAY_METRICS=off` 关闭指标，诊断日志仍由采样开关单独控制。
 

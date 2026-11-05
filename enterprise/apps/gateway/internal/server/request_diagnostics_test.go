@@ -34,14 +34,16 @@ func TestDiagnosticReasonsUseTypedEvidenceOnly(t *testing.T) {
 		err    error
 		reason observability.TerminalReason
 	}{
-		{nil, observability.ReasonCompleted}, {context.Canceled, observability.ReasonClientCancelled},
+		{nil, observability.ReasonCompleted},
+		{errors.Join(quota.ErrConcurrencyLeaseLost, context.Canceled), observability.ReasonConcurrencyLeaseLost}, {context.Canceled, observability.ReasonClientCancelled},
 		{context.DeadlineExceeded, observability.ReasonRequestTimeout}, {streamio.ErrHeaderTimeout, observability.ReasonHeaderTimeout},
 		{streamio.ErrIdleTimeout, observability.ReasonIdleTimeout}, {streamio.ErrBufferExceeded, observability.ReasonBufferExceeded},
 		{openai.ErrIncompleteStream, observability.ReasonIncomplete},
 		{&adaptor.UpstreamError{StatusCode: 429, Body: secret}, observability.ReasonRateLimited},
 		{&adaptor.UpstreamError{StatusCode: 401, Body: secret}, observability.ReasonAuth},
 		{&adaptor.UpstreamError{StatusCode: 403, Body: secret}, observability.ReasonForbidden},
-		{errors.New(secret), observability.ReasonUpstreamError}, {diagnosticOpaqueError{}, observability.ReasonUpstreamError},
+		{errors.New(secret), observability.ReasonUpstreamError},
+		{errors.New("quota:concurrency_lease_lost " + secret), observability.ReasonUpstreamError}, {diagnosticOpaqueError{}, observability.ReasonUpstreamError},
 	} {
 		if got := diagnosticStreamReason(tc.err); got != tc.reason {
 			t.Fatalf("reason=%s want=%s", got, tc.reason)
