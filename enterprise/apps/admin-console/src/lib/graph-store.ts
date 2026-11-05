@@ -179,7 +179,7 @@ class MemoryGraphStore {
 }
 
 class FileGraphStore extends MemoryGraphStore {
-  backendName: GraphBackendName = "file";
+  override backendName: GraphBackendName = "file";
   constructor(private readonly filePath: string) {
     super();
   }
