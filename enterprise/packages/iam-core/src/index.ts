@@ -38,4 +38,7 @@ export * from "./pat-revocation-store";
 export * from "./session-grant-service";
 export * from "./compliance-service";
 export * from "./quota-remaining";
+
+export * from "./database/tenant-iam-transaction";
+export * from "./repos/sso-identity-links";
 export * from "./repos/privilege-guard";

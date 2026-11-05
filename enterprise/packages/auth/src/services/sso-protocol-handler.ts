@@ -42,6 +42,8 @@ export type SsoStartResult =
 export type SsoExternalIdentity = {
   externalSubject: string;
   email: string;
+  /** OIDC email ownership evidence. SAML assertions retain their existing trust policy. */
+  emailVerified?: boolean | null;
   displayName?: string;
   deptHint?: string | null;
   roleCodeHints?: string[];
