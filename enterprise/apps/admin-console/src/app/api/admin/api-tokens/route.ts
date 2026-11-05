@@ -1,21 +1,33 @@
 import { NextResponse } from "next/server";
-import { PAT_SCOPES } from "@agenticx/core-api";
-import { createPat, listPats } from "@agenticx/iam-core";
+import { assertActorMayManagePatUser, createPat, isAllowedPatScope, listPats } from "@agenticx/iam-core";
 import { requireAdminScope } from "../../../../lib/admin-auth";
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireAdminScope(["provider:read"]);
+    const auth = await requireAdminScope(["user:read"]);
     if (!auth.ok) return auth.response;
-    const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
+    const tenantId = auth.session.tenantId;
     if (!tenantId) {
       return NextResponse.json({ code: "50000", message: "DEFAULT_TENANT_ID missing" }, { status: 500 });
     }
     const url = new URL(request.url);
     const userId = url.searchParams.get("userId")?.trim() || undefined;
-    const tokens = await listPats({ tenantId, userId });
+    const actor = { kind: "user" as const, tenantId, userId: auth.session.userId, scopes: auth.scopes };
+    if (userId) await assertActorMayManagePatUser(tenantId, userId, actor);
+    const records = await listPats({ tenantId, userId });
+    const visible = new Map<string, boolean>();
+    for (const record of records) {
+      if (visible.has(record.userId)) continue;
+      try { await assertActorMayManagePatUser(tenantId, record.userId, actor); visible.set(record.userId, true); }
+      catch (error) {
+        if (!(error instanceof Error) || error.name !== "PrivilegeEscalationError") throw error;
+        visible.set(record.userId, false);
+      }
+    }
+    const tokens = records.filter((record) => visible.get(record.userId));
     return NextResponse.json({ code: "00000", message: "ok", data: { tokens } });
   } catch (error) {
+    if (error instanceof Error && error.name === "PrivilegeEscalationError") return NextResponse.json({ code: "40300", message: "forbidden" }, { status: 403 });
     const message = error instanceof Error ? error.message : "failed to load api tokens";
     const hint = /api_tokens|relation .* does not exist/i.test(message)
       ? "请先执行 pnpm --filter @agenticx/db-schema db:migrate"
@@ -25,9 +37,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAdminScope(["provider:update"]);
+  const auth = await requireAdminScope(["user:update"]);
   if (!auth.ok) return auth.response;
-  const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
+  const tenantId = auth.session.tenantId;
   if (!tenantId) {
     return NextResponse.json({ code: "50000", message: "DEFAULT_TENANT_ID missing" }, { status: 500 });
   }
@@ -48,13 +60,14 @@ export async function POST(request: Request) {
       }
       const unknown = body.scopes
         .map((scope) => scope.trim())
-        .find((scope) => scope.startsWith("ma:") && !(PAT_SCOPES as readonly string[]).includes(scope));
+        .find((scope) => !isAllowedPatScope(scope));
       if (unknown) {
-        return NextResponse.json({ code: "40000", message: `未知的托管智能体权限：${unknown}` }, { status: 400 });
+        return NextResponse.json({ code: "40000", message: "不支持的令牌权限" }, { status: 400 });
       }
     }
     const result = await createPat({
       tenantId,
+      actor: { kind: "user", tenantId, userId: auth.session.userId, scopes: auth.scopes },
       userId: body.userId.trim(),
       deptId: body.deptId?.trim() || null,
       name: body.name.trim(),
@@ -68,9 +81,10 @@ export async function POST(request: Request) {
       data: { token: result.token, record: result.record },
     });
   } catch (error) {
+    const forbidden = error instanceof Error && error.name === "PrivilegeEscalationError";
     return NextResponse.json(
-      { code: "40000", message: error instanceof Error ? error.message : "create failed" },
-      { status: 400 }
+      { code: forbidden ? "40300" : "40000", message: error instanceof Error ? error.message : "create failed" },
+      { status: forbidden ? 403 : 400 }
     );
   }
 }
