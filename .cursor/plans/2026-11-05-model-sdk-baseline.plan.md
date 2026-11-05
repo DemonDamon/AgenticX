@@ -22,3 +22,8 @@ A real Python 3.10 framework test attempt cannot collect because unchanged `agen
 PyInstaller discovery finds `litellm.rust_bridge._native` and the offline pricing backup. Full frozen binary build has not been performed in this task.
 
 The direct SDK function-tool probe also passes on real Python 3.10, separately from the framework. The framework datetime.UTC import failure was reproduced in the unchanged main checkout itself.
+
+## Remote regression acceptance
+The path-filtered Python 3.12 contribution workflow installs the current branch requirements.lock, fixes compatible test-tool versions and prints its actual branch-local selection. It executes real SDK text/reasoning/tool/usage/multi-round contracts and existing available fault/tool tests; absent tests from independent contributions are explicitly listed. Parser and crypto imports are required whenever their acceptance files exist, and empty or skipped selected suites fail instead of reporting a false green. Model metadata and weight downloads are disabled. The security scan's pull-request trigger covers stacked bases, with push runs limited to main/master. Workflow structure, script compilation and report guard behavior were locally validated, and this branch's selection is run before publishing.
+
+Local CI runner on this branch: 34 cases passed with zero skips under the fixed compatible test tools, including all three real SDK contracts and the existing reasoning/usage regressions. Hosted verification will install this branch's exact lock rather than inheriting a developer environment.
