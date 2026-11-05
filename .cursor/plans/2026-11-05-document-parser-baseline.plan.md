@@ -21,3 +21,6 @@ Actual PyInstaller `collect_all` found PIL's JPEG/PNG/_imaging modules, 18 image
 Official files were downloaded and SHA256-verified: PDF 6.21.4 = 33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c; image parser 13.0.0 arm64 CPython 3.12 wheel = fc481f742ccda20e9ed760b8f978dff50f2a4e9bc253ac167fb0a05b0783ef52.
 
 Real Python 3.10 library-level probes passed PDF text/AES encryption and image-in-Office round trips with PDF 6.21.4 / image parser 12.3.0. This validates dependency compatibility only; the framework's existing Python 3.10 import defect remains.
+
+## Dependency stack integration
+This branch merges the independently verified model SDK baseline. The merged pyproject.toml, requirements.txt and freshly regenerated requirements.lock are byte-identical to the combined verification snapshot: SDK 1.105.7, HTTP SDK 2.54.0, MCP 1.27.2, PDF 6.21.4, image parser 13.0.0 and cryptography 48.0.0. The full combined Python target suite already reported 192 passed and the same two pre-existing runtime failures; no source changes justified repeating it after this lock-only conflict resolution. The only conflict was a dependency provenance comment.
