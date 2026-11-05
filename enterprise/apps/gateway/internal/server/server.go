@@ -659,6 +659,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(trustedProxyRealIP(s.trustedProxies))
 	r.Use(middleware.Recoverer)
 	r.Use(requestTimeout(requestTimeoutFromEnv(s.logger)))
+	r.Use(observability.NewPhaseSamplerFromEnv(s.logger, s.metrics).HTTPMiddleware())
 	if s.metrics != nil && s.metrics.Enabled() {
 		r.Use(s.metrics.HTTPMiddleware())
 	}
@@ -1210,6 +1211,8 @@ func (s *Server) handleStream(
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
 	}
 
+	recordStreamDiagnostic(r.Context(), streamErr, len(blockedHits) > 0)
+
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {
@@ -1490,6 +1493,7 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 }
 
 type requestIdentity struct {
+	diagnostics *observability.RequestPhases
 	// PublicRetrieval is set only after a verified public-retrieval signature.
 	PublicRetrieval bool
 	TenantID        string

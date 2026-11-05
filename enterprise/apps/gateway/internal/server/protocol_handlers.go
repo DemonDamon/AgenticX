@@ -383,6 +383,8 @@ func (s *Server) protocolStream(
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
 	}
 
+	recordStreamDiagnostic(r.Context(), streamErr, len(blockedHits) > 0)
+
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {

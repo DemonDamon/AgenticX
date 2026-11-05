@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 )
 
 var ErrHeaderTimeout = errors.New("stream:header_timeout")
@@ -35,6 +37,8 @@ func DoStream(client *http.Client, req *http.Request, cfg Config) (*http.Respons
 	})
 	streamClient := *client
 	streamClient.Timeout = 0
+	phases := observability.PhasesFromContext(req.Context())
+	phases.Mark(observability.UpstreamStart)
 	resp, err := streamClient.Do(req.WithContext(ctx))
 	mu.Lock()
 	returned = true
@@ -55,6 +59,7 @@ func DoStream(client *http.Client, req *http.Request, cfg Config) (*http.Respons
 		cancel()
 		return nil, err
 	}
+	phases.Mark(observability.ResponseHeaders)
 	resp.Body = &cancelBody{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil
 }

@@ -177,6 +177,9 @@ func (s *Server) reportUsageDetailed(
 	})
 	if s.traceReporter != nil && strings.TrimSpace(identity.TraceID) != "" && identity.TraceStep > 0 {
 		meta := map[string]any{}
+		if identity.diagnostics != nil {
+			meta["request_phases"] = identity.diagnostics.Snapshot().TraceMetadata()
+		}
 		if stage := strings.TrimSpace(firstNonEmpty(span.Stage, identity.TraceStage)); stage != "" {
 			meta["stage"] = stage
 		}
