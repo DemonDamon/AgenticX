@@ -295,7 +295,10 @@ func (c *PGPoolCounter) mutate(key PoolKey, delta int64, event string, requestID
 	bind := func(q string) string { v, _ := database.Rebind(c.database.Dialect, q); return v }
 	insert := `INSERT INTO gateway_quota_pool_usage (tenant_id,scope_type,scope_id,period,used_total,updated_at) VALUES (?,?,?,?,0,CURRENT_TIMESTAMP) ON CONFLICT (tenant_id,scope_type,scope_id,period) DO NOTHING`
 	if c.database.Dialect == database.MySQL {
-		insert = `INSERT IGNORE INTO gateway_quota_pool_usage (tenant_id,scope_type,scope_id,period,used_total,updated_at) VALUES (?,?,?,?,0,CURRENT_TIMESTAMP)`
+		// Acquire the row exclusively on the duplicate path. INSERT IGNORE
+		// followed by FOR UPDATE lets concurrent retries hold shared duplicate
+		// locks while each waits to upgrade, causing a lock-conversion deadlock.
+		insert = `INSERT INTO gateway_quota_pool_usage (tenant_id,scope_type,scope_id,period,used_total,updated_at) VALUES (?,?,?,?,0,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE used_total=used_total`
 	}
 	args := []any{key.TenantID, key.ScopeType, key.ScopeID, key.Period}
 	if _, err = tx.ExecContext(ctx, bind(insert), args...); err != nil {
