@@ -180,8 +180,60 @@ def validate_bridge_url_for_studio(url: str) -> Optional[str]:
     )
 
 
+# Dist artifacts that support agx wb-bridge headless spawn
+# (--print / --input-format stream-json without FORCE_LITE_WB).
+# App bundles that only ship codebuddy-lite-wb*.mjs fail MODULE_NOT_FOUND
+# on that path and must be skipped when a healthier candidate exists.
+_CODEBUDDY_HEADLESS_DIST_NAMES: Tuple[str, ...] = (
+    "codebuddy-headless.js",
+    "codebuddy-headless",
+    "codebuddy.js",
+    "codebuddy",
+)
+
+
+def codebuddy_has_headless_dist(exe: str) -> bool:
+    """True when ``exe`` looks usable for wb-bridge headless stream-json.
+
+    Typical layout is ``…/cli/bin/codebuddy`` with sibling ``…/cli/dist/``.
+    If that dist dir is missing (wrapper / non-standard install), return True
+    so exotic PATH hits are not rejected. If dist exists but only has the
+    lite-wb artifact (no headless/full), return False — those binaries exit
+    immediately with ``Cannot find module '../dist/codebuddy'`` under our argv.
+    """
+    raw = (exe or "").strip()
+    if not raw:
+        return False
+    try:
+        resolved = Path(raw).expanduser().resolve()
+    except OSError:
+        return False
+    if not os.access(str(resolved), os.X_OK):
+        return False
+    dist = resolved.parent.parent / "dist"
+    try:
+        if not dist.is_dir():
+            return True
+    except OSError:
+        return True
+    for name in _CODEBUDDY_HEADLESS_DIST_NAMES:
+        try:
+            if (dist / name).exists():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def resolve_codebuddy_executable() -> str:
-    """Resolve the CodeBuddy CLI binary. Never falls back to ``wb``."""
+    """Resolve the CodeBuddy CLI binary. Never falls back to ``wb``.
+
+    Order: ``AGX_WB_BRIDGE_EXECUTABLE`` → yaml ``wb_bridge.executable`` →
+    ``PATH``/``which`` (codebuddy, cbc) → fixed app-bundle candidates.
+    PATH is preferred over app bundles because some WorkBuddy.app installs
+    ship only the lite-wb dist and break headless spawn with MODULE_NOT_FOUND.
+    Candidates that expose a ``dist/`` without headless/full artifacts are skipped.
+    """
     env_exe = os.environ.get("AGX_WB_BRIDGE_EXECUTABLE", "").strip()
     if env_exe:
         return env_exe
@@ -193,16 +245,30 @@ def resolve_codebuddy_executable() -> str:
     if isinstance(from_yaml, str) and from_yaml.strip():
         return from_yaml.strip()
 
-    for raw in CODEBUDDY_PATH_CANDIDATES:
-        path = Path(raw).expanduser()
-        if os.access(str(path), os.X_OK):
-            return str(path)
-
+    candidates: list[str] = []
     for name in CODEBUDDY_WHICH_NAMES:
         found = shutil.which(name)
         if found:
-            return found
+            candidates.append(found)
+    for raw in CODEBUDDY_PATH_CANDIDATES:
+        path = Path(raw).expanduser()
+        candidates.append(str(path))
+
+    seen: set[str] = set()
+    for cand in candidates:
+        try:
+            key = str(Path(cand).expanduser().resolve())
+        except OSError:
+            key = cand
+        if key in seen:
+            continue
+        seen.add(key)
+        if not os.access(cand, os.X_OK):
+            continue
+        if codebuddy_has_headless_dist(cand):
+            return cand
 
     raise RuntimeError(
-        "未找到 codebuddy 可执行文件，请安装 WorkBuddy 客户端或设置 AGX_WB_BRIDGE_EXECUTABLE"
+        "未找到可用的 codebuddy 可执行文件（PATH / WorkBuddy.app 均缺少 "
+        "headless 产物），请安装 CodeBuddy CLI 或设置 AGX_WB_BRIDGE_EXECUTABLE"
     )

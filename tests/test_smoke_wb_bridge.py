@@ -126,6 +126,80 @@ def test_ac1_resolve_executable_env_and_missing(monkeypatch: pytest.MonkeyPatch)
         resolve_codebuddy_executable()
 
 
+def test_resolve_prefers_which_over_broken_app_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PATH npm install wins when WorkBuddy.app dist lacks headless artifacts."""
+    monkeypatch.delenv("AGX_WB_BRIDGE_EXECUTABLE", raising=False)
+    monkeypatch.setattr(wb_settings.ConfigManager, "get_value", lambda key: None)
+
+    healthy = tmp_path / "npm" / "bin" / "codebuddy"
+    healthy.parent.mkdir(parents=True)
+    healthy.write_text("#!/bin/sh\necho ok\n")
+    healthy.chmod(0o755)
+    (tmp_path / "npm" / "dist").mkdir()
+    (tmp_path / "npm" / "dist" / "codebuddy-headless.js").write_text("// headless\n")
+
+    broken = tmp_path / "WorkBuddy.app" / "Contents" / "Resources" / "app.asar.unpacked" / "cli" / "bin" / "codebuddy"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("#!/bin/sh\necho broken\n")
+    broken.chmod(0o755)
+    lite_dist = broken.parent.parent / "dist"
+    lite_dist.mkdir()
+    (lite_dist / "codebuddy-lite-wb.mjs").write_text("// lite only\n")
+
+    monkeypatch.setattr(
+        wb_settings,
+        "CODEBUDDY_PATH_CANDIDATES",
+        (str(broken),),
+    )
+    monkeypatch.setattr(
+        wb_settings.shutil,
+        "which",
+        lambda name: str(healthy) if name == "codebuddy" else None,
+    )
+    assert resolve_codebuddy_executable() == str(healthy.resolve())
+
+
+def test_resolve_skips_lite_only_bundle_without_which(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("AGX_WB_BRIDGE_EXECUTABLE", raising=False)
+    monkeypatch.setattr(wb_settings.ConfigManager, "get_value", lambda key: None)
+    monkeypatch.setattr(wb_settings.shutil, "which", lambda name: None)
+
+    broken = tmp_path / "cli" / "bin" / "codebuddy"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("#!/bin/sh\n")
+    broken.chmod(0o755)
+    (tmp_path / "cli" / "dist").mkdir()
+    (tmp_path / "cli" / "dist" / "codebuddy-lite-wb.mjs").write_text("x\n")
+
+    monkeypatch.setattr(wb_settings, "CODEBUDDY_PATH_CANDIDATES", (str(broken),))
+    with pytest.raises(RuntimeError, match="AGX_WB_BRIDGE_EXECUTABLE"):
+        resolve_codebuddy_executable()
+
+
+def test_codebuddy_has_headless_dist_detects_layouts(tmp_path: Path) -> None:
+    from agenticx.wb_bridge.settings import codebuddy_has_headless_dist
+
+    headless = tmp_path / "ok" / "bin" / "codebuddy"
+    headless.parent.mkdir(parents=True)
+    headless.write_text("#!/bin/sh\n")
+    headless.chmod(0o755)
+    (tmp_path / "ok" / "dist").mkdir()
+    (tmp_path / "ok" / "dist" / "codebuddy.js").write_text("x\n")
+    assert codebuddy_has_headless_dist(str(headless)) is True
+
+    lite = tmp_path / "lite" / "bin" / "codebuddy"
+    lite.parent.mkdir(parents=True)
+    lite.write_text("#!/bin/sh\n")
+    lite.chmod(0o755)
+    (tmp_path / "lite" / "dist").mkdir()
+    (tmp_path / "lite" / "dist" / "codebuddy-lite-wb.mjs").write_text("x\n")
+    assert codebuddy_has_headless_dist(str(lite)) is False
+
+
 def test_ac2_never_uses_wb_as_executable_name() -> None:
     assert "wb" not in CODEBUDDY_WHICH_NAMES
     names = {Path(p).name for p in CODEBUDDY_PATH_CANDIDATES}

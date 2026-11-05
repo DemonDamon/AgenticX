@@ -50,6 +50,26 @@ _WB_STATUS_MAP = {
     "exited": TURN_STATUS_EXITED,
 }
 
+_RESULT_TEXT_MAX_CHARS = 4000
+
+
+def _exit_stderr_excerpt(tail: str, *, limit: int = 500) -> str:
+    """Prefer ``[stderr]`` lines from a session tail for exit diagnostics."""
+    if not tail:
+        return ""
+    stderr_lines: list[str] = []
+    for raw in tail.splitlines():
+        line = raw.rstrip()
+        if line.startswith("[stderr] "):
+            stderr_lines.append(line[len("[stderr] ") :])
+        elif "Cannot find module" in line or "MODULE_NOT_FOUND" in line:
+            stderr_lines.append(line)
+    if stderr_lines:
+        return "\n".join(stderr_lines)[-limit:]
+    # Fall back to the end of the raw tail so exit is never empty noise.
+    return tail[-limit:].strip()
+
+
 
 class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
     """``codebuddy`` CLI (headless stream-json, turn snapshots) as adapter #2."""
@@ -154,6 +174,10 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         result_text = ""
         if unified == TURN_STATUS_SUCCESS:
             result_text = str(snap.get("last_result_text", "") or "")
+        elif unified == TURN_STATUS_EXITED:
+            # Surface stderr (e.g. MODULE_NOT_FOUND from a broken app bundle)
+            # so Near's "[harness codebuddy turn exited]" banner is actionable.
+            result_text = _exit_stderr_excerpt(str(snap.get("tail", "") or ""))
         detail = {
             k: snap.get(k)
             for k in (

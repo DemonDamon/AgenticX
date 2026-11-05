@@ -54,6 +54,9 @@ class BridgeSession:
     _tui_send_started: float = field(default=0.0, repr=False)
     _tui_last_line_count: int = field(default=0, repr=False)
     _tui_last_activity_mono: float = field(default=0.0, repr=False)
+    # Headless follow-up watermark: ignore result/success lines at indices
+    # below this value (set in send_user_message before writing stdin).
+    _result_wait_watermark: int = field(default=0, repr=False)
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -470,6 +473,10 @@ class BridgeSessionManager:
             session.append_log(anchor)
             self._write_stdin(session, text + "\r")
             return
+        # Watermark before stdin write so wait_for_success_result ignores
+        # prior-turn result/success lines already buffered in session.lines.
+        with session.lock:
+            session._result_wait_watermark = len(session.lines)
         line = build_user_message_line(text)
         self._write_stdin(session, line)
 
@@ -571,19 +578,37 @@ class BridgeSessionManager:
         session_id: str,
         timeout_sec: float,
         poll_interval: float = 0.2,
+        *,
+        after_line_index: Optional[int] = None,
     ) -> Tuple[bool, str]:
-        """Block until a result/success line appears, timeout, or process exit."""
+        """Block until a *new* result/success line appears, timeout, or exit.
+
+        Only lines at index >= watermark count. Watermark defaults to
+        ``session._result_wait_watermark`` (set by ``send_user_message``);
+        callers may pass ``after_line_index`` explicitly. Without this,
+        follow-up turns would immediately succeed on a prior turn's result
+        already present in ``session.lines``.
+        """
         session = self.get(session_id)
         if session is None:
             return False, "unknown session"
         deadline = time.monotonic() + timeout_sec
-        last_count = 0
+        with session.lock:
+            watermark = (
+                int(after_line_index)
+                if after_line_index is not None
+                else int(session._result_wait_watermark)
+            )
+            watermark = max(0, watermark)
+            last_count = watermark
         while time.monotonic() < deadline:
             if session.done.is_set() and session.proc.poll() is not None:
                 with session.lock:
                     all_lines = list(session.lines)
                     tail = session.recent_text()
-                for line in all_lines:
+                for idx, line in enumerate(all_lines):
+                    if idx < watermark:
+                        continue
                     if line_looks_like_result_success(line):
                         return True, tail
                 return False, f"process exited code={session.exit_code}\n{tail}"
