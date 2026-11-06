@@ -37,8 +37,9 @@ _PERMISSION_MODES = frozenset(
 
 _PERMISSION_HINT = (
     "CodeBuddy headless has no approval channel (no --permission-prompt-tool "
-    "support); for unattended work spawn with permission_mode=acceptEdits "
-    "(file edits) or dontAsk/bypassPermissions (edits + commands)"
+    "support); Near run_mode=auto maps spawn to permission_mode=acceptEdits. "
+    "ask/allowlist keep CB default and may stall on gated tools — use auto "
+    "or pass permission_mode=dontAsk/bypassPermissions for unattended work"
 )
 
 # wb wait_for_turn statuses -> unified statuses (identity for these five).
