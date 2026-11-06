@@ -4,7 +4,8 @@
  *
  * Covers: Settings default persistence (picker itself does not switch),
  * in-chat hot switch via switchSessionHarness, handoff-failure fallback,
- * in-flight no-fallback, and Settings updates skipping pinned panes.
+ * in-flight no-fallback, Settings not rewriting existing panes, and
+ * the chip unlocking even when message refresh hangs.
  *
  * Author: Damon Li
  */
@@ -605,9 +606,68 @@ describe("PaneHarnessPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: /Built-in Runtime/i }));
     expect(await screen.findByText(/Failed to load harnesses/)).toBeTruthy();
   });
+
+  it("optimistically updates the chip label before switch resolves", async () => {
+    let resolveSwitch: (value: { ok: boolean }) => void = () => {};
+    bridge().switchSessionHarness.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSwitch = resolve;
+        }),
+    );
+    useAppStore.setState({
+      panes: [makePane({ harnessId: "claude-code", harnessFollowsPreference: false })],
+    });
+    render(
+      <PaneHarnessPicker
+        paneId="pane-1"
+        apiBase="http://127.0.0.1:9740"
+        apiToken="tok"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Claude Code/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /Built-in Runtime/i }));
+    expect(await screen.findByRole("button", { name: /Built-in Runtime/i })).toBeTruthy();
+    expect(screen.getByText(/Switching engine/i)).toBeTruthy();
+    resolveSwitch({ ok: true });
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /Built-in Runtime/i }) as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  });
+
+  it("re-enables the chip even when loadSessionMessages hangs", async () => {
+    bridge().loadSessionMessages.mockImplementation(
+      () => new Promise(() => {
+        /* never resolves */
+      }),
+    );
+    useAppStore.setState({
+      panes: [makePane({ harnessId: "claude-code", harnessFollowsPreference: false })],
+    });
+    render(
+      <PaneHarnessPicker
+        paneId="pane-1"
+        apiBase="http://127.0.0.1:9740"
+        apiToken="tok"
+      />,
+    );
+    const trigger = await screen.findByRole("button", { name: /Claude Code/i });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: /Built-in Runtime/i }));
+
+    await waitFor(() => {
+      expect(useAppStore.getState().panes[0].harnessId ?? null).toBe(null);
+    });
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /Built-in Runtime/i }) as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  });
+
 });
 
-describe("setPreferredHarnessId follow flag", () => {
+describe("setPreferredHarnessId sticky sessions", () => {
   const originalSetPreferredHarnessId = useAppStore.getState().setPreferredHarnessId;
 
   beforeEach(() => {
@@ -616,7 +676,7 @@ describe("setPreferredHarnessId follow flag", () => {
     } as Partial<typeof useAppStore.getState>);
   });
 
-  it("does not overwrite a pane that pinned its own engine", () => {
+  it("updates the Settings default without rewriting existing panes", () => {
     const following = makePane({
       id: "pane-follow",
       harnessId: "claude-code",
@@ -633,7 +693,7 @@ describe("setPreferredHarnessId follow flag", () => {
     });
     useAppStore.getState().setPreferredHarnessId("codebuddy");
     const panes = useAppStore.getState().panes;
-    expect(panes.find((p) => p.id === "pane-follow")?.harnessId).toBe("codebuddy");
+    expect(panes.find((p) => p.id === "pane-follow")?.harnessId).toBe("claude-code");
     expect(panes.find((p) => p.id === "pane-pinned")?.harnessId).toBe("claude-code");
     expect(useAppStore.getState().preferredHarnessId).toBe("codebuddy");
   });

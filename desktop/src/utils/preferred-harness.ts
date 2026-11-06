@@ -2,10 +2,10 @@
  * Preferred coding-agent harness (Settings → General Preferences)
  * plus same-session hot-switch helpers.
  *
- * The Settings value is the default for new chats. Existing chats can
- * follow that default until the user picks a different engine in the
- * composer, which rebinds *this* session immediately (handoff first,
- * then a plain metadata rebind if handoff fails).
+ * The Settings value seeds NEW chats only. Existing conversations stay
+ * sticky to the harness last bound on that session; opening them again
+ * restores that binding. The composer picker can still hot-switch the
+ * current session (handoff first, metadata rebind fallback).
  */
 
 export const BUILTIN_HARNESS_ID = "python-agent";
@@ -58,7 +58,7 @@ export function persistPreferredHarnessId(harnessId: string | null): void {
   }
 }
 
-/** Sessions follow the Settings default until the composer picker pins them. */
+/** True unless the composer picker explicitly pinned a different engine. */
 export function paneFollowsPreferredHarness(
   pane: { harnessFollowsPreference?: boolean } | null | undefined,
 ): boolean {

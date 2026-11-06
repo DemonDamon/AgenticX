@@ -61,7 +61,6 @@ import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
 import {
   loadPreferredHarnessIdFromStorage,
-  paneFollowsPreferredHarness,
   persistPreferredHarnessId,
   toStoredPreferredHarnessId,
 } from "./utils/preferred-harness";
@@ -281,7 +280,9 @@ export type ChatPane = {
   harnessId?: string | null;
   /**
    * When false, this chat pinned its own engine via the composer picker.
-   * Settings → default harness no longer overwrites it.
+   * Settings → default harness never rewrites existing panes; this flag is
+   * kept so a composer pick that matches the default can still "follow" it
+   * for display/coercion helpers.
    */
   harnessFollowsPreference?: boolean;
   /** + menu turn intent: default execute / plan first / isolated copy. */
@@ -1714,8 +1715,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = toStoredPreferredHarnessId(harnessId);
       persistPreferredHarnessId(next);
-      // Preference is the default for new chats and for panes that still
-      // follow it. Composer-pinned panes keep their own engine.
+      // Settings default applies only to NEW chats/panes. Existing panes keep
+      // whatever engine they last used (sticky per conversation).
       const providers = state.settings.providers;
       const coercedActive = coerceModelForHarness(
         providers,
@@ -1724,37 +1725,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         state.activeModel,
         state.activeProvider,
       );
-      const nextPanes = state.panes.map((pane) => {
-        if (!paneFollowsPreferredHarness(pane)) return pane;
-        const activeHarness = resolveActiveHarnessId(next, next);
-        const provider = (pane.modelProvider || "").trim();
-        const model = (pane.modelName || "").trim();
-        let modelProvider = pane.modelProvider;
-        let modelName = pane.modelName;
-        if (provider || model) {
-          const coerced = coerceModelForHarness(
-            providers,
-            activeHarness,
-            provider,
-            model,
-            provider,
-          );
-          if (!coerced) {
-            modelProvider = "";
-            modelName = "";
-          } else {
-            modelProvider = coerced.provider;
-            modelName = coerced.model;
-          }
-        }
-        return { ...pane, harnessId: next, harnessFollowsPreference: true, modelProvider, modelName };
-      });
-      const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
       return {
         preferredHarnessId: next,
-        panes: nextPanes,
-        activeProvider: (activePane?.modelProvider || coercedActive?.provider || "").trim(),
-        activeModel: (activePane?.modelName || coercedActive?.model || "").trim(),
+        // Do not rewrite panes here — open sessions stay on their bound harness.
+        activeProvider: (coercedActive?.provider || state.activeProvider || "").trim(),
+        activeModel: (coercedActive?.model || state.activeModel || "").trim(),
       };
     }),
   setUserNickname: (name) =>

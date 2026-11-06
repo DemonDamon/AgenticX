@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Terminal } from "lucide-react";
+import { Bot, Check, ChevronDown, Code2, Loader2, Sparkles } from "lucide-react";
 import { useAppStore } from "../store";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 import {
@@ -12,6 +12,22 @@ import {
 } from "../utils/preferred-harness";
 import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "./ds/settings-typography";
 import { SettingsDropdown, type SettingsDropdownOption } from "./ds/SettingsDropdown";
+
+const HARNESS_SWITCH_TIMEOUT_MS = 45_000;
+
+function HarnessGlyph({
+  harnessId,
+  className,
+}: {
+  harnessId: string;
+  className?: string;
+}) {
+  const id = normalizePreferredHarnessId(harnessId);
+  const common = { className, strokeWidth: 2, "aria-hidden": true as const };
+  if (id === "claude-code") return <Sparkles {...common} />;
+  if (id === "codebuddy") return <Code2 {...common} />;
+  return <Bot {...common} />;
+}
 
 /** Catalog entry returned by GET /api/harnesses (studio server). */
 export type HarnessCatalogEntry = {
@@ -32,7 +48,7 @@ type SettingsProps = {
  * Settings → General Preferences harness enum (compact SettingsDropdown).
  *
  * Same row layout as language / appearance. Persists the global default
- * for new sessions (and for chats that still follow the default).
+ * for NEW sessions only — existing chats stay on their last harness.
  * Unavailable CLIs stay in the menu as disabled options (fail-closed).
  */
 export function PreferredHarnessPicker({ apiBase, apiToken }: SettingsProps) {
@@ -133,9 +149,8 @@ type PaneProps = {
  *
  * Shows the engine bound to *this* chat and switches it immediately via
  * `switchSessionHarness` (handoff + CLI restart, with metadata-rebind
- * fallback). Does not change the Settings default. Picking a different
- * engine than the default pins the session so a later Settings change
- * will not overwrite it.
+ * fallback). Does not change the Settings default (that only seeds NEW
+ * chats). Existing sessions stay sticky to the harness last used here.
  */
 export function PaneHarnessPicker({ paneId, apiBase, apiToken, disabled = false }: PaneProps) {
   const { t } = useTranslation("chat");
@@ -150,6 +165,7 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken, disabled = false 
   const [switchError, setSwitchError] = useState<string | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const switchGenRef = useRef(0);
 
   const currentHarnessId = (pane?.harnessId || "").trim() || BUILTIN_HARNESS_ID;
   const triggerLocked = switching || disabled;
@@ -223,34 +239,50 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken, disabled = false 
     const follows =
       toStoredPreferredHarnessId(nextId) ===
       toStoredPreferredHarnessId(preferredHarnessId);
-    // Optimistic local flip; the switch call below is authoritative.
+    // Optimistic local flip so the chip label/icon update immediately.
     setPaneHarness(paneId, nextId, follows);
     const sid = String(pane?.sessionId ?? "").trim();
     if (!sid) return;
     setSwitching(true);
     setSwitchError(null);
-    void switchSessionHarnessWithFallback(sid, nextId, {
+    const switchGen = ++switchGenRef.current;
+    const switchPromise = switchSessionHarnessWithFallback(sid, nextId, {
       switchSessionHarness: (payload) => window.agenticxDesktop.switchSessionHarness(payload),
       setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
-    })
-      .then(async (resp) => {
+    });
+    const timeoutPromise = new Promise<{ ok: false; error: string }>((resolve) => {
+      window.setTimeout(() => {
+        if (switchGenRef.current === switchGen) {
+          resolve({ ok: false, error: "harness switch timed out" });
+        }
+      }, HARNESS_SWITCH_TIMEOUT_MS);
+    });
+    void Promise.race([switchPromise, timeoutPromise])
+      .then((resp) => {
+        if (switchGenRef.current !== switchGen) return;
         if (!resp.ok) {
           // Fail closed: the server kept the previous binding — mirror it
-          // locally and surface why (busy 409 / plan failure 400 / ...).
+          // locally and surface why (busy 409 / plan failure 400 / timeout).
           setPaneHarness(paneId, previousId, pane?.harnessFollowsPreference);
           const detail = String(resp.error ?? "").trim();
-          const busy = detail.includes("409") || detail.includes("in flight") || detail.includes("busy");
+          const busy =
+            detail.includes("409") ||
+            detail.includes("in flight") ||
+            detail.includes("busy");
           setSwitchError(busy ? t("harness.switchBusy") : t("harness.switchFailed"));
           return;
         }
-        // Success: reload so the boundary marker + carried context show up.
-        await refreshPaneMessages(sid);
+        // Unlock the chip before message reload — a hung loadSessionMessages
+        // must not leave the picker permanently grayed out.
+        void refreshPaneMessages(sid);
       })
       .catch(() => {
+        if (switchGenRef.current !== switchGen) return;
         setPaneHarness(paneId, previousId, pane?.harnessFollowsPreference);
         setSwitchError(t("harness.switchFailed"));
       })
       .finally(() => {
+        if (switchGenRef.current !== switchGen) return;
         setSwitching(false);
         window.setTimeout(() => setSwitchError(null), 6000);
       });
@@ -291,11 +323,18 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken, disabled = false 
         aria-expanded={open}
         aria-label={currentLabel}
       >
-        <Terminal
-          className="h-3.5 w-3.5 shrink-0 text-text-muted"
-          strokeWidth={2}
-          aria-hidden
-        />
+        {switching ? (
+          <Loader2
+            className="h-3.5 w-3.5 shrink-0 animate-spin text-text-muted"
+            strokeWidth={2}
+            aria-hidden
+          />
+        ) : (
+          <HarnessGlyph
+            harnessId={currentHarnessId}
+            className="h-3.5 w-3.5 shrink-0 text-text-muted"
+          />
+        )}
         <span className="min-w-0 truncate text-text-strong">{currentLabel}</span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-text-muted transition-transform duration-fast ease-out ${open ? "rotate-180" : ""}`}
@@ -303,6 +342,14 @@ export function PaneHarnessPicker({ paneId, apiBase, apiToken, disabled = false 
           aria-hidden
         />
       </button>
+      {switching
+        ? createPortal(
+            <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-border bg-surface-card/95 px-3 py-2 text-xs text-text-primary shadow-lg backdrop-blur-sm">
+              {t("harness.switching")}
+            </div>,
+            document.body,
+          )
+        : null}
       {switchError ? (
         <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 max-w-[260px] truncate rounded-md bg-red-500/10 px-2 py-1 text-[11px] text-red-400">
           {switchError}
