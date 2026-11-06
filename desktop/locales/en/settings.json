@@ -2145,7 +2145,7 @@
   },
   "harness": {
     "title": "Default coding engine",
-    "hint": "Applies globally: existing chats use it on their next message.",
+    "hint": "Default for new chats. Existing chats that still follow this default also switch on their next message.",
     "builtin": "Built-in Runtime",
     "unavailable": "Local CLI not installed, unavailable",
     "loading": "Loading engines…",

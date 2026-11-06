@@ -61,6 +61,7 @@ import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
 import {
   loadPreferredHarnessIdFromStorage,
+  paneFollowsPreferredHarness,
   persistPreferredHarnessId,
   toStoredPreferredHarnessId,
 } from "./utils/preferred-harness";
@@ -278,6 +279,11 @@ export type ChatPane = {
    * null/undefined = builtin python runtime ("python-agent").
    */
   harnessId?: string | null;
+  /**
+   * When false, this chat pinned its own engine via the composer picker.
+   * Settings → default harness no longer overwrites it.
+   */
+  harnessFollowsPreference?: boolean;
   /** + menu turn intent: default execute / plan first / isolated copy. */
   turnIntent?: TurnIntent;
   /** True after Multitask successfully created a worktree for this pane. */
@@ -966,7 +972,7 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
-  setPaneHarness: (paneId: string, harnessId: string | null) => void;
+  setPaneHarness: (paneId: string, harnessId: string | null, followPreference?: boolean) => void;
   setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
   setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -1708,9 +1714,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = toStoredPreferredHarnessId(harnessId);
       persistPreferredHarnessId(next);
-      // Preference is global: existing panes follow it immediately so the
-      // model picker stays valid. The next user turn rebinds the server
-      // session (see ensureSessionFollowsPreferredHarness).
+      // Preference is the default for new chats and for panes that still
+      // follow it. Composer-pinned panes keep their own engine.
       const providers = state.settings.providers;
       const coercedActive = coerceModelForHarness(
         providers,
@@ -1720,6 +1725,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         state.activeProvider,
       );
       const nextPanes = state.panes.map((pane) => {
+        if (!paneFollowsPreferredHarness(pane)) return pane;
         const activeHarness = resolveActiveHarnessId(next, next);
         const provider = (pane.modelProvider || "").trim();
         const model = (pane.modelName || "").trim();
@@ -1741,7 +1747,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             modelName = coerced.model;
           }
         }
-        return { ...pane, harnessId: next, modelProvider, modelName };
+        return { ...pane, harnessId: next, harnessFollowsPreference: true, modelProvider, modelName };
       });
       const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
       return {
@@ -2163,6 +2169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           scratchChats: [],
           parkedScratchChats: [],
           harnessId: state.preferredHarnessId || null,
+          harnessFollowsPreference: true,
         },
       ],
       activePaneId: paneId,
@@ -2710,7 +2717,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
       ),
     })),
-  setPaneHarness: (paneId, harnessId) =>
+  setPaneHarness: (paneId, harnessId, followPreference) =>
     set((state) => {
       const nextHarness = harnessId || null;
       const providers = state.settings.providers;
@@ -2737,7 +2744,15 @@ export const useAppStore = create<AppState>((set, get) => ({
             modelName = coerced.model;
           }
         }
-        return { ...pane, harnessId: nextHarness, modelProvider, modelName };
+        return {
+          ...pane,
+          harnessId: nextHarness,
+          modelProvider,
+          modelName,
+          ...(followPreference !== undefined
+            ? { harnessFollowsPreference: followPreference }
+            : {}),
+        };
       });
       const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
       if (!activePane || activePane.id !== paneId) {
