@@ -554,6 +554,33 @@ async def _external_harness_chat_stream(
                 )
             return lines_out
 
+        def _sse_lines_include_token(lines: list[str]) -> bool:
+            return any(
+                '"type": "token"' in line or '"type":"token"' in line
+                for line in lines
+            )
+
+        async def _collect_stream_json_tool_fallback_lines() -> list[str]:
+            """Replay tool_start/tool_end the live drain missed (late bind)."""
+            if adapter is None or not surface_sid or not hasattr(
+                adapter, "list_turn_tool_progress"
+            ):
+                return []
+            try:
+                snap_items = await asyncio.to_thread(
+                    adapter.list_turn_tool_progress, surface_sid
+                )
+            except Exception:
+                snap_items = []
+            lines_out: list[str] = []
+            for item in snap_items or []:
+                if not isinstance(item, dict):
+                    continue
+                line = _midturn_item_to_sse(item)
+                if line is not None:
+                    lines_out.append(line)
+            return lines_out
+
         while True:
             try:
                 result = await asyncio.wait_for(
@@ -572,6 +599,12 @@ async def _external_harness_chat_stream(
                         pass
                 midturn_lines = await _drain_midturn_sse_lines()
                 if midturn_lines:
+                    # If no tool row has gone out yet, replay any already-
+                    # recorded tools before this text batch so the answer does
+                    # not paint above a late fallback.
+                    if _sse_lines_include_token(midturn_lines) and not emitted_tool_ids:
+                        for line in await _collect_stream_json_tool_fallback_lines():
+                            yield line
                     for line in midturn_lines:
                         yield line
                     last_heartbeat = time.time()
@@ -592,28 +625,11 @@ async def _external_harness_chat_stream(
                     yield _progress_sse("running")
                     last_heartbeat = time.time()
 
-        # Flush any trailing deltas that arrived with the terminal result.
-        for line in await _drain_midturn_sse_lines():
+        # End-of-turn tool fallback BEFORE leftover mid-turn text: the last
+        # drain often flushes the answer, and appending replayed tool_call
+        # rows after that made ChatPane render tools under the markdown.
+        for line in await _collect_stream_json_tool_fallback_lines():
             yield line
-
-        # End-of-turn tool fallback: re-scan the turn's stream-json for any
-        # tool_start/tool_end the mid-turn poll missed (late bind / aborted SSE
-        # reconnect). Only emits ids not already sent this stream.
-        if adapter is not None and surface_sid and hasattr(
-            adapter, "list_turn_tool_progress"
-        ):
-            try:
-                snap_items = await asyncio.to_thread(
-                    adapter.list_turn_tool_progress, surface_sid
-                )
-            except Exception:
-                snap_items = []
-            for item in snap_items or []:
-                if not isinstance(item, dict):
-                    continue
-                line = _midturn_item_to_sse(item)
-                if line is not None:
-                    yield line
 
         # CodeBuddy may only expose observed_tools on the turn snapshot.
         # Only use this when no stream-json tool rows were emitted at all.
@@ -663,6 +679,12 @@ async def _external_harness_chat_stream(
                     )
                     + "\n\n"
                 )
+
+        # Flush any trailing deltas that arrived with the terminal result.
+        # Tool fallback above already ran so leftover token events follow
+        # replayed tool rows rather than precede them.
+        for line in await _drain_midturn_sse_lines():
+            yield line
 
         final_text = str(result.result_text or "").strip()
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
