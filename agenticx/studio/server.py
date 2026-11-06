@@ -596,6 +596,74 @@ async def _external_harness_chat_stream(
         for line in await _drain_midturn_sse_lines():
             yield line
 
+        # End-of-turn tool fallback: re-scan the turn's stream-json for any
+        # tool_start/tool_end the mid-turn poll missed (late bind / aborted SSE
+        # reconnect). Only emits ids not already sent this stream.
+        if adapter is not None and surface_sid and hasattr(
+            adapter, "list_turn_tool_progress"
+        ):
+            try:
+                snap_items = await asyncio.to_thread(
+                    adapter.list_turn_tool_progress, surface_sid
+                )
+            except Exception:
+                snap_items = []
+            for item in snap_items or []:
+                if not isinstance(item, dict):
+                    continue
+                line = _midturn_item_to_sse(item)
+                if line is not None:
+                    yield line
+
+        # CodeBuddy may only expose observed_tools on the turn snapshot.
+        # Only use this when no stream-json tool rows were emitted at all.
+        try:
+            observed = (result.detail or {}).get("observed_tools")
+        except Exception:
+            observed = None
+        if isinstance(observed, list) and not emitted_tool_ids:
+            from agenticx.runtime.events import normalize_tool_sse_payload
+
+            for idx, name in enumerate(observed):
+                nm = str(name or "").strip() or "tool"
+                tid = f"observed-{idx}-{nm}"
+                if tid in emitted_tool_ids:
+                    continue
+                emitted_tool_ids.add(tid)
+                tool_payload = normalize_tool_sse_payload(
+                    {
+                        "name": nm,
+                        "arguments": {},
+                        "tool_call_id": tid,
+                        "agent_id": "meta",
+                    }
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        SseEvent(type="tool_call", data=tool_payload).model_dump(),
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                done_payload = normalize_tool_sse_payload(
+                    {
+                        "name": nm,
+                        "tool_call_id": tid,
+                        "result": "ok",
+                        "is_error": False,
+                        "agent_id": "meta",
+                    }
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        SseEvent(type="tool_result", data=done_payload).model_dump(),
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+
         final_text = str(result.result_text or "").strip()
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
         final = SseEvent(
@@ -608,8 +676,35 @@ async def _external_harness_chat_stream(
                 "harness_status": result.status,
             },
         )
-        yield f"data: {json.dumps(final.model_dump(), ensure_ascii=False)}\n\n"
-        yield f'data: {json.dumps({"type": "done", "data": {"reason": terminal_reason}}, ensure_ascii=False)}\n\n'
+        yield (
+            "data: "
+            + json.dumps(final.model_dump(), ensure_ascii=False)
+            + "\n\n"
+        )
+
+        # Map harness TurnResult.detail usage → token_usage (ChatPane).
+        try:
+            from agenticx.harness.usage import usage_metadata_from_harness_detail
+
+            usage_meta = usage_metadata_from_harness_detail(
+                getattr(result, "detail", None)
+            )
+        except Exception:
+            usage_meta = None
+        if usage_meta:
+            tu = SseEvent(type="token_usage", data=dict(usage_meta))
+            yield (
+                "data: "
+                + json.dumps(tu.model_dump(), ensure_ascii=False)
+                + "\n\n"
+            )
+
+        yield (
+            "data: "
+            + json.dumps({"type": "done", "data": {"reason": terminal_reason}}, ensure_ascii=False)
+            + "\n\n"
+        )
+
     except (GeneratorExit, asyncio.CancelledError):
         # Client went away mid-turn: the harness turn keeps running
         # server-side; hand lock release to a watcher task.

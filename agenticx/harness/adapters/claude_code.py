@@ -36,12 +36,8 @@ _RESULT_TEXT_MAX_CHARS = 4000
 _CC_MODES = frozenset({"headless", "visible_tui"})
 
 
-def _last_result_text(session: BridgeSession) -> str:
-    """Best-effort ``result`` field from the last NDJSON result line.
-
-    Sanitize before truncating so a long thinking preamble cannot push the
-    real answer past ``_RESULT_TEXT_MAX_CHARS``.
-    """
+def _last_result_payload(session: BridgeSession) -> dict:
+    """Return the last NDJSON ``result`` object (or {})."""
     with session.lock:
         lines = list(session.lines)
     for line in reversed(lines):
@@ -52,14 +48,33 @@ def _last_result_text(session: BridgeSession) -> str:
             obj = ujson.loads(line)
         except (ValueError, TypeError):
             continue
-        if not isinstance(obj, dict) or obj.get("type") != "result":
-            continue
-        result = obj.get("result")
-        if result is None:
-            return ""
-        cleaned = sanitize_claude_code_result_text(str(result))
-        return cleaned[:_RESULT_TEXT_MAX_CHARS]
-    return ""
+        if isinstance(obj, dict) and obj.get("type") == "result":
+            return obj
+    return {}
+
+
+def _last_result_text(session: BridgeSession) -> str:
+    """Best-effort ``result`` field from the last NDJSON result line.
+
+    Sanitize before truncating so a long thinking preamble cannot push the
+    real answer past ``_RESULT_TEXT_MAX_CHARS``.
+    """
+    obj = _last_result_payload(session)
+    result = obj.get("result")
+    if result is None:
+        return ""
+    cleaned = sanitize_claude_code_result_text(str(result))
+    return cleaned[:_RESULT_TEXT_MAX_CHARS]
+
+
+def _last_result_usage_metadata(session: BridgeSession) -> dict:
+    """Near ``token_usage`` payload from Claude Code ``result.usage`` (or {})."""
+    from agenticx.harness.usage import usage_metadata_from_claude_result_usage
+
+    obj = _last_result_payload(session)
+    usage = obj.get("usage")
+    meta = usage_metadata_from_claude_result_usage(usage if isinstance(usage, dict) else None)
+    return dict(meta or {})
 
 
 class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
@@ -165,13 +180,18 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
 
         ok, tail = self.wait_for_success_result(session_id, request.wait_seconds)
         if ok:
+            detail: Dict[str, Any] = {"mode": "headless"}
+            usage_meta = _last_result_usage_metadata(session)
+            if usage_meta:
+                detail["usage_metadata"] = usage_meta
+                detail["usage"] = usage_meta
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_SUCCESS,
                 result_text=_last_result_text(session),
                 tail=tail,
-                detail={"mode": "headless"},
+                detail=detail,
             )
         if session.proc.poll() is not None:
             return TurnResult(

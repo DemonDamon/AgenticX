@@ -744,6 +744,55 @@ class BridgeSessionManager:
             if item.get("kind") == "text"
         )
 
+    def list_turn_tool_progress(self, session_id: str) -> List[Dict[str, Any]]:
+        """Snapshot all tool start/end events for the current turn (no text).
+
+        Used by the studio SSE pump as an end-of-turn fallback when mid-turn
+        drains were missed (client abort / late surface_sid bind). Does not
+        advance the visible-text cursor or mutate the mid-turn trackers.
+        """
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            drain_midturn_items_from_lines,
+            VisibleTextTracker,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            if int(session._stream_generation or 0) <= 0:
+                return []
+            watermark = int(session._result_wait_watermark or 0)
+            chunk_lines = list(session.lines)
+        # Fresh trackers: do not disturb the live mid-turn drain state.
+        items, _ = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=watermark,
+            text_tracker=VisibleTextTracker(),
+            tool_tracker=ToolProgressTracker(),
+        )
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
     def wait_for_success_result(
 
         self,
