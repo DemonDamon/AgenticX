@@ -2145,7 +2145,7 @@
   },
   "harness": {
     "title": "Default coding engine",
-    "hint": "Used when starting a new conversation. Does not switch mid-session.",
+    "hint": "Applies globally: existing chats use it on their next message.",
     "builtin": "Built-in Runtime",
     "unavailable": "Local CLI not installed, unavailable",
     "loading": "Loading engines…",

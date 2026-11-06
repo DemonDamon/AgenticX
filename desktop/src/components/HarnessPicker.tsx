@@ -27,9 +27,10 @@ type Props = {
 /**
  * Settings → General Preferences harness enum (compact SettingsDropdown).
  *
- * Same row layout as language / appearance. Persists default for *new*
- * sessions only — no mid-session switch. Unavailable CLIs stay in the
- * menu as disabled options (fail-closed).
+ * Same row layout as language / appearance. Persists the global default.
+ * Existing sessions follow it on their next user turn (no immediate
+ * switch from this picker). Unavailable CLIs stay in the menu as
+ * disabled options (fail-closed).
  */
 export function PreferredHarnessPicker({ apiBase, apiToken }: Props) {
   const { t } = useTranslation("settings");

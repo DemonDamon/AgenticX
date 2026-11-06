@@ -83,7 +83,10 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
-import { bindPreferredHarnessToSession } from "../utils/preferred-harness";
+import {
+  bindPreferredHarnessToSession,
+  ensureSessionFollowsPreferredHarness,
+} from "../utils/preferred-harness";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_OPEN_PREVIEW,
@@ -10217,6 +10220,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [],
   );
 
+  const syncExistingSessionHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const state = useAppStore.getState();
+      await ensureSessionFollowsPreferredHarness(paneIdForBind, sessionIdForBind, {
+        getPreferredHarnessId: () => state.preferredHarnessId,
+        setPaneHarness: state.setPaneHarness,
+        switchSessionHarness: (payload) => window.agenticxDesktop.switchSessionHarness(payload),
+        setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
+      });
+    },
+    [],
+  );
+
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
     const existing = (pane.sessionId || "").trim();
     if (existing) return existing;
@@ -11295,6 +11311,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           signal: abortController.signal,
         });
       };
+
+      if (!isContinuation && requestSessionId) {
+        await syncExistingSessionHarness(pane.id, requestSessionId);
+      }
 
       let resp = await sendChatRequest(requestSessionId);
       if (resp.status === 404) {

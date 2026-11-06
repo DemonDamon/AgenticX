@@ -1708,20 +1708,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = toStoredPreferredHarnessId(harnessId);
       persistPreferredHarnessId(next);
-      // Preferred applies to newly created sessions. Coerce the global
-      // active model so the next pane defaults remain valid for the new
-      // preferred harness; existing panes keep their snapshotted harnessId.
+      // Preference is global: existing panes follow it immediately so the
+      // model picker stays valid. The next user turn rebinds the server
+      // session (see ensureSessionFollowsPreferredHarness).
+      const providers = state.settings.providers;
       const coercedActive = coerceModelForHarness(
-        state.settings.providers,
+        providers,
         next,
         state.activeProvider,
         state.activeModel,
         state.activeProvider,
       );
+      const nextPanes = state.panes.map((pane) => {
+        const activeHarness = resolveActiveHarnessId(next, next);
+        const provider = (pane.modelProvider || "").trim();
+        const model = (pane.modelName || "").trim();
+        let modelProvider = pane.modelProvider;
+        let modelName = pane.modelName;
+        if (provider || model) {
+          const coerced = coerceModelForHarness(
+            providers,
+            activeHarness,
+            provider,
+            model,
+            provider,
+          );
+          if (!coerced) {
+            modelProvider = "";
+            modelName = "";
+          } else {
+            modelProvider = coerced.provider;
+            modelName = coerced.model;
+          }
+        }
+        return { ...pane, harnessId: next, modelProvider, modelName };
+      });
+      const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
       return {
         preferredHarnessId: next,
-        activeProvider: coercedActive?.provider ?? "",
-        activeModel: coercedActive?.model ?? "",
+        panes: nextPanes,
+        activeProvider: (activePane?.modelProvider || coercedActive?.provider || "").trim(),
+        activeModel: (activePane?.modelName || coercedActive?.model || "").trim(),
       };
     }),
   setUserNickname: (name) =>

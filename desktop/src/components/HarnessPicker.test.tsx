@@ -3,7 +3,8 @@
  * PreferredHarnessPicker enum (SettingsDropdown) + preferred-harness util tests.
  *
  * Covers: catalog → dropdown options, unavailable options disabled in menu,
- * selection persists preferredHarnessId, no mid-session switchSessionHarness.
+ * selection persists preferredHarnessId, picker itself does not switch,
+ * and ensureSessionFollowsPreferredHarness rebinds existing sessions.
  *
  * Author: Damon Li
  */
@@ -15,6 +16,7 @@ import { useAppStore } from "../store";
 import {
   BUILTIN_HARNESS_ID,
   bindPreferredHarnessToSession,
+  ensureSessionFollowsPreferredHarness,
   normalizePreferredHarnessId,
   toStoredPreferredHarnessId,
 } from "../utils/preferred-harness";
@@ -100,6 +102,83 @@ describe("preferred-harness util", () => {
       setSessionHarness,
     });
     expect(setPaneHarness).toHaveBeenLastCalledWith("pane-1", null);
+  });
+
+  it("ensureSessionFollowsPreferredHarness switches an existing session", async () => {
+    const setPaneHarness = vi.fn();
+    const switchSessionHarness = vi.fn().mockResolvedValue({ ok: true });
+    const setSessionHarness = vi.fn();
+    const ok = await ensureSessionFollowsPreferredHarness("pane-1", "sess-old", {
+      getPreferredHarnessId: () => "codebuddy",
+      setPaneHarness,
+      switchSessionHarness,
+      setSessionHarness,
+    });
+    expect(ok).toBe(true);
+    expect(switchSessionHarness).toHaveBeenCalledWith({
+      sessionId: "sess-old",
+      harnessId: "codebuddy",
+    });
+    expect(setPaneHarness).toHaveBeenCalledWith("pane-1", "codebuddy");
+    expect(setSessionHarness).not.toHaveBeenCalled();
+  });
+
+  it("ensureSessionFollowsPreferredHarness unbinds via python-agent", async () => {
+    const setPaneHarness = vi.fn();
+    const switchSessionHarness = vi.fn().mockResolvedValue({ ok: true });
+    const setSessionHarness = vi.fn();
+    const ok = await ensureSessionFollowsPreferredHarness("pane-1", "sess-old", {
+      getPreferredHarnessId: () => null,
+      setPaneHarness,
+      switchSessionHarness,
+      setSessionHarness,
+    });
+    expect(ok).toBe(true);
+    expect(switchSessionHarness).toHaveBeenCalledWith({
+      sessionId: "sess-old",
+      harnessId: BUILTIN_HARNESS_ID,
+    });
+    expect(setPaneHarness).toHaveBeenCalledWith("pane-1", null);
+    expect(setSessionHarness).not.toHaveBeenCalled();
+  });
+
+  it("falls back to setSessionHarness when switch fails", async () => {
+    const setPaneHarness = vi.fn();
+    const switchSessionHarness = vi.fn().mockResolvedValue({
+      ok: false,
+      error: "handoff failed",
+    });
+    const setSessionHarness = vi.fn().mockResolvedValue({ ok: true });
+    const ok = await ensureSessionFollowsPreferredHarness("pane-1", "sess-old", {
+      getPreferredHarnessId: () => "codebuddy",
+      setPaneHarness,
+      switchSessionHarness,
+      setSessionHarness,
+    });
+    expect(ok).toBe(true);
+    expect(setSessionHarness).toHaveBeenCalledWith({
+      sessionId: "sess-old",
+      harnessId: "codebuddy",
+    });
+    expect(setPaneHarness).toHaveBeenCalledWith("pane-1", "codebuddy");
+  });
+
+  it("does not fallback when a harness turn is already in flight", async () => {
+    const setPaneHarness = vi.fn();
+    const switchSessionHarness = vi.fn().mockResolvedValue({
+      ok: false,
+      error: "session sess-old has a harness turn in flight; switch after it settles",
+    });
+    const setSessionHarness = vi.fn();
+    const ok = await ensureSessionFollowsPreferredHarness("pane-1", "sess-old", {
+      getPreferredHarnessId: () => "codebuddy",
+      setPaneHarness,
+      switchSessionHarness,
+      setSessionHarness,
+    });
+    expect(ok).toBe(false);
+    expect(setSessionHarness).not.toHaveBeenCalled();
+    expect(setPaneHarness).not.toHaveBeenCalled();
   });
 });
 
