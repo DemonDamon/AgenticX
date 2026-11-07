@@ -133,7 +133,7 @@ function normalizeProfile(raw: Partial<IdMapProfileRecord> & { name?: string }):
         }))
     : [];
   if (id_types.length < 1) throw new Error("id_types required");
-  const mergeRaw = raw.merge && typeof raw.merge === "object" ? raw.merge : {};
+  const mergeRaw: Partial<IdMapProfileRecord["merge"]> = raw.merge && typeof raw.merge === "object" ? raw.merge : {};
   const priority =
     Array.isArray(mergeRaw.priority) && mergeRaw.priority.length
       ? mergeRaw.priority.map(String)
@@ -234,7 +234,7 @@ export function mergeRecords(
     if (!subjectId) subjectId = `anon:${randomBytes(4).toString("hex")}`;
 
     for (const i of idxs) {
-      const row = { ...(records[i] ?? {}), subject_id: subjectId };
+      const row: Record<string, unknown> = { ...(records[i] ?? {}), subject_id: subjectId };
       outRecords.push(row);
       for (const t of typeNames) {
         const v = row[t];

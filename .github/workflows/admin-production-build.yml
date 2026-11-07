@@ -1,0 +1,78 @@
+name: Admin production build
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "enterprise/apps/admin-console/**"
+      - "enterprise/packages/**"
+      - "enterprise/features/**"
+      - "enterprise/package.json"
+      - "enterprise/pnpm-workspace.yaml"
+      - "enterprise/tsconfig.base.json"
+      - "enterprise/.npmrc"
+      - ".github/workflows/admin-production-build.yml"
+  pull_request:
+    paths:
+      - "enterprise/apps/admin-console/**"
+      - "enterprise/packages/**"
+      - "enterprise/features/**"
+      - "enterprise/package.json"
+      - "enterprise/pnpm-workspace.yaml"
+      - "enterprise/tsconfig.base.json"
+      - "enterprise/.npmrc"
+      - ".github/workflows/admin-production-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-production-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admin-build:
+    name: Admin production compile and scoped regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: enterprise
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - name: Install workspace dependencies
+        # The workspace lockfile is not tracked; match the current CI install policy.
+        run: pnpm install --no-frozen-lockfile
+      - name: Scoped admin regressions
+        run: |
+          set -euo pipefail
+          test_files=(
+            apps/admin-console/src/lib/__tests__/ecp-tenant-settings-dialect.test.ts
+            apps/admin-console/src/lib/__tests__/idmapping-store.test.ts
+            apps/admin-console/src/lib/__tests__/graph-store.test.ts
+            apps/admin-console/src/lib/__tests__/platform-catalog-distribution.integration.test.ts
+            apps/admin-console/src/lib/__tests__/ecp-e4-expert-package.integration.test.ts
+          )
+          for file in "${test_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing scoped regression: $file"
+              exit 1
+            fi
+          done
+          env -u DATABASE_DIALECT -u DATABASE_URL pnpm exec vitest run "${test_files[@]}"
+      - name: Build admin production bundle with type validation
+        # Disposable compile-only inputs. No service or deployment credentials are used.
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: "1"
+          DATABASE_DIALECT: postgresql
+          DATABASE_URL: postgresql://127.0.0.1:1/preview_build
+          DEFAULT_TENANT_ID: "01J00000000000000000000000"
+        run: pnpm --filter @agenticx/app-admin-console build
