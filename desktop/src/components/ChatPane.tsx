@@ -83,7 +83,11 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
-import { bindPreferredHarnessToSession } from "../utils/preferred-harness";
+import { PaneHarnessPicker } from "./HarnessPicker";
+import {
+  bindPreferredHarnessToSession,
+  ensureSessionHarness,
+} from "../utils/preferred-harness";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_OPEN_PREVIEW,
@@ -10208,9 +10212,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const applyPreferredHarness = useCallback(
     async (paneIdForBind: string, sessionIdForBind: string) => {
       const state = useAppStore.getState();
+      const current = state.panes.find((item) => item.id === paneIdForBind);
       await bindPreferredHarnessToSession(paneIdForBind, sessionIdForBind, {
-        getPreferredHarnessId: () => state.preferredHarnessId,
+        getPreferredHarnessId: () =>
+          current && current.harnessId !== undefined
+            ? current.harnessId
+            : state.preferredHarnessId,
         setPaneHarness: state.setPaneHarness,
+        setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
+      });
+    },
+    [],
+  );
+
+  const syncExistingSessionHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const state = useAppStore.getState();
+      const current = state.panes.find((item) => item.id === paneIdForBind);
+      await ensureSessionHarness(paneIdForBind, sessionIdForBind, {
+        getTargetHarnessId: () =>
+          current && current.harnessId !== undefined
+            ? current.harnessId
+            : state.preferredHarnessId,
+        setPaneHarness: state.setPaneHarness,
+        switchSessionHarness: (payload) => window.agenticxDesktop.switchSessionHarness(payload),
         setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
       });
     },
@@ -11295,6 +11320,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           signal: abortController.signal,
         });
       };
+
+      if (!isContinuation && requestSessionId) {
+        await syncExistingSessionHarness(pane.id, requestSessionId);
+      }
 
       let resp = await sendChatRequest(requestSessionId);
       if (resp.status === 404) {
@@ -15820,6 +15849,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       isStreaming={isStreamingCurrentSession}
                     />
                   ) : null}
+                  <PaneHarnessPicker
+                    paneId={pane.id}
+                    apiBase={apiBase}
+                    apiToken={apiToken}
+                    disabled={isStreamingCurrentSession}
+                  />
                   <PaneModelPicker paneId={pane.id} />
                 </div>
                 <ActionCircleButton

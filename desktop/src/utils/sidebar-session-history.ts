@@ -20,6 +20,8 @@ export type SidebarSessionRow = {
   model?: string;
   session_mode?: "code_dev" | "daily_office";
   parent_session_id?: string | null;
+  /** Bound coding-agent harness for this session (sticky across reopen). */
+  harness_id?: string | null;
 };
 
 export type SidebarHistoryNode = {
@@ -155,6 +157,11 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
       parent_session_id: (() => {
         const parent = String(row.parent_session_id ?? "").trim();
         return parent || undefined;
+      })(),
+      harness_id: (() => {
+        if (row.harness_id == null) return null;
+        const hid = String(row.harness_id).trim();
+        return hid || null;
       })(),
     });
   }

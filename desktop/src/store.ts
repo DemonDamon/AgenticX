@@ -278,6 +278,13 @@ export type ChatPane = {
    * null/undefined = builtin python runtime ("python-agent").
    */
   harnessId?: string | null;
+  /**
+   * When false, this chat pinned its own engine via the composer picker.
+   * Settings → default harness never rewrites existing panes; this flag is
+   * kept so a composer pick that matches the default can still "follow" it
+   * for display/coercion helpers.
+   */
+  harnessFollowsPreference?: boolean;
   /** + menu turn intent: default execute / plan first / isolated copy. */
   turnIntent?: TurnIntent;
   /** True after Multitask successfully created a worktree for this pane. */
@@ -966,7 +973,7 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
-  setPaneHarness: (paneId: string, harnessId: string | null) => void;
+  setPaneHarness: (paneId: string, harnessId: string | null, followPreference?: boolean) => void;
   setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
   setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -1708,11 +1715,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = toStoredPreferredHarnessId(harnessId);
       persistPreferredHarnessId(next);
-      // Preferred applies to newly created sessions. Coerce the global
-      // active model so the next pane defaults remain valid for the new
-      // preferred harness; existing panes keep their snapshotted harnessId.
+      // Settings default applies only to NEW chats/panes. Existing panes keep
+      // whatever engine they last used (sticky per conversation).
+      const providers = state.settings.providers;
       const coercedActive = coerceModelForHarness(
-        state.settings.providers,
+        providers,
         next,
         state.activeProvider,
         state.activeModel,
@@ -1720,8 +1727,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
       return {
         preferredHarnessId: next,
-        activeProvider: coercedActive?.provider ?? "",
-        activeModel: coercedActive?.model ?? "",
+        // Do not rewrite panes here — open sessions stay on their bound harness.
+        activeProvider: (coercedActive?.provider || state.activeProvider || "").trim(),
+        activeModel: (coercedActive?.model || state.activeModel || "").trim(),
       };
     }),
   setUserNickname: (name) =>
@@ -2136,6 +2144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           scratchChats: [],
           parkedScratchChats: [],
           harnessId: state.preferredHarnessId || null,
+          harnessFollowsPreference: true,
         },
       ],
       activePaneId: paneId,
@@ -2683,7 +2692,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
       ),
     })),
-  setPaneHarness: (paneId, harnessId) =>
+  setPaneHarness: (paneId, harnessId, followPreference) =>
     set((state) => {
       const nextHarness = harnessId || null;
       const providers = state.settings.providers;
@@ -2710,7 +2719,15 @@ export const useAppStore = create<AppState>((set, get) => ({
             modelName = coerced.model;
           }
         }
-        return { ...pane, harnessId: nextHarness, modelProvider, modelName };
+        return {
+          ...pane,
+          harnessId: nextHarness,
+          modelProvider,
+          modelName,
+          ...(followPreference !== undefined
+            ? { harnessFollowsPreference: followPreference }
+            : {}),
+        };
       });
       const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
       if (!activePane || activePane.id !== paneId) {

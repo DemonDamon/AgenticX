@@ -2145,7 +2145,7 @@
   },
   "harness": {
     "title": "默认执行引擎",
-    "hint": "新建会话时使用的编码 Agent Runtime。不会在对话进行中切换。",
+    "hint": "只作用于新建对话/任务。已有会话保持上次使用的执行引擎，改这里不会改它们。",
     "builtin": "内置 Runtime",
     "unavailable": "本机 CLI 未安装，不可用",
     "loading": "正在加载执行引擎列表…",

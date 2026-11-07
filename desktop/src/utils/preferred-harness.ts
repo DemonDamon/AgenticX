@@ -1,10 +1,25 @@
 /**
- * Preferred coding-agent harness (Settings → General Preferences).
- * Applies to newly created sessions only — not mid-session handoff.
+ * Preferred coding-agent harness (Settings → General Preferences)
+ * plus same-session hot-switch helpers.
+ *
+ * The Settings value seeds NEW chats only. Existing conversations stay
+ * sticky to the harness last bound on that session; opening them again
+ * restores that binding. The composer picker can still hot-switch the
+ * current session (handoff first, metadata rebind fallback).
  */
 
 export const BUILTIN_HARNESS_ID = "python-agent";
 export const PREFERRED_HARNESS_STORAGE_KEY = "agx-preferred-harness";
+
+export type SessionHarnessBinder = (payload: {
+  sessionId: string;
+  harnessId: string | null;
+}) => Promise<{ ok: boolean; error?: string }>;
+
+export type SessionHarnessSwitcher = (payload: {
+  sessionId: string;
+  harnessId: string;
+}) => Promise<{ ok: boolean; error?: string }>;
 
 /** Normalize stored preference: empty / builtin → builtin id for UI compare. */
 export function normalizePreferredHarnessId(
@@ -43,9 +58,17 @@ export function persistPreferredHarnessId(harnessId: string | null): void {
   }
 }
 
+/** True unless the composer picker explicitly pinned a different engine. */
+export function paneFollowsPreferredHarness(
+  pane: { harnessFollowsPreference?: boolean } | null | undefined,
+): boolean {
+  return pane?.harnessFollowsPreference !== false;
+}
+
 /**
- * Bind the Settings-preferred harness onto a freshly created session.
- * No-op when preference is builtin (server default). Never used for history open.
+ * Bind a harness onto a freshly created session.
+ * `getTargetHarnessId` is usually the pane's current pick (falling back
+ * to the Settings default). No-op when the target is builtin.
  */
 export async function bindPreferredHarnessToSession(
   paneId: string,
@@ -53,10 +76,7 @@ export async function bindPreferredHarnessToSession(
   deps: {
     getPreferredHarnessId: () => string | null;
     setPaneHarness: (paneId: string, harnessId: string | null) => void;
-    setSessionHarness: (payload: {
-      sessionId: string;
-      harnessId: string | null;
-    }) => Promise<{ ok: boolean; error?: string }>;
+    setSessionHarness: SessionHarnessBinder;
   },
 ): Promise<void> {
   const sid = String(sessionId ?? "").trim();
@@ -76,4 +96,111 @@ export async function bindPreferredHarnessToSession(
   } catch {
     deps.setPaneHarness(paneId, null);
   }
+}
+
+function shouldFallbackToRebind(error?: string): boolean {
+  const msg = String(error ?? "").toLowerCase();
+  if (!msg) return true;
+  if (msg.includes("in flight") || msg.includes("busy")) return false;
+  return true;
+}
+
+/**
+ * Mid-session switch with handoff, falling back to a plain metadata rebind
+ * when handoff fails. Does not fall back while a turn is already in flight.
+ */
+export async function switchSessionHarnessWithFallback(
+  sessionId: string,
+  targetHarnessId: string | null | undefined,
+  deps: {
+    switchSessionHarness: SessionHarnessSwitcher;
+    setSessionHarness: SessionHarnessBinder;
+  },
+): Promise<{ ok: boolean; error?: string }> {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return { ok: false, error: "sessionId is required" };
+  const preferred = toStoredPreferredHarnessId(targetHarnessId);
+  const target = preferred ?? BUILTIN_HARNESS_ID;
+
+  try {
+    const switched = await deps.switchSessionHarness({
+      sessionId: sid,
+      harnessId: target,
+    });
+    if (switched?.ok) return { ok: true };
+    if (!shouldFallbackToRebind(switched?.error)) {
+      return { ok: false, error: switched?.error };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err ?? "");
+    if (!shouldFallbackToRebind(message)) return { ok: false, error: message };
+  }
+
+  try {
+    const bound = await deps.setSessionHarness({
+      sessionId: sid,
+      harnessId: preferred,
+    });
+    if (bound?.ok) return { ok: true };
+    return { ok: false, error: bound?.error };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err ?? ""),
+    };
+  }
+}
+
+/**
+ * Rebind an existing session to an explicit target harness (usually the
+ * pane's current pick, not necessarily the Settings default).
+ */
+export async function ensureSessionHarness(
+  paneId: string,
+  sessionId: string,
+  deps: {
+    getTargetHarnessId: () => string | null;
+    setPaneHarness: (paneId: string, harnessId: string | null) => void;
+    switchSessionHarness: SessionHarnessSwitcher;
+    setSessionHarness: SessionHarnessBinder;
+  },
+): Promise<boolean> {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid || !paneId) return false;
+  const preferred = toStoredPreferredHarnessId(deps.getTargetHarnessId());
+
+  const result = await switchSessionHarnessWithFallback(sid, preferred, {
+    switchSessionHarness: deps.switchSessionHarness,
+    setSessionHarness: deps.setSessionHarness,
+  });
+  if (result.ok) {
+    deps.setPaneHarness(paneId, preferred);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Rebind an existing session to the current Settings preference.
+ *
+ * Uses mid-session switch (context handoff + clean CLI restart) when the
+ * bound harness differs. Falls back to a plain metadata rebind if handoff
+ * fails, except when a turn is already in flight (fail closed).
+ */
+export async function ensureSessionFollowsPreferredHarness(
+  paneId: string,
+  sessionId: string,
+  deps: {
+    getPreferredHarnessId: () => string | null;
+    setPaneHarness: (paneId: string, harnessId: string | null) => void;
+    switchSessionHarness: SessionHarnessSwitcher;
+    setSessionHarness: SessionHarnessBinder;
+  },
+): Promise<boolean> {
+  return ensureSessionHarness(paneId, sessionId, {
+    getTargetHarnessId: deps.getPreferredHarnessId,
+    setPaneHarness: deps.setPaneHarness,
+    switchSessionHarness: deps.switchSessionHarness,
+    setSessionHarness: deps.setSessionHarness,
+  });
 }
