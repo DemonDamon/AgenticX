@@ -9,6 +9,7 @@ import pytest
 
 from agenticx.harness.codebuddy_oauth_login import (
     CodebuddyOAuthJobStatus,
+    classify_codebuddy_oauth_outcome,
     codebuddy_oauth_job_snapshot,
     get_codebuddy_oauth_job,
     start_codebuddy_oauth_login,
@@ -29,6 +30,39 @@ async def test_start_fails_when_executable_missing() -> None:
     assert get_codebuddy_oauth_job(job.job_id) is job
 
 
+def test_classify_oauth_outcome_rules() -> None:
+    status, err = classify_codebuddy_oauth_outcome(
+        exit_code=0,
+        authorize_url=None,
+        auth_verified=False,
+    )
+    assert status == CodebuddyOAuthJobStatus.FAILED
+    assert err
+
+    status, err = classify_codebuddy_oauth_outcome(
+        exit_code=0,
+        authorize_url="https://copilot.tencent.com/oauth/x",
+        auth_verified=False,
+    )
+    assert status == CodebuddyOAuthJobStatus.FAILED
+    assert err
+
+    status, err = classify_codebuddy_oauth_outcome(
+        exit_code=0,
+        authorize_url="https://copilot.tencent.com/oauth/x",
+        auth_verified=True,
+    )
+    assert status == CodebuddyOAuthJobStatus.SUCCESS
+    assert err is None
+
+    status, _ = classify_codebuddy_oauth_outcome(
+        exit_code=2,
+        authorize_url="https://copilot.tencent.com/oauth/x",
+        auth_verified=True,
+    )
+    assert status == CodebuddyOAuthJobStatus.FAILED
+
+
 @pytest.mark.asyncio
 async def test_parses_authorize_url_and_success_exit() -> None:
     lines = [
@@ -47,6 +81,9 @@ async def test_parses_authorize_url_and_success_exit() -> None:
     with patch(
         "agenticx.wb_bridge.settings.resolve_codebuddy_executable",
         return_value="/usr/bin/codebuddy",
+    ), patch(
+        "agenticx.harness.codebuddy_oauth_login._best_effort_codebuddy_logout",
+        new=AsyncMock(),
     ), patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_proc)):
         job = await start_codebuddy_oauth_login("/tmp")
         for _ in range(80):
@@ -63,6 +100,36 @@ async def test_parses_authorize_url_and_success_exit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exit_zero_without_authorize_url_is_failed() -> None:
+    stdout = MagicMock()
+    stdout.readline = AsyncMock(side_effect=[b"Already logged in\n", b""])
+
+    fake_proc = MagicMock()
+    fake_proc.stdout = stdout
+    fake_proc.wait = AsyncMock(return_value=0)
+
+    with patch(
+        "agenticx.wb_bridge.settings.resolve_codebuddy_executable",
+        return_value="/usr/bin/codebuddy",
+    ), patch(
+        "agenticx.harness.codebuddy_oauth_login._best_effort_codebuddy_logout",
+        new=AsyncMock(),
+    ), patch(
+        "agenticx.harness.codebuddy_oauth_login.verify_codebuddy_tencent_auth",
+        new=AsyncMock(return_value=True),
+    ), patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_proc)):
+        job = await start_codebuddy_oauth_login("/tmp")
+        for _ in range(80):
+            if job.status == CodebuddyOAuthJobStatus.FAILED:
+                break
+            await asyncio.sleep(0.02)
+
+    assert job.authorize_url is None
+    assert job.status == CodebuddyOAuthJobStatus.FAILED
+    assert job.error
+
+
+@pytest.mark.asyncio
 async def test_failed_exit_sets_error() -> None:
     stdout = MagicMock()
     stdout.readline = AsyncMock(return_value=b"")
@@ -74,6 +141,9 @@ async def test_failed_exit_sets_error() -> None:
     with patch(
         "agenticx.wb_bridge.settings.resolve_codebuddy_executable",
         return_value="/usr/bin/codebuddy",
+    ), patch(
+        "agenticx.harness.codebuddy_oauth_login._best_effort_codebuddy_logout",
+        new=AsyncMock(),
     ), patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_proc)):
         job = await start_codebuddy_oauth_login("/tmp")
         for _ in range(80):
