@@ -231,7 +231,7 @@ dev = [
     "isort>=5.12.0,<6",
     "flake8>=6.0.0,<8",
     "mypy>=1.0.0,<3",
-    "pre-commit>=3.0.0,<4",
+    "pre-commit>=3.0.0,<5",
     "fakeredis>=2.20,<3",
 ]
 # ── 全部功能（不含 dev/docs）──
