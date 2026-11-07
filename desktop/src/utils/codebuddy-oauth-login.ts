@@ -93,3 +93,40 @@ export async function waitForCodebuddyOAuth(args: {
   }
   return { job_id: args.jobId, status: "failed", error: "等待腾讯授权超时" };
 }
+
+/** Stop live CodeBuddy harness PTYs so the next chat turn reloads OAuth credentials. */
+export async function refreshCodebuddyHarnessAfterOAuth(args: {
+  apiBase: string;
+  apiToken: string;
+  sessionId: string;
+}): Promise<{ ok: boolean; stopped_surface_ids?: string[]; refreshed_binding?: boolean; error?: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (args.apiToken) headers["x-agx-desktop-token"] = args.apiToken;
+  const sid = String(args.sessionId || "").trim();
+  if (!sid) {
+    return { ok: false, error: "session_id required" };
+  }
+  try {
+    const res = await fetch(`${args.apiBase}/api/codebuddy/oauth/refresh-harness`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ session_id: sid }),
+    });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      stopped_surface_ids?: string[];
+      refreshed_binding?: boolean;
+      error?: string;
+    };
+    if (!data?.ok) {
+      return { ok: false, error: data?.error || "刷新 CodeBuddy 会话失败" };
+    }
+    return {
+      ok: true,
+      stopped_surface_ids: data.stopped_surface_ids,
+      refreshed_binding: data.refreshed_binding,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

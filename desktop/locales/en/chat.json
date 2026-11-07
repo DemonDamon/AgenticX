@@ -1118,6 +1118,7 @@
       "oauthFailed": "Authorization did not finish: {{error}}",
       "oauthFailedGeneric": "Tencent authorization did not complete. Try again later.",
       "oauthStartFailed": "Could not start CodeBuddy login. Install the CodeBuddy CLI and try again.",
+      "harnessRefreshFailed": "Sign-in succeeded but refreshing the CodeBuddy session failed. Retry or restart Near.",
       "resolvedNotice": "This turn stopped earlier because CodeBuddy login was required.",
       "terminal": "CodeBuddy login",
       "writeFailed": "The terminal could not accept the login command yet. Run codebuddy login in the terminal that opened."

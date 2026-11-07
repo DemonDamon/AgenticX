@@ -9518,6 +9518,30 @@ def create_studio_app() -> FastAPI:
             logger.warning("codebuddy_oauth_login_status error: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    @app.post("/api/codebuddy/oauth/refresh-harness")
+    async def codebuddy_oauth_refresh_harness_route(
+        body: dict | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """After Tencent OAuth, stop CodeBuddy harness children so the next turn respawns."""
+        _check_token(x_agx_desktop_token)
+        session_id = ""
+        if isinstance(body, dict):
+            session_id = str(body.get("session_id") or "").strip()
+        if not session_id:
+            return {"ok": False, "error": "session_id required"}
+        try:
+            require_safe_session_id(session_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            from agenticx.studio import harness_wiring as hw
+
+            return hw.refresh_codebuddy_harness_after_oauth(manager, session_id)
+        except Exception as exc:
+            logger.warning("codebuddy_oauth_refresh_harness error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     @app.get("/api/codebuddy/resolve-model")
     async def resolve_codebuddy_model_route(
         model: str = "",
