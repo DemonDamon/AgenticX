@@ -80,6 +80,7 @@ import {
   shouldSuppressCodebuddyHarnessErrorBody,
 } from "../../utils/codebuddy-login";
 import { CodebuddyLoginPrompt } from "./CodebuddyLoginPrompt";
+import { CodebuddyLoginPendingTip } from "./CodebuddyLoginPendingTip";
 
 type Props = {
   message: Message;
@@ -159,6 +160,8 @@ type Props = {
   /** Full pane transcript for per-turn login detection. */
   conversationMessages?: Message[];
   onCodebuddyLogin?: () => void;
+  /** User already launched shell login; show retry guidance instead of the CTA. */
+  codebuddyLoginAwaitingRetry?: boolean;
 };
 
 function ExecutionContractNote({ lines }: { lines: string[] }) {
@@ -457,6 +460,7 @@ export function ImBubble({
   activeHarnessId,
   conversationMessages,
   onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry = false,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -507,10 +511,11 @@ export function ImBubble({
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
   const loginTranscript = conversationMessages ?? [];
+  const turnNeedsCodebuddyLogin =
+    !isUser && assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
   const showInlineCodebuddyLogin =
-    !isUser &&
-    Boolean(onCodebuddyLogin) &&
-    assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
+    turnNeedsCodebuddyLogin && Boolean(onCodebuddyLogin) && !codebuddyLoginAwaitingRetry;
+  const showCodebuddyLoginPendingTip = turnNeedsCodebuddyLogin && codebuddyLoginAwaitingRetry;
   const showResolvedCodebuddyLoginNotice =
     !isUser &&
     assistantShowsResolvedCodebuddyLoginNotice(message, loginTranscript, activeHarnessId);
@@ -568,6 +573,7 @@ export function ImBubble({
     displayQuotedItems.length > 0 ||
     hasImageBlock(message.blocks) ||
     showInlineCodebuddyLogin ||
+    showCodebuddyLoginPendingTip ||
     showResolvedCodebuddyLoginNotice;
   const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
@@ -1431,6 +1437,8 @@ export function ImBubble({
                     ) : null}
                     {showInlineCodebuddyLogin ? (
                       <CodebuddyLoginPrompt variant="inline" onLogin={onCodebuddyLogin!} />
+                    ) : showCodebuddyLoginPendingTip ? (
+                      <CodebuddyLoginPendingTip />
                     ) : showResolvedCodebuddyLoginNotice ? (
                       <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
                         {t("harness.codebuddyLogin.resolvedNotice")}

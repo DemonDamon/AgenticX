@@ -190,7 +190,9 @@ export function assistantShowsResolvedCodebuddyLoginNotice(
 export function sessionShowsCodebuddyLoginPrompt(
   messages: CodebuddyLoginMessage[],
   activeHarnessId?: string | null,
+  opts?: { suppressWhileAwaitingRetry?: boolean },
 ): boolean {
+  if (opts?.suppressWhileAwaitingRetry) return false;
   let lastAssistant = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === "assistant") {
@@ -284,27 +286,40 @@ export async function writeCommandToTerminalTab(args: {
   cwd: string;
   label: string;
   command: string;
-  addTab: (cwd: string, label: string) => void;
-  readActiveTabId: () => string | null;
-  write: (tabId: string, data: string) => Promise<{ ok?: boolean } | null | undefined>;
+  /** Must create a dedicated shell tab and return its id. */
+  addTab: (cwd: string, label: string) => string | null;
+  /** Write into native shell PTY for tabId only (never harness/cc-bridge REPL). */
+  writePty: (tabId: string, data: string) => Promise<{ ok?: boolean } | null | undefined>;
+  waitPtyReady?: (tabId: string) => Promise<boolean>;
   onTabReady?: (tabId: string) => void;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<{ ok: boolean; tabId: string | null }> {
   const cwd = String(args.cwd || "").trim() || "~";
-  args.addTab(cwd, args.label);
-  const tabId = args.readActiveTabId();
+  const tabId = args.addTab(cwd, args.label);
   if (!tabId) return { ok: false, tabId: null };
   args.onTabReady?.(tabId);
   const sleep = args.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const ready = args.waitPtyReady ?? (async () => true);
   const data = `${args.command}\n`;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const wrote = await args.write(tabId, data);
-      if (wrote?.ok) return { ok: true, tabId };
-    } catch {
-      // Terminal pty may still be spawning.
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (await ready(tabId)) {
+      try {
+        const wrote = await args.writePty(tabId, data);
+        if (wrote?.ok) return { ok: true, tabId };
+      } catch {
+        // Terminal pty may still be spawning.
+      }
     }
-    await sleep(180);
+    await sleep(200);
   }
   return { ok: false, tabId };
+}
+
+export function paneAwaitingCodebuddyLoginRetry(
+  sessionId: string | null | undefined,
+  awaitingSessionId: string | null | undefined,
+): boolean {
+  const sid = String(sessionId ?? "").trim();
+  const awaiting = String(awaitingSessionId ?? "").trim();
+  return Boolean(sid && awaiting && sid === awaiting);
 }

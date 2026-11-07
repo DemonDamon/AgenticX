@@ -41,4 +41,33 @@ describe("ImBubble codebuddy login", () => {
     fireEvent.click(button);
     expect(onLogin).toHaveBeenCalledOnce();
   });
+
+  it("shows pending retry guidance after shell login was started", async () => {
+    await i18n.changeLanguage("zh");
+    render(
+      <ImBubble
+        message={{
+          id: "a-fail",
+          role: "assistant",
+          content:
+            "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+          metadata: { harness: "codebuddy", codebuddy_login_required: true },
+        }}
+        conversationMessages={[
+          { role: "user", content: "search", id: "u1" },
+          {
+            id: "a-fail",
+            role: "assistant",
+            content:
+              "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+            metadata: { harness: "codebuddy", codebuddy_login_required: true },
+          },
+        ]}
+        activeHarnessId="codebuddy"
+        codebuddyLoginAwaitingRetry
+      />,
+    );
+    expect(screen.getByText(/登录已在终端启动/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /点击重新登录/ })).toBeNull();
+  });
 });

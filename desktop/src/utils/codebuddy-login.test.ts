@@ -4,6 +4,7 @@ import {
   assistantShowsResolvedCodebuddyLoginNotice,
   assistantTurnNeedsCodebuddyLogin,
   buildCodebuddyLoginCommand,
+  paneAwaitingCodebuddyLoginRetry,
   pickLoginCwd,
   sessionShowsCodebuddyLoginPrompt,
   shouldSuppressCodebuddyHarnessErrorBody,
@@ -194,29 +195,44 @@ describe("codebuddy login terminal", () => {
     expect(pickLoginCwd([], null)).toBe("~");
   });
 
-  it("writes the command after the terminal tab exists", async () => {
+  it("writes the command into the shell pty after the tab exists", async () => {
     const writes: string[] = [];
-    let tab: string | null = null;
     let ready = "";
     const result = await writeCommandToTerminalTab({
       cwd: "/tmp/ws",
-      label: "login",
+      label: "zsh",
       command: "echo hi",
-      addTab: () => {
-        tab = "tab-1";
-      },
-      readActiveTabId: () => tab,
+      addTab: () => "tab-1",
       onTabReady: (tabId) => {
         ready = tabId;
       },
-      write: async (_tabId, data) => {
+      waitPtyReady: async () => true,
+      writePty: async (_tabId, data) => {
         writes.push(data);
-        return { ok: writes.length > 1 };
+        return { ok: writes.length > 0 };
       },
       sleep: async () => {},
     });
     expect(ready).toBe("tab-1");
     expect(result).toEqual({ ok: true, tabId: "tab-1" });
     expect(writes.at(-1)).toBe("echo hi\n");
+  });
+
+  it("tracks awaiting-retry session match", () => {
+    expect(paneAwaitingCodebuddyLoginRetry("s1", "s1")).toBe(true);
+    expect(paneAwaitingCodebuddyLoginRetry("s1", "s2")).toBe(false);
+    expect(
+      sessionShowsCodebuddyLoginPrompt(
+        [
+          {
+            role: "assistant",
+            content: "[harness codebuddy turn error] 401",
+            metadata: { harness: "codebuddy", codebuddy_login_required: true },
+          },
+        ],
+        "codebuddy",
+        { suppressWhileAwaitingRetry: true },
+      ),
+    ).toBe(false);
   });
 });

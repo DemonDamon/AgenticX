@@ -181,6 +181,7 @@ type Props = {
   onContinueFromMessage?: (message: Message) => void;
   activeHarnessId?: string | null;
   onCodebuddyLogin?: () => void;
+  codebuddyLoginAwaitingRetry?: boolean;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -463,6 +464,7 @@ export function MessageRenderer({
   onContinueFromMessage,
   activeHarnessId,
   onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry,
 }: Props) {
   const { t } = useTranslation("chat");
   const chatStyle = useAppStore((s) => s.chatStyle);
@@ -698,6 +700,7 @@ export function MessageRenderer({
         activeHarnessId={activeHarnessId}
         conversationMessages={allMessages}
         onCodebuddyLogin={onCodebuddyLogin}
+        codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
       />,
     );
   }

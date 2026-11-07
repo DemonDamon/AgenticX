@@ -480,6 +480,7 @@ import {
   buildCodebuddyLoginCommand,
   pickLoginCwd,
   assistantTurnNeedsCodebuddyLogin,
+  paneAwaitingCodebuddyLoginRetry,
   sessionShowsCodebuddyLoginPrompt,
   writeCommandToTerminalTab,
 } from "../utils/codebuddy-login";
@@ -3174,8 +3175,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const codebuddyLoginAwaitingRetry = useMemo(
+    () =>
+      paneAwaitingCodebuddyLoginRetry(
+        pane.sessionId,
+        pane.codebuddyLoginAwaitingRetrySessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginAwaitingRetrySessionId],
+  );
+
+  useEffect(() => {
+    if (!pane.codebuddyLoginAwaitingRetrySessionId) return;
+    const rows = pane.messages ?? [];
+    if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) {
+      clearCodebuddyLoginAwaitingRetry(pane.id);
+    }
+  }, [
+    clearCodebuddyLoginAwaitingRetry,
+    pane.codebuddyLoginAwaitingRetrySessionId,
+    pane.harnessId,
+    pane.id,
+    pane.messages,
+  ]);
+
   const showCodebuddyLogin = useMemo(() => {
     const rows = pane.messages ?? [];
+    if (codebuddyLoginAwaitingRetry) return false;
     if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) return false;
     let lastAssistant: (typeof rows)[number] | undefined;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -3188,7 +3213,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return false;
     }
     return true;
-  }, [pane.messages, pane.harnessId]);
+  }, [pane.messages, pane.harnessId, codebuddyLoginAwaitingRetry]);
   const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -3241,6 +3266,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
+  const markCodebuddyLoginAwaitingRetry = useAppStore((s) => s.markCodebuddyLoginAwaitingRetry);
+  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
@@ -3910,22 +3937,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       const wrote = await writeCommandToTerminalTab({
         cwd,
-        label: t("harness.codebuddyLogin.terminal"),
+        label: "zsh",
         command: buildCodebuddyLoginCommand(platform),
-        addTab: (nextCwd, label) => addPaneTerminalTab(pane.id, nextCwd, label),
-        readActiveTabId: () =>
-          useAppStore.getState().panes.find((item) => item.id === pane.id)?.activeTerminalTabId
-          ?? null,
+        addTab: (nextCwd, label) =>
+          addPaneTerminalTab(pane.id, nextCwd, label, undefined, { shellOnly: true }),
         onTabReady: (tabId) => setWorkPanelFocus({ kind: "terminal", tabId }),
-        write: (tabId, data) => window.agenticxDesktop.terminalWriteByTab({ tabId, data }),
+        waitPtyReady: async (tabId) => {
+          if (typeof window.agenticxDesktop?.terminalHasPtyForTab !== "function") return false;
+          const res = await window.agenticxDesktop.terminalHasPtyForTab({ tabId });
+          return res.ok === true;
+        },
+        writePty: (tabId, data) => {
+          if (typeof window.agenticxDesktop?.terminalWritePtyByTab !== "function") {
+            return Promise.resolve({ ok: false });
+          }
+          return window.agenticxDesktop.terminalWritePtyByTab({ tabId, data });
+        },
       });
       if (!wrote.ok) {
         setAttachToastMessage(t("harness.codebuddyLogin.writeFailed"));
         setAttachToastOpen(true);
+        return;
       }
+      markCodebuddyLoginAwaitingRetry(pane.id, pane.sessionId);
     })();
   }, [
     addPaneTerminalTab,
+    markCodebuddyLoginAwaitingRetry,
     openSidePanel,
     pane.activeTaskspaceId,
     pane.id,
@@ -9494,6 +9532,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
               activeHarnessId={pane.harnessId}
               onCodebuddyLogin={startCodebuddyLogin}
+              codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
             />
             </MarkdownContext.Provider>
           </div>
