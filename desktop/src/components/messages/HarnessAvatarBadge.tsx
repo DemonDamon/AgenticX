@@ -15,11 +15,14 @@ type Props = {
   className?: string;
 };
 
+/** 24px chip → 12px radius; nest cutout uses radius+gap in CSS. */
+export const HARNESS_CHIP_PX = 24;
+
 /**
- * Grok-style circular harness mark at the user-bubble top-right.
- * Offset ≈ -(radius + gap) on a 24px chip (~16px / -top-4) so the circle
- * sits fully outside the orange fill with a small page-bg gap. Chip fill
- * matches the chat pane canvas so that gap reads like Grok.
+ * Grok-style harness mark nested in a concave cutout on the user-bubble
+ * top-right. Chip center sits on the corner; the bubble mask bites a
+ * matching quarter-circle (see .agx-im-user-bubble:has(...)) so ~1/4 of
+ * the chip occupies the missing corner with a small uniform gap.
  */
 export function HarnessAvatarBadge({
   harnessId,
@@ -44,7 +47,7 @@ export function HarnessAvatarBadge({
       data-harness-badge-corner=""
       title={label}
       aria-label={label}
-      className={`pointer-events-auto absolute -right-4 -top-4 z-[2] inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border bg-[var(--shell-canvas,var(--surface-base))] p-[3px] text-text-strong shadow-[0_1px_2px_rgba(0,0,0,0.14)] ${className}`}
+      className={`pointer-events-auto absolute -right-3 -top-3 z-[2] inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border bg-[var(--shell-canvas,var(--surface-base))] p-[3px] text-text-strong shadow-[0_1px_2px_rgba(0,0,0,0.14)] ${className}`}
     >
       <HarnessMark harnessId={id} size={18} className="h-[18px] w-[18px]" />
       <span className="sr-only">{label}</span>
