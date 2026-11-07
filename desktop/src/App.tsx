@@ -73,6 +73,7 @@ import {
 } from "./utils/model-options";
 import { scanAndPruneUnauthorizedVisibleModels } from "./utils/prune-unauthorized-visible-models";
 import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchGroupsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
+import { readSessionHarnessBinding, resolveStickyPaneHarness } from "./utils/preferred-harness";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -113,6 +114,9 @@ type PersistedPaneState = {
   isolateActive?: boolean;
   scratchChats?: ScratchChat[];
   parkedScratchChats?: ScratchChat[];
+  /** null = explicit builtin. Absent key = unknown (do not invent Settings). */
+  harnessId?: string | null;
+  harnessFollowsPreference?: boolean;
 };
 
 type PersistedWorkspaceState = {
@@ -251,7 +255,21 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         isolateActive: row.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(row.scratchChats),
         parkedScratchChats: normalizePersistedScratchChats(row.parkedScratchChats),
-      };
+        ...(Object.prototype.hasOwnProperty.call(row, "harnessId")
+          ? {
+              harnessId: (() => {
+                const raw = row.harnessId;
+                if (raw == null) return null;
+                const text = String(raw).trim();
+                if (!text || text === "python-agent") return null;
+                return text;
+              })(),
+            }
+          : {}),
+        ...(typeof row.harnessFollowsPreference === "boolean"
+          ? { harnessFollowsPreference: row.harnessFollowsPreference }
+          : {}),
+      } as PersistedPaneState;
     })
     .filter((item): item is PersistedPaneState => !!item);
   if (panes.length === 0) return null;
@@ -961,6 +979,29 @@ export function App() {
               console.error("[App init] restore pane failed:", pane.id, err);
             }
           }
+          for (const pane of hydratedPanes) {
+            const sid = String(pane.sessionId ?? "").trim();
+            if (!sid) continue;
+            try {
+              const plan = await resolveStickyPaneHarness({
+                pinned: pane.harnessFollowsPreference === false,
+                paneHarnessId: pane.harnessId,
+                readBinding: () => readSessionHarnessBinding(base, token, sid),
+              });
+              if (plan.harnessId !== undefined) {
+                pane.harnessId = plan.harnessId;
+                pane.harnessFollowsPreference = false;
+              }
+              if (plan.rebindHarnessId) {
+                await window.agenticxDesktop.setSessionHarness({
+                  sessionId: sid,
+                  harnessId: plan.rebindHarnessId,
+                });
+              }
+            } catch (err) {
+              console.warn("[App init] sticky harness restore failed:", sid, err);
+            }
+          }
           if (hydratedPanes.length > 0) {
             const nextActivePaneId =
               hydratedPanes.some((pane) => pane.id === saved.activePaneId)
@@ -1246,6 +1287,10 @@ export function App() {
         isolateActive: pane.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(pane.scratchChats),
         parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
+        ...(pane.harnessId !== undefined ? { harnessId: pane.harnessId } : {}),
+        ...(pane.harnessFollowsPreference !== undefined
+          ? { harnessFollowsPreference: pane.harnessFollowsPreference }
+          : {}),
       })),
       hiddenScratchSessionIds: mergeHiddenScratchSessionIdsForPersist(
         (() => {

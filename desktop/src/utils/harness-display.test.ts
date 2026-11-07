@@ -5,6 +5,7 @@ import {
   harnessBadgeFallbackLabel,
   harnessDisplayKind,
   resolveMessageHarnessId,
+  stampUserMessageHarnessMetadata,
 } from "./harness-display";
 
 describe("harness-display", () => {
@@ -35,5 +36,15 @@ describe("harness-display", () => {
     expect(harnessBadgeFallbackLabel("hermes-agent")).toBe("Hermes Agent");
     expect(harnessBadgeFallbackLabel("pi-agent")).toBe("PI Agent");
     expect(harnessBadgeFallbackLabel("openclaw")).toBe("OpenClaw");
+  });
+
+  it("restamps a user row onto the harness that owns the regenerate", () => {
+    const stamped = stampUserMessageHarnessMetadata(
+      { harness: "codebuddy", client_turn_id: "turn-1" },
+      null,
+    );
+    expect(stamped.client_turn_id).toBe("turn-1");
+    expect(resolveMessageHarnessId(stamped)).toBe("python-agent");
+    expect(stamped.harness_id).toBe("python-agent");
   });
 });
