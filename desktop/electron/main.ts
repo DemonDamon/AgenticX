@@ -171,6 +171,13 @@ import {
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import {
+  registerShellTabPty,
+  resolveNativeShellPtySessionId,
+  resolveTabWriteSessionId,
+  shellTabPtyByTabId,
+  unregisterShellTabPtyForSession,
+} from "./terminal-shell-routing";
+import {
   previewLimitExceededMessage,
   previewMaxBytesForHost,
 } from "./preview-file-limit";
@@ -7477,6 +7484,7 @@ function requireNodePty(): typeof import("node-pty") | null {
 function killTerminalSession(id: string): void {
   const sess = terminalSessions.get(id);
   if (!sess) return;
+  unregisterShellTabPtyForSession(id);
   terminalSessions.delete(id);
   if (sess.kind === "bridge") {
     try {
@@ -7497,6 +7505,7 @@ function killAllTerminalSessions(): void {
   for (const id of [...terminalSessions.keys()]) {
     killTerminalSession(id);
   }
+  shellTabPtyByTabId.clear();
 }
 
 /** Escape minimal HTML for inline error pages (load failures). */
@@ -14361,7 +14370,17 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "terminal-spawn",
-    async (event, payload: { id: string; cwd: string; cols?: number; rows?: number }) => {
+    async (
+      event,
+      payload: {
+        id: string;
+        cwd: string;
+        cols?: number;
+        rows?: number;
+        tabId?: string;
+        shellOnly?: boolean;
+      },
+    ) => {
       const ptyMod = requireNodePty();
       if (!ptyMod) return { ok: false as const, error: "node-pty unavailable" };
       // Fall back to home dir if the requested cwd no longer exists
@@ -14405,6 +14424,10 @@ function registerIpc(): void {
           })(),
         });
         terminalSessions.set(id, { kind: "pty", pty: ptyProcess, wc });
+        const bindTabId = String(payload.tabId ?? "").trim();
+        if (bindTabId && payload.shellOnly) {
+          registerShellTabPty(bindTabId, id);
+        }
         ptyProcess.onData((data) => {
           if (!wc.isDestroyed()) {
             wc.send("terminal-data", { id, data });
@@ -14442,51 +14465,57 @@ function registerIpc(): void {
   ipcMain.handle("terminal-write-by-tab", async (_event, payload: { tabId: string; data: string }) => {
     const tabId = (payload.tabId || "").trim();
     if (!tabId) return { ok: false };
-    const prefix = `${tabId}:`;
+    const sessionKinds = new Map<string, "pty" | "bridge">();
     for (const [id, sess] of terminalSessions.entries()) {
-      if (!id.startsWith(prefix)) continue;
-      if (sess.kind === "bridge") {
-        const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
-        const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
-        return { ok, id };
-      }
-      try {
-        sess.pty.write(payload.data);
-        return { ok: true, id };
-      } catch {
-        return { ok: false };
-      }
+      sessionKinds.set(id, sess.kind);
     }
-    return { ok: false };
+    const id = resolveTabWriteSessionId(tabId, sessionKinds, false);
+    if (!id) return { ok: false };
+    const sess = terminalSessions.get(id);
+    if (!sess) return { ok: false };
+    if (sess.kind === "bridge") {
+      const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
+      const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
+      return { ok, id };
+    }
+    try {
+      sess.pty.write(payload.data);
+      return { ok: true, id };
+    } catch {
+      return { ok: false };
+    }
   });
 
   /** Write only to a native shell PTY for this tab — never CodeBuddy/cc-bridge REPL. */
   ipcMain.handle("terminal-write-pty-by-tab", async (_event, payload: { tabId: string; data: string }) => {
     const tabId = (payload.tabId || "").trim();
     if (!tabId) return { ok: false };
-    const prefix = `${tabId}:`;
+    const sessionKinds = new Map<string, "pty" | "bridge">();
     for (const [id, sess] of terminalSessions.entries()) {
-      if (!id.startsWith(prefix) || sess.kind !== "pty") continue;
-      try {
-        sess.pty.write(payload.data);
-        return { ok: true, id };
-      } catch {
-        return { ok: false };
-      }
+      sessionKinds.set(id, sess.kind);
     }
-    return { ok: false };
+    const id = resolveNativeShellPtySessionId(tabId, sessionKinds);
+    if (!id) return { ok: false };
+    const sess = terminalSessions.get(id);
+    if (!sess || sess.kind !== "pty") return { ok: false };
+    try {
+      sess.pty.write(payload.data);
+      return { ok: true, id };
+    } catch {
+      return { ok: false };
+    }
   });
 
   ipcMain.handle("terminal-has-pty-for-tab", async (_event, payload: { tabId: string }) => {
     const tabId = (payload.tabId || "").trim();
     if (!tabId) return { ok: false };
-    const prefix = `${tabId}:`;
+    const sessionKinds = new Map<string, "pty" | "bridge">();
     for (const [id, sess] of terminalSessions.entries()) {
-      if (id.startsWith(prefix) && sess.kind === "pty") {
-        return { ok: true, id };
-      }
+      sessionKinds.set(id, sess.kind);
     }
-    return { ok: false };
+    const id = resolveNativeShellPtySessionId(tabId, sessionKinds);
+    if (!id) return { ok: false };
+    return { ok: true, id };
   });
 
   ipcMain.handle("terminal-resize", async (_event, payload: { id: string; cols: number; rows: number }) => {

@@ -1424,6 +1424,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const apiToken = useAppStore((s) => s.apiToken);
   const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
   const setPaneContextWindow = useAppStore((s) => s.setPaneContextWindow);
@@ -1505,6 +1506,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
 
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
+    if (activeHarnessId === "codebuddy") {
+      clearCodebuddyLoginAwaitingRetry(paneId);
+    }
     setOpen(false);
     // Persist the current pane model as global fallback for restarts.
     void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
@@ -3928,6 +3932,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         paneRef.current?.clientWidth ?? paneWidth,
         openSidePanel,
       );
+      setRailKind("terminal");
+      setWorkPanelFocus({ kind: "terminal" });
       let platform: "posix" | "windows" = "posix";
       try {
         const host = await window.agenticxDesktop.platform();
@@ -3935,17 +3941,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       } catch {
         platform = "posix";
       }
+      const loginCommand = buildCodebuddyLoginCommand(platform);
       const wrote = await writeCommandToTerminalTab({
         cwd,
-        label: "zsh",
-        command: buildCodebuddyLoginCommand(platform),
+        label: "codebuddy-login",
+        command: loginCommand,
         addTab: (nextCwd, label) =>
           addPaneTerminalTab(pane.id, nextCwd, label, undefined, { shellOnly: true }),
         onTabReady: (tabId) => setWorkPanelFocus({ kind: "terminal", tabId }),
         waitPtyReady: async (tabId) => {
           if (typeof window.agenticxDesktop?.terminalHasPtyForTab !== "function") return false;
           const res = await window.agenticxDesktop.terminalHasPtyForTab({ tabId });
-          return res.ok === true;
+          if (!res.ok || !res.id || res.id.includes(":bridge:")) return false;
+          return true;
         },
         writePty: (tabId, data) => {
           if (typeof window.agenticxDesktop?.terminalWritePtyByTab !== "function") {
@@ -3969,6 +3977,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.id,
     pane.sessionId,
     paneWidth,
+    setRailKind,
     t,
   ]);
   const openScratchFromDraft = useCallback(

@@ -1920,6 +1920,8 @@ declare global {
         cwd: string;
         cols?: number;
         rows?: number;
+        tabId?: string;
+        shellOnly?: boolean;
       }) => Promise<{ ok: boolean; id?: string; error?: string }>;
       terminalBridgeAttach: (payload: {
         id: string;
