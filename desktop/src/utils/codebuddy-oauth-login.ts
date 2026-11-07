@@ -10,7 +10,10 @@ export type CodebuddyOAuthSnapshot = {
   status?: CodebuddyOAuthJobStatus;
   authorize_url?: string | null;
   error?: string | null;
+  auth_verified?: boolean | null;
 };
+
+export type OpenAuthorizeUrlResult = { ok: true } | { ok: false; error?: string };
 
 export async function startCodebuddyOAuthLogin(args: {
   apiBase: string;
@@ -57,12 +60,34 @@ export function codebuddyOAuthTerminalStatus(status: CodebuddyOAuthJobStatus | u
   return status === "success" || status === "failed";
 }
 
+function tryOpenAuthorizeUrl(
+  opener: ((url: string) => void | boolean | OpenAuthorizeUrlResult) | undefined,
+  url: string,
+): OpenAuthorizeUrlResult {
+  if (!opener) {
+    return { ok: false, error: "missing_open_handler" };
+  }
+  try {
+    const out = opener(url);
+    if (out === false) return { ok: false, error: "browser_open_rejected" };
+    if (out === true || out === undefined) return { ok: true };
+    if (typeof out === "object" && out !== null && "ok" in out) {
+      return out.ok ? { ok: true } : { ok: false, error: out.error || "browser_open_failed" };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function waitForCodebuddyOAuth(args: {
   apiBase: string;
   apiToken: string;
   jobId: string;
   onUpdate?: (snap: CodebuddyOAuthSnapshot) => void;
-  openAuthorizeUrl?: (url: string) => void;
+  /** Called only after authorize URL was actually opened (WorkPanel or external). */
+  onAuthorizing?: () => void;
+  openAuthorizeUrl?: (url: string) => void | boolean | OpenAuthorizeUrlResult;
   pollIntervalMs?: number;
   maxMs?: number;
 }): Promise<CodebuddyOAuthSnapshot> {
@@ -71,6 +96,7 @@ export async function waitForCodebuddyOAuth(args: {
   const maxMs = args.maxMs ?? 600_000;
   const started = Date.now();
   let openedUrl = false;
+  let browserOpenFailed: string | undefined;
   while (Date.now() - started < maxMs) {
     const polled = await pollCodebuddyOAuthJob({
       apiBase: args.apiBase,
@@ -82,10 +108,34 @@ export async function waitForCodebuddyOAuth(args: {
       args.onUpdate?.(snap);
       const url = String(snap.authorize_url ?? "").trim();
       if (url && !openedUrl) {
-        openedUrl = true;
-        args.openAuthorizeUrl?.(url);
+        const opened = tryOpenAuthorizeUrl(args.openAuthorizeUrl, url);
+        if (opened.ok) {
+          openedUrl = true;
+          args.onAuthorizing?.();
+        } else {
+          browserOpenFailed = opened.error || "browser_open_failed";
+        }
       }
       if (codebuddyOAuthTerminalStatus(snap.status)) {
+        if (snap.status === "success") {
+          if (!openedUrl) {
+            return {
+              ...snap,
+              status: "failed",
+              error:
+                browserOpenFailed
+                || snap.error
+                || "未打开腾讯授权页面，请重试",
+            };
+          }
+          if (snap.auth_verified === false) {
+            return {
+              ...snap,
+              status: "failed",
+              error: snap.error || "腾讯登录未完成或凭据校验失败",
+            };
+          }
+        }
         return snap;
       }
     }

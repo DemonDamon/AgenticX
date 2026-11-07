@@ -15,7 +15,8 @@ describe("codebuddy oauth login", () => {
   });
 
   it("opens authorize url once and completes on success", async () => {
-    const openAuthorizeUrl = vi.fn();
+    const onAuthorizing = vi.fn();
+    const openAuthorizeUrl = vi.fn(() => ({ ok: true as const }));
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -33,8 +34,37 @@ describe("codebuddy oauth login", () => {
           ok: true,
           job_id: "j1",
           status: "success",
+          auth_verified: true,
         }),
       });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const snap = await waitForCodebuddyOAuth({
+      apiBase: "http://127.0.0.1:9",
+      apiToken: "t",
+      jobId: "j1",
+      onAuthorizing,
+      openAuthorizeUrl,
+      pollIntervalMs: 1,
+    });
+    expect(snap.status).toBe("success");
+    expect(openAuthorizeUrl).toHaveBeenCalledTimes(1);
+    expect(onAuthorizing).toHaveBeenCalledTimes(1);
+    expect(openAuthorizeUrl.mock.calls[0][0]).toContain("tencent.com");
+    vi.unstubAllGlobals();
+  });
+
+  it("fails when backend success arrives without opening authorize url", async () => {
+    const openAuthorizeUrl = vi.fn(() => ({ ok: false as const, error: "no_browser_pane" }));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        job_id: "j1",
+        status: "success",
+        auth_verified: true,
+      }),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const snap = await waitForCodebuddyOAuth({
@@ -44,9 +74,59 @@ describe("codebuddy oauth login", () => {
       openAuthorizeUrl,
       pollIntervalMs: 1,
     });
+    expect(snap.status).toBe("failed");
+    expect(String(snap.error || "")).toMatch(/未打开|browser/i);
+    vi.unstubAllGlobals();
+  });
+
+  it("does not show authorizing until browser open succeeds", async () => {
+    const onAuthorizing = vi.fn();
+    const openAuthorizeUrl = vi
+      .fn()
+      .mockReturnValueOnce({ ok: false as const, error: "no_browser_pane" })
+      .mockReturnValueOnce({ ok: true as const });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          job_id: "j1",
+          status: "authorizing",
+          authorize_url: "https://copilot.tencent.com/oauth/start",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          job_id: "j1",
+          status: "authorizing",
+          authorize_url: "https://copilot.tencent.com/oauth/start",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          job_id: "j1",
+          status: "success",
+          auth_verified: true,
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const snap = await waitForCodebuddyOAuth({
+      apiBase: "http://127.0.0.1:9",
+      apiToken: "t",
+      jobId: "j1",
+      onAuthorizing,
+      openAuthorizeUrl,
+      pollIntervalMs: 1,
+    });
+    expect(onAuthorizing).toHaveBeenCalledTimes(1);
+    expect(openAuthorizeUrl).toHaveBeenCalledTimes(2);
     expect(snap.status).toBe("success");
-    expect(openAuthorizeUrl).toHaveBeenCalledTimes(1);
-    expect(openAuthorizeUrl.mock.calls[0][0]).toContain("tencent.com");
     vi.unstubAllGlobals();
   });
 

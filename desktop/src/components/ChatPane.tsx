@@ -3976,16 +3976,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         setAttachToastOpen(true);
         return;
       }
-      markCodebuddyLoginAuthorizing(pane.id, pane.sessionId);
       const final = await waitForCodebuddyOAuth({
         apiBase,
         apiToken,
         jobId,
+        onAuthorizing: () => markCodebuddyLoginAuthorizing(pane.id, pane.sessionId),
         openAuthorizeUrl: (url) => {
           const opened = ensureInAppBrowserOpenRef.current(url);
-          if (!opened.ok) {
-            void window.agenticxDesktop?.openExternal?.(url);
+          if (opened.ok) return { ok: true as const };
+          if (typeof window.agenticxDesktop?.openExternal === "function") {
+            void window.agenticxDesktop.openExternal(url);
+            return { ok: true as const };
           }
+          return { ok: false as const, error: opened.error || "browser_open_failed" };
         },
       });
       clearCodebuddyLoginAuthorizing(pane.id);
