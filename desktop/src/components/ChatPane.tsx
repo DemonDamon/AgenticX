@@ -484,6 +484,7 @@ import {
   sessionShowsCodebuddyLoginPrompt,
 } from "../utils/codebuddy-login";
 import {
+  refreshCodebuddyHarnessAfterOAuth,
   startCodebuddyOAuthLogin,
   waitForCodebuddyOAuth,
 } from "../utils/codebuddy-oauth-login";
@@ -3989,6 +3990,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       });
       clearCodebuddyLoginAuthorizing(pane.id);
       if (final.status === "success") {
+        const sid = String(pane.sessionId || "").trim();
+        if (sid) {
+          const refreshed = await refreshCodebuddyHarnessAfterOAuth({
+            apiBase,
+            apiToken,
+            sessionId: sid,
+          });
+          if (!refreshed.ok) {
+            setAttachToastMessage(
+              refreshed.error || t("harness.codebuddyLogin.harnessRefreshFailed"),
+            );
+            setAttachToastOpen(true);
+          }
+        }
         markCodebuddyLoginAwaitingRetry(pane.id, pane.sessionId);
         return;
       }

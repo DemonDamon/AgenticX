@@ -1118,6 +1118,7 @@
       "oauthFailed": "授权未完成：{{error}}",
       "oauthFailedGeneric": "腾讯授权未完成，请稍后重试。",
       "oauthStartFailed": "无法启动 CodeBuddy 登录，请确认已安装 CodeBuddy CLI。",
+      "harnessRefreshFailed": "授权成功，但刷新 CodeBuddy 会话失败，请重试一次或重启 Near。",
       "resolvedNotice": "此前因 CodeBuddy 登录失效未能完成回答。",
       "terminal": "CodeBuddy 登录",
       "writeFailed": "终端暂时无法输入登录命令，请在已打开的终端中执行 codebuddy login"

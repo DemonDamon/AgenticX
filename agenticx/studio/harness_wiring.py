@@ -565,6 +565,61 @@ def ensure_harness_session(
     return surface_sid
 
 
+_CODEBUDDY_HARNESS_ID = "codebuddy"
+
+
+def refresh_codebuddy_harness_after_oauth(
+    manager: Any,
+    studio_session_id: str,
+) -> Dict[str, Any]:
+    """Stop live CodeBuddy CLI children after Tencent OAuth so the next turn respawns.
+
+    OAuth runs ``codebuddy login`` in a separate subprocess; the long-lived
+    headless ``codebuddy --print`` harness child keeps stale auth until exit.
+    """
+    sid = require_safe_session_id(studio_session_id)
+    adapter = harness_registry().require(_CODEBUDDY_HARNESS_ID)
+    stopped: List[str] = []
+    for row in adapter.list_sessions():
+        if not isinstance(row, dict):
+            continue
+        surface = str(row.get("session_id") or "").strip()
+        if not surface:
+            raw = row.get("raw")
+            if isinstance(raw, dict):
+                surface = str(raw.get("session_id") or "").strip()
+        if not surface:
+            continue
+        try:
+            if adapter.stop(surface):
+                stopped.append(surface)
+        except Exception:
+            pass
+    binding = manager.get_session_harness(sid) or {}
+    hid = str(binding.get("harness_id") or "").strip() or None
+    if not hid:
+        managed = manager.get(sid, touch=False)
+        history = None
+        if managed is not None:
+            history = getattr(managed.studio_session, "chat_history", None)
+        hid = derive_sticky_harness_id(history, None)
+    refreshed_binding = False
+    if hid == _CODEBUDDY_HARNESS_ID:
+        manager.set_session_harness(
+            sid,
+            harness_id=_CODEBUDDY_HARNESS_ID,
+            thread_id=binding.get("harness_thread_id"),
+            options=dict(binding.get("harness_options") or {}),
+            surface_session_id=None,
+        )
+        refreshed_binding = True
+    return {
+        "ok": True,
+        "stopped_surface_ids": stopped,
+        "refreshed_binding": refreshed_binding,
+    }
+
+
 # ----------------------------------------------------------------------
 # external harness turn execution (chat routing)
 # ----------------------------------------------------------------------
