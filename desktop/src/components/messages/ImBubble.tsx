@@ -552,6 +552,8 @@ export function ImBubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
+  const menuLayoutRef = useRef(menuLayout);
+  menuLayoutRef.current = menuLayout;
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -653,9 +655,17 @@ export function ImBubble({
     };
   }, [menuOpen]);
 
+  // Presence only. Function identities change on every ChatPane render (login opens
+  // the terminal and re-renders the thread). Depending on the functions re-ran this
+  // effect and setState(null) nested until React aborted.
+  const menuActionPresence =
+    (onEditMessage ? 1 : 0) + (onQuoteToNewPane ? 2 : 0) + (onRetryMessage ? 4 : 0);
   useLayoutEffect(() => {
     if (!menuOpen) {
-      setMenuLayout(null);
+      if (menuLayoutRef.current !== null) {
+        menuLayoutRef.current = null;
+        setMenuLayout(null);
+      }
       return;
     }
 
@@ -681,13 +691,18 @@ export function ImBubble({
           : menuPos.y - rect.height >= MESSAGE_CONTEXT_MENU_MARGIN
             ? menuPos.y - rect.height
             : maxTop;
-      setMenuLayout((prev) => (prev?.x === left && prev.y === top ? prev : { x: left, y: top }));
+      setMenuLayout((prev) => {
+        if (prev?.x === left && prev.y === top) return prev;
+        const next = { x: left, y: top };
+        menuLayoutRef.current = next;
+        return next;
+      });
     };
 
     reposition();
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
-  }, [menuOpen, menuPos, menuHasSelection, onEditMessage, onQuoteToNewPane, onRetryMessage]);
+  }, [menuOpen, menuPos, menuActionPresence]);
 
   useEffect(() => {
     // NOTE: Keyword highlight used to mutate React-managed DOM nodes directly,

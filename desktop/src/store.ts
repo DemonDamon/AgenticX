@@ -3212,11 +3212,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
     })),
   setActivePaneTerminalTab: (paneId, tabId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, activeTerminalTabId: tabId } : pane
-      ),
-    })),
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      if (!pane || pane.activeTerminalTabId === tabId) return state;
+      return {
+        panes: state.panes.map((item) =>
+          item.id === paneId ? { ...item, activeTerminalTabId: tabId } : item
+        ),
+      };
+    }),
   addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
       const activePane = state.panes.find((pane) => pane.id === state.activePaneId);
