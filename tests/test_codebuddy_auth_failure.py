@@ -225,3 +225,5 @@ def test_wiring_persists_login_required_metadata(monkeypatch: pytest.MonkeyPatch
     assert len(assistants) == 1
     assert assistants[0]["metadata"]["codebuddy_login_required"] is True
     assert assistants[0]["metadata"]["harness"] == "codebuddy"
+    assert "[harness codebuddy turn error]" not in assistants[0]["content"]
+    assert "invalid JSON" not in assistants[0]["content"]

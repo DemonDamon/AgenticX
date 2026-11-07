@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assistantShowsResolvedCodebuddyLoginNotice,
+  assistantTurnNeedsCodebuddyLogin,
   buildCodebuddyLoginCommand,
+  paneAwaitingCodebuddyLoginRetry,
   pickLoginCwd,
   sessionShowsCodebuddyLoginPrompt,
+  shouldSuppressCodebuddyHarnessErrorBody,
   writeCommandToTerminalTab,
 } from "./codebuddy-login";
 
@@ -104,6 +108,43 @@ describe("codebuddy login prompt", () => {
     ).toBe(false);
   });
 
+  it("only shows the live CTA on the latest failing assistant row", () => {
+    const messages = [
+      { role: "user", content: "q1" },
+      {
+        role: "assistant",
+        id: "old",
+        content: "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+        metadata: { harness: "codebuddy", codebuddy_login_required: true },
+      },
+      { role: "user", content: "q2" },
+      {
+        role: "assistant",
+        id: "new",
+        content: "done",
+        metadata: { harness: "codebuddy", harness_status: "success" },
+      },
+    ] as const;
+    const oldMsg = messages[1];
+    const newMsg = messages[3];
+    expect(assistantTurnNeedsCodebuddyLogin(oldMsg, [...messages], "codebuddy")).toBe(false);
+    expect(assistantTurnNeedsCodebuddyLogin(newMsg, [...messages], "codebuddy")).toBe(false);
+    expect(assistantShowsResolvedCodebuddyLoginNotice(oldMsg, [...messages], "codebuddy")).toBe(
+      true,
+    );
+  });
+
+  it("suppresses harness error bodies for login-required metadata", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+        metadata: { harness: "codebuddy", codebuddy_login_required: true },
+      },
+    ];
+    expect(shouldSuppressCodebuddyHarnessErrorBody(messages[0], messages, "codebuddy")).toBe(true);
+  });
+
   it("does not flag a successful codebuddy answer that merely mentions login", () => {
     expect(
       sessionShowsCodebuddyLoginPrompt(
@@ -154,29 +195,44 @@ describe("codebuddy login terminal", () => {
     expect(pickLoginCwd([], null)).toBe("~");
   });
 
-  it("writes the command after the terminal tab exists", async () => {
+  it("writes the command into the shell pty after the tab exists", async () => {
     const writes: string[] = [];
-    let tab: string | null = null;
     let ready = "";
     const result = await writeCommandToTerminalTab({
       cwd: "/tmp/ws",
-      label: "login",
+      label: "zsh",
       command: "echo hi",
-      addTab: () => {
-        tab = "tab-1";
-      },
-      readActiveTabId: () => tab,
+      addTab: () => "tab-1",
       onTabReady: (tabId) => {
         ready = tabId;
       },
-      write: async (_tabId, data) => {
+      waitPtyReady: async () => true,
+      writePty: async (_tabId, data) => {
         writes.push(data);
-        return { ok: writes.length > 1 };
+        return { ok: writes.length > 0 };
       },
       sleep: async () => {},
     });
     expect(ready).toBe("tab-1");
     expect(result).toEqual({ ok: true, tabId: "tab-1" });
     expect(writes.at(-1)).toBe("echo hi\n");
+  });
+
+  it("tracks awaiting-retry session match", () => {
+    expect(paneAwaitingCodebuddyLoginRetry("s1", "s1")).toBe(true);
+    expect(paneAwaitingCodebuddyLoginRetry("s1", "s2")).toBe(false);
+    expect(
+      sessionShowsCodebuddyLoginPrompt(
+        [
+          {
+            role: "assistant",
+            content: "[harness codebuddy turn error] 401",
+            metadata: { harness: "codebuddy", codebuddy_login_required: true },
+          },
+        ],
+        "codebuddy",
+        { suppressWhileAwaitingRetry: true },
+      ),
+    ).toBe(false);
   });
 });

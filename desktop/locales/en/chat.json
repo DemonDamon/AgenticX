@@ -1111,6 +1111,10 @@
     "badgeOpenClaw": "OpenClaw",
     "codebuddyLogin": {
       "banner": "CodeBuddy Tencent login expired. Click to sign in again.",
+      "body": "CodeBuddy Tencent login is required. Sign in again to continue.",
+      "retryHint": "After signing in, use Retry on your last question to continue.",
+      "pendingRetry": "Sign-in started in the terminal. After Tencent auth finishes, return here and use Retry on your last question.",
+      "resolvedNotice": "This turn stopped earlier because CodeBuddy login was required.",
       "terminal": "CodeBuddy login",
       "writeFailed": "The terminal could not accept the login command yet. Run codebuddy login in the terminal that opened."
     }

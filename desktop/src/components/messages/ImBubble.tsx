@@ -74,6 +74,13 @@ import { usePacedStreamText } from "./usePacedStreamText";
 import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
 import { isLongUserQuery } from "../../utils/long-user-query";
 import { splitAutomationExecutionContract } from "../../utils/automation-contract-display";
+import {
+  assistantShowsResolvedCodebuddyLoginNotice,
+  assistantTurnNeedsCodebuddyLogin,
+  shouldSuppressCodebuddyHarnessErrorBody,
+} from "../../utils/codebuddy-login";
+import { CodebuddyLoginPrompt } from "./CodebuddyLoginPrompt";
+import { CodebuddyLoginPendingTip } from "./CodebuddyLoginPendingTip";
 
 type Props = {
   message: Message;
@@ -148,6 +155,13 @@ type Props = {
   sessionWebRefs?: SearchReference[];
   /** Also collapse a long user query when the caller opts in explicitly. */
   collapseLongUserQuery?: boolean;
+  /** Near session harness id for CodeBuddy login detection. */
+  activeHarnessId?: string | null;
+  /** Full pane transcript for per-turn login detection. */
+  conversationMessages?: Message[];
+  onCodebuddyLogin?: () => void;
+  /** User already launched shell login; show retry guidance instead of the CTA. */
+  codebuddyLoginAwaitingRetry?: boolean;
 };
 
 function ExecutionContractNote({ lines }: { lines: string[] }) {
@@ -443,6 +457,10 @@ export function ImBubble({
   onOpenWorkspaceRefs,
   sessionWebRefs,
   collapseLongUserQuery = false,
+  activeHarnessId,
+  conversationMessages,
+  onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry = false,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -492,10 +510,25 @@ export function ImBubble({
     : (userQuoteDisplay?.body ?? message.content);
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
+  const loginTranscript = conversationMessages ?? [];
+  const turnNeedsCodebuddyLogin =
+    !isUser && assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
+  const showInlineCodebuddyLogin =
+    turnNeedsCodebuddyLogin && Boolean(onCodebuddyLogin) && !codebuddyLoginAwaitingRetry;
+  const showCodebuddyLoginPendingTip = turnNeedsCodebuddyLogin && codebuddyLoginAwaitingRetry;
+  const showResolvedCodebuddyLoginNotice =
+    !isUser &&
+    assistantShowsResolvedCodebuddyLoginNotice(message, loginTranscript, activeHarnessId);
+  const suppressHarnessLoginError = shouldSuppressCodebuddyHarnessErrorBody(
+    message,
+    loginTranscript,
+    activeHarnessId,
+  );
+  const strippedForDisplay = suppressHarnessLoginError ? "" : strippedBody;
   const bodyText =
     isGroupAssistant
-      ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
-      : strippedBody;
+      ? String(strippedForDisplay ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : strippedForDisplay;
   const commandName = isUser ? String(message.command_name ?? "").trim() : "";
   const commandParts = commandName ? splitCommandBody(String(bodyText ?? "")) : null;
   const groupStreamActive = isGroupAssistant && isStreaming;
@@ -536,7 +569,12 @@ export function ImBubble({
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
   const hasBody =
-    !!bodyText?.trim() || displayQuotedItems.length > 0 || hasImageBlock(message.blocks);
+    !!bodyText?.trim() ||
+    displayQuotedItems.length > 0 ||
+    hasImageBlock(message.blocks) ||
+    showInlineCodebuddyLogin ||
+    showCodebuddyLoginPendingTip ||
+    showResolvedCodebuddyLoginNotice;
   const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
     ? {
@@ -1396,6 +1434,15 @@ export function ImBubble({
                       ) : isGroupAssistant ? null : (
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
+                    ) : null}
+                    {showInlineCodebuddyLogin ? (
+                      <CodebuddyLoginPrompt variant="inline" onLogin={onCodebuddyLogin!} />
+                    ) : showCodebuddyLoginPendingTip ? (
+                      <CodebuddyLoginPendingTip />
+                    ) : showResolvedCodebuddyLoginNotice ? (
+                      <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
+                        {t("harness.codebuddyLogin.resolvedNotice")}
+                      </p>
                     ) : null}
                     {!showMetaCitation && webReferences.length > 0 ? (
                       <div className="mt-2">

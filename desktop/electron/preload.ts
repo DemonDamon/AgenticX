@@ -1147,6 +1147,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("terminal-write", payload) as Promise<{ ok: boolean }>,
   terminalWriteByTab: async (payload: { tabId: string; data: string }) =>
     ipcRenderer.invoke("terminal-write-by-tab", payload) as Promise<{ ok: boolean; id?: string }>,
+  terminalWritePtyByTab: async (payload: { tabId: string; data: string }) =>
+    ipcRenderer.invoke("terminal-write-pty-by-tab", payload) as Promise<{ ok: boolean; id?: string }>,
+  terminalHasPtyForTab: async (payload: { tabId: string }) =>
+    ipcRenderer.invoke("terminal-has-pty-for-tab", payload) as Promise<{ ok: boolean; id?: string }>,
   terminalResize: async (payload: { id: string; cols: number; rows: number }) =>
     ipcRenderer.invoke("terminal-resize", payload) as Promise<{ ok: boolean }>,
   terminalKill: async (id: string) => ipcRenderer.invoke("terminal-kill", id) as Promise<{ ok: boolean }>,

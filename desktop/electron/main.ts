@@ -14460,6 +14460,35 @@ function registerIpc(): void {
     return { ok: false };
   });
 
+  /** Write only to a native shell PTY for this tab — never CodeBuddy/cc-bridge REPL. */
+  ipcMain.handle("terminal-write-pty-by-tab", async (_event, payload: { tabId: string; data: string }) => {
+    const tabId = (payload.tabId || "").trim();
+    if (!tabId) return { ok: false };
+    const prefix = `${tabId}:`;
+    for (const [id, sess] of terminalSessions.entries()) {
+      if (!id.startsWith(prefix) || sess.kind !== "pty") continue;
+      try {
+        sess.pty.write(payload.data);
+        return { ok: true, id };
+      } catch {
+        return { ok: false };
+      }
+    }
+    return { ok: false };
+  });
+
+  ipcMain.handle("terminal-has-pty-for-tab", async (_event, payload: { tabId: string }) => {
+    const tabId = (payload.tabId || "").trim();
+    if (!tabId) return { ok: false };
+    const prefix = `${tabId}:`;
+    for (const [id, sess] of terminalSessions.entries()) {
+      if (id.startsWith(prefix) && sess.kind === "pty") {
+        return { ok: true, id };
+      }
+    }
+    return { ok: false };
+  });
+
   ipcMain.handle("terminal-resize", async (_event, payload: { id: string; cols: number; rows: number }) => {
     const sess = terminalSessions.get(payload.id);
     if (!sess) return { ok: false };

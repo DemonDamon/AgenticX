@@ -20,6 +20,10 @@ export type CodebuddyLoginMessage = {
 const HARNESS_ERROR_RE =
   /\[harness\s+\S+\s+turn\s+(?:error|failed|exited|timeout|blocked)\]/i;
 
+/** Persisted assistant text when harness_wiring strips the raw error (backend). */
+export const CODEBUDDY_LOGIN_PERSISTED_BODY =
+  "CodeBuddy Tencent login is required. Use the re-login action in the chat.";
+
 const EXPLICIT_LOGIN = [
   "codebuddy login",
   "please login",
@@ -109,10 +113,86 @@ function isSuccessfulHarnessTurn(message: CodebuddyLoginMessage): boolean {
  * Show the login CTA when the latest assistant turn is a CodeBuddy auth failure.
  * A later successful answer hides it.
  */
+function turnStartBeforeAssistant(messages: CodebuddyLoginMessage[], assistantIndex: number): number {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") return index + 1;
+  }
+  return 0;
+}
+
+function messageIndexById(
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  message: CodebuddyLoginMessage & { id?: string },
+): number {
+  const id = String(message.id ?? "").trim();
+  if (id) {
+    return messages.findIndex((row) => row.id === id);
+  }
+  return messages.indexOf(message);
+}
+
+function lastAssistantIndex(messages: CodebuddyLoginMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") return index;
+  }
+  return -1;
+}
+
+/** True when this row should show the live re-login CTA (last failing assistant turn). */
+export function assistantTurnNeedsCodebuddyLogin(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  if (message.role !== "assistant") return false;
+  if (!sessionShowsCodebuddyLoginPrompt(messages, activeHarnessId)) return false;
+  const assistantIndex = messageIndexById(messages, message);
+  if (assistantIndex < 0 || assistantIndex !== lastAssistantIndex(messages)) return false;
+  const start = turnStartBeforeAssistant(messages, assistantIndex);
+  const slice = messages.slice(start, assistantIndex + 1);
+  return sessionShowsCodebuddyLoginPrompt(slice, activeHarnessId);
+}
+
+function isLoginPersistedBody(text: string): boolean {
+  const trimmed = String(text ?? "").trim();
+  return trimmed === CODEBUDDY_LOGIN_PERSISTED_BODY;
+}
+
+/** Hide harness 400/401 banners and backend login placeholder from the bubble body. */
+export function shouldSuppressCodebuddyHarnessErrorBody(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  const raw = String(message.content ?? "");
+  if (loginFlag(message.metadata)) {
+    return (
+      HARNESS_ERROR_RE.test(raw)
+      || isLoginPersistedBody(raw)
+      || isCodebuddyAuthFailureText(raw)
+    );
+  }
+  if (!assistantTurnNeedsCodebuddyLogin(message, messages, activeHarnessId)) return false;
+  return HARNESS_ERROR_RE.test(raw) || isLoginPersistedBody(raw) || isCodebuddyAuthFailureText(raw);
+}
+
+/** Historical login turns (resolved): short notice, no CTA. */
+export function assistantShowsResolvedCodebuddyLoginNotice(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  if (message.role !== "assistant" || !loginFlag(message.metadata)) return false;
+  if (assistantTurnNeedsCodebuddyLogin(message, messages, activeHarnessId)) return false;
+  return shouldSuppressCodebuddyHarnessErrorBody(message, messages, activeHarnessId);
+}
+
 export function sessionShowsCodebuddyLoginPrompt(
   messages: CodebuddyLoginMessage[],
   activeHarnessId?: string | null,
+  opts?: { suppressWhileAwaitingRetry?: boolean },
 ): boolean {
+  if (opts?.suppressWhileAwaitingRetry) return false;
   let lastAssistant = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === "assistant") {
@@ -206,27 +286,40 @@ export async function writeCommandToTerminalTab(args: {
   cwd: string;
   label: string;
   command: string;
-  addTab: (cwd: string, label: string) => void;
-  readActiveTabId: () => string | null;
-  write: (tabId: string, data: string) => Promise<{ ok?: boolean } | null | undefined>;
+  /** Must create a dedicated shell tab and return its id. */
+  addTab: (cwd: string, label: string) => string | null;
+  /** Write into native shell PTY for tabId only (never harness/cc-bridge REPL). */
+  writePty: (tabId: string, data: string) => Promise<{ ok?: boolean } | null | undefined>;
+  waitPtyReady?: (tabId: string) => Promise<boolean>;
   onTabReady?: (tabId: string) => void;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<{ ok: boolean; tabId: string | null }> {
   const cwd = String(args.cwd || "").trim() || "~";
-  args.addTab(cwd, args.label);
-  const tabId = args.readActiveTabId();
+  const tabId = args.addTab(cwd, args.label);
   if (!tabId) return { ok: false, tabId: null };
   args.onTabReady?.(tabId);
   const sleep = args.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const ready = args.waitPtyReady ?? (async () => true);
   const data = `${args.command}\n`;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const wrote = await args.write(tabId, data);
-      if (wrote?.ok) return { ok: true, tabId };
-    } catch {
-      // Terminal pty may still be spawning.
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (await ready(tabId)) {
+      try {
+        const wrote = await args.writePty(tabId, data);
+        if (wrote?.ok) return { ok: true, tabId };
+      } catch {
+        // Terminal pty may still be spawning.
+      }
     }
-    await sleep(180);
+    await sleep(200);
   }
   return { ok: false, tabId };
+}
+
+export function paneAwaitingCodebuddyLoginRetry(
+  sessionId: string | null | undefined,
+  awaitingSessionId: string | null | undefined,
+): boolean {
+  const sid = String(sessionId ?? "").trim();
+  const awaiting = String(awaitingSessionId ?? "").trim();
+  return Boolean(sid && awaiting && sid === awaiting);
 }

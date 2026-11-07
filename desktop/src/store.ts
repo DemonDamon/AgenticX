@@ -210,6 +210,8 @@ export type PaneTerminalTab = {
   id: string;
   cwd: string;
   label: string;
+  /** Host PTY only — never attach cc-bridge for this tab. */
+  shellOnly?: boolean;
   /** When set, embed PTY stream from local cc-bridge (visible_tui) instead of a local shell. */
   ccBridgePty?: {
     sessionId: string;
@@ -306,6 +308,11 @@ export type ChatPane = {
   runDrawerOpen?: boolean;
   /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
   runDrawerRunId?: string | null;
+  /**
+   * User launched shell `codebuddy login` for this session — hide stale auth CTA until
+   * a later successful assistant turn clears it.
+   */
+  codebuddyLoginAwaitingRetrySessionId?: string | null;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -1027,8 +1034,11 @@ type AppState = {
     paneId: string,
     cwd: string,
     labelHint?: string,
-    ccBridgePty?: PaneTerminalTab["ccBridgePty"]
-  ) => void;
+    ccBridgePty?: PaneTerminalTab["ccBridgePty"],
+    opts?: { shellOnly?: boolean },
+  ) => string | null;
+  markCodebuddyLoginAwaitingRetry: (paneId: string, sessionId: string | null) => void;
+  clearCodebuddyLoginAwaitingRetry: (paneId: string) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
@@ -3174,31 +3184,48 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, runDrawerOpen: false, runDrawerRunId: null } : pane
       ),
     })),
-  addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty) =>
-    set((state) => {
-      const pane = state.panes.find((p) => p.id === paneId);
-      if (!pane) return state;
-      const trimmed = (cwd || "").trim();
-      if (!trimmed) return state;
-      const baseRaw = (labelHint ?? "").trim() || trimmed.split(/[/\\]/).filter(Boolean).pop() || "terminal";
-      const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
-      const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
-      const id = uid();
-      const tab: PaneTerminalTab = ccBridgePty
-        ? { id, cwd: trimmed, label, ccBridgePty }
+  addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty, opts) => {
+    const pane = get().panes.find((p) => p.id === paneId);
+    if (!pane) return null;
+    const trimmed = (cwd || "").trim();
+    if (!trimmed) return null;
+    const baseRaw = (labelHint ?? "").trim() || trimmed.split(/[/\\]/).filter(Boolean).pop() || "terminal";
+    const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
+    const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
+    const id = uid();
+    const shellOnly = Boolean(opts?.shellOnly) && !ccBridgePty;
+    const tab: PaneTerminalTab = ccBridgePty
+      ? { id, cwd: trimmed, label, ccBridgePty }
+      : shellOnly
+        ? { id, cwd: trimmed, label, shellOnly: true }
         : { id, cwd: trimmed, label };
-      return {
-        panes: state.panes.map((p) =>
-          p.id === paneId
-            ? {
-                ...p,
-                terminalTabs: [...p.terminalTabs, tab],
-                activeTerminalTabId: id,
-              }
-            : p
-        ),
-      };
-    }),
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === paneId
+          ? {
+              ...p,
+              terminalTabs: [...p.terminalTabs, tab],
+              activeTerminalTabId: id,
+            }
+          : p
+      ),
+    }));
+    return id;
+  },
+  markCodebuddyLoginAwaitingRetry: (paneId, sessionId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, codebuddyLoginAwaitingRetrySessionId: sessionId || null }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginAwaitingRetry: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, codebuddyLoginAwaitingRetrySessionId: null } : pane
+      ),
+    })),
   removePaneTerminalTab: (paneId, tabId) =>
     set((state) => ({
       panes: state.panes.map((pane) => {

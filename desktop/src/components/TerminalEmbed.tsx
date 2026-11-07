@@ -17,6 +17,7 @@ import {
 type Props = {
   tabId: string;
   cwd: string;
+  shellOnly?: boolean;
   ccBridgePty?: PaneTerminalTab["ccBridgePty"];
   /** Selected terminal text → quote chip in the current chat composer. */
   onQuoteSelection?: (text: string) => void;
@@ -133,6 +134,7 @@ function newPtySessionId(tabId: string): string {
 export function TerminalEmbed({
   tabId,
   cwd,
+  shellOnly = false,
   ccBridgePty,
   onQuoteSelection,
   onOpenScratchSelection,
@@ -171,8 +173,9 @@ export function TerminalEmbed({
 
     // Unique id per effect run so kill/exit from a previous session never matches
     // this listener (fixes Strict Mode + parent re-render races).
-    const ptySessionId = ccBridgePty
-      ? `${tabId}:bridge:${ccBridgePty.sessionId.trim()}`
+    const useBridge = Boolean(ccBridgePty) && !shellOnly;
+    const ptySessionId = useBridge
+      ? `${tabId}:bridge:${ccBridgePty!.sessionId.trim()}`
       : newPtySessionId(tabId);
 
     setExited(false);
@@ -280,7 +283,7 @@ export function TerminalEmbed({
 
     void (async () => {
       scheduleFit();
-      if (ccBridgePty) {
+      if (useBridge && ccBridgePty) {
         const res = await window.agenticxDesktop.terminalBridgeAttach({
           id: ptySessionId,
           sessionId: ccBridgePty.sessionId.trim(),

@@ -3538,6 +3538,7 @@ export function WorkPanel({
                     <TerminalEmbed
                       tabId={tab.id}
                       cwd={tab.cwd}
+                      shellOnly={tab.shellOnly}
                       ccBridgePty={tab.ccBridgePty}
                       onQuoteSelection={onQuoteTerminalSelection}
                       onOpenScratchSelection={

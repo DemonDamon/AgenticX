@@ -1111,6 +1111,10 @@
     "badgeOpenClaw": "OpenClaw",
     "codebuddyLogin": {
       "banner": "CodeBuddy 腾讯登录已失效，点击重新登录",
+      "body": "CodeBuddy 腾讯登录已失效，请重新登录后再试。",
+      "retryHint": "完成登录后，可点击上一条消息的重试按钮继续提问。",
+      "pendingRetry": "登录已在终端启动，完成腾讯授权后回到对话，点击上一条消息的重试即可继续。",
+      "resolvedNotice": "此前因 CodeBuddy 登录失效未能完成回答。",
       "terminal": "CodeBuddy 登录",
       "writeFailed": "终端暂时无法输入登录命令，请在已打开的终端中执行 codebuddy login"
     }
