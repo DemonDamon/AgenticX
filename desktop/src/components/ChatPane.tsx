@@ -477,13 +477,16 @@ import {
   stopWbBridgeProgressPoll,
 } from "../utils/wb-bridge-progress";
 import {
-  buildCodebuddyLoginCommand,
   pickLoginCwd,
   assistantTurnNeedsCodebuddyLogin,
   paneAwaitingCodebuddyLoginRetry,
+  paneCodebuddyLoginSessionActive,
   sessionShowsCodebuddyLoginPrompt,
-  writeCommandToTerminalTab,
 } from "../utils/codebuddy-login";
+import {
+  startCodebuddyOAuthLogin,
+  waitForCodebuddyOAuth,
+} from "../utils/codebuddy-oauth-login";
 import { CodebuddyLoginPrompt } from "./messages/CodebuddyLoginPrompt";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
@@ -3179,8 +3182,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const markCodebuddyLoginAuthorizing = useAppStore((s) => s.markCodebuddyLoginAuthorizing);
+  const clearCodebuddyLoginAuthorizing = useAppStore((s) => s.clearCodebuddyLoginAuthorizing);
   const markCodebuddyLoginAwaitingRetry = useAppStore((s) => s.markCodebuddyLoginAwaitingRetry);
   const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
+  const markCodebuddyLoginOAuthFailed = useAppStore((s) => s.markCodebuddyLoginOAuthFailed);
+  const clearCodebuddyLoginOAuthFailed = useAppStore((s) => s.clearCodebuddyLoginOAuthFailed);
+  const codebuddyLoginAuthorizing = useMemo(
+    () =>
+      paneCodebuddyLoginSessionActive(
+        pane.sessionId,
+        pane.codebuddyLoginAuthorizingSessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginAuthorizingSessionId],
+  );
   const codebuddyLoginAwaitingRetry = useMemo(
     () =>
       paneAwaitingCodebuddyLoginRetry(
@@ -3188,6 +3203,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         pane.codebuddyLoginAwaitingRetrySessionId,
       ),
     [pane.sessionId, pane.codebuddyLoginAwaitingRetrySessionId],
+  );
+  const codebuddyLoginOAuthFailed = useMemo(
+    () =>
+      paneCodebuddyLoginSessionActive(
+        pane.sessionId,
+        pane.codebuddyLoginOAuthFailedSessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginOAuthFailedSessionId],
   );
 
   useEffect(() => {
@@ -3206,7 +3229,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const showCodebuddyLogin = useMemo(() => {
     const rows = pane.messages ?? [];
-    if (codebuddyLoginAwaitingRetry) return false;
+    if (codebuddyLoginAuthorizing || codebuddyLoginAwaitingRetry || codebuddyLoginOAuthFailed) {
+      return false;
+    }
     if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) return false;
     let lastAssistant: (typeof rows)[number] | undefined;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -3219,7 +3244,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return false;
     }
     return true;
-  }, [pane.messages, pane.harnessId, codebuddyLoginAwaitingRetry]);
+  }, [
+    pane.messages,
+    pane.harnessId,
+    codebuddyLoginAuthorizing,
+    codebuddyLoginAwaitingRetry,
+    codebuddyLoginOAuthFailed,
+  ]);
   const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -3928,67 +3959,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           cwd = "~";
         }
       }
-      openWorkspaceSidebarForPane(
-        pane.id,
-        paneRef.current?.clientWidth ?? paneWidth,
-        openSidePanel,
-      );
-      let platform: "posix" | "windows" = "posix";
-      try {
-        const host = await window.agenticxDesktop.platform();
-        if (host === "win32") platform = "windows";
-      } catch {
-        platform = "posix";
-      }
-      const loginCommand = buildCodebuddyLoginCommand(platform);
-      const wrote = await writeCommandToTerminalTab({
+      clearCodebuddyLoginOAuthFailed(pane.id);
+      clearCodebuddyLoginAwaitingRetry(pane.id);
+      const started = await startCodebuddyOAuthLogin({
+        apiBase,
+        apiToken,
         cwd,
-        label: "codebuddy-login",
-        command: loginCommand,
-        addTab: (nextCwd, label) =>
-          addPaneTerminalTab(pane.id, nextCwd, label, undefined, { shellOnly: true }),
-        onTabReady: (tabId) => {
-          setRailKind("terminal");
-          setActivePaneTerminalTab(pane.id, tabId);
-          setWorkPanelFocus({ kind: "terminal", tabId });
-        },
-        waitPtyReady: async (tabId) => {
-          if (typeof window.agenticxDesktop?.terminalHasPtyForTab !== "function") return false;
-          const res = await window.agenticxDesktop.terminalHasPtyForTab({
-            tabId,
-            requireRegistered: true,
-          });
-          if (!res.ok || !res.id || res.id.includes(":bridge:")) return false;
-          return true;
-        },
-        writePty: (tabId, data) => {
-          if (typeof window.agenticxDesktop?.terminalWritePtyByTab !== "function") {
-            return Promise.resolve({ ok: false });
-          }
-          return window.agenticxDesktop.terminalWritePtyByTab({
-            tabId,
-            data,
-            requireRegistered: true,
-          });
-        },
       });
-      if (!wrote.ok) {
-        setAttachToastMessage(t("harness.codebuddyLogin.writeFailed"));
+      const jobId = started.snapshot?.job_id;
+      if (!started.ok || !jobId) {
+        markCodebuddyLoginOAuthFailed(pane.id, pane.sessionId, started.error || started.snapshot?.error);
+        setAttachToastMessage(
+          started.error || started.snapshot?.error || t("harness.codebuddyLogin.oauthStartFailed"),
+        );
         setAttachToastOpen(true);
         return;
       }
-      markCodebuddyLoginAwaitingRetry(pane.id, pane.sessionId);
+      markCodebuddyLoginAuthorizing(pane.id, pane.sessionId);
+      const final = await waitForCodebuddyOAuth({
+        apiBase,
+        apiToken,
+        jobId,
+        openAuthorizeUrl: (url) => {
+          const opened = ensureInAppBrowserOpenRef.current(url);
+          if (!opened.ok) {
+            void window.agenticxDesktop?.openExternal?.(url);
+          }
+        },
+      });
+      clearCodebuddyLoginAuthorizing(pane.id);
+      if (final.status === "success") {
+        markCodebuddyLoginAwaitingRetry(pane.id, pane.sessionId);
+        return;
+      }
+      markCodebuddyLoginOAuthFailed(
+        pane.id,
+        pane.sessionId,
+        final.error || t("harness.codebuddyLogin.oauthFailedGeneric"),
+      );
     })();
   }, [
-    addPaneTerminalTab,
-    setActivePaneTerminalTab,
+    apiBase,
+    apiToken,
+    clearCodebuddyLoginAwaitingRetry,
+    clearCodebuddyLoginAuthorizing,
+    clearCodebuddyLoginOAuthFailed,
+    markCodebuddyLoginAuthorizing,
     markCodebuddyLoginAwaitingRetry,
-    openSidePanel,
+    markCodebuddyLoginOAuthFailed,
     pane.activeTaskspaceId,
     pane.id,
     pane.sessionId,
-    paneWidth,
-    setRailKind,
     t,
   ]);
   const openScratchFromDraft = useCallback(
@@ -9553,6 +9574,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               activeHarnessId={pane.harnessId}
               onCodebuddyLogin={startCodebuddyLogin}
               codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
+              codebuddyLoginAuthorizing={codebuddyLoginAuthorizing}
+              codebuddyLoginOAuthFailed={codebuddyLoginOAuthFailed}
+              codebuddyLoginOAuthError={pane.codebuddyLoginOAuthError}
             />
             </MarkdownContext.Provider>
           </div>

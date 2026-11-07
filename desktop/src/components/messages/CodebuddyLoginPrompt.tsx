@@ -9,7 +9,7 @@ type Props = {
 const CTA_BUTTON_CLASS =
   "inline-flex max-w-full items-center justify-center gap-2 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1.5 text-center text-[12px] text-amber-100/95 transition hover:bg-amber-500/20 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900 [html[data-theme=light]_&]:hover:bg-amber-500/25";
 
-/** CodeBuddy auth expired — re-login inside Near's terminal. */
+/** CodeBuddy auth expired — browser OAuth (same flow as MCP F2.0 connectors). */
 export function CodebuddyLoginPrompt({ onLogin, variant = "composer" }: Props) {
   const { t } = useTranslation("chat");
   if (variant === "inline") {

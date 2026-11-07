@@ -42,7 +42,7 @@ describe("ImBubble codebuddy login", () => {
     expect(onLogin).toHaveBeenCalledOnce();
   });
 
-  it("shows pending retry guidance after shell login was started", async () => {
+  it("shows oauth success tip only after authorization finished", async () => {
     await i18n.changeLanguage("zh");
     render(
       <ImBubble
@@ -67,7 +67,36 @@ describe("ImBubble codebuddy login", () => {
         codebuddyLoginAwaitingRetry
       />,
     );
-    expect(screen.getByText(/登录已在终端启动/)).toBeTruthy();
+    expect(screen.getByText(/授权成功/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /点击重新登录/ })).toBeNull();
+  });
+
+  it("shows authorizing tip while oauth is in progress", async () => {
+    await i18n.changeLanguage("zh");
+    render(
+      <ImBubble
+        message={{
+          id: "a-fail",
+          role: "assistant",
+          content:
+            "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+          metadata: { harness: "codebuddy", codebuddy_login_required: true },
+        }}
+        conversationMessages={[
+          { role: "user", content: "search", id: "u1" },
+          {
+            id: "a-fail",
+            role: "assistant",
+            content:
+              "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+            metadata: { harness: "codebuddy", codebuddy_login_required: true },
+          },
+        ]}
+        activeHarnessId="codebuddy"
+        codebuddyLoginAuthorizing
+      />,
+    );
+    expect(screen.getByText(/正在打开浏览器完成腾讯授权/)).toBeTruthy();
+    expect(screen.queryByText(/登录已在终端启动/)).toBeNull();
   });
 });

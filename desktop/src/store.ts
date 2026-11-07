@@ -309,10 +309,16 @@ export type ChatPane = {
   /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
   runDrawerRunId?: string | null;
   /**
-   * User launched shell `codebuddy login` for this session — hide stale auth CTA until
-   * a later successful assistant turn clears it.
+   * CodeBuddy OAuth in progress for this session — hide CTA and show authorizing tip.
+   */
+  codebuddyLoginAuthorizingSessionId?: string | null;
+  /**
+   * OAuth finished successfully — user should retry the last message.
    */
   codebuddyLoginAwaitingRetrySessionId?: string | null;
+  /** Last OAuth attempt failed for this session (inline failure tip). */
+  codebuddyLoginOAuthFailedSessionId?: string | null;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -1037,8 +1043,12 @@ type AppState = {
     ccBridgePty?: PaneTerminalTab["ccBridgePty"],
     opts?: { shellOnly?: boolean },
   ) => string | null;
+  markCodebuddyLoginAuthorizing: (paneId: string, sessionId: string | null) => void;
+  clearCodebuddyLoginAuthorizing: (paneId: string) => void;
   markCodebuddyLoginAwaitingRetry: (paneId: string, sessionId: string | null) => void;
   clearCodebuddyLoginAwaitingRetry: (paneId: string) => void;
+  markCodebuddyLoginOAuthFailed: (paneId: string, sessionId: string | null, error?: string) => void;
+  clearCodebuddyLoginOAuthFailed: (paneId: string) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
@@ -3212,6 +3222,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     return id;
   },
+  markCodebuddyLoginAuthorizing: (paneId, sessionId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginAuthorizingSessionId: sessionId || null,
+              codebuddyLoginOAuthFailedSessionId: null,
+              codebuddyLoginOAuthError: null,
+            }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginAuthorizing: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, codebuddyLoginAuthorizingSessionId: null } : pane
+      ),
+    })),
   markCodebuddyLoginAwaitingRetry: (paneId, sessionId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -3224,6 +3253,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, codebuddyLoginAwaitingRetrySessionId: null } : pane
+      ),
+    })),
+  markCodebuddyLoginOAuthFailed: (paneId, sessionId, error) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginOAuthFailedSessionId: sessionId || null,
+              codebuddyLoginOAuthError: error ? String(error).slice(0, 240) : null,
+            }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginOAuthFailed: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginOAuthFailedSessionId: null,
+              codebuddyLoginOAuthError: null,
+            }
+          : pane
       ),
     })),
   removePaneTerminalTab: (paneId, tabId) =>
