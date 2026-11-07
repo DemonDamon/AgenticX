@@ -1083,12 +1083,12 @@ body.agx-settings-nav-resizing {
   mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
 }
 
-/* Grok-like nest: bite a circular corner when harness chip is present.
- * Cutout radius ≈ chipRadius (12px) + gap (~3px) = 15px, centered on the
- * top-right corner so the 24px chip (-top-3/-right-3) sits in the notch
- * with an even page-bg seam. Only user bubbles; :has keeps other roles intact.
+/* Grok-like nest: bite a circular corner on the orange fill only.
+ * Cutout radius ≈ chipRadius (12px) + gap (~3px) = 15px at top-right.
+ * Badge is a SIBLING of the masked bubble (see ImBubble wrapper) so the
+ * mask cannot clip it. Only .agx-im-user-bubble--harness-nest.
  */
-.agx-im-user-bubble:has([data-harness-badge-corner]) {
+.agx-im-user-bubble--harness-nest {
   --agx-harness-nest-r: 15px;
   -webkit-mask-image: radial-gradient(
     circle var(--agx-harness-nest-r) at 100% 0,
@@ -1100,6 +1100,14 @@ body.agx-settings-nav-resizing {
     transparent calc(var(--agx-harness-nest-r) - 0.5px),
     #000 var(--agx-harness-nest-r)
   );
+}
+
+.agx-im-user-bubble-nest {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  width: fit-content;
+  overflow: visible;
 }
 
 /* 用户气泡：实心填充胶囊；圆角只放这里，避免和 Tailwind 抢 border-radius */

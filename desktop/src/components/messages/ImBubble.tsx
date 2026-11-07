@@ -66,6 +66,7 @@ import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/gr
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { HarnessAvatarBadge } from "./HarnessAvatarBadge";
+import { resolveMessageHarnessId } from "../../utils/harness-display";
 import { Shimmer } from "../ds/Shimmer";
 import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
 import { GroupTalkReportCard } from "./GroupTalkReportCard";
@@ -751,6 +752,13 @@ export function ImBubble({
       }
     : bubbleStyle;
 
+  const showHarnessNest =
+    isUser &&
+    Boolean(
+      (turnHarnessId && String(turnHarnessId).trim()) ||
+        resolveMessageHarnessId(message.metadata ?? undefined),
+    );
+
   const assistantIconButtons = shouldShowAssistantIconButtons({
     hideActions,
     isUser,
@@ -1043,15 +1051,12 @@ export function ImBubble({
               </div>
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
+            <div className="agx-im-user-bubble-nest">
             <MaybeConversationContent
               active={showSenderIdentity}
-              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full overflow-visible border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+              className={`agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full overflow-visible border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed${showHarnessNest ? " agx-im-user-bubble--harness-nest" : ""}`}
               style={userBubbleStyle}
             >
-              <HarnessAvatarBadge
-                harnessId={turnHarnessId}
-                metadata={message.metadata}
-              />
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {message.forwardedHistory ? (
@@ -1104,6 +1109,13 @@ export function ImBubble({
                 ) : null}
               </div>
             </MaybeConversationContent>
+            {showHarnessNest ? (
+              <HarnessAvatarBadge
+                harnessId={turnHarnessId}
+                metadata={message.metadata}
+              />
+            ) : null}
+            </div>
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}
