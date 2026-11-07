@@ -1207,3 +1207,46 @@ def test_delegation_reasoning_only_stall_pauses_early() -> None:
     assert paused.data["detector"] == "reasoning_only_stall"
     assert paused.data["retryable"] is True
     assert int(paused.data["round"]) < 20
+
+
+@pytest.mark.parametrize("raw_arguments,expected_dispatches", [
+    ('{"message":', 0), ('null', 0), ('[1, 2]', 0), ('', 0), ('{}', 1),
+])
+def test_optional_tool_dispatch_requires_valid_streamed_object(monkeypatch, raw_arguments, expected_dispatches):
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    dispatched = []
+
+    async def dispatch(*args, **kwargs):
+        dispatched.append((args, kwargs))
+        return "ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", dispatch)
+
+    class OptionalToolThenAnswer:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_with_tools(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield {"type": "tool_call_delta", "tool_name": "list_items",
+                       "tool_call_id": "call-optional", "arguments_delta": raw_arguments}
+            else:
+                yield {"type": "content", "text": "Completed."}
+
+    tools = [{"type": "function", "function": {
+        "name": "list_items", "description": "List optional items",
+        "parameters": {"type": "object", "properties": {"message": {"type": "string"}}},
+    }}]
+    async def collect():
+        runtime = AgentRuntime(OptionalToolThenAnswer(), _ApproveGate())
+        return [
+            {"type": event.type, "data": event.data}
+            async for event in runtime.run_turn("hello", StudioSession(), tools=tools)
+        ]
+
+    events = __import__("asyncio").run(collect())
+    assert len(dispatched) == expected_dispatches
+    if not expected_dispatches:
+        assert any(event["type"] == EventType.ROUND_END.value and event["data"].get("auto_retry") for event in events)
