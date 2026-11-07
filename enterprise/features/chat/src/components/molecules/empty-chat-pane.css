@@ -1,0 +1,10 @@
+/* Query the actual available chat height, including visual-viewport changes. */
+@container chat-empty (max-height: 560px) {
+  .agx-empty-chat-content {
+    gap: 0.75rem;
+    padding-top: 0.75rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .agx-empty-chat-hero { display: none; }
+  .agx-empty-chat-composer { margin-top: auto; }
+}

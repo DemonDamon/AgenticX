@@ -30,6 +30,8 @@ import { laneSourceHost, type LaneSource } from "./deep-research-lane-sources";
 import { useChatCopy, useChatLocale } from "../../i18n/ChatLocaleProvider";
 import { localizeReportChrome } from "./localize-report-chrome";
 import { WebSearchFavicon } from "./WebSearchFavicon";
+import { usePreviewDialog, usePreviewPanelLayout } from "../../hooks/usePreviewPanelLayout";
+import { usableViewportStyle } from "../../utils/usable-viewport";
 import "../../markdown/chat-prism-themes.css";
 
 export type { ArtifactListItem };
@@ -521,8 +523,13 @@ export function DeepResearchFilesPanel({
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   const [zipping, setZipping] = React.useState(false);
   const [panelWidthPx, setPanelWidthPx] = React.useState(480);
-  const panelRef = React.useRef<HTMLElement | null>(null);
+  const { panelRef, overlay, containerWidth } = usePreviewPanelLayout(open);
+  const resizeCleanupRef = React.useRef<(() => void) | null>(null);
   const userResizedRef = React.useRef(false);
+  usePreviewDialog(panelRef, open && (fullscreen || overlay), () => {
+    if (fullscreen) setFullscreen(false);
+    else onOpenChange(false);
+  });
 
   const tree = React.useMemo(() => buildArtifactTree(artifacts), [artifacts]);
 
@@ -545,40 +552,42 @@ export function DeepResearchFilesPanel({
 
   const onResizePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (fullscreen || event.button !== 0) return;
+      if (fullscreen || overlay || event.button !== 0) return;
+      resizeCleanupRef.current?.();
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = panelWidthPx;
-      const containerPx = measureContainerWidth();
+      const previousCursor = document.body.style.cursor;
+      const previousSelection = document.body.style.userSelect;
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
 
       const onMove = (moveEvent: PointerEvent) => {
         // Drag handle left → wider panel; right → narrower panel.
-        const next = clampFilesPanelWidth(startWidth + (startX - moveEvent.clientX), containerPx);
+        const next = clampFilesPanelWidth(startWidth + (startX - moveEvent.clientX), measureContainerWidth());
         userResizedRef.current = true;
         setPanelWidthPx(next);
       };
       const onUp = () => {
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousSelection;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        resizeCleanupRef.current = null;
       };
+      resizeCleanupRef.current = onUp;
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp, { once: true });
+      window.addEventListener("pointercancel", onUp, { once: true });
     },
-    [fullscreen, panelWidthPx, measureContainerWidth],
+    [fullscreen, overlay, panelWidthPx, measureContainerWidth],
   );
 
   React.useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFullscreen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
+    if (!open || fullscreen || overlay) resizeCleanupRef.current?.();
+    return () => resizeCleanupRef.current?.();
+  }, [open, fullscreen, overlay]);
 
   const mdComponents = React.useMemo(
     () =>
@@ -720,15 +729,14 @@ export function DeepResearchFilesPanel({
     }
   }, [open, fullscreen, view, selectedIsHtml, selectedId, measureContainerWidth]);
 
-  // Keep the panel inside constraints when the window shrinks.
+  // Parent changes include the sidebar and a selected fold segment, not just a
+  // window resize. Keep an explicit user width while restoring sensible defaults.
   React.useEffect(() => {
-    if (!open || fullscreen) return;
-    const onWinResize = () => {
-      setPanelWidthPx((width) => clampFilesPanelWidth(width, measureContainerWidth()));
-    };
-    window.addEventListener("resize", onWinResize);
-    return () => window.removeEventListener("resize", onWinResize);
-  }, [open, fullscreen, measureContainerWidth]);
+    if (!open || fullscreen || overlay || containerWidth === null) return;
+    setPanelWidthPx((width) => userResizedRef.current
+      ? clampFilesPanelWidth(width, containerWidth)
+      : defaultFilesPanelWidth(containerWidth, { htmlPreview: view === "preview" && selectedIsHtml }));
+  }, [open, fullscreen, overlay, containerWidth, view, selectedIsHtml]);
 
   const triggerBlobDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -873,20 +881,26 @@ export function DeepResearchFilesPanel({
       ref={panelRef}
       className={[
         fullscreen
-          ? "fixed inset-0 z-50 flex min-h-0 w-full flex-col bg-background shadow-2xl"
-          : "relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background",
+          ? "fixed z-50 box-border flex min-h-0 w-full flex-col bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl"
+          : overlay
+            ? "fixed z-40 box-border flex min-h-0 w-full flex-col bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-xl"
+            : "relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
-      style={fullscreen ? undefined : { width: panelWidthPx }}
+      style={fullscreen || overlay ? usableViewportStyle : { width: panelWidthPx }}
       data-testid="deep-research-files-panel"
       data-view={view}
       data-fullscreen={fullscreen ? "true" : "false"}
-      data-panel-width={fullscreen ? undefined : String(panelWidthPx)}
+      data-layout={fullscreen ? "fullscreen" : overlay ? "overlay" : "docked"}
+      data-preview-modal={fullscreen || overlay ? "true" : undefined}
+      role={fullscreen || overlay ? "dialog" : undefined}
+      aria-modal={fullscreen || overlay ? true : undefined}
+      data-panel-width={fullscreen || overlay ? undefined : String(panelWidthPx)}
       aria-label={browsing ? copy.delivery.allFiles : sourcesView ? "网页搜索来源" : "文件预览"}
     >
-      {!fullscreen ? (
+      {!fullscreen && !overlay ? (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1024,6 +1038,7 @@ export function DeepResearchFilesPanel({
                 onOpenChange(false);
               }}
               aria-label="关闭"
+              data-preview-close
             >
               <IconClose className="h-4 w-4" />
             </Button>
