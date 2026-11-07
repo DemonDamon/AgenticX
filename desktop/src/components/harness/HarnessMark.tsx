@@ -13,7 +13,7 @@ type Props = {
 
 /**
  * Shared exclusive harness mark for bubble corner badge + picker.
- * Known brands (incl. Near app icon for AgenticX) render as <img>.
+ * Known brands (incl. Near orange cube SVG for AgenticX) render as <img>.
  */
 export function HarnessMark({ harnessId, size = 16, className = "", title }: Props) {
   const id = canonicalizeHarnessId(harnessId);

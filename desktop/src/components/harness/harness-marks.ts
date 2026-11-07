@@ -1,10 +1,10 @@
 /**
  * Exclusive harness brand marks (Damon SVGs under assets/harness/).
  * Vite imports resolve to URL strings usable in <img src>.
- * AgenticX / python-agent uses the Near desktop app icon.
+ * AgenticX / python-agent uses the Near orange cube mark (transparent SVG).
  */
 
-import agenticxMark from "../../assets/harness/agenticx.png";
+import agenticxMark from "../../assets/harness/agenticx.svg";
 import claudeCodeMark from "../../assets/harness/claude-code.svg";
 import codebuddyMark from "../../assets/harness/codebuddy.svg";
 import codexMark from "../../assets/harness/codex.svg";
@@ -29,7 +29,7 @@ const MARK_BY_ID: Record<string, string> = {
   "pi-agent": piAgentMark,
 };
 
-/** URL for the harness mark image (Near app icon for AgenticX). */
+/** URL for the harness mark image (Near cube SVG for AgenticX). */
 export function harnessMarkSrc(harnessId: string | null | undefined): string | null {
   const id = canonicalizeHarnessId(harnessId);
   return MARK_BY_ID[id] ?? null;

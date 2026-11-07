@@ -20,9 +20,10 @@ describe("harness-marks", () => {
     }
   });
 
-  it("AgenticX uses Near app icon asset", () => {
+  it("AgenticX uses Near orange cube SVG (no yellow plate PNG)", () => {
     const src = String(harnessMarkSrc("python-agent") ?? "");
     expect(src.length).toBeGreaterThan(0);
-    expect(src).toMatch(/png|image/i);
+    expect(src).toMatch(/svg|agenticx/i);
+    expect(src).not.toMatch(/\.png(\?|$)/i);
   });
 });
