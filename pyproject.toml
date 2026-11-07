@@ -85,7 +85,7 @@ dependencies = [
 # `pip install "$PROJECT_ROOT[desktop-runtime]"` 安装本组。
 desktop-runtime = [
     "PyMuPDF>=1.23.0,<2",
-    "pypdf>=3.15.0,<5",
+    "pypdf>=3.15.0,<7",
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
     "docx2txt>=0.8,<1",
@@ -140,7 +140,7 @@ graphiti = [
 #        docx2txt 处理旧版 .doc 需要 antiword (brew install antiword)
 document = [
     "PyMuPDF>=1.23.0,<2",
-    "pypdf>=3.15.0,<5",
+    "pypdf>=3.15.0,<7",
     "PyPDF2>=3.0.0,<4",
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
