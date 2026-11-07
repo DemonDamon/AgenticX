@@ -5,7 +5,7 @@ import { harnessMarkSrc } from "./harness-marks";
 
 type Props = {
   harnessId: string | null | undefined;
-  /** Pixel box for the glyph (badge ~16, picker ~14). */
+  /** Pixel box for the glyph (badge ~18, picker ~14). */
   size?: number;
   className?: string;
   title?: string;
@@ -27,7 +27,7 @@ export function HarnessMark({ harnessId, size = 16, className = "", title }: Pro
         data-harness-mark={id}
         width={size}
         height={size}
-        className={`shrink-0 object-contain ${className}`}
+        className={`block shrink-0 object-contain ${className}`}
         draggable={false}
         aria-hidden
       />
