@@ -7178,7 +7178,7 @@ def create_studio_app() -> FastAPI:
         Body: ``{harness_id, strategy?, manual_context?}``. Busy (a turn in
         flight, builtin or external) → 409; plan/handoff failures → 400 with
         the session keeping its current binding (fail closed). Switching to
-        ``python-agent`` returns to the builtin runtime: chat_history is its
+        ``python-agent`` / agenticx returns to the builtin runtime: chat_history is projected into agent_messages (run_turn context); chat_history is its
         context, so only the boundary marker + rebind happen.
         """
         _check_token(x_agx_desktop_token)

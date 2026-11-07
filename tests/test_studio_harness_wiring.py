@@ -430,6 +430,8 @@ def test_switch_to_builtin_boundary_and_unbind(wiring):
     manager = FakeManager(session)
     manager.set_session_harness("sess-1", harness_id="alpha")
     hw.run_external_harness_turn(manager, "sess-1", "one")
+    # External turns never touch agent_messages — the bug surface.
+    assert session.agent_messages == []
 
     result = hw.switch_harness(manager, "sess-1", "python-agent")
 
@@ -443,9 +445,50 @@ def test_switch_to_builtin_boundary_and_unbind(wiring):
     assert meta["kind"] == "harness_switch"
     assert meta["from_harness"] == "alpha"
     assert meta["to_harness"] is None
-    assert "alpha" in boundaries[0]["content"] and "python-agent" in boundaries[0]["content"]
-    # chat_history itself is untouched (it IS the builtin context).
+    assert "alpha" in boundaries[0]["content"] and "agenticx" in boundaries[0]["content"]
+    # chat_history stays the UI transcript.
     assert len([m for m in session.chat_history if m["role"] in ("user", "assistant")]) == 2
+    # Builtin run_turn reads agent_messages — must be projected from chat_history.
+    assert result.get("synced_agent_messages") == 2
+    assert [(m["role"], m["content"]) for m in session.agent_messages] == [
+        ("user", "one"),
+        ("assistant", "alpha reply #1"),
+    ]
+
+
+def test_switch_to_builtin_replaces_stale_agent_messages(wiring):
+    hw, alpha, _beta, _ = wiring
+    session = make_session()
+    session.agent_messages = [
+        {"role": "user", "content": "stale only"},
+        {"role": "assistant", "content": "old builtin reply"},
+    ]
+    session.chat_history = [
+        {"role": "user", "content": "earlier", "metadata": {"harness": "alpha"}},
+        {
+            "role": "assistant",
+            "content": "from claude-code",
+            "metadata": {"harness": "claude-code"},
+        },
+        {
+            "role": "system",
+            "content": "已切换执行引擎：claude-code → python-agent（策略 builtin）",
+            "system_notice": True,
+            "metadata": {"kind": "harness_switch"},
+        },
+    ]
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="alpha")
+
+    result = hw.switch_harness(manager, "sess-1", "agenticx")
+
+    assert result["ok"] and result["strategy"] == "builtin"
+    assert result.get("synced_agent_messages") == 2
+    assert [m["content"] for m in session.agent_messages] == [
+        "earlier",
+        "from claude-code",
+    ]
+    assert all(not m.get("system_notice") for m in session.agent_messages)
 
 
 def test_switch_external_records_handoff_and_boundary(wiring):
