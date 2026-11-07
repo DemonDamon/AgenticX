@@ -27,14 +27,28 @@ function wrap(node: React.ReactNode) {
 }
 
 describe("HarnessAvatarBadge", () => {
-  it("renders AgenticX for builtin metadata", () => {
+  it("renders a compact corner icon with hover name (no text pill)", () => {
     const html = wrap(<HarnessAvatarBadge metadata={{ harness: "python-agent" }} />);
-    expect(html).toContain("data-harness-avatar-badge=\"python-agent\"");
-    expect(html).toContain("AgenticX");
+    expect(html).toContain('data-harness-avatar-badge="python-agent"');
+    expect(html).toContain('data-harness-badge-corner=""');
+    expect(html).toContain('title="AgenticX"');
+    expect(html).toContain("sr-only");
+    // Icon-only chip: no truncate text pill next to the glyph.
+    expect(html).not.toContain("truncate");
+    expect(html).not.toContain("max-w-[9.5rem]");
   });
 
   it("omits when harness unknown", () => {
     const html = wrap(<HarnessAvatarBadge metadata={{}} />);
     expect(html).toBe("");
+  });
+
+  it("uses Claude Code / CodeBuddy titles", () => {
+    expect(wrap(<HarnessAvatarBadge metadata={{ harness: "claude-code" }} />)).toContain(
+      'title="Claude Code"',
+    );
+    expect(wrap(<HarnessAvatarBadge metadata={{ harness: "codebuddy" }} />)).toContain(
+      'title="CodeBuddy"',
+    );
   });
 });

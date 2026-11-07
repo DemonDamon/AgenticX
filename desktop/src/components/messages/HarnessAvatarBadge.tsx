@@ -12,27 +12,25 @@ import { BUILTIN_HARNESS_ID } from "../../utils/preferred-harness";
 type Props = {
   harnessId?: string | null;
   metadata?: Record<string, unknown> | null;
-  /** Overlay on avatar (bottom-right) vs inline chip beside avatar/name. */
-  variant?: "overlay" | "inline";
   className?: string;
 };
 
 function HarnessGlyph({ harnessId }: { harnessId: string }) {
   const kind = harnessDisplayKind(harnessId);
-  const common = { size: 10 as const, strokeWidth: 2.25 as const, "aria-hidden": true as const };
+  const common = { size: 11 as const, strokeWidth: 2.4 as const, "aria-hidden": true as const };
   if (kind === "claude-code") return <Sparkles {...common} />;
   if (kind === "codebuddy") return <Code2 {...common} />;
   return <Bot {...common} />;
 }
 
 /**
- * Small per-turn harness marker for assistant bubbles (Damon: avatar_badge).
- * Omit when harness is unknown so historical rows stay uncluttered.
+ * Compact per-turn harness marker: Grok-style circular icon on the
+ * top-right corner of the assistant answer bubble. Icon only; hover
+ * title shows AgenticX / Claude Code / CodeBuddy. Omit when unknown.
  */
 export function HarnessAvatarBadge({
   harnessId,
   metadata,
-  variant = "inline",
   className = "",
 }: Props) {
   const { t } = useTranslation("chat");
@@ -47,23 +45,16 @@ export function HarnessAvatarBadge({
     defaultValue: harnessBadgeFallbackLabel(id),
   });
 
-  const chip = (
+  return (
     <span
       data-harness-avatar-badge={id}
+      data-harness-badge-corner=""
       title={label}
-      className={`inline-flex max-w-[9.5rem] items-center gap-0.5 rounded-full border border-border/80 bg-surface-card/95 px-1.5 py-0.5 text-[10px] font-medium leading-none text-text-muted shadow-sm ${className}`}
+      aria-label={label}
+      className={`pointer-events-auto absolute -right-1 -top-1 z-[2] inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-surface-card text-text-muted shadow-sm ${className}`}
     >
       <HarnessGlyph harnessId={id} />
-      <span className="min-w-0 truncate">{label}</span>
+      <span className="sr-only">{label}</span>
     </span>
   );
-
-  if (variant === "overlay") {
-    return (
-      <span className="pointer-events-none absolute -bottom-1 left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap">
-        {chip}
-      </span>
-    );
-  }
-  return chip;
 }

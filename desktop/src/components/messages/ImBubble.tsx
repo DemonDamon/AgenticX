@@ -66,7 +66,6 @@ import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/gr
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { HarnessAvatarBadge } from "./HarnessAvatarBadge";
-import { resolveMessageHarnessId } from "../../utils/harness-display";
 import { Shimmer } from "../ds/Shimmer";
 import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
 import { GroupTalkReportCard } from "./GroupTalkReportCard";
@@ -313,7 +312,6 @@ export function ChatImAvatar({
   avatarId,
   color,
   size = "md",
-  harnessBadge,
 }: {
   label: string;
   imageUrl?: string;
@@ -322,8 +320,6 @@ export function ChatImAvatar({
   /** Palette key or empty (= Meta / theme). When omitted and avatarId set, looked up from store. */
   color?: string;
   size?: "sm" | "md";
-  /** Optional per-turn harness chip beside / under the avatar (Damon: avatar_badge). */
-  harnessBadge?: ReactNode;
 }) {
   const metaCostumeUrl = useDisplayedMetaAvatarUrl();
   const liveExpert = useAppStore((s) => {
@@ -394,13 +390,7 @@ export function ChatImAvatar({
       </div>
     );
   }
-  if (!harnessBadge) return face;
-  return (
-    <span className="relative inline-flex shrink-0 flex-col items-center gap-0.5">
-      {face}
-      {harnessBadge}
-    </span>
-  );
+  return face;
 }
 
 const MESSAGE_CONTEXT_MENU_MARGIN = 8;
@@ -951,14 +941,6 @@ export function ImBubble({
             avatarId={senderAvatarId}
             variant="circle"
             size="sm"
-            harnessBadge={
-              !isUser ? (
-                <HarnessAvatarBadge
-                  metadata={message.metadata}
-                  variant="inline"
-                />
-              ) : null
-            }
           />
         </div>
       ) : isGroupAssistant && clusterContinue ? (
@@ -983,11 +965,6 @@ export function ImBubble({
         {isPeerHuman && !clusterContinue ? (
           <div className="mb-0.5 max-w-full truncate text-[12px] font-medium leading-4 text-text-faint">
             {displayName}
-          </div>
-        ) : null}
-        {!isUser && !showGroupIdentityChrome && !compactAssistant && resolveMessageHarnessId(message.metadata) ? (
-          <div className="mb-1 flex items-center gap-1" data-harness-badge-row="">
-            <HarnessAvatarBadge metadata={message.metadata} variant="inline" />
           </div>
         ) : null}
         {isEditing ? (
@@ -1234,6 +1211,7 @@ export function ImBubble({
                     : userBubbleStyle
               }
             >
+              <HarnessAvatarBadge metadata={message.metadata} />
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {displayQuotedItems.length > 0 ? (

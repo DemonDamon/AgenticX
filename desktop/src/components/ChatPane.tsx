@@ -193,8 +193,7 @@ import {
   lastAdjacentClusterKey,
 } from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
-import { HarnessAvatarBadge } from "./messages/HarnessAvatarBadge";
+import { ImBubble } from "./messages/ImBubble";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -9474,19 +9473,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       </svg>
                     </button>
                   ) : null}
-                  <div className="mt-0.5 shrink-0" data-react-harness-avatar="">
-                    <ChatImAvatar
-                      label={paneAvatarMeta.name}
-                      imageUrl={paneAvatarMeta.url}
-                      size="sm"
-                      harnessBadge={
-                        <HarnessAvatarBadge
-                          metadata={lastAssistantInBlock?.metadata ?? finalAssistant?.metadata}
-                          variant="inline"
-                        />
-                      }
-                    />
-                  </div>
                   {useUnifiedReActCard ? (
                     (() => {
                       const actionTailReady = shouldShowReActBlockActionTail({
