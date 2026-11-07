@@ -4,7 +4,7 @@
 The CLI still owns Tencent / Copilot credentials. Near only recognizes a
 failed turn (WebSearch 401 Authorization Required, or an error that mentions
 401 / Authorization / login / apiKeySource on copilot.tencent.com) so the
-desktop can open its own terminal and run ``codebuddy login``.
+Desktop starts OAuth via :mod:`agenticx.harness.codebuddy_oauth_login` (CLI subprocess).
 
 A session init frame that only reports ``apiKeySource`` is not a failure:
 custom-local chat can succeed while tool calls still use that source.

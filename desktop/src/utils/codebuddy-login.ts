@@ -362,11 +362,18 @@ export async function writeCommandToTerminalTab(args: {
   return { ok: false, tabId, sessionId: null };
 }
 
+export function paneCodebuddyLoginSessionActive(
+  sessionId: string | null | undefined,
+  flagSessionId: string | null | undefined,
+): boolean {
+  const sid = String(sessionId ?? "").trim();
+  const flag = String(flagSessionId ?? "").trim();
+  return Boolean(sid && flag && sid === flag);
+}
+
 export function paneAwaitingCodebuddyLoginRetry(
   sessionId: string | null | undefined,
   awaitingSessionId: string | null | undefined,
 ): boolean {
-  const sid = String(sessionId ?? "").trim();
-  const awaiting = String(awaitingSessionId ?? "").trim();
-  return Boolean(sid && awaiting && sid === awaiting);
+  return paneCodebuddyLoginSessionActive(sessionId, awaitingSessionId);
 }

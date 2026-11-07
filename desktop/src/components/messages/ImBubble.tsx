@@ -162,6 +162,9 @@ type Props = {
   onCodebuddyLogin?: () => void;
   /** User already launched shell login; show retry guidance instead of the CTA. */
   codebuddyLoginAwaitingRetry?: boolean;
+  codebuddyLoginAuthorizing?: boolean;
+  codebuddyLoginOAuthFailed?: boolean;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 function ExecutionContractNote({ lines }: { lines: string[] }) {
@@ -461,6 +464,9 @@ export function ImBubble({
   conversationMessages,
   onCodebuddyLogin,
   codebuddyLoginAwaitingRetry = false,
+  codebuddyLoginAuthorizing = false,
+  codebuddyLoginOAuthFailed = false,
+  codebuddyLoginOAuthError = null,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -514,8 +520,20 @@ export function ImBubble({
   const turnNeedsCodebuddyLogin =
     !isUser && assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
   const showInlineCodebuddyLogin =
-    turnNeedsCodebuddyLogin && Boolean(onCodebuddyLogin) && !codebuddyLoginAwaitingRetry;
-  const showCodebuddyLoginPendingTip = turnNeedsCodebuddyLogin && codebuddyLoginAwaitingRetry;
+    turnNeedsCodebuddyLogin
+    && Boolean(onCodebuddyLogin)
+    && !codebuddyLoginAwaitingRetry
+    && !codebuddyLoginAuthorizing
+    && !codebuddyLoginOAuthFailed;
+  const codebuddyLoginTipPhase = codebuddyLoginAuthorizing
+    ? "authorizing"
+    : codebuddyLoginAwaitingRetry
+      ? "success"
+      : codebuddyLoginOAuthFailed
+        ? "failed"
+        : null;
+  const showCodebuddyLoginPendingTip =
+    turnNeedsCodebuddyLogin && codebuddyLoginTipPhase !== null;
   const showResolvedCodebuddyLoginNotice =
     !isUser &&
     assistantShowsResolvedCodebuddyLoginNotice(message, loginTranscript, activeHarnessId);
@@ -1437,8 +1455,11 @@ export function ImBubble({
                     ) : null}
                     {showInlineCodebuddyLogin ? (
                       <CodebuddyLoginPrompt variant="inline" onLogin={onCodebuddyLogin!} />
-                    ) : showCodebuddyLoginPendingTip ? (
-                      <CodebuddyLoginPendingTip />
+                    ) : showCodebuddyLoginPendingTip && codebuddyLoginTipPhase ? (
+                      <CodebuddyLoginPendingTip
+                        phase={codebuddyLoginTipPhase}
+                        error={codebuddyLoginOAuthError}
+                      />
                     ) : showResolvedCodebuddyLoginNotice ? (
                       <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
                         {t("harness.codebuddyLogin.resolvedNotice")}

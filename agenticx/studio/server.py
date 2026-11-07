@@ -9477,6 +9477,47 @@ def create_studio_app() -> FastAPI:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/codebuddy/oauth/start")
+    async def start_codebuddy_oauth_login_route(
+        body: dict | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        cwd = ""
+        if isinstance(body, dict):
+            cwd = str(body.get("cwd") or "").strip()
+        try:
+            from agenticx.harness.codebuddy_oauth_login import (
+                codebuddy_oauth_job_snapshot,
+                start_codebuddy_oauth_login,
+            )
+
+            job = await start_codebuddy_oauth_login(cwd or "~")
+            return {"ok": job.status.value != "failed", **codebuddy_oauth_job_snapshot(job)}
+        except Exception as exc:
+            logger.warning("start_codebuddy_oauth_login error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/codebuddy/oauth/status")
+    async def codebuddy_oauth_login_status_route(
+        job_id: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.harness.codebuddy_oauth_login import (
+                codebuddy_oauth_job_snapshot,
+                get_codebuddy_oauth_job,
+            )
+
+            job = get_codebuddy_oauth_job(job_id)
+            if not job:
+                return {"ok": False, "error": "unknown job_id"}
+            return {"ok": True, **codebuddy_oauth_job_snapshot(job)}
+        except Exception as exc:
+            logger.warning("codebuddy_oauth_login_status error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     @app.get("/api/codebuddy/resolve-model")
     async def resolve_codebuddy_model_route(
         model: str = "",
