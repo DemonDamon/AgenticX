@@ -1,4 +1,5 @@
-const MAX_BYTES = 24_000;
+import { createHash } from "node:crypto";
+import { downloadSkillBytes, type SkillAddressLookup, type SkillHttpsRequest } from "./skill-bundle-transport";
 
 export function skillBundleAllowlist(): Set<string> {
   const raw = process.env.ENTERPRISE_SKILL_BUNDLE_HOST_ALLOWLIST ?? "";
@@ -12,29 +13,41 @@ export function skillBundleAllowlist(): Set<string> {
 
 export async function loadSkillBody(
   bundleUri: string | null,
-  fetchImpl: typeof fetch = fetch,
+  options: {
+    expectedDigest?: string | null;
+    resolveAddresses?: SkillAddressLookup;
+    requestImpl?: SkillHttpsRequest;
+  } = {},
 ): Promise<string | null> {
-  if (!bundleUri) return null;
+  if (!bundleUri || bundleUri.length > 2048) return null;
   let url: URL;
   try {
     url = new URL(bundleUri);
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" || url.username || url.password) return null;
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
   const host = url.hostname.toLowerCase();
   if (!skillBundleAllowlist().has(host)) return null;
-  let response: Response;
+  const rawDigest = options.expectedDigest?.trim();
+  const digest = rawDigest?.toLowerCase().replace(/^sha256:/, "");
+  if (rawDigest && !/^[a-f0-9]{64}$/.test(digest ?? "")) return null;
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(new Error("skill download deadline")), 2500);
+  let bytes: Buffer;
   try {
-    response = await fetchImpl(url.toString(), {
-      redirect: "error",
-      signal: AbortSignal.timeout(2500),
+    bytes = await downloadSkillBytes(url, controller.signal, {
+      allowPrivate: process.env.ENTERPRISE_SKILL_BUNDLE_ALLOW_PRIVATE_NETWORK === "true",
+      resolveAddresses: options.resolveAddresses,
+      requestImpl: options.requestImpl,
     });
+    if (digest && createHash("sha256").update(bytes).digest("hex") !== digest) return null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(deadline);
   }
-  if (!response.ok) return null;
-  const text = (await response.text()).slice(0, MAX_BYTES);
+  const text = bytes.toString("utf8");
   if (!text.startsWith("---")) return text;
   const end = text.indexOf("\n---", 3);
   if (end === -1) return text;
