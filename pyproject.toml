@@ -87,7 +87,7 @@ desktop-runtime = [
     "PyMuPDF>=1.23.0,<2",
     "pypdf>=3.15.0,<5",
     "python-docx>=0.8.11,<2",
-    "python-pptx>=0.6.21,<1",
+    "python-pptx>=0.6.21,<2",
     "docx2txt>=0.8,<1",
     "numpy>=1.24.0,<2",
     # 知识库默认向量后端：agenticx.studio.kb.runtime._ChromaBackend 直接
@@ -143,7 +143,7 @@ document = [
     "pypdf>=3.15.0,<5",
     "PyPDF2>=3.0.0,<4",
     "python-docx>=0.8.11,<2",
-    "python-pptx>=0.6.21,<1",
+    "python-pptx>=0.6.21,<2",
     "docx2txt>=0.8,<1",
     "pytesseract>=0.3.10,<1",
     "pdf2image>=1.16.0,<2",
