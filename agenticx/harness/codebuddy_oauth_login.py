@@ -1,21 +1,38 @@
-"""In-process CodeBuddy Tencent OAuth via CLI ``login`` (subprocess, not harness REPL).
+"""In-process CodeBuddy Tencent OAuth via official auth/state + token APIs.
 
-Near Desktop opens the authorize URL in the WorkPanel browser and polls status until
-the CLI exits. Tokens stay in CodeBuddy's own credential store.
+Near Desktop opens the authorize URL in the WorkPanel browser and polls job
+status until tokens are written into CodeBuddy's credential store.
+
+Important: Homebrew / npm CodeBuddy CLI (2.x) has no ``login`` / ``--no-browser``
+subcommand. Interactive slash ``/login`` opens the same Tencent web flow that
+these HTTP endpoints drive. Spawning ``codebuddy login`` treats ``login`` as a
+chat prompt or fails with unknown options (exit 1).
 """
 
 from __future__ import annotations
 
 import asyncio
-import re
+import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
-_URL_RE = re.compile(r"https://[^\s'\"<>)\]]+", re.I)
+_AUTH_ID = "Tencent-Cloud.coding-copilot"
+_PREFIX_PATH = "/plugin"
+_PLATFORM = "cli"
+_TOKEN_PENDING_CODE = 11217
+_DEFAULT_ENDPOINTS = (
+    "https://copilot.tencent.com",
+    "https://www.codebuddy.cn",
+    "https://www.codebuddy.ai",
+)
 
 
 class CodebuddyOAuthJobStatus(str, Enum):
@@ -35,8 +52,9 @@ class CodebuddyOAuthJob:
     auth_verified: Optional[bool] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
-    _login_output: str = field(default="", repr=False)
-    _proc: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
+    _state: Optional[str] = field(default=None, repr=False)
+    _api_base: Optional[str] = field(default=None, repr=False)
+    _cancel: bool = field(default=False, repr=False)
 
 
 _jobs: Dict[str, CodebuddyOAuthJob] = {}
@@ -54,16 +72,6 @@ def _normalize_cwd(cwd: str) -> str:
     return str(Path.home())
 
 
-def _extract_authorize_url(line: str) -> Optional[str]:
-    for match in _URL_RE.finditer(line):
-        url = match.group(0).rstrip(".,;)")
-        if "tencent" in url.lower() or "qq.com" in url.lower() or "oauth" in url.lower():
-            return url
-    for match in _URL_RE.finditer(line):
-        return match.group(0).rstrip(".,;)")
-    return None
-
-
 def classify_codebuddy_oauth_outcome(
     *,
     exit_code: int,
@@ -72,7 +80,7 @@ def classify_codebuddy_oauth_outcome(
 ) -> tuple[CodebuddyOAuthJobStatus, Optional[str]]:
     """Pure success/failure rules for OAuth jobs (unit-tested)."""
     if exit_code != 0:
-        return CodebuddyOAuthJobStatus.FAILED, f"codebuddy login exited with status {exit_code}"
+        return CodebuddyOAuthJobStatus.FAILED, f"codebuddy oauth exited with status {exit_code}"
     if not (authorize_url or "").strip():
         return (
             CodebuddyOAuthJobStatus.FAILED,
@@ -86,199 +94,308 @@ def classify_codebuddy_oauth_outcome(
     return CodebuddyOAuthJobStatus.SUCCESS, None
 
 
-def _output_indicates_logged_out(text: str) -> bool:
-    lowered = text.lower()
-    if any(
-        phrase in lowered or phrase in text
-        for phrase in ("not logged", "未登录", "login required", "请登录", "请先登录")
-    ):
+def codebuddy_auth_info_path() -> Path:
+    """Path of the CLI credential file CodeBuddy reads after Tencent login."""
+    override = (os.environ.get("CODEBUDDY_AUTH_INFO_PATH") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    home = Path.home()
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or (home / "AppData" / "Roaming"))
+        return base / "CodeBuddyExtension" / "Data" / "Public" / "auth" / f"{_AUTH_ID}.info"
+    if sys_platform_is_darwin():
+        return (
+            home
+            / "Library"
+            / "Application Support"
+            / "CodeBuddyExtension"
+            / "Data"
+            / "Public"
+            / "auth"
+            / f"{_AUTH_ID}.info"
+        )
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
+    return xdg / "CodeBuddyExtension" / "Data" / "Public" / "auth" / f"{_AUTH_ID}.info"
+
+
+def sys_platform_is_darwin() -> bool:
+    return os.uname().sysname.lower() == "darwin" if hasattr(os, "uname") else False
+
+
+def resolve_codebuddy_oauth_api_base() -> str:
+    """Pick API origin: env override, existing credential domain, then defaults."""
+    env = (os.environ.get("CODEBUDDY_OAUTH_API_BASE") or "").strip().rstrip("/")
+    if env:
+        return env
+    path = codebuddy_auth_info_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            domain = str((data.get("auth") or {}).get("domain") or "").strip()
+            if domain:
+                if domain.startswith("http://") or domain.startswith("https://"):
+                    return domain.rstrip("/")
+                return f"https://{domain}".rstrip("/")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+    return _DEFAULT_ENDPOINTS[0]
+
+
+def _http_json(
+    method: str,
+    url: str,
+    *,
+    body: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout: float = 20.0,
+) -> dict:
+    payload = None if body is None else json.dumps(body).encode("utf-8")
+    req_headers = {
+        "Accept": "application/json",
+        "User-Agent": "AgenticX-Near-CodeBuddy-OAuth/1.0",
+    }
+    if payload is not None:
+        req_headers["Content-Type"] = "application/json"
+    if headers:
+        req_headers.update(headers)
+    req = Request(url, data=payload, method=method.upper(), headers=req_headers)
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            parsed = {"code": exc.code, "msg": raw or str(exc)}
+        if not isinstance(parsed, dict):
+            parsed = {"code": exc.code, "msg": str(parsed)}
+        parsed.setdefault("code", exc.code)
+        return parsed
+    except URLError as exc:
+        return {"code": -1, "msg": str(exc.reason if hasattr(exc, "reason") else exc)}
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        return {"code": -1, "msg": raw[:200] or "invalid json"}
+    return parsed if isinstance(parsed, dict) else {"code": -1, "msg": "invalid json object"}
+
+
+async def _http_json_async(
+    method: str,
+    url: str,
+    *,
+    body: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout: float = 20.0,
+) -> dict:
+    return await asyncio.to_thread(
+        _http_json, method, url, body=body, headers=headers, timeout=timeout
+    )
+
+
+def _is_token_pending(payload: dict) -> bool:
+    code = payload.get("code")
+    if code == _TOKEN_PENDING_CODE:
         return True
-    return False
+    msg = str(payload.get("msg") or "").lower()
+    return "login ing" in msg or "logging in" in msg or "pending" in msg
 
 
-def _output_indicates_logged_in(text: str) -> bool:
-    lowered = text.lower()
-    if _output_indicates_logged_out(text):
+def _has_usable_auth_token(auth: Any) -> bool:
+    if not isinstance(auth, dict):
         return False
-    if any(
-        phrase in lowered or phrase in text
-        for phrase in (
-            "logged in",
-            "login successful",
-            "already logged",
-            "已登录",
-            "登录成功",
-            "authenticated",
-            "authentication complete",
-            "auth complete",
-        )
-    ):
-        return True
-    # Status probes that exit 0 with an account identifier.
-    if re.search(r"@[\w.-]+\.", text) or re.search(r"\buser(id)?\s*[:=]", lowered):
-        return True
-    return False
+    token = str(auth.get("accessToken") or auth.get("access_token") or "").strip()
+    return bool(token)
 
 
-async def _best_effort_codebuddy_logout(exe: str, cwd: str) -> None:
-    """Clear stale tokens before interactive OAuth (mirrors explicit re-login intent)."""
-    for argv in (["logout"], ["auth", "logout"]):
+def _calculate_expires_at(auth: dict) -> dict:
+    now_ms = int(time.time() * 1000)
+    out = dict(auth)
+    out.setdefault("lastRefreshTime", now_ms)
+    if not out.get("expiresAt"):
+        expires_in = out.get("expiresIn")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                exe,
-                *argv,
-                cwd=cwd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(proc.wait(), timeout=12.0)
-        except (asyncio.TimeoutError, FileNotFoundError, OSError, ProcessLookupError):
+            if expires_in is not None:
+                out["expiresAt"] = now_ms + int(float(expires_in) * 1000)
+        except (TypeError, ValueError):
+            pass
+    if not out.get("refreshExpiresAt"):
+        refresh_expires_in = out.get("refreshExpiresIn")
+        try:
+            if refresh_expires_in is not None:
+                out["refreshExpiresAt"] = now_ms + int(float(refresh_expires_in) * 1000)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def write_codebuddy_auth_session(session: dict, *, path: Optional[Path] = None) -> Path:
+    """Persist CLI session JSON for CodeBuddy to pick up on next process start."""
+    target = path or codebuddy_auth_info_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + f".tmp.{uuid.uuid4().hex}")
+    text = json.dumps(session, ensure_ascii=False, indent=2)
+    tmp.write_text(text + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+    return target
+
+
+def _session_from_token_and_account(auth: dict, account: Optional[dict]) -> dict:
+    auth_norm = _calculate_expires_at(auth)
+    if account and isinstance(account, dict):
+        acct = dict(account)
+        acct["lastLogin"] = True
+        accounts = [acct]
+    else:
+        acct = {"lastLogin": True}
+        accounts = [acct]
+    return {"account": acct, "auth": auth_norm, "accounts": accounts}
+
+
+async def create_codebuddy_oauth_state(api_base: str) -> tuple[str, str]:
+    """POST /v2/plugin/auth/state → (state, authUrl)."""
+    url = f"{api_base.rstrip('/')}/v2{_PREFIX_PATH}/auth/state?platform={_PLATFORM}"
+    payload = await _http_json_async("POST", url, body={})
+    if int(payload.get("code", -1)) != 0:
+        raise RuntimeError(str(payload.get("msg") or payload.get("error") or "auth/state failed"))
+    data = payload.get("data") or {}
+    state = str(data.get("state") or "").strip()
+    auth_url = str(data.get("authUrl") or data.get("auth_url") or "").strip()
+    if not state or not auth_url:
+        raise RuntimeError("auth/state missing state or authUrl")
+    # Keep authorize URL on the same origin as the API we poll.
+    try:
+        parsed = urlparse(auth_url)
+        base = urlparse(api_base)
+        if parsed.scheme and parsed.netloc and base.netloc and parsed.netloc != base.netloc:
+            auth_url = f"{base.scheme}://{base.netloc}{parsed.path}"
+            if parsed.query:
+                auth_url = f"{auth_url}?{parsed.query}"
+    except Exception:
+        pass
+    return state, auth_url
+
+
+async def poll_codebuddy_oauth_token(
+    api_base: str,
+    state: str,
+    *,
+    timeout_seconds: float,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    poll_interval: float = 1.5,
+) -> dict:
+    url = f"{api_base.rstrip('/')}/v2{_PREFIX_PATH}/auth/token?state={state}"
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if should_cancel and should_cancel():
+            raise asyncio.CancelledError()
+        payload = await _http_json_async("GET", url)
+        if _is_token_pending(payload):
+            await asyncio.sleep(poll_interval)
             continue
+        if int(payload.get("code", -1)) != 0:
+            raise RuntimeError(str(payload.get("msg") or "auth/token failed"))
+        data = payload.get("data")
+        if _has_usable_auth_token(data):
+            return data  # type: ignore[return-value]
+        await asyncio.sleep(poll_interval)
+    raise TimeoutError("等待腾讯授权超时")
 
 
-async def verify_codebuddy_tencent_auth(exe: str, cwd: str, *, timeout_seconds: float = 20.0) -> bool:
-    """Best-effort CLI probe after ``login`` — rejects stale exit-0 short-circuits."""
-    probes: tuple[tuple[str, ...], ...] = (
-        ("auth", "status"),
-        ("whoami"),
-        ("status"),
+async def fetch_codebuddy_account(api_base: str, access_token: str) -> Optional[dict]:
+    url = f"{api_base.rstrip('/')}/v2{_PREFIX_PATH}/account"
+    payload = await _http_json_async(
+        "GET",
+        url,
+        headers={"Authorization": f"Bearer {access_token}"},
     )
-    for extra in probes:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                exe,
-                *extra,
-                cwd=cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        except (FileNotFoundError, OSError):
-            continue
-        try:
-            out_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            continue
-        text = (out_b[0] or b"").decode(errors="replace")
-        if proc.returncode != 0:
-            continue
-        if _output_indicates_logged_in(text):
-            return True
-        if _output_indicates_logged_out(text):
-            return False
-    return False
+    if int(payload.get("code", -1)) != 0:
+        return None
+    data = payload.get("data")
+    return data if isinstance(data, dict) else None
 
 
-async def _consume_login_output(job: CodebuddyOAuthJob, *, exe: str) -> None:
-    proc = job._proc
-    if not proc or proc.stdout is None:
+async def verify_codebuddy_tencent_auth(exe: str = "", cwd: str = "", *, timeout_seconds: float = 20.0) -> bool:
+    """Best-effort check that a usable CLI credential file exists."""
+    del exe, cwd, timeout_seconds  # kept for call-site compatibility
+    path = codebuddy_auth_info_path()
+    if not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    auth = data.get("auth") if isinstance(data, dict) else None
+    return _has_usable_auth_token(auth)
+
+
+async def _run_oauth_job(job: CodebuddyOAuthJob, *, timeout_seconds: float) -> None:
+    try:
+        api_base = resolve_codebuddy_oauth_api_base()
+        # Prefer CN origin when defaulting and CN endpoint is reachable via existing domain.
+        job._api_base = api_base
+        state, auth_url = await create_codebuddy_oauth_state(api_base)
+        job._state = state
+        job.authorize_url = auth_url
+        job.status = CodebuddyOAuthJobStatus.AUTHORIZING
+
+        auth = await poll_codebuddy_oauth_token(
+            api_base,
+            state,
+            timeout_seconds=timeout_seconds,
+            should_cancel=lambda: job._cancel,
+        )
+        access = str(auth.get("accessToken") or auth.get("access_token") or "")
+        account = await fetch_codebuddy_account(api_base, access) if access else None
+        session = _session_from_token_and_account(auth, account)
+        write_codebuddy_auth_session(session)
+        verified = await verify_codebuddy_tencent_auth()
+        job.auth_verified = verified
+        status, err = classify_codebuddy_oauth_outcome(
+            exit_code=0 if verified else 1,
+            authorize_url=job.authorize_url,
+            auth_verified=verified,
+        )
+        job.status = status
+        job.error = err
+    except asyncio.CancelledError:
         job.status = CodebuddyOAuthJobStatus.FAILED
-        job.error = "login process has no stdout"
+        job.error = "授权已取消"
+        job.auth_verified = False
+    except TimeoutError as exc:
+        job.status = CodebuddyOAuthJobStatus.FAILED
+        job.error = str(exc) or "等待腾讯授权超时"
+        job.auth_verified = False
+    except Exception as exc:
+        job.status = CodebuddyOAuthJobStatus.FAILED
+        job.error = str(exc) or "腾讯登录失败"
+        job.auth_verified = False
+    finally:
         job.finished_at = time.time()
-        return
-    assert proc.stdout is not None
-    while True:
-        line_b = await proc.stdout.readline()
-        if not line_b:
-            break
-        try:
-            line = line_b.decode(errors="replace").strip()
-        except Exception:
-            line = ""
-        if not line:
-            continue
-        if job._login_output:
-            job._login_output = f"{job._login_output}\n{line}"
-        else:
-            job._login_output = line
-        if not job.authorize_url:
-            found = _extract_authorize_url(line)
-            if found:
-                job.authorize_url = found
-                job.status = CodebuddyOAuthJobStatus.AUTHORIZING
-    code = await proc.wait()
-    verified = False
-    if code == 0:
-        verified = _output_indicates_logged_in(job._login_output) or await verify_codebuddy_tencent_auth(
-            exe,
-            job.cwd,
-        )
-    job.auth_verified = verified
-    status, err = classify_codebuddy_oauth_outcome(
-        exit_code=code,
-        authorize_url=job.authorize_url,
-        auth_verified=verified,
-    )
-    job.status = status
-    job.error = err
-    job.finished_at = time.time()
 
 
 async def start_codebuddy_oauth_login(cwd: str, *, timeout_seconds: float = 600.0) -> CodebuddyOAuthJob:
-    """Spawn ``codebuddy login`` in a real OS subprocess (never harness REPL)."""
-    from agenticx.wb_bridge.settings import resolve_codebuddy_executable
-
+    """Start Tencent OAuth without spawning a non-existent ``codebuddy login`` CLI."""
     job_id = str(uuid.uuid4())
     job = CodebuddyOAuthJob(job_id=job_id, cwd=_normalize_cwd(cwd))
     async with _lock:
         _jobs[job_id] = job
 
-    try:
-        exe = resolve_codebuddy_executable()
-    except Exception as exc:
-        job.status = CodebuddyOAuthJobStatus.FAILED
-        job.error = str(exc)
-        job.finished_at = time.time()
-        return job
-
-    await _best_effort_codebuddy_logout(exe, job.cwd)
-
-    proc: Optional[asyncio.subprocess.Process] = None
-    login_argv_variants: tuple[tuple[str, ...], ...] = (
-        ("login", "--no-browser"),
-        ("login",),
-    )
-    spawn_error: Optional[Exception] = None
-    for login_argv in login_argv_variants:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                exe,
-                *login_argv,
-                cwd=job.cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            spawn_error = None
-            break
-        except Exception as exc:
-            spawn_error = exc
-            proc = None
-    if proc is None:
-        job.status = CodebuddyOAuthJobStatus.FAILED
-        job.error = str(spawn_error or "failed to spawn codebuddy login")
-        job.finished_at = time.time()
-        return job
-
-    job._proc = proc
-
     async def _watch() -> None:
-        try:
-            await asyncio.wait_for(_consume_login_output(job, exe=exe), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
-            job.status = CodebuddyOAuthJobStatus.FAILED
-            job.error = "等待腾讯授权超时"
-            job.finished_at = time.time()
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-        finally:
-            job._proc = None
+        await _run_oauth_job(job, timeout_seconds=timeout_seconds)
 
     asyncio.create_task(_watch())
+    # Give the state request a brief head start so the first Desktop poll often
+    # already has authorize_url (or a fast failure).
+    for _ in range(40):
+        if job.authorize_url or job.status == CodebuddyOAuthJobStatus.FAILED:
+            break
+        await asyncio.sleep(0.05)
     return job
 
 
@@ -302,8 +419,14 @@ __all__ = [
     "CodebuddyOAuthJob",
     "CodebuddyOAuthJobStatus",
     "classify_codebuddy_oauth_outcome",
+    "codebuddy_auth_info_path",
     "codebuddy_oauth_job_snapshot",
+    "create_codebuddy_oauth_state",
+    "fetch_codebuddy_account",
     "get_codebuddy_oauth_job",
+    "poll_codebuddy_oauth_token",
+    "resolve_codebuddy_oauth_api_base",
     "start_codebuddy_oauth_login",
     "verify_codebuddy_tencent_auth",
+    "write_codebuddy_auth_session",
 ]

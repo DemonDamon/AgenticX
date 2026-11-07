@@ -1,6 +1,7 @@
 /**
- * MCP-style CodeBuddy Tencent OAuth: studio runs `codebuddy login` subprocess,
- * Desktop opens authorize URL in WorkPanel browser and polls until success/failure.
+ * MCP-style CodeBuddy Tencent OAuth: studio starts auth/state+token job
+ * (CLI has no `login` subcommand), Desktop opens authorize URL in WorkPanel
+ * and polls until credentials are written / verified.
  */
 
 export type CodebuddyOAuthJobStatus = "starting" | "authorizing" | "success" | "failed";
