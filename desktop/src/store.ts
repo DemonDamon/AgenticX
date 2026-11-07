@@ -973,7 +973,12 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
-  setPaneHarness: (paneId: string, harnessId: string | null, followPreference?: boolean) => void;
+  setPaneHarness: (
+    paneId: string,
+    harnessId: string | null,
+    followPreference?: boolean,
+    options?: { preserveModel?: boolean },
+  ) => void;
   setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
   setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -2692,18 +2697,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
       ),
     })),
-  setPaneHarness: (paneId, harnessId, followPreference) =>
+  setPaneHarness: (paneId, harnessId, followPreference, options) =>
     set((state) => {
       const nextHarness = harnessId || null;
+      const preserveModel = options?.preserveModel === true;
       const providers = state.settings.providers;
       const nextPanes = state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
-        const activeHarness = resolveActiveHarnessId(nextHarness, state.preferredHarnessId);
         const provider = (pane.modelProvider || "").trim();
         const model = (pane.modelName || "").trim();
         let modelProvider = pane.modelProvider;
         let modelName = pane.modelName;
-        if (provider || model) {
+        if (!preserveModel && (provider || model)) {
+          const activeHarness = resolveActiveHarnessId(nextHarness, state.preferredHarnessId);
           const coerced = coerceModelForHarness(
             providers,
             activeHarness,

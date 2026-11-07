@@ -216,6 +216,83 @@ def test_run_turn_happy_path_records_messages(wiring):
     assert "sess-1" in manager.persisted
 
 
+def test_skip_user_history_restamps_tail_user_without_duplicate(wiring):
+    hw, alpha, _beta, _store = wiring
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="alpha")
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "first task",
+            "metadata": {"harness": "codebuddy", "client_turn_id": "c1"},
+        }
+    ]
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "first task", skip_user_history=True
+    )
+
+    user_rows = [m for m in session.chat_history if m["role"] == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["metadata"]["harness"] == "alpha"
+    assert user_rows[0]["metadata"]["harness_id"] == "alpha"
+    assert user_rows[0]["metadata"]["client_turn_id"] == "c1"
+    assert [m["role"] for m in session.chat_history] == ["user", "assistant"]
+
+
+def test_derive_sticky_harness_from_latest_message_when_session_field_missing(wiring):
+    hw, _alpha, _beta, _store = wiring
+    history = [
+        {"role": "user", "content": "hi", "metadata": {"harness": "codebuddy"}},
+        {
+            "role": "system",
+            "content": "switched",
+            "metadata": {
+                "kind": "harness_switch",
+                "from_harness": "codebuddy",
+                "to_harness": None,
+                "strategy": "builtin",
+            },
+        },
+        {
+            "role": "assistant",
+            "content": "[harness codebuddy turn exited]",
+            "metadata": {"harness": "codebuddy"},
+        },
+    ]
+    assert hw.derive_sticky_harness_id(history, None) == "codebuddy"
+    assert hw.derive_sticky_harness_id(history, "claude-code") == "claude-code"
+
+
+def test_derive_sticky_harness_keeps_builtin_when_switch_is_the_tail(wiring):
+    hw, _alpha, _beta, _store = wiring
+    history = [
+        {"role": "user", "content": "hi", "metadata": {"harness": "codebuddy"}},
+        {"role": "assistant", "content": "done", "metadata": {"harness": "codebuddy"}},
+        {
+            "role": "system",
+            "content": "switched",
+            "metadata": {
+                "kind": "harness_switch",
+                "from_harness": "codebuddy",
+                "to_harness": None,
+                "strategy": "builtin",
+            },
+        },
+    ]
+    assert hw.derive_sticky_harness_id(history, None) is None
+
+
+def test_derive_sticky_harness_without_metadata_is_unset(wiring):
+    hw, _alpha, _beta, _store = wiring
+    history = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "yo"},
+    ]
+    assert hw.derive_sticky_harness_id(history, None) is None
+
+
 def test_run_turn_reuses_surface_session(wiring):
     hw, alpha, beta, _ = wiring
     session = make_session()

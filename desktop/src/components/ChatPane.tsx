@@ -86,7 +86,8 @@ import { ContextUsageButton } from "./ContextUsagePopup";
 import { PaneHarnessPicker } from "./HarnessPicker";
 import {
   bindPreferredHarnessToSession,
-  ensureSessionHarness,
+  readSessionHarnessBinding,
+  restorePaneHarnessFromSession,
 } from "../utils/preferred-harness";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
@@ -194,7 +195,7 @@ import {
 } from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
-import { resolveMessageHarnessId } from "../utils/harness-display";
+import { resolveMessageHarnessId, stampUserMessageHarnessMetadata } from "../utils/harness-display";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -3530,6 +3531,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const freshlyCreatedSessionRef = useRef("");
+  /** Skip sticky restore while a brand-new session is still receiving Settings preferred. */
+  const stickyHarnessSkipRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
   const sessionBootstrapAttemptRef = useRef(0);
   const [sessionBootstrapRetryNonce, setSessionBootstrapRetryNonce] = useState(0);
@@ -8407,6 +8410,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.sessionId, syncStreamingUiForCurrentSession]
   );
 
+  const restoreStickyHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const base = useAppStore.getState().apiBase || apiBase;
+      const token = useAppStore.getState().apiToken || apiToken;
+      await restorePaneHarnessFromSession(paneIdForBind, sessionIdForBind, {
+        getPane: () => useAppStore.getState().panes.find((item) => item.id === paneIdForBind),
+        readBinding: () => readSessionHarnessBinding(base, token, sessionIdForBind),
+        setPaneHarness: (id, harnessId, follow, options) =>
+          useAppStore.getState().setPaneHarness(id, harnessId, follow, options),
+        rebindSessionHarness: (harnessId) =>
+          window.agenticxDesktop.setSessionHarness({
+            sessionId: sessionIdForBind,
+            harnessId,
+          }),
+      });
+    },
+    [apiBase, apiToken],
+  );
+
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    if (stickyHarnessSkipRef.current === sid) return;
+    void restoreStickyHarness(pane.id, sid);
+  }, [pane.id, pane.sessionId, restoreStickyHarness]);
+
   const retryUserMessage = useCallback(
     async (msg: Message) => {
       if (msg.role !== "user") return;
@@ -8448,7 +8477,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (idx < 0) return;
         const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
         const expectRemoved = hasTrailingTurnMessages(msgs, idx);
-        const remainingRetry = msgs.slice(0, idx + 1);
+        await restoreStickyHarness(pane.id, sid);
+        const harnessForStamp = useAppStore.getState().panes.find((item) => item.id === pane.id)?.harnessId;
+        const remainingRetry = msgs.slice(0, idx + 1).map((row, rowIdx) => {
+          if (rowIdx !== idx || harnessForStamp === undefined) return row;
+          return {
+            ...row,
+            metadata: stampUserMessageHarnessMetadata(row.metadata, harnessForStamp),
+          };
+        });
         const streamWasActive = Boolean(sessionStreamStateRef.current[sid]?.active);
 
         // Optimistic: drop trailing turns and show generating chrome before any persist.
@@ -8509,6 +8546,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setPaneMessages,
       syncStreamingUiForCurrentSession,
       truncateSessionAtUserMessage,
+      restoreStickyHarness,
     ]
   );
 
@@ -10248,36 +10286,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const applyPreferredHarness = useCallback(
     async (paneIdForBind: string, sessionIdForBind: string) => {
+      const sid = sessionIdForBind.trim();
+      if (sid) stickyHarnessSkipRef.current = sid;
       const state = useAppStore.getState();
       const current = state.panes.find((item) => item.id === paneIdForBind);
-      await bindPreferredHarnessToSession(paneIdForBind, sessionIdForBind, {
-        getPreferredHarnessId: () =>
-          current && current.harnessId !== undefined
-            ? current.harnessId
-            : state.preferredHarnessId,
-        setPaneHarness: state.setPaneHarness,
-        setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
-      });
+      try {
+        await bindPreferredHarnessToSession(paneIdForBind, sessionIdForBind, {
+          getPreferredHarnessId: () =>
+            current && current.harnessId !== undefined
+              ? current.harnessId
+              : state.preferredHarnessId,
+          setPaneHarness: state.setPaneHarness,
+          setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
+        });
+      } finally {
+        if (sid && stickyHarnessSkipRef.current === sid) stickyHarnessSkipRef.current = "";
+      }
     },
     [],
   );
 
-  const syncExistingSessionHarness = useCallback(
-    async (paneIdForBind: string, sessionIdForBind: string) => {
-      const state = useAppStore.getState();
-      const current = state.panes.find((item) => item.id === paneIdForBind);
-      await ensureSessionHarness(paneIdForBind, sessionIdForBind, {
-        getTargetHarnessId: () =>
-          current && current.harnessId !== undefined
-            ? current.harnessId
-            : state.preferredHarnessId,
-        setPaneHarness: state.setPaneHarness,
-        switchSessionHarness: (payload) => window.agenticxDesktop.switchSessionHarness(payload),
-        setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
-      });
-    },
-    [],
-  );
 
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
     const existing = (pane.sessionId || "").trim();
@@ -10854,6 +10882,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
+    if (requestSessionId && !isContinuation) {
+      await restoreStickyHarness(pane.id, requestSessionId);
+    }
+
     if (targetAgentId === "meta") {
       if (!suppressUserEcho) {
         const userEchoContent =
@@ -10872,6 +10904,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             metadata: {
               client_turn_id: clientTurnId,
               ...(options?.commandName ? { command_name: options.commandName } : {}),
+              ...(() => {
+                const liveHarness = useAppStore.getState().panes.find((item) => item.id === pane.id)?.harnessId;
+                if (liveHarness === undefined) return {};
+                return stampUserMessageHarnessMetadata(undefined, liveHarness);
+              })(),
             },
             ...(() => {
               const payload = buildQuotedPayload();
@@ -11357,10 +11394,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           signal: abortController.signal,
         });
       };
-
-      if (!isContinuation && requestSessionId) {
-        await syncExistingSessionHarness(pane.id, requestSessionId);
-      }
 
       let resp = await sendChatRequest(requestSessionId);
       if (resp.status === 404) {

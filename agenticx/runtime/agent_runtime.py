@@ -4614,6 +4614,29 @@ class AgentRuntime:
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = _history_text or user_input
                     _should_mid_turn_persist = True
+                else:
+                    # Regenerate keeps this user row. Restamp its harness when
+                    # the caller names one, so the bubble follows the new turn.
+                    # Deferred import: harness_wiring loads session_manager,
+                    # which imports this module.
+                    harness_stamp = ""
+                    if isinstance(history_user_metadata, dict):
+                        harness_stamp = str(
+                            history_user_metadata.get("harness")
+                            or history_user_metadata.get("harness_id")
+                            or ""
+                        ).strip()
+                    if harness_stamp:
+                        from agenticx.studio.harness_wiring import (
+                            restamp_tail_user_harness,
+                        )
+
+                        if restamp_tail_user_harness(
+                            session.chat_history,
+                            harness_stamp,
+                            expected_text=ui_text,
+                        ):
+                            _should_mid_turn_persist = True
         # FR-1: append visible compaction notice after the user chat_history row
         # so reload order is [user] → [compaction notice] → [assistant].
         if pending_compaction_notice_count is not None:

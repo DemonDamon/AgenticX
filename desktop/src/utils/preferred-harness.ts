@@ -204,3 +204,152 @@ export async function ensureSessionFollowsPreferredHarness(
     setSessionHarness: deps.setSessionHarness,
   });
 }
+
+export type StickyHarnessPlan = {
+  /** undefined = leave the pane harness unset */
+  harnessId: string | null | undefined;
+  /** External id to write with a plain rebind. No switch boundary. */
+  rebindHarnessId?: string;
+};
+
+export type SessionHarnessBinding = {
+  harnessId: string | null;
+  recoveredHarnessId: string | null;
+};
+
+/**
+ * Existing-session composer harness.
+ *
+ * Settings preferred is intentionally not an input. A missing session field
+ * uses the recovered id (latest message stamp). An explicit pane pin
+ * (follow === false) is left alone, except an external pin rebinds the
+ * server when the stored field is still empty.
+ */
+export function planStickyHarnessRestore(input: {
+  pinned: boolean;
+  paneHarnessId: string | null | undefined;
+  serverHarnessId: string | null | undefined;
+  recoveredHarnessId?: string | null;
+}): StickyHarnessPlan {
+  const server =
+    input.serverHarnessId === undefined
+      ? undefined
+      : toStoredPreferredHarnessId(input.serverHarnessId);
+  const recovered = input.recoveredHarnessId
+    ? toStoredPreferredHarnessId(input.recoveredHarnessId)
+    : null;
+
+  if (input.pinned) {
+    const pane = toStoredPreferredHarnessId(input.paneHarnessId);
+    return {
+      harnessId: pane,
+      rebindHarnessId: pane && server !== undefined && pane !== server ? pane : undefined,
+    };
+  }
+  if (server) return { harnessId: server };
+  if (recovered) return { harnessId: recovered, rebindHarnessId: recovered };
+  if (server === null) return { harnessId: null };
+  return { harnessId: undefined };
+}
+
+export async function readSessionHarnessBinding(
+  base: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionHarnessBinding | undefined> {
+  const sid = String(sessionId ?? "").trim();
+  const root = String(base ?? "").replace(/\/$/, "");
+  if (!sid || !root) return undefined;
+  const resp = await fetch(`${root}/api/sessions/${encodeURIComponent(sid)}/harness`, {
+    headers: token ? { "x-agx-desktop-token": token } : {},
+  });
+  if (!resp.ok) return undefined;
+  const body = (await resp.json()) as {
+    harness_id?: string | null;
+    recovered_harness_id?: string | null;
+  };
+  if (!body || typeof body !== "object" || !("harness_id" in body)) return undefined;
+  return {
+    harnessId: body.harness_id ?? null,
+    recoveredHarnessId: body.recovered_harness_id ?? null,
+  };
+}
+
+export async function resolveStickyPaneHarness(input: {
+  pinned: boolean;
+  paneHarnessId: string | null | undefined;
+  readBinding: () => Promise<SessionHarnessBinding | undefined>;
+}): Promise<StickyHarnessPlan> {
+  let binding: SessionHarnessBinding | undefined;
+  try {
+    binding = await input.readBinding();
+  } catch {
+    binding = undefined;
+  }
+  if (!binding) {
+    if (input.paneHarnessId !== undefined) {
+      return { harnessId: toStoredPreferredHarnessId(input.paneHarnessId) };
+    }
+    return { harnessId: undefined };
+  }
+  return planStickyHarnessRestore({
+    pinned: input.pinned,
+    paneHarnessId: input.paneHarnessId,
+    serverHarnessId: binding.harnessId,
+    recoveredHarnessId: binding.recoveredHarnessId,
+  });
+}
+
+export async function restorePaneHarnessFromSession(
+  paneId: string,
+  sessionId: string,
+  deps: {
+    getPane: () => { harnessId?: string | null; harnessFollowsPreference?: boolean } | undefined;
+    readBinding: () => Promise<SessionHarnessBinding | undefined>;
+    setPaneHarness: (
+      paneId: string,
+      harnessId: string | null,
+      followPreference?: boolean,
+      options?: { preserveModel?: boolean },
+    ) => void;
+    rebindSessionHarness: (harnessId: string) => Promise<unknown>;
+  },
+): Promise<void> {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid || !paneId) return;
+  const before = deps.getPane();
+  if (!before) return;
+  let binding: SessionHarnessBinding | undefined;
+  try {
+    binding = await deps.readBinding();
+  } catch {
+    binding = undefined;
+  }
+  const live = deps.getPane();
+  if (!live) return;
+  if (
+    live.harnessId !== before.harnessId ||
+    live.harnessFollowsPreference !== before.harnessFollowsPreference
+  ) {
+    return;
+  }
+  if (!binding) return;
+  const plan = planStickyHarnessRestore({
+    pinned: live.harnessFollowsPreference === false,
+    paneHarnessId: live.harnessId,
+    serverHarnessId: binding.harnessId,
+    recoveredHarnessId: binding.recoveredHarnessId,
+  });
+  if (plan.harnessId !== undefined) {
+    const same =
+      toStoredPreferredHarnessId(live.harnessId) === plan.harnessId &&
+      live.harnessFollowsPreference === false;
+    if (!same) {
+      deps.setPaneHarness(paneId, plan.harnessId, false, { preserveModel: true });
+    }
+  }
+  if (plan.rebindHarnessId) {
+    await deps.rebindSessionHarness(plan.rebindHarnessId);
+  }
+}
+

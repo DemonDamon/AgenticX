@@ -371,6 +371,7 @@ async def _external_harness_chat_stream(
             sid,
             payload.user_input,
             chat_model=getattr(payload, "model", None),
+            skip_user_history=bool(getattr(payload, "skip_user_history", False)),
         )
     )
     owns_release = True
@@ -4863,6 +4864,7 @@ def create_studio_app() -> FastAPI:
                                     for key, value in {
                                         "client_turn_id": _ctid,
                                         "command_name": str(getattr(payload, "command_name", "") or "").strip(),
+                                        "harness": "python-agent",
                                     }.items()
                                     if value
                                 }
@@ -7080,6 +7082,46 @@ def create_studio_app() -> FastAPI:
                 }
             )
         return {"ok": True, "harnesses": harnesses}
+
+    @app.get("/api/sessions/{session_id}/harness")
+    async def get_session_harness(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Sticky harness for an existing session.
+
+        ``harness_id`` is the persisted binding (null = builtin). When that
+        field was never set, ``recovered_harness_id`` is the latest turn's
+        message stamp and is written back so the next open does not fall
+        through to the Settings default. An explicit builtin switch that is
+        still the tail stays null.
+        """
+        _check_token(x_agx_desktop_token)
+        try:
+            sid = require_safe_session_id(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.studio import harness_wiring
+
+        binding = manager.get_session_harness(sid) or {}
+        bound = binding.get("harness_id")
+        history = list(getattr(managed.studio_session, "chat_history", None) or [])
+        derived = harness_wiring.derive_sticky_harness_id(history, bound)
+        recovered = derived if (not bound and derived) else None
+        if recovered:
+            try:
+                harness_wiring.persist_derived_harness(manager, sid, recovered)
+            except ValueError:
+                pass
+        return {
+            "ok": True,
+            "session_id": sid,
+            "harness_id": bound,
+            "recovered_harness_id": recovered,
+        }
 
     @app.post("/api/sessions/{session_id}/harness")
     async def set_session_harness(

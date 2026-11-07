@@ -141,6 +141,128 @@ def is_external_harness(harness_id: Optional[str]) -> bool:
     return bool(harness_id) and harness_id not in _BUILTIN_HARNESS_IDS
 
 
+_STICKY_BUILTIN_NAMES = frozenset({"", "python-agent", "builtin", "agenticx"})
+
+
+def _sticky_external_id(raw: Optional[str]) -> Optional[str]:
+    text = str(raw or "").strip()
+    if not text or text.lower() in _STICKY_BUILTIN_NAMES:
+        return None
+    return text
+
+
+def derive_sticky_harness_id(
+    history: Optional[List[Dict[str, Any]]],
+    bound: Optional[str],
+) -> Optional[str]:
+    """Last harness this conversation actually used.
+
+    A persisted external binding wins. When the session field is missing or
+    still the builtin null, the latest user/assistant ``metadata.harness``
+    is the backfill. A harness-switch row only wins when it is newer than
+    every stamped turn (an explicit switch that has not been followed by a
+    message yet). Builtin / empty ids stay None.
+    """
+    bound_external = _sticky_external_id(bound)
+    if bound_external:
+        return bound_external
+    if not isinstance(history, list):
+        return None
+
+    latest_stamp_idx: Optional[int] = None
+    latest_stamp: Optional[str] = None
+    latest_switch_idx: Optional[int] = None
+    latest_switch_to: Optional[str] = None
+
+    for index, item in enumerate(history):
+        if not isinstance(item, dict):
+            continue
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if meta.get("kind") == "harness_switch":
+            latest_switch_idx = index
+            to_raw = meta.get("to_harness")
+            strategy = str(meta.get("strategy") or "")
+            to_text = str(to_raw or "").strip()
+            if (
+                strategy == "builtin"
+                or not to_text
+                or to_text.lower() in _STICKY_BUILTIN_NAMES
+            ):
+                latest_switch_to = None
+            else:
+                latest_switch_to = to_text
+            continue
+        if item.get("role") not in {"user", "assistant"}:
+            continue
+        stamped = _sticky_external_id(
+            meta.get("harness") or meta.get("harness_id") or meta.get("harnessId")
+        )
+        if stamped:
+            latest_stamp_idx = index
+            latest_stamp = stamped
+
+    if latest_switch_idx is not None and (
+        latest_stamp_idx is None or latest_switch_idx > latest_stamp_idx
+    ):
+        return latest_switch_to
+    return latest_stamp
+
+
+def restamp_tail_user_harness(
+    history: Optional[List[Dict[str, Any]]],
+    harness_id: Optional[str],
+    *,
+    expected_text: Optional[str] = None,
+) -> bool:
+    """Rewrite the trailing user row's harness stamp. No new row.
+
+    Returns True when metadata changed. A text mismatch leaves history
+    untouched and returns False.
+    """
+    canonical = str(harness_id or "").strip()
+    if not canonical or not isinstance(history, list):
+        return False
+    for item in reversed(history):
+        if not isinstance(item, dict) or item.get("role") != "user":
+            continue
+        if expected_text is not None and str(item.get("content") or "").strip() != expected_text.strip():
+            return False
+        meta = item.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+            item["metadata"] = meta
+        changed = meta.get("harness") != canonical or meta.get("harness_id") != canonical
+        meta["harness"] = canonical
+        meta["harness_id"] = canonical
+        return changed
+    return False
+
+
+def _tail_user_text(history: Optional[List[Dict[str, Any]]]) -> str:
+    if not isinstance(history, list):
+        return ""
+    for item in reversed(history):
+        if isinstance(item, dict) and item.get("role") == "user":
+            return str(item.get("content") or "").strip()
+    return ""
+
+
+def persist_derived_harness(manager: Any, session_id: str, harness_id: str) -> bool:
+    """Write a backfilled external id without clearing an existing thread."""
+    existing = manager.get_session_harness(session_id) or {}
+    kwargs: Dict[str, Any] = {"harness_id": harness_id}
+    thread_id = existing.get("harness_thread_id")
+    if thread_id:
+        kwargs["thread_id"] = thread_id
+    options = existing.get("harness_options")
+    if isinstance(options, dict):
+        kwargs["options"] = options
+    surface = existing.get("harness_session_id")
+    if surface:
+        kwargs["surface_session_id"] = surface
+    return bool(manager.set_session_harness(session_id, **kwargs))
+
+
 # ----------------------------------------------------------------------
 # snapshot assembly
 # ----------------------------------------------------------------------
@@ -452,6 +574,7 @@ def run_external_harness_turn(
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    skip_user_history: bool = False,
 ) -> TurnResult:
     """Execute one turn on the bound external harness and record it in
     chat_history (user + harness-attributed assistant message).
@@ -469,7 +592,11 @@ def run_external_harness_turn(
         )
     try:
         return _run_external_harness_turn_body(
-            manager, sid, user_text, chat_model=chat_model
+            manager,
+            sid,
+            user_text,
+            chat_model=chat_model,
+            skip_user_history=skip_user_history,
         )
     finally:
         _end_inflight(sid)
@@ -481,6 +608,7 @@ def _run_external_harness_turn_body(
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    skip_user_history: bool = False,
 ) -> TurnResult:
     sid = require_safe_session_id(session_id)
     managed = manager.get(sid)
@@ -505,13 +633,20 @@ def _run_external_harness_turn_body(
 
     user_text = str(user_text or "").strip()
     if user_text:
-        session.chat_history.append(
-            {
-                "role": "user",
-                "content": user_text,
-                "metadata": {"harness": harness_id},
-            }
-        )
+        # Regenerate keeps the existing user row and only updates its harness
+        # stamp. A missing tail still appends, matching the builtin path.
+        if skip_user_history and _tail_user_text(session.chat_history) == user_text:
+            restamp_tail_user_harness(
+                session.chat_history, harness_id, expected_text=user_text
+            )
+        else:
+            session.chat_history.append(
+                {
+                    "role": "user",
+                    "content": user_text,
+                    "metadata": {"harness": harness_id, "harness_id": harness_id},
+                }
+            )
 
     request = TurnRequest(text=user_text or "(continue)", wait_seconds=_TURN_WAIT_SECONDS)
     result = adapter.turn(surface_sid, request)
@@ -808,6 +943,7 @@ async def run_external_harness_turn_async(
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    skip_user_history: bool = False,
 ) -> TurnResult:
     """Async wrapper: adapter turns block for the whole turn, so run them
     on a worker thread to keep the event loop responsive."""
@@ -817,6 +953,7 @@ async def run_external_harness_turn_async(
         session_id,
         user_text,
         chat_model=chat_model,
+        skip_user_history=skip_user_history,
     )
 
 
