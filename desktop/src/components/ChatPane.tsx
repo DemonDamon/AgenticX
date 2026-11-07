@@ -3272,6 +3272,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
+  const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
@@ -3932,8 +3933,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         paneRef.current?.clientWidth ?? paneWidth,
         openSidePanel,
       );
-      setRailKind("terminal");
-      setWorkPanelFocus({ kind: "terminal" });
       let platform: "posix" | "windows" = "posix";
       try {
         const host = await window.agenticxDesktop.platform();
@@ -3948,10 +3947,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         command: loginCommand,
         addTab: (nextCwd, label) =>
           addPaneTerminalTab(pane.id, nextCwd, label, undefined, { shellOnly: true }),
-        onTabReady: (tabId) => setWorkPanelFocus({ kind: "terminal", tabId }),
+        onTabReady: (tabId) => {
+          setRailKind("terminal");
+          setActivePaneTerminalTab(pane.id, tabId);
+          setWorkPanelFocus({ kind: "terminal", tabId });
+        },
         waitPtyReady: async (tabId) => {
           if (typeof window.agenticxDesktop?.terminalHasPtyForTab !== "function") return false;
-          const res = await window.agenticxDesktop.terminalHasPtyForTab({ tabId });
+          const res = await window.agenticxDesktop.terminalHasPtyForTab({
+            tabId,
+            requireRegistered: true,
+          });
           if (!res.ok || !res.id || res.id.includes(":bridge:")) return false;
           return true;
         },
@@ -3959,7 +3965,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           if (typeof window.agenticxDesktop?.terminalWritePtyByTab !== "function") {
             return Promise.resolve({ ok: false });
           }
-          return window.agenticxDesktop.terminalWritePtyByTab({ tabId, data });
+          return window.agenticxDesktop.terminalWritePtyByTab({
+            tabId,
+            data,
+            requireRegistered: true,
+          });
         },
       });
       if (!wrote.ok) {
@@ -3971,6 +3981,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     })();
   }, [
     addPaneTerminalTab,
+    setActivePaneTerminalTab,
     markCodebuddyLoginAwaitingRetry,
     openSidePanel,
     pane.activeTaskspaceId,

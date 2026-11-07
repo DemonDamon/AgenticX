@@ -4,6 +4,7 @@ import {
   assistantShowsResolvedCodebuddyLoginNotice,
   assistantTurnNeedsCodebuddyLogin,
   buildCodebuddyLoginCommand,
+  CODEBUDDY_LOGIN_SHELL_BANNER,
   isCompleteCodebuddyLoginCommand,
   isNativeShellTerminalSessionId,
   paneAwaitingCodebuddyLoginRetry,
@@ -171,6 +172,7 @@ describe("codebuddy login command", () => {
     expect(cmd).toContain("command -v cbc");
     expect(cmd).toContain("WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy");
     expect(cmd).toContain('"$CB" login');
+    expect(cmd).toContain(CODEBUDDY_LOGIN_SHELL_BANNER);
     expect(cmd.toLowerCase()).not.toContain("oauth");
     expect(cmd).not.toContain("token");
   });
@@ -215,6 +217,28 @@ describe("codebuddy login terminal", () => {
       sleep: async () => {},
     });
     expect(result).toEqual({ ok: false, tabId: "tab-1", sessionId: null });
+  });
+
+  it("waits for onTabReady before polling the pty", async () => {
+    let focusCalled = false;
+    let pollCount = 0;
+    const result = await writeCommandToTerminalTab({
+      cwd: "/tmp/ws",
+      label: "codebuddy-login",
+      command: buildCodebuddyLoginCommand("posix"),
+      addTab: () => "tab-1",
+      onTabReady: () => {
+        focusCalled = true;
+      },
+      waitPtyReady: async () => {
+        pollCount += 1;
+        return focusCalled && pollCount > 0;
+      },
+      writePty: async () => ({ ok: true, id: "tab-1:spawn-abc" }),
+      sleep: async () => {},
+    });
+    expect(focusCalled).toBe(true);
+    expect(result.ok).toBe(true);
   });
 
   it("writes the command into the shell pty after the tab exists", async () => {

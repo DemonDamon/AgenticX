@@ -171,8 +171,12 @@ import {
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import {
+  isBareCodebuddyReplLoginPayload,
+  isBridgeTerminalSessionId,
+  isLikelyCodebuddyLoginPayload,
   registerShellTabPty,
   resolveNativeShellPtySessionId,
+  resolveRegisteredShellPtySessionId,
   resolveTabWriteSessionId,
   shellTabPtyByTabId,
   unregisterShellTabPtyForSession,
@@ -14474,6 +14478,9 @@ function registerIpc(): void {
     const sess = terminalSessions.get(id);
     if (!sess) return { ok: false };
     if (sess.kind === "bridge") {
+      if (isLikelyCodebuddyLoginPayload(payload.data) || isBareCodebuddyReplLoginPayload(payload.data)) {
+        return { ok: false, id, error: "codebuddy_login_requires_native_shell" };
+      }
       const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
       const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
       return { ok, id };
@@ -14487,36 +14494,58 @@ function registerIpc(): void {
   });
 
   /** Write only to a native shell PTY for this tab — never CodeBuddy/cc-bridge REPL. */
-  ipcMain.handle("terminal-write-pty-by-tab", async (_event, payload: { tabId: string; data: string }) => {
-    const tabId = (payload.tabId || "").trim();
-    if (!tabId) return { ok: false };
-    const sessionKinds = new Map<string, "pty" | "bridge">();
-    for (const [id, sess] of terminalSessions.entries()) {
-      sessionKinds.set(id, sess.kind);
-    }
-    const id = resolveNativeShellPtySessionId(tabId, sessionKinds);
-    if (!id) return { ok: false };
-    const sess = terminalSessions.get(id);
-    if (!sess || sess.kind !== "pty") return { ok: false };
-    try {
-      sess.pty.write(payload.data);
-      return { ok: true, id };
-    } catch {
-      return { ok: false };
-    }
-  });
+  ipcMain.handle(
+    "terminal-write-pty-by-tab",
+    async (
+      _event,
+      payload: { tabId: string; data: string; requireRegistered?: boolean },
+    ) => {
+      const tabId = (payload.tabId || "").trim();
+      if (!tabId) return { ok: false, error: "missing_tab" };
+      if (isBareCodebuddyReplLoginPayload(payload.data)) {
+        return { ok: false, error: "bare_login_refused" };
+      }
+      const sessionKinds = new Map<string, "pty" | "bridge">();
+      for (const [id, sess] of terminalSessions.entries()) {
+        sessionKinds.set(id, sess.kind);
+      }
+      const requireRegistered = payload.requireRegistered === true;
+      const id = requireRegistered
+        ? resolveRegisteredShellPtySessionId(tabId, sessionKinds)
+        : resolveNativeShellPtySessionId(tabId, sessionKinds);
+      if (!id || isBridgeTerminalSessionId(id)) {
+        return { ok: false, error: "native_shell_pty_missing" };
+      }
+      const sess = terminalSessions.get(id);
+      if (!sess || sess.kind !== "pty") {
+        return { ok: false, error: "native_shell_pty_missing" };
+      }
+      try {
+        sess.pty.write(payload.data);
+        return { ok: true, id };
+      } catch {
+        return { ok: false, error: "pty_write_failed" };
+      }
+    },
+  );
 
-  ipcMain.handle("terminal-has-pty-for-tab", async (_event, payload: { tabId: string }) => {
-    const tabId = (payload.tabId || "").trim();
-    if (!tabId) return { ok: false };
-    const sessionKinds = new Map<string, "pty" | "bridge">();
-    for (const [id, sess] of terminalSessions.entries()) {
-      sessionKinds.set(id, sess.kind);
-    }
-    const id = resolveNativeShellPtySessionId(tabId, sessionKinds);
-    if (!id) return { ok: false };
-    return { ok: true, id };
-  });
+  ipcMain.handle(
+    "terminal-has-pty-for-tab",
+    async (_event, payload: { tabId: string; requireRegistered?: boolean }) => {
+      const tabId = (payload.tabId || "").trim();
+      if (!tabId) return { ok: false };
+      const sessionKinds = new Map<string, "pty" | "bridge">();
+      for (const [id, sess] of terminalSessions.entries()) {
+        sessionKinds.set(id, sess.kind);
+      }
+      const id =
+        payload.requireRegistered === true
+          ? resolveRegisteredShellPtySessionId(tabId, sessionKinds)
+          : resolveNativeShellPtySessionId(tabId, sessionKinds);
+      if (!id || isBridgeTerminalSessionId(id)) return { ok: false };
+      return { ok: true, id };
+    },
+  );
 
   ipcMain.handle("terminal-resize", async (_event, payload: { id: string; cols: number; rows: number }) => {
     const sess = terminalSessions.get(payload.id);

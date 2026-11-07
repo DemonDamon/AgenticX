@@ -1,9 +1,12 @@
 import { describe, expect, it, beforeEach } from "vitest";
 
 import {
+  isBareCodebuddyReplLoginPayload,
   isBridgeTerminalSessionId,
+  isLikelyCodebuddyLoginPayload,
   registerShellTabPty,
   resolveNativeShellPtySessionId,
+  resolveRegisteredShellPtySessionId,
   resolveTabWriteSessionId,
   shellTabPtyByTabId,
   unregisterShellTabPtyForSession,
@@ -45,5 +48,27 @@ describe("terminal shell routing", () => {
     registerShellTabPty("tab-a", "tab-a:shell-1");
     unregisterShellTabPtyForSession("tab-a:shell-1");
     expect(shellTabPtyByTabId.has("tab-a")).toBe(false);
+  });
+
+  it("registered resolver ignores prefix bridge on dual sessions", () => {
+    const kinds = new Map<string, "pty" | "bridge">([
+      ["tab-a:bridge:cc", "bridge"],
+      ["tab-a:unregistered-pty", "pty"],
+    ]);
+    expect(resolveRegisteredShellPtySessionId("tab-a", kinds)).toBeNull();
+    registerShellTabPty("tab-a", "tab-a:shell-1");
+    kinds.set("tab-a:shell-1", "pty");
+    expect(resolveRegisteredShellPtySessionId("tab-a", kinds)).toBe("tab-a:shell-1");
+  });
+
+  it("never resolves bridge for shellOnly tab write", () => {
+    const kinds = new Map<string, "pty" | "bridge">([["tab-a:bridge:cc", "bridge"]]);
+    expect(resolveTabWriteSessionId("tab-a", kinds, true)).toBeNull();
+  });
+
+  it("detects login payloads vs bare REPL token", () => {
+    expect(isLikelyCodebuddyLoginPayload('"$CB" login')).toBe(true);
+    expect(isBareCodebuddyReplLoginPayload("login\n")).toBe(true);
+    expect(isLikelyCodebuddyLoginPayload("login\n")).toBe(false);
   });
 });
