@@ -655,15 +655,18 @@ def _run_external_harness_turn_body(
     if isinstance(result.detail, dict):
         native_thread = result.detail.get("native_thread_id")
     assistant_content = format_external_harness_assistant_content(harness_id, result)
+    assistant_metadata: Dict[str, Any] = {
+        "harness": harness_id,
+        "harness_status": result.status,
+        "native_thread_id": native_thread,
+    }
+    if isinstance(result.detail, dict) and result.detail.get("codebuddy_login_required") is True:
+        assistant_metadata["codebuddy_login_required"] = True
     session.chat_history.append(
         {
             "role": "assistant",
             "content": assistant_content,
-            "metadata": {
-                "harness": harness_id,
-                "harness_status": result.status,
-                "native_thread_id": native_thread,
-            },
+            "metadata": assistant_metadata,
         }
     )
     # Keep the binding's native-thread handle fresh for resume/handoff.

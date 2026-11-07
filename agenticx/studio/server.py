@@ -691,16 +691,20 @@ async def _external_harness_chat_stream(
             harness_id, result
         )
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
-        final = SseEvent(
-            type="final",
-            data={
-                "text": final_text,
-                "turn_terminal": True,
-                "terminal_reason": terminal_reason,
-                "harness": harness_id,
-                "harness_status": result.status,
-            },
-        )
+        final_data: dict = {
+            "text": final_text,
+            "turn_terminal": True,
+            "terminal_reason": terminal_reason,
+            "harness": harness_id,
+            "harness_status": result.status,
+        }
+        result_detail = getattr(result, "detail", None)
+        if (
+            isinstance(result_detail, dict)
+            and result_detail.get("codebuddy_login_required") is True
+        ):
+            final_data["codebuddy_login_required"] = True
+        final = SseEvent(type="final", data=final_data)
         yield (
             "data: "
             + json.dumps(final.model_dump(), ensure_ascii=False)

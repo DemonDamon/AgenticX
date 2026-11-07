@@ -13,6 +13,10 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from agenticx.harness.adapter import HarnessAdapter
+from agenticx.harness.codebuddy_auth import (
+    codebuddy_login_required_from_lines,
+    is_codebuddy_auth_failure_text,
+)
 from agenticx.harness.stream_json_text import visible_assistant_text_from_lines
 from agenticx.harness.types import (
     CapabilityNotSupported,
@@ -200,6 +204,11 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             visible = self._turn_error_visible_text(session_id)
             if visible:
                 detail["error_visible_text"] = visible[:_RESULT_TEXT_MAX_CHARS]
+            turn_lines = self._turn_stream_lines(session_id)
+            if codebuddy_login_required_from_lines(
+                turn_lines, turn_failed=True
+            ) or is_codebuddy_auth_failure_text(visible):
+                detail["codebuddy_login_required"] = True
         return TurnResult(
             harness=self.harness_id,
             session_id=session_id,
@@ -210,15 +219,18 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             detail=detail,
         )
 
-    def _turn_error_visible_text(self, session_id: str) -> str:
-        """Assistant text emitted before a non-success result, if any."""
+    def _turn_stream_lines(self, session_id: str) -> list[str]:
+        """Stdout lines belonging to the current turn (excludes earlier turns)."""
         session = self.get(session_id)
         if session is None:
-            return ""
+            return []
         with session.lock:
             start = max(0, int(session.turn_line_start or 0))
-            lines = list(session.lines[start:])
-        return visible_assistant_text_from_lines(lines)
+            return list(session.lines[start:])
+
+    def _turn_error_visible_text(self, session_id: str) -> str:
+        """Assistant text emitted before a non-success result, if any."""
+        return visible_assistant_text_from_lines(self._turn_stream_lines(session_id))
 
     # ------------------------------------------------------------------
     # stop

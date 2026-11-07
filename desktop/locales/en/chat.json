@@ -1108,6 +1108,11 @@
     "badgeDeepSeek": "DeepSeek",
     "badgeHermesAgent": "Hermes Agent",
     "badgePiAgent": "PI Agent",
-    "badgeOpenClaw": "OpenClaw"
+    "badgeOpenClaw": "OpenClaw",
+    "codebuddyLogin": {
+      "banner": "CodeBuddy Tencent login expired. Click to sign in again.",
+      "terminal": "CodeBuddy login",
+      "writeFailed": "The terminal could not accept the login command yet. Run codebuddy login in the terminal that opened."
+    }
   }
 }

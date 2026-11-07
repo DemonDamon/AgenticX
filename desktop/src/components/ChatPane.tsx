@@ -476,6 +476,13 @@ import {
   stopAllWbBridgeProgressPolls,
   stopWbBridgeProgressPoll,
 } from "../utils/wb-bridge-progress";
+import {
+  buildCodebuddyLoginCommand,
+  pickLoginCwd,
+  sessionShowsCodebuddyLoginPrompt,
+  writeCommandToTerminalTab,
+} from "../utils/codebuddy-login";
+import { CodebuddyLoginPrompt } from "./messages/CodebuddyLoginPrompt";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import {
@@ -3166,6 +3173,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const showCodebuddyLogin = useMemo(
+    () => sessionShowsCodebuddyLoginPrompt(pane.messages ?? [], pane.harnessId),
+    [pane.messages, pane.harnessId],
+  );
   const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -3858,6 +3869,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [crewSettingsAvatarId, isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
+  const startCodebuddyLogin = useCallback(() => {
+    void (async () => {
+      const sid = String(pane.sessionId || "").trim();
+      let cwd = "~";
+      if (sid && typeof window.agenticxDesktop?.listTaskspaces === "function") {
+        try {
+          const listed = await window.agenticxDesktop.listTaskspaces(sid);
+          if (listed.ok && Array.isArray(listed.workspaces)) {
+            cwd = pickLoginCwd(listed.workspaces, pane.activeTaskspaceId);
+          }
+        } catch {
+          cwd = "~";
+        }
+      }
+      openWorkspaceSidebarForPane(
+        pane.id,
+        paneRef.current?.clientWidth ?? paneWidth,
+        openSidePanel,
+      );
+      let platform: "posix" | "windows" = "posix";
+      try {
+        const host = await window.agenticxDesktop.platform();
+        if (host === "win32") platform = "windows";
+      } catch {
+        platform = "posix";
+      }
+      const wrote = await writeCommandToTerminalTab({
+        cwd,
+        label: t("harness.codebuddyLogin.terminal"),
+        command: buildCodebuddyLoginCommand(platform),
+        addTab: (nextCwd, label) => addPaneTerminalTab(pane.id, nextCwd, label),
+        readActiveTabId: () =>
+          useAppStore.getState().panes.find((item) => item.id === pane.id)?.activeTerminalTabId
+          ?? null,
+        onTabReady: (tabId) => setWorkPanelFocus({ kind: "terminal", tabId }),
+        write: (tabId, data) => window.agenticxDesktop.terminalWriteByTab({ tabId, data }),
+      });
+      if (!wrote.ok) {
+        setAttachToastMessage(t("harness.codebuddyLogin.writeFailed"));
+        setAttachToastOpen(true);
+      }
+    })();
+  }, [
+    addPaneTerminalTab,
+    openSidePanel,
+    pane.activeTaskspaceId,
+    pane.id,
+    pane.sessionId,
+    paneWidth,
+    t,
+  ]);
   const openScratchFromDraft = useCallback(
     (draft: ScratchChatDraft) => {
       const { chatId } = upsertScratchChat(pane.id, draft);
@@ -11459,6 +11521,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
       let pendingFinalHarness: string | undefined;
+      let pendingCodebuddyLoginRequired = false;
       /** Last-round truncation marker (rounds_exhausted) carried by FINAL data. */
       let pendingFinalRoundsExhausted: { round: number; maxRounds: number } | null = null;
       let pendingReferences: SearchReference[] = [];
@@ -13147,6 +13210,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     payload.data?.harness ?? payload.data?.harness_id ?? null;
                   const harnessId = String(harnessRaw ?? "").trim();
                   if (harnessId) pendingFinalHarness = harnessId;
+                  if (payload.data?.codebuddy_login_required === true) {
+                    pendingCodebuddyLoginRequired = true;
+                  }
                 }
                 if (payload.data?.rounds_exhausted === true) {
                   pendingFinalRoundsExhausted = {
@@ -13395,6 +13461,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
               ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
+              ...(pendingCodebuddyLoginRequired ? { codebuddy_login_required: true } : {}),
               ...(pendingFinalRoundsExhausted
                 ? {
                     rounds_exhausted: true,
@@ -15467,6 +15534,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           ) : null}
+          {showCodebuddyLogin ? <CodebuddyLoginPrompt onLogin={startCodebuddyLogin} /> : null}
           {voiceInputHint ? (
             <div className="mb-2 flex justify-center px-1">
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
