@@ -3175,6 +3175,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const markCodebuddyLoginAwaitingRetry = useAppStore((s) => s.markCodebuddyLoginAwaitingRetry);
+  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
   const codebuddyLoginAwaitingRetry = useMemo(
     () =>
       paneAwaitingCodebuddyLoginRetry(
@@ -3266,8 +3268,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
-  const markCodebuddyLoginAwaitingRetry = useAppStore((s) => s.markCodebuddyLoginAwaitingRetry);
-  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
