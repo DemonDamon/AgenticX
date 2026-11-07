@@ -193,7 +193,8 @@ import {
   lastAdjacentClusterKey,
 } from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ImBubble } from "./messages/ImBubble";
+import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { HarnessAvatarBadge } from "./messages/HarnessAvatarBadge";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -9473,6 +9474,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       </svg>
                     </button>
                   ) : null}
+                  <div className="mt-0.5 shrink-0" data-react-harness-avatar="">
+                    <ChatImAvatar
+                      label={paneAvatarMeta.name}
+                      imageUrl={paneAvatarMeta.url}
+                      size="sm"
+                      harnessBadge={
+                        <HarnessAvatarBadge
+                          metadata={lastAssistantInBlock?.metadata ?? finalAssistant?.metadata}
+                          variant="inline"
+                        />
+                      }
+                    />
+                  </div>
                   {useUnifiedReActCard ? (
                     (() => {
                       const actionTailReady = shouldShowReActBlockActionTail({
@@ -11388,6 +11402,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      let pendingFinalHarness: string | undefined;
       /** Last-round truncation marker (rounds_exhausted) carried by FINAL data. */
       let pendingFinalRoundsExhausted: { round: number; maxRounds: number } | null = null;
       let pendingReferences: SearchReference[] = [];
@@ -13071,6 +13086,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
                 pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
                 pendingFinalTerminalReason = normalizedFinal.terminalReason;
+                {
+                  const harnessRaw =
+                    payload.data?.harness ?? payload.data?.harness_id ?? null;
+                  const harnessId = String(harnessRaw ?? "").trim();
+                  if (harnessId) pendingFinalHarness = harnessId;
+                }
                 if (payload.data?.rounds_exhausted === true) {
                   pendingFinalRoundsExhausted = {
                     round: Number(payload.data?.round ?? 0) || 0,
@@ -13317,6 +13338,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
+              ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
               ...(pendingFinalRoundsExhausted
                 ? {
                     rounds_exhausted: true,

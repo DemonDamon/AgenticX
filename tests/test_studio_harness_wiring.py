@@ -690,3 +690,70 @@ def test_same_model_reuses_surface_session(wiring):
         manager, "sess-1", "two", chat_model="glm-5.3-flash"
     )
     assert cc.spawn_count == 1
+
+def test_apply_chat_model_empty_prev_keeps_injected_surface(wiring):
+    """Handoff spawn often has options=None; filling model must keep surface."""
+    hw, alpha, beta, _ = wiring
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    manager = FakeManager(session)
+    # Simulate post-handoff binding: live surface, no model in options yet.
+    manager.set_session_harness(
+        "sess-1",
+        harness_id="claude-code",
+        options=None,
+        surface_session_id="cc-injected-1",
+    )
+    cc._sessions["cc-injected-1"] = {
+        "session_id": "cc-injected-1",
+        "cwd": "/tmp",
+        "state": "idle",
+        "options": {},
+        "native_thread_id": "cc-native-inj",
+        "model": None,
+        "raw": {"model": None},
+    }
+
+    hw.apply_chat_model_to_harness_options(
+        manager, "sess-1", "claude-code", "glm-5.3-flash"
+    )
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_options"]["model"] == "glm-5.3-flash"
+    assert binding["harness_session_id"] == "cc-injected-1"
+    assert "cc-injected-1" in cc._sessions
+    assert cc.spawn_count == 0
+
+
+def test_switch_handoff_spawns_with_session_model(wiring):
+    """Cross-harness handoff should pass Near chat model into spawn options."""
+    hw, alpha, beta, _ = wiring
+    cc = RecordingAdapter("claude-code")
+    hw.harness_registry().register(cc)
+    session = make_session()
+    session.model_name = "glm-5.3-flash"
+    session.chat_history = [
+        {"role": "user", "content": "特朗普新闻最近有啥"},
+        {
+            "role": "assistant",
+            "content": "新闻摘要",
+            "metadata": {"harness": "python-agent"},
+        },
+        {"role": "user", "content": "南沙今天天气怎么样"},
+        {
+            "role": "assistant",
+            "content": "南沙多云 24–28℃",
+            "metadata": {"harness": "python-agent"},
+        },
+    ]
+    manager = FakeManager(session)
+
+    result = hw.switch_harness(manager, "sess-1", "claude-code")
+    assert result["ok"]
+    assert cc.spawn_count == 1
+    surf = next(iter(cc._sessions.values()))
+    assert surf["options"]["model"] == "glm-5.3-flash"
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_options"]["model"] == "glm-5.3-flash"
+    assert "南沙" in cc.turns[0]["text"]
+

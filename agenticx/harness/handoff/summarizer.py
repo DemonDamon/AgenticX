@@ -83,17 +83,15 @@ class TemplateSummarizer(SummarizationProvider):
             return SummarizationResult(summary, self.provider_id)
 
         # Delta window: only messages the target has not seen yet; full
-        # window: everything. The goal section always comes from the very
-        # first user message so the objective survives any strategy.
+        # window: everything. Goal prefers the *latest* meaningful user
+        # turn (so a mid-thread topic change like 南沙天气 wins over an
+        # older opener); keep a short thread-objective hint when the
+        # first user turn still differs.
         history = snapshot.history
         window = history[plan.delta_from_position : plan.delta_to_position]
 
-        first_user = next(
-            (m for m in history if m.role == "user"), None
-        )
-        goal = _clip(first_user.content if first_user else "(no user goal recorded)")
-
-        decisions = _recent_assistant_excerpt(window)
+        goal = _goal_from_history(history)
+        decisions = _recent_turn_excerpt(window)
         changed_files = _changed_files(snapshot, plan)
         commands_and_tests = _commands_and_tests(snapshot, plan)
         plan_todos = _clip(snapshot.todos) if snapshot.todos else "(none recorded)"
@@ -116,21 +114,58 @@ class TemplateSummarizer(SummarizationProvider):
         return SummarizationResult(summary, self.provider_id)
 
 
-def _recent_assistant_excerpt(window: List[object]) -> str:
+def _meaningful_user_messages(history: List[object]) -> List[object]:
+    out: List[object] = []
+    for message in history:
+        if getattr(message, "role", "") != "user":
+            continue
+        content = (getattr(message, "content", "") or "").strip()
+        if not content:
+            continue
+        out.append(message)
+    return out
+
+
+def _goal_from_history(history: List[object]) -> str:
+    """Latest user intent wins; keep a short opener as thread objective."""
+    users = _meaningful_user_messages(history)
+    if not users:
+        return "(no user goal recorded)"
+    latest = (getattr(users[-1], "content", "") or "").strip()
+    first = (getattr(users[0], "content", "") or "").strip()
+    if first and first != latest:
+        return _clip(
+            f"{latest}\n\n(thread objective: {_clip(first, 160)})"
+        )
+    return _clip(latest)
+
+
+def _recent_turn_excerpt(window: List[object]) -> str:
+    """Most recent user + assistant turns in the handoff window.
+
+    Prefer the tail of the window so a full_summary still carries the
+    last builtin replies (e.g. 南沙天气) instead of only early chatter.
+    """
     excerpts: List[str] = []
     for message in reversed(window):
-        if getattr(message, "role", "") != "assistant":
+        role = getattr(message, "role", "")
+        if role not in ("user", "assistant"):
             continue
         content = (getattr(message, "content", "") or "").strip()
         if not content:
             continue
         excerpt = _clip(content, _MAX_EXCERPT_CHARS)
-        excerpts.append(f"- {excerpt}")
-        if len(excerpts) >= 3:
+        excerpts.append(f"- [{role}] {excerpt}")
+        if len(excerpts) >= 6:
             break
     if not excerpts:
         return "(none recorded)"
     return "\n".join(reversed(excerpts))
+
+
+def _recent_assistant_excerpt(window: List[object]) -> str:
+    """Backward-compatible alias used by older tests/callers."""
+    return _recent_turn_excerpt(window)
 
 
 def _runs_in_window(
