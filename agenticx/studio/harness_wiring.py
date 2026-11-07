@@ -334,9 +334,11 @@ def apply_chat_model_to_harness_options(
     Policy: only harnesses listed in ``_HARNESSES_WITH_MODEL_OPTION`` receive
     ``model`` (they already expose a CLI/API model knob). Empty/omitted chat
     model leaves existing options untouched. When a live surface session was
-    spawned under a *different* model, stop it and clear
+    spawned under a *different non-empty* model, stop it and clear
     ``harness_session_id`` so ``ensure_harness_session`` re-spawns with the
     picker value on the next turn (CLI ``--model`` / ``-m`` is spawn-time).
+    Filling an empty ``options.model`` after handoff inject keeps the
+    injected surface session.
     """
     desired = str(chat_model or "").strip()
     if not desired:
@@ -352,7 +354,11 @@ def apply_chat_model_to_harness_options(
     options["model"] = desired
 
     # Mid-session picker change → respawn so the new model reaches argv.
-    if surface_sid and prev != desired:
+    # Filling an *empty* spawn model (common after handoff inject, which
+    # often started with options=None) must NOT kill the injected surface:
+    # the next turn would otherwise spawn a blank CLI session and lose
+    # the handoff context ("这是第一条消息").
+    if surface_sid and prev and prev != desired:
         adapter = harness_registry().require(hid)
         try:
             adapter.stop(surface_sid)
@@ -546,6 +552,50 @@ def _run_external_harness_turn_body(
     return result
 
 
+
+def _session_chat_model(manager: Any, session_id: str) -> Optional[str]:
+    """Near session model picker value (``StudioSession.model_name``)."""
+    try:
+        managed = manager.get(session_id, touch=False)
+    except TypeError:
+        managed = manager.get(session_id)
+    except Exception:
+        return None
+    if managed is None:
+        return None
+    session = getattr(managed, "studio_session", None)
+    if session is None:
+        return None
+    model = str(getattr(session, "model_name", "") or "").strip()
+    return model or None
+
+
+def _handoff_spawn_options(
+    manager: Any,
+    session_id: str,
+    target_harness: str,
+    binding: Dict[str, Any],
+    *,
+    same_harness: bool,
+) -> Optional[Dict[str, Any]]:
+    """Options for the handoff target spawn.
+
+    Same-harness rebinds keep existing options. Cross-harness switches
+    start fresh but fold in the current Near chat model when the target
+    exposes a native ``model`` knob — so the injected surface already
+    has the right ``--model`` and the next turn will not respawn.
+    """
+    options: Dict[str, Any] = {}
+    if same_harness:
+        options = dict(binding.get("harness_options") or {})
+    hid = str(target_harness or "").strip()
+    if hid in _HARNESSES_WITH_MODEL_OPTION:
+        model = _session_chat_model(manager, session_id)
+        if model:
+            options["model"] = model
+    return options or None
+
+
 # ----------------------------------------------------------------------
 # mid-session switch
 # ----------------------------------------------------------------------
@@ -656,13 +706,20 @@ def switch_harness(
             "notes": "fresh session: bound without handoff",
         }
 
+    spawn_options = _handoff_spawn_options(
+        manager,
+        sid,
+        target,
+        binding,
+        same_harness=(target == current),
+    )
     result = engine.execute_handoff(
         snapshot,
         target,
         user_strategy=user_strategy,
         manual_context=manual_context,
         pending_user_message="",
-        spawn_options=(binding.get("harness_options") if target == current else None),
+        spawn_options=spawn_options,
     )
 
     native_thread = result.handoff.resumed_native_thread_id or (
@@ -672,7 +729,7 @@ def switch_harness(
         sid,
         harness_id=target,
         thread_id=str(native_thread or "") or None,
-        options=(binding.get("harness_options") if target == current else None),
+        options=spawn_options,
         surface_session_id=result.detail.get("target_session_id"),
     )
     _append_switch_boundary(

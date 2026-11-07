@@ -194,6 +194,7 @@ import {
 } from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
+import { resolveMessageHarnessId } from "../utils/harness-display";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -9177,6 +9178,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         omitSuggestedQuestions?: boolean;
         actionRhythmBodyTail?: boolean;
         holdToolGroupProgress?: boolean;
+        turnHarnessId?: string | null;
       }
     ) => {
       const reactCol = opts.reactWorkColumn ?? false;
@@ -9186,6 +9188,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const omitSuggestedQuestions = opts.omitSuggestedQuestions ?? false;
       const actionRhythmBodyTail = opts.actionRhythmBodyTail ?? false;
       const holdToolGroupProgress = opts.holdToolGroupProgress ?? false;
+      const turnHarnessId = opts.turnHarnessId ?? null;
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
@@ -9274,6 +9277,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 setWorkPanelFocus(replayFocus);
               }}
+              turnHarnessId={
+                message.role === "user"
+                  ? (turnHarnessId ?? resolveMessageHarnessId(message.metadata))
+                  : null
+              }
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -9419,7 +9427,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       topLevelRowsIm !== null
         ? topLevelRowsIm.map((seg, segIdx) => {
             if (seg.kind === "user") {
-              return renderGroupedRow({ kind: "message", message: seg.message }, segIdx, {});
+              const next = topLevelRowsIm?.[segIdx + 1];
+              let replyHarness: string | null = resolveMessageHarnessId(seg.message.metadata);
+              if (!replyHarness && next?.kind === "react") {
+                for (let i = next.block.workMessages.length - 1; i >= 0; i--) {
+                  const m = next.block.workMessages[i];
+                  if (m.role !== "assistant") continue;
+                  replyHarness = resolveMessageHarnessId(m.metadata);
+                  if (replyHarness) break;
+                }
+              }
+              return renderGroupedRow(
+                { kind: "message", message: seg.message },
+                segIdx,
+                { turnHarnessId: replyHarness },
+              );
             }
             const { workMessages, finalAssistant } = seg.block;
             const groupedWork = parkTrailingReasoningInProcess(groupConsecutiveToolMessages(workMessages));
@@ -9704,11 +9726,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
               -1,
             );
+            let turnHarnessId: string | null = null;
+            if (row.kind === "message" && row.message.role === "user") {
+              turnHarnessId = resolveMessageHarnessId(row.message.metadata);
+              if (!turnHarnessId) {
+                for (let j = rowIdx + 1; j < groupedVisibleMessages.length; j++) {
+                  const later = groupedVisibleMessages[j];
+                  if (later.kind === "message" && later.message.role === "user") break;
+                  if (later.kind === "message" && later.message.role === "assistant") {
+                    turnHarnessId = resolveMessageHarnessId(later.message.metadata);
+                    if (turnHarnessId) break;
+                  }
+                }
+              }
+            }
             return renderGroupedRow(row, rowIdx, {
               holdToolGroupProgress:
                 row.kind === "tool_group" &&
                 rowIdx === lastToolGroupIdx &&
                 shouldHoldToolGroupProgress(pane.messages ?? [], row.messages, isStreamingCurrentSession),
+              turnHarnessId,
             });
           });
 
@@ -11388,6 +11425,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      let pendingFinalHarness: string | undefined;
       /** Last-round truncation marker (rounds_exhausted) carried by FINAL data. */
       let pendingFinalRoundsExhausted: { round: number; maxRounds: number } | null = null;
       let pendingReferences: SearchReference[] = [];
@@ -13071,6 +13109,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
                 pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
                 pendingFinalTerminalReason = normalizedFinal.terminalReason;
+                {
+                  const harnessRaw =
+                    payload.data?.harness ?? payload.data?.harness_id ?? null;
+                  const harnessId = String(harnessRaw ?? "").trim();
+                  if (harnessId) pendingFinalHarness = harnessId;
+                }
                 if (payload.data?.rounds_exhausted === true) {
                   pendingFinalRoundsExhausted = {
                     round: Number(payload.data?.round ?? 0) || 0,
@@ -13317,6 +13361,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
+              ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
               ...(pendingFinalRoundsExhausted
                 ? {
                     rounds_exhausted: true,

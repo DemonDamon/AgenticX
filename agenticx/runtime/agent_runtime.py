@@ -3980,11 +3980,17 @@ class AgentRuntime:
             persisted_metadata: Dict[str, Any] = {
                 "turn_terminal": True,
                 "terminal_reason": terminal_reason,
+                # Builtin AgenticX runtime — so UI can badge the turn even
+                # when the session later switches to an external harness.
+                "harness": "python-agent",
             }
             if terminal_metadata:
                 for key, value in terminal_metadata.items():
                     if key not in {"turn_terminal", "terminal_reason"}:
                         persisted_metadata[str(key)] = value
+            # External / override metadata may already set harness; keep it.
+            if not str(persisted_metadata.get("harness") or "").strip():
+                persisted_metadata["harness"] = "python-agent"
             hist: Dict[str, Any] = {
                 "role": "assistant",
                 "content": body,
@@ -4049,11 +4055,14 @@ class AgentRuntime:
             "text": body,
             "turn_terminal": True,
             "terminal_reason": terminal_reason,
+            "harness": "python-agent",
         }
         if terminal_metadata:
             for key, value in terminal_metadata.items():
                 if key not in {"turn_terminal", "terminal_reason"}:
                     final_data[str(key)] = value
+        if not str(final_data.get("harness") or "").strip():
+            final_data["harness"] = "python-agent"
         if sug_list:
             final_data["suggested_questions"] = list(sug_list)
         if safe_reasoning.strip():

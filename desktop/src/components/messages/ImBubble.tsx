@@ -65,6 +65,8 @@ import { hasVisibleReactNode } from "../../utils/visible-react-node";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
+import { HarnessAvatarBadge } from "./HarnessAvatarBadge";
+import { resolveMessageHarnessId } from "../../utils/harness-display";
 import { Shimmer } from "../ds/Shimmer";
 import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
 import { GroupTalkReportCard } from "./GroupTalkReportCard";
@@ -75,6 +77,8 @@ import { splitAutomationExecutionContract } from "../../utils/automation-contrac
 
 type Props = {
   message: Message;
+  /** Harness that answered this user turn (badge on user bubble). */
+  turnHarnessId?: string | null;
   /** When message.references is empty, inherit from same-turn tool_result / embedded JSON. */
   resolvedReferences?: SearchReference[];
   highlightTerms?: string[];
@@ -334,9 +338,10 @@ export function ChatImAvatar({
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
+  let face: ReactNode;
   if (resolvedImage) {
     if (isBundledMetaAvatarUrl(resolvedImage)) {
-      return (
+      face = (
         <span
           className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-hidden ${rounded}`}
           data-avatar-fit="logo"
@@ -348,9 +353,8 @@ export function ChatImAvatar({
           />
         </span>
       );
-    }
-    if (isNearCubePortraitUrl(resolvedImage)) {
-      return (
+    } else if (isNearCubePortraitUrl(resolvedImage)) {
+      face = (
         <span
           className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-visible`}
           data-avatar-fit="cube"
@@ -362,37 +366,41 @@ export function ChatImAvatar({
           />
         </span>
       );
+    } else {
+      face = (
+        <ThemedAvatarImage
+          src={resolvedImage}
+          alt={label}
+          className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
+        />
+      );
     }
-    return (
-      <ThemedAvatarImage
-        src={resolvedImage}
-        alt={label}
-        className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
-      />
+  } else {
+    const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
+    face = (
+      <div
+        className={`agx-im-avatar flex ${dim} shrink-0 items-center justify-center font-bold ${rounded} ${tintClass}`}
+        style={
+          avatarId
+            ? undefined
+            : {
+                background: "var(--chat-im-avatar-bg)",
+                color: "var(--chat-im-avatar-fg, var(--text-strong))",
+              }
+        }
+      >
+        {char}
+      </div>
     );
   }
-  const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
-  return (
-    <div
-      className={`agx-im-avatar flex ${dim} shrink-0 items-center justify-center font-bold ${rounded} ${tintClass}`}
-      style={
-        avatarId
-          ? undefined
-          : {
-              background: "var(--chat-im-avatar-bg)",
-              color: "var(--chat-im-avatar-fg, var(--text-strong))",
-            }
-      }
-    >
-      {char}
-    </div>
-  );
+  return face;
 }
 
 const MESSAGE_CONTEXT_MENU_MARGIN = 8;
 
 export function ImBubble({
   message,
+  turnHarnessId,
   resolvedReferences,
   highlightTerms,
   badge,
@@ -744,6 +752,13 @@ export function ImBubble({
       }
     : bubbleStyle;
 
+  const showHarnessNest =
+    isUser &&
+    Boolean(
+      (turnHarnessId && String(turnHarnessId).trim()) ||
+        resolveMessageHarnessId(message.metadata ?? undefined),
+    );
+
   const assistantIconButtons = shouldShowAssistantIconButtons({
     hideActions,
     isUser,
@@ -1036,9 +1051,10 @@ export function ImBubble({
               </div>
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
+            <div className="agx-im-user-bubble-nest">
             <MaybeConversationContent
               active={showSenderIdentity}
-              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+              className={`agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full overflow-visible border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed${showHarnessNest ? " agx-im-user-bubble--harness-nest" : ""}`}
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -1093,6 +1109,13 @@ export function ImBubble({
                 ) : null}
               </div>
             </MaybeConversationContent>
+            {showHarnessNest ? (
+              <HarnessAvatarBadge
+                harnessId={turnHarnessId}
+                metadata={message.metadata}
+              />
+            ) : null}
+            </div>
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}

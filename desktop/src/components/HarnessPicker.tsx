@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, Check, ChevronDown, Code2, Loader2, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
+import { HarnessMark } from "./harness/HarnessMark";
 import { useAppStore } from "../store";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 import {
@@ -22,11 +23,7 @@ function HarnessGlyph({
   harnessId: string;
   className?: string;
 }) {
-  const id = normalizePreferredHarnessId(harnessId);
-  const common = { className, strokeWidth: 2, "aria-hidden": true as const };
-  if (id === "claude-code") return <Sparkles {...common} />;
-  if (id === "codebuddy") return <Code2 {...common} />;
-  return <Bot {...common} />;
+  return <HarnessMark harnessId={harnessId} size={14} className={className} />;
 }
 
 /** Catalog entry returned by GET /api/harnesses (studio server). */

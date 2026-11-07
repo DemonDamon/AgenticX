@@ -1089,7 +1089,7 @@
     }
   },
   "harness": {
-    "builtin": "Built-in Runtime",
+    "builtin": "AgenticX",
     "switching": "Switching engine…",
     "switchFailed": "Engine switch failed; previous engine restored",
     "switchBusy": "A turn is still running — try switching again after it settles",
@@ -1098,6 +1098,16 @@
     "unavailable": "Local CLI not installed",
     "loading": "Loading harnesses…",
     "loadFailed": "Failed to load harnesses",
-    "empty": "No harnesses available"
+    "empty": "No harnesses available",
+    "badgeAgenticX": "AgenticX",
+    "badgeClaudeCode": "Claude Code",
+    "badgeCodeBuddy": "CodeBuddy",
+    "badgeOther": "{{name}}",
+    "badgeCodex": "Codex",
+    "badgeOpenCode": "OpenCode",
+    "badgeDeepSeek": "DeepSeek",
+    "badgeHermesAgent": "Hermes Agent",
+    "badgePiAgent": "PI Agent",
+    "badgeOpenClaw": "OpenClaw"
   }
 }
