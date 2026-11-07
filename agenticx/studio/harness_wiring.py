@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from agenticx.utils.agx_home import agx_home
 from agenticx.harness.registry import HarnessRegistry, default_registry
 from agenticx.harness.types import TurnRequest, TurnResult
+from agenticx.studio.harness_turn_text import format_external_harness_assistant_content
 from agenticx.harness.handoff import (
     AppThreadSnapshot,
     HandoffEngine,
@@ -518,12 +519,7 @@ def _run_external_harness_turn_body(
     native_thread = None
     if isinstance(result.detail, dict):
         native_thread = result.detail.get("native_thread_id")
-    assistant_content = str(result.result_text or "").strip()
-    if not result.ok:
-        assistant_content = (
-            f"[harness {harness_id} turn {result.status}] "
-            f"{str(result.result_text or '').strip()[:500]}"
-        )
+    assistant_content = format_external_harness_assistant_content(harness_id, result)
     session.chat_history.append(
         {
             "role": "assistant",

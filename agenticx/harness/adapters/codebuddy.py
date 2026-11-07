@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from agenticx.harness.adapter import HarnessAdapter
+from agenticx.harness.stream_json_text import visible_assistant_text_from_lines
 from agenticx.harness.types import (
     CapabilityNotSupported,
     HarnessCapabilities,
@@ -195,6 +196,10 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             )
             if k in snap
         }
+        if unified != TURN_STATUS_SUCCESS:
+            visible = self._turn_error_visible_text(session_id)
+            if visible:
+                detail["error_visible_text"] = visible[:_RESULT_TEXT_MAX_CHARS]
         return TurnResult(
             harness=self.harness_id,
             session_id=session_id,
@@ -204,6 +209,16 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             deduplicated=deduplicated,
             detail=detail,
         )
+
+    def _turn_error_visible_text(self, session_id: str) -> str:
+        """Assistant text emitted before a non-success result, if any."""
+        session = self.get(session_id)
+        if session is None:
+            return ""
+        with session.lock:
+            start = max(0, int(session.turn_line_start or 0))
+            lines = list(session.lines[start:])
+        return visible_assistant_text_from_lines(lines)
 
     # ------------------------------------------------------------------
     # stop

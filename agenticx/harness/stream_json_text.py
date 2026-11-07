@@ -448,6 +448,17 @@ def drain_visible_text_from_lines(
     return "".join(parts), new_index
 
 
+def visible_assistant_text_from_lines(lines: List[str]) -> str:
+    """Sanitized assistant text from one turn's stream-json lines.
+
+    Complete ``assistant`` blocks released before ``result`` are included.
+    The terminal ``result`` payload is not.
+    """
+    tracker = VisibleTextTracker()
+    drain_visible_text_from_lines(lines, start_index=0, tracker=tracker)
+    return tracker.emitted.strip()
+
+
 __all__ = [
     "MidTurnItem",
     "ToolProgressEvent",
@@ -455,6 +466,7 @@ __all__ = [
     "VisibleTextTracker",
     "drain_midturn_items_from_lines",
     "drain_visible_text_from_lines",
+    "visible_assistant_text_from_lines",
     "iter_raw_text_fragments",
     "iter_raw_tool_progress",
     "parse_stream_json_object",
