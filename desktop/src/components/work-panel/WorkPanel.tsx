@@ -3524,7 +3524,7 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "terminal" ? (
-          <div className="flex h-full min-h-0 flex-col">
+          <div className="relative flex h-full min-h-0 flex-col">
             {terminalTabs.length === 0 ? (
               <EmptyBlock
                 icon={<TerminalIcon className="h-9 w-9" strokeWidth={1.3} />}
@@ -3532,9 +3532,22 @@ export function WorkPanel({
                 subtitle={t("work.emptyTerminalHint")}
               />
             ) : (
-              terminalTabs.map((tab) =>
-                tab.id === (activeTerminalTabId ?? terminalTabs[terminalTabs.length - 1]?.id) ? (
-                  <div key={tab.id} className="min-h-0 flex-1">
+              terminalTabs.map((tab) => {
+                const activeId =
+                  activeTerminalTabId ?? terminalTabs[terminalTabs.length - 1]?.id;
+                const isActive = tab.id === activeId;
+                const keepMounted = Boolean(tab.shellOnly) || isActive;
+                if (!keepMounted) return null;
+                return (
+                  <div
+                    key={tab.id}
+                    className={
+                      isActive
+                        ? "min-h-0 flex-1"
+                        : "pointer-events-none invisible absolute inset-0 z-0 min-h-0"
+                    }
+                    aria-hidden={!isActive}
+                  >
                     <TerminalEmbed
                       tabId={tab.id}
                       cwd={tab.cwd}
@@ -3559,8 +3572,8 @@ export function WorkPanel({
                       }
                     />
                   </div>
-                ) : null
-              )
+                );
+              })
             )}
           </div>
         ) : null}

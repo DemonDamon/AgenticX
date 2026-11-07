@@ -24,16 +24,26 @@ export function unregisterShellTabPtyForSession(sessionId: string): void {
   }
 }
 
-export function resolveNativeShellPtySessionId(
+export function resolveRegisteredShellPtySessionId(
   tabId: string,
   sessionKinds: ReadonlyMap<string, "pty" | "bridge">,
 ): string | null {
   const tid = tabId.trim();
   if (!tid) return null;
   const registered = shellTabPtyByTabId.get(tid);
-  if (registered && sessionKinds.get(registered) === "pty" && !isBridgeTerminalSessionId(registered)) {
-    return registered;
-  }
+  if (!registered || isBridgeTerminalSessionId(registered)) return null;
+  if (sessionKinds.get(registered) !== "pty") return null;
+  return registered;
+}
+
+export function resolveNativeShellPtySessionId(
+  tabId: string,
+  sessionKinds: ReadonlyMap<string, "pty" | "bridge">,
+): string | null {
+  const registered = resolveRegisteredShellPtySessionId(tabId, sessionKinds);
+  if (registered) return registered;
+  const tid = tabId.trim();
+  if (!tid) return null;
   const prefix = `${tid}:`;
   for (const [id, kind] of sessionKinds.entries()) {
     if (!id.startsWith(prefix) || kind !== "pty" || isBridgeTerminalSessionId(id)) continue;
@@ -58,4 +68,22 @@ export function resolveTabWriteSessionId(
     if (kind === "bridge") bridgeFallback = id;
   }
   return bridgeFallback;
+}
+
+/** Block accidental CodeBuddy login snippets on cc-bridge REPL sessions. */
+export function isLikelyCodebuddyLoginPayload(data: string): boolean {
+  const text = String(data ?? "");
+  if (!text.includes("login")) return false;
+  return (
+    text.includes('"$CB" login')
+    || text.includes("& $cb login")
+    || text.includes("command -v codebuddy")
+    || text.includes("Get-Command codebuddy")
+  );
+}
+
+/** Refuse bare REPL tokens that collapse from failed shell routing. */
+export function isBareCodebuddyReplLoginPayload(data: string): boolean {
+  const normalized = String(data ?? "").trim();
+  return normalized === "login" || normalized === "login\r" || /^login\r?\n$/i.test(normalized);
 }

@@ -244,7 +244,11 @@ export function pickLoginCwd(
   return path || "~";
 }
 
+export const CODEBUDDY_LOGIN_SHELL_BANNER =
+  "echo '=== Near codebuddy-login shell (native zsh) — NOT harness REPL ==='";
+
 const POSIX_LOGIN = [
+  CODEBUDDY_LOGIN_SHELL_BANNER,
   'CB=""',
   'if [ -x .cb/bin/codebuddy ]; then CB=".cb/bin/codebuddy"',
   'elif [ -x "$HOME/.cb/bin/codebuddy" ]; then CB="$HOME/.cb/bin/codebuddy"',
@@ -259,6 +263,7 @@ const POSIX_LOGIN = [
 ].join("; ");
 
 const WINDOWS_LOGIN = [
+  "Write-Output '=== Near codebuddy-login shell (native) — NOT harness REPL ==='",
   "$cb = $null",
   "if (Test-Path -LiteralPath '.\\.cb\\bin\\codebuddy.exe') { $cb = '.\\.cb\\bin\\codebuddy.exe' }",
   "elseif (Test-Path -LiteralPath '.\\.cb\\bin\\codebuddy') { $cb = '.\\.cb\\bin\\codebuddy' }",
@@ -317,9 +322,11 @@ export async function writeCommandToTerminalTab(args: {
   writePty: (
     tabId: string,
     data: string,
-  ) => Promise<{ ok?: boolean; id?: string } | null | undefined>;
+  ) => Promise<{ ok?: boolean; id?: string; error?: string } | null | undefined>;
+  /** Wait until main process has a registered native shell PTY (never bridge). */
   waitPtyReady?: (tabId: string) => Promise<boolean>;
-  onTabReady?: (tabId: string) => void;
+  /** Focus UI on the new tab before waiting for PTY (avoids stale bridge tab focus). */
+  onTabReady?: (tabId: string) => void | Promise<void>;
   beforeWrite?: () => void | Promise<void>;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<{ ok: boolean; tabId: string | null; sessionId?: string | null }> {
@@ -332,7 +339,8 @@ export async function writeCommandToTerminalTab(args: {
   }
   const tabId = args.addTab(cwd, args.label);
   if (!tabId) return { ok: false, tabId: null, sessionId: null };
-  args.onTabReady?.(tabId);
+  await args.onTabReady?.(tabId);
+  await waitForNextPaint();
   await waitForNextPaint();
   const sleep = args.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const ready = args.waitPtyReady ?? (async () => true);
