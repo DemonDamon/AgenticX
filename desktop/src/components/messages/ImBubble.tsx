@@ -76,6 +76,8 @@ import { splitAutomationExecutionContract } from "../../utils/automation-contrac
 
 type Props = {
   message: Message;
+  /** Harness that answered this user turn (badge on user bubble). */
+  turnHarnessId?: string | null;
   /** When message.references is empty, inherit from same-turn tool_result / embedded JSON. */
   resolvedReferences?: SearchReference[];
   highlightTerms?: string[];
@@ -397,6 +399,7 @@ const MESSAGE_CONTEXT_MENU_MARGIN = 8;
 
 export function ImBubble({
   message,
+  turnHarnessId,
   resolvedReferences,
   highlightTerms,
   badge,
@@ -1042,9 +1045,13 @@ export function ImBubble({
             {hasBody || message.forwardedHistory || contentBadge ? (
             <MaybeConversationContent
               active={showSenderIdentity}
-              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full overflow-visible border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               style={userBubbleStyle}
             >
+              <HarnessAvatarBadge
+                harnessId={turnHarnessId}
+                metadata={message.metadata}
+              />
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {message.forwardedHistory ? (
@@ -1211,7 +1218,6 @@ export function ImBubble({
                     : userBubbleStyle
               }
             >
-              <HarnessAvatarBadge metadata={message.metadata} />
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {displayQuotedItems.length > 0 ? (

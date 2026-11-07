@@ -91,6 +91,8 @@ type Props = {
   onOpenSubAgentRun?: (runId: string) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
+  /** Harness that answered this user turn (corner badge on user bubble). */
+  turnHarnessId?: string | null;
   /** IM assistant: align with ReAct block tool column (no duplicate avatar). */
   imAssistantVisual?: "default" | "compact-inline" | "compact-inline-with-actions";
   /** Pass-through to ImBubble: remove inner bubble border when inside unified ReAct container. */
@@ -405,6 +407,7 @@ export function MessageRenderer({
   onOpenSubAgentRun,
   assistantName,
   assistantAvatarUrl,
+  turnHarnessId,
   userName,
   userAvatarUrl,
   onCopyMessage,
@@ -634,6 +637,7 @@ export function MessageRenderer({
       onRevealPath,
       <ImBubble
         message={displayMessage}
+        turnHarnessId={turnHarnessId}
         resolvedReferences={resolvedReferences}
         highlightTerms={highlightTerms}
         badge={assistantBadge}

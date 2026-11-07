@@ -17,8 +17,8 @@ type Props = {
 
 /**
  * Compact per-turn harness marker: Grok-style circular icon on the
- * top-right corner of the assistant answer bubble. Exclusive SVG when
- * known; hover title shows the display name. Omit when unknown.
+ * top-right corner of the user input bubble. Exclusive SVG when known;
+ * hover title shows the display name. Omit when unknown.
  */
 export function HarnessAvatarBadge({
   harnessId,
