@@ -16,12 +16,22 @@ from agenticx.harness.types import TurnResult
 
 _DETAIL_LIMIT = 500
 
+_CODEBUDDY_LOGIN_BODY = (
+    "CodeBuddy Tencent login is required. Use the re-login action in the chat."
+)
+
 
 def format_external_harness_assistant_content(harness_id: str, result: TurnResult) -> str:
     """Text persisted to chat history and sent as the SSE ``final`` body."""
     body = str(result.result_text or "").strip()
     if result.ok:
         return body
+    detail = result.detail if isinstance(result.detail, dict) else {}
+    if (
+        str(harness_id or "").strip() == "codebuddy"
+        and detail.get("codebuddy_login_required") is True
+    ):
+        return _CODEBUDDY_LOGIN_BODY
     status = str(result.status or "error").strip() or "error"
     prefix = f"[harness {harness_id} turn {status}]"
     detail = body or _failure_detail(result.detail)

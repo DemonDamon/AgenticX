@@ -479,6 +479,7 @@ import {
 import {
   buildCodebuddyLoginCommand,
   pickLoginCwd,
+  assistantTurnNeedsCodebuddyLogin,
   sessionShowsCodebuddyLoginPrompt,
   writeCommandToTerminalTab,
 } from "../utils/codebuddy-login";
@@ -3173,10 +3174,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
-  const showCodebuddyLogin = useMemo(
-    () => sessionShowsCodebuddyLoginPrompt(pane.messages ?? [], pane.harnessId),
-    [pane.messages, pane.harnessId],
-  );
+  const showCodebuddyLogin = useMemo(() => {
+    const rows = pane.messages ?? [];
+    if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) return false;
+    let lastAssistant: (typeof rows)[number] | undefined;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (rows[index]?.role === "assistant") {
+        lastAssistant = rows[index];
+        break;
+      }
+    }
+    if (lastAssistant && assistantTurnNeedsCodebuddyLogin(lastAssistant, rows, pane.harnessId)) {
+      return false;
+    }
+    return true;
+  }, [pane.messages, pane.harnessId]);
   const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -9480,6 +9492,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onResolveActionConfirmation={(confirmation, decision) =>
                 void resolveActionConfirmation(confirmation, decision, "button")
               }
+              activeHarnessId={pane.harnessId}
+              onCodebuddyLogin={startCodebuddyLogin}
             />
             </MarkdownContext.Provider>
           </div>
@@ -13251,9 +13265,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 // Final payload is authoritative. Replacing (instead of merging) avoids
                 // duplicate concatenation when token stream shape differs from final text.
-                if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
+                if (
+                  finalText.trim() &&
+                  !isThinkingPlaceholderText(finalText) &&
+                  !(
+                    pendingCodebuddyLoginRequired &&
+                    /\[harness\s+\S+\s+turn\s+(?:error|failed|exited|timeout|blocked)\]/i.test(finalText)
+                  )
+                ) {
                   full = finalText;
                   cumulativeFull = finalText;
+                } else if (pendingCodebuddyLoginRequired) {
+                  full = "";
+                  cumulativeFull = "";
                 } else if (!assistantVisibleBodyForUi(full).trim()) {
                   full = "";
                   cumulativeFull = "";

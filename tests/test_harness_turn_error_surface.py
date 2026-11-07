@@ -40,6 +40,22 @@ def test_visible_text_is_the_error_assistant_line_not_the_result() -> None:
     assert text == "401 Unauthorized"
 
 
+def test_codebuddy_login_required_replaces_harness_error_banner() -> None:
+    result = TurnResult(
+        harness="codebuddy",
+        session_id="s",
+        status=TURN_STATUS_ERROR,
+        result_text="",
+        detail={
+            "error_visible_text": "400 Invalid request: invalid JSON request body",
+            "codebuddy_login_required": True,
+        },
+    )
+    text = format_external_harness_assistant_content("codebuddy", result)
+    assert "[harness codebuddy turn error]" not in text
+    assert "invalid JSON" not in text
+
+
 def test_failed_turn_display_is_one_banner_with_visible_detail() -> None:
     result = TurnResult(
         harness="codebuddy",

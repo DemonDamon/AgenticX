@@ -20,6 +20,10 @@ export type CodebuddyLoginMessage = {
 const HARNESS_ERROR_RE =
   /\[harness\s+\S+\s+turn\s+(?:error|failed|exited|timeout|blocked)\]/i;
 
+/** Persisted assistant text when harness_wiring strips the raw error (backend). */
+export const CODEBUDDY_LOGIN_PERSISTED_BODY =
+  "CodeBuddy Tencent login is required. Use the re-login action in the chat.";
+
 const EXPLICIT_LOGIN = [
   "codebuddy login",
   "please login",
@@ -109,6 +113,80 @@ function isSuccessfulHarnessTurn(message: CodebuddyLoginMessage): boolean {
  * Show the login CTA when the latest assistant turn is a CodeBuddy auth failure.
  * A later successful answer hides it.
  */
+function turnStartBeforeAssistant(messages: CodebuddyLoginMessage[], assistantIndex: number): number {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") return index + 1;
+  }
+  return 0;
+}
+
+function messageIndexById(
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  message: CodebuddyLoginMessage & { id?: string },
+): number {
+  const id = String(message.id ?? "").trim();
+  if (id) {
+    return messages.findIndex((row) => row.id === id);
+  }
+  return messages.indexOf(message);
+}
+
+function lastAssistantIndex(messages: CodebuddyLoginMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") return index;
+  }
+  return -1;
+}
+
+/** True when this row should show the live re-login CTA (last failing assistant turn). */
+export function assistantTurnNeedsCodebuddyLogin(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  if (message.role !== "assistant") return false;
+  if (!sessionShowsCodebuddyLoginPrompt(messages, activeHarnessId)) return false;
+  const assistantIndex = messageIndexById(messages, message);
+  if (assistantIndex < 0 || assistantIndex !== lastAssistantIndex(messages)) return false;
+  const start = turnStartBeforeAssistant(messages, assistantIndex);
+  const slice = messages.slice(start, assistantIndex + 1);
+  return sessionShowsCodebuddyLoginPrompt(slice, activeHarnessId);
+}
+
+function isLoginPersistedBody(text: string): boolean {
+  const trimmed = String(text ?? "").trim();
+  return trimmed === CODEBUDDY_LOGIN_PERSISTED_BODY;
+}
+
+/** Hide harness 400/401 banners and backend login placeholder from the bubble body. */
+export function shouldSuppressCodebuddyHarnessErrorBody(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  const raw = String(message.content ?? "");
+  if (loginFlag(message.metadata)) {
+    return (
+      HARNESS_ERROR_RE.test(raw)
+      || isLoginPersistedBody(raw)
+      || isCodebuddyAuthFailureText(raw)
+    );
+  }
+  if (!assistantTurnNeedsCodebuddyLogin(message, messages, activeHarnessId)) return false;
+  return HARNESS_ERROR_RE.test(raw) || isLoginPersistedBody(raw) || isCodebuddyAuthFailureText(raw);
+}
+
+/** Historical login turns (resolved): short notice, no CTA. */
+export function assistantShowsResolvedCodebuddyLoginNotice(
+  message: CodebuddyLoginMessage & { id?: string },
+  messages: Array<CodebuddyLoginMessage & { id?: string }>,
+  activeHarnessId?: string | null,
+): boolean {
+  if (message.role !== "assistant" || !loginFlag(message.metadata)) return false;
+  if (assistantTurnNeedsCodebuddyLogin(message, messages, activeHarnessId)) return false;
+  return shouldSuppressCodebuddyHarnessErrorBody(message, messages, activeHarnessId);
+}
+
 export function sessionShowsCodebuddyLoginPrompt(
   messages: CodebuddyLoginMessage[],
   activeHarnessId?: string | null,

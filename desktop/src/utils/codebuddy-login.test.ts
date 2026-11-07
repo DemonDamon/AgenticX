@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assistantShowsResolvedCodebuddyLoginNotice,
+  assistantTurnNeedsCodebuddyLogin,
   buildCodebuddyLoginCommand,
   pickLoginCwd,
   sessionShowsCodebuddyLoginPrompt,
+  shouldSuppressCodebuddyHarnessErrorBody,
   writeCommandToTerminalTab,
 } from "./codebuddy-login";
 
@@ -102,6 +105,43 @@ describe("codebuddy login prompt", () => {
         "python-agent",
       ),
     ).toBe(false);
+  });
+
+  it("only shows the live CTA on the latest failing assistant row", () => {
+    const messages = [
+      { role: "user", content: "q1" },
+      {
+        role: "assistant",
+        id: "old",
+        content: "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+        metadata: { harness: "codebuddy", codebuddy_login_required: true },
+      },
+      { role: "user", content: "q2" },
+      {
+        role: "assistant",
+        id: "new",
+        content: "done",
+        metadata: { harness: "codebuddy", harness_status: "success" },
+      },
+    ] as const;
+    const oldMsg = messages[1];
+    const newMsg = messages[3];
+    expect(assistantTurnNeedsCodebuddyLogin(oldMsg, [...messages], "codebuddy")).toBe(false);
+    expect(assistantTurnNeedsCodebuddyLogin(newMsg, [...messages], "codebuddy")).toBe(false);
+    expect(assistantShowsResolvedCodebuddyLoginNotice(oldMsg, [...messages], "codebuddy")).toBe(
+      true,
+    );
+  });
+
+  it("suppresses harness error bodies for login-required metadata", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: "[harness codebuddy turn error] 400 Invalid request: invalid JSON request body",
+        metadata: { harness: "codebuddy", codebuddy_login_required: true },
+      },
+    ];
+    expect(shouldSuppressCodebuddyHarnessErrorBody(messages[0], messages, "codebuddy")).toBe(true);
   });
 
   it("does not flag a successful codebuddy answer that merely mentions login", () => {
