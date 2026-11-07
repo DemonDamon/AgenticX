@@ -686,7 +686,9 @@ async def _external_harness_chat_stream(
         for line in await _drain_midturn_sse_lines():
             yield line
 
-        final_text = str(result.result_text or "").strip()
+        final_text = harness_wiring.format_external_harness_assistant_content(
+            harness_id, result
+        )
         terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
         final = SseEvent(
             type="final",

@@ -19,6 +19,7 @@ import ujson
 from agenticx.cc_bridge.session_manager import BridgeSession, BridgeSessionManager
 from agenticx.harness.adapter import HarnessAdapter
 from agenticx.harness.cc_result_sanitize import sanitize_claude_code_result_text
+from agenticx.harness.stream_json_text import visible_assistant_text_from_lines
 from agenticx.harness.types import (
     CapabilityNotSupported,
     HarnessCapabilities,
@@ -65,6 +66,27 @@ def _last_result_text(session: BridgeSession) -> str:
         return ""
     cleaned = sanitize_claude_code_result_text(str(result))
     return cleaned[:_RESULT_TEXT_MAX_CHARS]
+
+
+def _failure_visible_text(session: BridgeSession) -> str:
+    """Assistant text from the current turn when the result is not success.
+
+    Same stream-json shape as the WB bridge: an assistant line such as
+    ``401 Unauthorized`` can arrive before ``result`` / ``is_error``.
+    """
+    with session.lock:
+        start = max(0, int(session._result_wait_watermark or 0))
+        lines = list(session.lines[start:])
+    return visible_assistant_text_from_lines(lines)
+
+
+def _detail_with_failure_text(session: BridgeSession, detail: dict) -> dict:
+    text = _failure_visible_text(session)
+    if not text:
+        return detail
+    merged = dict(detail)
+    merged["error_visible_text"] = text[:_RESULT_TEXT_MAX_CHARS]
+    return merged
 
 
 def _last_result_usage_metadata(session: BridgeSession) -> dict:
@@ -200,7 +222,10 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                 status=TURN_STATUS_EXITED,
                 result_text="",
                 tail=tail,
-                detail={"mode": "headless", "exit_code": session.exit_code},
+                detail=_detail_with_failure_text(
+                    session,
+                    {"mode": "headless", "exit_code": session.exit_code},
+                ),
             )
         return TurnResult(
             harness=self.harness_id,
@@ -208,14 +233,17 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
             status=TURN_STATUS_TIMEOUT,
             result_text="",
             tail=tail,
-            detail={
-                "mode": "headless",
-                "wait_seconds": request.wait_seconds,
-                "hint": (
-                    "still waiting when wait_seconds elapsed; poll describe() "
-                    "and do not assume failure"
-                ),
-            },
+            detail=_detail_with_failure_text(
+                session,
+                {
+                    "mode": "headless",
+                    "wait_seconds": request.wait_seconds,
+                    "hint": (
+                        "still waiting when wait_seconds elapsed; poll describe() "
+                        "and do not assume failure"
+                    ),
+                },
+            ),
         )
 
     # ------------------------------------------------------------------
