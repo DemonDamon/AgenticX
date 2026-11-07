@@ -3842,6 +3842,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [sessionFindOpen, setSessionFindOpen] = useState(false);
   /** One-shot focus for WorkPanel tabs (summary / workspace / terminal / browser). */
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
+  const clearWorkPanelFocus = useCallback(() => setWorkPanelFocus(null), []);
   const [destinationChooserOpen, setDestinationChooserOpen] = useState(false);
   const [railKind, setRailKind] = useState<DestinationKind | null>(null);
   /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
@@ -16139,7 +16140,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onToggleExpand={compactSidePanels ? undefined : toggleWorkPanelExpand}
             tintColor={paneTint}
             focusRequest={workPanelFocus}
-            onFocusRequestHandled={() => setWorkPanelFocus(null)}
+            onFocusRequestHandled={clearWorkPanelFocus}
             onPickFileForReference={(taskspaceId, path) => {
               void insertWorkspaceFileReference(taskspaceId, path);
             }}

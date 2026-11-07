@@ -1833,6 +1833,8 @@ export function WorkPanel({
     };
   }, []);
 
+  const onFocusRequestHandledRef = useRef(onFocusRequestHandled);
+  onFocusRequestHandledRef.current = onFocusRequestHandled;
   useEffect(() => {
     if (!focusRequest) return;
     if (focusRequest.kind === "summary") {
@@ -1978,8 +1980,8 @@ export function WorkPanel({
         });
       }
     }
-    onFocusRequestHandled?.();
-  }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab, scratchChats, activeScratchId]);
+    onFocusRequestHandledRef.current?.();
+  }, [focusRequest, paneId, setActivePaneTerminalTab, scratchChats, activeScratchId]);
 
   useEffect(() => {
     setOpenSections((prev) =>
