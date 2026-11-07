@@ -42,8 +42,8 @@ describe("HarnessAvatarBadge", () => {
     expect(html).toContain("<img");
     expect(html).toContain('data-harness-mark="python-agent"');
     expect(html).toContain("bg-surface-cardSolid");
-    expect(html).toContain("-right-7");
-    expect(html).toContain("-top-7");
+    expect(html).toContain("-right-2.5");
+    expect(html).toContain("-top-2.5");
     expect(html).not.toContain("truncate");
     expect(html).not.toContain("max-w-[9.5rem]");
   });

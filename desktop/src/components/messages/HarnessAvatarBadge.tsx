@@ -17,8 +17,8 @@ type Props = {
 
 /**
  * Grok-style circular harness mark at the user-bubble top-right.
- * Floats just outside the corner with a small gap (not stacked onto
- * the orange fill). Chip fill uses Near theme surface tokens.
+ * Sits at the top-right corner with a tiny (~2px) Grok-like gap —
+ * almost kissing the bubble, not stacked into the orange fill. Chip fill uses Near theme surface tokens.
  */
 export function HarnessAvatarBadge({
   harnessId,
@@ -43,7 +43,7 @@ export function HarnessAvatarBadge({
       data-harness-badge-corner=""
       title={label}
       aria-label={label}
-      className={`pointer-events-auto absolute -right-7 -top-7 z-[2] inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border bg-surface-cardSolid p-[3px] text-text-strong shadow-[0_1px_3px_rgba(0,0,0,0.18)] ${className}`}
+      className={`pointer-events-auto absolute -right-2.5 -top-2.5 z-[2] inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border bg-surface-cardSolid p-[3px] text-text-strong shadow-[0_1px_3px_rgba(0,0,0,0.18)] ${className}`}
     >
       <HarnessMark harnessId={id} size={18} className="h-[18px] w-[18px]" />
       <span className="sr-only">{label}</span>
