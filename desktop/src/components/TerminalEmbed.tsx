@@ -311,6 +311,8 @@ export function TerminalEmbed({
         cwd,
         cols: term.cols,
         rows: term.rows,
+        tabId,
+        shellOnly,
       });
       if (disposed) return;
       if (!res.ok) {
@@ -346,7 +348,7 @@ export function TerminalEmbed({
     };
   // spawnGen drives re-mount / re-spawn when user clicks restart
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, cwd, spawnGen, ccBridgePty?.sessionId, ccBridgePty?.baseUrl, ccBridgePty?.token]);
+  }, [tabId, cwd, shellOnly, spawnGen, ccBridgePty?.sessionId, ccBridgePty?.baseUrl, ccBridgePty?.token]);
 
   useEffect(() => {
     if (!termRef.current || !containerRef.current) return;

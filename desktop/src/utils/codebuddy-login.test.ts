@@ -4,6 +4,8 @@ import {
   assistantShowsResolvedCodebuddyLoginNotice,
   assistantTurnNeedsCodebuddyLogin,
   buildCodebuddyLoginCommand,
+  isCompleteCodebuddyLoginCommand,
+  isNativeShellTerminalSessionId,
   paneAwaitingCodebuddyLoginRetry,
   pickLoginCwd,
   sessionShowsCodebuddyLoginPrompt,
@@ -195,13 +197,34 @@ describe("codebuddy login terminal", () => {
     expect(pickLoginCwd([], null)).toBe("~");
   });
 
+  it("rejects bare login commands and bridge session ids", () => {
+    expect(isCompleteCodebuddyLoginCommand("login")).toBe(false);
+    expect(isCompleteCodebuddyLoginCommand(buildCodebuddyLoginCommand("posix"))).toBe(true);
+    expect(isNativeShellTerminalSessionId("tab:bridge:uuid")).toBe(false);
+    expect(isNativeShellTerminalSessionId("tab:spawn-1")).toBe(true);
+  });
+
+  it("refuses to accept bridge pty write results", async () => {
+    const result = await writeCommandToTerminalTab({
+      cwd: "/tmp/ws",
+      label: "codebuddy-login",
+      command: buildCodebuddyLoginCommand("posix"),
+      addTab: () => "tab-1",
+      waitPtyReady: async () => true,
+      writePty: async () => ({ ok: true, id: "tab-1:bridge:cc" }),
+      sleep: async () => {},
+    });
+    expect(result).toEqual({ ok: false, tabId: "tab-1", sessionId: null });
+  });
+
   it("writes the command into the shell pty after the tab exists", async () => {
     const writes: string[] = [];
     let ready = "";
+    const loginCmd = buildCodebuddyLoginCommand("posix");
     const result = await writeCommandToTerminalTab({
       cwd: "/tmp/ws",
-      label: "zsh",
-      command: "echo hi",
+      label: "codebuddy-login",
+      command: loginCmd,
       addTab: () => "tab-1",
       onTabReady: (tabId) => {
         ready = tabId;
@@ -209,13 +232,13 @@ describe("codebuddy login terminal", () => {
       waitPtyReady: async () => true,
       writePty: async (_tabId, data) => {
         writes.push(data);
-        return { ok: writes.length > 0 };
+        return { ok: writes.length > 0, id: "tab-1:spawn-abc" };
       },
       sleep: async () => {},
     });
     expect(ready).toBe("tab-1");
-    expect(result).toEqual({ ok: true, tabId: "tab-1" });
-    expect(writes.at(-1)).toBe("echo hi\n");
+    expect(result).toEqual({ ok: true, tabId: "tab-1", sessionId: "tab-1:spawn-abc" });
+    expect(writes.at(-1)).toBe(`${loginCmd}\n`);
   });
 
   it("tracks awaiting-retry session match", () => {

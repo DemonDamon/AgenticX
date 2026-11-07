@@ -268,6 +268,31 @@ const WINDOWS_LOGIN = [
   "else { Write-Output 'Complete CodeBuddy login in this terminal.'; & $cb login }",
 ].join("; ");
 
+/** True when a terminal payload is the full shell login snippet (not bare REPL "login"). */
+export function isCompleteCodebuddyLoginCommand(command: string): boolean {
+  const text = String(command ?? "");
+  if (!text.includes("login")) return false;
+  return (
+    text.includes('"$CB" login')
+    || text.includes("& $cb login")
+    || text.includes("command -v codebuddy")
+    || text.includes("Get-Command codebuddy")
+  );
+}
+
+export function isNativeShellTerminalSessionId(sessionId: string | undefined | null): boolean {
+  const id = String(sessionId ?? "").trim();
+  if (!id || id.includes(":bridge:")) return false;
+  return true;
+}
+
+async function waitForNextPaint(): Promise<void> {
+  if (typeof requestAnimationFrame !== "function") return;
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 /** Shell snippet that resolves the same binaries wb-bridge prefers, then runs login. */
 export function buildCodebuddyLoginCommand(platform: CodebuddyLoginPlatform): string {
   switch (platform) {
@@ -289,15 +314,26 @@ export async function writeCommandToTerminalTab(args: {
   /** Must create a dedicated shell tab and return its id. */
   addTab: (cwd: string, label: string) => string | null;
   /** Write into native shell PTY for tabId only (never harness/cc-bridge REPL). */
-  writePty: (tabId: string, data: string) => Promise<{ ok?: boolean } | null | undefined>;
+  writePty: (
+    tabId: string,
+    data: string,
+  ) => Promise<{ ok?: boolean; id?: string } | null | undefined>;
   waitPtyReady?: (tabId: string) => Promise<boolean>;
   onTabReady?: (tabId: string) => void;
+  beforeWrite?: () => void | Promise<void>;
   sleep?: (ms: number) => Promise<void>;
-}): Promise<{ ok: boolean; tabId: string | null }> {
+}): Promise<{ ok: boolean; tabId: string | null; sessionId?: string | null }> {
+  if (!isCompleteCodebuddyLoginCommand(args.command)) {
+    return { ok: false, tabId: null, sessionId: null };
+  }
   const cwd = String(args.cwd || "").trim() || "~";
+  if (args.beforeWrite) {
+    await args.beforeWrite();
+  }
   const tabId = args.addTab(cwd, args.label);
-  if (!tabId) return { ok: false, tabId: null };
+  if (!tabId) return { ok: false, tabId: null, sessionId: null };
   args.onTabReady?.(tabId);
+  await waitForNextPaint();
   const sleep = args.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const ready = args.waitPtyReady ?? (async () => true);
   const data = `${args.command}\n`;
@@ -305,14 +341,17 @@ export async function writeCommandToTerminalTab(args: {
     if (await ready(tabId)) {
       try {
         const wrote = await args.writePty(tabId, data);
-        if (wrote?.ok) return { ok: true, tabId };
+        const sessionId = typeof wrote?.id === "string" ? wrote.id : null;
+        if (wrote?.ok && isNativeShellTerminalSessionId(sessionId)) {
+          return { ok: true, tabId, sessionId };
+        }
       } catch {
         // Terminal pty may still be spawning.
       }
     }
     await sleep(200);
   }
-  return { ok: false, tabId };
+  return { ok: false, tabId, sessionId: null };
 }
 
 export function paneAwaitingCodebuddyLoginRetry(

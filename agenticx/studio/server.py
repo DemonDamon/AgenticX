@@ -9477,6 +9477,30 @@ def create_studio_app() -> FastAPI:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.get("/api/codebuddy/resolve-model")
+    async def resolve_codebuddy_model_route(
+        model: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        raw = str(model or "").strip()
+        try:
+            from agenticx.wb_bridge.custom_model import (
+                CUSTOM_LOCAL_PREFIX,
+                resolve_codebuddy_cli_model,
+            )
+
+            resolved = resolve_codebuddy_cli_model(raw) or raw
+            return {
+                "ok": True,
+                "model": raw,
+                "resolved": resolved,
+                "uses_custom_local": resolved.startswith(CUSTOM_LOCAL_PREFIX),
+            }
+        except Exception as exc:
+            logger.warning("resolve_codebuddy_model error: %s", exc)
+            return {"ok": False, "model": raw, "error": str(exc)}
+
     # --- WB Bridge (local CodeBuddy HTTP) config ---
 
     @app.get("/api/wb-bridge/config")

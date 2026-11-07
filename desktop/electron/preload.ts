@@ -1128,7 +1128,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   uninstallSkill: async (args: { name: string; source?: string }) =>
     ipcRenderer.invoke("uninstall-skill", args),
 
-  terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
+  terminalSpawn: async (payload: {
+    id: string;
+    cwd: string;
+    cols?: number;
+    rows?: number;
+    tabId?: string;
+    shellOnly?: boolean;
+  }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,
   terminalBridgeAttach: async (payload: {
     id: string;
