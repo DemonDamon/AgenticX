@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalizeHarnessId,
   harnessBadgeFallbackLabel,
   harnessDisplayKind,
   resolveMessageHarnessId,
@@ -14,10 +15,25 @@ describe("harness-display", () => {
     expect(resolveMessageHarnessId({})).toBeNull();
   });
 
-  it("maps builtin to AgenticX labels", () => {
+  it("canonicalizes aliases Damon listed", () => {
+    expect(canonicalizeHarnessId("hermes")).toBe("hermes-agent");
+    expect(canonicalizeHarnessId("hermesagent")).toBe("hermes-agent");
+    expect(canonicalizeHarnessId("pi")).toBe("pi-agent");
+    expect(canonicalizeHarnessId("deepseek-harness")).toBe("deepseek");
+    expect(canonicalizeHarnessId("open-claw")).toBe("openclaw");
+    expect(canonicalizeHarnessId("code-buddy")).toBe("codebuddy");
+  });
+
+  it("maps known harnesses to display labels", () => {
     expect(harnessDisplayKind("python-agent")).toBe("agenticx");
     expect(harnessBadgeFallbackLabel("python-agent")).toBe("AgenticX");
     expect(harnessBadgeFallbackLabel("claude-code")).toBe("Claude Code");
     expect(harnessBadgeFallbackLabel("codebuddy")).toBe("CodeBuddy");
+    expect(harnessBadgeFallbackLabel("codex")).toBe("Codex");
+    expect(harnessBadgeFallbackLabel("opencode")).toBe("OpenCode");
+    expect(harnessBadgeFallbackLabel("deepseek")).toBe("DeepSeek");
+    expect(harnessBadgeFallbackLabel("hermes-agent")).toBe("Hermes Agent");
+    expect(harnessBadgeFallbackLabel("pi-agent")).toBe("PI Agent");
+    expect(harnessBadgeFallbackLabel("openclaw")).toBe("OpenClaw");
   });
 });

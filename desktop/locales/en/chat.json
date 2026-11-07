@@ -1102,6 +1102,12 @@
     "badgeAgenticX": "AgenticX",
     "badgeClaudeCode": "Claude Code",
     "badgeCodeBuddy": "CodeBuddy",
-    "badgeOther": "{{name}}"
+    "badgeOther": "{{name}}",
+    "badgeCodex": "Codex",
+    "badgeOpenCode": "OpenCode",
+    "badgeDeepSeek": "DeepSeek",
+    "badgeHermesAgent": "Hermes Agent",
+    "badgePiAgent": "PI Agent",
+    "badgeOpenClaw": "OpenClaw"
   }
 }

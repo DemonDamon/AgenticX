@@ -15,6 +15,12 @@ void i18n.use(initReactI18next).init({
           badgeAgenticX: "AgenticX",
           badgeClaudeCode: "Claude Code",
           badgeCodeBuddy: "CodeBuddy",
+          badgeCodex: "Codex",
+          badgeOpenCode: "OpenCode",
+          badgeDeepSeek: "DeepSeek",
+          badgeHermesAgent: "Hermes Agent",
+          badgePiAgent: "PI Agent",
+          badgeOpenClaw: "OpenClaw",
           badgeOther: "{{name}}",
         },
       },
@@ -33,7 +39,6 @@ describe("HarnessAvatarBadge", () => {
     expect(html).toContain('data-harness-badge-corner=""');
     expect(html).toContain('title="AgenticX"');
     expect(html).toContain("sr-only");
-    // Icon-only chip: no truncate text pill next to the glyph.
     expect(html).not.toContain("truncate");
     expect(html).not.toContain("max-w-[9.5rem]");
   });
@@ -43,12 +48,18 @@ describe("HarnessAvatarBadge", () => {
     expect(html).toBe("");
   });
 
-  it("uses Claude Code / CodeBuddy titles", () => {
-    expect(wrap(<HarnessAvatarBadge metadata={{ harness: "claude-code" }} />)).toContain(
-      'title="Claude Code"',
-    );
-    expect(wrap(<HarnessAvatarBadge metadata={{ harness: "codebuddy" }} />)).toContain(
-      'title="CodeBuddy"',
-    );
+  it("uses exclusive mark img for Claude Code / CodeBuddy / Codex", () => {
+    const cc = wrap(<HarnessAvatarBadge metadata={{ harness: "claude-code" }} />);
+    expect(cc).toContain('title="Claude Code"');
+    expect(cc).toContain('data-harness-mark="claude-code"');
+    expect(cc).toContain("<img");
+
+    const cb = wrap(<HarnessAvatarBadge metadata={{ harness: "codebuddy" }} />);
+    expect(cb).toContain('title="CodeBuddy"');
+    expect(cb).toContain('data-harness-mark="codebuddy"');
+
+    const cx = wrap(<HarnessAvatarBadge metadata={{ harness: "codex" }} />);
+    expect(cx).toContain('title="Codex"');
+    expect(cx).toContain('data-harness-mark="codex"');
   });
 });
