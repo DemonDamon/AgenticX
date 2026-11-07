@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { hasExclusiveHarnessMark, harnessMarkSrc } from "./harness-marks";
 
 describe("harness-marks", () => {
-  it("exposes exclusive SVGs for Damon harnesses", () => {
+  it("exposes exclusive marks for Damon harnesses + Near AgenticX", () => {
     for (const id of [
+      "python-agent",
       "claude-code",
       "codebuddy",
       "codex",
@@ -15,12 +16,13 @@ describe("harness-marks", () => {
       "openclaw",
     ]) {
       expect(hasExclusiveHarnessMark(id)).toBe(true);
-      expect(String(harnessMarkSrc(id))).toMatch(/svg/i);
+      expect(String(harnessMarkSrc(id))).toMatch(/svg|png|image/i);
     }
   });
 
-  it("AgenticX has no exclusive SVG (Bot fallback)", () => {
-    expect(hasExclusiveHarnessMark("python-agent")).toBe(false);
-    expect(harnessMarkSrc("python-agent")).toBeNull();
+  it("AgenticX uses Near app icon asset", () => {
+    const src = String(harnessMarkSrc("python-agent") ?? "");
+    expect(src.length).toBeGreaterThan(0);
+    expect(src).toMatch(/png|image/i);
   });
 });

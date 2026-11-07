@@ -5,7 +5,7 @@ import { harnessMarkSrc } from "./harness-marks";
 
 type Props = {
   harnessId: string | null | undefined;
-  /** Pixel box for the glyph (badge ~12, picker ~14). */
+  /** Pixel box for the glyph (badge ~16, picker ~14). */
   size?: number;
   className?: string;
   title?: string;
@@ -13,9 +13,9 @@ type Props = {
 
 /**
  * Shared exclusive harness mark for bubble corner badge + picker.
- * Known brand SVGs render as <img>; AgenticX / unknown fall back to Bot.
+ * Known brands (incl. Near app icon for AgenticX) render as <img>.
  */
-export function HarnessMark({ harnessId, size = 12, className = "", title }: Props) {
+export function HarnessMark({ harnessId, size = 16, className = "", title }: Props) {
   const id = canonicalizeHarnessId(harnessId);
   const src = harnessMarkSrc(id);
   if (src) {

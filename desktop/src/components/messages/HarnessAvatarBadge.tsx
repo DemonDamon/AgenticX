@@ -17,8 +17,9 @@ type Props = {
 
 /**
  * Compact per-turn harness marker: Grok-style circular icon on the
- * top-right corner of the user input bubble. Exclusive SVG when known;
- * hover title shows the display name. Omit when unknown.
+ * top-right corner of the user input bubble. Solid opaque chip so the
+ * orange bubble does not wash through; exclusive / Near marks fill most
+ * of the circle.
  */
 export function HarnessAvatarBadge({
   harnessId,
@@ -43,9 +44,9 @@ export function HarnessAvatarBadge({
       data-harness-badge-corner=""
       title={label}
       aria-label={label}
-      className={`pointer-events-auto absolute -right-1 -top-1 z-[2] inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-surface-card text-text-muted shadow-sm ${className}`}
+      className={`pointer-events-auto absolute -right-1.5 -top-1.5 z-[2] inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/10 bg-white p-0.5 text-text-strong shadow-md [html[data-theme=dark]_&]:border-white/20 [html[data-theme=dark]_&]:bg-[#2c2c30] ${className}`}
     >
-      <HarnessMark harnessId={id} size={12} />
+      <HarnessMark harnessId={id} size={18} className="h-[18px] w-[18px]" />
       <span className="sr-only">{label}</span>
     </span>
   );
