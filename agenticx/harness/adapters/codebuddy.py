@@ -42,6 +42,9 @@ from agenticx.wb_bridge.codebuddy_agent_await import (
     parse_agent_spawns_from_lines,
     user_asked_for_claude_code_subagents,
 )
+from agenticx.harness.codebuddy_cc_subagents import (
+    maybe_run_cc_subagents_for_codebuddy_turn,
+)
 
 _PERMISSION_MODES = frozenset(
     {"default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "auto"}
@@ -171,6 +174,23 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
                     f"last_activity={snapshot.get('last_activity') or 'n/a'}"
                 ),
             )
+
+        # Cross-harness: user asked for Claude Code as subagents → Near spawns
+        # real `claude` CLI sessions instead of letting CodeBuddy Agent pretend.
+        session = self.get(session_id)
+        cwd = str(getattr(session, "cwd", "") or "") if session else ""
+        model = None
+        if session is not None:
+            model = getattr(session, "model", None) or None
+        intercepted = maybe_run_cc_subagents_for_codebuddy_turn(
+            parent_session_id=session_id,
+            user_text=request.text,
+            cwd=cwd,
+            wait_seconds=request.wait_seconds,
+            model=(str(model).strip() or None) if model else None,
+        )
+        if intercepted is not None:
+            return intercepted
 
         outbound = request.text
         guard = codebuddy_cc_subagent_guard_prefix(request.text)
