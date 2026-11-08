@@ -182,8 +182,13 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         model = None
         if session is not None:
             model = getattr(session, "model", None) or None
+        owner_sid = (
+            str(getattr(request, "owner_session_id", "") or "").strip()
+            or str(getattr(request, "studio_session_id", "") or "").strip()
+            or str(session_id or "").strip()
+        )
         intercepted = maybe_run_cc_subagents_for_codebuddy_turn(
-            parent_session_id=session_id,
+            parent_session_id=owner_sid,
             user_text=request.text,
             cwd=cwd,
             wait_seconds=request.wait_seconds,

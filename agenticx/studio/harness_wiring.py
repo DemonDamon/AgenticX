@@ -620,6 +620,76 @@ def refresh_codebuddy_harness_after_oauth(
     }
 
 
+
+def _append_cc_subagent_cluster_anchor(
+    session: Any,
+    cc_payload: Dict[str, Any],
+) -> bool:
+    """Persist an in-chat Agent-swarm anchor for Near-orchestrated CC children.
+
+    Mirrors ``_append_subagent_cluster_anchor_if_needed`` so Desktop renders
+    「Agent 蜂群 · N 个并行任务」from chat_history after mergeTailFromDisk.
+    """
+    if not isinstance(cc_payload, dict):
+        return False
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        return False
+    cluster_id = str(cc_payload.get("cluster_id") or "").strip()
+    run_ids = [
+        str(item).strip()
+        for item in (cc_payload.get("run_ids") or [])
+        if str(item).strip()
+    ]
+    if not run_ids:
+        run_ids = [
+            str(row.get("run_id") or "").strip()
+            for row in (cc_payload.get("results") or [])
+            if isinstance(row, dict) and str(row.get("run_id") or "").strip()
+        ]
+    if not cluster_id or not run_ids:
+        return False
+    created_at = cc_payload.get("cluster_created_at")
+    try:
+        created_at_f = float(created_at) if created_at is not None else time.time()
+    except (TypeError, ValueError):
+        created_at_f = time.time()
+    title = str(cc_payload.get("cluster_title") or "").strip()
+    if not title:
+        title = f"Agent 蜂群 · {len(run_ids)} 个并行任务"
+    anchor = {
+        "cluster_id": cluster_id,
+        "run_ids": run_ids,
+        "title": title,
+        "created_at": created_at_f,
+    }
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        meta = row.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        existing = meta.get("subagent_cluster")
+        if not isinstance(existing, dict):
+            continue
+        if str(existing.get("cluster_id", "") or "").strip() != cluster_id:
+            continue
+        if existing == anchor:
+            return False
+        meta["subagent_cluster"] = anchor
+        return True
+    history.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "metadata": {"subagent_cluster": anchor},
+            "timestamp": created_at_f,
+            "source_tool_call_id": str(cc_payload.get("batch_source_id") or "").strip() or None,
+        }
+    )
+    return True
+
+
 # ----------------------------------------------------------------------
 # external harness turn execution (chat routing)
 # ----------------------------------------------------------------------
@@ -703,7 +773,12 @@ def _run_external_harness_turn_body(
                 }
             )
 
-    request = TurnRequest(text=user_text or "(continue)", wait_seconds=_TURN_WAIT_SECONDS)
+    request = TurnRequest(
+        text=user_text or "(continue)",
+        wait_seconds=_TURN_WAIT_SECONDS,
+        owner_session_id=sid,
+        studio_session_id=sid,
+    )
     result = adapter.turn(surface_sid, request)
 
     native_thread = None
@@ -724,6 +799,14 @@ def _run_external_harness_turn_body(
             "metadata": assistant_metadata,
         }
     )
+    # CB→CC: register swarm card under the Near studio session (not surface_sid).
+    if isinstance(result.detail, dict):
+        cc_payload = result.detail.get("near_cc_subagents")
+        if isinstance(cc_payload, dict):
+            try:
+                _append_cc_subagent_cluster_anchor(session, cc_payload)
+            except Exception:
+                pass
     # Keep the binding's native-thread handle fresh for resume/handoff.
     if native_thread:
         manager.set_session_harness(
