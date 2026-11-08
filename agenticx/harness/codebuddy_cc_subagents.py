@@ -9,7 +9,10 @@ parent CodeBuddy turn.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from agenticx.harness.types import TURN_STATUS_ERROR, TURN_STATUS_SUCCESS, TurnRequest, TurnResult
 from agenticx.wb_bridge.codebuddy_agent_await import user_asked_for_claude_code_subagents
+
+_log = logging.getLogger(__name__)
 
 _TWO_REPORTS_RE = re.compile(
     r"(?:两份|两个).{0,40}?(?:关于|就)?(?P<body>.+?)(?:的)?(?:推演|预测|分析|报告)",
@@ -144,14 +149,123 @@ def claude_code_cli_available() -> bool:
     return bool(ClaudeCodeAdapter().available())
 
 
+def _register_cc_run_open(
+    *,
+    owner_session_id: str,
+    run_id: str,
+    task: CcSubagentTask,
+    model: Optional[str],
+    batch_source_id: str,
+    cluster_title: str,
+) -> None:
+    """Register one Claude Code CLI child into the parent WorkPanel Spawns store."""
+    if not owner_session_id:
+        return
+    try:
+        from agenticx.runtime.subagent_runs import SubAgentRunStore
+
+        store = SubAgentRunStore(owner_session_id)
+        store.open_run(
+            run_id=run_id,
+            kind="claude-code",
+            name=task.name,
+            role="Claude Code CLI subagent",
+            task=task.prompt[:2000],
+            status="running",
+            provider="claude-code",
+            model=str(model or "").strip(),
+            source_tool_call_id=batch_source_id,
+            title=cluster_title,
+            started_at=time.time(),
+            detail_refs={
+                "child_harness": "claude-code",
+                "orchestrated_by": "near",
+                "output_path": task.output_path,
+            },
+        )
+        store.append_activity(
+            run_id,
+            event_type="subagent_started",
+            title="Claude Code CLI subagent started",
+            detail=f"harness=claude-code output={task.output_path}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[cc_subagents] open_run failed for %s: %s", run_id, exc)
+
+
+def _register_cc_run_close(
+    *,
+    owner_session_id: str,
+    run_id: str,
+    outcome: Dict[str, Any],
+) -> None:
+    """Finalize one Claude Code CLI child run for WorkPanel Spawns/clusters."""
+    if not owner_session_id or not run_id:
+        return
+    try:
+        from agenticx.runtime.subagent_runs import SubAgentRunStore
+
+        store = SubAgentRunStore(owner_session_id)
+        ok = bool(outcome.get("ok"))
+        status = "completed" if ok else "failed"
+        out_path = str(outcome.get("output_path") or "").strip()
+        wrote = bool(outcome.get("wrote_output"))
+        output_files = [out_path] if wrote and out_path else []
+        artifacts = [{"path": out_path, "kind": "file"}] if output_files else []
+        summary = str(outcome.get("result_text") or "").strip()[:2000]
+        error_text = "" if ok else (summary or str(outcome.get("status") or "error"))
+        store.close_run(
+            run_id,
+            status=status,
+            result_summary=summary,
+            error_text=error_text,
+            result_file=out_path if wrote else "",
+            output_files=output_files,
+            artifacts=artifacts,
+            detail_refs={
+                "child_harness": "claude-code",
+                "orchestrated_by": "near",
+                "claude_session_id": str(outcome.get("session_id") or ""),
+                "result_md_path": out_path if wrote else None,
+            },
+            completed_at=time.time(),
+        )
+        store.append_activity(
+            run_id,
+            event_type="subagent_completed" if ok else "subagent_error",
+            title="Claude Code CLI subagent completed" if ok else "Claude Code CLI subagent failed",
+            detail=(
+                f"status={status} wrote_output={wrote} path={out_path}"
+                if out_path
+                else f"status={status}"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[cc_subagents] close_run failed for %s: %s", run_id, exc)
+
+
 def _run_one(
     *,
     task: CcSubagentTask,
     cwd: str,
     wait_seconds: float,
     model: Optional[str],
+    parent_session_id: str = "",
+    run_id: str = "",
+    batch_source_id: str = "",
+    cluster_title: str = "",
 ) -> Dict[str, Any]:
     from agenticx.harness.adapters.claude_code import ClaudeCodeAdapter
+
+    rid = str(run_id or "").strip() or f"cc-subagent-{uuid.uuid4().hex[:10]}"
+    _register_cc_run_open(
+        owner_session_id=parent_session_id,
+        run_id=rid,
+        task=task,
+        model=model,
+        batch_source_id=batch_source_id or rid,
+        cluster_title=cluster_title or "Claude Code CLI subagents",
+    )
 
     adapter = ClaudeCodeAdapter()
     options: Dict[str, Any] = {
@@ -161,30 +275,59 @@ def _run_one(
     }
     if model:
         options["model"] = model
-    view = adapter.spawn(cwd, options=options)
-    sid = str(view.get("session_id") or "")
+    sid = ""
+    outcome: Dict[str, Any] = {
+        "name": task.name,
+        "run_id": rid,
+        "session_id": "",
+        "status": TURN_STATUS_ERROR,
+        "result_text": "",
+        "output_path": task.output_path,
+        "wrote_output": False,
+        "ok": False,
+        "detail": {},
+    }
     try:
+        view = adapter.spawn(cwd, options=options)
+        sid = str(view.get("session_id") or "")
+        outcome["session_id"] = sid
         result = adapter.turn(
             sid,
             TurnRequest(text=task.prompt, wait_seconds=float(wait_seconds)),
         )
         out_path = Path(task.output_path)
         wrote = out_path.is_file() and out_path.stat().st_size > 0
-        return {
-            "name": task.name,
-            "session_id": sid,
-            "status": result.status,
-            "result_text": result.result_text or "",
-            "output_path": task.output_path,
-            "wrote_output": wrote,
-            "ok": bool(result.ok),
-            "detail": dict(result.detail or {}),
-        }
+        outcome.update(
+            {
+                "status": result.status,
+                "result_text": result.result_text or "",
+                "wrote_output": wrote,
+                "ok": bool(result.ok),
+                "detail": dict(result.detail or {}),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        outcome.update(
+            {
+                "status": TURN_STATUS_ERROR,
+                "result_text": str(exc),
+                "wrote_output": False,
+                "ok": False,
+                "detail": {"exception": type(exc).__name__},
+            }
+        )
     finally:
-        try:
-            adapter.stop(sid)
-        except Exception:
-            pass
+        if sid:
+            try:
+                adapter.stop(sid)
+            except Exception:
+                pass
+        _register_cc_run_close(
+            owner_session_id=parent_session_id,
+            run_id=rid,
+            outcome=outcome,
+        )
+    return outcome
 
 
 def run_claude_code_subagents(
@@ -193,8 +336,14 @@ def run_claude_code_subagents(
     cwd: str,
     wait_seconds: float = 180.0,
     model: Optional[str] = None,
+    parent_session_id: str = "",
 ) -> Dict[str, Any]:
-    """Spawn real Claude Code CLI subagents and collect per-task outcomes."""
+    """Spawn real Claude Code CLI subagents and collect per-task outcomes.
+
+    When ``parent_session_id`` is set, each child is registered into
+    ``SubAgentRunStore`` under that owner session so WorkPanel Spawns/clusters
+    can list Claude Code CLI harness runs (not CodeBuddy Agent teammates).
+    """
     tasks = plan_claude_code_subagent_tasks(user_text, cwd=cwd)
     if not tasks:
         return {"ok": False, "error": "no_tasks", "results": []}
@@ -206,6 +355,9 @@ def run_claude_code_subagents(
             "tasks": [{"name": t.name, "output_path": t.output_path} for t in tasks],
         }
 
+    batch_id = uuid.uuid4().hex[:10]
+    batch_source_id = f"near-cc-{batch_id}"
+    cluster_title = "Claude Code CLI subagents"
     results: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         futs = {
@@ -215,8 +367,12 @@ def run_claude_code_subagents(
                 cwd=cwd,
                 wait_seconds=wait_seconds,
                 model=model,
+                parent_session_id=parent_session_id,
+                run_id=f"cc-subagent-{batch_id}-{idx}",
+                batch_source_id=batch_source_id,
+                cluster_title=cluster_title,
             ): t
-            for t in tasks
+            for idx, t in enumerate(tasks, start=1)
         }
         for fut in as_completed(futs):
             try:
@@ -226,6 +382,7 @@ def run_claude_code_subagents(
                 results.append(
                     {
                         "name": t.name,
+                        "run_id": "",
                         "session_id": "",
                         "status": TURN_STATUS_ERROR,
                         "result_text": str(exc),
@@ -243,6 +400,8 @@ def run_claude_code_subagents(
         "error": None if any_ok else "all_failed",
         "results": results,
         "task_count": len(tasks),
+        "batch_source_id": batch_source_id,
+        "parent_session_id": parent_session_id,
     }
 
 
@@ -295,6 +454,7 @@ def maybe_run_cc_subagents_for_codebuddy_turn(
         cwd=cwd or ".",
         wait_seconds=wait_seconds,
         model=model,
+        parent_session_id=parent_session_id,
     )
     text = format_cc_subagent_result_text(payload)
     status = TURN_STATUS_SUCCESS if payload.get("ok") else TURN_STATUS_ERROR
