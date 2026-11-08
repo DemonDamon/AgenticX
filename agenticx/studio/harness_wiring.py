@@ -48,7 +48,7 @@ from agenticx.studio.session_manager import require_safe_session_id
 
 _TURN_WAIT_SECONDS = 240.0
 
-_BUILTIN_HARNESS_IDS = frozenset({"", "python-agent"})
+_BUILTIN_HARNESS_IDS = frozenset({"", "python-agent", "builtin", "agenticx"})
 
 # Harnesses whose spawn() already accepts a native ``model`` option.
 # codebuddy CLI exposes ``--model`` (verified via ``codebuddy --help``);
@@ -129,7 +129,7 @@ def handoff_engine() -> HandoffEngine:
 
 def harness_display_name(harness_id: Optional[str]) -> str:
     if not harness_id or harness_id in _BUILTIN_HARNESS_IDS:
-        return "python-agent"
+        return "agenticx"
     try:
         descriptor = harness_registry().describe(harness_id)
         return descriptor.display_name if descriptor else harness_id
@@ -788,6 +788,45 @@ def _handoff_spawn_options(
 # ----------------------------------------------------------------------
 # mid-session switch
 # ----------------------------------------------------------------------
+
+def sync_builtin_agent_messages_from_chat_history(session: Any) -> int:
+    """Project UI ``chat_history`` into ``agent_messages`` for agenticx/builtin.
+
+    External harness turns only write ``chat_history``. Builtin ``run_turn``
+    reads ``agent_messages``. Hot-switch back to agenticx must rebuild the
+    model context from the visible transcript or the next turn looks empty.
+    System-notice switch markers are skipped.
+    """
+    history = list(getattr(session, "chat_history", None) or [])
+    projected: List[Dict[str, Any]] = []
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        if row.get("system_notice"):
+            continue
+        role = str(row.get("role") or "").strip()
+        if role not in ("user", "assistant", "system"):
+            continue
+        content = row.get("content")
+        if content is None:
+            continue
+        if isinstance(content, str) and not content.strip() and role == "user":
+            continue
+        entry: Dict[str, Any] = {"role": role, "content": content}
+        meta = row.get("metadata")
+        if isinstance(meta, dict) and meta:
+            slim = {
+                key: meta[key]
+                for key in ("harness", "harness_id")
+                if key in meta and meta[key] is not None
+            }
+            if slim:
+                entry["metadata"] = slim
+        projected.append(entry)
+    session.agent_messages = projected
+    return len(projected)
+
+
 def switch_harness(
     manager: Any,
     session_id: str,
@@ -837,10 +876,14 @@ def switch_harness(
     if strategy and str(strategy).strip() and str(strategy).strip() != "auto":
         user_strategy = str(strategy).strip()
 
-    # Switching back to the builtin python-agent runtime: the canonical
-    # chat_history IS its context, so only the boundary marker + rebind
-    # are needed (isomorphic switch; no engine handoff required).
+    # Switching back to the builtin/agenticx runtime.
+    # External harness turns only append to chat_history; builtin run_turn
+    # reads agent_messages. Sync the visible transcript into agent_messages
+    # before unbind, otherwise the next agenticx turn has empty context
+    # (repro: session 88c93d1c after claude-code → AgenticX).
     if not is_external_harness(target):
+        synced = sync_builtin_agent_messages_from_chat_history(session)
+        notes = [f"synced {synced} turns into agent_messages"] if synced else []
         _append_switch_boundary(
             manager,
             session,
@@ -849,16 +892,21 @@ def switch_harness(
             to_harness=None,
             strategy="builtin",
             handoff_id=None,
-            notes=[],
+            notes=notes,
         )
         manager.set_session_harness(sid, harness_id=None)
+        try:
+            manager._persist_session_state(sid, session)
+        except Exception:
+            pass
         return {
             "ok": True,
             "strategy": "builtin",
             "from": current,
             "to": None,
             "handoff_id": None,
-            "notes": [],
+            "notes": notes,
+            "synced_agent_messages": synced,
         }
 
     engine = handoff_engine()
@@ -1049,5 +1097,6 @@ __all__ = [
     "run_external_harness_turn_async",
     "snapshot_from_session",
     "switch_harness",
+    "sync_builtin_agent_messages_from_chat_history",
     "switch_harness_async",
 ]
