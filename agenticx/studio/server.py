@@ -687,6 +687,68 @@ async def _external_harness_chat_stream(
         for line in await _drain_midturn_sse_lines():
             yield line
 
+        # Near-orchestrated CB→CC children: emit WorkPanel subagent SSE under
+        # the studio session stream (ChatPane addSubAgent), then include the
+        # swarm anchor on final so clients can show 「Agent 蜂群」.
+        cc_payload = None
+        result_detail_early = getattr(result, "detail", None)
+        if isinstance(result_detail_early, dict):
+            maybe_cc = result_detail_early.get("near_cc_subagents")
+            if isinstance(maybe_cc, dict):
+                cc_payload = maybe_cc
+        if isinstance(cc_payload, dict):
+            for row in list(cc_payload.get("results") or []):
+                if not isinstance(row, dict):
+                    continue
+                rid = str(row.get("run_id") or "").strip()
+                if not rid:
+                    continue
+                started = SseEvent(
+                    type="subagent_started",
+                    data={
+                        "agent_id": rid,
+                        "name": str(row.get("name") or rid),
+                        "role": str(row.get("role") or "Claude Code CLI subagent"),
+                        "task": "",
+                        "status": "running",
+                        "provider": str(row.get("provider") or "claude-code"),
+                        "model": str(row.get("model") or ""),
+                        "cluster_id": str(cc_payload.get("cluster_id") or row.get("cluster_id") or ""),
+                    },
+                )
+                yield (
+                    "data: "
+                    + json.dumps(started.model_dump(), ensure_ascii=False)
+                    + "\n\n"
+                )
+                if row.get("ok"):
+                    done_evt = SseEvent(
+                        type="subagent_completed",
+                        data={
+                            "agent_id": rid,
+                            "summary": str(row.get("result_text") or "")[:2000],
+                            "result_file": (
+                                str(row.get("output_path") or "")
+                                if row.get("wrote_output")
+                                else ""
+                            ),
+                        },
+                    )
+                else:
+                    done_evt = SseEvent(
+                        type="subagent_error",
+                        data={
+                            "agent_id": rid,
+                            "text": str(row.get("result_text") or "执行异常")[:500],
+                            "status": "failed",
+                        },
+                    )
+                yield (
+                    "data: "
+                    + json.dumps(done_evt.model_dump(), ensure_ascii=False)
+                    + "\n\n"
+                )
+
         final_text = harness_wiring.format_external_harness_assistant_content(
             harness_id, result
         )
@@ -704,6 +766,34 @@ async def _external_harness_chat_stream(
             and result_detail.get("codebuddy_login_required") is True
         ):
             final_data["codebuddy_login_required"] = True
+        if isinstance(cc_payload, dict):
+            cluster_id = str(cc_payload.get("cluster_id") or "").strip()
+            run_ids = [
+                str(item).strip()
+                for item in (cc_payload.get("run_ids") or [])
+                if str(item).strip()
+            ]
+            if not run_ids:
+                run_ids = [
+                    str(row.get("run_id") or "").strip()
+                    for row in (cc_payload.get("results") or [])
+                    if isinstance(row, dict) and str(row.get("run_id") or "").strip()
+                ]
+            if cluster_id and run_ids:
+                title = str(cc_payload.get("cluster_title") or "").strip()
+                if not title:
+                    title = f"Agent 蜂群 · {len(run_ids)} 个并行任务"
+                created_at = cc_payload.get("cluster_created_at")
+                try:
+                    created_at_f = float(created_at) if created_at is not None else None
+                except (TypeError, ValueError):
+                    created_at_f = None
+                final_data["subagent_cluster"] = {
+                    "cluster_id": cluster_id,
+                    "run_ids": run_ids,
+                    "title": title,
+                    **({"created_at": created_at_f} if created_at_f else {}),
+                }
         final = SseEvent(type="final", data=final_data)
         yield (
             "data: "

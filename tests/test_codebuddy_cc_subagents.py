@@ -84,7 +84,7 @@ def test_maybe_run_orchestrates_when_asked(tmp_path: Path):
 
 
 def test_run_registers_subagent_run_store(tmp_path: Path, monkeypatch):
-    """Each CC child open_run/close_run under the parent CodeBuddy session_id."""
+    """Each CC child open_run/close_run under the Near studio owner session id."""
     report = tmp_path / "report_cc_subagent_1.md"
     report.write_text("# ok\n", encoding="utf-8")
 
@@ -157,3 +157,237 @@ def test_run_registers_subagent_run_store(tmp_path: Path, monkeypatch):
     # every SubAgentRunStore constructed with parent session id
     for call in store_cls.call_args_list:
         assert call.args[0] == "owner-cb-session"
+
+def test_run_registers_under_studio_owner_not_surface(tmp_path: Path, monkeypatch):
+    """WorkPanel queries studio session; surface_sid must not own the store."""
+    report = tmp_path / "report_cc_subagent_1.md"
+    report.write_text("# ok\n", encoding="utf-8")
+
+    class _FakeAdapter:
+        def available(self):
+            return True
+
+        def spawn(self, cwd, options=None):
+            return {"session_id": "cc-cli-sess-1"}
+
+        def turn(self, session_id, request):
+            return TurnResult(
+                harness="claude-code",
+                session_id=session_id,
+                status=TURN_STATUS_SUCCESS,
+                result_text="摘要完成",
+            )
+
+        def stop(self, session_id):
+            return None
+
+    store = MagicMock()
+    store.open_run.return_value = MagicMock(
+        cluster_id="cl-studio-1",
+        badge_seq="01",
+        created_at=123.0,
+    )
+    store.close_run.return_value = MagicMock()
+    store.append_activity.return_value = MagicMock()
+
+    monkeypatch.setattr(
+        "agenticx.harness.codebuddy_cc_subagents.claude_code_cli_available",
+        lambda: True,
+    )
+    with patch(
+        "agenticx.harness.adapters.claude_code.ClaudeCodeAdapter",
+        _FakeAdapter,
+    ), patch(
+        "agenticx.runtime.subagent_runs.SubAgentRunStore",
+        return_value=store,
+    ) as store_cls:
+        payload = run_claude_code_subagents(
+            "用 Claude Code 做两个 subagent 写报告",
+            cwd=str(tmp_path),
+            wait_seconds=1.0,
+            parent_session_id="studio-near-894e",
+        )
+
+    assert payload["ok"] is True
+    assert payload["parent_session_id"] == "studio-near-894e"
+    assert payload["cluster_id"] == "cl-studio-1"
+    assert payload["cluster_title"].startswith("Agent 蜂群")
+    assert "并行任务" in payload["cluster_title"]
+    assert len(payload["run_ids"]) >= 1
+    for call in store_cls.call_args_list:
+        assert call.args[0] == "studio-near-894e"
+        assert call.args[0] != "surface-cb-87a2"
+
+
+def test_maybe_run_uses_studio_owner_session_id(tmp_path: Path):
+    fake_payload = {
+        "ok": True,
+        "error": None,
+        "results": [
+            {
+                "name": "claude-code-1",
+                "run_id": "cc-subagent-x-1",
+                "ok": True,
+                "status": "success",
+                "result_text": "摘要A",
+                "output_path": str(tmp_path / "a.md"),
+                "wrote_output": True,
+                "cluster_id": "cl-1",
+            }
+        ],
+        "task_count": 1,
+        "cluster_id": "cl-1",
+        "cluster_title": "Agent 蜂群 · 1 个并行任务",
+        "run_ids": ["cc-subagent-x-1"],
+        "parent_session_id": "studio-sid",
+    }
+    with patch(
+        "agenticx.harness.codebuddy_cc_subagents.run_claude_code_subagents",
+        return_value=fake_payload,
+    ) as mocked:
+        result = maybe_run_cc_subagents_for_codebuddy_turn(
+            parent_session_id="studio-sid",
+            user_text="用 Claude Code 做 subagent 写报告",
+            cwd=str(tmp_path),
+            wait_seconds=5.0,
+        )
+    assert result is not None
+    assert mocked.call_args.kwargs.get("parent_session_id") == "studio-sid"
+    assert result.detail["near_cc_subagents"]["cluster_id"] == "cl-1"
+    assert result.detail["near_cc_subagents"]["parent_session_id"] == "studio-sid"
+
+
+def test_codebuddy_adapter_prefers_turn_owner_session_id(tmp_path: Path):
+    """adapter.turn(surface_sid) must register under request.owner_session_id."""
+    from agenticx.harness.adapters.codebuddy import CodeBuddyAdapter
+    from agenticx.harness.types import TurnRequest
+
+    adapter = CodeBuddyAdapter.__new__(CodeBuddyAdapter)
+    adapter.turn_matches_idempotency_key = lambda *a, **k: False
+    adapter.describe_session = lambda sid: {
+        "turn_state": "idle",
+        "turn_seq": 0,
+        "turn_elapsed_sec": 0,
+        "last_activity": None,
+    }
+    fake_session = MagicMock()
+    fake_session.cwd = str(tmp_path)
+    fake_session.model = None
+    adapter.get = lambda sid: fake_session
+
+    captured = {}
+
+    def _fake_maybe(**kwargs):
+        captured.update(kwargs)
+        return TurnResult(
+            harness="codebuddy",
+            session_id=kwargs["parent_session_id"],
+            status=TURN_STATUS_SUCCESS,
+            result_text="ok",
+            detail={"near_cc_subagents": {"parent_session_id": kwargs["parent_session_id"]}},
+        )
+
+    with patch(
+        "agenticx.harness.adapters.codebuddy.maybe_run_cc_subagents_for_codebuddy_turn",
+        side_effect=_fake_maybe,
+    ):
+        result = CodeBuddyAdapter.turn(
+            adapter,
+            "surface-cb-87a2",
+            TurnRequest(
+                text="用 Claude Code 做 subagent 写两份报告",
+                wait_seconds=1.0,
+                owner_session_id="studio-near-894e",
+                studio_session_id="studio-near-894e",
+            ),
+        )
+    assert captured["parent_session_id"] == "studio-near-894e"
+    assert result.detail["near_cc_subagents"]["parent_session_id"] == "studio-near-894e"
+
+
+def test_harness_wiring_sets_owner_and_appends_cluster_anchor(tmp_path: Path, monkeypatch):
+    """run_external_harness_turn passes studio sid and persists Agent 蜂群 anchor."""
+    from types import SimpleNamespace
+    from agenticx.studio import harness_wiring as hw
+    from agenticx.harness.types import TurnRequest, TurnResult
+
+    studio_sid = "studio-near-894e"
+    surface_sid = "surface-cb-87a2"
+
+    history: list = []
+    session = SimpleNamespace(chat_history=history, model_name="")
+    managed = SimpleNamespace(studio_session=session, updated_at=0.0)
+    manager = MagicMock()
+    manager.get.return_value = managed
+    manager.get_session_harness.return_value = {
+        "harness_id": "codebuddy",
+        "harness_session_id": surface_sid,
+        "harness_options": {},
+    }
+
+    captured_request = {}
+
+    class _FakeAdapter:
+        def turn(self, session_id, request: TurnRequest):
+            captured_request["surface"] = session_id
+            captured_request["owner"] = request.owner_session_id
+            captured_request["studio"] = request.studio_session_id
+            return TurnResult(
+                harness="codebuddy",
+                session_id=session_id,
+                status=TURN_STATUS_SUCCESS,
+                result_text="done",
+                detail={
+                    "near_cc_subagents": {
+                        "ok": True,
+                        "parent_session_id": request.owner_session_id,
+                        "cluster_id": "cl-anchor-1",
+                        "cluster_title": "Agent 蜂群 · 2 个并行任务",
+                        "cluster_created_at": 42.0,
+                        "batch_source_id": "near-cc-batch",
+                        "run_ids": ["cc-subagent-a-1", "cc-subagent-a-2"],
+                        "results": [
+                            {"run_id": "cc-subagent-a-1", "ok": True, "name": "claude-code-1"},
+                            {"run_id": "cc-subagent-a-2", "ok": True, "name": "claude-code-2"},
+                        ],
+                    }
+                },
+            )
+
+    monkeypatch.setattr(hw, "require_safe_session_id", lambda sid: sid)
+    monkeypatch.setattr(hw, "is_external_harness", lambda hid: True)
+    monkeypatch.setattr(hw, "apply_chat_model_to_harness_options", lambda *a, **k: None)
+    monkeypatch.setattr(hw, "apply_run_mode_to_harness_options", lambda *a, **k: None)
+    monkeypatch.setattr(hw, "ensure_harness_session", lambda *a, **k: surface_sid)
+    monkeypatch.setattr(hw, "harness_registry", lambda: SimpleNamespace(require=lambda hid: _FakeAdapter()))
+    monkeypatch.setattr(hw, "_begin_inflight", lambda sid: True)
+    monkeypatch.setattr(hw, "_end_inflight", lambda sid: None)
+    monkeypatch.setattr(
+        hw,
+        "format_external_harness_assistant_content",
+        lambda hid, result: result.result_text or "",
+    )
+
+    result = hw.run_external_harness_turn(
+        manager,
+        studio_sid,
+        "用 Claude Code 做 subagent 写两份报告",
+    )
+    assert captured_request["surface"] == surface_sid
+    assert captured_request["owner"] == studio_sid
+    assert captured_request["studio"] == studio_sid
+    assert result.detail["near_cc_subagents"]["parent_session_id"] == studio_sid
+
+    anchors = [
+        row
+        for row in history
+        if isinstance(row, dict)
+        and isinstance(row.get("metadata"), dict)
+        and isinstance(row["metadata"].get("subagent_cluster"), dict)
+    ]
+    assert anchors, "expected persisted Agent 蜂群 chat_history anchor"
+    anchor = anchors[0]["metadata"]["subagent_cluster"]
+    assert anchor["cluster_id"] == "cl-anchor-1"
+    assert anchor["run_ids"] == ["cc-subagent-a-1", "cc-subagent-a-2"]
+    assert anchor["title"] == "Agent 蜂群 · 2 个并行任务"
+

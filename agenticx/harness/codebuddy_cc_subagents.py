@@ -157,15 +157,20 @@ def _register_cc_run_open(
     model: Optional[str],
     batch_source_id: str,
     cluster_title: str,
-) -> None:
-    """Register one Claude Code CLI child into the parent WorkPanel Spawns store."""
+) -> Dict[str, Any]:
+    """Register one Claude Code CLI child into the parent WorkPanel Spawns store.
+
+    Returns ``{cluster_id, created_at}`` when registration succeeds (empty dict
+    otherwise). Owner must be the Near studio session id, not the CodeBuddy
+    harness surface session id.
+    """
     if not owner_session_id:
-        return
+        return {}
     try:
         from agenticx.runtime.subagent_runs import SubAgentRunStore
 
         store = SubAgentRunStore(owner_session_id)
-        store.open_run(
+        record = store.open_run(
             run_id=run_id,
             kind="claude-code",
             name=task.name,
@@ -189,8 +194,15 @@ def _register_cc_run_open(
             title="Claude Code CLI subagent started",
             detail=f"harness=claude-code output={task.output_path}",
         )
+        if record is None:
+            return {}
+        return {
+            "cluster_id": str(getattr(record, "cluster_id", "") or "").strip(),
+            "created_at": float(getattr(record, "created_at", 0.0) or 0.0),
+        }
     except Exception as exc:  # noqa: BLE001
         _log.warning("[cc_subagents] open_run failed for %s: %s", run_id, exc)
+        return {}
 
 
 def _register_cc_run_close(
@@ -258,13 +270,13 @@ def _run_one(
     from agenticx.harness.adapters.claude_code import ClaudeCodeAdapter
 
     rid = str(run_id or "").strip() or f"cc-subagent-{uuid.uuid4().hex[:10]}"
-    _register_cc_run_open(
+    open_meta = _register_cc_run_open(
         owner_session_id=parent_session_id,
         run_id=rid,
         task=task,
         model=model,
         batch_source_id=batch_source_id or rid,
-        cluster_title=cluster_title or "Claude Code CLI subagents",
+        cluster_title=cluster_title or "Agent 蜂群",
     )
 
     adapter = ClaudeCodeAdapter()
@@ -286,6 +298,11 @@ def _run_one(
         "wrote_output": False,
         "ok": False,
         "detail": {},
+        "cluster_id": str(open_meta.get("cluster_id") or ""),
+        "cluster_created_at": float(open_meta.get("created_at") or 0.0) or None,
+        "role": "Claude Code CLI subagent",
+        "provider": "claude-code",
+        "model": str(model or "").strip(),
     }
     try:
         view = adapter.spawn(cwd, options=options)
@@ -341,8 +358,9 @@ def run_claude_code_subagents(
     """Spawn real Claude Code CLI subagents and collect per-task outcomes.
 
     When ``parent_session_id`` is set, each child is registered into
-    ``SubAgentRunStore`` under that owner session so WorkPanel Spawns/clusters
-    can list Claude Code CLI harness runs (not CodeBuddy Agent teammates).
+    ``SubAgentRunStore`` under that owner (Near **studio** session id, not the
+    CodeBuddy harness surface id) so WorkPanel 「子智能体」 and the in-chat
+    Agent 蜂群 card can list Claude Code CLI harness runs.
     """
     tasks = plan_claude_code_subagent_tasks(user_text, cwd=cwd)
     if not tasks:
@@ -357,7 +375,7 @@ def run_claude_code_subagents(
 
     batch_id = uuid.uuid4().hex[:10]
     batch_source_id = f"near-cc-{batch_id}"
-    cluster_title = "Claude Code CLI subagents"
+    cluster_title = f"Agent 蜂群 · {len(tasks)} 个并行任务"
     results: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         futs = {
@@ -395,6 +413,23 @@ def run_claude_code_subagents(
 
     results.sort(key=lambda r: str(r.get("name") or ""))
     any_ok = any(bool(r.get("ok")) for r in results)
+    run_ids = [
+        str(r.get("run_id") or "").strip()
+        for r in results
+        if str(r.get("run_id") or "").strip()
+    ]
+    cluster_id = ""
+    cluster_created_at = None
+    for r in results:
+        cid = str(r.get("cluster_id") or "").strip()
+        if cid:
+            cluster_id = cid
+            created = r.get("cluster_created_at")
+            try:
+                cluster_created_at = float(created) if created is not None else None
+            except (TypeError, ValueError):
+                cluster_created_at = None
+            break
     return {
         "ok": any_ok,
         "error": None if any_ok else "all_failed",
@@ -402,6 +437,10 @@ def run_claude_code_subagents(
         "task_count": len(tasks),
         "batch_source_id": batch_source_id,
         "parent_session_id": parent_session_id,
+        "cluster_id": cluster_id,
+        "cluster_title": cluster_title,
+        "cluster_created_at": cluster_created_at,
+        "run_ids": run_ids,
     }
 
 
