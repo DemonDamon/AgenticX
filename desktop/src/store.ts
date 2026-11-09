@@ -914,6 +914,7 @@ type AppState = {
         | "usage"
         | "modelSelection"
         | "id"
+        | "subAgentCluster"
       >
     > &
       Partial<MessageToolExtras>

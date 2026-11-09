@@ -348,7 +348,7 @@ import {
   resolvePendingToolName,
   type PendingToolResult,
 } from "../utils/pending-tool-result";
-import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
+import { injectLiveSubAgentClusterAnchors, upsertLiveSubAgentClusterAnchor } from "../utils/subagent-cluster-inline";
 import {
   buildSubAgentFromRunRecord,
   hydrateSessionSubAgentsFromDisk,
@@ -13195,6 +13195,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           : "已启动",
                     }
                   );
+                  // Cross-harness CB↔CC: also pin a live Agent 蜂群 card even if
+                  // synthetic spawn_subagent tool rows are delayed/missed.
+                  const clusterId = String(payload.data?.cluster_id ?? "").trim();
+                  if (clusterId) {
+                    const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                    if (pan && isTargetSessionStillActive()) {
+                      const next = upsertLiveSubAgentClusterAnchor(
+                        pan.messages,
+                        {
+                          clusterId,
+                          runIds: [String(subId)],
+                          title: String(payload.data?.cluster_title ?? "").trim() || undefined,
+                        },
+                        requestSessionId || undefined,
+                      );
+                      if (next !== pan.messages) setPaneMessages(pane.id, next);
+                    }
+                  }
                 }
                 if (isDelegation && avatarSessionId && !isGroupPane) {
                   const dlgName = String(payload.data?.name ?? "").trim();
@@ -13307,6 +13325,49 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             if (payload.type === "final") {
+              // Near CB↔CC final may carry subagent_cluster for Agent 蜂群 card.
+              if (eventAgentId === "meta") {
+                const rawCluster = payload.data?.subagent_cluster;
+                if (rawCluster && typeof rawCluster === "object") {
+                  const clusterId = String(
+                    (rawCluster as { cluster_id?: unknown; clusterId?: unknown }).cluster_id
+                      ?? (rawCluster as { clusterId?: unknown }).clusterId
+                      ?? "",
+                  ).trim();
+                  const rawRunIds =
+                    (rawCluster as { run_ids?: unknown; runIds?: unknown }).run_ids
+                    ?? (rawCluster as { runIds?: unknown }).runIds
+                    ?? [];
+                  const runIds = Array.isArray(rawRunIds)
+                    ? rawRunIds.map((x) => String(x ?? "").trim()).filter(Boolean)
+                    : [];
+                  if (clusterId && runIds.length > 0) {
+                    const title = String(
+                      (rawCluster as { title?: unknown }).title ?? "",
+                    ).trim();
+                    const createdAtRaw = Number(
+                      (rawCluster as { created_at?: unknown; createdAt?: unknown }).created_at
+                        ?? (rawCluster as { createdAt?: unknown }).createdAt,
+                    );
+                    const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                    if (pan && isTargetSessionStillActive()) {
+                      const next = upsertLiveSubAgentClusterAnchor(
+                        pan.messages,
+                        {
+                          clusterId,
+                          runIds,
+                          ...(title ? { title } : {}),
+                          ...(Number.isFinite(createdAtRaw) && createdAtRaw > 0
+                            ? { createdAt: createdAtRaw }
+                            : {}),
+                        },
+                        requestSessionId || undefined,
+                      );
+                      if (next !== pan.messages) setPaneMessages(pane.id, next);
+                    }
+                  }
+                }
+              }
               receivedFinalEvent = true;
               setStallWait(null);
               if (eventAgentId === "meta") {

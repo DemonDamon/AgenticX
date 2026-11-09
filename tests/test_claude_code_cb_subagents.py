@@ -386,6 +386,23 @@ def test_harness_wiring_sets_owner_and_appends_cluster_anchor(tmp_path: Path, mo
     assert anchor["cluster_id"] == "cl-anchor-1"
     assert anchor["run_ids"] == ["cb-subagent-a-1", "cb-subagent-a-2"]
     assert anchor["title"] == "Agent 蜂群 · 2 个并行任务"
+    tool_rows = [
+        row for row in history
+        if isinstance(row, dict) and row.get("tool_name") == "spawn_subagent"
+    ]
+    assert len(tool_rows) == 2
+    assert tool_rows[0]["tool_call_id"] == "near-spawn-cb-subagent-a-1"
+    # Tools + cluster card should sit before the harness assistant summary.
+    assistant_idxs = [i for i, row in enumerate(history) if isinstance(row, dict) and row.get("role") == "assistant"]
+    tool_idxs = [i for i, row in enumerate(history) if isinstance(row, dict) and row.get("tool_name") == "spawn_subagent"]
+    anchor_idxs = [
+        i for i, row in enumerate(history)
+        if isinstance(row, dict)
+        and isinstance((row.get("metadata") or {}).get("subagent_cluster"), dict)
+    ]
+    assert tool_idxs and anchor_idxs and assistant_idxs
+    assert max(tool_idxs) < max(assistant_idxs)
+    assert anchor_idxs[0] < max(assistant_idxs)
 
 
 
