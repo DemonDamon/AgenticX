@@ -391,6 +391,7 @@ async def _external_harness_chat_stream(
 
     started = time.time()
     emitted_tool_ids: set[str] = set()
+    emitted_cc_subagent_ids: set[str] = set()
 
     def _progress_sse(phase: str) -> str:
         beat = SseEvent(
@@ -561,6 +562,100 @@ async def _external_harness_chat_stream(
                 for line in lines
             )
 
+        async def _drain_cc_orchestration_sse_lines() -> list[str]:
+            """CB→CC intercept: mid-turn tokens + subagent_* while children await."""
+            try:
+                from agenticx.harness.codebuddy_cc_subagents import (
+                    drain_cc_orchestration_progress,
+                )
+            except Exception:
+                return []
+            try:
+                items = await asyncio.to_thread(drain_cc_orchestration_progress, sid)
+            except Exception:
+                return []
+            lines_out: list[str] = []
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                kind = str(item.get("kind") or "")
+                if kind == "text":
+                    piece = str(item.get("text") or "")
+                    if not piece:
+                        continue
+                    agent_id = str(item.get("agent_id") or "meta").strip() or "meta"
+                    tok = SseEvent(
+                        type="token",
+                        data={"text": piece, "agent_id": agent_id},
+                    )
+                    lines_out.append(
+                        f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
+                if kind == "subagent_started":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if not rid or rid in emitted_cc_subagent_ids:
+                        continue
+                    emitted_cc_subagent_ids.add(rid)
+                    started_evt = SseEvent(
+                        type="subagent_started",
+                        data={
+                            "agent_id": rid,
+                            "name": str(item.get("name") or rid),
+                            "role": str(
+                                item.get("role") or "Claude Code CLI subagent"
+                            ),
+                            "task": str(item.get("task") or ""),
+                            "status": str(item.get("status") or "running"),
+                            "provider": str(item.get("provider") or "claude-code"),
+                            "model": str(item.get("model") or ""),
+                            "cluster_id": str(item.get("cluster_id") or ""),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(started_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+                if kind == "subagent_completed":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if rid:
+                        emitted_cc_subagent_ids.add(rid)
+                    done_evt = SseEvent(
+                        type="subagent_completed",
+                        data={
+                            "agent_id": rid,
+                            "summary": str(item.get("summary") or "")[:2000],
+                            "result_file": str(item.get("result_file") or ""),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(done_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+                if kind == "subagent_error":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if rid:
+                        emitted_cc_subagent_ids.add(rid)
+                    err_evt = SseEvent(
+                        type="subagent_error",
+                        data={
+                            "agent_id": rid,
+                            "text": str(item.get("text") or "执行异常")[:500],
+                            "status": str(item.get("status") or "failed"),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(err_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+            return lines_out
+
         async def _collect_stream_json_tool_fallback_lines() -> list[str]:
             """Replay tool_start/tool_end the live drain missed (late bind)."""
             if adapter is None or not surface_sid or not hasattr(
@@ -609,6 +704,11 @@ async def _external_harness_chat_stream(
                     for line in midturn_lines:
                         yield line
                     last_heartbeat = time.time()
+                cc_lines = await _drain_cc_orchestration_sse_lines()
+                if cc_lines:
+                    for line in cc_lines:
+                        yield line
+                    last_heartbeat = time.time()
                 perm_lines = await _drain_permission_sse_lines()
                 if perm_lines:
                     for line in perm_lines:
@@ -618,7 +718,7 @@ async def _external_harness_chat_stream(
                     yield _progress_sse("awaiting_permission")
                     last_heartbeat = time.time()
                     continue
-                if midturn_lines:
+                if midturn_lines or cc_lines:
                     continue
                 # Heartbeat: keeps the desktop stall watchdog quiet while
                 # the adapter turn blocks on its CLI with no new tokens.
@@ -686,6 +786,8 @@ async def _external_harness_chat_stream(
         # replayed tool rows rather than precede them.
         for line in await _drain_midturn_sse_lines():
             yield line
+        for line in await _drain_cc_orchestration_sse_lines():
+            yield line
 
         # Near-orchestrated CB→CC children: emit WorkPanel subagent SSE under
         # the studio session stream (ChatPane addSubAgent), then include the
@@ -703,6 +805,10 @@ async def _external_harness_chat_stream(
                 rid = str(row.get("run_id") or "").strip()
                 if not rid:
                     continue
+                # Mid-turn drain already emitted started/completed for these runs.
+                if rid in emitted_cc_subagent_ids:
+                    continue
+                emitted_cc_subagent_ids.add(rid)
                 started = SseEvent(
                     type="subagent_started",
                     data={
@@ -748,6 +854,15 @@ async def _external_harness_chat_stream(
                     + json.dumps(done_evt.model_dump(), ensure_ascii=False)
                     + "\n\n"
                 )
+
+        try:
+            from agenticx.harness.codebuddy_cc_subagents import (
+                clear_cc_orchestration_progress,
+            )
+
+            clear_cc_orchestration_progress(sid)
+        except Exception:
+            pass
 
         final_text = harness_wiring.format_external_harness_assistant_content(
             harness_id, result

@@ -466,3 +466,115 @@ def test_cancel_claude_code_subagent_run_stops_tracked_and_marks_store(tmp_path:
     record = SubAgentRunStore(owner).get_run(run_id)
     assert record is not None
     assert record.status == "cancelled"
+
+
+def test_orchestration_progress_bus_start_and_complete(tmp_path: Path, monkeypatch):
+    """Parent SSE bus receives mid-turn started/text/completed while CC awaits."""
+    from agenticx.harness.codebuddy_cc_subagents import (
+        clear_cc_orchestration_progress,
+        drain_cc_orchestration_progress,
+    )
+
+    report = tmp_path / "report_cc_subagent_1.md"
+    report.write_text("# ok\n", encoding="utf-8")
+    owner = "studio-progress-bus"
+
+    class _FakeAdapter:
+        def available(self):
+            return True
+
+        def spawn(self, cwd, options=None):
+            return {"session_id": "cc-cli-sess-progress"}
+
+        def turn(self, session_id, request):
+            # Simulate a short blocking turn; mid-turn drain happens around this.
+            import time as _t
+
+            _t.sleep(0.05)
+            return TurnResult(
+                harness="claude-code",
+                session_id=session_id,
+                status=TURN_STATUS_SUCCESS,
+                result_text="进度摘要",
+            )
+
+        def stop(self, session_id):
+            return True
+
+        def drain_midturn_stream_items(self, session_id):
+            # One child token during the nested wait loop.
+            if getattr(self, "_drained", False):
+                return []
+            self._drained = True
+            return [{"kind": "text", "text": "子代理草稿片段"}]
+
+    store = MagicMock()
+    store.open_run.return_value = MagicMock(
+        cluster_id="cl-progress",
+        badge_seq="01",
+        created_at=1.0,
+    )
+    store.close_run.return_value = MagicMock()
+    store.append_activity.return_value = MagicMock()
+
+    clear_cc_orchestration_progress(owner)
+    monkeypatch.setattr(
+        "agenticx.harness.codebuddy_cc_subagents.claude_code_cli_available",
+        lambda: True,
+    )
+    with patch(
+        "agenticx.harness.adapters.claude_code.ClaudeCodeAdapter",
+        _FakeAdapter,
+    ), patch(
+        "agenticx.runtime.subagent_runs.SubAgentRunStore",
+        return_value=store,
+    ):
+        payload = run_claude_code_subagents(
+            "用 Claude Code 做 subagent 写一份报告",
+            cwd=str(tmp_path),
+            wait_seconds=2.0,
+            parent_session_id=owner,
+        )
+
+    assert payload["ok"] is True
+    items = drain_cc_orchestration_progress(owner)
+    kinds = [i.get("kind") for i in items]
+    assert "subagent_started" in kinds
+    assert "subagent_completed" in kinds
+    assert "text" in kinds
+    meta_texts = [
+        i.get("text", "")
+        for i in items
+        if i.get("kind") == "text" and i.get("agent_id") == "meta"
+    ]
+    assert any("正在跨引擎拉起" in t for t in meta_texts)
+    assert any("已启动" in t for t in meta_texts)
+    child_texts = [
+        i.get("text", "")
+        for i in items
+        if i.get("kind") == "text" and str(i.get("agent_id") or "").startswith("cc-subagent-")
+    ]
+    assert any("子代理草稿片段" in t for t in child_texts)
+    clear_cc_orchestration_progress(owner)
+
+
+def test_publish_drain_clear_progress_helpers():
+    from agenticx.harness.codebuddy_cc_subagents import (
+        clear_cc_orchestration_progress,
+        drain_cc_orchestration_progress,
+        publish_cc_orchestration_progress,
+    )
+
+    sid = "studio-progress-helpers"
+    clear_cc_orchestration_progress(sid)
+    publish_cc_orchestration_progress(
+        sid, {"kind": "text", "agent_id": "meta", "text": "hello"}
+    )
+    publish_cc_orchestration_progress(
+        sid, {"kind": "subagent_started", "agent_id": "cc-1", "name": "n"}
+    )
+    items = drain_cc_orchestration_progress(sid)
+    assert len(items) == 2
+    assert drain_cc_orchestration_progress(sid) == []
+    clear_cc_orchestration_progress(sid)
+
