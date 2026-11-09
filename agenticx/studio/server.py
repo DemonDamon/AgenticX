@@ -563,16 +563,29 @@ async def _external_harness_chat_stream(
             )
 
         async def _drain_cc_orchestration_sse_lines() -> list[str]:
-            """CB→CC intercept: mid-turn tokens + subagent_* while children await."""
+            """CB→CC / CC→CB intercept: mid-turn tokens + subagent_* while children await."""
+            items: list = []
             try:
                 from agenticx.harness.codebuddy_cc_subagents import (
                     drain_cc_orchestration_progress,
                 )
+
+                items.extend(
+                    await asyncio.to_thread(drain_cc_orchestration_progress, sid) or []
+                )
             except Exception:
-                return []
+                pass
             try:
-                items = await asyncio.to_thread(drain_cc_orchestration_progress, sid)
+                from agenticx.harness.claude_code_cb_subagents import (
+                    drain_cb_orchestration_progress,
+                )
+
+                items.extend(
+                    await asyncio.to_thread(drain_cb_orchestration_progress, sid) or []
+                )
             except Exception:
+                pass
+            if not items:
                 return []
             lines_out: list[str] = []
             for item in items or []:
@@ -798,6 +811,10 @@ async def _external_harness_chat_stream(
             maybe_cc = result_detail_early.get("near_cc_subagents")
             if isinstance(maybe_cc, dict):
                 cc_payload = maybe_cc
+            maybe_cb = result_detail_early.get("near_cb_subagents")
+            if isinstance(maybe_cb, dict):
+                # CC→CB uses the same WorkPanel/SSE shape as CB→CC.
+                cc_payload = maybe_cb
         if isinstance(cc_payload, dict):
             for row in list(cc_payload.get("results") or []):
                 if not isinstance(row, dict):
@@ -861,6 +878,14 @@ async def _external_harness_chat_stream(
             )
 
             clear_cc_orchestration_progress(sid)
+        except Exception:
+            pass
+        try:
+            from agenticx.harness.claude_code_cb_subagents import (
+                clear_cb_orchestration_progress,
+            )
+
+            clear_cb_orchestration_progress(sid)
         except Exception:
             pass
 
@@ -5836,12 +5861,33 @@ def create_studio_app() -> FastAPI:
                 return cc_result
             return None
 
-        # Prefer the CC CLI path when the WorkPanel card is clearly a cc-subagent-*
-        # run — native AgentTeamManager has no handle for those processes.
+        def _cancel_cb_cli() -> dict | None:
+            """Interrupt Near-orchestrated CodeBuddy CLI WorkPanel runs."""
+            try:
+                from agenticx.harness.claude_code_cb_subagents import (
+                    cancel_codebuddy_subagent_run,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[cancel] cb import failed sid=%s agent=%s: %s", session_id, agent_id, exc)
+                return None
+            cb_result = cancel_codebuddy_subagent_run(
+                owner_session_id=session_id,
+                run_id=agent_id,
+            )
+            if cb_result.get("ok"):
+                return cb_result
+            return None
+
+        # Prefer the cross-harness CLI path when the WorkPanel card is clearly a
+        # cc-subagent-* / cb-subagent-* run — native AgentTeamManager has no handle.
         if agent_id.startswith("cc-subagent-"):
             cc_hit = _cancel_cc_cli()
             if cc_hit is not None:
                 return cc_hit
+        if agent_id.startswith("cb-subagent-"):
+            cb_hit = _cancel_cb_cli()
+            if cb_hit is not None:
+                return cb_hit
 
         team_manager = managed.team_manager
         if team_manager is None:
@@ -5855,6 +5901,9 @@ def create_studio_app() -> FastAPI:
                 cc_hit = _cancel_cc_cli()
                 if cc_hit is not None:
                     return cc_hit
+                cb_hit = _cancel_cb_cli()
+                if cb_hit is not None:
+                    return cb_hit
                 logger.warning("[cancel] sid=%s agent=%s global lookup also failed", session_id, agent_id)
                 raise HTTPException(status_code=404, detail="agent team not initialized")
         logger.info(

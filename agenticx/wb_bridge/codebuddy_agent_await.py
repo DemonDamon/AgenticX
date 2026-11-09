@@ -28,6 +28,17 @@ _CC_SUBAGENT_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_CB_SUBAGENT_RE = re.compile(
+    r"(?:code\s*buddy|codebuddy|(?<![A-Za-z0-9_-])cb(?![A-Za-z0-9_-]))"
+    r".{0,40}(?:sub[\s-]?agents?|子代理|队友)"
+    r"|(?:sub[\s-]?agents?|子代理).{0,40}"
+    r"(?:code\s*buddy|codebuddy|(?<![A-Za-z0-9_-])cb(?![A-Za-z0-9_-]))"
+    r"|用\s*(?:code\s*buddy|codebuddy|cb)\s*.{0,20}(?:sub|子)"
+    r"|(?:调用|拉起|派发?)\s*(?:code\s*buddy|codebuddy).{0,24}(?:作为|当|做)?.{0,8}(?:sub|子)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 _SYSTEM_OR_AUTO_PREFIX_RE = re.compile(
     r"^\s*\[(?:系统通知|auto-nudge)\]",
     re.IGNORECASE,
@@ -50,16 +61,36 @@ class AgentSpawn:
     expected_paths: tuple[str, ...]
 
 
-def user_asked_for_claude_code_subagents(text: str) -> bool:
-    """True when the user asked to use Claude Code / CC as subagents.
+def user_asked_for_codebuddy_subagents(text: str) -> bool:
+    """True when the user asked to use CodeBuddy / CB as subagents.
 
     System-injected completion notices and run-id echoes must not match: they
-    previously re-triggered Near's CB→CC intercept and spawned endless swarms.
+    would re-trigger Near's CC→CB intercept and spawn endless swarms.
     """
     raw = text or ""
     if _SYSTEM_OR_AUTO_PREFIX_RE.search(raw):
         return False
     if _SUBAGENT_COMPLETION_NOTICE_RE.search(raw):
+        return False
+    return bool(_CB_SUBAGENT_RE.search(raw))
+
+
+def user_asked_for_claude_code_subagents(text: str) -> bool:
+    """True when the user asked to use Claude Code / CC as subagents.
+
+    System-injected completion notices and run-id echoes must not match: they
+    previously re-triggered Near's CB→CC intercept and spawned endless swarms.
+
+    When both harness names appear (e.g. "用 claude code harness 调用 codebuddy
+    作为 subagents"), prefer the CodeBuddy-as-subagent intent so the reverse
+    CC→CB path can own the turn.
+    """
+    raw = text or ""
+    if _SYSTEM_OR_AUTO_PREFIX_RE.search(raw):
+        return False
+    if _SUBAGENT_COMPLETION_NOTICE_RE.search(raw):
+        return False
+    if user_asked_for_codebuddy_subagents(raw):
         return False
     return bool(_CC_SUBAGENT_RE.search(raw))
 

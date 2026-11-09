@@ -12,6 +12,7 @@ from agenticx.wb_bridge.codebuddy_agent_await import (
     honesty_footer,
     parse_agent_spawns_from_objects,
     user_asked_for_claude_code_subagents,
+    user_asked_for_codebuddy_subagents,
 )
 from agenticx.wb_bridge.events import extract_tool_activity
 from agenticx.harness.stream_json_text import iter_raw_tool_progress
@@ -25,6 +26,18 @@ def test_detect_claude_code_subagent_ask():
     assert not user_asked_for_claude_code_subagents("写两份中美关系报告")
     assert codebuddy_cc_subagent_guard_prefix("用 Claude Code 做子代理")
     assert codebuddy_cc_subagent_guard_prefix("普通问题") == ""
+
+
+def test_detect_codebuddy_subagent_ask():
+    assert user_asked_for_codebuddy_subagents(
+        "用 claude code harness 来调用 codebuddy 作为 subagents"
+    )
+    assert user_asked_for_codebuddy_subagents("用 CodeBuddy 做 subagent 写报告")
+    assert not user_asked_for_codebuddy_subagents("写两份中美关系报告")
+    # Prefer CB-as-subagent when both harness names appear.
+    assert not user_asked_for_claude_code_subagents(
+        "用 claude code harness 来调用 codebuddy 作为 subagents"
+    )
 
 
 def test_parse_agent_spawns_extracts_report_paths():

@@ -799,12 +799,18 @@ def _run_external_harness_turn_body(
             "metadata": assistant_metadata,
         }
     )
-    # CB→CC: register swarm card under the Near studio session (not surface_sid).
+    # CB→CC / CC→CB: register swarm card under the Near studio session (not surface_sid).
     if isinstance(result.detail, dict):
         cc_payload = result.detail.get("near_cc_subagents")
         if isinstance(cc_payload, dict):
             try:
                 _append_cc_subagent_cluster_anchor(session, cc_payload)
+            except Exception:
+                pass
+        cb_payload = result.detail.get("near_cb_subagents")
+        if isinstance(cb_payload, dict):
+            try:
+                _append_cc_subagent_cluster_anchor(session, cb_payload)
             except Exception:
                 pass
     # Keep the binding's native-thread handle fresh for resume/handoff.

@@ -1011,6 +1011,8 @@ def maybe_run_cc_subagents_for_codebuddy_turn(
     # "use Claude Code as subagents" ask (that caused endless swarm respawns).
     if text.startswith("[系统通知]") or text.startswith("[auto-nudge]"):
         return None
+    if "你是由 Near 跨引擎派发的" in text:
+        return None
     if "以下子智能体已全部结束" in text or "子智能体已全部结束或暂停" in text:
         return None
     if not user_asked_for_claude_code_subagents(text):

@@ -31,6 +31,9 @@ from agenticx.harness.types import (
     TurnRequest,
     TurnResult,
 )
+from agenticx.harness.claude_code_cb_subagents import (
+    maybe_run_cb_subagents_for_claude_code_turn,
+)
 
 _RESULT_TEXT_MAX_CHARS = 4000
 
@@ -175,6 +178,26 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
         session = self.get(session_id)
         if session is None:
             raise SessionNotFoundError(session_id)
+
+        # Cross-harness: user asked for CodeBuddy as subagents → Near spawns
+        # real `codebuddy` CLI sessions instead of letting Claude Code Task pretend.
+        cwd = str(getattr(session, "cwd", "") or "")
+        model = getattr(session, "model", None) or None
+        owner_sid = (
+            str(getattr(request, "owner_session_id", "") or "").strip()
+            or str(getattr(request, "studio_session_id", "") or "").strip()
+            or str(session_id or "").strip()
+        )
+        intercepted = maybe_run_cb_subagents_for_claude_code_turn(
+            parent_session_id=owner_sid,
+            user_text=request.text,
+            cwd=cwd,
+            wait_seconds=request.wait_seconds,
+            model=(str(model).strip() or None) if model else None,
+        )
+        if intercepted is not None:
+            return intercepted
+
         try:
             self.send_user_message(session_id, request.text)
         except KeyError as exc:
