@@ -5865,6 +5865,8 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+
+        team_result: dict = {"ok": False, "message": "agent team not initialized"}
         team_manager = managed.team_manager
         if team_manager is None:
             team_manager = AgentTeamManager.find_manager_for_agent(
@@ -5872,28 +5874,70 @@ def create_studio_app() -> FastAPI:
                 include_archived=True,
                 session_id=session_id,
             )
-            if team_manager is None:
-                raise HTTPException(status_code=404, detail="agent team not initialized")
-        result = await team_manager.update_subagent_model(
-            agent_id,
-            provider=provider,
-            model=model,
-        )
-        if not result.get("ok"):
-            fallback_manager = AgentTeamManager.find_manager_for_agent(
+        if team_manager is not None:
+            team_result = await team_manager.update_subagent_model(
                 agent_id,
-                include_archived=True,
-                session_id=session_id,
+                provider=provider,
+                model=model,
             )
-            if fallback_manager is not None and fallback_manager is not team_manager:
-                result = await fallback_manager.update_subagent_model(
+            if not team_result.get("ok"):
+                fallback_manager = AgentTeamManager.find_manager_for_agent(
                     agent_id,
-                    provider=provider,
-                    model=model,
+                    include_archived=True,
+                    session_id=session_id,
                 )
-            if not result.get("ok"):
-                raise HTTPException(status_code=400, detail=result.get("message", "update model failed"))
-        return result
+                if fallback_manager is not None and fallback_manager is not team_manager:
+                    team_result = await fallback_manager.update_subagent_model(
+                        agent_id,
+                        provider=provider,
+                        model=model,
+                    )
+
+        # Always try the run ledger too: CC CLI children (cc-subagent-*) live only
+        # there, and native sa-* rows should stay aligned for poll/hydrate.
+        run_provider = provider or ""
+        run_model = model or ""
+        persisted_run = False
+        try:
+            store = SubAgentRunStore(session_id)
+            record = store.update_model(
+                agent_id,
+                provider=provider,
+                model=model,
+            )
+            if record is not None:
+                persisted_run = True
+                run_provider = str(record.provider or "") or run_provider
+                run_model = str(record.model or "") or run_model
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[subagent/model] run-store update failed sid=%s agent=%s: %s",
+                session_id,
+                agent_id,
+                exc,
+            )
+
+        if team_result.get("ok") or persisted_run:
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "provider": (
+                    str(team_result.get("provider") or "").strip()
+                    or run_provider
+                    or (provider or "")
+                ),
+                "model": (
+                    str(team_result.get("model") or "").strip()
+                    or run_model
+                    or (model or "")
+                ),
+                "team_updated": bool(team_result.get("ok")),
+                "persisted_run": persisted_run,
+            }
+        raise HTTPException(
+            status_code=400,
+            detail=team_result.get("message", "update model failed"),
+        )
 
     @app.get("/api/session/subagent-clusters")
     async def session_subagent_clusters(

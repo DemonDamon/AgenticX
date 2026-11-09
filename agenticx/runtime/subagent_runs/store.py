@@ -205,6 +205,37 @@ class SubAgentRunStore:
             self._write_json(self._index_file, index_data)
             return record
 
+    def update_model(
+        self,
+        run_id: str,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional[RunRecord]:
+        """Update provider/model fields for one persisted run (WorkPanel picker)."""
+        rid = str(run_id or "").strip()
+        if not rid:
+            return None
+        prov = str(provider or "").strip()
+        mod = str(model or "").strip()
+        if not prov and not mod:
+            return None
+        with self._lock:
+            record = self.get_run(run_id=rid)
+            if record is None:
+                return None
+            now = time.time()
+            if prov:
+                record.provider = prov
+            if mod:
+                record.model = mod
+            record.updated_at = now
+            self._write_json(self._record_file(rid), record.to_dict())
+            index_data = self._load_index()
+            self._update_index_run(index_data=index_data, record=record)
+            self._write_json(self._index_file, index_data)
+            return record
+
     def append_activity(
         self,
         run_id: str,
