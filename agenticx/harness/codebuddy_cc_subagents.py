@@ -16,10 +16,11 @@ import signal
 import threading
 import time
 import uuid
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from agenticx.harness.types import TURN_STATUS_ERROR, TURN_STATUS_SUCCESS, TurnRequest, TurnResult
 from agenticx.wb_bridge.codebuddy_agent_await import user_asked_for_claude_code_subagents
@@ -29,6 +30,51 @@ _log = logging.getLogger(__name__)
 # Live Claude Code CLI children for WorkPanel 「中断」. Keyed by run_id.
 _ACTIVE_CC_RUNS: Dict[str, Dict[str, Any]] = {}
 _ACTIVE_CC_LOCK = threading.RLock()
+
+# Mid-turn progress for parent Near SSE (studio session id → queue).
+# The CB→CC intercept blocks adapter.turn(); without this bus the desktop only
+# sees harness_progress heartbeats and then one final dump.
+_CC_PROGRESS: Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
+_CC_PROGRESS_LOCK = threading.RLock()
+_CC_PROGRESS_MAX = 400
+
+
+def publish_cc_orchestration_progress(
+    owner_session_id: str,
+    item: Dict[str, Any],
+) -> None:
+    """Enqueue one mid-turn SSE-shaped progress item for a studio session."""
+    sid = str(owner_session_id or "").strip()
+    if not sid or not isinstance(item, dict):
+        return
+    row = dict(item)
+    with _CC_PROGRESS_LOCK:
+        q = _CC_PROGRESS[sid]
+        q.append(row)
+        while len(q) > _CC_PROGRESS_MAX:
+            q.popleft()
+
+
+def drain_cc_orchestration_progress(owner_session_id: str) -> List[Dict[str, Any]]:
+    """Pop all queued CB→CC progress items for the Near studio session."""
+    sid = str(owner_session_id or "").strip()
+    if not sid:
+        return []
+    with _CC_PROGRESS_LOCK:
+        q = _CC_PROGRESS.get(sid)
+        if not q:
+            return []
+        items = list(q)
+        q.clear()
+        return items
+
+
+def clear_cc_orchestration_progress(owner_session_id: str) -> None:
+    sid = str(owner_session_id or "").strip()
+    if not sid:
+        return
+    with _CC_PROGRESS_LOCK:
+        _CC_PROGRESS.pop(sid, None)
 
 _TWO_REPORTS_RE = re.compile(
     r"(?:两份|两个).{0,40}?(?:关于|就)?(?P<body>.+?)(?:的)?(?:推演|预测|分析|报告)",
@@ -412,9 +458,34 @@ def _register_cc_run_open(
         )
         if record is None:
             return {}
+        cluster_id = str(getattr(record, "cluster_id", "") or "").strip()
+        created_at = float(getattr(record, "created_at", 0.0) or 0.0)
+        publish_cc_orchestration_progress(
+            owner_session_id,
+            {
+                "kind": "subagent_started",
+                "agent_id": run_id,
+                "name": task.name,
+                "role": "Claude Code CLI subagent",
+                "task": task.prompt[:500],
+                "status": "running",
+                "provider": "claude-code",
+                "model": str(model or "").strip(),
+                "cluster_id": cluster_id,
+                "cluster_title": cluster_title,
+            },
+        )
+        publish_cc_orchestration_progress(
+            owner_session_id,
+            {
+                "kind": "text",
+                "agent_id": "meta",
+                "text": f"- **{task.name}**：已启动（Claude Code CLI）\n",
+            },
+        )
         return {
-            "cluster_id": str(getattr(record, "cluster_id", "") or "").strip(),
-            "created_at": float(getattr(record, "created_at", 0.0) or 0.0),
+            "cluster_id": cluster_id,
+            "created_at": created_at,
         }
     except Exception as exc:  # noqa: BLE001
         _log.warning("[cc_subagents] open_run failed for %s: %s", run_id, exc)
@@ -482,6 +553,64 @@ def _register_cc_run_close(
                 else f"status={status}"
             ),
         )
+        name = str(outcome.get("name") or run_id)
+        summary = str(outcome.get("result_text") or "").strip()
+        if status == "cancelled":
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {
+                    "kind": "subagent_error",
+                    "agent_id": run_id,
+                    "text": "用户中断",
+                    "status": "cancelled",
+                },
+            )
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {
+                    "kind": "text",
+                    "agent_id": "meta",
+                    "text": f"- **{name}**：已中断\n",
+                },
+            )
+        elif ok:
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {
+                    "kind": "subagent_completed",
+                    "agent_id": run_id,
+                    "summary": summary[:2000],
+                    "result_file": out_path if wrote else "",
+                },
+            )
+            line = f"- **{name}**：成功"
+            if wrote and out_path:
+                line += f"；已写文件 `{out_path}`"
+            line += "\n"
+            if summary:
+                line += f"  摘要：{summary[:400]}\n"
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {"kind": "text", "agent_id": "meta", "text": line},
+            )
+        else:
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {
+                    "kind": "subagent_error",
+                    "agent_id": run_id,
+                    "text": (summary or status or "执行异常")[:500],
+                    "status": "failed",
+                },
+            )
+            publish_cc_orchestration_progress(
+                owner_session_id,
+                {
+                    "kind": "text",
+                    "agent_id": "meta",
+                    "text": f"- **{name}**：未完成（{status or 'error'}）\n",
+                },
+            )
     except Exception as exc:  # noqa: BLE001
         _log.warning("[cc_subagents] close_run failed for %s: %s", run_id, exc)
 
@@ -567,20 +696,112 @@ def _run_one(
                 }
             )
         else:
-            result = adapter.turn(
-                sid,
-                TurnRequest(text=task.prompt, wait_seconds=float(wait_seconds)),
+            # Run the blocking Claude Code turn on a nested thread so this
+            # worker can drain mid-turn stream-json into the parent SSE bus.
+            turn_box: Dict[str, Any] = {}
+            err_box: Dict[str, Any] = {}
+
+            def _blocking_turn() -> None:
+                try:
+                    turn_box["result"] = adapter.turn(
+                        sid,
+                        TurnRequest(
+                            text=task.prompt,
+                            wait_seconds=float(wait_seconds),
+                        ),
+                    )
+                except Exception as turn_exc:  # noqa: BLE001
+                    err_box["exc"] = turn_exc
+
+            turn_thread = threading.Thread(
+                target=_blocking_turn,
+                name=f"cc-turn-{rid}",
+                daemon=True,
             )
+            turn_thread.start()
+            drain = getattr(adapter, "drain_midturn_stream_items", None)
+            last_heartbeat = time.monotonic()
+            while turn_thread.is_alive():
+                if _cc_run_cancel_requested(rid):
+                    try:
+                        adapter.stop(sid)
+                    except Exception:
+                        pass
+                    break
+                if callable(drain) and parent_session_id:
+                    try:
+                        items = drain(sid) or []
+                    except Exception:
+                        items = []
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        kind = str(item.get("kind") or "")
+                        if kind == "text":
+                            piece = str(item.get("text") or "")
+                            if piece:
+                                publish_cc_orchestration_progress(
+                                    parent_session_id,
+                                    {
+                                        "kind": "text",
+                                        "agent_id": rid,
+                                        "text": piece,
+                                    },
+                                )
+                        elif kind in {"tool_start", "tool_end"}:
+                            # Surface tool activity into the WorkPanel live pane.
+                            name = str(item.get("name") or "tool").strip() or "tool"
+                            marker = (
+                                f"\n# {name} …\n"
+                                if kind == "tool_start"
+                                else f"\n# {name} done\n"
+                            )
+                            publish_cc_orchestration_progress(
+                                parent_session_id,
+                                {
+                                    "kind": "text",
+                                    "agent_id": rid,
+                                    "text": marker,
+                                },
+                            )
+                now = time.monotonic()
+                if parent_session_id and now - last_heartbeat >= 12.0:
+                    publish_cc_orchestration_progress(
+                        parent_session_id,
+                        {
+                            "kind": "text",
+                            "agent_id": "meta",
+                            "text": f"（{task.name} 仍在运行…）\n",
+                        },
+                    )
+                    last_heartbeat = now
+                turn_thread.join(0.25)
+
+            if err_box.get("exc") is not None and not _cc_run_cancel_requested(rid):
+                raise err_box["exc"]  # noqa: B904 — re-raise for outer handler
+
+            result = turn_box.get("result")
             out_path = Path(task.output_path)
             wrote = out_path.is_file() and out_path.stat().st_size > 0
             if _cc_run_cancel_requested(rid):
+                detail = dict(getattr(result, "detail", None) or {}) if result else {}
                 outcome.update(
                     {
                         "status": "cancelled",
                         "result_text": "用户中断",
                         "wrote_output": wrote,
                         "ok": False,
-                        "detail": {"cancelled": True, **dict(result.detail or {})},
+                        "detail": {"cancelled": True, **detail},
+                    }
+                )
+            elif result is None:
+                outcome.update(
+                    {
+                        "status": TURN_STATUS_ERROR,
+                        "result_text": "Claude Code CLI turn returned no result",
+                        "wrote_output": wrote,
+                        "ok": False,
+                        "detail": {},
                     }
                 )
             else:
@@ -664,6 +885,19 @@ def run_claude_code_subagents(
     batch_source_id = f"near-cc-{batch_id}"
     cluster_title = f"Agent 蜂群 · {len(tasks)} 个并行任务"
     results: List[Dict[str, Any]] = []
+    if parent_session_id:
+        clear_cc_orchestration_progress(parent_session_id)
+        publish_cc_orchestration_progress(
+            parent_session_id,
+            {
+                "kind": "text",
+                "agent_id": "meta",
+                "text": (
+                    f"正在跨引擎拉起 {len(tasks)} 个真实 Claude Code CLI subagent"
+                    + "（不是 CodeBuddy Agent 队友）…\n\n"
+                                ),
+            },
+        )
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         futs = {
             pool.submit(
@@ -811,9 +1045,12 @@ def maybe_run_cc_subagents_for_codebuddy_turn(
 __all__ = [
     "CcSubagentTask",
     "cancel_claude_code_subagent_run",
+    "clear_cc_orchestration_progress",
     "claude_code_cli_available",
+    "drain_cc_orchestration_progress",
     "format_cc_subagent_result_text",
     "maybe_run_cc_subagents_for_codebuddy_turn",
     "plan_claude_code_subagent_tasks",
+    "publish_cc_orchestration_progress",
     "run_claude_code_subagents",
 ]
