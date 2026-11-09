@@ -415,7 +415,7 @@ flowchart TD
    - channels：`internal/channel/registry.go` 的刷新函数（子规划作者定位）。
    - policy：`internal/server/server.go` 的 `reloadPolicyIfNeeded()`（第 560 行起）。
    - mcp_servers：`internal/mcp/loader.go` 的 `reload()`（第 88 行起）。
-3. 统一「失败保留最后可用快照」：逐一核对上述 4 个 reload 函数在**拉取失败**和**解析失败**时是否保留旧快照，不保留的改成保留。**远端返回 404 的语义不在本子规划中修改**，只把它登记为一次成功、内容为空的应用，并在 `LastError` 中写 `"remote 404 treated as empty"`，留给 D-3 决策。
+3. 统一「失败保留最后可用快照」：逐一核对上述 4 个 reload 函数在**拉取失败**和**解析失败**时是否保留旧快照，不保留的改成保留。**远端返回 404**（D-3 已决策）：4 个核心域一律保留最后可用快照，登记为一次失败，`LastError` 写 `"remote 404, keeping last known good"`。进程启动后从未成功加载过时，保持现有的空快照行为。策略域的 404 原本会回落到内置规则包，此时改为保留上一次已发布快照；从未加载过时仍回落内置规则包。
 4. 新增路由 `GET /internal/config-status`，注册在 `server.go` 第 665 行附近，与 `/internal/policy-status` 并列。返回：
 
    ```json
@@ -434,7 +434,10 @@ flowchart TD
 - FR-3：本地端到端可查。
   - AC-4：执行 `bash enterprise/scripts/start-dev-with-infra.sh` 后，`curl --noproxy '*' -H "Authorization: Bearer $GATEWAY_INTERNAL_TOKEN" http://127.0.0.1:<网关端口>/internal/config-status` 返回 200，并且 4 个 domain 的 `AppliedAt` 都非零。
 
-**Out of scope：** 其余配置源（quota、budget、pricing、cache、compliance、PAT 吊销、session grants），列为候选 C-01；改 404 语义；推送式下发；改 admin 侧的快照生成。
+- FR-4：远端 404 时保留最后可用快照（D-3）。
+  - AC-5：在 `runtimeconfig_test.go` 中用 `httptest` 先返回合法 providers、再返回 404，断言 `ResolveByModel` 仍命中，并且 `LastError` 包含 `remote 404`。
+
+**Out of scope：** 其余配置源（quota、budget、pricing、cache、compliance、PAT 吊销、session grants），列为候选 C-01；推送式下发；改 admin 侧的快照生成。
 
 ---
 
@@ -549,7 +552,19 @@ flowchart TD
 
 ## 8. 需要用户确认的决策点
 
-子规划作者在对应子规划开工前，向用户确认以下决策，**不得自行拍板**：
+子规划作者在对应子规划开工前，向用户确认以下决策，**不得自行拍板**。
+
+**2026-11-09 已决策：**
+
+- D-1：不过内容策略，只透传。
+- D-2：放行并记录日志，不做严格模式。
+- D-3：保留最后可用快照，已并入 GW-04。
+- D-4：放在现有渠道相关页面内，新增子区块；保留时长由子规划取 7 天。
+- D-5：不接审批，有权限的管理员直接发布。
+- D-6：独立快照接口 `api/internal/virtual-models`。
+- D-7：默认只审计。
+
+原始问题如下：
 
 - **D-1（GW-00）：** 流式工具调用参数是否需要过内容策略？默认答案是不过，只透传，因为工具参数常含结构化数据，用关键词或正则误伤率高。
 - **D-2（SEC-02）：** `bundleDigest` 为空的存量技能怎么处理？默认是放行并记录日志。可选的严格模式是不加载正文，可以加环境变量 `ENTERPRISE_SKILL_REQUIRE_DIGEST=1`。
