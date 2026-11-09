@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -207,6 +208,9 @@ func (e *Executor) Stream(
 			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
 		}
 		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
+		if result.committed {
+			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
+		}
 		excludeChannels[ch.ID] = struct{}{}
 	}
 	return StreamResult{Attempts: attempts}, lastErr
@@ -216,6 +220,7 @@ type channelStreamOutcome struct {
 	keyRef    string
 	latencyMS int64
 	attempts  []channel.Attempt
+	committed bool
 }
 
 func (e *Executor) streamOnChannel(
@@ -230,8 +235,10 @@ func (e *Executor) streamOnChannel(
 	excludeKeys := map[string]struct{}{}
 	var lastErr error
 	var lastKeyRef string
+	var committed bool
 
 	for keyTry := 0; keyTry < maxKeyTries; keyTry++ {
+		committed = false
 		resolved := e.resolveKeyWithExcludes(ch, poolID, excludeKeys)
 		lastKeyRef = resolved.KeyRef
 		if resolved.Key == "" && len(refs) > 0 {
@@ -241,21 +248,20 @@ func (e *Executor) streamOnChannel(
 		chTry := ch
 		chTry.APIKey = resolved.Key
 
-		var tokensSent bool
 		wrappedPush := func(chunk openai.StreamChunk) error {
-			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
-				if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
-					tokensSent = true
-				}
+			if err := push(chunk); err != nil {
+				return &clientPushError{err: err}
 			}
-			return push(chunk)
+			if len(chunk.Choices) > 0 && deltaHasClientPayload(chunk.Choices[0].Delta) {
+				committed = true
+			}
+			return nil
 		}
 
 		start := time.Now()
 		ad, err := e.factory.For(chTry)
 		if err != nil {
-			return channelStreamOutcome{}, err
+			return channelStreamOutcome{committed: committed}, err
 		}
 		err = ad.Stream(ctx, req, chTry, wrappedPush)
 		latency := time.Since(start).Milliseconds()
@@ -266,6 +272,7 @@ func (e *Executor) streamOnChannel(
 			return channelStreamOutcome{
 				keyRef:    resolved.KeyRef,
 				latencyMS: latency,
+				committed: committed,
 				attempts: []channel.Attempt{{
 					ChannelID: ch.ID,
 					Provider:  ch.ProviderLabel,
@@ -283,7 +290,7 @@ func (e *Executor) streamOnChannel(
 			RetryReason: reason,
 			LatencyMS:   latency,
 		}
-		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !tokensSent
+		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !committed
 		if canRetryKey {
 			e.keypool.MarkFailure(poolID, resolved.KeyRef, reason)
 			excludeKeys[resolved.KeyRef] = struct{}{}
@@ -291,9 +298,9 @@ func (e *Executor) streamOnChannel(
 				continue
 			}
 		}
-		return channelStreamOutcome{keyRef: lastKeyRef, attempts: []channel.Attempt{attempt}}, err
+		return channelStreamOutcome{keyRef: lastKeyRef, attempts: []channel.Attempt{attempt}, committed: committed}, err
 	}
-	return channelStreamOutcome{keyRef: lastKeyRef}, lastErr
+	return channelStreamOutcome{keyRef: lastKeyRef, committed: committed}, lastErr
 }
 
 func (e *Executor) resolveKeyWithExcludes(ch channel.Channel, poolID string, exclude map[string]struct{}) keypool.ResolveResult {
@@ -322,6 +329,10 @@ func maxKeyAttempts(ch channel.Channel) int {
 // IsKeyRetryable upstream errors that should try the next key within the same channel.
 func IsKeyRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	var pushErr *clientPushError
+	if errors.As(err, &pushErr) {
 		return false
 	}
 	var up *adaptor.UpstreamError
@@ -355,6 +366,10 @@ func IsChannelRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	var pushErr *clientPushError
+	if errors.As(err, &pushErr) {
+		return false
+	}
 	var up *adaptor.UpstreamError
 	if errors.As(err, &up) {
 		if up.StatusCode == httpStatusTooManyRequests || up.StatusCode >= 500 {
@@ -382,6 +397,32 @@ func IsChannelRetryable(err error) bool {
 // IsRetryable kept for backward-compatible tests (channel-level retry).
 func IsRetryable(err error) bool {
 	return IsChannelRetryable(err)
+}
+
+type clientPushError struct {
+	err error
+}
+
+func (e *clientPushError) Error() string {
+	if e == nil || e.err == nil {
+		return "client push failed"
+	}
+	return e.err.Error()
+}
+
+func (e *clientPushError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func deltaHasClientPayload(delta openai.StreamDelta) bool {
+	if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
+		return true
+	}
+	raw := bytes.TrimSpace(delta.ToolCalls)
+	return len(raw) > 0 && string(raw) != "null"
 }
 
 const httpStatusTooManyRequests = 429
