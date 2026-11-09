@@ -23,6 +23,7 @@ type Executor struct {
 	factory  *adaptor.Factory
 	keypool  *keypool.Pool
 	cooldown time.Duration
+	virtual  VirtualPlanner
 }
 
 func NewExecutor(picker *channel.Picker, factory *adaptor.Factory, pool *keypool.Pool) *Executor {
@@ -43,16 +44,82 @@ type CompleteResult struct {
 	KeyRef        string
 	Attempts      []channel.Attempt
 	PickDecision  channel.PickDecision
+	ResolvedModel string
+	VirtualName   string
 }
 
 type StreamResult struct {
-	Channel      channel.Channel
-	KeyRef       string
-	Attempts     []channel.Attempt
-	PickDecision channel.PickDecision
+	Channel       channel.Channel
+	KeyRef        string
+	Attempts      []channel.Attempt
+	PickDecision  channel.PickDecision
+	ResolvedModel string
+	VirtualName   string
+}
+
+// VirtualPlanner resolves a virtual model name before channel selection.
+// ok is false for ordinary model names.
+type VirtualPlanner interface {
+	Plan(tenantID, name string, available func(model string) bool) (order []string, virtualName string, ok bool)
+}
+
+func (e *Executor) SetVirtualPlanner(p VirtualPlanner) {
+	if e == nil {
+		return
+	}
+	e.virtual = p
+}
+
+func (e *Executor) virtualPlan(model string, id channel.Identity) ([]string, string, bool) {
+	if e == nil || e.virtual == nil {
+		return nil, "", false
+	}
+	return e.virtual.Plan(id.TenantID, model, func(target string) bool {
+		if e.picker == nil {
+			return false
+		}
+		return e.picker.HasRoutableChannel(id.TenantID, target)
+	})
 }
 
 func (e *Executor) Complete(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	model string,
+	id channel.Identity,
+) (CompleteResult, error) {
+	if order, virtualName, ok := e.virtualPlan(model, id); ok {
+		return e.completeVirtual(ctx, req, order, virtualName, id)
+	}
+	return e.completeOne(ctx, req, model, id)
+}
+
+func (e *Executor) completeVirtual(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	order []string,
+	virtualName string,
+	id channel.Identity,
+) (CompleteResult, error) {
+	var lastErr error
+	attempts := make([]channel.Attempt, 0)
+	for i, target := range order {
+		reqTry := req
+		reqTry.Model = target
+		result, err := e.completeOne(ctx, reqTry, target, id)
+		attempts = append(attempts, result.Attempts...)
+		result.Attempts = attempts
+		result.ResolvedModel = target
+		result.VirtualName = virtualName
+		if err == nil || !isNoChannel(err) || i == len(order)-1 {
+			return result, err
+		}
+		lastErr = err
+	}
+	return CompleteResult{Attempts: attempts, VirtualName: virtualName}, lastErr
+}
+
+func (e *Executor) completeOne(
 	ctx context.Context,
 	req openai.ChatCompletionRequest,
 	model string,
@@ -174,6 +241,49 @@ func (e *Executor) completeOnChannel(
 }
 
 func (e *Executor) Stream(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	model string,
+	id channel.Identity,
+	push adaptor.StreamPush,
+) (StreamResult, error) {
+	if order, virtualName, ok := e.virtualPlan(model, id); ok {
+		return e.streamVirtual(ctx, req, order, virtualName, id, push)
+	}
+	return e.streamOne(ctx, req, model, id, push)
+}
+
+func (e *Executor) streamVirtual(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	order []string,
+	virtualName string,
+	id channel.Identity,
+	push adaptor.StreamPush,
+) (StreamResult, error) {
+	var lastErr error
+	attempts := make([]channel.Attempt, 0)
+	for i, target := range order {
+		reqTry := req
+		reqTry.Model = target
+		result, err := e.streamOne(ctx, reqTry, target, id, push)
+		attempts = append(attempts, result.Attempts...)
+		result.Attempts = attempts
+		result.ResolvedModel = target
+		result.VirtualName = virtualName
+		if err == nil || !isNoChannel(err) || i == len(order)-1 {
+			return result, err
+		}
+		lastErr = err
+	}
+	return StreamResult{Attempts: attempts, VirtualName: virtualName}, lastErr
+}
+
+func isNoChannel(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "no channel for model ")
+}
+
+func (e *Executor) streamOne(
 	ctx context.Context,
 	req openai.ChatCompletionRequest,
 	model string,

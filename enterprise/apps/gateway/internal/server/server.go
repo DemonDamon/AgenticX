@@ -44,6 +44,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/residency"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
+	"github.com/agenticx/enterprise/gateway/internal/virtualmodel"
 	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
 	"github.com/go-chi/chi/v5"
@@ -68,6 +69,7 @@ type Server struct {
 	metering              metering.Sink
 	traceReporter         *metering.TraceReporter
 	adminLoader           *runtimeconfig.Loader
+	virtualLoader         *virtualmodel.Loader
 	quotaTracker          *quota.Tracker
 	policySnapBodyHash    string
 	policyRemoteCheckedAt time.Time
@@ -167,6 +169,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	adminLoader := runtimeconfig.New(logger)
 	adminLoader.SetConfigStatus(cfgStatus)
 	adminLoader.Start(context.Background())
+	virtualLoader := virtualmodel.New(logger)
+	virtualLoader.Start(context.Background())
 
 	quotaCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_CONFIG_FILE"))
 	if quotaCfgPath == "" {
@@ -232,6 +236,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:             sink,
 		traceReporter:        traceReporter,
 		adminLoader:          adminLoader,
+		virtualLoader:        virtualLoader,
 		quotaTracker:         quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:          patVerifier,
 		sessionGrants:        gatewayauth.NewSessionGrantStore(dbHandle),
@@ -1260,7 +1265,7 @@ func (s *Server) handleStream(
 	var streamResult relay.StreamResult
 	if s.useChannelRelay() {
 		streamResult, streamErr = s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
-		decision = routingDecisionFromStream(streamResult, req.Model, decision)
+		decision = routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), decision)
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
 	}
@@ -1304,6 +1309,7 @@ func (s *Server) handleStream(
 			}
 			enrichAuditFromAttempts(&ev, streamResult.Attempts)
 			enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+			annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
@@ -1430,6 +1436,7 @@ func (s *Server) handleStream(
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+	annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")

@@ -197,7 +197,7 @@ func (s *Server) protocolComplete(
 		return
 	}
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
-	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
+	decision := routingDecisionFromRelay(result, relayModel(req.Model, result.ResolvedModel), s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
@@ -268,7 +268,13 @@ func (s *Server) protocolComplete(
 }
 
 func streamResultFromComplete(result relay.CompleteResult) relay.StreamResult {
-	return relay.StreamResult{Channel: result.Channel, KeyRef: result.KeyRef, Attempts: result.Attempts}
+	return relay.StreamResult{
+		Channel:       result.Channel,
+		KeyRef:        result.KeyRef,
+		Attempts:      result.Attempts,
+		ResolvedModel: result.ResolvedModel,
+		VirtualName:   result.VirtualName,
+	}
 }
 
 func (s *Server) protocolStream(
@@ -377,7 +383,7 @@ func (s *Server) protocolStream(
 	}
 
 	streamResult, streamErr := s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
-	decision := routingDecisionFromStream(streamResult, req.Model, s.decider.Decide(r, req.Model))
+	decision := routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), s.decider.Decide(r, req.Model))
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
@@ -520,5 +526,6 @@ func (s *Server) protocolAuditEvent(
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+	annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 	return ev
 }

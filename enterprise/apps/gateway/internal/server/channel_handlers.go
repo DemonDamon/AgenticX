@@ -28,7 +28,7 @@ func (s *Server) handleChatCompleteRelay(
 	qctx quota.RequestContext,
 ) {
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
-	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
+	decision := routingDecisionFromRelay(result, relayModel(req.Model, result.ResolvedModel), s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.recordUpstreamError(identity.TenantID, makeID("req"), result.Channel.ID, 500, []byte(err.Error()))
@@ -100,6 +100,7 @@ func (s *Server) handleChatCompleteRelay(
 			}
 			enrichAuditFromAttempts(&ev, result.Attempts)
 			enrichAuditRoutingPolicy(&ev, result.PickDecision)
+			annotateVirtualModelAudit(&ev, result.VirtualName, result.ResolvedModel)
 			if err := s.writeAuditEvent(ev); err != nil {
 				writeAPIError(w, openai.Internal("audit write failed"))
 				return
@@ -154,6 +155,7 @@ func (s *Server) handleChatCompleteRelay(
 	}
 	enrichAuditFromAttempts(&ev, result.Attempts)
 	enrichAuditRoutingPolicy(&ev, result.PickDecision)
+	annotateVirtualModelAudit(&ev, result.VirtualName, result.ResolvedModel)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))

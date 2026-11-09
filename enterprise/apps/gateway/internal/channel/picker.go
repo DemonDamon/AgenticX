@@ -38,6 +38,23 @@ func NewPicker(registry *Registry, stats *StatsStore, affinity *AffinityStore) *
 	}
 }
 
+// HasRoutableChannel reports whether any channel for the model is outside cooldown.
+// It does not use filterHealthy's all-cooldown fallback, so a fully cooled model
+// stays unavailable to virtual-model failover.
+func (p *Picker) HasRoutableChannel(tenantID, model string) bool {
+	if p == nil || p.registry == nil {
+		return false
+	}
+	now := time.Now()
+	for _, ch := range p.registry.ListByModel(tenantID, model) {
+		if p.stats != nil && p.stats.InCooldown(ch.ID, now) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // Pick 返回候选 Channel；exclude 用于重试时跳过已失败通道。
 func (p *Picker) Pick(model string, id Identity, exclude map[string]struct{}) (Channel, bool) {
 	ch, _, ok := p.PickWithPrefix(model, id, exclude, nil)
