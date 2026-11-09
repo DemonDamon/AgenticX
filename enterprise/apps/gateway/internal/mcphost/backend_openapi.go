@@ -10,17 +10,75 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/egress"
 )
 
 // OpenAPIBackend proxies MCP tool calls to HTTP endpoints described by OpenAPI 3.x.
 type OpenAPIBackend struct {
-	client *http.Client
+	timeout time.Duration
+	mode    egress.Mode
+	allow   *egress.Allowlist
+	hook    func(egress.Decision)
+	audit   audit.EventWriter
 }
 
 func NewOpenAPIBackend() *OpenAPIBackend {
 	return &OpenAPIBackend{
-		client: &http.Client{Timeout: 30 * time.Second},
+		timeout: 30 * time.Second,
+		mode:    egress.ModeFromEnv(),
+		allow:   egress.AllowlistFromEnv(),
 	}
+}
+
+// SetDecisionHook 在每次出站判定需要记录时回调。干净放行不会触发。
+func (b *OpenAPIBackend) SetDecisionHook(fn func(egress.Decision)) {
+	b.hook = fn
+}
+
+// SetAuditWriter 注入审计写入器。未注入时只执行守护，不写审计。
+func (b *OpenAPIBackend) SetAuditWriter(w audit.EventWriter) {
+	b.audit = w
+}
+
+func (b *OpenAPIBackend) httpClient(rec *ServerRecord, tool string) *http.Client {
+	return egress.NewHTTPClient(&http.Client{Timeout: b.timeout}, b.mode, b.allow, func(d egress.Decision) {
+		if b.hook != nil {
+			b.hook(d)
+		}
+		b.writeEgressAudit(rec, tool, d)
+	})
+}
+
+func (b *OpenAPIBackend) writeEgressAudit(rec *ServerRecord, tool string, d egress.Decision) {
+	if b == nil || b.audit == nil || (!d.Blocked && !d.WouldBlock) {
+		return
+	}
+	status := "egress_would_block"
+	if d.Blocked {
+		status = "egress_blocked"
+	}
+	serverName := ""
+	if rec != nil {
+		serverName = rec.Name
+	}
+	summary := ""
+	if d.IP != nil {
+		summary = d.IP.String()
+	}
+	ev := audit.Event{
+		ID:          fmt.Sprintf("audit_%d", time.Now().UnixNano()),
+		EventTime:   time.Now().UTC().Format(time.RFC3339),
+		EventType:   "mcp_tool_call",
+		ClientType:  "web-portal",
+		Route:       "mcp",
+		MCPServer:   serverName,
+		MCPToolName: tool,
+		MCPStatus:   status,
+		Digest:      &audit.Digest{ResponseSummary: summary},
+	}
+	_ = b.audit.Write(&ev)
 }
 
 func (b *OpenAPIBackend) Name() string { return BackendOpenAPI }
@@ -82,7 +140,7 @@ func (b *OpenAPIBackend) CallTool(ctx context.Context, rec *ServerRecord, name s
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := b.client.Do(req)
+	resp, err := b.httpClient(rec, name).Do(req)
 	if err != nil {
 		return textResult("upstream request failed: "+err.Error(), true), nil
 	}

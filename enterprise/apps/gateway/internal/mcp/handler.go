@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/egress"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/go-chi/chi/v5"
 )
@@ -35,11 +37,13 @@ type CallerIdentity struct {
 
 // Handler proxies MCP streamable-HTTP traffic to registered upstream servers.
 type Handler struct {
-	Registry *Registry
-	Quota    *quota.Tracker
-	Audit    audit.EventWriter
-	Logger   *slog.Logger
-	Client   *http.Client
+	Registry   *Registry
+	Quota      *quota.Tracker
+	Audit      audit.EventWriter
+	Logger     *slog.Logger
+	Client     *http.Client
+	egressMode egress.Mode
+	allowlist  *egress.Allowlist
 }
 
 func NewHandler(reg *Registry, quotaTracker *quota.Tracker, auditWriter audit.EventWriter, logger *slog.Logger) *Handler {
@@ -47,11 +51,13 @@ func NewHandler(reg *Registry, quotaTracker *quota.Tracker, auditWriter audit.Ev
 		logger = slog.Default()
 	}
 	return &Handler{
-		Registry: reg,
-		Quota:    quotaTracker,
-		Audit:    auditWriter,
-		Logger:   logger,
-		Client:   &http.Client{Timeout: 10 * time.Minute},
+		Registry:   reg,
+		Quota:      quotaTracker,
+		Audit:      auditWriter,
+		Logger:     logger,
+		Client:     &http.Client{Timeout: 10 * time.Minute},
+		egressMode: egress.ModeFromEnv(),
+		allowlist:  egress.AllowlistFromEnv(),
 	}
 }
 
@@ -126,10 +132,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = h.Client.Transport
-	if proxy.Transport == nil {
-		proxy.Transport = http.DefaultTransport
-	}
+	guarded := egress.NewHTTPClient(h.Client, h.egressMode, h.allowlist, func(d egress.Decision) {
+		if !d.Blocked && !d.WouldBlock {
+			return
+		}
+		status := "egress_would_block"
+		if d.Blocked {
+			status = "egress_blocked"
+		}
+		summary := ""
+		if d.IP != nil {
+			summary = d.IP.String()
+		}
+		h.writeAudit(id, rec, toolName, status, started, hashText(string(bodyBytes)), summary)
+	})
+	proxy.Transport = guarded.Transport
 	origDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		origDirector(req)
@@ -157,7 +174,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.FlushInterval = 50 * time.Millisecond
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		h.Logger.Warn("mcp upstream proxy error", "server_id", serverID, "error", proxyErr)
-		writeProxyError(rw, http.StatusBadGateway, "mcp:upstream_unreachable", serverID)
+		code := "mcp:upstream_unreachable"
+		if proxyErr != nil && (errors.Is(proxyErr, egress.ErrForbidden) || strings.Contains(proxyErr.Error(), "egress:forbidden")) {
+			code = "egress:forbidden"
+		}
+		writeProxyError(rw, http.StatusBadGateway, code, serverID)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		status := "ok"
