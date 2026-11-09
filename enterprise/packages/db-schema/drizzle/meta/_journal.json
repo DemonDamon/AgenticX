@@ -526,6 +526,13 @@
       "when": 1789300000000,
       "tag": "0075_gateway_instances",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789300000001,
+      "tag": "0076_mcp_server_versions",
+      "breakpoints": true
     }
   ]
 }

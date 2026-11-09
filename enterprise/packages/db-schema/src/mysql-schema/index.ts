@@ -25,6 +25,7 @@ export * from "./gateway-budget";
 export * from "./api-tokens";
 export * from "./mcp-servers";
 export * from "./mcp-tools";
+export * from "./mcp-server-versions";
 export * from "./connector-gateway";
 export * from "./business-revenue";
 export * from "./billing-split";

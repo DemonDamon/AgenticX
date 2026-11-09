@@ -88,7 +88,7 @@ func (b *OpenAPIBackend) ListTools(ctx context.Context, rec *ServerRecord) ([]To
 	if rec == nil {
 		return nil, fmt.Errorf("openapi backend: nil server")
 	}
-	if len(rec.Tools) > 0 {
+	if rec.ToolsFromPublishedVersion || len(rec.Tools) > 0 {
 		out := make([]Tool, 0, len(rec.Tools))
 		for _, t := range rec.Tools {
 			if t.Enabled {
