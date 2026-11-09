@@ -160,3 +160,7 @@ docs/managed-agent/shots/**/*.srt
 docs/enterprise-capability-platform/shots/**/*.png
 docs/enterprise-capability-platform/shots/**/*.mp4
 docs/enterprise-capability-platform/shots/**/*.srt
+
+# 客户原始材料（未脱敏，严禁入库）
+材料_方宇杰/
+材料_*/
