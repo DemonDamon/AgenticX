@@ -10,7 +10,10 @@ parent CodeBuddy turn.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import signal
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +25,10 @@ from agenticx.harness.types import TURN_STATUS_ERROR, TURN_STATUS_SUCCESS, TurnR
 from agenticx.wb_bridge.codebuddy_agent_await import user_asked_for_claude_code_subagents
 
 _log = logging.getLogger(__name__)
+
+# Live Claude Code CLI children for WorkPanel 「中断」. Keyed by run_id.
+_ACTIVE_CC_RUNS: Dict[str, Dict[str, Any]] = {}
+_ACTIVE_CC_LOCK = threading.RLock()
 
 _TWO_REPORTS_RE = re.compile(
     r"(?:两份|两个).{0,40}?(?:关于|就)?(?P<body>.+?)(?:的)?(?:推演|预测|分析|报告)",
@@ -149,6 +156,215 @@ def claude_code_cli_available() -> bool:
     return bool(ClaudeCodeAdapter().available())
 
 
+
+def _track_cc_run(
+    run_id: str,
+    *,
+    owner_session_id: str,
+    claude_session_id: str = "",
+    pid: Optional[int] = None,
+) -> None:
+    rid = str(run_id or "").strip()
+    if not rid:
+        return
+    with _ACTIVE_CC_LOCK:
+        row = dict(_ACTIVE_CC_RUNS.get(rid) or {})
+        row.update(
+            {
+                "owner_session_id": str(owner_session_id or "").strip(),
+                "claude_session_id": str(claude_session_id or "").strip(),
+                "pid": int(pid) if pid else row.get("pid"),
+                "cancel_requested": bool(row.get("cancel_requested")),
+            }
+        )
+        _ACTIVE_CC_RUNS[rid] = row
+
+
+def _untrack_cc_run(run_id: str) -> None:
+    rid = str(run_id or "").strip()
+    if not rid:
+        return
+    with _ACTIVE_CC_LOCK:
+        _ACTIVE_CC_RUNS.pop(rid, None)
+
+
+def _mark_cc_run_cancel_requested(run_id: str) -> Optional[Dict[str, Any]]:
+    rid = str(run_id or "").strip()
+    if not rid:
+        return None
+    with _ACTIVE_CC_LOCK:
+        row = _ACTIVE_CC_RUNS.get(rid)
+        if row is None:
+            return None
+        row = dict(row)
+        row["cancel_requested"] = True
+        _ACTIVE_CC_RUNS[rid] = row
+        return row
+
+
+def _cc_run_cancel_requested(run_id: str) -> bool:
+    rid = str(run_id or "").strip()
+    if not rid:
+        return False
+    with _ACTIVE_CC_LOCK:
+        row = _ACTIVE_CC_RUNS.get(rid) or {}
+        return bool(row.get("cancel_requested"))
+
+
+def _patch_run_process_refs(
+    *,
+    owner_session_id: str,
+    run_id: str,
+    claude_session_id: str = "",
+    pid: Optional[int] = None,
+) -> None:
+    """Persist claude session/pid onto the WorkPanel run record for interrupt."""
+    if not owner_session_id or not run_id:
+        return
+    refs: Dict[str, Any] = {}
+    if claude_session_id:
+        refs["claude_session_id"] = claude_session_id
+    if pid:
+        refs["pid"] = int(pid)
+        refs["process_id"] = int(pid)
+    if not refs:
+        return
+    try:
+        from agenticx.runtime.subagent_runs import SubAgentRunStore
+
+        SubAgentRunStore(owner_session_id).merge_detail_refs(run_id, refs)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[cc_subagents] patch process refs failed for %s: %s", run_id, exc)
+
+
+def _stop_claude_session(claude_session_id: str) -> bool:
+    sid = str(claude_session_id or "").strip()
+    if not sid:
+        return False
+    try:
+        from agenticx.harness.adapters.claude_code import ClaudeCodeAdapter
+
+        return bool(ClaudeCodeAdapter().stop(sid))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[cc_subagents] stop claude session %s failed: %s", sid, exc)
+        return False
+
+
+def _kill_pid(pid: Optional[int]) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, PermissionError, OSError):
+        return True
+    try:
+        os.kill(int(pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    return True
+
+
+def cancel_claude_code_subagent_run(
+    *,
+    owner_session_id: str,
+    run_id: str,
+) -> Dict[str, Any]:
+    """WorkPanel 「中断」 for Near-orchestrated Claude Code CLI children.
+
+    Native ``AgentTeamManager.cancel_subagent`` only knows ``sa-*`` teammates.
+    CC CLI runs live in ``SubAgentRunStore`` + an in-process registry; without
+    this path the red 中断 button is a no-op.
+    """
+    sid = str(owner_session_id or "").strip()
+    rid = str(run_id or "").strip()
+    if not sid or not rid:
+        return {
+            "ok": False,
+            "error": "missing_ids",
+            "message": "session_id and agent_id are required",
+        }
+
+    tracked = _mark_cc_run_cancel_requested(rid)
+    claude_sid = str((tracked or {}).get("claude_session_id") or "").strip()
+    pid = (tracked or {}).get("pid")
+
+    store_record = None
+    try:
+        from agenticx.runtime.subagent_runs import SubAgentRunStore
+
+        store = SubAgentRunStore(sid)
+        store_record = store.get_run(rid)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[cc_subagents] cancel store lookup failed for %s: %s", rid, exc)
+        store = None  # type: ignore[assignment]
+
+    if store_record is None and tracked is None:
+        # Allow cancel by run id even when owner mismatch: scan is too heavy;
+        # require owner_session_id match for store rows.
+        return {
+            "ok": False,
+            "error": "not_found",
+            "message": f"未找到 Claude Code CLI subagent: {rid}",
+        }
+
+    if store_record is not None:
+        refs = dict(store_record.detail_refs or {})
+        if not claude_sid:
+            claude_sid = str(refs.get("claude_session_id") or "").strip()
+        if not pid:
+            raw_pid = refs.get("pid") or refs.get("process_id")
+            try:
+                pid = int(raw_pid) if raw_pid is not None else None
+            except (TypeError, ValueError):
+                pid = None
+        kind = str(store_record.kind or "").strip()
+        if kind and kind not in {"claude-code", "cc", "claude_code"} and not rid.startswith(
+            "cc-subagent-"
+        ):
+            return {
+                "ok": False,
+                "error": "not_cc_run",
+                "message": f"run {rid} is not a Claude Code CLI subagent",
+            }
+
+    stopped = False
+    if claude_sid:
+        stopped = _stop_claude_session(claude_sid) or stopped
+    if pid:
+        stopped = _kill_pid(pid) or stopped
+
+    status = "cancelled"
+    if store is not None and store_record is not None:
+        try:
+            store.update_status(
+                rid,
+                status=status,
+                error_text="用户中断",
+                completed_at=time.time(),
+            )
+            store.append_activity(
+                rid,
+                event_type="subagent_cancelled",
+                title="Claude Code CLI subagent cancelled",
+                detail=f"stopped={stopped} claude_session_id={claude_sid or '-'} pid={pid or '-'}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[cc_subagents] cancel store update failed for %s: %s", rid, exc)
+
+    return {
+        "ok": True,
+        "agent_id": rid,
+        "run_id": rid,
+        "status": status,
+        "stopped": bool(stopped),
+        "kind": "claude-code",
+    }
+
+
 def _register_cc_run_open(
     *,
     owner_session_id: str,
@@ -218,8 +434,13 @@ def _register_cc_run_close(
         from agenticx.runtime.subagent_runs import SubAgentRunStore
 
         store = SubAgentRunStore(owner_session_id)
-        ok = bool(outcome.get("ok"))
-        status = "completed" if ok else "failed"
+        raw_status = str(outcome.get("status") or "").strip().lower()
+        if raw_status == "cancelled" or bool((outcome.get("detail") or {}).get("cancelled")):
+            ok = False
+            status = "cancelled"
+        else:
+            ok = bool(outcome.get("ok"))
+            status = "completed" if ok else "failed"
         out_path = str(outcome.get("output_path") or "").strip()
         wrote = bool(outcome.get("wrote_output"))
         output_files = [out_path] if wrote and out_path else []
@@ -242,10 +463,19 @@ def _register_cc_run_close(
             },
             completed_at=time.time(),
         )
+        if status == "cancelled":
+            event_type = "subagent_cancelled"
+            title = "Claude Code CLI subagent cancelled"
+        elif ok:
+            event_type = "subagent_completed"
+            title = "Claude Code CLI subagent completed"
+        else:
+            event_type = "subagent_error"
+            title = "Claude Code CLI subagent failed"
         store.append_activity(
             run_id,
-            event_type="subagent_completed" if ok else "subagent_error",
-            title="Claude Code CLI subagent completed" if ok else "Claude Code CLI subagent failed",
+            event_type=event_type,
+            title=title,
             detail=(
                 f"status={status} wrote_output={wrote} path={out_path}"
                 if out_path
@@ -304,46 +534,103 @@ def _run_one(
         "provider": "claude-code",
         "model": str(model or "").strip(),
     }
+    _track_cc_run(rid, owner_session_id=parent_session_id)
     try:
         view = adapter.spawn(cwd, options=options)
         sid = str(view.get("session_id") or "")
         outcome["session_id"] = sid
-        result = adapter.turn(
-            sid,
-            TurnRequest(text=task.prompt, wait_seconds=float(wait_seconds)),
+        raw_pid = view.get("pid")
+        try:
+            pid_val = int(raw_pid) if raw_pid is not None else None
+        except (TypeError, ValueError):
+            pid_val = None
+        _track_cc_run(
+            rid,
+            owner_session_id=parent_session_id,
+            claude_session_id=sid,
+            pid=pid_val,
         )
-        out_path = Path(task.output_path)
-        wrote = out_path.is_file() and out_path.stat().st_size > 0
-        outcome.update(
-            {
-                "status": result.status,
-                "result_text": result.result_text or "",
-                "wrote_output": wrote,
-                "ok": bool(result.ok),
-                "detail": dict(result.detail or {}),
-            }
+        _patch_run_process_refs(
+            owner_session_id=parent_session_id,
+            run_id=rid,
+            claude_session_id=sid,
+            pid=pid_val,
         )
+        if _cc_run_cancel_requested(rid):
+            outcome.update(
+                {
+                    "status": "cancelled",
+                    "result_text": "用户中断",
+                    "wrote_output": False,
+                    "ok": False,
+                    "detail": {"cancelled": True},
+                }
+            )
+        else:
+            result = adapter.turn(
+                sid,
+                TurnRequest(text=task.prompt, wait_seconds=float(wait_seconds)),
+            )
+            out_path = Path(task.output_path)
+            wrote = out_path.is_file() and out_path.stat().st_size > 0
+            if _cc_run_cancel_requested(rid):
+                outcome.update(
+                    {
+                        "status": "cancelled",
+                        "result_text": "用户中断",
+                        "wrote_output": wrote,
+                        "ok": False,
+                        "detail": {"cancelled": True, **dict(result.detail or {})},
+                    }
+                )
+            else:
+                outcome.update(
+                    {
+                        "status": result.status,
+                        "result_text": result.result_text or "",
+                        "wrote_output": wrote,
+                        "ok": bool(result.ok),
+                        "detail": dict(result.detail or {}),
+                    }
+                )
     except Exception as exc:  # noqa: BLE001
-        outcome.update(
-            {
-                "status": TURN_STATUS_ERROR,
-                "result_text": str(exc),
-                "wrote_output": False,
-                "ok": False,
-                "detail": {"exception": type(exc).__name__},
-            }
-        )
+        if _cc_run_cancel_requested(rid):
+            outcome.update(
+                {
+                    "status": "cancelled",
+                    "result_text": "用户中断",
+                    "wrote_output": False,
+                    "ok": False,
+                    "detail": {"cancelled": True, "exception": type(exc).__name__},
+                }
+            )
+        else:
+            outcome.update(
+                {
+                    "status": TURN_STATUS_ERROR,
+                    "result_text": str(exc),
+                    "wrote_output": False,
+                    "ok": False,
+                    "detail": {"exception": type(exc).__name__},
+                }
+            )
     finally:
         if sid:
             try:
                 adapter.stop(sid)
             except Exception:
                 pass
+        if _cc_run_cancel_requested(rid):
+            outcome["status"] = "cancelled"
+            outcome["ok"] = False
+            if not str(outcome.get("result_text") or "").strip():
+                outcome["result_text"] = "用户中断"
         _register_cc_run_close(
             owner_session_id=parent_session_id,
             run_id=rid,
             outcome=outcome,
         )
+        _untrack_cc_run(rid)
     return outcome
 
 
@@ -485,11 +772,18 @@ def maybe_run_cc_subagents_for_codebuddy_turn(
 
     Returns None when the ask should fall through to normal CodeBuddy handling.
     """
-    if not user_asked_for_claude_code_subagents(user_text):
+    text = (user_text or "").strip()
+    # Defense in depth: never treat Near's completion/system notices as a fresh
+    # "use Claude Code as subagents" ask (that caused endless swarm respawns).
+    if text.startswith("[系统通知]") or text.startswith("[auto-nudge]"):
+        return None
+    if "以下子智能体已全部结束" in text or "子智能体已全部结束或暂停" in text:
+        return None
+    if not user_asked_for_claude_code_subagents(text):
         return None
 
     payload = run_claude_code_subagents(
-        user_text,
+        text,
         cwd=cwd or ".",
         wait_seconds=wait_seconds,
         model=model,
@@ -516,6 +810,7 @@ def maybe_run_cc_subagents_for_codebuddy_turn(
 
 __all__ = [
     "CcSubagentTask",
+    "cancel_claude_code_subagent_run",
     "claude_code_cli_available",
     "format_cc_subagent_result_text",
     "maybe_run_cc_subagents_for_codebuddy_turn",

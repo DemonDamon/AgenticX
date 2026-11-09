@@ -6,10 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from agenticx.harness.codebuddy_cc_subagents import (
+    cancel_claude_code_subagent_run,
     format_cc_subagent_result_text,
     maybe_run_cc_subagents_for_codebuddy_turn,
     plan_claude_code_subagent_tasks,
     run_claude_code_subagents,
+    _track_cc_run,
+    _untrack_cc_run,
 )
 from agenticx.harness.types import TURN_STATUS_SUCCESS, TurnResult
 
@@ -391,3 +394,75 @@ def test_harness_wiring_sets_owner_and_appends_cluster_anchor(tmp_path: Path, mo
     assert anchor["run_ids"] == ["cc-subagent-a-1", "cc-subagent-a-2"]
     assert anchor["title"] == "Agent 蜂群 · 2 个并行任务"
 
+
+
+
+def test_maybe_run_skips_system_completion_notice(tmp_path: Path):
+    notice = (
+        "[系统通知] 以下子智能体已全部结束或暂停（可能成功、失败或因限流/轮次触顶暂停）。"
+        "请结合用户最初的请求，直接完成其中尚未完成的后续步骤（例如汇总、对比、成稿）。"
+        " - 【claude-code-1-美国党派】(cc-subagent-3af0c47dab-1) [已完成]: 摘要"
+    )
+    with patch(
+        "agenticx.harness.codebuddy_cc_subagents.run_claude_code_subagents"
+    ) as mocked:
+        result = maybe_run_cc_subagents_for_codebuddy_turn(
+            parent_session_id="studio-sid",
+            user_text=notice,
+            cwd=str(tmp_path),
+            wait_seconds=1.0,
+        )
+    assert result is None
+    mocked.assert_not_called()
+
+
+def test_cancel_claude_code_subagent_run_stops_tracked_and_marks_store(tmp_path: Path, monkeypatch):
+    owner = "studio-cancel-test"
+    run_id = "cc-subagent-deadbeef-1"
+    store_root = tmp_path / "sessions" / owner / "subagent_runs"
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    from agenticx.runtime.subagent_runs import SubAgentRunStore
+
+    store = SubAgentRunStore(owner)
+    store.open_run(
+        run_id=run_id,
+        kind="claude-code",
+        name="claude-code-1",
+        role="Claude Code CLI subagent",
+        task="demo",
+        status="running",
+        provider="claude-code",
+        source_tool_call_id="near-cc-deadbeef",
+        title="Agent 蜂群 · 1 个并行任务",
+        detail_refs={"child_harness": "claude-code"},
+    )
+    _track_cc_run(
+        run_id,
+        owner_session_id=owner,
+        claude_session_id="cc-cli-sess-cancel",
+        pid=None,
+    )
+    stopped = {"n": 0}
+
+    class _FakeAdapter:
+        def stop(self, session_id):
+            stopped["n"] += 1
+            assert session_id == "cc-cli-sess-cancel"
+            return True
+
+    with patch(
+        "agenticx.harness.adapters.claude_code.ClaudeCodeAdapter",
+        _FakeAdapter,
+    ):
+        result = cancel_claude_code_subagent_run(
+            owner_session_id=owner,
+            run_id=run_id,
+        )
+    _untrack_cc_run(run_id)
+    assert result["ok"] is True
+    assert result["status"] == "cancelled"
+    assert stopped["n"] == 1
+    record = SubAgentRunStore(owner).get_run(run_id)
+    assert record is not None
+    assert record.status == "cancelled"

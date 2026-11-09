@@ -16,11 +16,24 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import ujson
 
+# Intentionally avoid matching WorkPanel / system-notice run ids such as
+# ``cc-subagent-…`` or ``【claude-code-1-主题】(cc-subagent-…)`` — those are
+# status echoes, not a fresh user ask to spawn Claude Code CLI subagents.
 _CC_SUBAGENT_RE = re.compile(
-    r"(claude\s*code|claude-code|\bcc\b).{0,40}(sub[\s-]?agent|子代理|队友)"
-    r"|(sub[\s-]?agent|子代理).{0,40}(claude\s*code|claude-code|\bcc\b)"
-    r"|用\s*(claude\s*code|claude-code|cc)\s*.{0,20}(sub|子)",
+    r"(?:claude\s*code|claude-code|(?<![A-Za-z0-9_-])cc(?![A-Za-z0-9_-]))"
+    r".{0,40}(?:sub[\s-]?agents?|子代理|队友)"
+    r"|(?:sub[\s-]?agents?|子代理).{0,40}"
+    r"(?:claude\s*code|claude-code|(?<![A-Za-z0-9_-])cc(?![A-Za-z0-9_-]))"
+    r"|用\s*(?:claude\s*code|claude-code|cc)\s*.{0,20}(?:sub|子)",
     re.IGNORECASE | re.DOTALL,
+)
+
+_SYSTEM_OR_AUTO_PREFIX_RE = re.compile(
+    r"^\s*\[(?:系统通知|auto-nudge)\]",
+    re.IGNORECASE,
+)
+_SUBAGENT_COMPLETION_NOTICE_RE = re.compile(
+    r"以下子智能体已全部结束|子智能体已全部结束或暂停",
 )
 
 _PATH_RE = re.compile(
@@ -38,8 +51,17 @@ class AgentSpawn:
 
 
 def user_asked_for_claude_code_subagents(text: str) -> bool:
-    """True when the user asked to use Claude Code / CC as subagents."""
-    return bool(_CC_SUBAGENT_RE.search(text or ""))
+    """True when the user asked to use Claude Code / CC as subagents.
+
+    System-injected completion notices and run-id echoes must not match: they
+    previously re-triggered Near's CB→CC intercept and spawned endless swarms.
+    """
+    raw = text or ""
+    if _SYSTEM_OR_AUTO_PREFIX_RE.search(raw):
+        return False
+    if _SUBAGENT_COMPLETION_NOTICE_RE.search(raw):
+        return False
+    return bool(_CC_SUBAGENT_RE.search(raw))
 
 
 def _paths_from_text(text: str) -> List[str]:

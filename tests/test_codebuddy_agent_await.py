@@ -157,3 +157,20 @@ def test_iter_raw_tool_progress_function_call():
     assert len(evs) == 1 and evs[0].kind == "start" and evs[0].name == "WebSearch"
     evs2 = list(iter_raw_tool_progress(end))
     assert len(evs2) == 1 and evs2[0].kind == "end" and evs2[0].tool_call_id == "c2"
+
+
+def test_detect_ignores_system_completion_notice():
+    notice = (
+        "[系统通知] 以下子智能体已全部结束或暂停（可能成功、失败或因限流/轮次触顶暂停）。"
+        "请结合用户最初的请求，直接完成其中尚未完成的后续步骤。"
+        " - 【claude-code-2-中国关系】(cc-subagent-3af0c47dab-2) [已完成]: ok"
+    )
+    assert not user_asked_for_claude_code_subagents(notice)
+    assert not user_asked_for_claude_code_subagents("cc-subagent-404a58f7fe-1")
+    assert codebuddy_cc_subagent_guard_prefix(notice) == ""
+
+
+def test_detect_still_matches_real_user_ask():
+    ask = "你能用 claude code 来作为 subagents，写两份关于后续的美国党派和中国关系的推演预测报告"
+    assert user_asked_for_claude_code_subagents(ask)
+    assert user_asked_for_claude_code_subagents("用 CC 做 subagent 写推演")
