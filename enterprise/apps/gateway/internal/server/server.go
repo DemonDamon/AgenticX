@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/connectorstore"
 	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
@@ -42,6 +44,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/residency"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
+	"github.com/agenticx/enterprise/gateway/internal/virtualmodel"
 	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
 	"github.com/go-chi/chi/v5"
@@ -66,6 +69,7 @@ type Server struct {
 	metering              metering.Sink
 	traceReporter         *metering.TraceReporter
 	adminLoader           *runtimeconfig.Loader
+	virtualLoader         *virtualmodel.Loader
 	quotaTracker          *quota.Tracker
 	policySnapBodyHash    string
 	policyRemoteCheckedAt time.Time
@@ -97,7 +101,11 @@ type Server struct {
 	wasmManager           *wasmhost.Manager
 	errorStore            *gwerrors.Store
 	channelProber         *channel.Prober
+	configStatus          *configstatus.Registry
+	startedAt             time.Time
 }
+
+var _ configstatus.Metrics = (*observability.Registry)(nil)
 
 var (
 	publicKeyOnce sync.Once
@@ -154,8 +162,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		}
 	}
 
+	metrics := observability.NewRegistryFromEnv()
+	cfgStatus := configstatus.NewRegistry(metrics)
+	startedAt := time.Now().UTC()
+
 	adminLoader := runtimeconfig.New(logger)
+	adminLoader.SetConfigStatus(cfgStatus)
 	adminLoader.Start(context.Background())
+	virtualLoader := virtualmodel.New(logger)
+	virtualLoader.Start(context.Background())
 
 	quotaCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_CONFIG_FILE"))
 	if quotaCfgPath == "" {
@@ -179,8 +194,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	engine, snapshotModTime, snapBodyHash, overrideModTime, snapshotStatus, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
 	if err != nil {
+		cfgStatus.ReportFailure(configstatus.DomainPolicy, policySnapshotPath, err)
 		return nil, err
 	}
+	cfgStatus.ReportSuccess(configstatus.DomainPolicy, policySnapshotPath, snapBodyHash, policyPublishVersion(snapshotStatus))
 
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
@@ -219,14 +236,17 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:             sink,
 		traceReporter:        traceReporter,
 		adminLoader:          adminLoader,
+		virtualLoader:        virtualLoader,
 		quotaTracker:         quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:          patVerifier,
 		sessionGrants:        gatewayauth.NewSessionGrantStore(dbHandle),
 		compliance:           residency.NewComplianceStore(dbHandle),
 		cacheService:         nil,
 		pricingLoader:        initPricingLoader(logger),
-		metrics:              observability.NewRegistryFromEnv(),
+		metrics:              metrics,
 		database:             dbHandle,
+		configStatus:         cfgStatus,
+		startedAt:            startedAt,
 	}
 	cacheSvc, redisStore := initCacheService(logger)
 	srv.cacheService = cacheSvc
@@ -246,6 +266,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.channelProber = channel.NewProber()
 	srv.initWasmHost()
 	observability.InitPyroscopeFromEnv()
+	configstatus.StartHeartbeat(context.Background(), cfgStatus, startedAt, logger)
 	return srv, nil
 }
 
@@ -451,7 +472,10 @@ func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, t
 	}
 	mod := info.ModTime()
 	manifests, mod, status, err := snapshotManifestsFromRaw(raw, mod)
-	return manifests, mod, "", status, err
+	if err != nil {
+		return nil, mod, "", policySnapshotRuntimeStatus{}, err
+	}
+	return manifests, mod, sha256Hex(raw), status, nil
 }
 
 func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
@@ -568,6 +592,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 		if err != nil {
 			if !os.IsNotExist(err) {
 				s.logger.Warn("policy override stat failed", "path", ov, "error", err)
+				s.reportPolicyFailure(err)
 				return
 			}
 		} else {
@@ -587,16 +612,28 @@ func (s *Server) reloadPolicyIfNeeded() {
 				s.markRemotePolicyChecked(now)
 				if err != nil {
 					s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 				var sum string
 				switch {
 				case code == http.StatusNotFound:
+					s.policyMu.RLock()
+					published := len(s.policySnapshotStatus.Tenants) > 0
+					s.policyMu.RUnlock()
+					if published {
+						if s.logger != nil {
+							s.logger.Warn("policy snapshot remote 404, keeping last known good", "url", snap)
+						}
+						s.reportPolicyFailure(configstatus.ErrRemote404Keep)
+						return
+					}
 					sum = ""
 				case code >= 200 && code < 300:
 					sum = sha256Hex(raw)
 				default:
 					s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
+					s.reportPolicyFailure(fmt.Errorf("policy snapshot bad status: http %d", code))
 					return
 				}
 				s.policyMu.RLock()
@@ -608,6 +645,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 			if err != nil {
 				if !os.IsNotExist(err) {
 					s.logger.Warn("policy snapshot stat failed", "path", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 			} else {
@@ -634,6 +672,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 	engine, snapshotMod, snapHash, overrideMod, snapshotStatus, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
 	if buildErr != nil {
 		s.logger.Warn("policy reload failed", "snapshot", s.policySnapshot, "override", s.policyOverride, "error", buildErr)
+		s.reportPolicyFailure(buildErr)
 		return
 	}
 	s.policyMu.Lock()
@@ -643,7 +682,38 @@ func (s *Server) reloadPolicyIfNeeded() {
 	s.policySnapBodyHash = snapHash
 	s.policySnapshotStatus = snapshotStatus
 	s.policyMu.Unlock()
+	s.reportPolicySuccess(snapHash, snapshotStatus)
 	s.logger.Info("policy engine reloaded", "snapshot", s.policySnapshot, "override_file", s.policyOverride)
+}
+
+func policyPublishVersion(status policySnapshotRuntimeStatus) string {
+	if len(status.Tenants) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(status.Tenants))
+	for id := range status.Tenants {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, status.Tenants[id].PublishID)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (s *Server) reportPolicySuccess(hash string, status policySnapshotRuntimeStatus) {
+	if s == nil || s.configStatus == nil {
+		return
+	}
+	s.configStatus.ReportSuccess(configstatus.DomainPolicy, s.policySnapshot, hash, policyPublishVersion(status))
+}
+
+func (s *Server) reportPolicyFailure(err error) {
+	if s == nil || s.configStatus == nil || err == nil {
+		return
+	}
+	s.configStatus.ReportFailure(configstatus.DomainPolicy, s.policySnapshot, err)
 }
 
 func (s *Server) Router() http.Handler {
@@ -663,6 +733,7 @@ func (s *Server) Router() http.Handler {
 	}
 	r.Get("/internal/channel-stats", s.handleChannelStats)
 	r.Get("/internal/policy-status", s.handleInternalPolicyStatus)
+	r.Get("/internal/config-status", s.handleInternalConfigStatus)
 	r.Get("/internal/keypool-stats", s.handleKeypoolStats)
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/internal/cache/reload", s.handleCacheConfigReload)
@@ -773,7 +844,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	qctx := s.quotaContext(identity, req.Model)
+	requestedModel := req.Model
+	admission := s.admitVirtual(identity.TenantID, requestedModel)
+	qctx := s.quotaContext(identity, admission.quotaModel)
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
@@ -825,6 +898,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = quotaReservation
+	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -848,7 +922,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		rollbackModel := req.Model
+		if admission.virtualName != "" {
+			rollbackModel = qctx.Model
+		}
+		s.rollbackChatQuotaAndBudget(identity, rollbackModel, estimatedInputTokens, budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
 			Status:       "error",
@@ -878,7 +956,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
 	})
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
+	s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, providerInputTokens+providerOutputTokens, req.Model)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,
@@ -1194,7 +1272,7 @@ func (s *Server) handleStream(
 	var streamResult relay.StreamResult
 	if s.useChannelRelay() {
 		streamResult, streamErr = s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
-		decision = routingDecisionFromStream(streamResult, req.Model, decision)
+		decision = routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), decision)
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
 	}
@@ -1238,6 +1316,7 @@ func (s *Server) handleStream(
 			}
 			enrichAuditFromAttempts(&ev, streamResult.Attempts)
 			enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+			annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
@@ -1320,14 +1399,14 @@ func (s *Server) handleStream(
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
 	var settleDelta int64
 	if s.useChannelRelay() {
-		settle := s.billingService.SettleContext(
-			qctx,
-			reservedTokens,
-			int64(inputTokens+outputTokens),
-		)
+		actualModel := streamResult.ResolvedModel
+		if strings.TrimSpace(actualModel) == "" {
+			actualModel = req.Model
+		}
+		settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
 		settleDelta = settle.Delta
 	} else {
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+		s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, inputTokens+outputTokens, req.Model)
 	}
 
 	ev := audit.Event{
@@ -1364,6 +1443,7 @@ func (s *Server) handleStream(
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+	annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")

@@ -15,6 +15,7 @@ func (s *Server) initMCPProxy() {
 	reg := mcp.NewRegistry()
 	s.mcpRegistry = reg
 	s.mcpLoader = mcp.NewLoader(s.logger, reg)
+	s.mcpLoader.SetConfigStatus(s.configStatus)
 	s.mcpLoader.Start(context.Background())
 	s.mcpProxy = mcp.NewHandler(reg, s.quotaTracker, s.audit, s.logger)
 	s.logger.Info("MCP upstream proxy enabled", "config", s.mcpLoader.Path())

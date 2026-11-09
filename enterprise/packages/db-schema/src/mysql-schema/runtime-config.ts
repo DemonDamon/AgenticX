@@ -191,3 +191,26 @@ export const authRefreshSessions = mysqlTable("auth_refresh_sessions", {
   expiresAt: datetime("expires_at", { fsp: 6 }).notNull(),
   createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
+
+/** 租户虚拟模型：对外模型名映射到带权重与优先级的真实模型。 */
+export type RuntimeVirtualModelTarget = {
+  model: string;
+  weight: number;
+  priority: number;
+};
+
+export const enterpriseRuntimeVirtualModels = mysqlTable(
+  "enterprise_runtime_virtual_models",
+  {
+    id: varchar("id", { length: 26 }).primaryKey(),
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    name: varchar("name", { length: 128 }).notNull(),
+    displayName: varchar("display_name", { length: 256 }).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    targets: json("targets").default([]).notNull().$type<RuntimeVirtualModelTarget[]>(),
+    ...auditColumns,
+  },
+  (table) => ({
+    tenantNameUk: uniqueIndex("enterprise_runtime_vm_tenant_name_uk").on(table.tenantId, table.name),
+  }),
+);

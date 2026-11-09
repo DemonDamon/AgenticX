@@ -27,6 +27,7 @@ import {
 } from "@agenticx/ui";
 import { Activity, Circle, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { GatewayReplicas } from "./gateway-replicas";
 
 const PROVIDER_TYPES = [
   "openai",
@@ -445,6 +446,8 @@ export default function ChannelsPage() {
         </div>
       )}
 
+      <GatewayReplicas />
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
@@ -703,6 +706,7 @@ export default function ChannelsPage() {
                 <div>
                   <Label>{t("priorityLabel")}</Label>
                   <Input value={editing.priority} onChange={(e) => setEditing({ ...editing, priority: e.target.value })} />
+                  <p className="mt-1 text-xs text-muted-foreground">{t("priorityHint")}</p>
                 </div>
               </div>
               <div>
