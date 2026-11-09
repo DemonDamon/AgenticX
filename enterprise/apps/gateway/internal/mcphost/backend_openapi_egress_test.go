@@ -140,6 +140,32 @@ func TestOpenAPIEgressEnforceAllowlistPermitsLoopback(t *testing.T) {
 	}
 }
 
+func TestNewHostOpenAPIWritesEgressAudit(t *testing.T) {
+	t.Setenv("GATEWAY_EGRESS_GUARD_MODE", "audit")
+	t.Setenv("GATEWAY_EGRESS_ALLOWLIST", "")
+	srv := newLoopbackServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	aw := &memAudit{}
+	host := NewHost(nil, nil, nil, aw, nil)
+	backend, ok := host.backends[BackendOpenAPI].(*OpenAPIBackend)
+	if !ok || backend == nil || backend.audit == nil {
+		t.Fatal("OpenAPI backend was not given the host audit writer")
+	}
+	res, err := backend.CallTool(context.Background(), pingRecord(srv.URL), "ping", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error result: %+v", res)
+	}
+	if !aw.hasStatus("egress_would_block") {
+		t.Fatalf("audit events %+v", aw.events)
+	}
+}
+
 func pingRecord(baseURL string) *ServerRecord {
 	return &ServerRecord{
 		Name: "pet",

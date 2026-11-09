@@ -96,7 +96,28 @@ func isRestricted(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
+type decisionCallbackKey struct{}
+
+// WithDecisionCallback 把本次请求的判定回调放进 ctx。
+// 守护客户端应长期复用；回调在拨号时读取，因此可以按请求变化。
+func WithDecisionCallback(ctx context.Context, fn func(Decision)) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, decisionCallbackKey{}, fn)
+}
+
+func decisionCallbackFrom(ctx context.Context) func(Decision) {
+	if ctx == nil {
+		return nil
+	}
+	fn, _ := ctx.Value(decisionCallbackKey{}).(func(Decision))
+	return fn
+}
+
 // NewHTTPClient 在 base 的拨号路径上安装守护。不修改 base 本身。
+// 返回的 Client 自带连接池，应长期复用。同一上游的后续请求可能复用已有连接而不再拨号，
+// 因此 would-block 与 blocked 回调按建连记录，而不是按每一次请求记录。
 func NewHTTPClient(base *http.Client, mode Mode, allow *Allowlist, onDecision func(Decision)) *http.Client {
 	return NewHTTPClientWithResolver(base, mode, allow, nil, onDecision)
 }
@@ -160,8 +181,13 @@ func (g *guard) dialContext(ctx context.Context, network, address string) (net.C
 	if chosen == nil && !forbid {
 		return nil, fmt.Errorf("egress: no suitable address for %s", host)
 	}
-	if g.onDecision != nil && (decision.Blocked || decision.WouldBlock) {
-		g.onDecision(decision)
+	if decision.Blocked || decision.WouldBlock {
+		if g.onDecision != nil {
+			g.onDecision(decision)
+		}
+		if fn := decisionCallbackFrom(ctx); fn != nil {
+			fn(decision)
+		}
 	}
 	if forbid || decision.Blocked {
 		return nil, ErrForbidden

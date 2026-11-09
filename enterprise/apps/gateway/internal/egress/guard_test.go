@@ -145,6 +145,43 @@ func TestDialUsesInjectedResolverNotDNS(t *testing.T) {
 	}
 }
 
+func TestDialInvokesContextCallbackAfterConstructorHook(t *testing.T) {
+	clearProxyEnv(t)
+	prev := overrideDial
+	overrideDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		return nil, errors.New("stop")
+	}
+	t.Cleanup(func() { overrideDial = prev })
+
+	resolver := func(ctx context.Context, network, host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.0.0.5")}, nil
+	}
+	var ctor, fromCtx int
+	client := NewHTTPClientWithResolver(&http.Client{Timeout: 2 * time.Second}, ModeAudit, nil, resolver, func(d Decision) {
+		ctor++
+		if !d.WouldBlock {
+			t.Fatalf("ctor decision %+v", d)
+		}
+	})
+	req, err := http.NewRequest(http.MethodGet, "http://name.test/x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = req.WithContext(WithDecisionCallback(req.Context(), func(d Decision) {
+		fromCtx++
+		if ctor != 1 {
+			t.Fatal("context callback ran before the constructor hook")
+		}
+		if !d.WouldBlock || d.Blocked {
+			t.Fatalf("ctx decision %+v", d)
+		}
+	}))
+	_, _ = client.Do(req)
+	if ctor != 1 || fromCtx != 1 {
+		t.Fatalf("ctor=%d ctx=%d", ctor, fromCtx)
+	}
+}
+
 func TestDialConnectsToResolvedIP(t *testing.T) {
 	clearProxyEnv(t)
 	var dialed []string

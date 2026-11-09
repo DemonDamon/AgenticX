@@ -306,7 +306,7 @@ cd enterprise/apps/gateway && go test ./... && go vet ./...
 
 ## 观察到但未处理
 
-- `Host.NewHost`（`mcphost/host.go` 第 51 行）调用 `NewOpenAPIBackend()` 时没有 `audit.EventWriter`。主规划把接入点限制为 OpenAPI client 与 MCP 反向代理两处，因此本计划不改 `host.go`。生产上的托管 OpenAPI 调用会执行守护，但 `audit` 字段为 nil，**不会**写出 `egress_would_block` / `egress_blocked`。写入路径由 `SetAuditWriter` 单测覆盖。反向代理生产路径有 `Handler.Audit`，会写。
+- 返修后 `NewHost` 会把 `auditWriter` 交给 OpenAPI 后端。守护客户端与反向代理 Transport 各只构建一次；判定回调放在请求上下文里，按建连记录。同一连接上的后续请求不再拨号，因此不会再次回调。
 - `connector-runtime/internal/executor/executor.go` 第 174–176 行的 `isForbiddenIP` 还包含 `IsLinkLocalMulticast` 与 `IsMulticast`。主规划要求对齐 `proxy.go` 第 101–116 行的四项，组播不拦。
 - `http.DefaultTransport` 使用环境代理时，`DialContext` 看到的是代理地址，不是上游主机。守护会判定代理 IP。本计划不改 `Transport.Proxy`。
 - `NewOpenAPIBackend` / `NewHandler` 只在构造时读环境变量，运行中修改不会热更新。

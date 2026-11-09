@@ -17,19 +17,20 @@ import (
 
 // OpenAPIBackend proxies MCP tool calls to HTTP endpoints described by OpenAPI 3.x.
 type OpenAPIBackend struct {
-	timeout time.Duration
-	mode    egress.Mode
-	allow   *egress.Allowlist
-	hook    func(egress.Decision)
-	audit   audit.EventWriter
+	client *http.Client
+	hook   func(egress.Decision)
+	audit  audit.EventWriter
 }
 
 func NewOpenAPIBackend() *OpenAPIBackend {
-	return &OpenAPIBackend{
-		timeout: 30 * time.Second,
-		mode:    egress.ModeFromEnv(),
-		allow:   egress.AllowlistFromEnv(),
-	}
+	b := &OpenAPIBackend{}
+	b.client = egress.NewHTTPClient(
+		&http.Client{Timeout: 30 * time.Second},
+		egress.ModeFromEnv(),
+		egress.AllowlistFromEnv(),
+		nil,
+	)
+	return b
 }
 
 // SetDecisionHook 在每次出站判定需要记录时回调。干净放行不会触发。
@@ -42,8 +43,8 @@ func (b *OpenAPIBackend) SetAuditWriter(w audit.EventWriter) {
 	b.audit = w
 }
 
-func (b *OpenAPIBackend) httpClient(rec *ServerRecord, tool string) *http.Client {
-	return egress.NewHTTPClient(&http.Client{Timeout: b.timeout}, b.mode, b.allow, func(d egress.Decision) {
+func (b *OpenAPIBackend) withEgressCallback(ctx context.Context, rec *ServerRecord, tool string) context.Context {
+	return egress.WithDecisionCallback(ctx, func(d egress.Decision) {
 		if b.hook != nil {
 			b.hook(d)
 		}
@@ -132,7 +133,7 @@ func (b *OpenAPIBackend) CallTool(ctx context.Context, rec *ServerRecord, name s
 	if err != nil {
 		return textResult(err.Error(), true), nil
 	}
-	req, err := http.NewRequestWithContext(ctx, op.Method, target, body)
+	req, err := http.NewRequestWithContext(b.withEgressCallback(ctx, rec, name), op.Method, target, body)
 	if err != nil {
 		return textResult(err.Error(), true), nil
 	}
@@ -140,7 +141,7 @@ func (b *OpenAPIBackend) CallTool(ctx context.Context, rec *ServerRecord, name s
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := b.httpClient(rec, name).Do(req)
+	resp, err := b.client.Do(req)
 	if err != nil {
 		return textResult("upstream request failed: "+err.Error(), true), nil
 	}
