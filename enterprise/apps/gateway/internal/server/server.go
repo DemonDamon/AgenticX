@@ -261,6 +261,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.channelProber = channel.NewProber()
 	srv.initWasmHost()
 	observability.InitPyroscopeFromEnv()
+	configstatus.StartHeartbeat(context.Background(), cfgStatus, startedAt, logger)
 	return srv, nil
 }
 

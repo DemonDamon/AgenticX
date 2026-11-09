@@ -162,6 +162,10 @@ if [ -z "${GATEWAY_REMOTE_BUDGET_CONFIG_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROV
   export GATEWAY_REMOTE_BUDGET_CONFIG_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/budget-snapshot"
 fi
 
+if [ -z "${GATEWAY_ADMIN_HEARTBEAT_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
+  export GATEWAY_ADMIN_HEARTBEAT_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/gateway-heartbeat"
+fi
+
 # 托管智能体凭证库主密钥（本地开发自动生成；生产由部署方注入 MA_VAULT_MASTER_KEY / _FILE）。
 if [ -z "${MA_VAULT_MASTER_KEY:-}" ] && [ -z "${MA_VAULT_MASTER_KEY_FILE:-}" ]; then
   mkdir -p "$ENTERPRISE_DIR/.local-secrets"

@@ -27,6 +27,7 @@ import {
 } from "@agenticx/ui";
 import { Activity, Circle, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { GatewayReplicas } from "./gateway-replicas";
 
 const PROVIDER_TYPES = [
   "openai",
@@ -444,6 +445,8 @@ export default function ChannelsPage() {
           })}
         </div>
       )}
+
+      <GatewayReplicas />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

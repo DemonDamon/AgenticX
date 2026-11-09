@@ -1707,7 +1707,30 @@
           "deleted": "已删除",
           "cooldownReset": "已重置 cooldown"
         },
-        "confirmDelete": "确定删除该 Channel？"
+        "confirmDelete": "确定删除该 Channel？",
+        "replicas": {
+          "title": "网关副本",
+          "description": "查看每个网关副本最近一次上报的配置生效情况。",
+          "emptyTitle": "尚未收到心跳",
+          "emptyDescription": "网关启动并完成上报后，会在这里显示各副本的生效状态。",
+          "lastSeen": "最后心跳",
+          "statusApplied": "已生效",
+          "statusPending": "未生效",
+          "statusOffline": "失联",
+          "domainProviders": "模型服务",
+          "domainChannels": "渠道",
+          "domainPolicy": "策略",
+          "domainMcp": "MCP 服务",
+          "appliedAt": "生效时间",
+          "version": "版本",
+          "error": "错误",
+          "summary": "内容摘要",
+          "publishedVersion": "当前已发布策略版本",
+          "unpublished": "尚未发布",
+          "emptyValue": "—",
+          "loadFailed": "加载网关副本失败",
+          "loading": "加载中…"
+        }
       },
       "dataGovernance": {
         "title": "数据治理",

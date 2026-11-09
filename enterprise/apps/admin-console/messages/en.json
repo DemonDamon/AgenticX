@@ -1707,7 +1707,30 @@
           "deleted": "Deleted",
           "cooldownReset": "Cooldown reset"
         },
-        "confirmDelete": "Delete this channel?"
+        "confirmDelete": "Delete this channel?",
+        "replicas": {
+          "title": "Gateway replicas",
+          "description": "See the configuration each gateway replica last reported as active.",
+          "emptyTitle": "No heartbeat yet",
+          "emptyDescription": "After a gateway starts and reports in, each replica appears here.",
+          "lastSeen": "Last heartbeat",
+          "statusApplied": "Applied",
+          "statusPending": "Not applied",
+          "statusOffline": "Offline",
+          "domainProviders": "Model services",
+          "domainChannels": "Channels",
+          "domainPolicy": "Policy",
+          "domainMcp": "MCP services",
+          "appliedAt": "Applied at",
+          "version": "Version",
+          "error": "Error",
+          "summary": "Content summary",
+          "publishedVersion": "Current published policy version",
+          "unpublished": "Not published",
+          "emptyValue": "—",
+          "loadFailed": "Failed to load gateway replicas",
+          "loading": "Loading…"
+        }
       },
       "dataGovernance": {
         "title": "Data governance",

@@ -151,6 +151,33 @@ func FillCoreDomains(have []Outcome) []Outcome {
 	return out
 }
 
+// StatusBody is the JSON body of GET /internal/config-status and the admin heartbeat.
+type StatusBody struct {
+	InstanceID string    `json:"instanceId"`
+	StartedAt  time.Time `json:"startedAt"`
+	Domains    []Outcome `json:"domains"`
+}
+
+// BuildStatus is the single constructor for the config-status payload.
+func BuildStatus(reg *Registry, startedAt time.Time) StatusBody {
+	var have []Outcome
+	started := startedAt
+	if reg != nil {
+		have = reg.Snapshot()
+		if started.IsZero() {
+			started = reg.StartedAt()
+		}
+	}
+	if started.IsZero() {
+		started = time.Now().UTC()
+	}
+	return StatusBody{
+		InstanceID: InstanceID(),
+		StartedAt:  started.UTC(),
+		Domains:    FillCoreDomains(have),
+	}
+}
+
 func HashBytes(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
