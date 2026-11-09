@@ -625,10 +625,11 @@ def _append_cc_subagent_cluster_anchor(
     session: Any,
     cc_payload: Dict[str, Any],
 ) -> bool:
-    """Persist an in-chat Agent-swarm anchor for Near-orchestrated CC children.
+    """Persist swarm tool rows + Agent-swarm anchor for Near-orchestrated children.
 
-    Mirrors ``_append_subagent_cluster_anchor_if_needed`` so Desktop renders
-    「Agent 蜂群 · N 个并行任务」from chat_history after mergeTailFromDisk.
+    Also writes synthetic ``spawn_subagent`` tool rows so Desktop reload shows
+    the same ``调用 N 次 · N 次 spawn_subagent`` group + 「Agent 蜂群」 card as
+    native spawn (live turns get those via mid-turn SSE).
     """
     if not isinstance(cc_payload, dict):
         return False
@@ -663,6 +664,36 @@ def _append_cc_subagent_cluster_anchor(
         "title": title,
         "created_at": created_at_f,
     }
+
+    # Synthetic spawn_subagent rows (idempotent by tool_call_id).
+    try:
+        from agenticx.harness.near_cross_harness_swarm_ui import (
+            collect_spawn_tool_rows_from_payload,
+            spawn_tool_call_id,
+        )
+
+        existing_tids = {
+            str(row.get("tool_call_id") or "").strip()
+            for row in history
+            if isinstance(row, dict) and str(row.get("tool_call_id") or "").strip()
+        }
+        tool_rows = [
+            row
+            for row in collect_spawn_tool_rows_from_payload(cc_payload)
+            if str(row.get("tool_call_id") or "").strip() not in existing_tids
+        ]
+    except Exception:
+        tool_rows = []
+
+    anchor_row = {
+        "role": "assistant",
+        "content": "",
+        "metadata": {"subagent_cluster": anchor},
+        "timestamp": created_at_f,
+        "source_tool_call_id": str(cc_payload.get("batch_source_id") or "").strip() or None,
+    }
+
+    # Update existing anchor in place when present.
     for row in history:
         if not isinstance(row, dict):
             continue
@@ -674,19 +705,35 @@ def _append_cc_subagent_cluster_anchor(
             continue
         if str(existing.get("cluster_id", "") or "").strip() != cluster_id:
             continue
-        if existing == anchor:
-            return False
+        changed = existing != anchor
         meta["subagent_cluster"] = anchor
-        return True
-    history.append(
-        {
-            "role": "assistant",
-            "content": "",
-            "metadata": {"subagent_cluster": anchor},
-            "timestamp": created_at_f,
-            "source_tool_call_id": str(cc_payload.get("batch_source_id") or "").strip() or None,
-        }
-    )
+        if tool_rows:
+            # Insert missing tool rows just before this anchor.
+            try:
+                idx = history.index(row)
+            except ValueError:
+                idx = len(history)
+            for offset, tool_row in enumerate(tool_rows):
+                history.insert(idx + offset, tool_row)
+            changed = True
+        return changed
+
+    # Prefer tools + cluster card *before* the just-appended harness assistant
+    # summary so reload matches native mid-turn ordering.
+    insert_at = len(history)
+    if history:
+        tail = history[-1]
+        if (
+            isinstance(tail, dict)
+            and str(tail.get("role") or "") == "assistant"
+            and isinstance(tail.get("metadata"), dict)
+            and str((tail.get("metadata") or {}).get("harness") or "").strip()
+            and "subagent_cluster" not in (tail.get("metadata") or {})
+        ):
+            insert_at = len(history) - 1
+    for offset, tool_row in enumerate(tool_rows):
+        history.insert(insert_at + offset, tool_row)
+    history.insert(insert_at + len(tool_rows), anchor_row)
     return True
 
 

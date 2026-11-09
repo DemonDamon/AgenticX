@@ -393,6 +393,15 @@ def test_harness_wiring_sets_owner_and_appends_cluster_anchor(tmp_path: Path, mo
     assert anchor["cluster_id"] == "cl-anchor-1"
     assert anchor["run_ids"] == ["cc-subagent-a-1", "cc-subagent-a-2"]
     assert anchor["title"] == "Agent 蜂群 · 2 个并行任务"
+    tool_rows = [
+        row for row in history
+        if isinstance(row, dict) and row.get("tool_name") == "spawn_subagent"
+    ]
+    assert len(tool_rows) == 2
+    assert tool_rows[0]["tool_call_id"] == "near-spawn-cc-subagent-a-1"
+    # Tools + cluster card should sit before the harness assistant summary.
+    roles = [row.get("role") for row in history if isinstance(row, dict)]
+    assert roles.index("tool") < roles.index("assistant") or roles.count("assistant") >= 2
 
 
 

@@ -475,6 +475,26 @@ def _register_cb_run_open(
                 "cluster_title": cluster_title,
             },
         )
+        # Synthetic spawn_subagent tool rows → Desktop TurnToolGroupCard + injectLive 蜂群卡.
+        try:
+            from agenticx.harness.near_cross_harness_swarm_ui import (
+                publish_synthetic_spawn_tool_events,
+            )
+
+            publish_synthetic_spawn_tool_events(
+                publish_cb_orchestration_progress,
+                owner_session_id,
+                run_id=run_id,
+                cluster_id=cluster_id,
+                name=task.name,
+                role="CodeBuddy CLI subagent",
+                task=task.prompt[:500],
+                provider="codebuddy",
+                model=str(model or "").strip(),
+                tool_group_id=batch_source_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("[cb_subagents] synthetic spawn tool publish skipped: %s", exc)
         publish_cb_orchestration_progress(
             owner_session_id,
             {

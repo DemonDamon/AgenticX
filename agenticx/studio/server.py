@@ -563,7 +563,7 @@ async def _external_harness_chat_stream(
             )
 
         async def _drain_cc_orchestration_sse_lines() -> list[str]:
-            """CB→CC / CC→CB intercept: mid-turn tokens + subagent_* while children await."""
+            """CB→CC / CC→CB: tokens, synthetic spawn tools, subagent_* while children await."""
             items: list = []
             try:
                 from agenticx.harness.codebuddy_cc_subagents import (
@@ -592,6 +592,57 @@ async def _external_harness_chat_stream(
                 if not isinstance(item, dict):
                     continue
                 kind = str(item.get("kind") or "")
+                # Synthetic spawn_subagent tool rows → live Agent 蜂群 card + tool group header.
+                if kind == "tool_start":
+                    name = str(item.get("name") or "tool").strip() or "tool"
+                    tid = str(item.get("tool_call_id") or "").strip()
+                    if not tid:
+                        continue
+                    if tid in emitted_tool_ids:
+                        continue
+                    emitted_tool_ids.add(tid)
+                    args = item.get("arguments")
+                    if not isinstance(args, dict):
+                        args = {}
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "arguments": args,
+                            "tool_call_id": tid,
+                            "agent_id": "meta",
+                        }
+                    )
+                    gid = str(item.get("tool_group_id") or "").strip()
+                    if gid:
+                        tool_payload["tool_group_id"] = gid
+                    evt = SseEvent(type="tool_call", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
+                if kind == "tool_end":
+                    name = str(item.get("name") or "tool").strip() or "tool"
+                    tid = str(item.get("tool_call_id") or "").strip()
+                    if not tid:
+                        continue
+                    is_error = bool(item.get("is_error"))
+                    result = item.get("result")
+                    if result is None:
+                        result = "error" if is_error else "ok"
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "tool_call_id": tid,
+                            "result": result,
+                            "is_error": is_error,
+                            "agent_id": "meta",
+                        }
+                    )
+                    evt = SseEvent(type="tool_result", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
                 if kind == "text":
                     piece = str(item.get("text") or "")
                     if not piece:
@@ -623,6 +674,7 @@ async def _external_harness_chat_stream(
                             "provider": str(item.get("provider") or "claude-code"),
                             "model": str(item.get("model") or ""),
                             "cluster_id": str(item.get("cluster_id") or ""),
+                            "cluster_title": str(item.get("cluster_title") or ""),
                         },
                     )
                     lines_out.append(
