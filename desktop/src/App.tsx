@@ -1486,11 +1486,25 @@ export function App() {
               : effectiveStatus !== "awaiting_input"
                 ? undefined
                 : existing?.pendingClarification;
+          // CC CLI ledger rows use provider=claude-code (harness kind). Do not
+          // clobber a catalog provider the user just picked in WorkPanel.
+          const harnessProviders = new Set(["claude-code", "codex", "opencode", "codebuddy"]);
+          const incomingProvider = (item.provider ?? existing?.provider ?? "").trim();
+          const incomingModel = (item.model ?? existing?.model ?? "").trim();
+          const existingProvider = (existing?.provider ?? "").trim();
+          const existingModel = (existing?.model ?? "").trim();
+          const keepCatalogPick =
+            !!existingProvider &&
+            !harnessProviders.has(existingProvider) &&
+            harnessProviders.has(String(item.provider ?? "").trim()) &&
+            (!incomingModel || !existingModel || incomingModel === existingModel);
+          const nextProvider = keepCatalogPick ? existingProvider : (incomingProvider || existingProvider || undefined);
+          const nextModel = keepCatalogPick ? (existingModel || incomingModel || undefined) : (incomingModel || existingModel || undefined);
           updateSubAgent(id, {
             status: effectiveStatus,
             currentAction,
-            provider: item.provider ?? existing?.provider,
-            model: item.model ?? existing?.model,
+            provider: nextProvider,
+            model: nextModel,
             avatarSessionId: itemAvatarSessionId ?? existing?.avatarSessionId,
             kind: itemKind,
             resultSummary: summaryText || undefined,
