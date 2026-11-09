@@ -1002,9 +1002,16 @@ def format_cc_subagent_result_text(payload: Dict[str, Any]) -> str:
         "",
     ]
     for r in results:
-        status = "成功" if r.get("ok") else f"未完成（{r.get('status') or 'error'}）"
+        wrote_output = bool(r.get("wrote_output"))
+        if r.get("ok") and wrote_output:
+            status = "成功"
+        elif r.get("ok") and not wrote_output:
+            # CLI turn may be ok while policy-refuse / no file — don't call that 成功.
+            status = "结束但无产物"
+        else:
+            status = f"未完成（{r.get('status') or 'error'}）"
         path = r.get("output_path") or ""
-        wrote = "已写文件" if r.get("wrote_output") else "未检测到产物文件"
+        wrote = "已写文件" if wrote_output else "未检测到产物文件"
         lines.append(f"- **{r.get('name')}**：{status}；{wrote} `{path}`")
         excerpt = (r.get("result_text") or "").strip()
         if excerpt:

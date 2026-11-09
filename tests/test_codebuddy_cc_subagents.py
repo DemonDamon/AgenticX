@@ -39,6 +39,47 @@ def test_format_unavailable():
     assert "无法跨引擎" in text
 
 
+def test_format_ok_without_artifact_is_not_success():
+    text = format_cc_subagent_result_text(
+        {
+            "ok": True,
+            "results": [
+                {
+                    "name": "claude-code-1",
+                    "ok": True,
+                    "status": "success",
+                    "result_text": "政策拒写",
+                    "output_path": "/tmp/a.md",
+                    "wrote_output": False,
+                }
+            ],
+        }
+    )
+    assert "结束但无产物" in text
+    assert "成功" not in text.split("claude-code-1")[1].split("\n")[0]
+    assert "未检测到产物文件" in text
+
+
+def test_format_ok_with_artifact_is_success(tmp_path: Path):
+    text = format_cc_subagent_result_text(
+        {
+            "ok": True,
+            "results": [
+                {
+                    "name": "claude-code-1",
+                    "ok": True,
+                    "status": "success",
+                    "result_text": "ok",
+                    "output_path": str(tmp_path / "a.md"),
+                    "wrote_output": True,
+                }
+            ],
+        }
+    )
+    assert "成功" in text
+    assert "已写文件" in text
+
+
 def test_maybe_run_returns_none_without_cc_ask(tmp_path: Path):
     assert (
         maybe_run_cc_subagents_for_codebuddy_turn(

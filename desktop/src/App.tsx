@@ -5,7 +5,11 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
 import { buildClarifyRequestBody } from "./utils/clarification-notice";
-import { shouldDeferAutoReport, shouldNotifySubagentCompletion } from "./utils/auto-report-gate";
+import {
+  shouldAutoReportSubagentCompletion,
+  shouldDeferAutoReport,
+  shouldNotifySubagentCompletion,
+} from "./utils/auto-report-gate";
 import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
@@ -1365,6 +1369,9 @@ export function App() {
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
             delegation?: boolean;
             kind?: string;
+            run_id?: string;
+            source_tool_call_id?: string;
+            detail_refs?: Record<string, unknown>;
             avatar_session_id?: string;
             result_summary?: string;
             result_file?: string;
@@ -1547,24 +1554,47 @@ export function App() {
             if (matchingPane) {
               store.addPaneMessage(matchingPane.id, "tool", completionMsg, id);
             }
-            console.debug("[auto-report] enqueue: agent=%s name=%s status=%s sid=%s", id, agentName, effectiveStatus, sid);
-            autoReportQueueRef.current.push({
-              agentId: id,
-              agentName,
-              summary: summaryBody,
-              sessionId: sid,
-              status:
-                effectiveStatus === "completed"
-                  ? "completed"
-                  : effectiveStatus === "paused"
-                    ? "paused"
-                    : "failed",
-              attempts: 0,
-              queuedAt: Date.now(),
-            });
-            useAppStore
-              .getState()
-              .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            // Near already wrote the parent synthesis bubble for CB/CC CLI children;
+            // do not POST a second `[系统通知]` /api/chat turn. Keep the pane chip above.
+            if (
+              shouldAutoReportSubagentCompletion({
+                agentId: id,
+                runId: typeof item.run_id === "string" ? item.run_id : id,
+                sourceToolCallId:
+                  typeof item.source_tool_call_id === "string" ? item.source_tool_call_id : "",
+                kind: typeof item.kind === "string" ? item.kind : "",
+                detailRefs:
+                  item.detail_refs && typeof item.detail_refs === "object"
+                    ? item.detail_refs
+                    : null,
+              })
+            ) {
+              console.debug("[auto-report] enqueue: agent=%s name=%s status=%s sid=%s", id, agentName, effectiveStatus, sid);
+              autoReportQueueRef.current.push({
+                agentId: id,
+                agentName,
+                summary: summaryBody,
+                sessionId: sid,
+                status:
+                  effectiveStatus === "completed"
+                    ? "completed"
+                    : effectiveStatus === "paused"
+                      ? "paused"
+                      : "failed",
+                attempts: 0,
+                queuedAt: Date.now(),
+              });
+              useAppStore
+                .getState()
+                .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            } else {
+              console.debug(
+                "[auto-report] skip Near cross-harness meta-report: agent=%s kind=%s sid=%s",
+                id,
+                item.kind ?? "",
+                sid,
+              );
+            }
             }
           }
 
