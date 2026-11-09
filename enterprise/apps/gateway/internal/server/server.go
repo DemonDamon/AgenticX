@@ -844,7 +844,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	qctx := s.quotaContext(identity, req.Model)
+	requestedModel := req.Model
+	admission := s.admitVirtual(identity.TenantID, requestedModel)
+	qctx := s.quotaContext(identity, admission.quotaModel)
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
@@ -896,6 +898,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = quotaReservation
+	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -919,7 +922,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		rollbackModel := req.Model
+		if admission.virtualName != "" {
+			rollbackModel = qctx.Model
+		}
+		s.rollbackChatQuotaAndBudget(identity, rollbackModel, estimatedInputTokens, budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
 			Status:       "error",
@@ -949,7 +956,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
 	})
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
+	s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, providerInputTokens+providerOutputTokens, req.Model)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,
@@ -1392,14 +1399,14 @@ func (s *Server) handleStream(
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
 	var settleDelta int64
 	if s.useChannelRelay() {
-		settle := s.billingService.SettleContext(
-			qctx,
-			reservedTokens,
-			int64(inputTokens+outputTokens),
-		)
+		actualModel := streamResult.ResolvedModel
+		if strings.TrimSpace(actualModel) == "" {
+			actualModel = req.Model
+		}
+		settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
 		settleDelta = settle.Delta
 	} else {
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+		s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, inputTokens+outputTokens, req.Model)
 	}
 
 	ev := audit.Event{

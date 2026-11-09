@@ -140,7 +140,9 @@ func (s *Server) dispatchProtocol(
 	_, derived := applyDerivedModel(req)
 	thinkingMode := transform.ThinkingModeFromEnv()
 
-	qctx := s.quotaContext(identity, req.Model)
+	requestedModel := req.Model
+	admission := s.admitVirtual(identity.TenantID, requestedModel)
+	qctx := s.quotaContext(identity, admission.quotaModel)
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
@@ -160,6 +162,7 @@ func (s *Server) dispatchProtocol(
 	if !ok {
 		return
 	}
+	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
 	decision := s.decider.Decide(r, req.Model)
 	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
@@ -235,7 +238,11 @@ func (s *Server) protocolComplete(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
+	actualModel := result.ResolvedModel
+	if strings.TrimSpace(actualModel) == "" {
+		actualModel = req.Model
+	}
+	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, actualTotal, actualModel)
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
@@ -421,11 +428,11 @@ func (s *Server) protocolStream(
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
-	settle := s.billingService.SettleContext(
-		qctx,
-		reservedTokens,
-		int64(inputTokens+outputTokens),
-	)
+	actualModel := streamResult.ResolvedModel
+	if strings.TrimSpace(actualModel) == "" {
+		actualModel = req.Model
+	}
+	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
 	s.reportUsageDetailed(identity, decision, openai.Usage{
 		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
 	}, &budgetCheck, spanMeta{

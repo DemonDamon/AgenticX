@@ -124,7 +124,9 @@ order := Plan(targets, picker.HasRoutableChannel, rng)
 }
 ```
 
-`id` 不含 `/`，`/api/chat/completions` 不会拆 provider，body.model 就是虚拟名。网关 Decider 不要求该名字存在于 provider 配置；渠道转发在 Executor 里解析。禁用的不出现。不参与部门/用户可见性收窄（本表没有 assignment）。
+`id` 不含 `/`，`/api/chat/completions` 不会拆 provider，body.model 就是虚拟名。网关 Decider 不要求该名字存在于 provider 配置；渠道转发在 Executor 里解析。禁用的不出现。
+
+启用的虚拟模型只有在**每一个目标模型**都落在该用户已经算出的可见模型集合里时才追加。可见 id 通常是 `provider/model`，目标通常是真实模型名。匹配规则：目标与某个可见 id 完全相等，或两边去掉最后一个 `/` 之前的前缀后模型段相等。任一目标对不上就不展示。
 
 ## FR / AC
 
@@ -144,8 +146,17 @@ order := Plan(targets, picker.HasRoutableChannel, rng)
   - AC-7 `admin-console/src/app/api/internal/virtual-models/__tests__/route.test.ts`。
 - FR-8 admin API 增删改真调 store，校验失败 400。
   - AC-8 `src/app/api/admin/virtual-models/__tests__/route.test.ts` 与 `src/lib/__tests__/virtual-models-validate.test.ts`（纯校验，不连库）。
-- FR-9 门户列表含启用虚拟模型，不含禁用。
-  - AC-9 `web-portal/src/lib/__tests__/admin-providers-reader.test.ts` 新增用例。既有 6 个用例补上第三次 `select` 的空虚拟模型结果。
+- FR-9 门户列表含启用虚拟模型，不含禁用。虚拟模型仅当全部目标都对该用户可见时展示。
+  - AC-9 `web-portal/src/lib/__tests__/admin-providers-reader.test.ts`：目标全可见（含 `gpt-4` 与 `openai/gpt-3.5` 两种写法）则展示；任一目标不可见则不展示；停用则不展示。
+- FR-10 配额与预算预检使用首选真实模型，并且 Executor 首先尝试的就是这一次解析出的顺序，不再单独抽样。
+  - 预检模型是 `Plan` 的 `order[0]`，通过 `context` 传给 `Executor.Complete/Stream`。
+  - 对账是差额修正：预检已经计入预估量。实际模型与预检模型相同时，差额仍记在预检模型上。
+  - 故障转移或预算回落后实际模型不同：把预估量从预检模型回滚，再把实际用量记到实际模型。月度计数按用户而不是按模型分桶；模型名决定采用哪条规则。实际模型没有月度规则或规则拒绝入账时，仍把实际用量写入用户计数，避免回滚后漏计。故障转移不再做第二次预检。
+  - 非虚拟名的预检、对账、回滚参数与改动前一致。
+  - 预算 `applyBudgetFallback` 若把 `req.Model` 改成一个非虚拟名，Executor 不再套用原来的虚拟计划，按普通模型转发。配额预检不因这次替换重做。
+  - AC-10 `server/virtual_quota_test.go`：只针对 `real-x` 的月度规则用尽时，虚拟名 `virt` 被拒绝；直接用 `virt` 查规则仍会落到更宽的角色规则。成功结算后用量记在真实模型侧，用量文件没有以虚拟名为键的行。故障转移后用量等于已结算量加实际量，不把预估再加一遍。
+  - AC-11 `relay/virtual_model_test.go` `TestExecutorUsesAdmissionPlanInsteadOfSamplingAgain`：上下文里的计划首项是低权重模型时，Executor 不改去抽高权重目标。
+- FR-11 门户聊天转发对不含 `/` 的模型名不做服务端可见性校验。虚拟名沿用该既有分支，不新增校验。见文末「观察到但未处理」。
 
 ## 校验规则（admin，写全）
 
@@ -165,5 +176,5 @@ order := Plan(targets, picker.HasRoutableChannel, rng)
 ## 观察到但未处理
 
 - `gateway_audit_events` 的 PG/MySQL 插入不含 `routing_policy` 列（GW-02 已把该字段放在 JSONL `Event` 上）。虚拟名因此出现在 JSONL 事件，不出现在 PG 行。按主规划不改表。
-- `reportUsageDetailed` 里 `SettleCheckedBudget` 在**没有** budget receipt 时会用 `decision.Model` 重选规则。渠道转发的正常路径有 receipt；无 receipt 的回落会看到真实模型名。不新增配额维度，预扣 `qctx` 仍是请求名。
-- 门户对不含 `/` 的模型不做可见性交集。虚拟名沿用这条既有分支，因此不在 provider 表里也能转发。这是刻意的，不是新开的旁路校验。
+- `reportUsageDetailed` 里 `SettleCheckedBudget` 在**没有** budget receipt 时会用 `decision.Model` 重选规则。渠道转发的正常路径有 receipt。
+- 门户 `POST /api/chat/completions` 只在 `model` 含 `/` 时对照可见模型列表拒绝请求。普通模型名不含 `/` 时本来就直接转发。虚拟名同样不含 `/`，手工提交一个对该用户不可见的虚拟名不会被这条校验拦住。按确认的修法，不为虚拟名单独加服务端校验。列表本身已经按全部目标可见性过滤。

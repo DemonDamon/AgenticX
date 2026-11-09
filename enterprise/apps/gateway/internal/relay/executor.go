@@ -13,6 +13,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/virtualmodel"
 )
 
 const defaultMaxRetries = 2
@@ -88,6 +89,9 @@ func (e *Executor) Complete(
 	model string,
 	id channel.Identity,
 ) (CompleteResult, error) {
+	if order, virtualName, ok := virtualmodel.PlanFromContext(ctx); ok {
+		return e.completeVirtual(ctx, req, order, virtualName, id)
+	}
 	if order, virtualName, ok := e.virtualPlan(model, id); ok {
 		return e.completeVirtual(ctx, req, order, virtualName, id)
 	}
@@ -247,6 +251,9 @@ func (e *Executor) Stream(
 	id channel.Identity,
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
+	if order, virtualName, ok := virtualmodel.PlanFromContext(ctx); ok {
+		return e.streamVirtual(ctx, req, order, virtualName, id, push)
+	}
 	if order, virtualName, ok := e.virtualPlan(model, id); ok {
 		return e.streamVirtual(ctx, req, order, virtualName, id, push)
 	}

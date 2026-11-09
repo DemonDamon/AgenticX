@@ -78,3 +78,48 @@ func TestStreamDoesNotSwitchVirtualTargetAfterOutput(t *testing.T) {
 		t.Fatalf("result model = %q virtual = %q", result.ResolvedModel, result.VirtualName)
 	}
 }
+
+func TestExecutorUsesAdmissionPlanInsteadOfSamplingAgain(t *testing.T) {
+	var heavyHits atomic.Int32
+	heavy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		heavyHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"heavy"}}]}`))
+	}))
+	defer heavy.Close()
+	light := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"light"}}]}`))
+	}))
+	defer light.Close()
+
+	reg := channel.NewRegistry(nil, nil)
+	reg.SetSnapshot([]channel.Channel{
+		{ID: "light", TenantID: "t1", ProviderType: "openai", BaseURL: light.URL, APIKey: "k", Status: channel.StatusActive, SupportedModels: []string{"real-light"}, Weight: 1},
+		{ID: "heavy", TenantID: "t1", ProviderType: "openai", BaseURL: heavy.URL, APIKey: "k", Status: channel.StatusActive, SupportedModels: []string{"real-heavy"}, Weight: 1},
+	})
+	exec := NewExecutor(channel.NewPicker(reg, channel.NewStatsStore(), channel.NewAffinityStore(0)), adaptor.NewFactory(adaptor.NewOpenAIAdaptor()), keypool.NewPool())
+	loader := virtualmodel.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	loader.SetSnapshot([]virtualmodel.Model{{
+		TenantID: "t1", Name: "virt", Enabled: true,
+		Targets: []virtualmodel.Target{
+			{Model: "real-light", Weight: 1, Priority: 0},
+			{Model: "real-heavy", Weight: 100, Priority: 0},
+		},
+	}})
+	exec.SetVirtualPlanner(loader)
+	ctx := virtualmodel.WithPlan(context.Background(), []string{"real-light", "real-heavy"}, "virt")
+	result, err := exec.Complete(ctx, openai.ChatCompletionRequest{
+		Model:    "virt",
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("hi")}},
+	}, "virt", channel.Identity{TenantID: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResolvedModel != "real-light" || result.Channel.ID != "light" {
+		t.Fatalf("resolved %q channel %q, want the admission plan's first model", result.ResolvedModel, result.Channel.ID)
+	}
+	if heavyHits.Load() != 0 {
+		t.Fatalf("heavy target calls = %d, want 0", heavyHits.Load())
+	}
+}
