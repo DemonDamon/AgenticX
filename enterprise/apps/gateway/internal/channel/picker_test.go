@@ -2,8 +2,16 @@ package channel
 
 import (
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 )
 
 func TestWeightedSampleDistribution(t *testing.T) {
@@ -66,4 +74,78 @@ func TestStatsCooldown(t *testing.T) {
 	if stats.InCooldown("c1", now.Add(31*time.Second)) {
 		t.Fatal("expected cooldown expired")
 	}
+}
+
+func TestReloadKeepsChannelsOnInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "channels.json")
+	body := []byte(`{"channels":[{"id":"ch-keep","tenantId":"t1","status":"active","supportedModels":["m-keep"],"weight":1}]}`)
+	if err := os.WriteFile(file, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GATEWAY_REMOTE_CHANNELS_URL", "")
+	t.Setenv("GATEWAY_ADMIN_CHANNELS_FILE", file)
+	status := configstatus.NewRegistry(nil)
+	reg := NewRegistry(nil, nil)
+	reg.SetConfigStatus(status)
+	if err := reg.reload(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.ByID("ch-keep"); !ok {
+		t.Fatal("expected channel after valid load")
+	}
+	if err := os.WriteFile(file, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.reload(); err == nil {
+		t.Fatal("expected parse error")
+	}
+	if _, ok := reg.ByID("ch-keep"); !ok {
+		t.Fatal("invalid json cleared the last snapshot")
+	}
+	if channelLastError(t, status) == "" {
+		t.Fatal("expected LastError")
+	}
+}
+
+func TestReloadKeepsChannelsOnRemote404(t *testing.T) {
+	var hits atomic.Int32
+	good := []byte(`{"channels":[{"id":"ch-keep","tenantId":"t1","status":"active","supportedModels":["m-keep"],"weight":1}]}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) == 1 {
+			_, _ = w.Write(good)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GATEWAY_REMOTE_CHANNELS_URL", srv.URL)
+	t.Setenv("GATEWAY_ADMIN_CHANNELS_FILE", "")
+	status := configstatus.NewRegistry(nil)
+	reg := NewRegistry(nil, nil)
+	reg.SetConfigStatus(status)
+	if err := reg.reload(); err != nil {
+		t.Fatal(err)
+	}
+	err := reg.reload()
+	if err == nil || !strings.Contains(err.Error(), "remote 404") {
+		t.Fatalf("reload err = %v", err)
+	}
+	if _, ok := reg.ByID("ch-keep"); !ok {
+		t.Fatal("remote 404 cleared the last snapshot")
+	}
+	if !strings.Contains(channelLastError(t, status), "remote 404") {
+		t.Fatalf("LastError = %q", channelLastError(t, status))
+	}
+}
+
+func channelLastError(t *testing.T, status *configstatus.Registry) string {
+	t.Helper()
+	for _, item := range status.Snapshot() {
+		if item.Domain == configstatus.DomainChannels {
+			return item.LastError
+		}
+	}
+	t.Fatal("missing channels domain")
+	return ""
 }

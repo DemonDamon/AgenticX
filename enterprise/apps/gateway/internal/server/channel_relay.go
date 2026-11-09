@@ -101,6 +101,7 @@ func (s *Server) initChannelRelay() {
 	s.channelStats = channel.NewStatsStore()
 	s.channelAffinity = channel.NewAffinityStore(0)
 	s.channelRegistry = channel.NewRegistry(s.logger, s.adminLoader)
+	s.channelRegistry.SetConfigStatus(s.configStatus)
 	s.channelRegistry.Start(context.Background())
 	s.channelPicker = channel.NewPicker(s.channelRegistry, s.channelStats, s.channelAffinity)
 	s.relayExecutor = relay.NewExecutor(s.channelPicker, s.adaptorFactory, s.keyPool)

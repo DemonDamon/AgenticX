@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/connectorstore"
 	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
@@ -97,7 +99,11 @@ type Server struct {
 	wasmManager           *wasmhost.Manager
 	errorStore            *gwerrors.Store
 	channelProber         *channel.Prober
+	configStatus          *configstatus.Registry
+	startedAt             time.Time
 }
+
+var _ configstatus.Metrics = (*observability.Registry)(nil)
 
 var (
 	publicKeyOnce sync.Once
@@ -154,7 +160,12 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		}
 	}
 
+	metrics := observability.NewRegistryFromEnv()
+	cfgStatus := configstatus.NewRegistry(metrics)
+	startedAt := time.Now().UTC()
+
 	adminLoader := runtimeconfig.New(logger)
+	adminLoader.SetConfigStatus(cfgStatus)
 	adminLoader.Start(context.Background())
 
 	quotaCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_CONFIG_FILE"))
@@ -179,8 +190,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	engine, snapshotModTime, snapBodyHash, overrideModTime, snapshotStatus, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
 	if err != nil {
+		cfgStatus.ReportFailure(configstatus.DomainPolicy, policySnapshotPath, err)
 		return nil, err
 	}
+	cfgStatus.ReportSuccess(configstatus.DomainPolicy, policySnapshotPath, snapBodyHash, policyPublishVersion(snapshotStatus))
 
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
@@ -225,8 +238,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		compliance:           residency.NewComplianceStore(dbHandle),
 		cacheService:         nil,
 		pricingLoader:        initPricingLoader(logger),
-		metrics:              observability.NewRegistryFromEnv(),
+		metrics:              metrics,
 		database:             dbHandle,
+		configStatus:         cfgStatus,
+		startedAt:            startedAt,
 	}
 	cacheSvc, redisStore := initCacheService(logger)
 	srv.cacheService = cacheSvc
@@ -451,7 +466,10 @@ func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, t
 	}
 	mod := info.ModTime()
 	manifests, mod, status, err := snapshotManifestsFromRaw(raw, mod)
-	return manifests, mod, "", status, err
+	if err != nil {
+		return nil, mod, "", policySnapshotRuntimeStatus{}, err
+	}
+	return manifests, mod, sha256Hex(raw), status, nil
 }
 
 func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
@@ -568,6 +586,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 		if err != nil {
 			if !os.IsNotExist(err) {
 				s.logger.Warn("policy override stat failed", "path", ov, "error", err)
+				s.reportPolicyFailure(err)
 				return
 			}
 		} else {
@@ -587,16 +606,28 @@ func (s *Server) reloadPolicyIfNeeded() {
 				s.markRemotePolicyChecked(now)
 				if err != nil {
 					s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 				var sum string
 				switch {
 				case code == http.StatusNotFound:
+					s.policyMu.RLock()
+					published := len(s.policySnapshotStatus.Tenants) > 0
+					s.policyMu.RUnlock()
+					if published {
+						if s.logger != nil {
+							s.logger.Warn("policy snapshot remote 404, keeping last known good", "url", snap)
+						}
+						s.reportPolicyFailure(configstatus.ErrRemote404Keep)
+						return
+					}
 					sum = ""
 				case code >= 200 && code < 300:
 					sum = sha256Hex(raw)
 				default:
 					s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
+					s.reportPolicyFailure(fmt.Errorf("policy snapshot bad status: http %d", code))
 					return
 				}
 				s.policyMu.RLock()
@@ -608,6 +639,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 			if err != nil {
 				if !os.IsNotExist(err) {
 					s.logger.Warn("policy snapshot stat failed", "path", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 			} else {
@@ -634,6 +666,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 	engine, snapshotMod, snapHash, overrideMod, snapshotStatus, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
 	if buildErr != nil {
 		s.logger.Warn("policy reload failed", "snapshot", s.policySnapshot, "override", s.policyOverride, "error", buildErr)
+		s.reportPolicyFailure(buildErr)
 		return
 	}
 	s.policyMu.Lock()
@@ -643,7 +676,38 @@ func (s *Server) reloadPolicyIfNeeded() {
 	s.policySnapBodyHash = snapHash
 	s.policySnapshotStatus = snapshotStatus
 	s.policyMu.Unlock()
+	s.reportPolicySuccess(snapHash, snapshotStatus)
 	s.logger.Info("policy engine reloaded", "snapshot", s.policySnapshot, "override_file", s.policyOverride)
+}
+
+func policyPublishVersion(status policySnapshotRuntimeStatus) string {
+	if len(status.Tenants) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(status.Tenants))
+	for id := range status.Tenants {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, status.Tenants[id].PublishID)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (s *Server) reportPolicySuccess(hash string, status policySnapshotRuntimeStatus) {
+	if s == nil || s.configStatus == nil {
+		return
+	}
+	s.configStatus.ReportSuccess(configstatus.DomainPolicy, s.policySnapshot, hash, policyPublishVersion(status))
+}
+
+func (s *Server) reportPolicyFailure(err error) {
+	if s == nil || s.configStatus == nil || err == nil {
+		return
+	}
+	s.configStatus.ReportFailure(configstatus.DomainPolicy, s.policySnapshot, err)
 }
 
 func (s *Server) Router() http.Handler {
@@ -663,6 +727,7 @@ func (s *Server) Router() http.Handler {
 	}
 	r.Get("/internal/channel-stats", s.handleChannelStats)
 	r.Get("/internal/policy-status", s.handleInternalPolicyStatus)
+	r.Get("/internal/config-status", s.handleInternalConfigStatus)
 	r.Get("/internal/keypool-stats", s.handleKeypoolStats)
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/internal/cache/reload", s.handleCacheConfigReload)

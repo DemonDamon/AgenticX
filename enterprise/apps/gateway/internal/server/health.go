@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
@@ -91,6 +92,35 @@ func (s *Server) handleInternalPolicyStatus(w http.ResponseWriter, r *http.Reque
 		"code":    "00000",
 		"message": "ok",
 		"data":    data,
+	})
+}
+
+type configStatusBody struct {
+	InstanceID string                 `json:"instanceId"`
+	StartedAt  time.Time              `json:"startedAt"`
+	Domains    []configstatus.Outcome `json:"domains"`
+}
+
+func (s *Server) handleInternalConfigStatus(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	var have []configstatus.Outcome
+	started := s.startedAt
+	if s.configStatus != nil {
+		have = s.configStatus.Snapshot()
+		if started.IsZero() {
+			started = s.configStatus.StartedAt()
+		}
+	}
+	if started.IsZero() {
+		started = time.Now().UTC()
+	}
+	writeJSON(w, http.StatusOK, configStatusBody{
+		InstanceID: configstatus.InstanceID(),
+		StartedAt:  started.UTC(),
+		Domains:    configstatus.FillCoreDomains(have),
 	})
 }
 
