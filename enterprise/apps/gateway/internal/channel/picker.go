@@ -66,36 +66,40 @@ func (p *Picker) PickWithPrefix(
 	if len(healthy) == 0 {
 		return Channel{}, PickDecision{}, false
 	}
+	tier := lowestPriorityTier(healthy)
+	if len(tier) == 0 {
+		return Channel{}, PickDecision{}, false
+	}
 
 	if policy == LBPrefixCache && len(messages) > 0 {
-		if ch, ok := p.pickByPrefix(healthy, messages); ok {
-			return ch, PickDecision{ChannelID: ch.ID, Policy: LBPrefixCache, Reason: "prefix"}, true
+		if ch, ok := p.pickByPrefix(tier, messages); ok {
+			return ch, decisionFor(ch, LBPrefixCache, "prefix"), true
 		}
 	}
 
 	if p.affinity != nil {
 		if lastID, ok := p.affinity.Get(id.SessionID, model); ok {
-			for _, ch := range healthy {
+			for _, ch := range tier {
 				if ch.ID == lastID {
-					return ch, PickDecision{ChannelID: ch.ID, Policy: policy, Reason: "affinity"}, true
+					return ch, decisionFor(ch, policy, "affinity"), true
 				}
 			}
 		}
 	}
 
 	if policy == LBLatencyAware {
-		ch := p.latencyAwareSample(healthy)
+		ch := p.latencyAwareSample(tier)
 		if ch.ID == "" {
 			return Channel{}, PickDecision{}, false
 		}
-		return ch, PickDecision{ChannelID: ch.ID, Policy: LBLatencyAware, Reason: "latency"}, true
+		return ch, decisionFor(ch, LBLatencyAware, "latency"), true
 	}
 
-	ch := p.weightedSample(healthy)
+	ch := p.weightedSample(tier)
 	if ch.ID == "" {
 		return Channel{}, PickDecision{}, false
 	}
-	return ch, PickDecision{ChannelID: ch.ID, Policy: LBWeight, Reason: "weight"}, true
+	return ch, decisionFor(ch, LBWeight, "weight"), true
 }
 
 func (p *Picker) filterHealthy(cands []Channel, exclude map[string]struct{}) []Channel {
@@ -128,6 +132,37 @@ func (p *Picker) filterHealthy(cands []Channel, exclude map[string]struct{}) []C
 		}
 	}
 	return healthy
+}
+
+// lowestPriorityTier keeps every channel at the minimum Priority.
+// Smaller numbers are preferred; 0 is the highest tier used by existing channels.
+// Relative order is preserved so same-tier weight and prefix selection stay stable.
+func lowestPriorityTier(healthy []Channel) []Channel {
+	if len(healthy) == 0 {
+		return nil
+	}
+	minP := healthy[0].Priority
+	for _, ch := range healthy[1:] {
+		if ch.Priority < minP {
+			minP = ch.Priority
+		}
+	}
+	tier := make([]Channel, 0, len(healthy))
+	for _, ch := range healthy {
+		if ch.Priority == minP {
+			tier = append(tier, ch)
+		}
+	}
+	return tier
+}
+
+func decisionFor(ch Channel, policy LBPolicy, reason string) PickDecision {
+	return PickDecision{
+		ChannelID: ch.ID,
+		Policy:    policy,
+		Reason:    reason,
+		Priority:  ch.Priority,
+	}
 }
 
 func (p *Picker) pickByPrefix(healthy []Channel, messages []openai.ChatMessage) (Channel, bool) {

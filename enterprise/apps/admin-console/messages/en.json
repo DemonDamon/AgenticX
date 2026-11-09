@@ -1687,6 +1687,7 @@
         "modelsLabel": "Supported models (comma or newline separated)",
         "weightLabel": "Weight",
         "priorityLabel": "Priority",
+        "priorityHint": "Lower numbers are preferred. Channels with the same priority share traffic by weight. The next tier is used only when the whole tier is unavailable.",
         "statusLabel": "Status",
         "enable": "Enable",
         "disable": "Disable",

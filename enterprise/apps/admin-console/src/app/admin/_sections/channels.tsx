@@ -703,6 +703,7 @@ export default function ChannelsPage() {
                 <div>
                   <Label>{t("priorityLabel")}</Label>
                   <Input value={editing.priority} onChange={(e) => setEditing({ ...editing, priority: e.target.value })} />
+                  <p className="mt-1 text-xs text-muted-foreground">{t("priorityHint")}</p>
                 </div>
               </div>
               <div>

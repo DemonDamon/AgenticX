@@ -1687,6 +1687,7 @@
         "modelsLabel": "支持模型（逗号或换行分隔）",
         "weightLabel": "权重",
         "priorityLabel": "优先级",
+        "priorityHint": "数值越小越优先；同一优先级内按权重分流，整层不可用时才使用下一层",
         "statusLabel": "状态",
         "enable": "启用",
         "disable": "禁用",
