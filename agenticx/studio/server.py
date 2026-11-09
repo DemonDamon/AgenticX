@@ -5703,6 +5703,31 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             logger.warning("[cancel] session NOT FOUND sid=%s agent=%s", session_id, agent_id)
             raise HTTPException(status_code=404, detail="session not found")
+
+        def _cancel_cc_cli() -> dict | None:
+            """Interrupt Near-orchestrated Claude Code CLI WorkPanel runs."""
+            try:
+                from agenticx.harness.codebuddy_cc_subagents import (
+                    cancel_claude_code_subagent_run,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[cancel] cc import failed sid=%s agent=%s: %s", session_id, agent_id, exc)
+                return None
+            cc_result = cancel_claude_code_subagent_run(
+                owner_session_id=session_id,
+                run_id=agent_id,
+            )
+            if cc_result.get("ok"):
+                return cc_result
+            return None
+
+        # Prefer the CC CLI path when the WorkPanel card is clearly a cc-subagent-*
+        # run — native AgentTeamManager has no handle for those processes.
+        if agent_id.startswith("cc-subagent-"):
+            cc_hit = _cancel_cc_cli()
+            if cc_hit is not None:
+                return cc_hit
+
         team_manager = managed.team_manager
         if team_manager is None:
             logger.warning("[cancel] sid=%s agent=%s tm=None, trying global lookup", session_id, agent_id)
@@ -5712,6 +5737,9 @@ def create_studio_app() -> FastAPI:
                 session_id=session_id,
             )
             if team_manager is None:
+                cc_hit = _cancel_cc_cli()
+                if cc_hit is not None:
+                    return cc_hit
                 logger.warning("[cancel] sid=%s agent=%s global lookup also failed", session_id, agent_id)
                 raise HTTPException(status_code=404, detail="agent team not initialized")
         logger.info(
@@ -5728,6 +5756,9 @@ def create_studio_app() -> FastAPI:
             if fallback_manager is not None and fallback_manager is not team_manager:
                 result = await fallback_manager.cancel_subagent(agent_id)
             if not result.get("ok"):
+                cc_hit = _cancel_cc_cli()
+                if cc_hit is not None:
+                    return cc_hit
                 logger.warning("[cancel] FAILED sid=%s agent=%s result=%s", session_id, agent_id, result)
                 raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
         return result

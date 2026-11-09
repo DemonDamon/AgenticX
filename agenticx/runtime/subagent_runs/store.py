@@ -182,6 +182,29 @@ class SubAgentRunStore:
             self._write_json(self._index_file, index_data)
             return record
 
+    def merge_detail_refs(
+        self,
+        run_id: str,
+        detail_refs: Dict[str, Any],
+    ) -> Optional[RunRecord]:
+        """Merge keys into an existing run's detail_refs without changing status."""
+        rid = str(run_id or "").strip()
+        if not rid or not isinstance(detail_refs, dict) or not detail_refs:
+            return None
+        with self._lock:
+            record = self.get_run(run_id=rid)
+            if record is None:
+                return None
+            merged = dict(record.detail_refs or {})
+            merged.update({k: v for k, v in detail_refs.items() if v is not None})
+            record.detail_refs = merged
+            record.updated_at = time.time()
+            self._write_json(self._record_file(rid), record.to_dict())
+            index_data = self._load_index()
+            self._update_index_run(index_data=index_data, record=record)
+            self._write_json(self._index_file, index_data)
+            return record
+
     def append_activity(
         self,
         run_id: str,
