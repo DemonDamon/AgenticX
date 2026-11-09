@@ -6,10 +6,12 @@
 import { enterpriseRuntimeModelProviders as pgMpTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeScopeDefaultModels as pgDefaultTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeUserVisibleModels as pgUvmTable } from "@agenticx/db-schema";
+import { enterpriseRuntimeVirtualModels as pgVmTable } from "@agenticx/db-schema";
 import {
   enterpriseRuntimeModelProviders as mysqlMpTable,
   enterpriseRuntimeScopeDefaultModels as mysqlDefaultTable,
   enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
+  enterpriseRuntimeVirtualModels as mysqlVmTable,
 } from "@agenticx/db-schema/mysql";
 import {
   createMysqlDb,
@@ -185,6 +187,7 @@ export async function listAvailableModelsForUser(
   const userKeys = resolveUserKeys(userId, email);
   const userStored = mergeUserStoredSet(userMap, userKeys);
   const effectiveIds = new Set(computeEffectiveUserAllowed(deptEffective, userStored));
+  const virtualModels = await readEnabledVirtualModels();
 
   const out: PortalModelOption[] = [];
   for (const p of providers) {
@@ -205,7 +208,39 @@ export async function listAvailableModelsForUser(
       });
     }
   }
+  for (const vm of virtualModels) {
+    if (out.some((item) => item.id === vm.name)) continue;
+    out.push({
+      id: vm.name,
+      provider: "virtual",
+      providerLabel: vm.displayName,
+      model: vm.name,
+      label: vm.displayName,
+      route: "third-party",
+      isDefault: false,
+    });
+  }
   return out;
+}
+
+async function readEnabledVirtualModels(): Promise<Array<{ name: string; displayName: string }>> {
+  const tid = requiredTenant();
+  const config = resolveDatabaseConfig();
+  let rows: Array<{ name: string; displayName: string; enabled: boolean }>;
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    rows = await db
+      .select({ name: mysqlVmTable.name, displayName: mysqlVmTable.displayName, enabled: mysqlVmTable.enabled })
+      .from(mysqlVmTable)
+      .where(eq(mysqlVmTable.tenantId, tid));
+  } else {
+    const db = getIamDb();
+    rows = await db
+      .select({ name: pgVmTable.name, displayName: pgVmTable.displayName, enabled: pgVmTable.enabled })
+      .from(pgVmTable)
+      .where(eq(pgVmTable.tenantId, tid));
+  }
+  return rows.filter((row) => row.enabled && row.name && !row.name.includes("/"));
 }
 
 /** 叶到根第一个仍在该用户可见集合内的部门默认模型。 */

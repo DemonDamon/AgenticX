@@ -1680,6 +1680,38 @@
         "confirm": {
           "deleteProvider": "确认删除厂商「{name}」？该操作不可撤销。",
           "removeModel": "从该厂商移除模型「{name}」？"
+        },
+        "virtualModels": {
+          "title": "虚拟模型",
+          "description": "一个对外名称可以按权重和优先级对应多个真实模型。",
+          "new": "新建虚拟模型",
+          "loading": "加载中…",
+          "empty": "还没有虚拟模型",
+          "edit": "编辑",
+          "name": "对外名称",
+          "displayName": "显示名",
+          "enabled": "启用",
+          "enabledBadge": "已启用",
+          "disabledBadge": "已停用",
+          "targets": "目标模型",
+          "addTarget": "添加目标",
+          "removeTarget": "移除",
+          "model": "真实模型",
+          "weight": "权重",
+          "priority": "优先级",
+          "priorityHint": "数值越小越优先；同一优先级内按权重选择，该模型没有可用渠道时才使用下一优先级。",
+          "createTitle": "新建虚拟模型",
+          "editTitle": "编辑虚拟模型",
+          "deleteTitle": "删除虚拟模型",
+          "deleteBody": "确定删除「{name}」？删除后前台将不再展示这个名称。",
+          "toast": {
+            "loadFailed": "加载虚拟模型失败",
+            "saved": "已保存",
+            "saveFailed": "保存失败，请检查名称和目标",
+            "duplicate": "这个对外名称已存在",
+            "deleted": "已删除",
+            "deleteFailed": "删除失败"
+          }
         }
       },
       "channels": {

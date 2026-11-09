@@ -52,6 +52,7 @@ import {
   Server,
 } from "lucide-react";
 import { inferModelCapabilities, isEmbeddingModelId } from "../../../lib/infer-model-capabilities";
+import { VirtualModelsPanel } from "./virtual-models";
 
 type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -942,6 +943,7 @@ export default function ModelProvidersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <VirtualModelsPanel />
     </div>
   );
 }

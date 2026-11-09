@@ -1680,6 +1680,38 @@
         "confirm": {
           "deleteProvider": "Delete provider \"{name}\"? This cannot be undone.",
           "removeModel": "Remove model \"{name}\" from this provider?"
+        },
+        "virtualModels": {
+          "title": "Virtual models",
+          "description": "One public name can map to several real models by weight and priority.",
+          "new": "New virtual model",
+          "loading": "Loading…",
+          "empty": "No virtual models yet",
+          "edit": "Edit",
+          "name": "Public name",
+          "displayName": "Display name",
+          "enabled": "Enabled",
+          "enabledBadge": "Enabled",
+          "disabledBadge": "Disabled",
+          "targets": "Target models",
+          "addTarget": "Add target",
+          "removeTarget": "Remove",
+          "model": "Real model",
+          "weight": "Weight",
+          "priority": "Priority",
+          "priorityHint": "Lower numbers are preferred. The same priority is chosen by weight. The next priority is used only when that model has no available channel.",
+          "createTitle": "New virtual model",
+          "editTitle": "Edit virtual model",
+          "deleteTitle": "Delete virtual model",
+          "deleteBody": "Delete \"{name}\"? It will disappear from the model list.",
+          "toast": {
+            "loadFailed": "Failed to load virtual models",
+            "saved": "Saved",
+            "saveFailed": "Save failed. Check the name and targets.",
+            "duplicate": "This public name already exists",
+            "deleted": "Deleted",
+            "deleteFailed": "Delete failed"
+          }
         }
       },
       "channels": {
