@@ -145,18 +145,23 @@ func (r *Registry) reload() error {
 		r.reportFailure(err)
 		return err
 	}
+	synthesized := false
 	if len(channels) == 0 && r.admin != nil {
 		if synth := synthesizeFromProviders(r.admin); len(synth) > 0 {
 			channels = synth
 			if encoded, mErr := json.Marshal(channels); mErr == nil {
 				raw = encoded
 			}
-			applied = true
+			synthesized = true
 		}
 	}
 	r.current.Store(&channels)
-	if applied {
+	// 只有真实来源（远端 2xx 或本地文件解析成功）且未再被合成覆盖时，才算最后可用快照。
+	// 合成结果每次轮询重算；若把它记成 hasGood，远端持续 404 会冻住兼容渠道。
+	if applied && !synthesized {
 		r.hasGood.Store(true)
+	}
+	if applied || synthesized {
 		r.reportSuccess(raw)
 	}
 	return nil

@@ -1,6 +1,9 @@
 package channel
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/configstatus"
+	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
 )
 
 func TestWeightedSampleDistribution(t *testing.T) {
@@ -136,6 +140,68 @@ func TestReloadKeepsChannelsOnRemote404(t *testing.T) {
 	}
 	if !strings.Contains(channelLastError(t, status), "remote 404") {
 		t.Fatalf("LastError = %q", channelLastError(t, status))
+	}
+}
+
+func TestReloadResynthesizesChannelsWhileRemote404(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "providers.json")
+	writeProviderModel(t, file, "model-a")
+	t.Setenv("GATEWAY_REMOTE_PROVIDERS_URL", "")
+	t.Setenv("GATEWAY_ADMIN_PROVIDERS_FILE", file)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	admin := runtimeconfig.New(logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	admin.Start(ctx)
+	cancel()
+	if _, ok := admin.ResolveByModel("model-a", ""); !ok {
+		t.Fatal("providers loader missed model-a")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GATEWAY_REMOTE_CHANNELS_URL", srv.URL)
+	t.Setenv("GATEWAY_ADMIN_CHANNELS_FILE", "")
+
+	status := configstatus.NewRegistry(nil)
+	reg := NewRegistry(nil, admin)
+	reg.SetConfigStatus(status)
+	if err := reg.reload(); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.ListByModel("", "model-a")) == 0 {
+		t.Fatal("expected synthesized channel for model-a")
+	}
+
+	writeProviderModel(t, file, "model-b")
+	ctx, cancel = context.WithCancel(context.Background())
+	admin.Start(ctx)
+	cancel()
+	if _, ok := admin.ResolveByModel("model-b", ""); !ok {
+		t.Fatal("providers loader missed model-b")
+	}
+	if err := reg.reload(); err != nil {
+		t.Fatalf("compat reload err = %v", err)
+	}
+	if len(reg.ListByModel("", "model-a")) != 0 {
+		t.Fatal("stale synthesized channel for model-a")
+	}
+	if len(reg.ListByModel("", "model-b")) == 0 {
+		t.Fatal("expected synthesized channel for model-b")
+	}
+	if got := channelLastError(t, status); got != "" {
+		t.Fatalf("LastError = %q", got)
+	}
+}
+
+func writeProviderModel(t *testing.T, file, model string) {
+	t.Helper()
+	body := `{"providers":[{"id":"p1","displayName":"P","baseUrl":"https://example.test/v1","apiKey":"k","enabled":true,"route":"third-party","models":[{"name":"` + model + `","enabled":true}]}]}`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
