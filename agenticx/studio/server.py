@@ -594,6 +594,8 @@ async def _external_harness_chat_stream(
                 kind = str(item.get("kind") or "")
                 # Synthetic spawn_subagent tool rows → live Agent 蜂群 card + tool group header.
                 if kind == "tool_start":
+                    from agenticx.runtime.events import normalize_tool_sse_payload
+
                     name = str(item.get("name") or "tool").strip() or "tool"
                     tid = str(item.get("tool_call_id") or "").strip()
                     if not tid:
@@ -621,6 +623,8 @@ async def _external_harness_chat_stream(
                     )
                     continue
                 if kind == "tool_end":
+                    from agenticx.runtime.events import normalize_tool_sse_payload
+
                     name = str(item.get("name") or "tool").strip() or "tool"
                     tid = str(item.get("tool_call_id") or "").strip()
                     if not tid:
