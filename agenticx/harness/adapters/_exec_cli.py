@@ -40,6 +40,22 @@ _READ_LINE_JOIN_SECONDS = 2.0
 _TAIL_MAX_CHARS = 2000
 
 
+def _plain_cli_tail(tail: str) -> str:
+    """Human-readable CLI lines, skipping NDJSON event envelopes."""
+    lines: List[str] = []
+    for raw in (tail or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("{") and stripped.endswith("}"):
+            continue
+        if stripped.startswith("Reading additional input from stdin"):
+            continue
+        lines.append(stripped)
+    return "\n".join(lines).strip()
+
+
+
 @dataclass
 class ExecCliSession:
     """Bookkeeping for one logical harness session."""
@@ -260,32 +276,46 @@ class ExecCliHarnessAdapter(HarnessAdapter):
             session.state = "idle"
 
         tail = "\n".join(tail_lines[-20:])
+        visible_tail = _plain_cli_tail(tail)
         if timed_out:
+            timeout_detail = dict(detail, wait_seconds=request.wait_seconds)
+            if visible_tail and not timeout_detail.get("terminal_detail"):
+                timeout_detail["terminal_detail"] = visible_tail[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_TIMEOUT,
                 result_text="",
                 tail=tail,
-                detail=dict(detail, wait_seconds=request.wait_seconds),
+                detail=timeout_detail,
             )
         if error_text:
+            err_detail = dict(detail, error=error_text[:500])
+            if not err_detail.get("terminal_detail") and not err_detail.get(
+                "error_visible_text"
+            ):
+                err_detail["terminal_detail"] = error_text[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
                 result_text="",
                 tail=tail,
-                detail=dict(detail, error=error_text[:500]),
+                detail=err_detail,
             )
         if exit_code not in (0, None):
+            fail_detail = dict(detail)
+            if visible_tail and not fail_detail.get("terminal_detail") and not fail_detail.get(
+                "error_visible_text"
+            ):
+                fail_detail["terminal_detail"] = visible_tail[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
                 result_text="",
                 tail=tail,
-                detail=detail,
+                detail=fail_detail,
             )
         return TurnResult(
             harness=self.harness_id,
