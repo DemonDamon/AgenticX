@@ -1050,6 +1050,7 @@ async def _external_harness_chat_stream(
         try:
             _managed = manager.get(sid, touch=False)
             if _managed is not None:
+                _fail_session = _managed.studio_session
                 _managed.studio_session.chat_history.append(
                     {
                         "role": "assistant",
@@ -1059,6 +1060,10 @@ async def _external_harness_chat_stream(
                             "harness_status": "error",
                             "source": "harness-turn-failed",
                         },
+                        **harness_wiring.turn_assistant_model_fields(
+                            _fail_session,
+                            getattr(payload, "model", None),
+                        ),
                     }
                 )
                 manager._persist_session_state(
