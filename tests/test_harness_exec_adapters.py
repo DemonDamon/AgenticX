@@ -380,9 +380,15 @@ def test_codex_resume_args(fake_codex):
     adapter.turn(sid, _turn("again"))
     argvs = _read_log(fake_codex["log"])
     second = argvs[1]["argv"]
-    assert second[:3] == ["exec", "resume", "thr_fake222"]
+    assert second[:2] == ["exec", "resume"]
     assert "--json" in second
     assert "--skip-git-repo-check" in second
+    # Codex 0.167: options must come before SESSION_ID; resume rejects -C.
+    assert "-C" not in second
+    rid = second.index("thr_fake222")
+    assert second.index("--json") < rid
+    assert second.index("--skip-git-repo-check") < rid
+    assert second[rid + 1] == "again"
 
 
 def test_codex_sandbox_and_model_args(fake_codex):
@@ -399,6 +405,29 @@ def test_codex_sandbox_and_model_args(fake_codex):
     assert argv[argv.index("-m") + 1] == "gpt-5.2-codex"
     i = argv.index("-C")
     assert argv[i + 1] == os.getcwd()
+
+
+def test_codex_resume_omits_cd_and_puts_options_before_session_id(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(
+        os.getcwd(),
+        options={"model": "glm-5.3-flash", "sandbox": "workspace-write"},
+    )["session_id"]
+    adapter.turn(sid, _turn())
+    adapter.turn(sid, _turn("follow up"))
+    first, second = (_read_log(fake_codex["log"])[i]["argv"] for i in (0, 1))
+    assert first[0] == "exec" and first[1] != "resume"
+    assert first[first.index("-C") + 1] == os.getcwd()
+    assert first[first.index("--sandbox") + 1] == "workspace-write"
+    assert first[first.index("-m") + 1] == "glm-5.3-flash"
+    assert second[:2] == ["exec", "resume"]
+    assert "-C" not in second
+    assert "--sandbox" not in second
+    assert second[second.index("-m") + 1] == "glm-5.3-flash"
+    rid = second.index("thr_fake222")
+    assert second.index("--json") < rid
+    assert second.index("-m") < rid
+    assert second[rid + 1] == "follow up"
 
 
 def test_codex_error_event_maps_to_error(fake_codex):

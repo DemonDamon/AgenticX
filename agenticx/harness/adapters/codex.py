@@ -115,23 +115,26 @@ class CodexAdapter(ExecCliHarnessAdapter):
         opts = session.options
         # Always skip the trusted-git-repo gate: Near already chose cwd,
         # and session taskspaces are typically empty non-git directories.
-        tail = ["--json", "--skip-git-repo-check", "-C", session.cwd]
+        # Codex 0.167: `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]`.
+        # Resume does not accept `-C` / `--cd`, `--sandbox`, or `--full-auto`.
+        common = ["--json", "--skip-git-repo-check"]
         model = opts.get("model")
         if model:
-            tail += ["-m", str(model)]
+            common += ["-m", str(model)]
+        if session.native_thread_id:
+            return [
+                "exec",
+                "resume",
+                *common,
+                session.native_thread_id,
+                text,
+            ]
+        tail = [*common, "-C", session.cwd]
         sandbox = opts.get("sandbox")
         if sandbox:
             tail += ["--sandbox", str(sandbox)]
         if opts.get("full_auto"):
             tail += ["--full-auto"]
-        if session.native_thread_id:
-            return [
-                "exec",
-                "resume",
-                session.native_thread_id,
-                *tail,
-                text,
-            ]
         return ["exec", *tail, text]
 
     # ------------------------------------------------------------------
