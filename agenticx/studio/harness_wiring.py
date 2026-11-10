@@ -58,6 +58,7 @@ _BUILTIN_HARNESS_IDS = frozenset({"", "python-agent", "builtin", "agenticx"})
 _HARNESSES_WITH_MODEL_OPTION = frozenset(
     {"claude-code", "codex", "opencode", "codebuddy"}
 )
+_CODEX_HARNESS_ID = "codex"
 
 _lock = threading.Lock()
 _registry: Optional[HarnessRegistry] = None
@@ -500,6 +501,90 @@ def apply_chat_model_to_harness_options(
     )
 
 
+
+def _sanitized_codex_provider_id(provider_name: Optional[str]) -> Optional[str]:
+    """Near provider name → Codex ``model_providers`` id, or None if unknown."""
+    raw = str(provider_name or "").strip()
+    if not raw:
+        return None
+    try:
+        from agenticx.harness.codex_settings import sanitize_codex_provider_id
+
+        return sanitize_codex_provider_id(raw)
+    except Exception:
+        return None
+
+
+def current_intended_codex_provider_id(
+    manager: Any,
+    session_id: str,
+    *,
+    chat_provider: Optional[str] = None,
+) -> Optional[str]:
+    """Intended Codex provider id at turn start (Near picker → sanitize).
+
+    ``chat_provider`` (the ChatRequest provider, same source as
+    ``maybe_sync_harness_settings``) wins; otherwise the session's
+    ``provider_name`` is used. Does not read config.toml or token files.
+    """
+    intended = _sanitized_codex_provider_id(chat_provider)
+    if intended:
+        return intended
+    try:
+        managed = manager.get(session_id, touch=False)
+    except TypeError:
+        managed = manager.get(session_id)
+    except Exception:
+        managed = None
+    if managed is None:
+        return None
+    session = getattr(managed, "studio_session", None)
+    return _sanitized_codex_provider_id(
+        getattr(session, "provider_name", None) if session is not None else None
+    )
+
+
+def _stamped_harness_provider_id(options: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(options, dict):
+        return None
+    text = str(options.get("model_provider") or "").strip()
+    return text or None
+
+
+def _provider_mismatch_requires_fresh_thread(
+    stamped_provider_id: Optional[str],
+    intended_provider_id: Optional[str],
+) -> bool:
+    """True when a stamped native thread belongs to a different provider."""
+    stamped = str(stamped_provider_id or "").strip()
+    intended = str(intended_provider_id or "").strip()
+    return bool(stamped and intended and stamped != intended)
+
+
+def _turn_error_haystack(result: TurnResult) -> str:
+    parts = [
+        str(getattr(result, "result_text", "") or ""),
+        str(getattr(result, "tail", "") or ""),
+        str(getattr(result, "status", "") or ""),
+    ]
+    detail = result.detail if isinstance(getattr(result, "detail", None), dict) else {}
+    for key in ("error", "error_visible_text", "terminal_detail", "type"):
+        parts.append(str(detail.get(key) or ""))
+    return "\n".join(parts)
+
+
+def is_codex_model_provider_mismatch(result: TurnResult) -> bool:
+    """Detect Codex refusing to resume a thread bound to another provider."""
+    if getattr(result, "ok", False):
+        return False
+    lowered = _turn_error_haystack(result).lower().replace("_", "")
+    return (
+        "modelprovidermismat" in lowered
+        or "thread/resume failed" in lowered
+        or "but your current provider is" in lowered
+    )
+
+
 # ----------------------------------------------------------------------
 # unified-surface session lifecycle
 # ----------------------------------------------------------------------
@@ -525,7 +610,11 @@ def ensure_harness_session(
 
 
 def ensure_harness_session_lease(
-    manager: Any, session_id: str, harness_id: str
+    manager: Any,
+    session_id: str,
+    harness_id: str,
+    *,
+    intended_provider_id: Optional[str] = None,
 ) -> HarnessSessionLease:
     """Reuse or spawn the unified-surface session and report if it is blank.
 
@@ -536,6 +625,12 @@ def ensure_harness_session_lease(
     If the live session reports a spawn ``model`` that differs from the
     binding's ``harness_options.model``, stop and re-spawn so the Near
     model picker takes effect (spawn-time CLI flag).
+
+    Codex (and any binding that stamps ``harness_options.model_provider``)
+    also refuses to resume a native thread when that stamp differs from
+    the current intended provider. Same-provider model changes still
+    resume; a provider switch starts a blank surface so the caller can
+    inject history.
     """
     adapter = harness_registry().require(harness_id)
     sid = require_safe_session_id(session_id)
@@ -543,6 +638,13 @@ def ensure_harness_session_lease(
     surface_sid = str(binding.get("harness_session_id") or "").strip()
     options = dict(binding.get("harness_options") or {})
     desired_model = str(options.get("model") or "").strip() or None
+    native_thread = str(binding.get("harness_thread_id") or "").strip()
+    intended = str(intended_provider_id or "").strip() or None
+    if intended is None:
+        intended = current_intended_codex_provider_id(manager, sid)
+    provider_mismatch = _provider_mismatch_requires_fresh_thread(
+        _stamped_harness_provider_id(options), intended
+    )
 
     if surface_sid:
         view = adapter.describe(surface_sid)
@@ -553,14 +655,16 @@ def ensure_harness_session_lease(
                 live_model = str(raw.get("model") or "").strip() or None
             if live_model is None and isinstance(view, dict):
                 live_model = str(view.get("model") or "").strip() or None
-            # Only enforce mismatch when we have a desired model and the
-            # adapter surfaces a spawn model (CC bridge). Exec CLIs that
-            # do not report model on describe keep the live session.
-            if (
+            # Only enforce model mismatch when we have a desired model and
+            # the adapter surfaces a spawn model (CC bridge). Exec CLIs
+            # that do not report model on describe keep the live session
+            # unless the stamped provider no longer matches.
+            model_mismatch = (
                 desired_model is not None
                 and live_model is not None
                 and live_model != desired_model
-            ):
+            )
+            if model_mismatch or provider_mismatch:
                 try:
                     adapter.stop(surface_sid)
                 except Exception:
@@ -569,10 +673,12 @@ def ensure_harness_session_lease(
             else:
                 return HarnessSessionLease(surface_sid, started_blank=False)
 
+    if provider_mismatch:
+        native_thread = ""
+
     cwd = snapshot_from_session(manager, sid).cwd
     view = adapter.spawn(cwd, options=dict(options))
     surface_sid = str(view["session_id"])
-    native_thread = str(binding.get("harness_thread_id") or "").strip()
     resumed = False
     if native_thread and adapter.capabilities().resume:
         try:
@@ -771,6 +877,7 @@ def run_external_harness_turn(
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    chat_provider: Optional[str] = None,
     skip_user_history: bool = False,
 ) -> TurnResult:
     """Execute one turn on the bound external harness and record it in
@@ -781,6 +888,8 @@ def run_external_harness_turn(
 
     ``chat_model`` (Near ``ChatRequest.model``) is folded into harness
     spawn options for adapters that already expose a native model knob.
+    ``chat_provider`` (Near ``ChatRequest.provider``) is the same source
+    settings sync uses to compute the Codex ``model_provider`` id.
     """
     sid = require_safe_session_id(session_id)
     if not _begin_inflight(sid):
@@ -793,6 +902,7 @@ def run_external_harness_turn(
             sid,
             user_text,
             chat_model=chat_model,
+            chat_provider=chat_provider,
             skip_user_history=skip_user_history,
         )
     finally:
@@ -846,12 +956,64 @@ def _outbound_text_for_fresh_surface(
     return text or pending
 
 
+def _retry_turn_after_provider_mismatch(
+    manager: Any,
+    session_id: str,
+    harness_id: str,
+    adapter: Any,
+    surface_sid: str,
+    *,
+    user_text: str,
+    session: Any,
+    intended_provider_id: Optional[str],
+) -> tuple[str, TurnResult]:
+    """Drop a provider-bound native thread and retry once on a blank surface."""
+    sid = session_id
+    binding = manager.get_session_harness(sid) or {}
+    options = dict(binding.get("harness_options") or {})
+    try:
+        if surface_sid:
+            adapter.stop(surface_sid)
+    except Exception:
+        pass
+    manager.set_session_harness(
+        sid,
+        harness_id=harness_id,
+        thread_id=None,
+        options=options or None,
+        surface_session_id=None,
+    )
+    lease = ensure_harness_session_lease(
+        manager,
+        sid,
+        harness_id,
+        intended_provider_id=intended_provider_id,
+    )
+    outbound = _outbound_text_for_fresh_surface(
+        manager,
+        sid,
+        harness_id,
+        user_text=user_text,
+        started_blank=True,
+        history=session.chat_history,
+    )
+    request = TurnRequest(
+        text=outbound,
+        wait_seconds=_TURN_WAIT_SECONDS,
+        owner_session_id=sid,
+        studio_session_id=sid,
+    )
+    result = adapter.turn(lease.surface_session_id, request)
+    return lease.surface_session_id, result
+
+
 def _run_external_harness_turn_body(
     manager: Any,
     session_id: str,
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    chat_provider: Optional[str] = None,
     skip_user_history: bool = False,
 ) -> TurnResult:
     sid = require_safe_session_id(session_id)
@@ -873,10 +1035,17 @@ def _run_external_harness_turn_body(
     )
     # Near confirm strategy → CC auto_allow / CB permission_mode.
     apply_run_mode_to_harness_options(manager, sid, harness_id)
-    binding = manager.get_session_harness(sid) or {}
+    provider = str(chat_provider or "").strip()
+    if provider:
+        session.provider_name = provider
+    intended = current_intended_codex_provider_id(
+        manager, sid, chat_provider=provider or chat_provider
+    )
 
     adapter = harness_registry().require(harness_id)
-    lease = ensure_harness_session_lease(manager, sid, harness_id)
+    lease = ensure_harness_session_lease(
+        manager, sid, harness_id, intended_provider_id=intended
+    )
     surface_sid = lease.surface_session_id
 
     user_text = str(user_text or "").strip()
@@ -911,6 +1080,23 @@ def _run_external_harness_turn_body(
         studio_session_id=sid,
     )
     result = adapter.turn(surface_sid, request)
+    retried_mismatch = False
+    if is_codex_model_provider_mismatch(result):
+        # Unstamped (or missed) provider-bound threads: never leave the
+        # stale native id in the binding, and never switch config.toml
+        # back to the old provider. Retry once on a blank surface with
+        # history injection; persist only the retry result.
+        surface_sid, result = _retry_turn_after_provider_mismatch(
+            manager,
+            sid,
+            harness_id,
+            adapter,
+            surface_sid,
+            user_text=user_text,
+            session=session,
+            intended_provider_id=intended,
+        )
+        retried_mismatch = True
 
     native_thread = None
     if isinstance(result.detail, dict):
@@ -945,13 +1131,30 @@ def _run_external_harness_turn_body(
                 _append_cc_subagent_cluster_anchor(session, cb_payload)
             except Exception:
                 pass
-    # Keep the binding's native-thread handle fresh for resume/handoff.
-    if native_thread:
+    latest = manager.get_session_harness(sid) or {}
+    options = dict(latest.get("harness_options") or {})
+    if harness_id == _CODEX_HARNESS_ID and intended and result.ok:
+        options["model_provider"] = intended
+    if retried_mismatch and not (result.ok and native_thread):
+        thread_for_binding = None
+    elif result.ok and native_thread:
+        thread_for_binding = str(native_thread)
+    elif retried_mismatch:
+        thread_for_binding = None
+    elif native_thread:
+        thread_for_binding = str(native_thread)
+    else:
+        thread_for_binding = latest.get("harness_thread_id")
+    if (
+        retried_mismatch
+        or native_thread
+        or (result.ok and harness_id == _CODEX_HARNESS_ID and intended)
+    ):
         manager.set_session_harness(
             sid,
             harness_id=harness_id,
-            thread_id=str(native_thread),
-            options=binding.get("harness_options"),
+            thread_id=thread_for_binding,
+            options=options or None,
             surface_session_id=surface_sid,
         )
     managed.updated_at = time.time()
@@ -1292,6 +1495,7 @@ async def run_external_harness_turn_async(
     user_text: str,
     *,
     chat_model: Optional[str] = None,
+    chat_provider: Optional[str] = None,
     skip_user_history: bool = False,
 ) -> TurnResult:
     """Async wrapper: adapter turns block for the whole turn, so run them
@@ -1302,6 +1506,7 @@ async def run_external_harness_turn_async(
         session_id,
         user_text,
         chat_model=chat_model,
+        chat_provider=chat_provider,
         skip_user_history=skip_user_history,
     )
 

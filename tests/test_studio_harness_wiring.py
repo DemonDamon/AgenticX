@@ -14,6 +14,7 @@ from agenticx.cli.studio import StudioSession
 from agenticx.harness.adapter import HarnessAdapter
 from agenticx.harness.registry import HarnessRegistry
 from agenticx.harness.types import (
+    TURN_STATUS_ERROR,
     TURN_STATUS_SUCCESS,
     HarnessCapabilities,
     TurnRequest,
@@ -1025,3 +1026,185 @@ def test_set_session_model_does_not_rewrite_harness_history_models(wiring):
     assert len(assistants) == 1
     assert assistants[0]["model"] == "model-a"
 
+
+
+class ProviderMismatchOnceAdapter(RecordingAdapter):
+    """Resume-capable Codex stand-in that fails once on a stamped stale thread."""
+
+    def __init__(self, *args: Any, stale_thread_id: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.stale_thread_id = stale_thread_id
+        self.mismatch_turns = 0
+
+    def turn(self, session_id: str, request: TurnRequest) -> TurnResult:
+        session = self._sessions[session_id]
+        native = str(session.get("native_thread_id") or "")
+        if native == self.stale_thread_id:
+            self.mismatch_turns += 1
+            self.turns.append({"session_id": session_id, "text": request.text})
+            return TurnResult(
+                harness=self.harness_id,
+                session_id=session_id,
+                status=TURN_STATUS_ERROR,
+                result_text="",
+                tail="",
+                detail={
+                    "native_thread_id": native,
+                    "error": (
+                        "thread/resume: thread/resume failed: This chat uses "
+                        "agenticx-custom-openai-1782269503107, but your current "
+                        "provider is agenticx-mimo. Switch to "
+                        "agenticx-custom-openai-1782269503107 to continue. "
+                        '(code -32600), data: {"type":"modelProviderMismatch"}'
+                    ),
+                },
+            )
+        return super().turn(session_id, request)
+
+
+def test_codex_provider_change_skips_resume_and_injects_history(wiring):
+    """Mid-session official MiMo switch must not resume a 彩讯-bound thread."""
+    hw, _alpha, _beta, _ = wiring
+    codex = RecordingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codex")
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "国内除了 OpenSandbox 还有哪些很不错的？",
+        chat_model="glm-5.3-flash",
+        chat_provider="custom_openai_1782269503107",
+    )
+    session.chat_history[-1]["content"] = (
+        "按信创可落地程度排序：第一梯队 CubeSandbox（腾讯云，Apache 2.0）"
+    )
+    first_binding = manager.get_session_harness("sess-1")
+    first_thread = first_binding["harness_thread_id"]
+    assert first_thread == "codex-native-1"
+    assert first_binding["harness_options"]["model_provider"] == (
+        "agenticx-custom-openai-1782269503107"
+    )
+    adopts_before_switch = list(codex.adopted)
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "你好",
+        chat_model="mimo-v2.6-flash",
+        chat_provider="mimo",
+    )
+
+    assert codex.spawn_count == 2
+    assert codex.adopted == adopts_before_switch
+    outbound = codex.turns[-1]["text"]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    assert "CubeSandbox" in outbound
+    assert outbound.endswith("你好")
+    assert session.chat_history[-2]["role"] == "user"
+    assert session.chat_history[-2]["content"] == "你好"
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_thread_id"] == "codex-native-2"
+    assert binding["harness_thread_id"] != first_thread
+    assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
+    assert session.chat_history[-1]["content"] == "codex reply #2"
+
+
+def test_codex_same_provider_model_change_still_resumes(wiring):
+    """Same Codex provider, different model: resume the native thread, no wrap."""
+    hw, _alpha, _beta, _ = wiring
+    codex = RecordingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codex")
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "one",
+        chat_model="mimo-v2.6-flash",
+        chat_provider="mimo",
+    )
+    first_thread = manager.get_session_harness("sess-1")["harness_thread_id"]
+    assert manager.get_session_harness("sess-1")["harness_options"][
+        "model_provider"
+    ] == "agenticx-mimo"
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "two",
+        chat_model="mimo-v2.6-pro",
+        chat_provider="mimo",
+    )
+
+    assert codex.spawn_count == 2
+    assert codex.adopted == [("codex-surf-2", first_thread)]
+    assert codex.turns[-1]["text"] == "two"
+    assert session.chat_history[-2]["content"] == "two"
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" not in codex.turns[-1]["text"]
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_thread_id"] == first_thread
+    assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
+
+
+def test_unstamped_codex_provider_mismatch_retries_with_history(wiring):
+    """Old sessions have a thread id but no provider stamp; retry once."""
+    hw, _alpha, _beta, _ = wiring
+    stale = "01a1c36d-994b-7f02-a685-d0a5322db6c4"
+    codex = ProviderMismatchOnceAdapter(
+        "codex", resume=True, stale_thread_id=stale
+    )
+    hw.harness_registry().register(codex)
+    session = make_session()
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "国内除了 OpenSandbox 还有哪些很不错的？",
+            "metadata": {"harness": "codex"},
+        },
+        {
+            "role": "assistant",
+            "content": "按信创可落地程度排序：第一梯队 CubeSandbox。",
+            "metadata": {"harness": "codex", "native_thread_id": stale},
+        },
+    ]
+    manager = FakeManager(session)
+    manager.set_session_harness(
+        "sess-1",
+        harness_id="codex",
+        thread_id=stale,
+        options={"model": "glm-5.3-flash"},
+        surface_session_id=None,
+    )
+
+    result = hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "你好",
+        chat_model="mimo-v2.6-flash",
+        chat_provider="mimo",
+    )
+
+    assert result.ok
+    assert codex.mismatch_turns == 1
+    assert codex.spawn_count == 2
+    assert codex.adopted == [("codex-surf-1", stale)]
+    # First outbound is a resume of the stale thread (raw prompt).
+    assert codex.turns[0]["text"] == "你好"
+    outbound = codex.turns[-1]["text"]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    assert "CubeSandbox" in outbound
+    assert outbound.endswith("你好")
+    assert session.chat_history[-2]["content"] == "你好"
+    assistants = [row for row in session.chat_history if row["role"] == "assistant"]
+    assert "modelProviderMismatch" not in assistants[-1]["content"]
+    assert "but your current provider is" not in assistants[-1]["content"]
+    assert assistants[-1]["content"] == "codex reply #2"
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_thread_id"] != stale
+    assert binding["harness_thread_id"] == "codex-native-2"
+    assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
