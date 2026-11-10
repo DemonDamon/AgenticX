@@ -372,6 +372,7 @@ async def _external_harness_chat_stream(
             sid,
             payload.user_input,
             chat_model=getattr(payload, "model", None),
+            chat_provider=getattr(payload, "provider", None),
             skip_user_history=bool(getattr(payload, "skip_user_history", False)),
         )
     )
