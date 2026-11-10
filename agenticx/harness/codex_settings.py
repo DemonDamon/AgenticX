@@ -14,6 +14,12 @@ compatible gateway works without a second manual config step.
 API keys are stored in ``$CODEX_HOME/.agenticx/<provider>.token`` (mode 0600)
 and referenced via ``auth.command = /bin/cat`` — not embedded in config.toml.
 
+Gateways known to reject OpenAI's hosted ``web_search`` Responses tool
+(currently official Xiaomi MiMo at ``api.xiaomimimo.com``) also get
+``web_search = "disabled"``. Other OpenAI-compatible Responses gateways keep
+Codex's default. Switching away from a limited gateway removes a Near-set
+``disabled`` value so the default is restored.
+
 Builtin / python-agent paths must never call into this module for writes.
 
 Author: Damon Li
@@ -27,6 +33,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
+from urllib.parse import urlparse
 
 from agenticx.llms.known_base_urls import (
     default_provider_base_url,
@@ -41,6 +48,53 @@ except ModuleNotFoundError:  # pragma: no cover
 DEFAULT_CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 _RESERVED_PROVIDER_IDS = frozenset({"openai", "ollama", "lmstudio"})
 _MANAGED_PREFIX = "agenticx-"
+
+# Codex 0.167 defaults ``web_search`` to ``cached``, which always registers
+# OpenAI's hosted Responses tool type ``web_search``. Official Xiaomi MiMo
+# (api.xiaomimimo.com) rejects that tool with responses_feature_not_supported.
+# Live-probed 2026-11-10: 彩讯/aibox, Bailian MAAS, MiniMax, Moonshot, and
+# DeepSeek accepted a default Codex turn with web_search left enabled.
+_WEB_SEARCH_UNSUPPORTED_HOST_SUFFIXES = (".xiaomimimo.com",)
+_WEB_SEARCH_UNSUPPORTED_HOSTS = frozenset({"xiaomimimo.com"})
+_CODEX_WEB_SEARCH_DISABLED = "disabled"
+
+
+def codex_gateway_lacks_hosted_web_search(base_url: str) -> bool:
+    """True when this Responses gateway rejects OpenAI's hosted web_search tool."""
+    host = (urlparse(str(base_url or "").strip()).hostname or "").lower()
+    if not host:
+        return False
+    if host in _WEB_SEARCH_UNSUPPORTED_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in _WEB_SEARCH_UNSUPPORTED_HOST_SUFFIXES)
+
+
+def _top_level_scalar_value(text: str, key: str) -> Optional[str]:
+    pattern = re.compile(r"^" + re.escape(key) + r"\s*=")
+    for line in (text or "").splitlines():
+        if line.startswith("["):
+            break
+        if not pattern.match(line):
+            continue
+        raw = line.split("=", 1)[1].strip()
+        quote = raw[0] if raw else ""
+        if len(raw) >= 2 and quote in ("'", '"') and raw[-1] == quote:
+            return raw[1:-1]
+        return raw
+    return None
+
+
+def _remove_top_level_key(text: str, key: str) -> str:
+    pattern = re.compile(r"^" + re.escape(key) + r"\s*=")
+    lines = (text or "").splitlines(keepends=True)
+    out: list[str] = []
+    removed = False
+    for line in lines:
+        if not removed and not line.startswith("[") and pattern.match(line):
+            removed = True
+            continue
+        out.append(line)
+    return "".join(out)
 
 
 class CodexSettingsError(ValueError):
@@ -249,6 +303,12 @@ def merge_provider_into_codex_config(
     provider_id = sanitize_codex_provider_id(provider_name)
     label = str(display_name or provider_name or provider_id).strip() or provider_id
     out = _upsert_top_level_string(out, "model_provider", provider_id)
+    if codex_gateway_lacks_hosted_web_search(normalized):
+        out = _upsert_top_level_string(out, "web_search", _CODEX_WEB_SEARCH_DISABLED)
+    elif _top_level_scalar_value(out, "web_search") == _CODEX_WEB_SEARCH_DISABLED:
+        # Restore the Codex default (cached) when leaving a limited gateway.
+        # Do not clobber an explicit cached/indexed/live setting.
+        out = _remove_top_level_key(out, "web_search")
     out = _remove_table(out, f"model_providers.{provider_id}.auth")
     out = _remove_table(out, f"model_providers.{provider_id}")
     use_token = token_file if str(api_key or "").strip() else None
@@ -466,6 +526,7 @@ __all__ = [
     "apply_provider_to_codex_settings",
     "atomic_write_text",
     "codex_config_path",
+    "codex_gateway_lacks_hosted_web_search",
     "load_codex_config_text",
     "managed_token_path",
     "maybe_sync_codex_settings",

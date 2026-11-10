@@ -9,6 +9,7 @@ from agenticx.harness.codex_settings import (
     CodexSettingsError,
     apply_named_provider_to_codex_settings,
     maybe_sync_codex_settings,
+    codex_gateway_lacks_hosted_web_search,
     merge_provider_into_codex_config,
     normalize_codex_base_url,
     parse_codex_config,
@@ -101,6 +102,7 @@ def test_merge_official_provider_uses_default_base_url() -> None:
     assert mimo["name"] == "小米 MiMo"
     leftover = doc["model_providers"]["agenticx-custom-openai-1782269503107"]
     assert leftover["base_url"] == "http://aibox.richaibox.com:2026/v1"
+    assert doc["web_search"] == "disabled"
 
 
 def test_merge_without_base_url_fails_closed() -> None:
@@ -183,6 +185,7 @@ def test_apply_named_official_mimo_does_not_reuse_leftover_gateway(
     assert doc["model_providers"]["agenticx-mimo"]["auth"]["args"] == [
         str(token_path)
     ]
+    assert doc["web_search"] == "disabled"
 
     unknown = {"custom_openai_9": {"api_key": "sk-fail"}}
     try:
@@ -239,6 +242,7 @@ def test_apply_named_and_maybe_sync(tmp_path: Path) -> None:
     assert doc["model"] == "qwen3.7-plus"
     assert doc["model_provider"] == "agenticx-bailian"
     assert doc["features"]["apps"] is False
+    assert "web_search" not in doc
     token_path = target.parent / ".agenticx" / "agenticx-bailian.token"
     assert token_path.exists()
     assert token_path.read_text(encoding="utf-8") == "sk-bailian"
@@ -272,3 +276,65 @@ def test_corrupt_toml_not_clobbered(tmp_path: Path) -> None:
     except Exception as exc:
         assert "invalid TOML" in str(exc) or "TOML" in str(exc)
     assert target.read_text(encoding="utf-8") == "not = [toml"
+
+
+def test_codex_gateway_lacks_hosted_web_search_is_mimo_specific() -> None:
+    assert codex_gateway_lacks_hosted_web_search("https://api.xiaomimimo.com/v1")
+    assert codex_gateway_lacks_hosted_web_search("https://api.xiaomimimo.com/v1/")
+    assert not codex_gateway_lacks_hosted_web_search("http://aibox.richaibox.com:2026/v1")
+    assert not codex_gateway_lacks_hosted_web_search(
+        "https://llm-d178jdr4rwpo9pmz.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    )
+    assert not codex_gateway_lacks_hosted_web_search("https://api.minimaxi.com/v1")
+    assert not codex_gateway_lacks_hosted_web_search("https://api.moonshot.cn/v1")
+    assert not codex_gateway_lacks_hosted_web_search("https://api.deepseek.com/v1")
+    assert not codex_gateway_lacks_hosted_web_search("https://api.openai.com/v1")
+    assert not codex_gateway_lacks_hosted_web_search("")
+
+
+def test_merge_disables_web_search_for_official_mimo_only() -> None:
+    disabled = merge_provider_into_codex_config(
+        'model = "glm-5.3-flash"\n',
+        provider_name="mimo",
+        model_id="mimo-v2.6-flash",
+        api_key=None,
+        base_url=None,
+        display_name="小米 MiMo",
+    )
+    doc = parse_codex_config(disabled)
+    assert doc["web_search"] == "disabled"
+    assert doc["model_providers"]["agenticx-mimo"]["wire_api"] == "responses"
+    assert doc["model_providers"]["agenticx-mimo"]["base_url"] == (
+        "https://api.xiaomimimo.com/v1"
+    )
+
+    restored = merge_provider_into_codex_config(
+        disabled,
+        provider_name="custom_openai_1782269503107",
+        model_id="glm-5.3-flash",
+        api_key=None,
+        base_url="http://aibox.richaibox.com:2026/v1",
+        display_name="彩讯-外网",
+    )
+    restored_doc = parse_codex_config(restored)
+    assert "web_search" not in restored_doc
+    assert restored_doc["model_provider"] == "agenticx-custom-openai-1782269503107"
+    # leftover mimo block stays; 彩讯 is not rewritten onto aibox leftovers
+    assert (
+        restored_doc["model_providers"]["agenticx-mimo"]["base_url"]
+        == "https://api.xiaomimimo.com/v1"
+    )
+
+
+def test_merge_preserves_explicit_live_web_search_on_non_mimo() -> None:
+    original = 'model = "keep"\nweb_search = "live"\n'
+    merged = merge_provider_into_codex_config(
+        original,
+        provider_name="deepseek",
+        model_id="deepseek-v4-flash",
+        api_key=None,
+        base_url="https://api.deepseek.com/v1",
+    )
+    doc = parse_codex_config(merged)
+    assert doc["web_search"] == "live"
+    assert doc["model_provider"] == "agenticx-deepseek"
