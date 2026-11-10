@@ -6,14 +6,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenticx.harness.codex_settings import (
+    CodexSettingsError,
     apply_named_provider_to_codex_settings,
     maybe_sync_codex_settings,
     merge_provider_into_codex_config,
     normalize_codex_base_url,
     parse_codex_config,
+    resolve_codex_gateway_base_url,
     sanitize_codex_provider_id,
     write_codex_config,
 )
+from agenticx.llms.known_base_urls import default_provider_base_url
 
 
 def test_normalize_codex_base_url_strips_responses_and_chat() -> None:
@@ -71,19 +74,146 @@ steer = true
     assert "personality" in merged
 
 
-def test_merge_without_base_url_only_sets_model() -> None:
-    original = 'model = "old"\nmodel_provider = "openai"\n'
+def test_merge_official_provider_uses_default_base_url() -> None:
+    original = (
+        'model = "glm-5.3-flash"\n'
+        'model_provider = "agenticx-custom-openai-1782269503107"\n'
+        "\n"
+        "[model_providers.agenticx-custom-openai-1782269503107]\n"
+        'name = "彩讯-外网"\n'
+        'base_url = "http://aibox.richaibox.com:2026/v1"\n'
+        'wire_api = "responses"\n'
+    )
     merged = merge_provider_into_codex_config(
         original,
-        provider_name="openai",
-        model_id="gpt-5.3-codex",
-        api_key="sk",
+        provider_name="mimo",
+        model_id="mimo-v2.6-flash",
+        api_key="sk-test",
         base_url=None,
+        display_name="小米 MiMo",
     )
     doc = parse_codex_config(merged)
-    assert doc["model"] == "gpt-5.3-codex"
-    assert doc["model_provider"] == "openai"
-    assert "model_providers" not in doc
+    assert doc["model"] == "mimo-v2.6-flash"
+    assert doc["model_provider"] == "agenticx-mimo"
+    mimo = doc["model_providers"]["agenticx-mimo"]
+    assert mimo["base_url"] == "https://api.xiaomimimo.com/v1"
+    assert mimo["wire_api"] == "responses"
+    assert mimo["name"] == "小米 MiMo"
+    leftover = doc["model_providers"]["agenticx-custom-openai-1782269503107"]
+    assert leftover["base_url"] == "http://aibox.richaibox.com:2026/v1"
+
+
+def test_merge_without_base_url_fails_closed() -> None:
+    original = (
+        'model = "glm-5.3-flash"\n'
+        'model_provider = "agenticx-custom-openai-1782269503107"\n'
+    )
+    try:
+        merge_provider_into_codex_config(
+            original,
+            provider_name="custom_openai_9",
+            model_id="mimo-v2.6-flash",
+            api_key="sk-test",
+            base_url=None,
+        )
+        raise AssertionError("expected CodexSettingsError")
+    except CodexSettingsError as exc:
+        msg = str(exc)
+        assert "base_url" in msg
+        assert "leftover" in msg
+
+
+def test_resolve_rejects_official_anthropic() -> None:
+    try:
+        resolve_codex_gateway_base_url("anthropic")
+        raise AssertionError("expected CodexSettingsError")
+    except CodexSettingsError as exc:
+        assert "Responses" in str(exc)
+    assert default_provider_base_url("anthropic") == "https://api.anthropic.com/v1"
+    assert default_provider_base_url("mimo") == "https://api.xiaomimimo.com/v1"
+    assert (
+        resolve_codex_gateway_base_url("mimo")
+        == "https://api.xiaomimimo.com/v1"
+    )
+    assert (
+        resolve_codex_gateway_base_url("mimo", "https://gateway.example/v1")
+        == "https://gateway.example/v1"
+    )
+
+
+def test_apply_named_official_mimo_does_not_reuse_leftover_gateway(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "config.toml"
+    write_codex_config(
+        (
+            'model = "glm-5.3-flash"\n'
+            'model_provider = "agenticx-custom-openai-1782269503107"\n'
+            "\n"
+            "[model_providers.agenticx-custom-openai-1782269503107]\n"
+            'name = "彩讯-外网"\n'
+            'base_url = "http://aibox.richaibox.com:2026/v1"\n'
+            'wire_api = "responses"\n'
+        ),
+        target,
+        backup_on_first_rewrite=False,
+    )
+    before = target.read_text(encoding="utf-8")
+    providers = {
+        "mimo": {
+            "api_key": "sk-test",
+            "display_name": "小米 MiMo",
+        }
+    }
+    doc = apply_named_provider_to_codex_settings(
+        "mimo",
+        "mimo-v2.6-flash",
+        path=target,
+        providers=providers,
+    )
+    assert doc["model"] == "mimo-v2.6-flash"
+    assert doc["model_provider"] == "agenticx-mimo"
+    assert (
+        doc["model_providers"]["agenticx-mimo"]["base_url"]
+        == "https://api.xiaomimimo.com/v1"
+    )
+    token_path = target.parent / ".agenticx" / "agenticx-mimo.token"
+    assert token_path.exists()
+    assert token_path.read_text(encoding="utf-8") == "sk-test"
+    assert doc["model_providers"]["agenticx-mimo"]["auth"]["args"] == [
+        str(token_path)
+    ]
+
+    unknown = {"custom_openai_9": {"api_key": "sk-fail"}}
+    try:
+        apply_named_provider_to_codex_settings(
+            "custom_openai_9",
+            "should-not-write",
+            path=target,
+            providers=unknown,
+        )
+        raise AssertionError("expected CodexSettingsError")
+    except CodexSettingsError:
+        pass
+    after_fail = target.read_text(encoding="utf-8")
+    failed_doc = parse_codex_config(after_fail)
+    assert failed_doc["model"] == "mimo-v2.6-flash"
+    assert failed_doc["model_provider"] == "agenticx-mimo"
+
+    assert (
+        maybe_sync_codex_settings(
+            "codex",
+            "custom_openai_9",
+            "should-not-write",
+            path=target,
+            providers=unknown,
+        )
+        is None
+    )
+    assert target.read_text(encoding="utf-8") == after_fail
+    # leftover file from the successful mimo apply is still a consistent pair
+    assert "should-not-write" not in after_fail
+    assert before != after_fail
 
 
 def test_apply_named_and_maybe_sync(tmp_path: Path) -> None:
