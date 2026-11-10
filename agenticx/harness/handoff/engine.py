@@ -48,6 +48,7 @@ from agenticx.harness.handoff.summarizer import (
     TemplateSummarizer,
 )
 from agenticx.harness.handoff.types import (
+    STRATEGY_FULL,
     STRATEGY_MANUAL,
     STRATEGY_RESUME,
     AppThreadSnapshot,
@@ -245,6 +246,31 @@ class HandoffEngine:
                 "provider": result.provider_id,
             },
         )
+
+    def build_injection_text(
+        self,
+        snapshot: AppThreadSnapshot,
+        target_harness: str,
+        *,
+        pending_user_message: str = "",
+        user_strategy: Optional[str] = STRATEGY_FULL,
+    ) -> str:
+        """Build a wrapped handoff payload, optionally followed by a user turn.
+
+        Does not spawn a session or persist a handoff record. Used when a
+        same-harness CLI already had to start a blank thread (model change
+        or dead surface) and the new first turn must carry recent history.
+        Defaults to ``full_summary`` so the payload prefers recent turns
+        rather than attempting resume on a thread that is already gone.
+        """
+        plan = self.plan_switch(snapshot, target_harness, user_strategy)
+        result: SummarizationResult = self._summarizer.summarize(snapshot, plan)
+        summary = redact_summary(result.summary)
+        payload = redact_text(summary_to_payload(summary))
+        pending = (pending_user_message or "").strip()
+        if pending:
+            return payload + "\n\n" + pending
+        return payload
 
     # ------------------------------------------------------------------
     # audit / rollback linkage

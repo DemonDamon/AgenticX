@@ -146,7 +146,7 @@ def _recent_turn_excerpt(window: List[object]) -> str:
     Prefer the tail of the window so a full_summary still carries the
     last builtin replies (e.g. 南沙天气) instead of only early chatter.
     """
-    excerpts: List[str] = []
+    kept: List[tuple] = []
     for message in reversed(window):
         role = getattr(message, "role", "")
         if role not in ("user", "assistant"):
@@ -154,12 +154,18 @@ def _recent_turn_excerpt(window: List[object]) -> str:
         content = (getattr(message, "content", "") or "").strip()
         if not content:
             continue
-        excerpt = _clip(content, _MAX_EXCERPT_CHARS)
-        excerpts.append(f"- [{role}] {excerpt}")
-        if len(excerpts) >= 6:
+        kept.append((role, content))
+        if len(kept) >= 6:
             break
-    if not excerpts:
+    if not kept:
         return "(none recorded)"
+    excerpts: List[str] = []
+    for index, (role, content) in enumerate(kept):
+        # Most recent two turns keep a fuller body so a mid-session
+        # model switch can continue an unfinished answer; older turns
+        # stay compact.
+        limit = _MAX_SECTION_CHARS if index < 2 else _MAX_EXCERPT_CHARS
+        excerpts.append(f"- [{role}] {_clip(content, limit)}")
     return "\n".join(reversed(excerpts))
 
 

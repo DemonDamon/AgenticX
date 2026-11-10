@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +41,7 @@ from agenticx.harness.handoff import (
     HandoffStore,
     HistoryMessage,
     RunRecord,
+    STRATEGY_FULL,
     STRATEGY_MANUAL,
     ThreadBinding,
 )
@@ -501,10 +503,31 @@ def apply_chat_model_to_harness_options(
 # ----------------------------------------------------------------------
 # unified-surface session lifecycle
 # ----------------------------------------------------------------------
+@dataclass(frozen=True)
+class HarnessSessionLease:
+    """Result of ensuring the live CLI / surface session.
+
+    ``started_blank`` is True when this call spawned a new CLI thread
+    that does *not* resume a prior native thread. The next user turn
+    must then carry recent chat history or the model sees a fresh
+    session (Near model-switch respawns because ``--model`` is spawn-time).
+    """
+
+    surface_session_id: str
+    started_blank: bool
+
+
 def ensure_harness_session(
     manager: Any, session_id: str, harness_id: str
 ) -> str:
-    """Return the unified-surface session id for a bound studio session.
+    """Return the unified-surface session id for a bound studio session."""
+    return ensure_harness_session_lease(manager, session_id, harness_id).surface_session_id
+
+
+def ensure_harness_session_lease(
+    manager: Any, session_id: str, harness_id: str
+) -> HarnessSessionLease:
+    """Reuse or spawn the unified-surface session and report if it is blank.
 
     Reuses the live adapter session when present; on cold start (adapter
     session gone) re-spawns and re-adopts the persisted native thread
@@ -544,15 +567,17 @@ def ensure_harness_session(
                     pass
                 surface_sid = ""
             else:
-                return surface_sid
+                return HarnessSessionLease(surface_sid, started_blank=False)
 
     cwd = snapshot_from_session(manager, sid).cwd
     view = adapter.spawn(cwd, options=dict(options))
     surface_sid = str(view["session_id"])
     native_thread = str(binding.get("harness_thread_id") or "").strip()
+    resumed = False
     if native_thread and adapter.capabilities().resume:
         try:
             adapter.adopt_thread(surface_sid, native_thread)
+            resumed = True
         except Exception:
             pass  # stale native thread: fresh one via the next turn
     manager.set_session_harness(
@@ -562,7 +587,7 @@ def ensure_harness_session(
         options=dict(options) or None,
         surface_session_id=surface_sid,
     )
-    return surface_sid
+    return HarnessSessionLease(surface_sid, started_blank=not resumed)
 
 
 _CODEBUDDY_HARNESS_ID = "codebuddy"
@@ -774,6 +799,53 @@ def run_external_harness_turn(
         _end_inflight(sid)
 
 
+
+def _history_has_assistant(history: Any) -> bool:
+    """True when the visible transcript already has an assistant reply."""
+    for row in list(history or []):
+        if not isinstance(row, dict):
+            continue
+        if row.get("system_notice"):
+            continue
+        if str(row.get("role") or "").strip() != "assistant":
+            continue
+        if str(row.get("content") or "").strip():
+            return True
+    return False
+
+
+def _outbound_text_for_fresh_surface(
+    manager: Any,
+    session_id: str,
+    harness_id: str,
+    *,
+    user_text: str,
+    started_blank: bool,
+    history: Any,
+) -> str:
+    """First turn on a blank CLI must carry recent history, not just the new prompt.
+
+    Same-harness model changes and cold starts without resume otherwise look
+    like a brand-new session to CodeBuddy / Claude Code. The visible
+    ``chat_history`` user row stays the raw prompt; only the outbound CLI
+    text is wrapped. Resume-capable re-adopts skip injection.
+    """
+    pending = user_text or "(continue)"
+    if not started_blank or not _history_has_assistant(history):
+        return pending
+    try:
+        snapshot = snapshot_from_session(manager, session_id)
+        text = handoff_engine().build_injection_text(
+            snapshot,
+            harness_id,
+            pending_user_message=pending,
+            user_strategy=STRATEGY_FULL,
+        )
+    except Exception:
+        return pending
+    return text or pending
+
+
 def _run_external_harness_turn_body(
     manager: Any,
     session_id: str,
@@ -793,6 +865,9 @@ def _run_external_harness_turn_body(
         raise ValueError(f"session {sid} is not bound to an external harness")
 
     # Near model picker → harness_options before ensure/spawn.
+    # A mid-session model change stops the live CLI (``--model`` is
+    # spawn-time) and clears harness_session_id; the lease below then
+    # reports started_blank so we can inject recent history.
     apply_chat_model_to_harness_options(
         manager, sid, harness_id, chat_model
     )
@@ -801,9 +876,18 @@ def _run_external_harness_turn_body(
     binding = manager.get_session_harness(sid) or {}
 
     adapter = harness_registry().require(harness_id)
-    surface_sid = ensure_harness_session(manager, sid, harness_id)
+    lease = ensure_harness_session_lease(manager, sid, harness_id)
+    surface_sid = lease.surface_session_id
 
     user_text = str(user_text or "").strip()
+    outbound = _outbound_text_for_fresh_surface(
+        manager,
+        sid,
+        harness_id,
+        user_text=user_text,
+        started_blank=lease.started_blank,
+        history=session.chat_history,
+    )
     if user_text:
         # Regenerate keeps the existing user row and only updates its harness
         # stamp. A missing tail still appends, matching the builtin path.
@@ -821,7 +905,7 @@ def _run_external_harness_turn_body(
             )
 
     request = TurnRequest(
-        text=user_text or "(continue)",
+        text=outbound,
         wait_seconds=_TURN_WAIT_SECONDS,
         owner_session_id=sid,
         studio_session_id=sid,
