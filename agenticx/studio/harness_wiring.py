@@ -844,6 +844,7 @@ def _run_external_harness_turn_body(
             "role": "assistant",
             "content": assistant_content,
             "metadata": assistant_metadata,
+            **turn_assistant_model_fields(session, chat_model),
         }
     )
     # CB→CC / CC→CB: register swarm card under the Near studio session (not surface_sid).
@@ -876,6 +877,28 @@ def _run_external_harness_turn_body(
         pass
     return result
 
+
+
+def turn_assistant_model_fields(
+    session: Any,
+    chat_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-turn model stamp for harness assistant rows (UI ModelBadge).
+
+    Matches builtin ``AgentRuntime`` finalize: ``model``, ``provider``, and
+    ``model_selection="manual"``. Never backfills from a later session switch.
+    """
+    model = (
+        str(chat_model or "").strip()
+        or str(getattr(session, "model_name", "") or "").strip()
+    )
+    provider = str(getattr(session, "provider_name", "") or "").strip()
+    fields: Dict[str, Any] = {"model_selection": "manual"}
+    if model:
+        fields["model"] = model
+    if provider:
+        fields["provider"] = provider
+    return fields
 
 
 def _session_chat_model(manager: Any, session_id: str) -> Optional[str]:
@@ -1227,6 +1250,7 @@ __all__ = [
     "harness_display_name",
     "harness_registry",
     "apply_chat_model_to_harness_options",
+    "turn_assistant_model_fields",
     "is_external_harness",
     "is_turn_inflight",
     "run_external_harness_turn",

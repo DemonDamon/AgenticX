@@ -157,6 +157,21 @@ class FakeManager:
         self.persisted.append(str(session_id))
         return True
 
+    def set_session_model(
+        self,
+        session_id: str,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> bool:
+        if str(session_id) != self._session.session_id:
+            return False
+        if provider is not None:
+            self._session.provider_name = str(provider or "").strip()
+        if model is not None:
+            self._session.model_name = str(model or "").strip()
+        return True
+
 
 def make_session(sid: str = "sess-1", cwd: str = "/tmp/wiring-ws") -> StudioSession:
     s = StudioSession()
@@ -876,4 +891,50 @@ def test_switch_handoff_spawns_with_session_model(wiring):
     binding = manager.get_session_harness("sess-1")
     assert binding["harness_options"]["model"] == "glm-5.3-flash"
     assert "南沙" in cc.turns[0]["text"]
+
+
+def test_harness_turn_stamps_per_turn_model_on_assistant(wiring):
+    """Two turns with different chat_model keep distinct model badges."""
+    hw, _alpha, _beta, _ = wiring
+    cb = RecordingAdapter("codebuddy")
+    hw.harness_registry().register(cb)
+    session = make_session()
+    session.provider_name = "zhipu"
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codebuddy")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "turn one", chat_model="model-a"
+    )
+    hw.run_external_harness_turn(
+        manager, "sess-1", "turn two", chat_model="model-b"
+    )
+
+    assistants = [m for m in session.chat_history if m["role"] == "assistant"]
+    assert len(assistants) == 2
+    assert assistants[0]["model"] == "model-a"
+    assert assistants[1]["model"] == "model-b"
+    assert assistants[0]["provider"] == "zhipu"
+    assert assistants[0]["model_selection"] == "manual"
+    assert assistants[1]["model_selection"] == "manual"
+
+
+def test_set_session_model_does_not_rewrite_harness_history_models(wiring):
+    hw, alpha, _beta, _ = wiring
+    session = make_session()
+    session.provider_name = "zhipu"
+    session.model_name = "model-a"
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="alpha")
+
+    hw.run_external_harness_turn(manager, "sess-1", "one", chat_model="model-a")
+
+    manager.set_session_model(
+        "sess-1", provider="zhipu", model="model-b"
+    )
+    assert session.model_name == "model-b"
+
+    assistants = [m for m in session.chat_history if m["role"] == "assistant"]
+    assert len(assistants) == 1
+    assert assistants[0]["model"] == "model-a"
 
