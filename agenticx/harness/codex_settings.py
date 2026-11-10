@@ -28,6 +28,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from agenticx.llms.known_base_urls import (
+    default_provider_base_url,
+    is_codex_non_openai_compat_provider,
+)
+
 try:
     import tomllib  # py311+
 except ModuleNotFoundError:  # pragma: no cover
@@ -81,6 +86,40 @@ def normalize_codex_base_url(url: str) -> str:
     if lower.endswith("/chat/completions"):
         text = text[: -len("/chat/completions")].rstrip("/")
     return text
+
+
+def resolve_codex_gateway_base_url(
+    provider_name: str, base_url: Optional[str] = None
+) -> str:
+    """Resolve a usable Codex gateway URL, or raise ``CodexSettingsError``.
+
+    Prefer the caller/config ``base_url``. If it is missing, fall back to the
+    built-in official default (see ``agenticx.llms.known_base_urls``). Official
+    Anthropic is rejected: Codex custom providers only speak the OpenAI
+    Responses API. If nothing usable can be resolved, fail closed — never
+    return an empty URL that would leave a new model name on a leftover
+    ``model_provider``.
+    """
+    name = str(provider_name or "").strip()
+    if not name:
+        raise CodexSettingsError("provider_name is required")
+    if is_codex_non_openai_compat_provider(name):
+        raise CodexSettingsError(
+            f"provider {name!r} is not an OpenAI-compatible Responses "
+            "gateway; Codex custom providers require wire_api=responses. "
+            "Refusing to sync this provider into ~/.codex/config.toml."
+        )
+    configured = normalize_codex_base_url(str(base_url or ""))
+    if configured:
+        return configured
+    fallback = normalize_codex_base_url(default_provider_base_url(name))
+    if fallback:
+        return fallback
+    raise CodexSettingsError(
+        f"cannot resolve a Codex gateway for provider {name!r}: no "
+        "base_url in the provider config and no built-in default. "
+        "Refusing to write the new model onto a leftover model_provider."
+    )
 
 
 def _escape_toml_basic_string(value: str) -> str:
@@ -193,19 +232,19 @@ def merge_provider_into_codex_config(
     """Return updated config.toml text with Near provider + model applied.
 
     Preserves unrelated tables (mcp_servers, features, …) via surgical edits.
-    When ``base_url`` is missing, only the top-level ``model`` is updated
-    (Codex keeps its existing ``model_provider`` / auth).
+    ``base_url`` may be omitted for official vendors that have a built-in
+    default; the matching ``model_providers.*`` block is still written.
+    If no usable gateway can be resolved, raise ``CodexSettingsError``
+    without mutating the previous model / model_provider pair.
     """
     model = str(model_id or "").strip()
     if not model:
         raise CodexSettingsError("model_id is required")
 
+    normalized = resolve_codex_gateway_base_url(provider_name, base_url)
+
     out = text if isinstance(text, str) else ""
     out = _upsert_top_level_string(out, "model", model)
-
-    normalized = normalize_codex_base_url(str(base_url or ""))
-    if not normalized:
-        return out if out.endswith("\n") or not out else out + "\n"
 
     provider_id = sanitize_codex_provider_id(provider_name)
     label = str(display_name or provider_name or provider_id).strip() or provider_id
@@ -313,10 +352,11 @@ def apply_provider_to_codex_settings(
     current = load_codex_config_text(target)
     if current.strip():
         parse_codex_config(current)
+    resolved_base = resolve_codex_gateway_base_url(provider_name, base_url)
     provider_id = sanitize_codex_provider_id(provider_name)
     token_file: Optional[Path] = None
     key = str(api_key or "").strip()
-    if key and normalize_codex_base_url(str(base_url or "")):
+    if key:
         token_file = write_managed_token(
             managed_token_path(provider_id, target.parent), key
         )
@@ -325,7 +365,7 @@ def apply_provider_to_codex_settings(
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,
-        base_url=base_url,
+        base_url=resolved_base,
         display_name=display_name,
         token_file=token_file,
     )
@@ -432,6 +472,7 @@ __all__ = [
     "merge_provider_into_codex_config",
     "normalize_codex_base_url",
     "parse_codex_config",
+    "resolve_codex_gateway_base_url",
     "sanitize_codex_provider_id",
     "write_codex_config",
     "write_managed_token",
