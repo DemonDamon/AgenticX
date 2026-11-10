@@ -1522,22 +1522,32 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (sid) {
       void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
     }
-    // Direct-style Claude settings sync (claude-code only; never for builtin / live aliases).
-    if (
+    // cc-switch: sync Near provider+model into the active harness native config
+    // (Claude Code / Codex / CodeBuddy). Never for builtin or live aliases.
+    const syncableHarness =
       activeHarnessId === "claude-code"
-      && !isClaudeLiveSettingsProvider(provider)
+      || activeHarnessId === "codex"
+      || activeHarnessId === "codebuddy";
+    if (
+      syncableHarness
+      && !(activeHarnessId === "claude-code" && isClaudeLiveSettingsProvider(provider))
     ) {
       const base = String(apiBase ?? "").trim().replace(/\/$/, "");
       if (base) {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-        void fetch(`${base}/api/claude-code/settings/apply`, {
+        void fetch(`${base}/api/harness/settings/apply`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ provider, model }),
+          body: JSON.stringify({
+            harness_id: activeHarnessId,
+            provider,
+            model,
+          }),
         })
           .then(async (resp) => {
             if (!resp.ok) return;
+            if (activeHarnessId !== "claude-code") return;
             try {
               const data = (await resp.json()) as { models?: unknown };
               if (Array.isArray(data.models)) {

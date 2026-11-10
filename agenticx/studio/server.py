@@ -352,11 +352,12 @@ async def _external_harness_chat_stream(
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
         return
 
-    # Direct-style Claude settings sync before spawn/turn (claude-code only).
+    # cc-switch style: sync Near provider+model into the active harness
+    # native config (Claude Code / Codex / CodeBuddy). Builtin never writes.
     try:
-        from agenticx.harness.claude_code_settings import maybe_sync_claude_code_settings
+        from agenticx.harness.harness_settings_sync import maybe_sync_harness_settings
 
-        maybe_sync_claude_code_settings(
+        maybe_sync_harness_settings(
             harness_id,
             getattr(payload, "provider", None),
             getattr(payload, "model", None),
@@ -7381,6 +7382,36 @@ def create_studio_app() -> FastAPI:
             "path": str(path),
             "models": extract_live_model_ids(doc),
         }
+
+    @app.post("/api/harness/settings/apply")
+    async def harness_settings_apply(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """cc-switch apply: sync Near provider+model into the active harness.
+
+        Supported: ``claude-code``, ``codex``, ``codebuddy``. Builtin callers
+        must not hit this. Desktop invokes on model pick for those harnesses.
+        """
+        _check_token(x_agx_desktop_token)
+        from agenticx.harness.claude_code_settings import ClaudeSettingsError
+        from agenticx.harness.codebuddy_settings import CodeBuddySettingsError
+        from agenticx.harness.codex_settings import CodexSettingsError
+        from agenticx.harness.harness_settings_sync import apply_harness_settings
+
+        body = payload or {}
+        harness_id = str(body.get("harness_id") or body.get("harness") or "").strip()
+        provider = str(body.get("provider") or "").strip()
+        model = str(body.get("model") or "").strip()
+        if not harness_id or not provider or not model:
+            raise HTTPException(
+                status_code=400,
+                detail="harness_id, provider and model are required",
+            )
+        try:
+            return apply_harness_settings(harness_id, provider, model)
+        except (ClaudeSettingsError, CodexSettingsError, CodeBuddySettingsError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/claude-code/settings/apply")
     async def claude_code_settings_apply(
