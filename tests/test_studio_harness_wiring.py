@@ -29,11 +29,17 @@ from agenticx.harness.types import UnknownHarnessError
 class RecordingAdapter(HarnessAdapter):
     """In-memory adapter with native-thread bookkeeping."""
 
-    def __init__(self, harness_id: str, available: bool = True) -> None:
+    def __init__(
+        self,
+        harness_id: str,
+        available: bool = True,
+        resume: bool = True,
+    ) -> None:
         self.harness_id = harness_id
         self.display_name = harness_id.title()
         self.description = f"{harness_id} adapter"
         self._available = available
+        self._resume = resume
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self.spawn_count = 0
         self.turns: List[Dict[str, Any]] = []
@@ -46,7 +52,7 @@ class RecordingAdapter(HarnessAdapter):
             streaming=False,
             turn_snapshots=False,
             idempotency=False,
-            resume=True,
+            resume=self._resume,
         )
 
     def spawn(self, cwd: str, *, options: Optional[Dict[str, Any]] = None):
@@ -808,6 +814,87 @@ def test_model_change_respawns_surface_session(wiring):
     assert first_sid not in cc._sessions
     surf = cc._sessions[second_sid]
     assert surf["options"]["model"] == "model-b"
+    # resume=True: the new surface adopts the native thread, so the
+    # outbound user text stays the raw prompt (no second handoff wrap).
+    assert cc.turns[-1]["text"] == "two"
+    assert session.chat_history[-2]["content"] == "two"
+
+
+def test_model_change_injects_history_when_resume_unavailable(wiring):
+    """CodeBuddy-like CLIs respawn on --model change with no resume.
+
+    The new first turn must carry recent history; the visible user row
+    stays the raw prompt (session 093e132d dropped CubeSandbox context).
+    """
+    hw, _alpha, _beta, _ = wiring
+    cb = RecordingAdapter("codebuddy", resume=False)
+    hw.harness_registry().register(cb)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codebuddy")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "国内除了 OpenSandbox 还有哪些很不错的？", chat_model="deepseek-v4-flash"
+    )
+    first_sid = manager.get_session_harness("sess-1")["harness_session_id"]
+    # Pretend the first assistant actually answered about CubeSandbox,
+    # as in the real Near transcript.
+    session.chat_history[-1]["content"] = (
+        "按信创可落地程度排序：第一梯队 CubeSandbox（腾讯云，Apache 2.0）"
+    )
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "好像没有说完的感觉", chat_model="glm-5.3-flash"
+    )
+    second_sid = manager.get_session_harness("sess-1")["harness_session_id"]
+    assert cb.spawn_count == 2
+    assert second_sid != first_sid
+    assert cb.adopted == []
+    outbound = cb.turns[-1]["text"]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    assert "CubeSandbox" in outbound
+    assert "OpenSandbox" in outbound
+    assert outbound.endswith("好像没有说完的感觉")
+    # UI transcript must not swallow the raw user prompt into the payload.
+    assert session.chat_history[-2]["role"] == "user"
+    assert session.chat_history[-2]["content"] == "好像没有说完的感觉"
+
+
+def test_cold_start_without_resume_injects_history(wiring):
+    """App relaunch / dead surface with no native thread still keeps context."""
+    hw, _alpha, _beta, _ = wiring
+    cb = RecordingAdapter("codebuddy", resume=False)
+    hw.harness_registry().register(cb)
+    session = make_session()
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "国内除了 OpenSandbox 还有哪些很不错的？",
+            "metadata": {"harness": "codebuddy"},
+        },
+        {
+            "role": "assistant",
+            "content": "按信创可落地程度排序：第一梯队 CubeSandbox。",
+            "metadata": {"harness": "codebuddy"},
+        },
+    ]
+    manager = FakeManager(session)
+    manager.set_session_harness(
+        "sess-1",
+        harness_id="codebuddy",
+        options={"model": "deepseek-v4-flash"},
+        surface_session_id="dead-surf-1",
+    )
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "好像没有说完的感觉", chat_model="deepseek-v4-flash"
+    )
+    assert cb.spawn_count == 1
+    outbound = cb.turns[-1]["text"]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    assert "CubeSandbox" in outbound
+    assert outbound.endswith("好像没有说完的感觉")
+    assert session.chat_history[-2]["content"] == "好像没有说完的感觉"
 
 
 def test_same_model_reuses_surface_session(wiring):
