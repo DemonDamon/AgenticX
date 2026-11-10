@@ -97,6 +97,22 @@ def test_failure_without_visible_text_uses_terminal_detail() -> None:
     )
 
 
+def test_failure_uses_structured_error_when_no_visible_text() -> None:
+    result = TurnResult(
+        harness="codex",
+        session_id="s1",
+        status=TURN_STATUS_ERROR,
+        result_text="",
+        detail={
+            "error": "Not inside a trusted directory and --skip-git-repo-check was not specified.",
+        },
+    )
+    assert (
+        format_external_harness_assistant_content("codex", result)
+        == "[harness codex turn error] Not inside a trusted directory and --skip-git-repo-check was not specified."
+    )
+
+
 def test_codebuddy_error_turn_records_visible_text(monkeypatch: pytest.MonkeyPatch) -> None:
     from agenticx.harness.adapters.codebuddy import CodeBuddyAdapter
 

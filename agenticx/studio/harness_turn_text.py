@@ -43,10 +43,11 @@ def format_external_harness_assistant_content(harness_id: str, result: TurnResul
 def _failure_detail(detail: Any) -> str:
     if not isinstance(detail, dict):
         return ""
-    visible = str(detail.get("error_visible_text") or "").strip()
-    if visible:
-        return visible
-    return str(detail.get("terminal_detail") or "").strip()
+    for key in ("error_visible_text", "terminal_detail", "error"):
+        visible = str(detail.get(key) or "").strip()
+        if visible:
+            return visible
+    return ""
 
 
 __all__ = ["format_external_harness_assistant_content"]

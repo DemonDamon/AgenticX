@@ -94,6 +94,29 @@ def emit(msg):
 if scenario == "slow":
     time.sleep(60)
     sys.exit(0)
+if scenario == "skip_git_denied":
+    print("Reading additional input from stdin...", flush=True)
+    print("Not inside a trusted directory and --skip-git-repo-check was not specified.", flush=True)
+    sys.exit(1)
+if scenario == "flat_v0167":
+    # Codex 0.167+ emits flat events (no msg envelope).
+    def emit_flat(obj):
+        print(json.dumps(obj), flush=True)
+    emit_flat({"type": "thread.started", "thread_id": "thr_flat167"})
+    emit_flat({"type": "item.completed", "item": {
+        "id": "item_0", "type": "error",
+        "message": "Model metadata for `glm-5.3-flash` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+    }})
+    emit_flat({"type": "turn.started"})
+    emit_flat({"type": "item.completed", "item": {
+        "id": "item_1", "type": "agent_message", "text": "ok"
+    }})
+    emit_flat({"type": "turn.completed", "usage": {
+        "input_tokens": 11611, "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0, "output_tokens": 3,
+        "reasoning_output_tokens": 1
+    }})
+    sys.exit(0)
 
 emit({"type": "thread.started", "thread_id": "thr_fake222"})
 emit({"type": "task_started"})
@@ -359,6 +382,7 @@ def test_codex_resume_args(fake_codex):
     second = argvs[1]["argv"]
     assert second[:3] == ["exec", "resume", "thr_fake222"]
     assert "--json" in second
+    assert "--skip-git-repo-check" in second
 
 
 def test_codex_sandbox_and_model_args(fake_codex):
@@ -370,6 +394,7 @@ def test_codex_sandbox_and_model_args(fake_codex):
     adapter.turn(sid, _turn())
     argv = _read_log(fake_codex["log"])[0]["argv"]
     assert argv[0] == "exec"
+    assert "--skip-git-repo-check" in argv
     assert argv[argv.index("--sandbox") + 1] == "workspace-write"
     assert argv[argv.index("-m") + 1] == "gpt-5.2-codex"
     i = argv.index("-C")
@@ -386,6 +411,39 @@ def test_codex_error_event_maps_to_error(fake_codex):
         os.environ.pop("FAKE_SCENARIO", None)
     assert result.status == "error"
     assert "model unavailable" in result.detail["error"]
+
+
+def test_codex_parses_flat_v0167_events_and_ignores_metadata_warning(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(os.getcwd())["session_id"]
+    os.environ["FAKE_SCENARIO"] = "flat_v0167"
+    try:
+        result = adapter.turn(sid, _turn())
+    finally:
+        os.environ.pop("FAKE_SCENARIO", None)
+    assert result.ok
+    assert result.result_text == "ok"
+    assert result.detail["native_thread_id"] == "thr_flat167"
+    assert result.detail["task_complete"] is True
+    assert result.detail["tokens"]["input"] == 11611
+    assert result.detail["tokens"]["output"] == 3
+    warnings = result.detail.get("warnings") or []
+    assert any("Model metadata" in w for w in warnings)
+
+
+def test_codex_plain_stderr_surfaces_in_terminal_detail(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(os.getcwd())["session_id"]
+    os.environ["FAKE_SCENARIO"] = "skip_git_denied"
+    try:
+        result = adapter.turn(sid, _turn())
+    finally:
+        os.environ.pop("FAKE_SCENARIO", None)
+    assert result.status == "error"
+    assert "trusted directory" in str(result.detail.get("terminal_detail") or "")
+    # The stdin boilerplate must not be the only visible text, and NDJSON
+    # is not required here because this path is plain stderr.
+    assert "Reading additional input" not in str(result.detail.get("terminal_detail") or "")
 
 
 def test_codex_capabilities_declared(fake_codex):
