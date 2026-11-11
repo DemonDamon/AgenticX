@@ -5,13 +5,16 @@
   "description": "AgenticX 桌面端浏览器代理：划词/整页发给 AGX 会话，并让 AGX 代理在你的浏览器里执行打开页面、提取、填表、截图等操作",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwvUg8qgW7kc5OePyU4swklSe9gGsTfGh4irNS3F2mctbzf6lb572qeaRVKtGBTk+cO2s4xAk1KrZjGFheahZLgyOaE2QjfqnfUEq1rLs6GPt9ArI/OFu36ATpiA/e0CDdmUNGd738qYxG+FAwdUa2eomxTZoHMXRjgpHbbMAfVP7+fR2pd+03vXyXlvEYfBuVDWsXVi2iXxQ3HDEsownzTrFDEzx+m6TtDsMUMa23v7eU+4dlYvysmFsrKXDoqnvea8GJWyD1WZZWKKLRQmHu6FAApEfLb5jHulhCYaBuddRJeAOE0xwgVu4/76FIuRwchqNNcmEW0/ma6XqqTllswIDAQAB",
   "permissions": ["nativeMessaging", "storage", "alarms", "scripting", "activeTab", "tabs", "contextMenus", "notifications"],
+  "host_permissions": ["<all_urls>"],
   "optional_host_permissions": ["<all_urls>"],
+  "icons": { "128": "icons/icon128.png" },
   "background": {
     "service_worker": "src/sw.js"
   },
   "action": {
     "default_title": "AGX Bridge",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": { "128": "icons/icon128.png" }
   },
   "options_ui": {
     "page": "options.html",
