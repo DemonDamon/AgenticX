@@ -47,6 +47,7 @@ from agenticx.harness.handoff.summarizer import (
     SummarizationResult,
     TemplateSummarizer,
 )
+from agenticx.harness.spawn_options import adapter_spawn_options
 from agenticx.harness.handoff.types import (
     STRATEGY_FULL,
     STRATEGY_MANUAL,
@@ -189,7 +190,7 @@ class HandoffEngine:
         cwd = snapshot.cwd or "."
         try:
             spawn_view = adapter.spawn(
-                cwd, options=spawn_options or {}
+                cwd, options=adapter_spawn_options(spawn_options)
             )
         except Exception as exc:
             raise HandoffError(f"target spawn failed: {exc}") from exc
