@@ -10,6 +10,7 @@ from agenticx.harness.codex_settings import (
     apply_named_provider_to_codex_settings,
     maybe_sync_codex_settings,
     codex_gateway_lacks_hosted_web_search,
+    is_codex_bailian_dashscope_gateway,
     merge_provider_into_codex_config,
     normalize_codex_base_url,
     parse_codex_config,
@@ -243,6 +244,7 @@ def test_apply_named_and_maybe_sync(tmp_path: Path) -> None:
     assert doc["model_provider"] == "agenticx-bailian"
     assert doc["features"]["apps"] is False
     assert "web_search" not in doc
+    assert doc["model_reasoning_effort"] == "none"
     token_path = target.parent / ".agenticx" / "agenticx-bailian.token"
     assert token_path.exists()
     assert token_path.read_text(encoding="utf-8") == "sk-bailian"
@@ -338,3 +340,128 @@ def test_merge_preserves_explicit_live_web_search_on_non_mimo() -> None:
     doc = parse_codex_config(merged)
     assert doc["web_search"] == "live"
     assert doc["model_provider"] == "agenticx-deepseek"
+
+
+_MAAS_BAILIAN = (
+    "https://llm-d178jdr4rwpo9pmz.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+)
+
+
+def test_is_codex_bailian_dashscope_gateway_matches_name_and_host() -> None:
+    assert is_codex_bailian_dashscope_gateway("bailian", "")
+    assert is_codex_bailian_dashscope_gateway("dashscope", "")
+    assert is_codex_bailian_dashscope_gateway("aliyun", "https://example.com/v1")
+    assert is_codex_bailian_dashscope_gateway(
+        "custom", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    assert is_codex_bailian_dashscope_gateway("custom", _MAAS_BAILIAN)
+    assert is_codex_bailian_dashscope_gateway(
+        "custom", "https://workspace-1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    )
+    assert not is_codex_bailian_dashscope_gateway("mimo", "https://api.xiaomimimo.com/v1")
+    assert not is_codex_bailian_dashscope_gateway(
+        "deepseek", "https://api.deepseek.com/v1"
+    )
+    assert not is_codex_bailian_dashscope_gateway(
+        "minimax", "https://api.minimaxi.com/v1"
+    )
+    assert not is_codex_bailian_dashscope_gateway(
+        "custom_openai_1782269503107", "http://aibox.richaibox.com:2026/v1"
+    )
+    assert not is_codex_bailian_dashscope_gateway("", "")
+
+
+def test_merge_forces_reasoning_effort_none_for_bailian_qwen_plus() -> None:
+    original = (
+        'model = "MiniMax-M3"\n'
+        'model_reasoning_effort = "low"\n'
+        'personality = "friendly"\n'
+        'model_provider = "agenticx-minimax"\n'
+    )
+    merged = merge_provider_into_codex_config(
+        original,
+        provider_name="bailian",
+        model_id="qwen-plus",
+        api_key=None,
+        base_url=_MAAS_BAILIAN,
+        display_name="bailian",
+    )
+    doc = parse_codex_config(merged)
+    assert doc["model"] == "qwen-plus"
+    assert doc["model_provider"] == "agenticx-bailian"
+    assert doc["model_reasoning_effort"] == "none"
+    assert doc["personality"] == "friendly"
+    assert "query_params" not in doc["model_providers"]["agenticx-bailian"]
+    assert doc["model_providers"]["agenticx-bailian"]["base_url"] == (
+        "https://llm-d178jdr4rwpo9pmz.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    )
+    assert "web_search" not in doc
+
+
+def test_merge_forces_reasoning_effort_none_for_other_bailian_models() -> None:
+    merged = merge_provider_into_codex_config(
+        'model = "keep"\nmodel_reasoning_effort = "minimal"\n',
+        provider_name="bailian",
+        model_id="MiniMax-M3",
+        api_key=None,
+        base_url=_MAAS_BAILIAN,
+    )
+    doc = parse_codex_config(merged)
+    assert doc["model"] == "MiniMax-M3"
+    assert doc["model_reasoning_effort"] == "none"
+
+
+def test_merge_writes_reasoning_effort_none_when_absent_on_dashscope() -> None:
+    merged = merge_provider_into_codex_config(
+        "",
+        provider_name="dashscope",
+        model_id="qwen-plus",
+        api_key=None,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    doc = parse_codex_config(merged)
+    assert doc["model_reasoning_effort"] == "none"
+    assert doc["model_provider"] == "agenticx-dashscope"
+
+
+def test_merge_removes_near_set_reasoning_effort_none_when_leaving_bailian() -> None:
+    from_bailian = merge_provider_into_codex_config(
+        'model = "qwen-plus"\nmodel_reasoning_effort = "low"\n',
+        provider_name="bailian",
+        model_id="qwen-plus",
+        api_key=None,
+        base_url=_MAAS_BAILIAN,
+    )
+    assert parse_codex_config(from_bailian)["model_reasoning_effort"] == "none"
+
+    restored = merge_provider_into_codex_config(
+        from_bailian,
+        provider_name="mimo",
+        model_id="mimo-v2.6-flash",
+        api_key=None,
+        base_url=None,
+        display_name="小米 MiMo",
+    )
+    doc = parse_codex_config(restored)
+    assert "model_reasoning_effort" not in doc
+    assert doc["web_search"] == "disabled"
+    assert doc["model"] == "mimo-v2.6-flash"
+
+
+def test_merge_preserves_low_reasoning_effort_on_non_bailian() -> None:
+    original = (
+        'model = "keep"\n'
+        'model_reasoning_effort = "low"\n'
+        'web_search = "live"\n'
+    )
+    merged = merge_provider_into_codex_config(
+        original,
+        provider_name="minimax",
+        model_id="MiniMax-M3",
+        api_key=None,
+        base_url="https://api.minimaxi.com/v1",
+    )
+    doc = parse_codex_config(merged)
+    assert doc["model_reasoning_effort"] == "low"
+    assert doc["web_search"] == "live"
+    assert doc["model_provider"] == "agenticx-minimax"
