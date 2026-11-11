@@ -61,6 +61,50 @@ _HARNESSES_WITH_MODEL_OPTION = frozenset(
 )
 _CODEX_HARNESS_ID = "codex"
 
+# Codex CLI base_instructions are English-only, and the AGENTICX CONTEXT
+# HANDOFF wrapper is marked non-executable reference. This policy must sit
+# *outside* that block and on every Codex outbound turn (first turn, fresh
+# surface / model-switch inject, and same-thread resume). Language-matching,
+# not Chinese-only — unlike the CC/CodeBuddy subagent "使用中文。" suffix.
+_HANDOFF_FOOTER = "===== AGENTICX CONTEXT HANDOFF (END) ====="
+CODEX_REPLY_LANGUAGE_POLICY = (
+    "Reply in the same language as the user's latest message "
+    "(the text after any handoff block). If they wrote in Chinese, "
+    "reply in Chinese. Do not switch to English just because system "
+    "instructions, tool results, or web search snippets are in English, "
+    "unless the user explicitly asks for another language. When using "
+    "web search, prefer a query in the user's language, or at least keep "
+    "this reply-language rule even if the snippets come back in English."
+)
+
+
+def attach_codex_reply_language_policy(text: str) -> str:
+    """Place the reply-language policy outside the non-executable handoff.
+
+    After a handoff wrapper, the policy is inserted after the footer and
+    immediately before the user's latest message. With no handoff (a first
+    turn or a same-thread resume) it is prepended to the outbound user text.
+    Idempotent when the policy is already present outside the handoff block.
+    """
+    outbound = str(text or "")
+    footer_idx = outbound.rfind(_HANDOFF_FOOTER)
+    if footer_idx >= 0:
+        prefix_end = footer_idx + len(_HANDOFF_FOOTER)
+        head = outbound[:prefix_end]
+        tail = outbound[prefix_end:].lstrip("\n")
+        if CODEX_REPLY_LANGUAGE_POLICY not in outbound[prefix_end:]:
+            if tail:
+                return head + "\n\n" + CODEX_REPLY_LANGUAGE_POLICY + "\n\n" + tail
+            return head + "\n\n" + CODEX_REPLY_LANGUAGE_POLICY
+        return outbound
+    if CODEX_REPLY_LANGUAGE_POLICY in outbound:
+        return outbound
+    body = outbound.strip("\n")
+    if not body:
+        return CODEX_REPLY_LANGUAGE_POLICY
+    return CODEX_REPLY_LANGUAGE_POLICY + "\n\n" + body
+
+
 _lock = threading.Lock()
 _registry: Optional[HarnessRegistry] = None
 _engine: Optional[HandoffEngine] = None
@@ -942,21 +986,29 @@ def _outbound_text_for_fresh_surface(
     like a brand-new session to CodeBuddy / Claude Code. The visible
     ``chat_history`` user row stays the raw prompt; only the outbound CLI
     text is wrapped. Resume-capable re-adopts skip injection.
+
+    Codex turns also receive :data:`CODEX_REPLY_LANGUAGE_POLICY` outside
+    the non-executable handoff block, including first turns and same-thread
+    resumes that do not re-inject history.
     """
     pending = user_text or "(continue)"
     if not started_blank or not _history_has_assistant(history):
-        return pending
-    try:
-        snapshot = snapshot_from_session(manager, session_id)
-        text = handoff_engine().build_injection_text(
-            snapshot,
-            harness_id,
-            pending_user_message=pending,
-            user_strategy=STRATEGY_FULL,
-        )
-    except Exception:
-        return pending
-    return text or pending
+        text = pending
+    else:
+        try:
+            snapshot = snapshot_from_session(manager, session_id)
+            text = handoff_engine().build_injection_text(
+                snapshot,
+                harness_id,
+                pending_user_message=pending,
+                user_strategy=STRATEGY_FULL,
+            )
+        except Exception:
+            text = pending
+        text = text or pending
+    if harness_id == _CODEX_HARNESS_ID:
+        return attach_codex_reply_language_policy(text)
+    return text
 
 
 def _retry_turn_after_provider_mismatch(

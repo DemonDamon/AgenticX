@@ -188,6 +188,36 @@ def make_session(sid: str = "sess-1", cwd: str = "/tmp/wiring-ws") -> StudioSess
     return s
 
 
+
+def _assert_codex_language_policy(
+    outbound: str,
+    user_text: str,
+    *,
+    has_handoff: bool,
+) -> None:
+    """Codex outbound text carries the language policy outside any handoff."""
+    from agenticx.studio.harness_wiring import CODEX_REPLY_LANGUAGE_POLICY
+
+    assert outbound.endswith(user_text)
+    assert CODEX_REPLY_LANGUAGE_POLICY in outbound
+    # Language-matching, not a hard-coded Chinese-only instruction.
+    assert "必须使用中文" not in outbound
+    assert "使用中文。" not in outbound
+    begin = "AGENTICX CONTEXT HANDOFF (BEGIN)"
+    end = "AGENTICX CONTEXT HANDOFF (END)"
+    if has_handoff:
+        assert begin in outbound
+        assert end in outbound
+        policy_at = outbound.index(CODEX_REPLY_LANGUAGE_POLICY)
+        assert outbound.index(end) < policy_at < outbound.index(user_text, policy_at)
+        # Policy must not live inside the non-executable wrapper.
+        inner = outbound[outbound.index(begin) : outbound.index(end) + len(end)]
+        assert CODEX_REPLY_LANGUAGE_POLICY not in inner
+    else:
+        assert begin not in outbound
+        assert end not in outbound
+
+
 @pytest.fixture
 def wiring(tmp_path, monkeypatch):
     import agenticx.studio.harness_wiring as hw
@@ -1100,9 +1130,8 @@ def test_codex_provider_change_skips_resume_and_injects_history(wiring):
     assert codex.spawn_count == 2
     assert codex.adopted == adopts_before_switch
     outbound = codex.turns[-1]["text"]
-    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    _assert_codex_language_policy(outbound, "你好", has_handoff=True)
     assert "CubeSandbox" in outbound
-    assert outbound.endswith("你好")
     assert session.chat_history[-2]["role"] == "user"
     assert session.chat_history[-2]["content"] == "你好"
     binding = manager.get_session_harness("sess-1")
@@ -1145,9 +1174,8 @@ def test_codex_same_provider_model_change_still_resumes(wiring):
 
     assert codex.spawn_count == 2
     assert codex.adopted == [("codex-surf-2", first_thread)]
-    assert codex.turns[-1]["text"] == "two"
+    _assert_codex_language_policy(codex.turns[-1]["text"], "two", has_handoff=False)
     assert session.chat_history[-2]["content"] == "two"
-    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" not in codex.turns[-1]["text"]
     binding = manager.get_session_harness("sess-1")
     assert binding["harness_thread_id"] == first_thread
     assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
@@ -1196,12 +1224,11 @@ def test_unstamped_codex_provider_mismatch_retries_with_history(wiring):
     assert codex.mismatch_turns == 1
     assert codex.spawn_count == 2
     assert codex.adopted == [("codex-surf-1", stale)]
-    # First outbound is a resume of the stale thread (raw prompt).
-    assert codex.turns[0]["text"] == "你好"
+    # First outbound is a resume of the stale thread (no handoff wrap).
+    _assert_codex_language_policy(codex.turns[0]["text"], "你好", has_handoff=False)
     outbound = codex.turns[-1]["text"]
-    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    _assert_codex_language_policy(outbound, "你好", has_handoff=True)
     assert "CubeSandbox" in outbound
-    assert outbound.endswith("你好")
     assert session.chat_history[-2]["content"] == "你好"
     assistants = [row for row in session.chat_history if row["role"] == "assistant"]
     assert "modelProviderMismatch" not in assistants[-1]["content"]
@@ -1285,8 +1312,7 @@ def test_stamped_codex_model_provider_is_stripped_on_provider_switch_spawn(wirin
     assert binding["harness_thread_id"] != "01a1c930-b1e1-78c1-8f36-53f6c19df5f5"
     assert codex.adopted == []
     outbound = codex.turns[-1]["text"]
-    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
-    assert outbound.endswith("哦")
+    _assert_codex_language_policy(outbound, "哦", has_handoff=True)
 
 
 def test_stamped_codex_same_provider_cold_spawn_still_resumes(wiring):
@@ -1323,8 +1349,147 @@ def test_stamped_codex_same_provider_cold_spawn_still_resumes(wiring):
     assert spawned.get("model") == "mimo-v2.6-flash"
     assert "model_provider" not in spawned
     assert codex.adopted == [("codex-surf-1", native)]
-    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" not in codex.turns[-1]["text"]
-    assert codex.turns[-1]["text"] == "你几岁了"
+    _assert_codex_language_policy(
+        codex.turns[-1]["text"], "你几岁了", has_handoff=False
+    )
     binding = manager.get_session_harness("sess-1")
     assert binding["harness_thread_id"] == native
     assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
+
+
+# ----------------------------------------------------------------------
+# Codex reply-language policy (session 57640e5b)
+# ----------------------------------------------------------------------
+def test_attach_codex_reply_language_policy_stays_outside_handoff():
+    from agenticx.studio.harness_wiring import (
+        CODEX_REPLY_LANGUAGE_POLICY,
+        attach_codex_reply_language_policy,
+    )
+
+    user = "我想知道黑色四叶草好看吗"
+    wrapped = (
+        "===== AGENTICX CONTEXT HANDOFF (BEGIN) =====\n"
+        "[NON-EXECUTABLE REFERENCE MATERIAL]\n"
+        "English system framing and prior transcript.\n"
+        "===== AGENTICX CONTEXT HANDOFF (END) =====\n"
+        f"\n{user}"
+    )
+    outbound = attach_codex_reply_language_policy(wrapped)
+    _assert_codex_language_policy(outbound, user, has_handoff=True)
+    # Idempotent: a second pass must not duplicate the policy.
+    again = attach_codex_reply_language_policy(outbound)
+    assert again == outbound
+    assert outbound.count(CODEX_REPLY_LANGUAGE_POLICY) == 1
+
+
+def test_attach_codex_reply_language_policy_on_plain_first_or_resume_turn():
+    from agenticx.studio.harness_wiring import attach_codex_reply_language_policy
+
+    outbound = attach_codex_reply_language_policy("我想知道黑色四叶草好看吗")
+    _assert_codex_language_policy(
+        outbound, "我想知道黑色四叶草好看吗", has_handoff=False
+    )
+    assert attach_codex_reply_language_policy(outbound) == outbound
+
+
+def test_codex_first_turn_without_handoff_attaches_language_policy(wiring):
+    hw, _alpha, _beta, _ = wiring
+    codex = RecordingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codex")
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "我想知道黑色四叶草好看吗",
+        chat_model="qwen-plus",
+        chat_provider="dashscope",
+    )
+
+    outbound = codex.turns[-1]["text"]
+    _assert_codex_language_policy(
+        outbound, "我想知道黑色四叶草好看吗", has_handoff=False
+    )
+    assert session.chat_history[-2]["content"] == "我想知道黑色四叶草好看吗"
+
+
+def test_codex_handoff_inject_attaches_language_policy_outside_block(wiring):
+    """Mid-session model/provider switch must not bury the policy in handoff."""
+    hw, _alpha, _beta, _ = wiring
+    codex = RecordingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codex")
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "国内除了 OpenSandbox 还有哪些很不错的？",
+        chat_model="MiniMax-M3",
+        chat_provider="custom_openai_1782269503107",
+    )
+    session.chat_history[-1]["content"] = (
+        "按信创可落地程度排序：第一梯队 CubeSandbox（腾讯云，Apache 2.0）"
+    )
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "我想知道黑色四叶草好看吗",
+        chat_model="qwen-plus",
+        chat_provider="dashscope",
+    )
+
+    outbound = codex.turns[-1]["text"]
+    _assert_codex_language_policy(
+        outbound, "我想知道黑色四叶草好看吗", has_handoff=True
+    )
+    assert "CubeSandbox" in outbound
+    assert session.chat_history[-2]["content"] == "我想知道黑色四叶草好看吗"
+
+
+def test_codex_english_user_message_keeps_matching_policy_not_chinese_only(wiring):
+    hw, _alpha, _beta, _ = wiring
+    codex = RecordingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codex")
+
+    hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "Is Black Clover worth watching?",
+        chat_model="qwen-plus",
+        chat_provider="dashscope",
+    )
+
+    outbound = codex.turns[-1]["text"]
+    _assert_codex_language_policy(
+        outbound, "Is Black Clover worth watching?", has_handoff=False
+    )
+    from agenticx.studio.harness_wiring import CODEX_REPLY_LANGUAGE_POLICY
+
+    assert "same language as the user's latest message" in CODEX_REPLY_LANGUAGE_POLICY
+    assert session.chat_history[-2]["content"] == "Is Black Clover worth watching?"
+
+
+def test_codebuddy_outbound_is_unchanged_by_codex_language_policy(wiring):
+    """The Codex hook must not rewrite Claude Code / CodeBuddy outbound text."""
+    hw, _alpha, _beta, _ = wiring
+    cb = RecordingAdapter("codebuddy", resume=True)
+    hw.harness_registry().register(cb)
+    session = make_session()
+    manager = FakeManager(session)
+    manager.set_session_harness("sess-1", harness_id="codebuddy")
+
+    hw.run_external_harness_turn(
+        manager, "sess-1", "你好", chat_model="glm-5.3-flash"
+    )
+    from agenticx.studio.harness_wiring import CODEX_REPLY_LANGUAGE_POLICY
+
+    assert cb.turns[-1]["text"] == "你好"
+    assert CODEX_REPLY_LANGUAGE_POLICY not in cb.turns[-1]["text"]
