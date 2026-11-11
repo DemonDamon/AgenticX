@@ -97,6 +97,7 @@ import {
 } from "./desktop-notify";
 import { applyRunOutcome, applyUserEnableToggle, markInterruptedOnStartup, markRunStarted } from "./automation-run-health";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
+import { installNmHost } from "./native-messaging-host";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
 import {
@@ -7831,6 +7832,15 @@ function createWindow(): void {
     });
   } else {
     console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
+  }
+  // SP6: keep the Chrome/Edge NM host registration in sync with the running
+  // app (idempotent overwrite; dev = repo shim + system node, installed =
+  // bundled shim + ELECTRON_RUN_AS_NODE). Matches scripts/install-extension-dev.sh
+  // output so the two paths never fight over the same files.
+  try {
+    installNmHost({ mode: app.isPackaged ? "installed" : "dev" });
+  } catch (err) {
+    console.warn("[main] NM host install failed (browser extension channel stays unregistered):", err);
   }
 }
 

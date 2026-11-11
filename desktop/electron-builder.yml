@@ -7,7 +7,9 @@ files:
   - dist-electron/**/*
 extraResources:
   - assets/**/*
-afterPack: scripts/verify-bundled-backend.js  # 漏打内嵌后端时直接 fail（含本地手工出包）
+afterPack:  # 漏打内嵌后端时直接 fail（含本地手工出包）；SP6：同时打 NM host shim 进 Resources
+  - scripts/verify-bundled-backend.js
+  - scripts/pack-nm-host.js
 # 签名/公证见 electron-builder.signing.yml（CI 注入 CSC_LINK 时自动切换）
 dmg:
   title: "${productName}"

@@ -16,6 +16,7 @@
     button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
     button:disabled { opacity: .5; cursor: default; }
     #allow-status { min-height: 20px; font-size: 12px; color: #6a737d; margin: 6px 0 12px; }
+    #screenshot-status { min-height: 20px; font-size: 12px; color: #6a737d; margin: 6px 0 12px; }
     ul#allow-list, ul#inject-origin-list { list-style: none; margin: 0; padding: 0; }
     ul#allow-list li, ul#inject-origin-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px;
       padding: 8px 12px; border: 1px solid #eaeef2; border-radius: 8px; margin-bottom: 6px; }
@@ -47,6 +48,21 @@
       <p class="note">使用「划词发给 AGX / 整页发给 AGX」时，首次对某站点发送会申请该站的注入权限。下方可查看并回收已授权的域名；回收后需重新授权才能继续发送。</p>
       <div id="inject-origin-status" class="when"></div>
       <ul id="inject-origin-list"></ul>
+    </section>
+
+    <section>
+      <h2>浏览器截图权限</h2>
+      <p class="note">AGX 代理执行「截图」操作需要浏览器截图权限（覆盖所有站点的可选权限）。默认关闭；开启后 AGX 才能截取当前页面的可视区域，可随时在此关闭。</p>
+      <div class="allow-row">
+        <button class="primary" id="screenshot-enable-btn">启用浏览器截图</button>
+        <button id="screenshot-revoke-btn" disabled>关闭截图权限</button>
+      </div>
+      <div id="screenshot-status"></div>
+    </section>
+
+    <section>
+      <h2>企业策略</h2>
+      <p class="note" id="enterprise-deny-note">尚未收到企业下发的额外拦截域名（连接 AGX 桌面端后自动同步）。</p>
     </section>
 
     <section>

@@ -310,6 +310,11 @@ UI 加载；这正是自动化只能用 Chrome for Testing 的原因。）
 2. **截图需要常驻授权**：六 action 的 `near_browser_screenshot` 依赖
    `captureVisibleTab`（要 `<all_urls>` 或 activeTab；自动化无手势拿不到
    activeTab），临时扩展副本按 SP3/SP4 姿势打 `<all_urls>` 常驻授权。
+   —— SP6 定稿（与「生产 manifest 无常驻授权」的矛盾解法）：生产走
+   `optional_host_permissions: <all_urls>` 动态申请，用户在扩展选项页「启用
+   浏览器截图」一次性授权/可撤销；executor 预检 `permissions.contains`，
+   无授权返回 `screenshot_permission_required`。e2e 的常驻 patch 即模拟
+   「用户已在选项页开启」的安装态（见 SP6 plan §5.1）。
 3. **调试端口启动有延迟**：`/json` 探测必须容错 ECONNREFUSED（浏览器拉起
    需要 1–2s），fetch 失败视为无目标下一轮再试。
 4. **单浏览器单 bridge 串完六条旅程**：不要每条旅程重开浏览器，J6 的

@@ -123,6 +123,13 @@ function onNativeMessage(message) {
   if (message && message.type === "pong" && typeof message.ts === "number") {
     const rtt = recordRtt(message.ts);
     log(`pong rtt=${rtt}ms`);
+    // SP6: the bridge may attach the enterprise deny list to the pong frame
+    // (config.yaml → enterprise.browser_deny_domains). The desktop config is
+    // the single source of truth — an attached list (even empty) overwrites
+    // whatever was synced last, so removals propagate too.
+    if (Array.isArray(message.enterprise_deny_domains)) {
+      void agxStoreEnterpriseDenyDomains(message.enterprise_deny_domains);
+    }
     return;
   }
   if (message && message.type === "act" && message.request_id) {

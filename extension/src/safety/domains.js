@@ -25,6 +25,15 @@
 const AGX_SAFETY_ALLOW_KEY = "agx_safety_allow";
 
 /**
+ * SP6 · chrome.storage.local key for the enterprise-pushed deny list:
+ * a plain array of hostname patterns (same exact/parent-domain semantics as
+ * the built-in list). Pushed by the desktop bridge over NM
+ * ({type:"enterprise_deny_domains"} riding the pong frame) and read-only for
+ * the user — enterprise entries CANNOT be un-blocked from the options page.
+ */
+const AGX_ENTERPRISE_DENY_KEY = "agx_enterprise_deny";
+
+/**
  * Built-in deny list, seeded from public category tables (banks / payment
  * providers / mailbox hosts / government). Patterns are registrable domains
  * or concrete hosts; keep this list conservative (default-deny for the listed
@@ -76,6 +85,39 @@ function agxMatchSensitiveDomain(hostname) {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// SP6 · enterprise deny list (bridge-pushed, read-only for the user)
+// ---------------------------------------------------------------------------
+
+/** Same exact/parent-domain matching as the built-in list; category fixed. */
+function agxMatchEnterpriseDenyDomain(hostname, patterns) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return null;
+  for (const pattern of Array.isArray(patterns) ? patterns : []) {
+    const p = String(pattern || "").trim().toLowerCase();
+    if (p && (host === p || host.endsWith(`.${p}`))) {
+      return { category: "enterprise", pattern: p };
+    }
+  }
+  return null;
+}
+
+async function agxReadEnterpriseDenyList() {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return []; // node unit tests
+  const store = await chrome.storage.local.get(AGX_ENTERPRISE_DENY_KEY);
+  const raw = store?.[AGX_ENTERPRISE_DENY_KEY];
+  return Array.isArray(raw) ? raw.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean) : [];
+}
+
+/** SW handler for the bridge's {type:"enterprise_deny_domains"} push. */
+async function agxStoreEnterpriseDenyDomains(domains) {
+  const cleaned = (Array.isArray(domains) ? domains : [])
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+  await chrome.storage.local.set({ [AGX_ENTERPRISE_DENY_KEY]: [...new Set(cleaned)] });
+  return cleaned.length;
 }
 
 /** Extract the hostname from a URL string; "" when not a parseable http(s) URL. */
@@ -142,8 +184,11 @@ async function agxIsDomainAllowed(hostname) {
  *
  * `open` is judged by its target URL; every other action is judged by the
  * active tab's URL (the page it would act on). Returns null when nothing
- * blocks, or {domain, category, tab_url} when the deny list hits and the
+ * blocks, or {domain, category, tab_url} when a deny list hits and the
  * options-page allow list does not contain the hostname.
+ *
+ * SP6: the enterprise-pushed deny list is checked FIRST and its hits are
+ * final — an enterprise entry cannot be un-blocked via the options page.
  */
 async function agxSensitiveDomainVerdict(action, target) {
   let url = "";
@@ -154,6 +199,10 @@ async function agxSensitiveDomainVerdict(action, target) {
   }
   const hostname = agxHostnameOf(url);
   if (!hostname) return null;
+  const enterpriseHit = agxMatchEnterpriseDenyDomain(hostname, await agxReadEnterpriseDenyList());
+  if (enterpriseHit) {
+    return { domain: hostname, category: enterpriseHit.category, tab_url: url };
+  }
   const hit = agxMatchSensitiveDomain(hostname);
   if (!hit) return null;
   if (await agxIsDomainAllowed(hostname)) return null;
@@ -164,8 +213,10 @@ async function agxSensitiveDomainVerdict(action, target) {
 if (typeof module !== "undefined" && typeof module.exports !== "undefined") {
   module.exports = {
     AGX_SAFETY_ALLOW_KEY,
+    AGX_ENTERPRISE_DENY_KEY,
     AGX_SENSITIVE_DOMAIN_PATTERNS,
     agxMatchSensitiveDomain,
+    agxMatchEnterpriseDenyDomain,
     agxHostnameOf,
     agxSensitiveDomainVerdict,
   };

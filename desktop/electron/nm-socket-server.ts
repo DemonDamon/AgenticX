@@ -27,6 +27,11 @@
  *     {type:"active_session", session_id, ...} via sendAct()
  *                              SP5: latest-active Studio session so the
  *                              extension can cache it for the next inject
+ *     {type:"pong", ts, enterprise_deny_domains?} SP6: every pong may carry
+ *                              the enterprise browser-deny list (read from
+ *                              AGX_HOME config.yaml by the bridge); the
+ *                              extension overwrites its synced copy on every
+ *                              attach, so config removals propagate too
  *   anything else → echoed verbatim (SP1 shim-test compatibility)
  *
  * Liveness (SP2 §2.3): a live connection whose latest ping is fresher than
@@ -70,6 +75,16 @@ export type NmActResultHandler = (row: Record<string, unknown>) => void;
 
 /** SP5: receives extension inject_context rows ({session_id?, url, title, text, kind}), transport `type` stripped. */
 export type NmInjectContextHandler = (row: Record<string, unknown>) => void;
+
+export type NmSocketServerOptions = {
+  /**
+   * SP6: enterprise browser-deny domains attached to every pong frame
+   * (config.yaml → enterprise.browser_deny_domains, resolved by the bridge).
+   * Read per pong so config edits propagate without a restart; undefined
+   * leaves the pong shape untouched (e2e/mock compatibility).
+   */
+  enterpriseDenyDomains?: () => string[];
+};
 
 export type NmSocketServer = {
   socketPath: string;
@@ -116,7 +131,10 @@ async function ensureBindTarget(socketPath: string): Promise<void> {
   }
 }
 
-export function startNmSocketServer(socketPathOverride?: string): Promise<NmSocketServer> {
+export function startNmSocketServer(
+  socketPathOverride?: string,
+  options?: NmSocketServerOptions,
+): Promise<NmSocketServer> {
   const socketPath = socketPathOverride ?? nmSocketPath();
   return new Promise<NmSocketServer>((resolve, reject) => {
     const server = net.createServer();
@@ -140,8 +158,15 @@ export function startNmSocketServer(socketPathOverride?: string): Promise<NmSock
       const row = parsed as Record<string, unknown>;
       if (row.type === "ping") {
         lastPingMs = Date.now();
-        // Echo protocol: ping → pong with ts passed through (RTT measured by the extension).
-        return JSON.stringify({ type: "pong", ts: row.ts });
+        // Echo protocol: ping → pong with ts passed through (RTT measured by
+        // the extension). SP6: attach the enterprise deny list when a
+        // provider is wired (undefined key keeps the frame shape unchanged
+        // for mocks/e2e harnesses).
+        const pong: Record<string, unknown> = { type: "pong", ts: row.ts };
+        if (options?.enterpriseDenyDomains) {
+          pong.enterprise_deny_domains = options.enterpriseDenyDomains();
+        }
+        return JSON.stringify(pong);
       }
       if (row.type === "act_result") {
         const { type: _transportType, ...result } = row;

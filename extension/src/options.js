@@ -101,17 +101,27 @@ $("domain-input").addEventListener("keydown", (event) => {
 renderDenyList();
 void refresh();
 void refreshInjectOrigins();
+void refreshScreenshotGrant();
+void refreshEnterpriseDeny();
 
 // Keep the list live: the allow list may also be written by another view of
 // this page open in another tab.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[AGX_SAFETY_ALLOW_KEY]) void refresh();
+  if (area === "local" && changes[AGX_ENTERPRISE_DENY_KEY]) void refreshEnterpriseDeny();
 });
 
 // SP5: permissions events keep the inject-origin list live (grants arrive
 // from context-menu requests in the service worker, revocations from here).
-chrome.permissions.onAdded?.addListener(() => void refreshInjectOrigins());
-chrome.permissions.onRemoved?.addListener(() => void refreshInjectOrigins());
+// SP6: they also keep the screenshot-grant buttons in sync.
+chrome.permissions.onAdded?.addListener(() => {
+  void refreshInjectOrigins();
+  void refreshScreenshotGrant();
+});
+chrome.permissions.onRemoved?.addListener(() => {
+  void refreshInjectOrigins();
+  void refreshScreenshotGrant();
+});
 
 // ---------------------------------------------------------------------------
 // SP5 · page-inject granted origins (view / revoke)
@@ -153,5 +163,71 @@ async function refreshInjectOrigins() {
     li.appendChild(left);
     li.appendChild(remove);
     list.appendChild(li);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SP6 · browser screenshot grant (optional <all_urls>, enable/revoke here).
+// e2e posture: the automation copy patches standing host_permissions instead;
+// this UI is the production path for the agent-driven screenshot action.
+// ---------------------------------------------------------------------------
+
+const AGX_SCREENSHOT_ORIGINS = ["<all_urls>"];
+
+function setScreenshotStatus(text, isError) {
+  const el = $("screenshot-status");
+  el.textContent = text || "";
+  el.style.color = isError ? "#c0392b" : "#2c7a4b";
+}
+
+async function refreshScreenshotGrant() {
+  const granted = await chrome.permissions.contains({ origins: AGX_SCREENSHOT_ORIGINS });
+  $("screenshot-enable-btn").disabled = granted;
+  $("screenshot-revoke-btn").disabled = !granted;
+  setScreenshotStatus(
+    granted ? "已启用：AGX 可截取任意站点的当前可视区域。" : "未启用：AGX 的截图操作会被拒绝。",
+    false,
+  );
+}
+
+$("screenshot-enable-btn").addEventListener("click", async () => {
+  try {
+    const granted = await chrome.permissions.request({ origins: AGX_SCREENSHOT_ORIGINS });
+    if (!granted) {
+      setScreenshotStatus("已取消：未授权截图权限。", true);
+      return;
+    }
+    await refreshScreenshotGrant();
+  } catch (err) {
+    setScreenshotStatus(`启用失败：${err?.message ?? err}`, true);
+  }
+});
+
+$("screenshot-revoke-btn").addEventListener("click", async () => {
+  try {
+    const removed = await chrome.permissions.remove({ origins: AGX_SCREENSHOT_ORIGINS });
+    if (!removed) throw new Error("remove_returned_false");
+    await refreshScreenshotGrant();
+  } catch (err) {
+    setScreenshotStatus(`关闭失败：${err?.message ?? err}`, true);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SP6 · enterprise deny list (pushed by the desktop bridge over NM; read-only).
+// ---------------------------------------------------------------------------
+
+async function refreshEnterpriseDeny() {
+  const el = $("enterprise-deny-note");
+  try {
+    const store = await chrome.storage.local.get(AGX_ENTERPRISE_DENY_KEY);
+    const rows = Array.isArray(store?.[AGX_ENTERPRISE_DENY_KEY]) ? store[AGX_ENTERPRISE_DENY_KEY] : [];
+    if (!rows.length) {
+      el.textContent = "尚未收到企业下发的额外拦截域名（连接 AGX 桌面端后自动同步）。";
+      return;
+    }
+    el.textContent = `企业已下发 ${rows.length} 个额外拦截域名（在内置清单之外，且不可在此放行）：${rows.join("、")}`;
+  } catch (err) {
+    el.textContent = `读取企业策略失败：${err?.message ?? err}`;
   }
 }

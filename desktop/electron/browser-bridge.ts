@@ -166,6 +166,29 @@ function browserActionAuditEnabled(): boolean {
   }
 }
 
+/**
+ * SP6 · enterprise browser-deny domains (config.yaml →
+ * enterprise.browser_deny_domains: [host, ...]). Read per pong frame so
+ * config edits propagate to the extension within one heartbeat (1 min)
+ * without a desktop restart; private deployments push their extra deny
+ * list this way (docs/guides/browser-extension/enterprise-deployment.md).
+ */
+export function readEnterpriseBrowserDenyDomains(): string[] {
+  try {
+    const raw = fs.readFileSync(path.join(agxConfigDir(), "config.yaml"), "utf-8");
+    const cfg = (yaml.load(raw) ?? {}) as
+      | { enterprise?: { browser_deny_domains?: unknown } }
+      | null;
+    const entries = cfg?.enterprise?.browser_deny_domains;
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map((entry) => String(entry ?? "").trim().toLowerCase())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function auditOutcomeFor(result: Record<string, unknown>): string {
   if (result.blocked === true) return "blocked";
   if (result.ok !== true) {
@@ -481,7 +504,11 @@ function createDefaultNmLifecycle(): NmLifecycle {
       },
     },
     start: () => {
-      startPromise ??= startNmSocketServer()
+      startPromise ??= startNmSocketServer(undefined, {
+        // SP6: every pong carries the enterprise deny list (single source of
+        // truth = AGX_HOME config.yaml; empty list clears the synced copy).
+        enterpriseDenyDomains: readEnterpriseBrowserDenyDomains,
+      })
         .then((server) => {
           started = server;
           server.onActResult((row) => actResultHandler?.(row));
