@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>AGX Bridge · 安全设置</title>
+  <style>
+    body { font: 14px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif; margin: 0; padding: 24px; color: #1c2128; }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p.note { color: #6a737d; margin: 0 0 20px; font-size: 13px; }
+    section { margin-bottom: 28px; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
+    .allow-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    input[type=text] { flex: 1; font: inherit; padding: 7px 10px; border: 1px solid #d0d7de; border-radius: 8px; }
+    button { font: inherit; padding: 7px 16px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; }
+    button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    #allow-status { min-height: 20px; font-size: 12px; color: #6a737d; margin: 6px 0 12px; }
+    ul#allow-list, ul#inject-origin-list { list-style: none; margin: 0; padding: 0; }
+    ul#allow-list li, ul#inject-origin-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 12px; border: 1px solid #eaeef2; border-radius: 8px; margin-bottom: 6px; }
+    ul#allow-list .empty, ul#inject-origin-list .empty { border: none; color: #6a737d; justify-content: center; }
+    .domain { font-family: ui-monospace, Menlo, monospace; }
+    .when { color: #6a737d; font-size: 12px; }
+    details summary { cursor: pointer; color: #1f6feb; }
+    ul#deny-list { columns: 2; margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: #444; }
+    ul#deny-list li { margin-bottom: 2px; font-family: ui-monospace, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AGX 浏览器代理 · 安全设置</h1>
+    <p class="note">敏感域名（银行 / 支付 / 邮箱 / 政务类）默认拒绝 agent 操作。你可以在下方显式放行某个域名——没有全局关闭开关。</p>
+
+    <section>
+      <h2>已放行域名</h2>
+      <div class="allow-row">
+        <input type="text" id="domain-input" placeholder="例如 mail.qq.com" spellcheck="false" />
+        <button class="primary" id="allow-btn">放行该域名</button>
+      </div>
+      <div id="allow-status"></div>
+      <ul id="allow-list"></ul>
+    </section>
+
+    <section>
+      <h2>页面注入已授权域名</h2>
+      <p class="note">使用「划词发给 AGX / 整页发给 AGX」时，首次对某站点发送会申请该站的注入权限。下方可查看并回收已授权的域名；回收后需重新授权才能继续发送。</p>
+      <div id="inject-origin-status" class="when"></div>
+      <ul id="inject-origin-list"></ul>
+    </section>
+
+    <section>
+      <details>
+        <summary>查看内置敏感域名清单（共 <span id="deny-count">0</span> 条）</summary>
+        <ul id="deny-list"></ul>
+      </details>
+    </section>
+  </main>
+  <script src="src/safety/domains.js"></script>
+  <script src="src/options.js"></script>
+</body>
+</html>

@@ -7824,7 +7824,11 @@ function createWindow(): void {
     }
   });
   if (typeof startNearBrowserBridge === "function") {
-    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null), {
+      // SP5: inject_context dispatch target — the same studio URL/token every
+      // other main-process studio call uses; read per request.
+      injectContextStudio: { url: getStudioUrl, token: getStudioToken },
+    });
   } else {
     console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
   }
