@@ -58,10 +58,61 @@ _WEB_SEARCH_UNSUPPORTED_HOST_SUFFIXES = (".xiaomimimo.com",)
 _WEB_SEARCH_UNSUPPORTED_HOSTS = frozenset({"xiaomimimo.com"})
 _CODEX_WEB_SEARCH_DISABLED = "disabled"
 
+# Codex 0.167 with model_reasoning_effort=low/minimal sends
+# ``reasoning.effort`` on the Responses body. BaiLian / DashScope
+# compatible-mode (including dedicated MAAS hosts) maps that to
+# enable_thinking=true without setting native result_format=message,
+# and the algo layer then rejects the turn with:
+#   The result_format parameter must be "message" when enable_thinking is true
+# Live-probed 2026-11-11 on Damon's MAAS qwen-plus: effort=low/minimal
+# reproduce that 400; effort=none or omitting effort succeeds. Adding
+# query_params result_format=message and/or enable_thinking=false does
+# not fix it. Near therefore writes model_reasoning_effort="none" for
+# these gateways so a leftover "low" (from another model, or Codex's
+# own default) is not forwarded. Official MiMo / DeepSeek / MiniMax /
+# 彩讯 are unchanged.
+_CODEX_REASONING_EFFORT_NONE = "none"
+_BAILIAN_DASHSCOPE_PROVIDER_NAMES = frozenset(
+    {"bailian", "dashscope", "aliyun", "alibaba", "tongyi"}
+)
+_BAILIAN_DASHSCOPE_HOSTS = frozenset(
+    {
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        "maas.aliyuncs.com",
+    }
+)
+_BAILIAN_DASHSCOPE_HOST_SUFFIXES = (
+    ".dashscope.aliyuncs.com",
+    ".dashscope-intl.aliyuncs.com",
+    ".maas.aliyuncs.com",
+)
+
+
+def _codex_gateway_host(base_url: str) -> str:
+    return (urlparse(str(base_url or "").strip()).hostname or "").lower()
+
+
+def is_codex_bailian_dashscope_gateway(
+    provider_name: str, base_url: str = ""
+) -> bool:
+    """True for Aliyun BaiLian / DashScope / MAAS Responses gateways."""
+    name = str(provider_name or "").strip().lower().replace("_", "-")
+    if name in _BAILIAN_DASHSCOPE_PROVIDER_NAMES:
+        return True
+    if "bailian" in name or "dashscope" in name:
+        return True
+    host = _codex_gateway_host(base_url)
+    if not host:
+        return False
+    if host in _BAILIAN_DASHSCOPE_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in _BAILIAN_DASHSCOPE_HOST_SUFFIXES)
+
 
 def codex_gateway_lacks_hosted_web_search(base_url: str) -> bool:
     """True when this Responses gateway rejects OpenAI's hosted web_search tool."""
-    host = (urlparse(str(base_url or "").strip()).hostname or "").lower()
+    host = _codex_gateway_host(base_url)
     if not host:
         return False
     if host in _WEB_SEARCH_UNSUPPORTED_HOSTS:
@@ -309,6 +360,18 @@ def merge_provider_into_codex_config(
         # Restore the Codex default (cached) when leaving a limited gateway.
         # Do not clobber an explicit cached/indexed/live setting.
         out = _remove_top_level_key(out, "web_search")
+    if is_codex_bailian_dashscope_gateway(provider_name, normalized):
+        out = _upsert_top_level_string(
+            out, "model_reasoning_effort", _CODEX_REASONING_EFFORT_NONE
+        )
+    elif _top_level_scalar_value(out, "model_reasoning_effort") == (
+        _CODEX_REASONING_EFFORT_NONE
+    ):
+        # Drop a Near-set "none" when leaving BaiLian/DashScope so other
+        # gateways regain the Codex default. Do not clobber a leftover
+        # low/minimal/high that the user or Codex wrote for those
+        # gateways.
+        out = _remove_top_level_key(out, "model_reasoning_effort")
     out = _remove_table(out, f"model_providers.{provider_id}.auth")
     out = _remove_table(out, f"model_providers.{provider_id}")
     use_token = token_file if str(api_key or "").strip() else None
@@ -527,6 +590,7 @@ __all__ = [
     "atomic_write_text",
     "codex_config_path",
     "codex_gateway_lacks_hosted_web_search",
+    "is_codex_bailian_dashscope_gateway",
     "load_codex_config_text",
     "managed_token_path",
     "maybe_sync_codex_settings",
