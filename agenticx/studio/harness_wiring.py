@@ -46,6 +46,7 @@ from agenticx.harness.handoff import (
     ThreadBinding,
 )
 from agenticx.harness.handoff.types import HandoffSummary
+from agenticx.harness.spawn_options import adapter_spawn_options
 from agenticx.studio.session_manager import require_safe_session_id
 
 _TURN_WAIT_SECONDS = 240.0
@@ -677,7 +678,9 @@ def ensure_harness_session_lease(
         native_thread = ""
 
     cwd = snapshot_from_session(manager, sid).cwd
-    view = adapter.spawn(cwd, options=dict(options))
+    # Persist the full binding (including internal stamps) but never
+    # forward those stamps as adapter spawn/CLI options.
+    view = adapter.spawn(cwd, options=adapter_spawn_options(options))
     surface_sid = str(view["session_id"])
     resumed = False
     if native_thread and adapter.capabilities().resume:

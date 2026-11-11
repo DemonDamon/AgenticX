@@ -1110,6 +1110,8 @@ def test_codex_provider_change_skips_resume_and_injects_history(wiring):
     assert binding["harness_thread_id"] != first_thread
     assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
     assert session.chat_history[-1]["content"] == "codex reply #2"
+    # The stamp stays on the binding but must not be a spawn option.
+    assert "model_provider" not in codex._sessions["codex-surf-2"]["options"]
 
 
 def test_codex_same_provider_model_change_still_resumes(wiring):
@@ -1149,6 +1151,7 @@ def test_codex_same_provider_model_change_still_resumes(wiring):
     binding = manager.get_session_harness("sess-1")
     assert binding["harness_thread_id"] == first_thread
     assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
+    assert "model_provider" not in codex._sessions["codex-surf-2"]["options"]
 
 
 def test_unstamped_codex_provider_mismatch_retries_with_history(wiring):
@@ -1207,4 +1210,121 @@ def test_unstamped_codex_provider_mismatch_retries_with_history(wiring):
     binding = manager.get_session_harness("sess-1")
     assert binding["harness_thread_id"] != stale
     assert binding["harness_thread_id"] == "codex-native-2"
+    assert binding["harness_options"]["model_provider"] == "agenticx-mimo"
+
+
+class CodexSpawnValidatingAdapter(RecordingAdapter):
+    """Recording adapter that applies the real Codex spawn allowlist."""
+
+    def spawn(self, cwd: str, *, options: Optional[Dict[str, Any]] = None):
+        from agenticx.harness.adapters.codex import CodexAdapter
+
+        CodexAdapter._validate_options(None, dict(options or {}))
+        return super().spawn(cwd, options=options)
+
+
+def test_stamped_codex_model_provider_is_stripped_on_provider_switch_spawn(wiring):
+    """Persisted #334 stamp must not be forwarded into Codex spawn options.
+
+    After a successful first turn the stamp is written. A mid-session
+    provider switch stops the live surface and re-spawns; that spawn
+    must succeed (the real Codex allowlist rejects unknown keys) and
+    must not receive ``model_provider``. Skip-resume and history
+    injection are preserved.
+    """
+    hw, _alpha, _beta, _ = wiring
+    codex = CodexSpawnValidatingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "你好",
+            "metadata": {"harness": "codex"},
+        },
+        {
+            "role": "assistant",
+            "content": "你好！有什么我可以帮你的？",
+            "metadata": {
+                "harness": "codex",
+                "harness_status": "success",
+                "native_thread_id": "01a1c930-b1e1-78c1-8f36-53f6c19df5f5",
+            },
+        },
+    ]
+    manager = FakeManager(session)
+    # Live surface already gone (picker change stopped it, or Near relaunched).
+    manager.set_session_harness(
+        "sess-1",
+        harness_id="codex",
+        thread_id="01a1c930-b1e1-78c1-8f36-53f6c19df5f5",
+        options={
+            "model": "deepseek-v4-flash",
+            "model_provider": "agenticx-mimo",
+        },
+        surface_session_id=None,
+    )
+
+    result = hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "哦",
+        chat_model="deepseek-v4-flash",
+        chat_provider="deepseek",
+    )
+
+    assert result.ok
+    assert codex.spawn_count == 1
+    spawned = codex._sessions["codex-surf-1"]["options"]
+    assert spawned.get("model") == "deepseek-v4-flash"
+    assert "model_provider" not in spawned
+    binding = manager.get_session_harness("sess-1")
+    # Stamp stays available and is updated after the successful new-vendor turn.
+    assert binding["harness_options"]["model_provider"] == "agenticx-deepseek"
+    # Previous vendor thread must not be resumed.
+    assert binding["harness_thread_id"] != "01a1c930-b1e1-78c1-8f36-53f6c19df5f5"
+    assert codex.adopted == []
+    outbound = codex.turns[-1]["text"]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" in outbound
+    assert outbound.endswith("哦")
+
+
+def test_stamped_codex_same_provider_cold_spawn_still_resumes(wiring):
+    """Relaunch of an already-stamped same-provider session must spawn and resume."""
+    hw, _alpha, _beta, _ = wiring
+    codex = CodexSpawnValidatingAdapter("codex", resume=True)
+    hw.harness_registry().register(codex)
+    session = make_session()
+    manager = FakeManager(session)
+    stale_surface = "50d25f55-3e0c-4e93-8476-e03762606c30"
+    native = "01a1c930-b1e1-78c1-8f36-53f6c19df5f5"
+    manager.set_session_harness(
+        "sess-1",
+        harness_id="codex",
+        thread_id=native,
+        options={
+            "model": "mimo-v2.6-flash",
+            "model_provider": "agenticx-mimo",
+        },
+        surface_session_id=stale_surface,  # describe() will miss this after relaunch
+    )
+
+    result = hw.run_external_harness_turn(
+        manager,
+        "sess-1",
+        "你几岁了",
+        chat_model="mimo-v2.6-flash",
+        chat_provider="mimo",
+    )
+
+    assert result.ok
+    assert codex.spawn_count == 1
+    spawned = codex._sessions["codex-surf-1"]["options"]
+    assert spawned.get("model") == "mimo-v2.6-flash"
+    assert "model_provider" not in spawned
+    assert codex.adopted == [("codex-surf-1", native)]
+    assert "AGENTICX CONTEXT HANDOFF (BEGIN)" not in codex.turns[-1]["text"]
+    assert codex.turns[-1]["text"] == "你几岁了"
+    binding = manager.get_session_harness("sess-1")
+    assert binding["harness_thread_id"] == native
     assert binding["harness_options"]["model_provider"] == "agenticx-mimo"

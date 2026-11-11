@@ -42,6 +42,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from agenticx.harness.adapters._exec_cli import ExecCliHarnessAdapter, ExecCliSession
+from agenticx.harness.spawn_options import adapter_spawn_options
 from agenticx.harness.types import HarnessCapabilities
 
 _RESULT_TEXT_MAX_CHARS = 4000
@@ -91,7 +92,9 @@ class CodexAdapter(ExecCliHarnessAdapter):
     # ------------------------------------------------------------------
     def _validate_options(self, options: Dict[str, Any]) -> None:
         allowed = {"model", "sandbox", "full_auto"}
-        unknown = sorted(set(options) - allowed)
+        # Internal stamps (e.g. model_provider) stay on harness_options
+        # for skip-resume, but are not Codex CLI/spawn flags.
+        unknown = sorted(set(adapter_spawn_options(options)) - allowed)
         if unknown:
             raise ValueError(f"unknown spawn options for codex: {unknown}")
         model = options.get("model")

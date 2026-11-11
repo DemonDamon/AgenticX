@@ -373,6 +373,31 @@ def test_codex_spawn_rejects_unknown_options(fake_codex):
         adapter.spawn(os.getcwd(), options={"mode": "whatever"})
 
 
+def test_codex_spawn_ignores_internal_model_provider(fake_codex):
+    """#334 model_provider stamp must not fail spawn or leak into argv."""
+    adapter = fake_codex["adapter"]
+    view = adapter.spawn(
+        os.getcwd(),
+        options={
+            "model": "mimo-v2.6-flash",
+            "model_provider": "agenticx-mimo",
+        },
+    )
+    assert view["session_id"]
+    # argv is recorded when the fake CLI runs on turn(), not on spawn().
+    adapter.turn(view["session_id"], _turn())
+    argv = _read_log(fake_codex["log"])[0]["argv"]
+    assert argv[argv.index("-m") + 1] == "mimo-v2.6-flash"
+    assert "model_provider" not in argv
+    assert "agenticx-mimo" not in argv
+    # Truly unknown flags still fail, even when a stamp is also present.
+    with pytest.raises(ValueError, match=r"unknown spawn options for codex: \['mode'\]"):
+        adapter.spawn(
+            os.getcwd(),
+            options={"mode": "whatever", "model_provider": "agenticx-mimo"},
+        )
+
+
 def test_codex_resume_args(fake_codex):
     adapter = fake_codex["adapter"]
     sid = adapter.spawn(os.getcwd())["session_id"]
