@@ -208,15 +208,29 @@ async function agxHandleContextMenuClick(info, tab) {
     return;
   }
   try {
-    // Permission posture: per-origin optional grant, requested from the
-    // context-menu user gesture; a standing <all_urls> grant never exists.
-    let granted = await agxPermissionContainsFn([originPattern]);
-    if (!granted) {
-      granted = await agxPermissionRequestFn([originPattern]);
+    // Permission posture (real-machine finding, 2026-11-11): the context-menu
+    // click itself activates activeTab, which alone authorizes executeScript
+    // on this tab — the per-origin grant is an enhancement for gesture-less
+    // future use, NOT a gate. MV3 often fails to forward the user gesture to
+    // contextMenus.onClicked, so permissions.request *throws* there; that
+    // throw must fall through to the activeTab path. An explicit `false`
+    // return (user really saw and dismissed the prompt) is still honored
+    // as a denial — nothing gets sent.
+    let granted = false;
+    let sawPromptAndDenied = false;
+    try {
+      granted = await agxPermissionContainsFn([originPattern]);
       if (!granted) {
-        void agxRecordInjectResult({ ok: false, kind, stage: "permission", error: "permission_denied", origin: originPattern });
-        return;
+        granted = await agxPermissionRequestFn([originPattern]);
+        sawPromptAndDenied = !granted;
       }
+    } catch (permErr) {
+      granted = false; // gesture absent (expected on MV3 menu dispatch) — activeTab covers this click
+      sawPromptAndDenied = false;
+    }
+    if (sawPromptAndDenied) {
+      void agxRecordInjectResult({ ok: false, kind, stage: "permission", error: "permission_denied", origin: originPattern });
+      return;
     }
 
     const collected = await agxCollectFromTab(tab, kind);

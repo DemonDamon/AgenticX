@@ -51,13 +51,19 @@
     </section>
 
     <section>
-      <h2>浏览器截图权限</h2>
-      <p class="note">AGX 代理执行「截图」操作需要浏览器截图权限（覆盖所有站点的可选权限）。默认关闭；开启后 AGX 才能截取当前页面的可视区域，可随时在此关闭。</p>
+      <h2>浏览器站点权限（截图与 agent 页面操作）</h2>
+      <p class="note">启用后 AGX 可以：截取任意站点的可视区域；对 agent 自己打开的标签页执行内容提取与操作（划词/整页发送不受影响——它们走你的点击手势授权）。默认关闭；可随时在此关闭。关闭后 agent 仅能操作你当前正在看、且刚与扩展交互过的页面。</p>
       <div class="allow-row">
         <button class="primary" id="screenshot-enable-btn">启用浏览器截图</button>
         <button id="screenshot-revoke-btn" disabled>关闭截图权限</button>
       </div>
       <div id="screenshot-status"></div>
+    </section>
+
+    <section>
+      <h2>最近一次页面发送</h2>
+      <p class="note">「划词发给 AGX / 整页发给 AGX」的最近一次结果（本地记录，用于无声失败时的自检）。发送正常但没看到进会话，请确认桌面端 Studio 已打开且会话在线。</p>
+      <div id="last-inject-result" class="when">尚无记录。</div>
     </section>
 
     <section>

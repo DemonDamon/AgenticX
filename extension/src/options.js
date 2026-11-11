@@ -18,6 +18,27 @@ function setStatus(text, isError) {
   el.style.color = isError ? "#c0392b" : "#2c7a4b";
 }
 
+function renderLastInject() {
+  const el = $("last-inject-result");
+  if (!el) return;
+  chrome.storage.local.get("agx_inject_last_result", (store) => {
+    const r = store && store.agx_inject_last_result;
+    if (!r) return; // keep the "尚无记录" placeholder already in HTML
+    el.textContent = "";
+    const ok = r.ok !== false;
+    const parts = [
+      `${ok ? "✓ 成功" : "✗ 失败"} · ${r.kind === "selection" ? "划词" : r.kind === "full_page" ? "整页" : r.kind || "?"}`,
+      r.error ? `错误：${r.error}` : "",
+      r.stage ? `阶段：${r.stage}` : "",
+      r.origin ? `站点：${r.origin}` : "",
+      r.url ? `URL：${r.url}` : "",
+      r.at ? `时间：${fmtWhen(r.at)}` : "",
+    ].filter(Boolean);
+    el.textContent = parts.join(" · ");
+    el.style.color = ok ? "#2c7a4b" : "#c0392b";
+  });
+}
+
 function fmtWhen(ts) {
   if (!ts) return "";
   try {
@@ -103,12 +124,14 @@ void refresh();
 void refreshInjectOrigins();
 void refreshScreenshotGrant();
 void refreshEnterpriseDeny();
+renderLastInject();
 
 // Keep the list live: the allow list may also be written by another view of
 // this page open in another tab.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[AGX_SAFETY_ALLOW_KEY]) void refresh();
   if (area === "local" && changes[AGX_ENTERPRISE_DENY_KEY]) void refreshEnterpriseDeny();
+  if (area === "local" && changes.agx_inject_last_result) renderLastInject();
 });
 
 // SP5: permissions events keep the inject-origin list live (grants arrive

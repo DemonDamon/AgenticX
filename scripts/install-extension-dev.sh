@@ -97,7 +97,7 @@ fi
 
 AGX_HOME_DIR="${HOME}/.agenticx"
 WRAPPER_PATH="${AGX_HOME_DIR}/agx-nm-bridge-host.sh"
-NM_SOCKET="${AGX_HOME_DIR}/nm-bridge.sock"
+NM_SOCKET="${AGX_HOME_DIR}/browser_bridge_nm.sock"
 
 # --- 1. NM host wrapper (path target of the manifest; must be executable) ---
 mkdir -p "${AGX_HOME_DIR}"
