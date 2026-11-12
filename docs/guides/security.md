@@ -66,6 +66,22 @@ This allows tests and deployments to swap implementations without forking the pi
 | `validate_tool_input(tool_name, args)` | Delegates to `InputValidator.validate`. |
 | `wrap_for_llm(content, source)` / `wrap_external_content(content)` | XML-style boundaries via `Sanitizer`. |
 
+### Studio mainline wiring (safety-layer-mainline)
+
+The Studio agent loop routes every tool call through `SafetyLayer` at the `dispatch_tool_async` choke point (bridge: `agenticx/runtime/studio_safety.py`):
+
+- **Input**: `validate_tool_input` runs before execution. `bash_exec` is exempt from input validation — it has its own three-layer defense (read-only verdict / whitelist / confirm gate) and the shell rules would false-positive on legitimate commands. Output sanitization still applies to `bash_exec` results.
+- **Output**: `sanitize_tool_output` runs after the credential-store redaction, before the result enters the LLM context.
+
+Flags (env > config > default; failures fall back to safe defaults):
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `AGX_STUDIO_SAFETY_LAYER` / `runtime.studio_safety_layer` | `true` | Off = zero-overhead passthrough, byte-equivalent to pre-SP1 behavior |
+| `AGX_STUDIO_SAFETY_MODE` / `runtime.studio_safety_mode` | `observe` | `observe`: pipeline runs and events are recorded, results untouched (WARN-only rollout); `enforce`: input violations block execution, output redact/sanitize/block apply |
+
+Events fan out to three sinks: the in-memory `SafetyAuditLog`, the append-only `~/.agenticx/safety/events.jsonl` (data source for `write_observation_report()`), and the enterprise audit outbox via `emit_action_audit` (kind `safety_event`) with `session_id` / `tool_call_id` correlation. Review the observation report for false positives before flipping the mode to `enforce`.
+
 ## Input validation
 
 `InputValidator` recursively flattens `dict` / `list` argument trees via `_flatten_args`, producing `(param_path, string_value)` pairs for regex scanning.
