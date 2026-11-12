@@ -118,12 +118,63 @@ def initialize_params() -> Dict[str, Any]:
     }
 
 
+def resolved_codex_sandbox_mode(
+    sandbox: Optional[str] = None,
+    full_auto: bool = False,
+) -> Optional[str]:
+    """Sandbox mode sent to thread/start or ``codex exec --sandbox``.
+
+    ``full_auto`` still means ``danger-full-access`` when no explicit
+    sandbox is set. Near 「全部允许」 must not use that path: it maps to
+    ``workspace-write`` plus network instead.
+    """
+    mode = str(sandbox or "").strip() or None
+    if full_auto and not mode:
+        return "danger-full-access"
+    return mode
+
+
+def sandbox_policy_params(
+    sandbox: Optional[str] = None,
+    *,
+    network_access: Optional[bool] = None,
+    full_auto: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Structured ``sandboxPolicy`` for turn/start (0.167 app-server).
+
+    Workspace-write defaults to no network; ``networkAccess`` must be
+    set explicitly when Near auto/「全部允许」 needs outbound tools.
+    """
+    mode = resolved_codex_sandbox_mode(sandbox, full_auto)
+    if mode == "danger-full-access":
+        return {"type": "dangerFullAccess"}
+    if mode == "read-only":
+        policy: Dict[str, Any] = {"type": "readOnly"}
+        if network_access is True:
+            policy["networkAccess"] = True
+        return policy
+    if mode == "workspace-write":
+        policy = {"type": "workspaceWrite"}
+        if network_access is True:
+            policy["networkAccess"] = True
+        return policy
+    return None
+
+
+def workspace_write_network_config(network_access: Optional[bool]) -> Optional[Dict[str, Any]]:
+    """Config.toml-shaped override for thread/start ``config``."""
+    if network_access is not True:
+        return None
+    return {"sandbox_workspace_write": {"network_access": True}}
+
+
 def thread_start_params(
     *,
     cwd: str,
     model: Optional[str] = None,
     sandbox: Optional[str] = None,
     full_auto: bool = False,
+    network_access: Optional[bool] = None,
 ) -> Dict[str, Any]:
     params: Dict[str, Any] = {
         "cwd": cwd,
@@ -132,11 +183,14 @@ def thread_start_params(
     }
     if model:
         params["model"] = model
-    mode = sandbox
-    if full_auto and not mode:
-        mode = "danger-full-access"
+    mode = resolved_codex_sandbox_mode(sandbox, full_auto)
     if mode:
         params["sandbox"] = mode
+    config = workspace_write_network_config(
+        network_access if mode == "workspace-write" else None
+    )
+    if config:
+        params["config"] = config
     return params
 
 
@@ -155,13 +209,29 @@ def turn_start_params(
     text: str,
     *,
     model: Optional[str] = None,
+    sandbox: Optional[str] = None,
+    full_auto: bool = False,
+    network_access: Optional[bool] = None,
 ) -> Dict[str, Any]:
+    """Build turn/start params.
+
+    ``sandboxPolicy`` is sent when Near mapped a sandbox so a resumed
+    thread (which cannot take ``--sandbox`` on ``codex exec resume``,
+    and whose app-server ``thread/resume`` still omits sandbox to stay
+    compatible with #332) still picks up the current permission mode
+    for this turn and subsequent turns.
+    """
     params: Dict[str, Any] = {
         "threadId": thread_id,
         "input": [{"type": "text", "text": text}],
     }
     if model:
         params["model"] = model
+    policy = sandbox_policy_params(
+        sandbox, network_access=network_access, full_auto=full_auto
+    )
+    if policy:
+        params["sandboxPolicy"] = policy
     return params
 
 
@@ -704,7 +774,10 @@ __all__ = [
     "consume_app_server_message",
     "preferred_transport",
     "thread_id_from_result",
+    "resolved_codex_sandbox_mode",
+    "sandbox_policy_params",
     "thread_resume_params",
     "thread_start_params",
     "turn_start_params",
+    "workspace_write_network_config",
 ]
